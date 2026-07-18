@@ -29,6 +29,10 @@ export function App() {
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [conflictDraft, setConflictDraft] = useState("");
   const [status, setStatus] = useState("");
+  const [reloadSeconds, setReloadSeconds] = useState(60);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState("60");
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const loadFeatures = useCallback(async () => {
     const res = await fetch("/api/features");
@@ -46,10 +50,25 @@ export function App() {
       const state = await (await fetch("/api/state")).json();
       setDataRepo(state.dataRepo);
       setNeedsRepo(state.needsDataRepo);
+      if (typeof state.reloadFrequencySeconds === "number") {
+        setReloadSeconds(state.reloadFrequencySeconds);
+      }
       if (!state.needsDataRepo) await loadFeatures();
       setLoading(false);
     })();
   }, [loadFeatures]);
+
+  // Mirror the server's cron reload (specs/crud-feature.spec.md): refresh the
+  // feature list on the same cadence so pulled changes show up, without
+  // clobbering an in-progress edit or conflict resolution.
+  useEffect(() => {
+    if (loading || needsRepo || reloadSeconds <= 0) return;
+    const id = setInterval(() => {
+      void loadFeatures();
+      if (selected && !dirty && !editing && !conflict) void openFeature(selected);
+    }, reloadSeconds * 1000);
+    return () => clearInterval(id);
+  }, [loading, needsRepo, reloadSeconds, selected, dirty, editing, conflict, loadFeatures]);
 
   const saveRepo = async (repo: string) => {
     setSettingRepo(true);
@@ -156,6 +175,33 @@ export function App() {
     setStatus("Unpublished changes — press Publish to commit and push.");
   };
 
+  const openSettings = () => {
+    setSettingsDraft(String(reloadSeconds));
+    setSettingsError(null);
+    setSettingsOpen(true);
+  };
+
+  // Settings are saved to .specdriven (specs/ui.spec.md).
+  const saveSettings = async () => {
+    const n = Number(settingsDraft);
+    if (!Number.isFinite(n) || n < 0) {
+      setSettingsError("Enter a number of seconds (0 disables automatic reload).");
+      return;
+    }
+    const res = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reloadFrequencySeconds: Math.floor(n) }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setReloadSeconds(data.reloadFrequencySeconds);
+      setSettingsOpen(false);
+    } else {
+      setSettingsError(data.error ?? "Could not save settings");
+    }
+  };
+
   /** Draft the next version of a published scenario as a new, editable scenario. */
   const newVersion = (i: number) => {
     if (!feature) return;
@@ -215,6 +261,9 @@ export function App() {
           ))}
           {features.length === 0 && <li className="empty">No feature files yet</li>}
         </ul>
+        <button className="settings-btn" onClick={openSettings}>
+          ⚙ Settings
+        </button>
       </aside>
       <section className="editor">
         {selected && feature ? (
@@ -296,6 +345,34 @@ export function App() {
           <p className="empty">Select a feature file or create a new one.</p>
         )}
       </section>
+      {settingsOpen && (
+        <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Settings</h3>
+            <label>
+              Data reload frequency (seconds)
+              <input
+                type="number"
+                min={0}
+                autoFocus
+                value={settingsDraft}
+                onChange={(e) => setSettingsDraft(e.target.value)}
+              />
+            </label>
+            <p className="hint">
+              The data repo is git-pulled automatically at this interval. Use 0 to disable
+              automatic reload. Saved to .specdriven.
+            </p>
+            {settingsError && <p className="error">{settingsError}</p>}
+            <div className="dialog-actions">
+              <button className="secondary" onClick={() => setSettingsOpen(false)}>
+                Cancel
+              </button>
+              <button onClick={saveSettings}>Save settings</button>
+            </div>
+          </div>
+        </div>
+      )}
       {editing && (
         <div className="dialog-backdrop" onClick={() => setEditing(null)}>
           <div className="dialog" onClick={(e) => e.stopPropagation()}>

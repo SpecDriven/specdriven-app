@@ -10,8 +10,26 @@ import {
   resolveFeatureConflict,
 } from "./server/features";
 import { parseFeature } from "./server/parser";
+import {
+  createReloadScheduler,
+  normalizeReloadSeconds,
+  reloadData,
+} from "./server/reload";
 
 const ROOT = process.cwd();
+
+// Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
+// where n comes from the Settings dialog and is stored in .specdriven.
+const reloader = createReloadScheduler(async () => {
+  try {
+    console.log(`[reload] ${await reloadData(ROOT)}`);
+  } catch (e) {
+    console.error(`[reload] ${(e as Error).message}`);
+  }
+});
+readState(ROOT).then((state) =>
+  reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds)),
+);
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status });
@@ -48,24 +66,48 @@ const server = Bun.serve({
     "/api/state": {
       GET: async () => {
         const state = await readState(ROOT);
-        return json({ dataRepo: state.dataRepo ?? null, needsDataRepo: needsDataRepo(state) });
+        return json({
+          dataRepo: state.dataRepo ?? null,
+          needsDataRepo: needsDataRepo(state),
+          reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
+        });
       },
       PUT: async (req) => {
-        const body = (await req.json()) as { dataRepo?: string };
-        const dataRepo = body.dataRepo?.trim();
-        if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
-        // Verify access before recording: a GitHub url is cloned on first use
-        // (specs/crud-feature.spec.md: "user is verified to have access to the
-        // data GH repo").
-        try {
-          await resolveDataRepo(dataRepo, ROOT);
-        } catch (e) {
-          return json({ error: (e as Error).message }, 400);
+        const body = (await req.json()) as {
+          dataRepo?: string;
+          reloadFrequencySeconds?: number;
+        };
+        if (body.dataRepo === undefined && body.reloadFrequencySeconds === undefined) {
+          return json({ error: "dataRepo or reloadFrequencySeconds is required" }, 400);
         }
         const state = await readState(ROOT);
-        state.dataRepo = dataRepo;
+        if (body.dataRepo !== undefined) {
+          const dataRepo = body.dataRepo.trim();
+          if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
+          // Verify access before recording: a GitHub url is cloned on first use
+          // (specs/crud-feature.spec.md: "user is verified to have access to the
+          // data GH repo").
+          try {
+            await resolveDataRepo(dataRepo, ROOT);
+          } catch (e) {
+            return json({ error: (e as Error).message }, 400);
+          }
+          state.dataRepo = dataRepo;
+        }
+        if (body.reloadFrequencySeconds !== undefined) {
+          const n = body.reloadFrequencySeconds;
+          if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+            return json({ error: "reloadFrequencySeconds must be a number >= 0" }, 400);
+          }
+          state.reloadFrequencySeconds = Math.floor(n);
+        }
         await writeState(state, ROOT);
-        return json({ dataRepo: state.dataRepo, needsDataRepo: false });
+        reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+        return json({
+          dataRepo: state.dataRepo ?? null,
+          needsDataRepo: needsDataRepo(state),
+          reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
+        });
       },
     },
 

@@ -36,4 +36,9 @@ Ex: ```Scenario: Basic Quote @v1 [pub]```
 - Either accept yours, accept theirs, or manual edit
 - do a git commit and push
 
+## Scenario: reload data on a cron job
+
+- automatically reload (git pull) data every n seconds
+- specify reload frequency in the Settings screen
+
 
