@@ -4,3 +4,9 @@
 Edit scenarios in a separate dialog box.
 
 If a scenario is already published, then it is immutable.
+
+# Settings
+
+A settings dialog. Settings are saved to .specdriven
+
+- Data reload frequency

@@ -37,3 +37,10 @@ test("recorded data repo round-trips and suppresses the prompt", async () => {
   expect(state.dataRepo).toBe("data");
   expect(needsDataRepo(state)).toBe(false);
 });
+
+// specs/ui.spec.md: Settings (data reload frequency) are saved to .specdriven.
+test("reload frequency round-trips through .specdriven", async () => {
+  await writeState({ dataRepo: "data", reloadFrequencySeconds: 30 }, dir);
+  const state = await readState(dir);
+  expect(state.reloadFrequencySeconds).toBe(30);
+});

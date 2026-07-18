@@ -4,6 +4,8 @@
 
 export interface SpecDrivenState {
   dataRepo?: string;
+  /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
+  reloadFrequencySeconds?: number;
 }
 
 export const STATE_FILE = ".specdriven";

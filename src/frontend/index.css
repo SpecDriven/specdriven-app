@@ -353,6 +353,18 @@ button.link:hover {
   resize: vertical;
 }
 
+aside > .settings-btn {
+  margin-top: auto;
+  background: none;
+  color: var(--accent);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
 .status {
   color: var(--muted);
   font-size: 0.85rem;
