@@ -7,7 +7,7 @@ import {
   createFeature,
   listFeatures,
   readFeature,
-  saveFeature,
+  publishFeature,
   resolveFeatureConflict,
   slugify,
 } from "../src/server/features";
@@ -75,11 +75,11 @@ test("createFeature refuses to overwrite an existing feature", async () => {
 
 test("path traversal in file names is rejected", async () => {
   expect(readFeature(root, "../evil.feature")).rejects.toThrow("Invalid feature file name");
-  expect(saveFeature(root, "no-extension", "x")).rejects.toThrow("Invalid feature file name");
+  expect(publishFeature(root, "no-extension", "x")).rejects.toThrow("Invalid feature file name");
 });
 
-// Scenario: save feature with successful merge — pull, then save.
-test("saveFeature pulls cleanly and saves when there is no conflict", async () => {
+// Scenario: Publish feature with successful merge — pull, then save.
+test("publishFeature pulls cleanly and saves when there is no conflict", async () => {
   const { a, b } = await twoClones();
   // b adds an unrelated file and pushes
   await Bun.write(join(b, "other.feature"), "Feature: Other\n");
@@ -87,24 +87,24 @@ test("saveFeature pulls cleanly and saves when there is no conflict", async () =
   await git(b, "commit", "-m", "other");
   await git(b, "push");
   // a saves seed.feature — the pull merges b's change in first
-  const result = await saveFeature(a, "seed.feature", "Feature: Seed\n\nScenario: One @v1\nbody\n");
-  expect(result.status).toBe("saved");
+  const result = await publishFeature(a, "seed.feature", "Feature: Seed\n\nScenario: One @v1\nbody\n");
+  expect(result.status).toBe("published");
   expect(await readFeature(a, "other.feature")).toBe("Feature: Other\n");
-  expect(await readFeature(a, "seed.feature")).toContain("Scenario: One @v1");
+  expect(await readFeature(a, "seed.feature")).toContain("Scenario: One @v1 [pub]");
 });
 
-// crud-feature.spec.md "save feature with successful merge": after saving,
+// crud-feature.spec.md "Publish feature with successful merge": after saving,
 // do a git commit and push — the other clone must see the change on pull.
-test("saveFeature commits and pushes to origin", async () => {
+test("publishFeature commits and pushes to origin", async () => {
   const { a, b } = await twoClones();
-  const result = await saveFeature(a, "seed.feature", "Feature: Seed v2\n");
-  expect(result.status).toBe("saved");
+  const result = await publishFeature(a, "seed.feature", "Feature: Seed v2\n");
+  expect(result.status).toBe("published");
   expect(result.message).toBe("committed and pushed");
   await git(b, "pull");
   expect(await readFeature(b, "seed.feature")).toBe("Feature: Seed v2\n");
 });
 
-// Scenario: save feature with merge conflict — surface both sides, then resolve.
+// Scenario: Publish feature with merge conflict — surface both sides, then resolve.
 test("conflicting saves surface theirs and can be resolved", async () => {
   const { a, b } = await twoClones();
   // b edits seed.feature and pushes
@@ -118,28 +118,51 @@ test("conflicting saves surface theirs and can be resolved", async () => {
   await git(a, "commit", "-m", "local");
 
   const ours = "Feature: Seed (ours)\n";
-  const result = await saveFeature(a, "seed.feature", ours);
+  const result = await publishFeature(a, "seed.feature", ours);
   expect(result.status).toBe("conflict");
   expect(result.theirs).toBe("Feature: Seed (theirs)\n");
   expect(result.ours).toBe(ours);
 
   // accept theirs
   const resolved = await resolveFeatureConflict(a, "seed.feature", result.theirs!);
-  expect(resolved.status).toBe("saved");
+  expect(resolved.status).toBe("published");
   expect(await readFeature(a, "seed.feature")).toBe("Feature: Seed (theirs)\n");
-  // crud-feature.spec.md "save feature with merge conflict": the resolution
+  // crud-feature.spec.md "Publish feature with merge conflict": the resolution
   // is committed and pushed — origin has the merge.
   expect(resolved.message).toContain("committed and pushed");
   await git(b, "pull");
   expect(await readFeature(b, "seed.feature")).toBe("Feature: Seed (theirs)\n");
   // merge is complete: repo is clean enough to save again
-  const again = await saveFeature(a, "seed.feature", "Feature: Seed final\n");
-  expect(again.status).toBe("saved");
+  const again = await publishFeature(a, "seed.feature", "Feature: Seed final\n");
+  expect(again.status).toBe("published");
 });
 
 test("saving into a plain directory (no standalone git repo) still works", async () => {
   await createFeature(root, "Standalone");
-  const result = await saveFeature(root, "standalone.feature", "Feature: Standalone\nedited\n");
-  expect(result.status).toBe("saved");
+  const result = await publishFeature(root, "standalone.feature", "Feature: Standalone\nedited\n");
+  expect(result.status).toBe("published");
   expect(await readFeature(root, "standalone.feature")).toBe("Feature: Standalone\nedited\n");
+});
+
+// specs/ui.spec.md: "If a scenario is already published, then it is immutable."
+test("published scenarios are immutable, but new versions may be added", async () => {
+  await createFeature(root, "Quote");
+  await publishFeature(root, "quote.feature", "Feature: Quote\n\nScenario: Basic @v1\nold body\n");
+  expect(await readFeature(root, "quote.feature")).toContain("Scenario: Basic @v1 [pub]");
+
+  // changing a published scenario's body is rejected
+  expect(
+    publishFeature(root, "quote.feature", "Feature: Quote\n\nScenario: Basic @v1 [pub]\nnew body\n"),
+  ).rejects.toThrow("immutable");
+  // dropping a published scenario is rejected
+  expect(publishFeature(root, "quote.feature", "Feature: Quote\n")).rejects.toThrow("immutable");
+
+  // adding a new version alongside the published one is fine
+  const result = await publishFeature(
+    root,
+    "quote.feature",
+    "Feature: Quote\n\nScenario: Basic @v1 [pub]\nold body\n\nScenario: Basic @v2\nnew body\n",
+  );
+  expect(result.status).toBe("published");
+  expect(await readFeature(root, "quote.feature")).toContain("Scenario: Basic @v2 [pub]");
 });

@@ -24,7 +24,7 @@ between specs and automated tests.
 
 File: quote-policy.feature
 
-Scenario: Basic Quote @v1
+Scenario: Basic Quote @v1 [pub]
 Given:
 Potential customer has an account
 When:

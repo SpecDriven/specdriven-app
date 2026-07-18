@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
+import { parseFeature, serializeFeature } from "../server/parser";
+import type { Feature, Scenario } from "../server/parser";
 
 interface Conflict {
   ours: string;
   theirs: string;
   message: string;
+}
+
+/** index === null means a new scenario being added. */
+interface EditState {
+  index: number | null;
+  scenario: Scenario;
 }
 
 export function App() {
@@ -15,9 +23,11 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [content, setContent] = useState("");
+  const [feature, setFeature] = useState<Feature | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [editing, setEditing] = useState<EditState | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
-  const [mergePending, setMergePending] = useState(false);
+  const [conflictDraft, setConflictDraft] = useState("");
   const [status, setStatus] = useState("");
 
   const loadFeatures = useCallback(async () => {
@@ -68,9 +78,10 @@ export function App() {
     if (res.ok) {
       const data = await res.json();
       setSelected(file);
-      setContent(data.content);
+      setFeature(parseFeature(data.content));
+      setDirty(false);
+      setEditing(null);
       setConflict(null);
-      setMergePending(false);
       setStatus("");
     }
   };
@@ -92,26 +103,70 @@ export function App() {
     }
   };
 
-  const save = async () => {
-    if (!selected) return;
-    setStatus("Saving…");
+  const publish = async () => {
+    if (!selected || !feature) return;
+    setStatus("Publishing…");
     const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, resolveConflict: mergePending }),
+      body: JSON.stringify({ content: serializeFeature(feature) }),
     });
     const data = await res.json();
     if (res.status === 409 && data.status === "conflict") {
       setConflict({ ours: data.ours, theirs: data.theirs, message: data.message });
-      setMergePending(true);
+      setConflictDraft(data.ours);
       setStatus("Merge conflict — choose a resolution below.");
     } else if (res.ok) {
-      setConflict(null);
-      setMergePending(false);
-      setStatus(`Saved. ${data.message}`);
+      await openFeature(selected);
+      setStatus(`Published. ${data.message}`);
     } else {
-      setStatus(data.error ?? "Save failed");
+      setStatus(data.error ?? "Publish failed");
     }
+  };
+
+  const resolveWith = async (resolved: string) => {
+    if (!selected) return;
+    setStatus("Publishing resolution…");
+    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: resolved, resolveConflict: true }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      await openFeature(selected);
+      setStatus(`Published. ${data.message}`);
+    } else {
+      setStatus(data.error ?? "Publish failed");
+    }
+  };
+
+  const saveScenario = () => {
+    if (!editing || !feature) return;
+    const s = editing.scenario;
+    setFeature({
+      ...feature,
+      scenarios:
+        editing.index === null
+          ? [...feature.scenarios, s]
+          : feature.scenarios.map((sc, i) => (i === editing.index ? s : sc)),
+    });
+    setDirty(true);
+    setEditing(null);
+    setStatus("Unpublished changes — press Publish to commit and push.");
+  };
+
+  /** Draft the next version of a published scenario as a new, editable scenario. */
+  const newVersion = (i: number) => {
+    if (!feature) return;
+    const src = feature.scenarios[i]!;
+    const maxVersion = Math.max(
+      ...feature.scenarios.filter((s) => s.name === src.name).map((s) => s.version),
+    );
+    setEditing({
+      index: null,
+      scenario: { ...src, version: maxVersion + 1, published: false },
+    });
   };
 
   if (loading) return <main className="centered">Loading…</main>;
@@ -139,6 +194,8 @@ export function App() {
     );
   }
 
+  const editingPublished = editing?.scenario.published ?? false;
+
   return (
     <main className="layout">
       <aside>
@@ -160,13 +217,53 @@ export function App() {
         </ul>
       </aside>
       <section className="editor">
-        {selected ? (
+        {selected && feature ? (
           <>
             <div className="editor-bar">
               <h2>{selected}</h2>
-              <button onClick={() => save()}>Save</button>
+              <button onClick={publish}>{dirty ? "Publish *" : "Publish"}</button>
             </div>
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} spellCheck={false} />
+            <h3 className="feature-name">Feature: {feature.name}</h3>
+            <div className="scenarios">
+              {feature.scenarios.map((s, i) => (
+                <article key={i} className={`scenario-card${s.published ? " published" : ""}`}>
+                  <header>
+                    <span className="scenario-title">
+                      {s.name} <span className="version">@v{s.version}</span>
+                      {s.published && <span className="badge">published</span>}
+                    </span>
+                    <span className="card-actions">
+                      {s.published && (
+                        <button className="link" onClick={() => newVersion(i)}>
+                          New version
+                        </button>
+                      )}
+                      <button
+                        className="link"
+                        onClick={() => setEditing({ index: i, scenario: { ...s } })}
+                      >
+                        {s.published ? "View" : "Edit"}
+                      </button>
+                    </span>
+                  </header>
+                  {s.body && <pre className="scenario-body">{s.body}</pre>}
+                </article>
+              ))}
+              {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
+            </div>
+            <div>
+              <button
+                className="add-scenario"
+                onClick={() =>
+                  setEditing({
+                    index: null,
+                    scenario: { name: "", version: 1, published: false, body: "" },
+                  })
+                }
+              >
+                + Add scenario
+              </button>
+            </div>
             {status && <p className="status">{status}</p>}
             {conflict && (
               <div className="conflict">
@@ -181,28 +278,16 @@ export function App() {
                     <pre>{conflict.theirs}</pre>
                   </div>
                 </div>
+                <textarea
+                  className="conflict-draft"
+                  value={conflictDraft}
+                  onChange={(e) => setConflictDraft(e.target.value)}
+                  spellCheck={false}
+                />
                 <div className="conflict-actions">
-                  <button
-                    onClick={() => {
-                      setContent(conflict.ours);
-                      setConflict(null);
-                      void saveWith(conflict.ours);
-                    }}
-                  >
-                    Accept yours
-                  </button>
-                  <button
-                    onClick={() => {
-                      setContent(conflict.theirs);
-                      setConflict(null);
-                      void saveWith(conflict.theirs);
-                    }}
-                  >
-                    Accept theirs
-                  </button>
-                  <button onClick={() => setStatus("Edit the text above, then Save to resolve.")}>
-                    Manual edit
-                  </button>
+                  <button onClick={() => resolveWith(conflict.ours)}>Accept yours</button>
+                  <button onClick={() => resolveWith(conflict.theirs)}>Accept theirs</button>
+                  <button onClick={() => resolveWith(conflictDraft)}>Publish manual edit</button>
                 </div>
               </div>
             )}
@@ -211,19 +296,66 @@ export function App() {
           <p className="empty">Select a feature file or create a new one.</p>
         )}
       </section>
+      {editing && (
+        <div className="dialog-backdrop" onClick={() => setEditing(null)}>
+          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {editing.index === null
+                ? "New scenario"
+                : editingPublished
+                  ? "Published scenario (immutable)"
+                  : "Edit scenario"}
+            </h3>
+            <label>
+              Name
+              <input
+                value={editing.scenario.name}
+                disabled={editingPublished}
+                autoFocus={!editingPublished}
+                onChange={(e) =>
+                  setEditing({ ...editing, scenario: { ...editing.scenario, name: e.target.value } })
+                }
+              />
+            </label>
+            <label>
+              Version
+              <input
+                type="number"
+                min={1}
+                value={editing.scenario.version}
+                disabled={editingPublished}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    scenario: { ...editing.scenario, version: Math.max(1, Number(e.target.value) || 1) },
+                  })
+                }
+              />
+            </label>
+            <label>
+              Body
+              <textarea
+                value={editing.scenario.body}
+                disabled={editingPublished}
+                spellCheck={false}
+                onChange={(e) =>
+                  setEditing({ ...editing, scenario: { ...editing.scenario, body: e.target.value } })
+                }
+              />
+            </label>
+            <div className="dialog-actions">
+              <button className="secondary" onClick={() => setEditing(null)}>
+                {editingPublished ? "Close" : "Cancel"}
+              </button>
+              {!editingPublished && (
+                <button onClick={saveScenario} disabled={!editing.scenario.name.trim()}>
+                  Save scenario
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
-
-  async function saveWith(resolved: string) {
-    if (!selected) return;
-    setContent(resolved);
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: resolved, resolveConflict: true }),
-    });
-    const data = await res.json();
-    if (res.ok) setMergePending(false);
-    setStatus(res.ok ? `Saved. ${data.message}` : (data.error ?? "Save failed"));
-  }
 }

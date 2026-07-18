@@ -3,13 +3,16 @@
 //   Feature: <name of the feature>
 //
 //   Scenario: <name of scenario> @vNNN   (NNN is a positive integer)
+//   Scenario: <name of scenario> @vNNN [pub]   (published scenario)
 //   <scenario body> (any text, may include Gherkin tables)
 //
-// Scenarios are atomic, immutable, and versioned.
+// Scenarios are atomic, immutable, and versioned. A published scenario is
+// marked with [pub] after the version and may no longer change.
 
 export interface Scenario {
   name: string;
   version: number;
+  published: boolean;
   body: string;
 }
 
@@ -19,7 +22,7 @@ export interface Feature {
 }
 
 const FEATURE_RE = /^(?:Feature|name):\s*(.+)\s*$/;
-const SCENARIO_RE = /^Scenario:\s*(.+?)\s*@v([1-9]\d*)\s*$/;
+const SCENARIO_RE = /^Scenario:\s*(.+?)\s*@v([1-9]\d*)\s*(\[pub\])?\s*$/;
 
 export function parseFeature(text: string): Feature {
   let name = "";
@@ -44,7 +47,12 @@ export function parseFeature(text: string): Feature {
     const scenarioMatch = line.match(SCENARIO_RE);
     if (scenarioMatch) {
       flush();
-      current = { name: scenarioMatch[1]!, version: Number(scenarioMatch[2]), body: "" };
+      current = {
+        name: scenarioMatch[1]!,
+        version: Number(scenarioMatch[2]),
+        published: Boolean(scenarioMatch[3]),
+        body: "",
+      };
       continue;
     }
     if (current) bodyLines.push(line);
@@ -57,7 +65,23 @@ export function parseFeature(text: string): Feature {
 export function serializeFeature(feature: Feature): string {
   const parts = [`Feature: ${feature.name}`];
   for (const s of feature.scenarios) {
-    parts.push(`Scenario: ${s.name} @v${s.version}\n${s.body}`.trimEnd());
+    const header = `Scenario: ${s.name} @v${s.version}${s.published ? " [pub]" : ""}`;
+    parts.push(`${header}\n${s.body}`.trimEnd());
   }
   return parts.join("\n\n") + "\n";
+}
+
+/**
+ * Mark every scenario header as published by appending [pub]. Works on the
+ * raw text line-by-line so content that doesn't fit the parse model survives
+ * untouched; already-published headers are left as they are.
+ */
+export function markPublished(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^(Scenario:\s*.+?\s*@v[1-9]\d*)\s*$/);
+      return m ? `${m[1]} [pub]` : line;
+    })
+    .join("\n");
 }
