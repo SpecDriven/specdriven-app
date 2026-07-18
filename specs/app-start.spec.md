@@ -1,2 +1,4 @@
 When the application starts, if the .specdriven file does not
-contain the name of the last data repo, the user is asked the name of the data repo
+contain the name of the last data repo, the user is asked the name of the data repo.
+
+Data repo format: https://github.com/SpecDriven/data-insurance (regular gitHub url)
