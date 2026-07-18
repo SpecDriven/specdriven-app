@@ -18,13 +18,19 @@ Scenario: <name of scenario> @vNNN (where NNN is a positive integer)
 - When: user asks to create a feature
 - Then: new feature file is created in the local filesystem
 
-## Scenario: save feature with successful merge
+## Publishing scenarios
+
+When a scenario is published it is marked with [pub] after the version
+
+Ex: ```Scenario: Basic Quote @v1 [pub]```
+
+## Scenario: Publish feature with successful merge
 
 - Do a 'git pull' and merge all the files.
 - If merge successful, proceed with saving
 - do a git commit and push
 
-## Scenario: save feature with merge conflict
+## Scenario: Publish feature with merge conflict
 
 - Display conflict to the user and ask for a resolution
 - Either accept yours, accept theirs, or manual edit

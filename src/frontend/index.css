@@ -9,6 +9,8 @@
   --danger-bg: #fef2f2;
   --danger-border: #fecaca;
   --danger-fg: #b91c1c;
+  --pub-bg: #eef2ff;
+  --pub-border: #c7d2fe;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +25,8 @@
     --danger-bg: #2a1518;
     --danger-border: #7f1d1d;
     --danger-fg: #f87171;
+    --pub-bg: #1c1c33;
+    --pub-border: #3b3b6b;
   }
 }
 
@@ -131,6 +135,7 @@ button {
 aside > button,
 .editor-bar button,
 .conflict-actions button,
+.add-scenario,
 .repo-prompt button {
   padding: 0.45rem 0.9rem;
   border: 1px solid var(--accent);
@@ -159,17 +164,192 @@ aside > button,
   font-family: ui-monospace, monospace;
 }
 
-.editor textarea {
+.feature-name {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.scenarios {
   flex: 1;
-  min-height: 20rem;
-  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+}
+
+.scenario-card {
   border: 1px solid var(--border);
   border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+}
+
+/* Published scenarios are shaded differently (specs/ui.spec.md) */
+.scenario-card.published {
+  background: var(--pub-bg);
+  border-color: var(--pub-border);
+}
+
+.scenario-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.scenario-title {
+  font-weight: 600;
+}
+
+.scenario-title .version {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.badge {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+button.link:hover {
+  text-decoration: underline;
+}
+
+/* Feature page shows up to 8 lines per scenario (specs/ui.spec.md) */
+.scenario-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  width: min(40rem, 90vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dialog h3 {
+  margin: 0;
+}
+
+.dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dialog input,
+.dialog textarea {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
   background: var(--bg);
   color: var(--fg);
+  font-size: 0.95rem;
+}
+
+.dialog textarea {
+  min-height: 14rem;
   font-family: ui-monospace, "SF Mono", monospace;
   font-size: 0.9rem;
   line-height: 1.5;
+  resize: vertical;
+}
+
+.dialog input:disabled,
+.dialog textarea:disabled {
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.dialog-actions button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.375rem;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.9rem;
+}
+
+.dialog-actions button.secondary {
+  background: none;
+  color: var(--accent);
+}
+
+.dialog-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.conflict-draft {
+  width: 100%;
+  min-height: 8rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.85rem;
   resize: vertical;
 }
 

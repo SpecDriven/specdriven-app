@@ -6,7 +6,7 @@ import {
   listFeatures,
   readFeature,
   createFeature,
-  saveFeature,
+  publishFeature,
   resolveFeatureConflict,
 } from "./server/features";
 import { parseFeature } from "./server/parser";
@@ -94,7 +94,7 @@ const server = Bun.serve({
         try {
           const result = body.resolveConflict
             ? await resolveFeatureConflict(dir, req.params.file, body.content)
-            : await saveFeature(dir, req.params.file, body.content);
+            : await publishFeature(dir, req.params.file, body.content);
           return json(result, result.status === "conflict" ? 409 : 200);
         } catch (e) {
           return json({ error: (e as Error).message }, 400);

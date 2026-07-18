@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseFeature, serializeFeature } from "../src/server/parser";
+import { parseFeature, serializeFeature, markPublished } from "../src/server/parser";
 
 const SAMPLE = `Feature: Quote Policy
 
@@ -36,6 +36,30 @@ test("accepts the legacy 'name:' feature header", () => {
 test("scenario versions must be positive integers", () => {
   const feature = parseFeature("Feature: X\n\nScenario: Bad @v0\nbody\n");
   expect(feature.scenarios).toHaveLength(0);
+});
+
+// ui.spec.md / crud-feature.spec.md: a published scenario is marked with
+// [pub] after the version.
+test("parses the [pub] published marker", () => {
+  const feature = parseFeature(
+    "Feature: X\n\nScenario: Done @v1 [pub]\nbody\n\nScenario: Draft @v2\nbody\n",
+  );
+  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
+});
+
+test("serialize keeps the [pub] marker", () => {
+  const text = "Feature: X\n\nScenario: Done @v1 [pub]\nbody\n";
+  expect(serializeFeature(parseFeature(text))).toBe(text);
+});
+
+test("markPublished appends [pub] to unpublished scenario headers only", () => {
+  const marked = markPublished(
+    "Feature: X\n\nScenario: Draft @v2\nbody\n\nScenario: Done @v1 [pub]\nbody\n",
+  );
+  expect(marked).toContain("Scenario: Draft @v2 [pub]");
+  expect(marked).toContain("Scenario: Done @v1 [pub]");
+  expect(marked).not.toContain("[pub] [pub]");
 });
 
 test("serialize then parse round-trips", () => {

@@ -1,11 +1,12 @@
 import { readdir } from "node:fs/promises";
 import { pull, theirsVersion, commitAndPush, resolveConflict as gitResolve } from "./git";
+import { parseFeature, markPublished } from "./parser";
 
-export interface SaveResult {
-  status: "saved" | "conflict";
+export interface PublishResult {
+  status: "published" | "conflict";
   /** On conflict: the remote side of the merge for this file. */
   theirs?: string;
-  /** On conflict: the content the user tried to save. */
+  /** On conflict: the content the user tried to publish. */
   ours?: string;
   message: string;
 }
@@ -46,34 +47,56 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
 }
 
 /**
- * Scenario "save feature": git pull first; on a clean merge, save, then
- * git commit and push. On a merge conflict, report both sides so the user
- * can resolve (accept yours / accept theirs / manual edit).
+ * Scenario "Publish feature": every scenario is marked [pub] (published
+ * scenarios are immutable — specs/ui.spec.md); git pull first; on a clean
+ * merge, save, then git commit and push. On a merge conflict, report both
+ * sides so the user can resolve (accept yours / accept theirs / manual edit).
  */
-export async function saveFeature(
+export async function publishFeature(
   dataDir: string,
   fileName: string,
   content: string,
-): Promise<SaveResult> {
+): Promise<PublishResult> {
   const name = safe(fileName);
+  const published = markPublished(content);
+  await assertPublishedUnchanged(dataDir, name, published);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
     const theirs = (await theirsVersion(dataDir, name)) ?? "";
-    return { status: "conflict", theirs, ours: content, message: pullResult.message };
+    return { status: "conflict", theirs, ours: published, message: pullResult.message };
   }
-  await Bun.write(`${dataDir}/${name}`, content);
-  const sync = await commitAndPush(dataDir, name, `Update feature: ${name}`);
-  return { status: "saved", message: sync.message };
+  await Bun.write(`${dataDir}/${name}`, published);
+  const sync = await commitAndPush(dataDir, name, `Publish feature: ${name}`);
+  return { status: "published", message: sync.message };
 }
 
-/** Complete a conflicted save with the user's chosen resolution, then commit and push. */
+/** Complete a conflicted publish with the user's chosen resolution, then commit and push. */
 export async function resolveFeatureConflict(
   dataDir: string,
   fileName: string,
   content: string,
-): Promise<SaveResult> {
-  const sync = await gitResolve(dataDir, safe(fileName), content);
-  return { status: "saved", message: sync.message };
+): Promise<PublishResult> {
+  const sync = await gitResolve(dataDir, safe(fileName), markPublished(content));
+  return { status: "published", message: sync.message };
+}
+
+/**
+ * specs/ui.spec.md: "If a scenario is already published, then it is
+ * immutable." A published scenario (same name and version) must survive a
+ * publish with its body intact; adding a new version alongside it is fine.
+ */
+async function assertPublishedUnchanged(dataDir: string, fileName: string, next: string) {
+  const existingText = await readFeature(dataDir, fileName);
+  if (existingText === null) return;
+  const before = parseFeature(existingText);
+  const after = parseFeature(next);
+  for (const old of before.scenarios) {
+    if (!old.published) continue;
+    const match = after.scenarios.find((s) => s.name === old.name && s.version === old.version);
+    if (!match || match.body !== old.body) {
+      throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);
+    }
+  }
 }
 
 function safe(fileName: string): string {
