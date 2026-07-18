@@ -22,10 +22,12 @@ Scenario: <name of scenario> @vNNN (where NNN is a positive integer)
 
 - Do a 'git pull' and merge all the files.
 - If merge successful, proceed with saving
+- do a git commit and push
 
 ## Scenario: save feature with merge conflict
 
 - Display conflict to the user and ask for a resolution
 - Either accept yours, accept theirs, or manual edit
+- do a git commit and push
 
 
