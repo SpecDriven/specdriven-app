@@ -7,7 +7,8 @@ If a scenario is already published, then it is immutable.
 
 # Main page
 
-Sync button (immediate data reload)
+Sync button (immediate data reload), disabled with a progress label while
+running. No "Syncing…"/"Synced" status update at the bottom of the page.
 
 Publish button: same style and behavior as the Sync button (disabled with a
 progress label while running). No "Published" status update at the bottom of
