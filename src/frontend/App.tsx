@@ -3,6 +3,7 @@ import type { CSSProperties, MouseEvent } from "react";
 import { parseFeature, serializeFeature, titleFromFileName } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
+import type { CurrentUser } from "../server/user";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
@@ -75,6 +76,11 @@ export function App() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
+  // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
+  // lower left corner; the chip opens a menu with User info and Settings.
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [userInfoOpen, setUserInfoOpen] = useState(false);
 
   const loadFeatures = useCallback(async () => {
     const res = await fetch("/api/features");
@@ -99,6 +105,7 @@ export function App() {
       if (typeof state.scenarioPreviewLines === "number") {
         setPreviewLines(state.scenarioPreviewLines);
       }
+      if (state.user) setUser(state.user);
       if (!state.needsDataRepo) {
         await loadFeatures();
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
@@ -124,7 +131,8 @@ export function App() {
   // highlight through the scenario cards, Enter opens the highlighted one in
   // the dialog. Inert while a dialog is open or while typing in a field.
   useEffect(() => {
-    if (!feature || feature.scenarios.length === 0 || editing || settingsOpen) return;
+    if (!feature || feature.scenarios.length === 0 || editing || settingsOpen || userInfoOpen)
+      return;
     const count = feature.scenarios.length;
     const onKeyDown = (e: KeyboardEvent) => {
       const t = e.target;
@@ -154,7 +162,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [feature, editing, settingsOpen, selectedScenario]);
+  }, [feature, editing, settingsOpen, userInfoOpen, selectedScenario]);
 
   // specs/ui.spec.md "Scenario edit dialog": ESC returns to the scenario
   // screen — same as Cancel/Close, and it works while a dialog field has focus.
@@ -170,11 +178,34 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
+  // specs/user-info-settings.spec.md: ESC or a click anywhere else closes
+  // the user menu.
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDown = (e: Event) => {
+      if (!(e.target instanceof Element) || !e.target.closest(".user-corner"))
+        setUserMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setUserMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [userMenuOpen]);
+
   // specs/folders.spec.md: ESC deselects the folder, moving the insertion
   // point back to the tree root so "+ New folder" adds a top-level folder.
   // Inert while a dialog is open or while typing (ESC cancels those instead).
   useEffect(() => {
-    if (selectedFolder === null || editing || settingsOpen) return;
+    if (selectedFolder === null || editing || settingsOpen || userMenuOpen || userInfoOpen)
+      return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const t = e.target;
@@ -189,11 +220,12 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFolder, editing, settingsOpen]);
+  }, [selectedFolder, editing, settingsOpen, userMenuOpen, userInfoOpen]);
 
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const editingTrapRef = useFocusTrap(editing !== null);
+  const userInfoTrapRef = useFocusTrap(userInfoOpen);
 
   useEffect(() => {
     if (selectedScenario !== null)
@@ -603,6 +635,16 @@ export function App() {
     }
   };
 
+  // Avatar initials: from the git name when set, else the OS user name
+  // (specs/user-info-settings.spec.md).
+  const initials = (user?.name || user?.username || "?")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0]!)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
   const openSettings = () => {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
@@ -819,9 +861,43 @@ export function App() {
             <p className="empty">No feature files yet</p>
           )}
         </div>
-        <button className="settings-btn" onClick={openSettings}>
-          ⚙ Settings
-        </button>
+        {/* specs/user-info-settings.spec.md: the lower left corner shows the
+            current user; its menu holds User info and Settings. */}
+        <div className="user-corner">
+          {userMenuOpen && (
+            <div className="user-menu" role="menu" aria-label="User menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  setUserInfoOpen(true);
+                }}
+              >
+                User info
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  openSettings();
+                }}
+              >
+                ⚙ Settings
+              </button>
+            </div>
+          )}
+          <button
+            className="user-chip"
+            aria-haspopup="menu"
+            aria-expanded={userMenuOpen}
+            onClick={() => setUserMenuOpen((o) => !o)}
+          >
+            <span className="avatar" aria-hidden="true">
+              {initials}
+            </span>
+            <span className="user-name">{user?.username ?? "…"}</span>
+          </button>
+        </div>
       </aside>
       <section className="editor">
         {selected && feature ? (
@@ -1027,6 +1103,29 @@ export function App() {
                 Cancel
               </button>
               <button onClick={saveSettings}>Save settings</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {userInfoOpen && (
+        <div className="dialog-backdrop" onClick={() => setUserInfoOpen(false)}>
+          <div className="dialog" ref={userInfoTrapRef} onClick={(e) => e.stopPropagation()}>
+            <h3>User info</h3>
+            <dl className="user-info">
+              <dt>OS user</dt>
+              <dd>{user?.username ?? "unknown"}</dd>
+              <dt>Git name</dt>
+              <dd>{user?.name ?? <span className="unset">not set</span>}</dd>
+              <dt>Git email</dt>
+              <dd>{user?.email ?? <span className="unset">not set</span>}</dd>
+            </dl>
+            <p className="hint">
+              Commits to the data repo are authored with this git identity.
+            </p>
+            <div className="dialog-actions">
+              <button autoFocus onClick={() => setUserInfoOpen(false)}>
+                Close
+              </button>
             </div>
           </div>
         </div>
