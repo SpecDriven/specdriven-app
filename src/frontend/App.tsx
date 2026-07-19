@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseFeature, serializeFeature } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
+import { MarkdownEditor } from "./MarkdownEditor";
 
 interface Conflict {
   ours: string;
@@ -525,51 +526,54 @@ export function App() {
       )}
       {editing && (
         <div className="dialog-backdrop" onClick={() => setEditing(null)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              {editing.index === null
-                ? "New scenario"
-                : editingPublished
-                  ? "Published scenario (immutable)"
-                  : "Edit scenario"}
-            </h3>
-            <label>
-              Name
+          {/* specs/ui.spec.md "Scenario edit dialog": the scenario name is the
+              dialog title (an editable title unless published), the dialog is
+              resizable, and the body is an embedded markdown editor. */}
+          <div className="dialog scenario-dialog" onClick={(e) => e.stopPropagation()}>
+            {editingPublished ? (
+              <h3 className="dialog-title">
+                {editing.scenario.name} <span className="version">v{editing.scenario.version}</span>
+                <span className="badge">published</span>
+              </h3>
+            ) : (
               <input
+                className="dialog-title-input"
                 value={editing.scenario.name}
-                disabled={editingPublished}
-                autoFocus={!editingPublished}
+                placeholder="Scenario name"
+                aria-label="Scenario name"
+                autoFocus
                 onChange={(e) =>
                   setEditing({ ...editing, scenario: { ...editing.scenario, name: e.target.value } })
                 }
               />
-            </label>
-            <label>
-              Version
-              <input
-                type="number"
-                min={1}
-                value={editing.scenario.version}
-                disabled={editingPublished}
-                onChange={(e) =>
-                  setEditing({
-                    ...editing,
-                    scenario: { ...editing.scenario, version: Math.max(1, Number(e.target.value) || 1) },
-                  })
-                }
-              />
-            </label>
-            <label>
-              Body
-              <textarea
+            )}
+            {!editingPublished && (
+              <label className="version-field">
+                Version
+                <input
+                  type="number"
+                  min={1}
+                  value={editing.scenario.version}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      scenario: { ...editing.scenario, version: Math.max(1, Number(e.target.value) || 1) },
+                    })
+                  }
+                />
+              </label>
+            )}
+            <div className="body-field">
+              <span className="field-label">Body</span>
+              <MarkdownEditor
                 value={editing.scenario.body}
-                disabled={editingPublished}
-                spellCheck={false}
-                onChange={(e) =>
-                  setEditing({ ...editing, scenario: { ...editing.scenario, body: e.target.value } })
+                readOnly={editingPublished}
+                placeholder="Describe the scenario in Markdown…"
+                onChange={(body) =>
+                  setEditing({ ...editing, scenario: { ...editing.scenario, body } })
                 }
               />
-            </label>
+            </div>
             <div className="dialog-actions">
               <button className="secondary" onClick={() => setEditing(null)}>
                 {editingPublished ? "Close" : "Cancel"}

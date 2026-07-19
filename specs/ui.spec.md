@@ -20,6 +20,9 @@ the page.
 
 # Scenario edit dialog
 
+- Name must be the title of the dialog
+- Must be resizable
+- Scenario body must contain an embedded Markdown Editor
 - ESC key to get back to Scenario screen.
 
 # Settings
