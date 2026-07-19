@@ -22,10 +22,15 @@ afterEach(async () => {
 });
 
 // specs/app-start.spec.md: data repo format is a regular gitHub url,
-// e.g. https://github.com/SpecDriven/data-insurance
+// e.g. https://github.com/SpecDriven/data-insurance.
+// specs/datastore.spec.md: if the https:// clone fails, try ssh — so a
+// parsed repo carries both clone urls, https first.
 test("parses a regular GitHub url", () => {
   expect(parseGitHubUrl("https://github.com/SpecDriven/data-insurance")).toEqual({
-    url: "https://github.com/SpecDriven/data-insurance",
+    urls: [
+      "https://github.com/SpecDriven/data-insurance",
+      "git@github.com:SpecDriven/data-insurance.git",
+    ],
     name: "data-insurance",
   });
 });
@@ -38,14 +43,20 @@ test("accepts .git suffix, trailing slash, and scheme-less variants", () => {
     "data-insurance",
   );
   expect(parseGitHubUrl("github.com/SpecDriven/data-insurance")).toEqual({
-    url: "https://github.com/SpecDriven/data-insurance",
+    urls: [
+      "https://github.com/SpecDriven/data-insurance",
+      "git@github.com:SpecDriven/data-insurance.git",
+    ],
     name: "data-insurance",
   });
 });
 
-test("accepts ssh remotes", () => {
+test("accepts ssh remotes, probing ssh first and https as the fallback", () => {
   expect(parseGitHubUrl("git@github.com:SpecDriven/data-insurance.git")).toEqual({
-    url: "git@github.com:SpecDriven/data-insurance.git",
+    urls: [
+      "git@github.com:SpecDriven/data-insurance.git",
+      "https://github.com/SpecDriven/data-insurance",
+    ],
     name: "data-insurance",
   });
 });
@@ -115,5 +126,22 @@ test("ensureClone clones on first use and reuses an existing clone", async () =>
 test("ensureClone surfaces clone failures (no access / no such repo)", async () => {
   expect(ensureClone(join(root, "no-such-origin.git"), join(root, "x"))).rejects.toThrow(
     "Could not clone",
+  );
+});
+
+// specs/datastore.spec.md "Probe multiple git clone schemes": when the first
+// clone fails (e.g. https auth with terminal prompts disabled), the next
+// scheme is tried.
+test("ensureClone falls back to the next url when the first clone fails", async () => {
+  const origin = await seededOrigin();
+  const dir = join(root, "clone");
+  await ensureClone([join(root, "no-such-origin.git"), origin], dir);
+  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+});
+
+test("ensureClone reports every failed probe", async () => {
+  const probes = [join(root, "missing-a.git"), join(root, "missing-b.git")];
+  expect(ensureClone(probes, join(root, "x"))).rejects.toThrow(
+    /missing-a\.git[\s\S]*missing-b\.git/,
   );
 });
