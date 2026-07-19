@@ -31,6 +31,7 @@ export function App() {
   const [status, setStatus] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
@@ -133,24 +134,32 @@ export function App() {
     }
   };
 
+  // Publish button (specs/ui.spec.md "Main page"): same style and behavior as
+  // Sync — disabled with a progress label while running, no "Published" status
+  // line at the bottom of the page.
   const publish = async () => {
     if (!selected || !feature) return;
-    setStatus("Publishing…");
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: serializeFeature(feature) }),
-    });
-    const data = await res.json();
-    if (res.status === 409 && data.status === "conflict") {
-      setConflict({ ours: data.ours, theirs: data.theirs, message: data.message });
-      setConflictDraft(data.ours);
-      setStatus("Merge conflict — choose a resolution below.");
-    } else if (res.ok) {
-      await openFeature(selected);
-      setStatus(`Published. ${data.message}`);
-    } else {
-      setStatus(data.error ?? "Publish failed");
+    setPublishing(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(feature) }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.status === "conflict") {
+        setConflict({ ours: data.ours, theirs: data.theirs, message: data.message });
+        setConflictDraft(data.ours);
+        setStatus("Merge conflict — choose a resolution below.");
+      } else if (res.ok) {
+        await openFeature(selected);
+      } else {
+        setStatus(data.error ?? "Publish failed");
+      }
+    } catch {
+      setStatus("Publish failed — is the server running?");
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -188,7 +197,6 @@ export function App() {
     const data = await res.json();
     if (res.ok) {
       await openFeature(selected);
-      setStatus(`Published. ${data.message}`);
     } else {
       setStatus(data.error ?? "Publish failed");
     }
@@ -335,7 +343,9 @@ export function App() {
                 <button className="secondary" onClick={syncNow} disabled={syncing}>
                   {syncing ? "Syncing…" : "Sync"}
                 </button>
-                <button onClick={publish}>{dirty || hasSaved ? "Publish *" : "Publish"}</button>
+                <button className="secondary" onClick={publish} disabled={publishing}>
+                  {publishing ? "Publishing…" : dirty || hasSaved ? "Publish *" : "Publish"}
+                </button>
               </div>
             </div>
             <h3 className="feature-name">Feature: {feature.name}</h3>
