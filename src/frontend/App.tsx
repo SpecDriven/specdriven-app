@@ -238,9 +238,9 @@ export function App() {
   // Sync button (specs/ui.spec.md "Main page"): immediate data reload — the
   // server runs one reload tick (pull + push saved), then the view refreshes.
   // Like the cron mirror above, an in-progress edit or conflict is not clobbered.
+  // Progress shows only on the button — no status line at the bottom of the page.
   const syncNow = async () => {
     setSyncing(true);
-    setStatus("Syncing…");
     try {
       const res = await fetch("/api/reload", { method: "POST" });
       const data = await res.json();
@@ -250,7 +250,6 @@ export function App() {
       }
       await loadFeatures();
       if (selected && !dirty && !editing && !conflict) await openFeature(selected);
-      setStatus(`Synced. ${data.message}`);
     } catch {
       setStatus("Sync failed — is the server running?");
     } finally {
