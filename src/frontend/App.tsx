@@ -30,6 +30,7 @@ export function App() {
   const [conflictDraft, setConflictDraft] = useState("");
   const [status, setStatus] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
@@ -150,6 +151,29 @@ export function App() {
       setStatus(`Published. ${data.message}`);
     } else {
       setStatus(data.error ?? "Publish failed");
+    }
+  };
+
+  // Sync button (specs/ui.spec.md "Main page"): immediate data reload — the
+  // server runs one reload tick (pull + push saved), then the view refreshes.
+  // Like the cron mirror above, an in-progress edit or conflict is not clobbered.
+  const syncNow = async () => {
+    setSyncing(true);
+    setStatus("Syncing…");
+    try {
+      const res = await fetch("/api/reload", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error ?? "Sync failed");
+        return;
+      }
+      await loadFeatures();
+      if (selected && !dirty && !editing && !conflict) await openFeature(selected);
+      setStatus(`Synced. ${data.message}`);
+    } catch {
+      setStatus("Sync failed — is the server running?");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -307,7 +331,12 @@ export function App() {
           <>
             <div className="editor-bar">
               <h2>{selected}</h2>
-              <button onClick={publish}>{dirty || hasSaved ? "Publish *" : "Publish"}</button>
+              <div className="editor-actions">
+                <button className="secondary" onClick={syncNow} disabled={syncing}>
+                  {syncing ? "Syncing…" : "Sync"}
+                </button>
+                <button onClick={publish}>{dirty || hasSaved ? "Publish *" : "Publish"}</button>
+              </div>
             </div>
             <h3 className="feature-name">Feature: {feature.name}</h3>
             {feature.description && <pre className="feature-desc">{feature.description}</pre>}
