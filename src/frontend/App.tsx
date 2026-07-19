@@ -103,6 +103,15 @@ export function App() {
       setEditing(null);
       setConflict(null);
       setStatus("");
+    } else {
+      // The file is gone — deleted, or renamed by the `.feature.md` migration.
+      // Drop a stale selection rather than re-fetching it on every reload tick.
+      if (file === selected) {
+        setSelected(null);
+        setFeature(null);
+        setStatus("");
+      }
+      await loadFeatures();
     }
   };
 
@@ -193,7 +202,7 @@ export function App() {
     if (res.ok) {
       setFeature(parseFeature(data.content));
       setDirty(false);
-      setStatus("Saved — press Publish to mark scenarios [pub].");
+      setStatus("Saved — press Publish to mark scenarios published.");
       flashSaved();
     } else {
       setDirty(true);
@@ -301,12 +310,13 @@ export function App() {
               <button onClick={publish}>{dirty || hasSaved ? "Publish *" : "Publish"}</button>
             </div>
             <h3 className="feature-name">Feature: {feature.name}</h3>
+            {feature.description && <pre className="feature-desc">{feature.description}</pre>}
             <div className="scenarios">
               {feature.scenarios.map((s, i) => (
                 <article key={i} className={`scenario-card${s.published ? " published" : ""}`}>
                   <header>
                     <span className="scenario-title">
-                      {s.name} <span className="version">@v{s.version}</span>
+                      {s.name} <span className="version">v{s.version}</span>
                       {s.published && <span className="badge">published</span>}
                       {!s.published && s.saved && <span className="badge saved">saved</span>}
                     </span>

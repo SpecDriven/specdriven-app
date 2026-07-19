@@ -127,7 +127,14 @@ const server = Bun.serve({
 
     "/api/features/:file": {
       GET: withDataDir(async (dir, req: BunRequest<"/api/features/:file">) => {
-        const content = await readFeature(dir, req.params.file);
+        // A name readFeature refuses — a legacy `<slug>.feature` still held by
+        // an open tab, or a traversal attempt — is "not found", not a 500.
+        let content: string | null;
+        try {
+          content = await readFeature(dir, req.params.file);
+        } catch {
+          return json({ error: "not found" }, 404);
+        }
         if (content === null) return json({ error: "not found" }, 404);
         return json({ fileName: req.params.file, content, parsed: parseFeature(content) });
       }),

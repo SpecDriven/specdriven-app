@@ -56,7 +56,7 @@ test("reload commits and pushes locally saved scenarios after the pull", async (
   await $`git -C ${data} config user.email test@example.com`.quiet();
   await $`git -C ${data} config user.name Test`.quiet();
   await $`git -C ${data} checkout -B main`.quiet();
-  await Bun.write(join(data, "seed.feature"), "Feature: Seed\n");
+  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
   await $`git -C ${data} add .`.quiet();
   await $`git -C ${data} commit -m seed`.quiet();
   await $`git -C ${data} push origin HEAD:main`.quiet();
@@ -64,7 +64,10 @@ test("reload commits and pushes locally saved scenarios after the pull", async (
   await writeState({ dataRepo: "data" }, dir);
 
   // an auto-saved (uncommitted) scenario is waiting in the working tree
-  await Bun.write(join(data, "seed.feature"), "Feature: Seed\n\nScenario: One @v1 [saved]\nbody\n");
+  await Bun.write(
+    join(data, "seed.feature.md"),
+    "# Seed\n\n## One v1 [saved]\n\nbody\n",
+  );
 
   const message = await reloadData(dir);
   expect(message).toContain("saved scenarios committed and pushed");

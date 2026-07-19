@@ -171,6 +171,15 @@ aside > button,
   font-weight: 500;
 }
 
+/* Free markdown between the feature heading and the first scenario */
+.feature-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
 .scenarios {
   flex: 1;
   display: flex;
@@ -223,7 +232,7 @@ aside > button,
   vertical-align: middle;
 }
 
-/* Saved-but-not-published marker (specs/crud-feature.spec.md, [saved]) */
+/* Saved-but-not-published marker (specs/crud-feature.spec.md, [saved] chip) */
 .badge.saved {
   background: var(--muted);
   color: var(--bg);

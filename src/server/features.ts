@@ -18,10 +18,14 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+function isFeatureFile(fileName: string): boolean {
+  return fileName.endsWith(".feature.md");
+}
+
 export async function listFeatures(dataDir: string): Promise<string[]> {
   try {
     const entries = await readdir(dataDir);
-    return entries.filter((f) => f.endsWith(".feature")).sort();
+    return entries.filter(isFeatureFile).sort();
   } catch {
     return [];
   }
@@ -36,12 +40,12 @@ export async function readFeature(dataDir: string, fileName: string): Promise<st
 export async function createFeature(dataDir: string, name: string): Promise<string> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Feature name is required");
-  const fileName = `${slugify(trimmed)}.feature`;
+  const fileName = `${slugify(trimmed)}.feature.md`;
   const path = `${dataDir}/${fileName}`;
   if (await Bun.file(path).exists()) {
     throw new Error(`Feature file already exists: ${fileName}`);
   }
-  await Bun.write(path, `Feature: ${trimmed}\n`);
+  await Bun.write(path, `# ${trimmed}\n`);
   await commitAndPush(dataDir, fileName, `Create feature: ${trimmed}`);
   return fileName;
 }
@@ -72,7 +76,7 @@ export async function saveFeature(
 }
 
 /**
- * Scenario "Publish feature": every scenario is marked [pub] (published
+ * Scenario "Publish feature": every scenario is marked [published] (published
  * scenarios are immutable — specs/ui.spec.md); git pull first; on a clean
  * merge, save, then git commit and push. On a merge conflict, report both
  * sides so the user can resolve (accept yours / accept theirs / manual edit).
@@ -125,7 +129,7 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
 }
 
 function safe(fileName: string): string {
-  if (fileName.includes("/") || fileName.includes("..") || !fileName.endsWith(".feature")) {
+  if (fileName.includes("/") || fileName.includes("..") || !isFeatureFile(fileName)) {
     throw new Error(`Invalid feature file name: ${fileName}`);
   }
   return fileName;
