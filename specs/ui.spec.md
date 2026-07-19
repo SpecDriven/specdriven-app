@@ -13,6 +13,11 @@ Publish button: same style and behavior as the Sync button (disabled with a
 progress label while running). No "Published" status update at the bottom of
 the page.
 
+# Select scenarios via up and down keys
+
+- Highlight selected scenario
+- Edit on Enter key press
+
 # Settings
 
 A settings dialog. Settings are saved to .specdriven

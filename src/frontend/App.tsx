@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parseFeature, serializeFeature } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 
@@ -24,6 +24,8 @@ export function App() {
   const [features, setFeatures] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
+  const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
+  const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
@@ -73,6 +75,47 @@ export function App() {
     return () => clearInterval(id);
   }, [loading, needsRepo, reloadSeconds, selected, dirty, editing, conflict, loadFeatures]);
 
+  // specs/ui.spec.md "Select scenarios via up and down keys": arrow keys move a
+  // highlight through the scenario cards, Enter opens the highlighted one in
+  // the dialog. Inert while a dialog is open or while typing in a field.
+  useEffect(() => {
+    if (!feature || feature.scenarios.length === 0 || editing || settingsOpen) return;
+    const count = feature.scenarios.length;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      )
+        return;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        // Steal focus from a clicked button (e.g. the feature just opened in
+        // the sidebar) so a following Enter edits the highlighted scenario
+        // instead of re-activating that button.
+        if (t instanceof HTMLElement) t.blur();
+        setSelectedScenario((i) => {
+          if (e.key === "ArrowDown") return i === null ? 0 : Math.min(i + 1, count - 1);
+          return i === null ? count - 1 : Math.max(i - 1, 0);
+        });
+      } else if (e.key === "Enter" && selectedScenario !== null) {
+        // A focused button keeps its native Enter activation.
+        if (t instanceof HTMLButtonElement || t instanceof HTMLAnchorElement) return;
+        const s = feature.scenarios[selectedScenario];
+        if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [feature, editing, settingsOpen, selectedScenario]);
+
+  useEffect(() => {
+    if (selectedScenario !== null)
+      scenarioRefs.current[selectedScenario]?.scrollIntoView({ block: "nearest" });
+  }, [selectedScenario]);
+
   const saveRepo = async (repo: string) => {
     setSettingRepo(true);
     setRepoError(null);
@@ -99,8 +142,14 @@ export function App() {
     const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
     if (res.ok) {
       const data = await res.json();
+      const parsed = parseFeature(data.content);
       setSelected(file);
-      setFeature(parseFeature(data.content));
+      setFeature(parsed);
+      // Keep the keyboard highlight across a same-file refresh (sync, cron);
+      // drop it when switching files or when the list shrank past it.
+      setSelectedScenario((prev) =>
+        file === selected && prev !== null && prev < parsed.scenarios.length ? prev : null,
+      );
       setDirty(false);
       setEditing(null);
       setConflict(null);
@@ -111,6 +160,7 @@ export function App() {
       if (file === selected) {
         setSelected(null);
         setFeature(null);
+        setSelectedScenario(null);
         setStatus("");
       }
       await loadFeatures();
@@ -352,7 +402,15 @@ export function App() {
             {feature.description && <pre className="feature-desc">{feature.description}</pre>}
             <div className="scenarios">
               {feature.scenarios.map((s, i) => (
-                <article key={i} className={`scenario-card${s.published ? " published" : ""}`}>
+                <article
+                  key={i}
+                  ref={(el) => {
+                    scenarioRefs.current[i] = el;
+                  }}
+                  className={`scenario-card${s.published ? " published" : ""}${
+                    i === selectedScenario ? " selected" : ""
+                  }`}
+                >
                   <header>
                     <span className="scenario-title">
                       {s.name} <span className="version">v{s.version}</span>
