@@ -13,8 +13,11 @@ Publish button: same style and behavior as the Sync button (disabled with a
 progress label while running). No "Published" status update at the bottom of
 the page.
 
-# Select scenarios via up and down keys
+## Scenario List
+- render scenario body as Markdown preview; up to n lines
+- make the number of Markdown lines to render for each scenario in list configurable in Settings dialog
 
+# Select scenarios via up and down keys
 - Highlight selected scenario
 - Edit on Enter key press
 

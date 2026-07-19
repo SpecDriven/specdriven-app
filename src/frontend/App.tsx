@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { parseFeature, serializeFeature } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { renderMarkdown } from "./markdown";
 
 interface Conflict {
   ours: string;
@@ -36,8 +38,10 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
+  const [previewLines, setPreviewLines] = useState(8);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
+  const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const loadFeatures = useCallback(async () => {
@@ -58,6 +62,9 @@ export function App() {
       setNeedsRepo(state.needsDataRepo);
       if (typeof state.reloadFrequencySeconds === "number") {
         setReloadSeconds(state.reloadFrequencySeconds);
+      }
+      if (typeof state.scenarioPreviewLines === "number") {
+        setPreviewLines(state.scenarioPreviewLines);
       }
       if (!state.needsDataRepo) await loadFeatures();
       setLoading(false);
@@ -309,6 +316,7 @@ export function App() {
 
   const openSettings = () => {
     setSettingsDraft(String(reloadSeconds));
+    setSettingsLinesDraft(String(previewLines));
     setSettingsError(null);
     setSettingsOpen(true);
   };
@@ -320,14 +328,23 @@ export function App() {
       setSettingsError("Enter a number of seconds (0 disables automatic reload).");
       return;
     }
+    const lines = Number(settingsLinesDraft);
+    if (!Number.isFinite(lines) || lines < 1) {
+      setSettingsError("Enter how many preview lines to show per scenario (at least 1).");
+      return;
+    }
     const res = await fetch("/api/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reloadFrequencySeconds: Math.floor(n) }),
+      body: JSON.stringify({
+        reloadFrequencySeconds: Math.floor(n),
+        scenarioPreviewLines: Math.floor(lines),
+      }),
     });
     const data = await res.json();
     if (res.ok) {
       setReloadSeconds(data.reloadFrequencySeconds);
+      setPreviewLines(data.scenarioPreviewLines);
       setSettingsOpen(false);
     } else {
       setSettingsError(data.error ?? "Could not save settings");
@@ -415,7 +432,12 @@ export function App() {
             </div>
             <h3 className="feature-name">Feature: {feature.name}</h3>
             {feature.description && <pre className="feature-desc">{feature.description}</pre>}
-            <div className="scenarios">
+            {/* specs/ui.spec.md "Scenario List": each card renders its body as
+                a Markdown preview, clamped to n lines (n set in Settings). */}
+            <div
+              className="scenarios"
+              style={{ "--preview-lines": previewLines } as CSSProperties}
+            >
               {feature.scenarios.map((s, i) => (
                 <article
                   key={i}
@@ -446,7 +468,9 @@ export function App() {
                       </button>
                     </span>
                   </header>
-                  {s.body && <pre className="scenario-body">{s.body}</pre>}
+                  {s.body && (
+                    <div className="md-preview scenario-body">{renderMarkdown(s.body)}</div>
+                  )}
                 </article>
               ))}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
@@ -512,7 +536,20 @@ export function App() {
             </label>
             <p className="hint">
               The data repo is git-pulled automatically at this interval. Use 0 to disable
-              automatic reload. Saved to .specdriven.
+              automatic reload.
+            </p>
+            <label>
+              Scenario preview lines
+              <input
+                type="number"
+                min={1}
+                value={settingsLinesDraft}
+                onChange={(e) => setSettingsLinesDraft(e.target.value)}
+              />
+            </label>
+            <p className="hint">
+              How many lines of the rendered Markdown body each scenario shows in the list.
+              Settings are saved to .specdriven.
             </p>
             {settingsError && <p className="error">{settingsError}</p>}
             <div className="dialog-actions">
