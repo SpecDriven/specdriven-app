@@ -1,6 +1,12 @@
 import { readdir } from "node:fs/promises";
-import { pull, theirsVersion, commitAndPush, resolveConflict as gitResolve } from "./git";
-import { parseFeature, markPublished, markSaved, slugify } from "./parser";
+import {
+  pull,
+  theirsVersion,
+  commitAndPush,
+  moveAndPush,
+  resolveConflict as gitResolve,
+} from "./git";
+import { parseFeature, markPublished, markSaved, slugify, titleFromFileName } from "./parser";
 
 export { slugify } from "./parser";
 
@@ -17,13 +23,34 @@ function isFeatureFile(fileName: string): boolean {
   return fileName.endsWith(".feature.md");
 }
 
-export async function listFeatures(dataDir: string): Promise<string[]> {
+export interface FeatureListing {
+  fileName: string;
+  /** Display name: the file's `# <name>` heading, or derived from the stem. */
+  name: string;
+}
+
+/**
+ * specs/ui.spec.md "Main page": the sidebar shows feature names, not file
+ * names — each listed file carries its display name.
+ */
+export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
+  let entries: string[];
   try {
-    const entries = await readdir(dataDir);
-    return entries.filter(isFeatureFile).sort();
+    entries = (await readdir(dataDir)).filter(isFeatureFile).sort();
   } catch {
     return [];
   }
+  return Promise.all(
+    entries.map(async (fileName) => {
+      let name = "";
+      try {
+        name = parseFeature(await Bun.file(`${dataDir}/${fileName}`).text()).name;
+      } catch {
+        // unreadable (e.g. deleted mid-listing): fall back to the stem
+      }
+      return { fileName, name: name || titleFromFileName(fileName) };
+    }),
+  );
 }
 
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
@@ -43,6 +70,32 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
   await Bun.write(path, `# ${trimmed}\n`);
   await commitAndPush(dataDir, fileName, `Create feature: ${trimmed}`);
   return fileName;
+}
+
+/**
+ * specs/ui.spec.md "Main page": the Edit link next to the feature name edits
+ * the actual feature file name. The new name is normalized the same way
+ * createFeature builds one (slug stem + `.feature.md`), and the rename is
+ * committed and pushed to GitHub using `git mv`.
+ */
+export async function renameFeature(
+  dataDir: string,
+  fileName: string,
+  newFileName: string,
+): Promise<{ fileName: string; message: string }> {
+  const from = safe(fileName);
+  const slug = slugify(newFileName.trim().replace(/\.feature\.md$|\.feature$|\.md$/, ""));
+  if (!slug) throw new Error("Feature file name is required");
+  const to = `${slug}.feature.md`;
+  if (to === from) return { fileName: from, message: "file name unchanged" };
+  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
+    throw new Error(`Feature file not found: ${from}`);
+  }
+  if (await Bun.file(`${dataDir}/${to}`).exists()) {
+    throw new Error(`Feature file already exists: ${to}`);
+  }
+  const sync = await moveAndPush(dataDir, from, to, `Rename feature: ${from} -> ${to}`);
+  return { fileName: to, message: sync.message };
 }
 
 export interface SaveResult {

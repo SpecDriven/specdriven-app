@@ -44,6 +44,21 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Display name derived from a feature file name — the stem of
+ * `<slug>.feature.md`, de-kebabed and title-cased: "quote-policy.feature.md"
+ * → "Quote Policy". Used wherever a feature has no `# <name>` heading to fall
+ * back on (specs/ui.spec.md "Main page": show the name, not the file name).
+ */
+export function titleFromFileName(fileName: string): string {
+  return fileName
+    .replace(/\.feature(\.md)?$/, "")
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
 const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */

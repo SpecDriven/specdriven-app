@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test";
-import { parseFeature, serializeFeature, markPublished, markSaved } from "../src/server/parser";
+import {
+  parseFeature,
+  serializeFeature,
+  markPublished,
+  markSaved,
+  titleFromFileName,
+} from "../src/server/parser";
 
 const SAMPLE = `# Quote Policy
 
@@ -16,6 +22,14 @@ Quotes for potential customers.
 - **Given** the customer has no account
 - **Then** the quote is declined
 `;
+
+// specs/ui.spec.md "Main page": show the feature name, not the file name —
+// files without a `# <name>` heading fall back to a stem-derived name.
+test("titleFromFileName derives a display name from the file stem", () => {
+  expect(titleFromFileName("quote-policy.feature.md")).toBe("Quote Policy");
+  expect(titleFromFileName("legacy.feature")).toBe("Legacy");
+  expect(titleFromFileName("a.feature.md")).toBe("A");
+});
 
 test("parses feature name, description, and versioned scenarios", () => {
   const feature = parseFeature(SAMPLE);

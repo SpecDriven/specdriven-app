@@ -160,17 +160,36 @@ aside > button,
   justify-content: space-between;
 }
 
+/* "Feature: <name>" heading (specs/ui.spec.md "Main page") */
 .editor-bar h2 {
   margin: 0;
   font-size: 1.1rem;
-  font-family: ui-monospace, monospace;
 }
 
-/* File name + its "Copy link" action (specs/navigation.spec.md) */
+/* Feature name + its "Edit" / "Copy link" actions */
 .feature-title {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
+}
+
+/* Inline file-name editor (specs/ui.spec.md "Main page"): the file name is
+   shown only while editing it; the rename runs `git mv` on the server. */
+.rename-form {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.rename-input {
+  min-width: 18rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  font-size: 0.95rem;
 }
 
 .editor-actions {
@@ -186,13 +205,6 @@ aside > button,
 .editor-bar button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.feature-name {
-  margin: 0;
-  font-size: 1rem;
-  color: var(--muted);
-  font-weight: 500;
 }
 
 /* Free markdown between the feature heading and the first scenario */
