@@ -451,12 +451,31 @@ export function App() {
   };
 
   /**
+   * The version a scenario gets is derived, never typed (specs/ui.spec.md):
+   * one past the highest version already carrying that name, or 1 when the
+   * name is new. Editing an existing entry keeps the version it was given.
+   */
+  const nextVersionFor = (name: string) => {
+    const versions = (feature?.scenarios ?? [])
+      .filter((s) => s.name.trim() === name.trim())
+      .map((s) => s.version);
+    return versions.length ? Math.max(...versions) + 1 : 1;
+  };
+
+  /** The version the open dialog will save under; shown read-only in the dialog. */
+  const draftVersion = !editing
+    ? 1
+    : editing.index === null
+      ? nextVersionFor(editing.scenario.name)
+      : editing.scenario.version;
+
+  /**
    * Saving the dialog auto-saves the whole feature locally (marked [saved],
    * so no data is lost); the server's reload cron commits and pushes it.
    */
   const saveScenario = async () => {
     if (!editing || !feature || !selected) return;
-    const s = editing.scenario;
+    const s = { ...editing.scenario, version: draftVersion };
     const next: Feature = {
       ...feature,
       scenarios:
@@ -524,12 +543,10 @@ export function App() {
   const newVersion = (i: number) => {
     if (!feature) return;
     const src = feature.scenarios[i]!;
-    const maxVersion = Math.max(
-      ...feature.scenarios.filter((s) => s.name === src.name).map((s) => s.version),
-    );
     setEditing({
       index: null,
-      scenario: { ...src, version: maxVersion + 1, published: false, saved: false },
+      // index null marks it as new, so the version is derived on save.
+      scenario: { ...src, version: nextVersionFor(src.name), published: false, saved: false },
     });
   };
 
@@ -825,20 +842,11 @@ export function App() {
               />
             )}
             {!editingPublished && (
-              <label className="version-field">
-                Version
-                <input
-                  type="number"
-                  min={1}
-                  value={editing.scenario.version}
-                  onChange={(e) =>
-                    setEditing({
-                      ...editing,
-                      scenario: { ...editing.scenario, version: Math.max(1, Number(e.target.value) || 1) },
-                    })
-                  }
-                />
-              </label>
+              // The version is assigned by the app, never typed: a new scenario
+              // takes the next version for its name (specs/ui.spec.md).
+              <p className="version-field">
+                Version <span className="version">v{draftVersion}</span>
+              </p>
             )}
             <div className="body-field">
               <span className="field-label">Body</span>
