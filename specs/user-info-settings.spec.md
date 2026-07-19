@@ -33,3 +33,10 @@ the server reports it via `/api/state`.
 - When: the user picks "User info" from the menu
 - Then: a dialog shows the OS user and the git name and email used for
   commits to the data repo
+
+## Git scheme [https | ssh | gh]
+
+- Logged in user uses one of the 3 schemes [https | ssh | gh]
+- Support choosing a scheme in the settings dialog box
+- Auto-discover current scheme by probing
+  - order: https, ssh, gh

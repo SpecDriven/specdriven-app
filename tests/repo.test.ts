@@ -7,9 +7,11 @@ import {
   parseGitHubUrl,
   looksLikeRepoUrl,
   cloneDir,
+  dataRepoDir,
   ensureClone,
   resolveDataRepo,
 } from "../src/server/repo";
+import { setGitScheme } from "../src/server/scheme";
 
 let root: string;
 
@@ -23,14 +25,11 @@ afterEach(async () => {
 
 // specs/app-start.spec.md: data repo format is a regular gitHub url,
 // e.g. https://github.com/SpecDriven/data-insurance.
-// specs/datastore.spec.md: if the https:// clone fails, try ssh — so a
-// parsed repo carries both clone urls, https first.
+// specs/git-operations.spec.md: the url only identifies the repository —
+// the git scheme decides the transport, so parsing yields one canonical url.
 test("parses a regular GitHub url", () => {
   expect(parseGitHubUrl("https://github.com/SpecDriven/data-insurance")).toEqual({
-    urls: [
-      "https://github.com/SpecDriven/data-insurance",
-      "git@github.com:SpecDriven/data-insurance.git",
-    ],
+    url: "https://github.com/SpecDriven/data-insurance",
     name: "data-insurance",
   });
 });
@@ -43,20 +42,14 @@ test("accepts .git suffix, trailing slash, and scheme-less variants", () => {
     "data-insurance",
   );
   expect(parseGitHubUrl("github.com/SpecDriven/data-insurance")).toEqual({
-    urls: [
-      "https://github.com/SpecDriven/data-insurance",
-      "git@github.com:SpecDriven/data-insurance.git",
-    ],
+    url: "https://github.com/SpecDriven/data-insurance",
     name: "data-insurance",
   });
 });
 
-test("accepts ssh remotes, probing ssh first and https as the fallback", () => {
+test("accepts ssh remotes; the url form does not pick the scheme", () => {
   expect(parseGitHubUrl("git@github.com:SpecDriven/data-insurance.git")).toEqual({
-    urls: [
-      "git@github.com:SpecDriven/data-insurance.git",
-      "https://github.com/SpecDriven/data-insurance",
-    ],
+    url: "https://github.com/SpecDriven/data-insurance",
     name: "data-insurance",
   });
 });
@@ -80,6 +73,13 @@ test("a GitHub repo maps to a sibling directory of the app root", () => {
   expect(cloneDir("/home/user/dev/sd_fable", "data-insurance")).toBe(
     "/home/user/dev/data-insurance",
   );
+});
+
+test("dataRepoDir resolves urls and paths to their local directory without cloning", () => {
+  expect(dataRepoDir("https://github.com/SpecDriven/data-insurance", "/home/user/dev/sd_fable")).toBe(
+    "/home/user/dev/data-insurance",
+  );
+  expect(dataRepoDir("data", "/home/user/dev/sd_fable")).toBe("/home/user/dev/sd_fable/data");
 });
 
 test("resolveDataRepo resolves plain names and paths against the app root", async () => {
@@ -129,19 +129,16 @@ test("ensureClone surfaces clone failures (no access / no such repo)", async () 
   );
 });
 
-// specs/datastore.spec.md "Probe multiple git clone schemes": when the first
-// clone fails (e.g. https auth with terminal prompts disabled), the next
-// scheme is tried.
-test("ensureClone falls back to the next url when the first clone fails", async () => {
-  const origin = await seededOrigin();
-  const dir = join(root, "clone");
-  await ensureClone([join(root, "no-such-origin.git"), origin], dir);
-  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
-});
-
-test("ensureClone reports every failed probe", async () => {
-  const probes = [join(root, "missing-a.git"), join(root, "missing-b.git")];
-  expect(ensureClone(probes, join(root, "x"))).rejects.toThrow(
-    /missing-a\.git[\s\S]*missing-b\.git/,
-  );
+// specs/git-operations.spec.md: local paths have no scheme — a scheme
+// chosen in Settings must not disturb cloning them.
+test("ensureClone clones local origins unchanged under a chosen scheme", async () => {
+  setGitScheme("ssh");
+  try {
+    const origin = await seededOrigin();
+    const dir = join(root, "clone");
+    await ensureClone(origin, dir);
+    expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  } finally {
+    setGitScheme(null);
+  }
 });

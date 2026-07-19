@@ -74,6 +74,12 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
+  // Git scheme (specs/git-operations.spec.md): how git authenticates to
+  // GitHub. null = auto-discover by probing (https, ssh, gh); the detected
+  // value is what probing landed on.
+  const [gitScheme, setGitScheme] = useState<string | null>(null);
+  const [gitSchemeDetected, setGitSchemeDetected] = useState<string | null>(null);
+  const [settingsSchemeDraft, setSettingsSchemeDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
@@ -106,6 +112,8 @@ export function App() {
       if (typeof state.scenarioPreviewLines === "number") {
         setPreviewLines(state.scenarioPreviewLines);
       }
+      setGitScheme(state.gitScheme ?? null);
+      setGitSchemeDetected(state.gitSchemeDetected ?? null);
       if (state.user) setUser(state.user);
       if (!state.needsDataRepo) {
         await loadFeatures();
@@ -649,6 +657,7 @@ export function App() {
   const openSettings = () => {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
+    setSettingsSchemeDraft(gitScheme ?? "auto");
     setSettingsError(null);
     setSettingsOpen(true);
   };
@@ -671,12 +680,15 @@ export function App() {
       body: JSON.stringify({
         reloadFrequencySeconds: Math.floor(n),
         scenarioPreviewLines: Math.floor(lines),
+        gitScheme: settingsSchemeDraft,
       }),
     });
     const data = await res.json();
     if (res.ok) {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
+      setGitScheme(data.gitScheme ?? null);
+      setGitSchemeDetected(data.gitSchemeDetected ?? null);
       setSettingsOpen(false);
     } else {
       setSettingsError(data.error ?? "Could not save settings");
@@ -1099,6 +1111,27 @@ export function App() {
             <p className="hint">
               How many lines of the rendered Markdown body each scenario shows in the list.
               Settings are saved to .specdriven.
+            </p>
+            {/* Git scheme (specs/git-operations.spec.md): https, ssh or gh;
+                auto-discovery probes them in that order. */}
+            <label>
+              Git scheme
+              <select
+                value={settingsSchemeDraft}
+                onChange={(e) => setSettingsSchemeDraft(e.target.value)}
+              >
+                <option value="auto">
+                  Auto-discover
+                  {gitScheme === null && gitSchemeDetected ? ` (using ${gitSchemeDetected})` : ""}
+                </option>
+                <option value="https">https</option>
+                <option value="ssh">ssh</option>
+                <option value="gh">gh (GitHub CLI)</option>
+              </select>
+            </label>
+            <p className="hint">
+              How git authenticates to GitHub for clone, pull and push. Auto-discover probes
+              https, then ssh, then gh.
             </p>
             {settingsError && <p className="error">{settingsError}</p>}
             <div className="dialog-actions">

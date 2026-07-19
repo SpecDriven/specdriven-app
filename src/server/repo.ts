@@ -7,10 +7,22 @@
 import { $ } from "bun";
 import { resolve } from "node:path";
 import { isRepoRoot } from "./git";
+import {
+  chosenScheme,
+  discoverScheme,
+  probeSchemes,
+  recordDiscoveredScheme,
+  schemeArgs,
+  PROBE_ENV,
+} from "./scheme";
+import type { GitScheme } from "./scheme";
 
 export interface GitHubRepo {
-  /** Candidate clone URLs, in probe order (specs/datastore.spec.md). */
-  urls: string[];
+  /**
+   * Canonical https url. The url form only identifies the repository — the
+   * git scheme decides the actual transport (specs/git-operations.spec.md).
+   */
+  url: string;
   /** Repository name — used as the local clone directory name. */
   name: string;
 }
@@ -25,10 +37,7 @@ export function parseGitHubUrl(input: string): GitHubRepo | null {
   if (!m) return null;
   const [, owner, name] = m;
   if (owner === "." || owner === ".." || name === "." || name === "..") return null;
-  const https = `https://github.com/${owner}/${name}`;
-  const ssh = `git@github.com:${owner}/${name}.git`;
-  const urls = trimmed.startsWith("git@") ? [ssh, https] : [https, ssh];
-  return { urls, name: name! };
+  return { url: `https://github.com/${owner}/${name}`, name: name! };
 }
 
 /** Something the user clearly meant as a URL, even if we can't parse it. */
@@ -41,24 +50,42 @@ export function cloneDir(rootDir: string, repoName: string): string {
   return resolve(rootDir, "..", repoName);
 }
 
+/** Local directory a configured data repo resolves to, without cloning. */
+export function dataRepoDir(dataRepo: string, rootDir: string): string {
+  const gh = parseGitHubUrl(dataRepo);
+  return gh ? cloneDir(rootDir, gh.name) : resolve(rootDir, dataRepo.trim());
+}
+
 /**
  * Clone into dir unless dir is already a git repo (e.g. a pre-existing
- * clone). Urls are probed in order — per specs/datastore.spec.md an https://
- * clone can fail on auth where ssh succeeds. GIT_TERMINAL_PROMPT=0 makes
- * auth failures fail fast instead of prompting on the server's stdin; git
- * removes the target dir on failure, so the next probe starts clean.
+ * clone). A GitHub url is cloned with the chosen git scheme; with none
+ * chosen the schemes are probed in order (specs/git-operations.spec.md —
+ * https, ssh, gh) and the first that works is remembered as the discovered
+ * scheme. Prompts are disabled so auth failures fail fast instead of
+ * hanging on the server's stdin; git removes the target dir on failure, so
+ * the next probe starts clean.
  */
-export async function ensureClone(urls: string | string[], dir: string): Promise<void> {
+export async function ensureClone(url: string, dir: string): Promise<void> {
   if (await isRepoRoot(dir)) return;
+  const chosen = chosenScheme();
+  const schemes: (GitScheme | null)[] = parseGitHubUrl(url)
+    ? chosen
+      ? [chosen]
+      : probeSchemes()
+    : [null]; // local paths and non-GitHub urls have no scheme
   const failures: string[] = [];
-  for (const url of Array.isArray(urls) ? urls : [urls]) {
-    const res = await $`git clone ${url} ${dir}`
-      .env({ ...process.env, GIT_TERMINAL_PROMPT: "0" })
+  for (const scheme of schemes) {
+    const probingEnv = scheme && !chosen;
+    const res = await $`git ${schemeArgs(scheme)} clone ${url} ${dir}`
+      .env(probingEnv ? PROBE_ENV : { ...process.env, GIT_TERMINAL_PROMPT: "0" })
       .quiet()
       .nothrow();
-    if (res.exitCode === 0) return;
+    if (res.exitCode === 0) {
+      if (scheme) recordDiscoveredScheme(dir, scheme);
+      return;
+    }
     const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-    failures.push(`Could not clone ${url}: ${detail}`);
+    failures.push(`Could not clone ${url}${scheme ? ` via ${scheme}` : ""}: ${detail}`);
   }
   throw new Error(failures.join("\n"));
 }
@@ -67,13 +94,15 @@ export async function ensureClone(urls: string | string[], dir: string): Promise
  * Resolve the configured data repo (GitHub url or local name/path) to a local
  * directory. Cloning a URL on first use doubles as the access check from
  * specs/crud-feature.spec.md ("user is verified to have access to the data
- * GH repo").
+ * GH repo"). The repo's git scheme is resolved here too, so every following
+ * git command follows it (specs/git-operations.spec.md).
  */
 export async function resolveDataRepo(dataRepo: string, rootDir: string): Promise<string> {
   const gh = parseGitHubUrl(dataRepo);
   if (gh) {
     const dir = cloneDir(rootDir, gh.name);
-    await ensureClone(gh.urls, dir);
+    await ensureClone(gh.url, dir);
+    await discoverScheme(dir);
     return dir;
   }
   if (looksLikeRepoUrl(dataRepo)) {
@@ -81,5 +110,10 @@ export async function resolveDataRepo(dataRepo: string, rootDir: string): Promis
       `Unsupported data repo URL: ${dataRepo.trim()} — expected https://github.com/<owner>/<repo>`,
     );
   }
-  return resolve(rootDir, dataRepo.trim());
+  const dir = resolve(rootDir, dataRepo.trim());
+  // A local dir may still have a GitHub origin (a clone made by hand); a
+  // dir that is not a repo root (e.g. the starter data/ folder) has no
+  // scheme and must not probe the containing repo's origin.
+  if (await isRepoRoot(dir)) await discoverScheme(dir);
+  return dir;
 }

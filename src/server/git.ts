@@ -1,5 +1,6 @@
 import { $ } from "bun";
 import { rename } from "node:fs/promises";
+import { gitSchemeFor, schemeArgs } from "./scheme";
 
 export interface PullResult {
   ok: boolean;
@@ -12,8 +13,16 @@ export interface SyncResult {
   message: string;
 }
 
+/**
+ * Every git command follows the repo's effective git scheme
+ * (specs/git-operations.spec.md). Prompts are disabled so a scheme that
+ * cannot authenticate fails fast instead of hanging the server.
+ */
 async function git(repoDir: string, ...args: string[]) {
-  return $`git -C ${repoDir} ${args}`.quiet().nothrow();
+  return $`git -C ${repoDir} ${schemeArgs(gitSchemeFor(repoDir))} ${args}`
+    .env({ ...process.env, GIT_TERMINAL_PROMPT: "0" })
+    .quiet()
+    .nothrow();
 }
 
 export async function isGitRepo(repoDir: string): Promise<boolean> {

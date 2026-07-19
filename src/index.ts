@@ -6,7 +6,16 @@ import {
   needsDataRepo,
   normalizeScenarioPreviewLines,
 } from "./server/state";
-import { resolveDataRepo } from "./server/repo";
+import type { SpecDrivenState } from "./server/state";
+import { dataRepoDir, resolveDataRepo } from "./server/repo";
+import { isRepoRoot } from "./server/git";
+import {
+  discoverScheme,
+  ghCliAvailable,
+  normalizeGitScheme,
+  setGitScheme,
+} from "./server/scheme";
+import type { GitScheme } from "./server/scheme";
 import { getCurrentUser } from "./server/user";
 import {
   listFeatures,
@@ -39,12 +48,31 @@ const reloader = createReloadScheduler(async () => {
     console.error(`[reload] ${(e as Error).message}`);
   }
 });
-readState(ROOT).then((state) =>
-  reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds)),
-);
+readState(ROOT).then((state) => {
+  reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  // Git scheme (specs/git-operations.spec.md): apply the chosen scheme to
+  // every git command; unset means auto-discover by probing on first use.
+  setGitScheme(normalizeGitScheme(state.gitScheme));
+});
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status });
+}
+
+/**
+ * Git-scheme fields for /api/state (specs/git-operations.spec.md): the
+ * scheme chosen in Settings (null = auto-discover), plus the scheme
+ * auto-discovery found by probing the existing clone. A GET never clones —
+ * without a local clone the detected scheme is simply unknown.
+ */
+async function gitSchemeFields(state: SpecDrivenState) {
+  const gitScheme = normalizeGitScheme(state.gitScheme);
+  let detected: GitScheme | null = null;
+  if (!gitScheme && !needsDataRepo(state)) {
+    const dir = dataRepoDir(state.dataRepo!, ROOT);
+    if (await isRepoRoot(dir)) detected = await discoverScheme(dir);
+  }
+  return { gitScheme, gitSchemeDetected: detected };
 }
 
 /**
@@ -88,6 +116,7 @@ const server = Bun.serve({
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
           scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+          ...(await gitSchemeFields(state)),
           // specs/user-info-settings.spec.md: the OS user by default, with
           // the git identity that authors data-repo commits.
           user: await getCurrentUser(),
@@ -98,18 +127,39 @@ const server = Bun.serve({
           dataRepo?: string;
           reloadFrequencySeconds?: number;
           scenarioPreviewLines?: number;
+          gitScheme?: string | null;
         };
         if (
           body.dataRepo === undefined &&
           body.reloadFrequencySeconds === undefined &&
-          body.scenarioPreviewLines === undefined
+          body.scenarioPreviewLines === undefined &&
+          body.gitScheme === undefined
         ) {
           return json(
-            { error: "dataRepo, reloadFrequencySeconds or scenarioPreviewLines is required" },
+            {
+              error:
+                "dataRepo, reloadFrequencySeconds, scenarioPreviewLines or gitScheme is required",
+            },
             400,
           );
         }
         const state = await readState(ROOT);
+        // Git scheme (specs/git-operations.spec.md): https, ssh or gh;
+        // "auto" clears the choice so the scheme is re-discovered by
+        // probing. Applied before a dataRepo change so a first clone
+        // already follows the new scheme.
+        if (body.gitScheme !== undefined) {
+          const scheme = normalizeGitScheme(body.gitScheme);
+          if (scheme === null && body.gitScheme !== "auto" && body.gitScheme !== null) {
+            return json({ error: "gitScheme must be https, ssh, gh or auto" }, 400);
+          }
+          if (scheme === "gh" && !ghCliAvailable()) {
+            return json({ error: "the gh scheme needs the GitHub CLI (gh) installed" }, 400);
+          }
+          if (scheme) state.gitScheme = scheme;
+          else delete state.gitScheme;
+          setGitScheme(scheme);
+        }
         if (body.dataRepo !== undefined) {
           const dataRepo = body.dataRepo.trim();
           if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
@@ -145,6 +195,7 @@ const server = Bun.serve({
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
           scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+          ...(await gitSchemeFields(state)),
         });
       },
     },

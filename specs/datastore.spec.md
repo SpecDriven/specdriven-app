@@ -8,3 +8,7 @@ When we try to `git clone https://....` we may get
 ## Probe multiple git clone schemes
 
 if https:// clone fails, try ssh-based git clone
+
+Probing follows the git scheme order from specs/git-operations.spec.md —
+https, ssh, then gh — and a scheme chosen in Settings is used directly,
+with no probing.
