@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import { parseFeature, serializeFeature } from "../server/parser";
+import { parseFeature, serializeFeature, titleFromFileName } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
+import type { FeatureListing } from "../server/features";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
@@ -37,9 +38,12 @@ export function App() {
   const [settingRepo, setSettingRepo] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [features, setFeatures] = useState<string[]>([]);
+  const [features, setFeatures] = useState<FeatureListing[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
+  /** Draft for the inline file-name editor; null while not editing. */
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -172,12 +176,13 @@ export function App() {
   useEffect(() => {
     const s =
       feature && selectedScenario !== null ? feature.scenarios[selectedScenario] : undefined;
+    const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
     document.title =
       !selected || !feature
         ? "SpecDriven"
         : s
-          ? `SpecDriven — ${feature.name || selected} · ${s.name} v${s.version}`
-          : `SpecDriven — ${feature.name || selected}`;
+          ? `SpecDriven — ${name} · ${s.name} v${s.version}`
+          : `SpecDriven — ${name}`;
   }, [selected, feature, selectedScenario]);
 
   const saveRepo = async (repo: string) => {
@@ -233,6 +238,7 @@ export function App() {
       }
       setDirty(false);
       setEditing(null);
+      setRenameDraft(null);
       setConflict(null);
       setStatus(
         missingScenario
@@ -294,6 +300,40 @@ export function App() {
       await openFeature(data.fileName, { push: true });
     } else {
       setStatus(data.error);
+    }
+  };
+
+  // specs/ui.spec.md "Main page": the Edit link next to the feature name lets
+  // the user edit the actual feature file name; the server renames with
+  // `git mv`, commits and pushes. The returned name is the normalized one.
+  const renameSelected = async () => {
+    if (!selected || renameDraft === null) return;
+    const target = renameDraft.trim();
+    if (!target || target === selected) {
+      setRenameDraft(null);
+      return;
+    }
+    setRenaming(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: target }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRenameDraft(null);
+        await loadFeatures();
+        // The canonical-url effect rewrites the address bar to the new path.
+        await openFeature(data.fileName);
+        setStatus(`Renamed to ${data.fileName} — ${data.message}.`);
+      } else {
+        setStatus(data.error ?? "Rename failed");
+      }
+    } catch {
+      setStatus("Rename failed — is the server running?");
+    } finally {
+      setRenaming(false);
     }
   };
 
@@ -528,15 +568,17 @@ export function App() {
         {loadError && <p className="error">{loadError}</p>}
         <ul>
           {features.map((f) => (
-            <li key={f}>
+            <li key={f.fileName}>
               {/* A real link (specs/navigation.spec.md "share a link"): plain
-                  clicks navigate in-app, right-click → Copy Link works. */}
+                  clicks navigate in-app, right-click → Copy Link works. The
+                  label is the feature name, not the file name
+                  (specs/ui.spec.md "Main page"). */}
               <a
-                href={featurePath(f)}
-                className={f === selected ? "active" : ""}
-                onClick={(e) => spaClick(e, () => void openFeature(f, { push: true }))}
+                href={featurePath(f.fileName)}
+                className={f.fileName === selected ? "active" : ""}
+                onClick={(e) => spaClick(e, () => void openFeature(f.fileName, { push: true }))}
               >
-                {f}
+                {f.name}
               </a>
             </li>
           ))}
@@ -550,11 +592,52 @@ export function App() {
         {selected && feature ? (
           <>
             <div className="editor-bar">
+              {/* specs/ui.spec.md "Main page": the top of the page shows
+                  "Feature: <name>", not the file name. The file name appears
+                  only while being edited via the Edit link; a rename is
+                  committed and pushed with `git mv` on the server. */}
               <div className="feature-title">
-                <h2>{selected}</h2>
-                <button className="link" onClick={() => copyLink(featurePath(selected))}>
-                  {copied === featurePath(selected) ? "Copied" : "Copy link"}
-                </button>
+                {renameDraft === null ? (
+                  <>
+                    <h2>Feature: {feature.name || titleFromFileName(selected)}</h2>
+                    <button className="link" onClick={() => setRenameDraft(selected)}>
+                      Edit
+                    </button>
+                    <button className="link" onClick={() => copyLink(featurePath(selected))}>
+                      {copied === featurePath(selected) ? "Copied" : "Copy link"}
+                    </button>
+                  </>
+                ) : (
+                  <form
+                    className="rename-form"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void renameSelected();
+                    }}
+                  >
+                    <input
+                      className="rename-input"
+                      value={renameDraft}
+                      aria-label="Feature file name"
+                      autoFocus
+                      spellCheck={false}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setRenameDraft(null);
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      className="link"
+                      disabled={renaming || !renameDraft.trim()}
+                    >
+                      {renaming ? "Renaming…" : "Save"}
+                    </button>
+                    <button type="button" className="link" onClick={() => setRenameDraft(null)}>
+                      Cancel
+                    </button>
+                  </form>
+                )}
               </div>
               <div className="editor-actions">
                 <button className="secondary" onClick={syncNow} disabled={syncing}>
@@ -565,7 +648,6 @@ export function App() {
                 </button>
               </div>
             </div>
-            <h3 className="feature-name">Feature: {feature.name}</h3>
             {feature.description && <pre className="feature-desc">{feature.description}</pre>}
             {/* specs/ui.spec.md "Scenario List": each card renders its body as
                 a Markdown preview, clamped to n lines (n set in Settings). */}

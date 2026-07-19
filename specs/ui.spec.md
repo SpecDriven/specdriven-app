@@ -7,6 +7,12 @@ If a scenario is already published, then it is immutable.
 
 # Main page
 
+- Top of page should say 'Scenario: <scenario name>' Ex: `Feature: Quote Policy`
+- Left side should also use abbreviated scenario name, not file name.
+- We don't need to display file name unless we want to edit it.
+- Add `Edit` link next to scenario name which allows to edit the actual feature file name.
+  - if file name is edited, it will be committed and pushed to GitHub using `git mv`
+
 Sync button (immediate data reload), disabled with a progress label while
 running. No "Syncing…"/"Synced" status update at the bottom of the page.
 

@@ -1,4 +1,5 @@
 import { $ } from "bun";
+import { rename } from "node:fs/promises";
 
 export interface PullResult {
   ok: boolean;
@@ -137,6 +138,33 @@ export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
     message: res.pushed
       ? "saved scenarios committed and pushed"
       : `saved scenarios committed; ${res.message}`,
+  };
+}
+
+/**
+ * Per specs/ui.spec.md "Main page": an edited feature file name is committed
+ * and pushed to GitHub using `git mv`. Outside a standalone git repo the file
+ * is simply renamed on disk.
+ */
+export async function moveAndPush(
+  repoDir: string,
+  fromPath: string,
+  toPath: string,
+  message: string,
+): Promise<SyncResult> {
+  if (!(await isRepoRoot(repoDir))) {
+    await rename(`${repoDir}/${fromPath}`, `${repoDir}/${toPath}`);
+    return { pushed: false, message: "renamed locally (not a git repository)" };
+  }
+  const mv = await git(repoDir, "mv", fromPath, toPath);
+  if (mv.exitCode !== 0) {
+    throw new Error(`git mv failed: ${(mv.stderr.toString() + mv.stdout.toString()).trim()}`);
+  }
+  await git(repoDir, "commit", "-m", message, "--", fromPath, toPath);
+  const res = await push(repoDir);
+  return {
+    pushed: res.pushed,
+    message: res.pushed ? "renamed, committed and pushed" : `renamed, committed; ${res.message}`,
   };
 }
 

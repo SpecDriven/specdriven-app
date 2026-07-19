@@ -11,6 +11,7 @@ import {
   listFeatures,
   readFeature,
   createFeature,
+  renameFeature,
   saveFeature,
   publishFeature,
   resolveFeatureConflict,
@@ -195,6 +196,19 @@ const server = Bun.serve({
             ? await resolveFeatureConflict(dir, req.params.file, body.content)
             : await publishFeature(dir, req.params.file, body.content);
           return json(result, result.status === "conflict" ? 409 : 200);
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
+    },
+
+    // specs/ui.spec.md "Main page": the Edit link renames the actual feature
+    // file; the rename is committed and pushed to GitHub using `git mv`.
+    "/api/features/:file/rename": {
+      POST: withDataDir(async (dir, req: BunRequest<"/api/features/:file/rename">) => {
+        const body = (await req.json()) as { fileName?: string };
+        try {
+          return json(await renameFeature(dir, req.params.file, body.fileName ?? ""));
         } catch (e) {
           return json({ error: (e as Error).message }, 400);
         }
