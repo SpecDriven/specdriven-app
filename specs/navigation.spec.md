@@ -15,8 +15,16 @@ via chat and email.
 
 Identity comes from the data repo, never from session state:
 
-- `<feature>` is the feature file name minus `.feature.md`. File stems are
-  already slugified and unique, so the mapping is bijective.
+- `<feature>` is the feature file path minus `.feature.md`, and spans several
+  url segments when the feature lives in a folder (specs/folders.spec.md):
+  `/features/billing/quotes` is `billing/quotes.feature.md`.
+  File stems are already slugified and unique within their folder, so the
+  mapping is bijective. The first `scenarios` segment with a following slug
+  separates the feature path from the scenario ref, so a folder literally
+  named `scenarios` is not addressable by deep link.
+- Moving a feature to another folder changes its urls — folder placement is
+  part of the path identity. A link to the old path reports "not found" like
+  any stale link.
 - `<scenario>` is `slugify(scenario name)` — the same slugify used for file
   stems. Scenario identity is (name, version), the same identity publish
   immutability keys on; list position is unstable across syncs and must never
@@ -29,9 +37,11 @@ Identity comes from the data repo, never from session state:
 ## Resolution rules
 
 - A versionless scenario url resolves to the highest version of that name.
-- Parsing is longest-valid-prefix: unrecognized trailing segments are ignored
-  (chat and email clients often mangle link tails). A path that doesn't start
-  with a known shape is home. A `<feature>` segment that already carries a
+- Segments after the scenario version are ignored, and a bare trailing
+  `/scenarios` is dropped (chat and email clients often mangle link tails).
+  Other unrecognized segments read as folder path — they resolve to "feature
+  not found" rather than being silently truncated. A path that doesn't start
+  with a known shape is home. A `<feature>` stem that already carries a
   `.feature.md` or legacy `.feature` suffix is accepted.
 - If several scenario names slugify identically, the first match in file
   order wins.

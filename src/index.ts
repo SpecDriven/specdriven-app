@@ -9,8 +9,12 @@ import {
 import { resolveDataRepo } from "./server/repo";
 import {
   listFeatures,
+  listFolders,
   readFeature,
   createFeature,
+  createFolder,
+  deleteFolder,
+  moveFeature,
   renameFeature,
   saveFeature,
   publishFeature,
@@ -156,7 +160,9 @@ const server = Bun.serve({
     },
 
     "/api/features": {
-      GET: withDataDir(async (dir) => json({ features: await listFeatures(dir) })),
+      GET: withDataDir(async (dir) =>
+        json({ features: await listFeatures(dir), folders: await listFolders(dir) }),
+      ),
       POST: withDataDir(async (dir, req: BunRequest<"/api/features">) => {
         const body = (await req.json()) as { name?: string };
         try {
@@ -196,6 +202,44 @@ const server = Bun.serve({
             ? await resolveFeatureConflict(dir, req.params.file, body.content)
             : await publishFeature(dir, req.params.file, body.content);
           return json(result, result.status === "conflict" ? 409 : 200);
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
+    },
+
+    // Folders (specs/folders.spec.md): directories in the data repo that
+    // hold feature files. Creation is local (git doesn't track empty dirs);
+    // deletion only removes empty folders.
+    "/api/folders": {
+      POST: withDataDir(async (dir, req: BunRequest<"/api/folders">) => {
+        const body = (await req.json()) as { path?: string };
+        try {
+          return json({ path: await createFolder(dir, body.path ?? "") }, 201);
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
+    },
+
+    "/api/folders/:path": {
+      DELETE: withDataDir(async (dir, req: BunRequest<"/api/folders/:path">) => {
+        try {
+          await deleteFolder(dir, req.params.path);
+          return json({ message: "folder deleted" });
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
+    },
+
+    // Drag-move between folders (specs/folders.spec.md): a `git mv` into
+    // the target directory, committed and pushed like a rename.
+    "/api/features/:file/move": {
+      POST: withDataDir(async (dir, req: BunRequest<"/api/features/:file/move">) => {
+        const body = (await req.json()) as { folder?: string };
+        try {
+          return json(await moveFeature(dir, req.params.file, body.folder ?? ""));
         } catch (e) {
           return json({ error: (e as Error).message }, 400);
         }

@@ -5,10 +5,13 @@
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
 //
-// <feature> is the file stem (file name minus `.feature.md`); <scenario> is
-// slugify(scenario name). Parsing is longest-valid-prefix: unrecognized
-// trailing segments are ignored, and a path that doesn't start with a known
-// shape is home.
+// <feature> is the file path minus `.feature.md` and may span several
+// segments when the feature lives in a folder (`billing/quotes`); <scenario>
+// is slugify(scenario name). The first `scenarios` segment with something
+// after it splits feature from scenario — so a folder literally named
+// `scenarios` is not addressable by deep link. Segments after the scenario
+// version are ignored, and a path that doesn't start with a known shape is
+// home.
 
 import { slugify } from "../server/parser";
 import type { Scenario } from "../server/parser";
@@ -39,19 +42,31 @@ function decode(segment: string): string {
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
   if (segs[0] !== "features" || !segs[1]) return {};
+  // The feature path runs up to the first `scenarios` segment that has a slug
+  // after it (folders make feature paths multi-segment).
+  let split = segs.findIndex((s, i) => i >= 2 && s === "scenarios" && segs[i + 1]);
+  if (split === -1) {
+    // No scenario ref: the whole tail is the feature path, except a trailing
+    // bare `scenarios` — that's a mangled scenario link tail, not a folder.
+    const last = segs.length - 1;
+    split = last >= 2 && segs[last] === "scenarios" ? last : segs.length;
+  }
+  const parts = segs.slice(1, split);
   // Accept a stem that already carries the `.feature.md` (or legacy
   // `.feature`) suffix — hand-edited links shouldn't double it up.
-  const stem = segs[1].replace(/\.feature(\.md)?$/, "");
+  const stem = parts.join("/").replace(/\.feature(\.md)?$/, "");
   const route: Route = { feature: `${stem}.feature.md` };
-  if (segs[2] !== "scenarios" || !segs[3]) return route;
-  route.scenario = { slug: segs[3] };
-  const version = segs[4]?.match(VERSION_SEG);
+  if (segs[split] !== "scenarios" || !segs[split + 1]) return route;
+  route.scenario = { slug: segs[split + 1]! };
+  const version = segs[split + 2]?.match(VERSION_SEG);
   if (version) route.scenario.version = Number(version[1]);
   return route;
 }
 
 export function featurePath(fileName: string): string {
-  return `/features/${fileName.replace(/\.feature\.md$/, "")}`;
+  const stem = fileName.replace(/\.feature\.md$/, "");
+  // Folder segments keep their `/`s; anything a url can't carry is escaped.
+  return `/features/${stem.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function scenarioPath(fileName: string, scenario: Scenario): string {

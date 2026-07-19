@@ -43,9 +43,23 @@ describe("parseRoute", () => {
     expect(parseRoute("/features/nav/scenarios/esc-key/vx").scenario).toEqual({ slug: "esc-key" });
   });
 
-  test("longest valid prefix: unrecognized tails are ignored", () => {
-    expect(parseRoute("/features/nav/bogus")).toEqual({ feature: "nav.feature.md" });
+  test("folder paths: every segment up to /scenarios belongs to the feature", () => {
+    expect(parseRoute("/features/billing/quotes")).toEqual({
+      feature: "billing/quotes.feature.md",
+    });
+    expect(parseRoute("/features/billing/sub/deep/scenarios/esc-key/v2")).toEqual({
+      feature: "billing/sub/deep.feature.md",
+      scenario: { slug: "esc-key", version: 2 },
+    });
+    // a top-level feature file that happens to be named scenarios
+    expect(parseRoute("/features/scenarios")).toEqual({ feature: "scenarios.feature.md" });
+  });
+
+  test("mangled tails: a bare trailing /scenarios is dropped; version tails are ignored", () => {
     expect(parseRoute("/features/nav/scenarios")).toEqual({ feature: "nav.feature.md" });
+    expect(parseRoute("/features/billing/nav/scenarios")).toEqual({
+      feature: "billing/nav.feature.md",
+    });
     expect(parseRoute("/features/nav/scenarios/esc-key/v2/extra")).toEqual({
       feature: "nav.feature.md",
       scenario: { slug: "esc-key", version: 2 },
@@ -59,8 +73,22 @@ describe("parseRoute", () => {
 });
 
 describe("paths", () => {
-  test("featurePath strips the suffix", () => {
+  test("featurePath strips the suffix and keeps folder segments", () => {
     expect(featurePath("navigation.feature.md")).toBe("/features/navigation");
+    expect(featurePath("billing/sub/quotes.feature.md")).toBe("/features/billing/sub/quotes");
+  });
+
+  test("folder paths round-trip through parseRoute", () => {
+    const path = scenarioPath("billing/quotes.feature.md", sc("Basic Quote!", 3));
+    expect(path).toBe("/features/billing/quotes/scenarios/basic-quote/v3");
+    expect(parseRoute(path)).toEqual({
+      feature: "billing/quotes.feature.md",
+      scenario: { slug: "basic-quote", version: 3 },
+    });
+    // segments a url can't carry are escaped and decoded back
+    expect(parseRoute(featurePath("odd folder/a b.feature.md"))).toEqual({
+      feature: "odd folder/a b.feature.md",
+    });
   });
 
   test("scenarioPath is the canonical versioned permalink", () => {

@@ -1,4 +1,5 @@
-import { readdir } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import {
   pull,
   theirsVersion,
@@ -24,22 +25,50 @@ function isFeatureFile(fileName: string): boolean {
 }
 
 export interface FeatureListing {
+  /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
   /** Display name: the file's `# <name>` heading, or derived from the stem. */
   name: string;
 }
 
 /**
+ * Folders are plain directories in the data repo (specs/folders.spec.md).
+ * Hidden entries (`.git` and friends) are not part of the tree.
+ */
+async function walk(
+  dataDir: string,
+  rel = "",
+): Promise<{ files: string[]; folders: string[] }> {
+  const files: string[] = [];
+  const folders: string[] = [];
+  let entries: Dirent[];
+  try {
+    entries = await readdir(`${dataDir}/${rel}`, { withFileTypes: true });
+  } catch {
+    return { files, folders };
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const path = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      folders.push(path);
+      const sub = await walk(dataDir, path);
+      files.push(...sub.files);
+      folders.push(...sub.folders);
+    } else if (isFeatureFile(entry.name)) {
+      files.push(path);
+    }
+  }
+  return { files, folders };
+}
+
+/**
  * specs/ui.spec.md "Main page": the sidebar shows feature names, not file
- * names — each listed file carries its display name.
+ * names — each listed file carries its display name. Feature files anywhere
+ * in the folder tree are listed, with folder-relative paths.
  */
 export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
-  let entries: string[];
-  try {
-    entries = (await readdir(dataDir)).filter(isFeatureFile).sort();
-  } catch {
-    return [];
-  }
+  const entries = (await walk(dataDir)).files.sort();
   return Promise.all(
     entries.map(async (fileName) => {
       let name = "";
@@ -53,23 +82,112 @@ export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
   );
 }
 
+/**
+ * Every folder in the data repo, including empty ones — a freshly created
+ * folder must show in the sidebar tree so features can be dragged into it.
+ */
+export async function listFolders(dataDir: string): Promise<string[]> {
+  return (await walk(dataDir)).folders.sort();
+}
+
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
   const file = Bun.file(`${dataDir}/${safe(fileName)}`);
   return (await file.exists()) ? file.text() : null;
 }
 
-/** Scenario "create new feature": creates a new feature file in the local filesystem. */
+/**
+ * Scenario "create new feature": creates a new feature file in the local
+ * filesystem. A `/` in the name places the feature in a folder
+ * (specs/folders.spec.md): `billing/Basic Quote` creates
+ * `billing/basic-quote.feature.md`, creating the folders as needed.
+ */
 export async function createFeature(dataDir: string, name: string): Promise<string> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Feature name is required");
-  const fileName = `${slugify(trimmed)}.feature.md`;
-  const path = `${dataDir}/${fileName}`;
+  const segments = name.split("/").map((s) => s.trim());
+  const featureName = segments.pop() ?? "";
+  if (!featureName) throw new Error("Feature name is required");
+  const folder = segments.map(slugify).filter(Boolean).join("/");
+  const fileName = folder
+    ? `${folder}/${slugify(featureName)}.feature.md`
+    : `${slugify(featureName)}.feature.md`;
+  const path = `${dataDir}/${safe(fileName)}`;
   if (await Bun.file(path).exists()) {
     throw new Error(`Feature file already exists: ${fileName}`);
   }
-  await Bun.write(path, `# ${trimmed}\n`);
-  await commitAndPush(dataDir, fileName, `Create feature: ${trimmed}`);
+  if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
+  await Bun.write(path, `# ${featureName}\n`);
+  await commitAndPush(dataDir, fileName, `Create feature: ${featureName}`);
   return fileName;
+}
+
+/**
+ * specs/folders.spec.md: create a folder for feature files. Nested
+ * paths (`billing/sub`) are allowed; each segment is slugified like a file
+ * stem. Git does not track empty directories, so the folder exists locally
+ * until a feature lands in it — nothing to commit here.
+ */
+export async function createFolder(dataDir: string, path: string): Promise<string> {
+  const folder = path.split("/").map(slugify).filter(Boolean).join("/");
+  if (!folder) throw new Error("Folder name is required");
+  safeFolder(folder);
+  const full = `${dataDir}/${folder}`;
+  if (await exists(full)) throw new Error(`Folder already exists: ${folder}`);
+  await mkdir(full, { recursive: true });
+  return folder;
+}
+
+/**
+ * specs/folders.spec.md: only an empty folder can be deleted — one with
+ * no files anywhere beneath it (macOS `.DS_Store` junk doesn't count). This
+ * keeps folder deletion non-destructive: features must be moved out first.
+ * Empty directories are untracked by git, so removal is a local fs operation.
+ */
+export async function deleteFolder(dataDir: string, path: string): Promise<void> {
+  const folder = safeFolder(path);
+  if (!folder) throw new Error("Folder name is required");
+  const full = `${dataDir}/${folder}`;
+  let s: Awaited<ReturnType<typeof stat>>;
+  try {
+    s = await stat(full);
+  } catch {
+    throw new Error(`Folder not found: ${folder}`);
+  }
+  if (!s.isDirectory()) throw new Error(`Folder not found: ${folder}`);
+  const contents = (await readdir(full, { recursive: true })) as string[];
+  const blocking = contents.filter((entry) => entry.split("/").pop() !== ".DS_Store");
+  for (const entry of blocking) {
+    if (!(await stat(`${full}/${entry}`)).isDirectory()) {
+      throw new Error(`Folder is not empty: ${folder} — move its features out first`);
+    }
+  }
+  await rm(full, { recursive: true });
+}
+
+/**
+ * specs/folders.spec.md: drag-moving a feature into a folder is a
+ * `git mv` into that directory, committed and pushed like a rename. The
+ * target folder must already exist; the file name itself is unchanged.
+ */
+export async function moveFeature(
+  dataDir: string,
+  fileName: string,
+  toFolder: string,
+): Promise<{ fileName: string; message: string }> {
+  const from = safe(fileName);
+  const folder = safeFolder(toFolder);
+  if (folder && !(await isDirectory(`${dataDir}/${folder}`))) {
+    throw new Error(`Folder not found: ${folder}`);
+  }
+  const base = from.split("/").pop()!;
+  const to = folder ? `${folder}/${base}` : base;
+  if (to === from) return { fileName: from, message: "already there" };
+  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
+    throw new Error(`Feature file not found: ${from}`);
+  }
+  if (await Bun.file(`${dataDir}/${to}`).exists()) {
+    throw new Error(`Feature file already exists: ${to}`);
+  }
+  const sync = await moveAndPush(dataDir, from, to, `Move feature: ${from} -> ${to}`);
+  return { fileName: to, message: sync.message };
 }
 
 /**
@@ -84,9 +202,16 @@ export async function renameFeature(
   newFileName: string,
 ): Promise<{ fileName: string; message: string }> {
   const from = safe(fileName);
-  const slug = slugify(newFileName.trim().replace(/\.feature\.md$|\.feature$|\.md$/, ""));
+  const input = newFileName.trim().replace(/\.feature\.md$|\.feature$|\.md$/, "");
+  // A plain name renames in place; a `/` path also moves between folders
+  // (specs/folders.spec.md) — segments are slugified like file stems.
+  const segments = input.split("/").map(slugify).filter(Boolean);
+  const slug = segments.pop();
   if (!slug) throw new Error("Feature file name is required");
-  const to = `${slug}.feature.md`;
+  const folder = input.includes("/")
+    ? segments.join("/")
+    : from.split("/").slice(0, -1).join("/");
+  const to = folder ? `${folder}/${slug}.feature.md` : `${slug}.feature.md`;
   if (to === from) return { fileName: from, message: "file name unchanged" };
   if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
     throw new Error(`Feature file not found: ${from}`);
@@ -94,6 +219,7 @@ export async function renameFeature(
   if (await Bun.file(`${dataDir}/${to}`).exists()) {
     throw new Error(`Feature file already exists: ${to}`);
   }
+  if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
   const sync = await moveAndPush(dataDir, from, to, `Rename feature: ${from} -> ${to}`);
   return { fileName: to, message: sync.message };
 }
@@ -176,9 +302,39 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
   }
 }
 
+/** Segments that would escape or hide inside the data repo are rejected. */
+function badSegment(segment: string): boolean {
+  return !segment || segment.startsWith(".") || segment.includes("\\");
+}
+
+/** A feature file path: `/`-separated safe segments ending in `.feature.md`. */
 function safe(fileName: string): string {
-  if (fileName.includes("/") || fileName.includes("..") || !isFeatureFile(fileName)) {
+  const segments = fileName.split("/");
+  if (segments.some(badSegment) || !isFeatureFile(segments[segments.length - 1]!)) {
     throw new Error(`Invalid feature file name: ${fileName}`);
   }
   return fileName;
+}
+
+/** A folder path relative to the data repo; empty means the top level. */
+function safeFolder(path: string): string {
+  const folder = path.replace(/^\/+|\/+$/g, "");
+  if (folder && folder.split("/").some(badSegment)) {
+    throw new Error(`Invalid folder path: ${path}`);
+  }
+  return folder;
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  return stat(path).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
 }
