@@ -90,6 +90,13 @@ aside {
 aside header h1 {
   margin: 0;
   font-size: 1.25rem;
+  line-height: 0;
+}
+
+.logo {
+  display: block;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.35);
 }
 
 .repo-name {

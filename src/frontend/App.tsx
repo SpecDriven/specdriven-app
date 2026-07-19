@@ -4,6 +4,7 @@ import { parseFeature, serializeFeature, titleFromFileName } from "../server/par
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { CurrentUser } from "../server/user";
+import { Logo } from "./Logo";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
@@ -826,7 +827,9 @@ export function App() {
       {savedFlash && <div className="saved-banner">Saved</div>}
       <aside>
         <header>
-          <h1>SpecDriven</h1>
+          <h1>
+            <Logo />
+          </h1>
           <span className="repo-name">{dataRepo}</span>
         </header>
         <div className="sidebar-actions">
