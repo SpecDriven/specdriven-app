@@ -6,9 +6,20 @@ export interface SpecDrivenState {
   dataRepo?: string;
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
+  /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
+  scenarioPreviewLines?: number;
 }
 
 export const STATE_FILE = ".specdriven";
+
+export const DEFAULT_SCENARIO_PREVIEW_LINES = 8;
+
+/** Effective scenario-list preview length for a stored value; at least 1 line. */
+export function normalizeScenarioPreviewLines(value: unknown): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_SCENARIO_PREVIEW_LINES;
+  return Math.floor(n);
+}
 
 export async function readState(rootDir: string = process.cwd()): Promise<SpecDrivenState> {
   const file = Bun.file(`${rootDir}/${STATE_FILE}`);

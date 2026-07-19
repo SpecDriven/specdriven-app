@@ -2,7 +2,14 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readState, writeState, needsDataRepo, STATE_FILE } from "../src/server/state";
+import {
+  readState,
+  writeState,
+  needsDataRepo,
+  normalizeScenarioPreviewLines,
+  DEFAULT_SCENARIO_PREVIEW_LINES,
+  STATE_FILE,
+} from "../src/server/state";
 
 let dir: string;
 
@@ -43,4 +50,21 @@ test("reload frequency round-trips through .specdriven", async () => {
   await writeState({ dataRepo: "data", reloadFrequencySeconds: 30 }, dir);
   const state = await readState(dir);
   expect(state.reloadFrequencySeconds).toBe(30);
+});
+
+// specs/ui.spec.md "Scenario List": the number of Markdown lines rendered per
+// scenario in the list is configurable in Settings and saved to .specdriven.
+test("scenario preview lines round-trip through .specdriven", async () => {
+  await writeState({ dataRepo: "data", scenarioPreviewLines: 4 }, dir);
+  const state = await readState(dir);
+  expect(state.scenarioPreviewLines).toBe(4);
+});
+
+test("scenario preview lines default to 8 and are at least 1", () => {
+  expect(normalizeScenarioPreviewLines(undefined)).toBe(DEFAULT_SCENARIO_PREVIEW_LINES);
+  expect(normalizeScenarioPreviewLines("nope")).toBe(DEFAULT_SCENARIO_PREVIEW_LINES);
+  expect(normalizeScenarioPreviewLines(0)).toBe(DEFAULT_SCENARIO_PREVIEW_LINES);
+  expect(normalizeScenarioPreviewLines(-3)).toBe(DEFAULT_SCENARIO_PREVIEW_LINES);
+  expect(normalizeScenarioPreviewLines(4.9)).toBe(4);
+  expect(normalizeScenarioPreviewLines(1)).toBe(1);
 });

@@ -1,6 +1,11 @@
 import type { BunRequest } from "bun";
 import index from "./index.html";
-import { readState, writeState, needsDataRepo } from "./server/state";
+import {
+  readState,
+  writeState,
+  needsDataRepo,
+  normalizeScenarioPreviewLines,
+} from "./server/state";
 import { resolveDataRepo } from "./server/repo";
 import {
   listFeatures,
@@ -71,15 +76,24 @@ const server = Bun.serve({
           dataRepo: state.dataRepo ?? null,
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
+          scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
         });
       },
       PUT: async (req) => {
         const body = (await req.json()) as {
           dataRepo?: string;
           reloadFrequencySeconds?: number;
+          scenarioPreviewLines?: number;
         };
-        if (body.dataRepo === undefined && body.reloadFrequencySeconds === undefined) {
-          return json({ error: "dataRepo or reloadFrequencySeconds is required" }, 400);
+        if (
+          body.dataRepo === undefined &&
+          body.reloadFrequencySeconds === undefined &&
+          body.scenarioPreviewLines === undefined
+        ) {
+          return json(
+            { error: "dataRepo, reloadFrequencySeconds or scenarioPreviewLines is required" },
+            400,
+          );
         }
         const state = await readState(ROOT);
         if (body.dataRepo !== undefined) {
@@ -102,12 +116,21 @@ const server = Bun.serve({
           }
           state.reloadFrequencySeconds = Math.floor(n);
         }
+        // Scenario-list preview length (specs/ui.spec.md "Scenario List").
+        if (body.scenarioPreviewLines !== undefined) {
+          const n = body.scenarioPreviewLines;
+          if (typeof n !== "number" || !Number.isFinite(n) || n < 1) {
+            return json({ error: "scenarioPreviewLines must be a number >= 1" }, 400);
+          }
+          state.scenarioPreviewLines = Math.floor(n);
+        }
         await writeState(state, ROOT);
         reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
         return json({
           dataRepo: state.dataRepo ?? null,
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
+          scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
         });
       },
     },
