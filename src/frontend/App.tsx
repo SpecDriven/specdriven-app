@@ -111,6 +111,20 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [feature, editing, settingsOpen, selectedScenario]);
 
+  // specs/ui.spec.md "Scenario edit dialog": ESC returns to the scenario
+  // screen — same as Cancel/Close, and it works while a dialog field has focus.
+  useEffect(() => {
+    if (!editing) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setEditing(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editing]);
+
   useEffect(() => {
     if (selectedScenario !== null)
       scenarioRefs.current[selectedScenario]?.scrollIntoView({ block: "nearest" });
