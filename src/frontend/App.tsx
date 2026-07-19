@@ -169,6 +169,27 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
+  // specs/folders.spec.md: ESC deselects the folder, moving the insertion
+  // point back to the tree root so "+ New folder" adds a top-level folder.
+  // Inert while a dialog is open or while typing (ESC cancels those instead).
+  useEffect(() => {
+    if (selectedFolder === null || editing || settingsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      setSelectedFolder(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedFolder, editing, settingsOpen]);
+
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const editingTrapRef = useFocusTrap(editing !== null);

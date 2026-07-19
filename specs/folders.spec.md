@@ -9,7 +9,9 @@ data repo, so the structure renders naturally on GitHub too.
 - Folders can nest arbitrarily.
 - Clicking a folder selects it (shown with an outline) and toggles its
   subtree. Opening a feature or clicking the tree background deselects;
-  deleting a selected folder (or an ancestor of it) deselects too.
+  deleting a selected folder (or an ancestor of it) deselects too. ESC
+  deselects as well, putting the insertion point back at the tree root so
+  the next "+ New folder" lands at the top level.
 - "+ New folder" creates a folder; `/` in the name creates nested folders.
   Folder names are slugified like feature file stems. Git does not track empty
   directories, so a new folder exists locally until a feature lands in it.
@@ -38,6 +40,12 @@ data repo, so the structure renders naturally on GitHub too.
 - When: user drags a feature onto another folder (or the tree root)
 - Then: the file is moved with `git mv`, keeping its file name
 - and the move is committed and pushed
+
+## Scenario: deselect a folder with ESC
+
+- When: a folder is selected and the user presses ESC outside a dialog or text field
+- Then: the folder is deselected and "+ New folder" creates at the tree root
+- Otherwise: with a dialog open or a field focused, ESC closes/cancels that instead
 
 ## Scenario: delete a folder
 
