@@ -95,7 +95,7 @@ async function seededOrigin(): Promise<string> {
   await $`git -C ${seed} config user.email test@example.com`.quiet();
   await $`git -C ${seed} config user.name Test`.quiet();
   await $`git -C ${seed} checkout -B main`.quiet().nothrow();
-  await Bun.write(join(seed, "seed.feature"), "Feature: Seed\n");
+  await Bun.write(join(seed, "seed.feature.md"), "# Seed\n");
   await $`git -C ${seed} add .`.quiet();
   await $`git -C ${seed} commit -m seed`.quiet();
   await $`git -C ${seed} push origin main`.quiet();
@@ -106,10 +106,10 @@ test("ensureClone clones on first use and reuses an existing clone", async () =>
   const origin = await seededOrigin();
   const dir = join(root, "clone");
   await ensureClone(origin, dir);
-  expect(await Bun.file(join(dir, "seed.feature")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
   // second call is a no-op on the pre-existing clone
   await ensureClone(origin, dir);
-  expect(await Bun.file(join(dir, "seed.feature")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
 });
 
 test("ensureClone surfaces clone failures (no access / no such repo)", async () => {

@@ -1,15 +1,21 @@
-// Feature file format per specs/crud-feature.spec.md:
+// Feature files are markdown, named `<slug>.feature.md`
+// (specs/crud-feature.spec.md):
 //
-//   Feature: <name of the feature>
+//   # <name of the feature>
 //
-//   Scenario: <name of scenario> @vNNN   (NNN is a positive integer)
-//   Scenario: <name of scenario> @vNNN [pub]   (published scenario)
-//   Scenario: <name of scenario> @vNNN [saved]   (saved, not yet published)
-//   <scenario body> (any text, may include Gherkin tables)
+//   <optional feature description — any markdown>
 //
-// Scenarios are atomic, immutable, and versioned. A published scenario is
-// marked with [pub] after the version and may no longer change. [saved]
-// marks a scenario that was auto-saved but not published.
+//   ## <name of scenario> vNNN              (draft, editable; NNN positive int)
+//   ## <name of scenario> vNNN [saved]      (auto-saved, not yet published)
+//   ## <name of scenario> vNNN [published]  (published, immutable)
+//
+//   <scenario body — any markdown up to the next scenario heading;
+//    Gherkin tables are written as markdown tables>
+//
+// The first `#` heading is the feature name; a `##` heading that ends with a
+// version starts a scenario. Scenarios are atomic, immutable, and versioned.
+// `##` headings without a version, and headings inside fenced code blocks
+// (``` or ~~~), are ordinary content, not scenario boundaries.
 
 export interface Scenario {
   name: string;
@@ -21,17 +27,43 @@ export interface Scenario {
 
 export interface Feature {
   name: string;
+  /** Free markdown between the feature heading and the first scenario. */
+  description: string;
   scenarios: Scenario[];
 }
 
-const FEATURE_RE = /^(?:Feature|name):\s*(.+)\s*$/;
-const SCENARIO_RE = /^Scenario:\s*(.+?)\s*@v([1-9]\d*)\s*(\[pub\]|\[saved\])?\s*$/;
+const FEATURE_RE = /^#\s+(.+?)\s*$/;
+const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|saved)\])?\s*$/;
+/** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
+const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|saved)`)?\s*$/;
+const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
+
+type Status = "published" | "saved" | null;
+
+interface HeadingMatch {
+  name: string;
+  version: number;
+  status: Status;
+}
+
+/** Read a scenario heading in either the current or the legacy chip syntax. */
+function matchScenario(line: string): HeadingMatch | null {
+  const m = line.match(LEGACY_SCENARIO_RE) ?? line.match(SCENARIO_RE);
+  if (!m) return null;
+  return {
+    name: m[1]!,
+    version: Number(m[2]),
+    status: m[3] === "published" || m[3] === "saved" ? m[3] : null,
+  };
+}
 
 export function parseFeature(text: string): Feature {
   let name = "";
+  const preamble: string[] = [];
   const scenarios: Scenario[] = [];
   let current: Scenario | null = null;
   const bodyLines: string[] = [];
+  let inFence = false;
 
   const flush = () => {
     if (current) {
@@ -42,67 +74,86 @@ export function parseFeature(text: string): Feature {
   };
 
   for (const line of text.split("\n")) {
-    const featureMatch = line.match(FEATURE_RE);
-    if (featureMatch && !name && !current) {
-      name = featureMatch[1]!;
-      continue;
-    }
-    const scenarioMatch = line.match(SCENARIO_RE);
-    if (scenarioMatch) {
-      flush();
-      current = {
-        name: scenarioMatch[1]!,
-        version: Number(scenarioMatch[2]),
-        published: scenarioMatch[3] === "[pub]",
-        saved: scenarioMatch[3] === "[saved]",
-        body: "",
-      };
-      continue;
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+    } else if (!inFence) {
+      const featureMatch = line.match(FEATURE_RE);
+      if (featureMatch && !name && !current) {
+        name = featureMatch[1]!;
+        continue;
+      }
+      const scenarioMatch = matchScenario(line);
+      if (scenarioMatch) {
+        flush();
+        current = {
+          name: scenarioMatch.name,
+          version: scenarioMatch.version,
+          published: scenarioMatch.status === "published",
+          saved: scenarioMatch.status === "saved",
+          body: "",
+        };
+        continue;
+      }
     }
     if (current) bodyLines.push(line);
+    else preamble.push(line);
   }
   flush();
 
-  return { name, scenarios };
+  return { name, description: preamble.join("\n").trim(), scenarios };
+}
+
+function header(name: string, version: number, status: Status): string {
+  const chip = status ? ` [${status}]` : "";
+  return `## ${name} v${version}${chip}`;
 }
 
 export function serializeFeature(feature: Feature): string {
-  const parts = [`Feature: ${feature.name}`];
+  const parts = [`# ${feature.name}`];
+  if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
-    const marker = s.published ? " [pub]" : s.saved ? " [saved]" : "";
-    const header = `Scenario: ${s.name} @v${s.version}${marker}`;
-    parts.push(`${header}\n${s.body}`.trimEnd());
+    const h = header(s.name, s.version, s.published ? "published" : s.saved ? "saved" : null);
+    parts.push(s.body ? `${h}\n\n${s.body}` : h);
   }
   return parts.join("\n\n") + "\n";
 }
 
 /**
- * Mark every scenario header as published by appending [pub]. Works on the
- * raw text line-by-line so content that doesn't fit the parse model survives
- * untouched; already-published headers are left as they are, and a [saved]
- * marker is upgraded to [pub].
+ * Rewrite every scenario heading's status chip with the value chosen by
+ * `next`. Works on the raw text line-by-line so body content that doesn't fit
+ * the parse model survives untouched, and headings inside fenced code blocks
+ * are left alone. Legacy headings are normalized to the bracket syntax.
  */
-export function markPublished(text: string): string {
+function rewriteHeaders(text: string, next: (status: Status) => Status): string {
+  let inFence = false;
   return text
     .split("\n")
     .map((line) => {
-      const m = line.match(/^(Scenario:\s*.+?\s*@v[1-9]\d*)(?:\s*\[saved\])?\s*$/);
-      return m ? `${m[1]} [pub]` : line;
+      if (FENCE_RE.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      const m = matchScenario(line);
+      if (!m) return line;
+      return header(m.name, m.version, next(m.status));
     })
     .join("\n");
 }
 
 /**
- * Mark every unmarked scenario header as saved-but-not-published by appending
- * [saved] (specs/crud-feature.spec.md, "Scenario is automatically saved
- * locally and pushed to GitHub"). [pub] and [saved] headers are untouched.
+ * Mark every scenario heading as published: a [saved] chip is upgraded and
+ * already-[published] headings stay as they are.
+ */
+export function markPublished(text: string): string {
+  return rewriteHeaders(text, () => "published");
+}
+
+/**
+ * Mark every unmarked scenario heading with a [saved] chip
+ * (specs/crud-feature.spec.md, "Scenario is automatically saved locally and
+ * pushed to GitHub"). [published] and [saved] headings are untouched.
  */
 export function markSaved(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => {
-      const m = line.match(/^(Scenario:\s*.+?\s*@v[1-9]\d*)\s*$/);
-      return m ? `${m[1]} [saved]` : line;
-    })
-    .join("\n");
+  return rewriteHeaders(text, (status) => status ?? "saved");
 }
