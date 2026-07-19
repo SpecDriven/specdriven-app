@@ -45,6 +45,12 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - Must be resizable
 - Scenario body must contain an embedded Markdown Editor
 - ESC key to get back to Scenario screen.
+- The version is never user editable; it is shown read-only and assigned by
+  the app.
+- A new scenario takes the next version for the name it is given: one past the
+  highest version already carrying that name, or v1 when the name is new.
+  Retyping the name in the dialog re-derives the version.
+- Editing an existing scenario keeps the version it was already assigned.
 
 # Settings
 
