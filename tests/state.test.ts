@@ -52,6 +52,15 @@ test("reload frequency round-trips through .specdriven", async () => {
   expect(state.reloadFrequencySeconds).toBe(30);
 });
 
+// specs/git-operations.spec.md: the chosen git scheme is a setting in
+// .specdriven; absent means auto-discover by probing.
+test("git scheme round-trips through .specdriven", async () => {
+  await writeState({ dataRepo: "data", gitScheme: "ssh" }, dir);
+  expect((await readState(dir)).gitScheme).toBe("ssh");
+  await writeState({ dataRepo: "data" }, dir);
+  expect((await readState(dir)).gitScheme).toBeUndefined();
+});
+
 // specs/ui.spec.md "Scenario List": the number of Markdown lines rendered per
 // scenario in the list is configurable in Settings and saved to .specdriven.
 test("scenario preview lines round-trip through .specdriven", async () => {

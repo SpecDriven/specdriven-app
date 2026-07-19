@@ -2,12 +2,19 @@
 // Per specs/app-start.spec.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
+import type { GitScheme } from "./scheme";
+
 export interface SpecDrivenState {
   dataRepo?: string;
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
   /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
   scenarioPreviewLines?: number;
+  /**
+   * Scheme git uses with GitHub (specs/git-operations.spec.md); absent
+   * means auto-discover by probing (https, ssh, gh).
+   */
+  gitScheme?: GitScheme;
 }
 
 export const STATE_FILE = ".specdriven";
