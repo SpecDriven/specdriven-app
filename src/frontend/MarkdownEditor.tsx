@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   insertLink,
@@ -25,6 +25,19 @@ interface MarkdownEditorProps {
 export function MarkdownEditor({ value, onChange, readOnly = false, placeholder }: MarkdownEditorProps) {
   const [tab, setTab] = useState<"write" | "preview">(readOnly ? "preview" : "write");
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  // The scenario table widget rewrites the body outside this textarea (e.g.
+  // typing "{amount}" appends a table below the caret). A controlled textarea
+  // would snap the caret to the end when the committed value differs from
+  // what was typed — restore the position recorded at the last keystroke.
+  const sel = useRef<{ start: number; end: number } | null>(null);
+  useLayoutEffect(() => {
+    const ta = ref.current;
+    const s = sel.current;
+    if (!ta || !s || document.activeElement !== ta) return;
+    if (ta.selectionStart !== s.start || ta.selectionEnd !== s.end)
+      ta.setSelectionRange(s.start, s.end);
+  }, [value]);
 
   const apply = (edit: (text: string, start: number, end: number) => Edit) => {
     const ta = ref.current;
@@ -105,7 +118,10 @@ export function MarkdownEditor({ value, onChange, readOnly = false, placeholder 
           readOnly={readOnly}
           placeholder={placeholder}
           spellCheck={false}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            sel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+            onChange(e.target.value);
+          }}
           onKeyDown={readOnly ? undefined : onKeyDown}
         />
       ) : (

@@ -48,6 +48,8 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - Name must be the title of the dialog
 - Must be resizable
 - Scenario body must contain an embedded Markdown Editor
+- Below the body, a table widget edits the scenario's markdown table
+  (specs/scenario-table.spec.md)
 - ESC key to get back to Scenario screen.
 - The version is never user editable; it is shown read-only and assigned by
   the app.
