@@ -113,6 +113,34 @@ export async function resolveConflict(
 }
 
 /**
+ * Per specs/crud-feature.spec.md ("Scenario is automatically saved locally and
+ * pushed to GitHub"): after the cron git pull, commit and push any locally
+ * saved scenarios so no data is lost. Skipped while a merge conflict is being
+ * resolved so conflict markers are never auto-committed.
+ */
+export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
+  if (!(await isRepoRoot(repoDir))) {
+    return { pushed: false, message: "not a standalone git repository; skipped sync" };
+  }
+  if ((await conflictedFiles(repoDir)).length > 0) {
+    return { pushed: false, message: "merge conflict in progress; skipped sync" };
+  }
+  const status = await git(repoDir, "status", "--porcelain");
+  if (status.exitCode !== 0 || status.stdout.toString().trim() === "") {
+    return { pushed: false, message: "no saved changes" };
+  }
+  await git(repoDir, "add", "-A");
+  await git(repoDir, "commit", "-m", "Auto-save scenarios");
+  const res = await push(repoDir);
+  return {
+    pushed: res.pushed,
+    message: res.pushed
+      ? "saved scenarios committed and pushed"
+      : `saved scenarios committed; ${res.message}`,
+  };
+}
+
+/**
  * Per specs/crud-feature.spec.md, saving ends with "do a git commit and push".
  */
 export async function commitAndPush(

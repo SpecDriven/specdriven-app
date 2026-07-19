@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { pull, theirsVersion, commitAndPush, resolveConflict as gitResolve } from "./git";
-import { parseFeature, markPublished } from "./parser";
+import { parseFeature, markPublished, markSaved } from "./parser";
 
 export interface PublishResult {
   status: "published" | "conflict";
@@ -44,6 +44,31 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
   await Bun.write(path, `Feature: ${trimmed}\n`);
   await commitAndPush(dataDir, fileName, `Create feature: ${trimmed}`);
   return fileName;
+}
+
+export interface SaveResult {
+  status: "saved";
+  /** The content as written, with unpublished scenarios marked [saved]. */
+  content: string;
+  message: string;
+}
+
+/**
+ * Scenario "Scenario is automatically saved locally and pushed to GitHub":
+ * write the feature to the local filesystem right away (we don't want to lose
+ * any data), marking unpublished scenarios [saved]. The reload cron then
+ * commits and pushes saved scenarios after its git pull.
+ */
+export async function saveFeature(
+  dataDir: string,
+  fileName: string,
+  content: string,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const saved = markSaved(content);
+  await assertPublishedUnchanged(dataDir, name, saved);
+  await Bun.write(`${dataDir}/${name}`, saved);
+  return { status: "saved", content: saved, message: "saved locally" };
 }
 
 /**

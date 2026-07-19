@@ -24,6 +24,17 @@ When a scenario is published it is marked with [pub] after the version
 
 Ex: ```Scenario: Basic Quote @v1 [pub]```
 
+## Scenario: Scenario is automatically saved locally and pushed to GitHub
+
+- We don't want to loose any data.
+- Based on data reload frequency in Settings
+- Use [saved] after version to indicate that scenario is saved, but not published.
+- after Git pull; do a commit and push of the saved scenarios; on the top banner of the UI,
+- display 'Saved' message for 2 sec
+
+Ex: ```Scenario: Customer calls accident hotline and talks to a live agent @v1 [saved]
+Customer calls accident hotline and leaves a message with accident info.```
+
 ## Scenario: Publish feature with successful merge
 
 - Do a 'git pull' and merge all the files.

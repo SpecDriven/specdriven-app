@@ -223,6 +223,27 @@ aside > button,
   vertical-align: middle;
 }
 
+/* Saved-but-not-published marker (specs/crud-feature.spec.md, [saved]) */
+.badge.saved {
+  background: var(--muted);
+  color: var(--bg);
+}
+
+/* Top banner 'Saved' message, shown for 2 sec after an auto-save */
+.saved-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 0.4rem;
+  text-align: center;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .card-actions {
   display: flex;
   gap: 0.75rem;
