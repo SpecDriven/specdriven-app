@@ -18,6 +18,10 @@ the page.
 - Highlight selected scenario
 - Edit on Enter key press
 
+# Scenario edit dialog
+
+- ESC key to get back to Scenario screen.
+
 # Settings
 
 A settings dialog. Settings are saved to .specdriven
