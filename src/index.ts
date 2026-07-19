@@ -7,6 +7,7 @@ import {
   normalizeScenarioPreviewLines,
 } from "./server/state";
 import { resolveDataRepo } from "./server/repo";
+import { getCurrentUser } from "./server/user";
 import {
   listFeatures,
   listFolders,
@@ -87,6 +88,9 @@ const server = Bun.serve({
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
           scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+          // specs/user-info-settings.spec.md: the OS user by default, with
+          // the git identity that authors data-repo commits.
+          user: await getCurrentUser(),
         });
       },
       PUT: async (req) => {
