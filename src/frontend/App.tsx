@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent } from "react";
 import { parseFeature, serializeFeature } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
+import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import type { ScenarioRef } from "./route";
 
 interface Conflict {
   ours: string;
@@ -15,6 +17,17 @@ interface Conflict {
 interface EditState {
   index: number | null;
   scenario: Scenario;
+}
+
+interface OpenOptions {
+  /** Push a history entry for the opened feature (deliberate navigation). */
+  push?: boolean;
+  /**
+   * Deep-link target (specs/navigation.spec.md): select this scenario, or
+   * clear the selection when null. Undefined keeps the same-file selection
+   * preservation used by sync/cron refreshes.
+   */
+  scenario?: ScenarioRef | null;
 }
 
 export function App() {
@@ -43,6 +56,8 @@ export function App() {
   const [settingsDraft, setSettingsDraft] = useState("60");
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  /** Path whose "Copy link" action just ran — its label shows "Copied". */
+  const [copied, setCopied] = useState<string | null>(null);
 
   const loadFeatures = useCallback(async () => {
     const res = await fetch("/api/features");
@@ -66,7 +81,11 @@ export function App() {
       if (typeof state.scenarioPreviewLines === "number") {
         setPreviewLines(state.scenarioPreviewLines);
       }
-      if (!state.needsDataRepo) await loadFeatures();
+      if (!state.needsDataRepo) {
+        await loadFeatures();
+        // Deep link (specs/navigation.spec.md): the entry url picks the view.
+        await openFromLocation();
+      }
       setLoading(false);
     })();
   }, [loadFeatures]);
@@ -138,7 +157,34 @@ export function App() {
       scenarioRefs.current[selectedScenario]?.scrollIntoView({ block: "nearest" });
   }, [selectedScenario]);
 
+  // Canonical url (specs/navigation.spec.md "Resolution rules"): the address
+  // bar always shows what is actually selected. replaceState so selection
+  // moves don't spam history — deliberate feature switches push in openFeature.
+  useEffect(() => {
+    if (loading || needsRepo) return;
+    const s = selectedScenario !== null ? feature?.scenarios[selectedScenario] : undefined;
+    const url = selected ? (s ? scenarioPath(selected, s) : featurePath(selected)) : "/";
+    if (location.pathname !== url) history.replaceState(null, "", url);
+  }, [loading, needsRepo, selected, feature, selectedScenario]);
+
+  // Window title follows the selection (specs/navigation.spec.md) — chat and
+  // email link previews show it.
+  useEffect(() => {
+    const s =
+      feature && selectedScenario !== null ? feature.scenarios[selectedScenario] : undefined;
+    document.title =
+      !selected || !feature
+        ? "SpecDriven"
+        : s
+          ? `SpecDriven — ${feature.name || selected} · ${s.name} v${s.version}`
+          : `SpecDriven — ${feature.name || selected}`;
+  }, [selected, feature, selectedScenario]);
+
   const saveRepo = async (repo: string) => {
+    // Capture the entry url now: once needsRepo flips, the canonical-url
+    // effect would rewrite a deep link before we get to honor it
+    // (specs/navigation.spec.md "deep link before a data repo is configured").
+    const entryPath = location.pathname;
     setSettingRepo(true);
     setRepoError(null);
     try {
@@ -152,6 +198,7 @@ export function App() {
         setDataRepo(state.dataRepo);
         setNeedsRepo(false);
         await loadFeatures();
+        await openFromLocation(entryPath);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
       }
@@ -160,34 +207,78 @@ export function App() {
     }
   };
 
-  const openFeature = async (file: string) => {
+  const openFeature = async (file: string, opts: OpenOptions = {}) => {
     const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
     if (res.ok) {
       const data = await res.json();
       const parsed = parseFeature(data.content);
       setSelected(file);
       setFeature(parsed);
-      // Keep the keyboard highlight across a same-file refresh (sync, cron);
-      // drop it when switching files or when the list shrank past it.
-      setSelectedScenario((prev) =>
-        file === selected && prev !== null && prev < parsed.scenarios.length ? prev : null,
-      );
+      let missingScenario: string | null = null;
+      if (opts.scenario !== undefined) {
+        // Deep link (specs/navigation.spec.md): resolve slug (+ version) to a
+        // card; a miss opens the feature with no selection and a note.
+        const idx = opts.scenario === null ? null : resolveScenario(parsed.scenarios, opts.scenario);
+        if (opts.scenario !== null && idx === null) missingScenario = opts.scenario.slug;
+        setSelectedScenario(idx);
+      } else {
+        // Keep the keyboard highlight across a same-file refresh (sync, cron);
+        // drop it when switching files or when the list shrank past it.
+        setSelectedScenario((prev) =>
+          file === selected && prev !== null && prev < parsed.scenarios.length ? prev : null,
+        );
+      }
+      if (opts.push && location.pathname !== featurePath(file)) {
+        history.pushState(null, "", featurePath(file));
+      }
       setDirty(false);
       setEditing(null);
       setConflict(null);
-      setStatus("");
+      setStatus(
+        missingScenario
+          ? `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`
+          : "",
+      );
     } else {
-      // The file is gone — deleted, or renamed by the `.feature.md` migration.
-      // Drop a stale selection rather than re-fetching it on every reload tick.
+      // The file is gone — deleted, renamed by the `.feature.md` migration, or
+      // a stale deep link. Drop a stale selection rather than re-fetching it
+      // on every reload tick; a link or click that misses leaves a note.
       if (file === selected) {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
         setStatus("");
       }
+      if (opts.push || opts.scenario !== undefined) {
+        setStatus(`Feature "${file}" not found — the link may be stale.`);
+      }
       await loadFeatures();
     }
   };
+
+  /** Derive the view from a url (initial load, popstate, after repo setup). */
+  const openFromLocation = async (pathname = location.pathname) => {
+    const route = parseRoute(pathname);
+    if (route.feature) {
+      await openFeature(route.feature, { scenario: route.scenario ?? null });
+    } else {
+      setSelected(null);
+      setFeature(null);
+      setSelectedScenario(null);
+      setStatus("");
+    }
+  };
+
+  // Back/forward (specs/navigation.spec.md "browser history and reload"):
+  // re-derive the view from the url. The ref keeps the handler current
+  // without re-registering listeners on every state change.
+  const openFromLocationRef = useRef(openFromLocation);
+  openFromLocationRef.current = openFromLocation;
+  useEffect(() => {
+    const onPop = () => void openFromLocationRef.current();
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const createFeature = async () => {
     const name = window.prompt("Feature name:");
@@ -200,7 +291,7 @@ export function App() {
     const data = await res.json();
     if (res.ok) {
       await loadFeatures();
-      await openFeature(data.fileName);
+      await openFeature(data.fileName, { push: true });
     } else {
       setStatus(data.error);
     }
@@ -271,6 +362,40 @@ export function App() {
     } else {
       setStatus(data.error ?? "Publish failed");
     }
+  };
+
+  /** Handle a link in-app on a plain click; cmd/ctrl/shift-clicks keep their
+      native behavior (new tab etc — specs/navigation.spec.md "share a link"). */
+  const spaClick = (e: MouseEvent, go: () => void) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    go();
+  };
+
+  // "Copy link" (specs/navigation.spec.md "share a link"): absolute url on
+  // the clipboard; the pressed control's label flips to "Copied" for 2 sec.
+  const copyLink = async (path: string) => {
+    const url = location.origin + path;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // navigator.clipboard needs a secure context and permission — absent
+      // e.g. on a plain-http LAN host. Fall back to a selection-based copy.
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (!ok) {
+        setStatus("Could not copy the link to the clipboard.");
+        return;
+      }
+    }
+    setCopied(path);
+    window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
   };
 
   // specs/crud-feature.spec.md ("Scenario is automatically saved locally and
@@ -404,9 +529,15 @@ export function App() {
         <ul>
           {features.map((f) => (
             <li key={f}>
-              <button className={f === selected ? "active" : ""} onClick={() => openFeature(f)}>
+              {/* A real link (specs/navigation.spec.md "share a link"): plain
+                  clicks navigate in-app, right-click → Copy Link works. */}
+              <a
+                href={featurePath(f)}
+                className={f === selected ? "active" : ""}
+                onClick={(e) => spaClick(e, () => void openFeature(f, { push: true }))}
+              >
                 {f}
-              </button>
+              </a>
             </li>
           ))}
           {features.length === 0 && <li className="empty">No feature files yet</li>}
@@ -419,7 +550,12 @@ export function App() {
         {selected && feature ? (
           <>
             <div className="editor-bar">
-              <h2>{selected}</h2>
+              <div className="feature-title">
+                <h2>{selected}</h2>
+                <button className="link" onClick={() => copyLink(featurePath(selected))}>
+                  {copied === featurePath(selected) ? "Copied" : "Copy link"}
+                </button>
+              </div>
               <div className="editor-actions">
                 <button className="secondary" onClick={syncNow} disabled={syncing}>
                   {syncing ? "Syncing…" : "Sync"}
@@ -449,11 +585,25 @@ export function App() {
                 >
                   <header>
                     <span className="scenario-title">
-                      {s.name} <span className="version">v{s.version}</span>
+                      {/* The title is the scenario's permalink
+                          (specs/navigation.spec.md "share a link"). */}
+                      <a
+                        href={scenarioPath(selected, s)}
+                        onClick={(e) => spaClick(e, () => setSelectedScenario(i))}
+                      >
+                        {s.name}
+                      </a>{" "}
+                      <span className="version">v{s.version}</span>
                       {s.published && <span className="badge">published</span>}
                       {!s.published && s.saved && <span className="badge saved">saved</span>}
                     </span>
                     <span className="card-actions">
+                      <button
+                        className="link"
+                        onClick={() => copyLink(scenarioPath(selected, s))}
+                      >
+                        {copied === scenarioPath(selected, s) ? "Copied" : "Copy link"}
+                      </button>
                       {s.published && (
                         <button className="link" onClick={() => newVersion(i)}>
                           New version
@@ -516,7 +666,11 @@ export function App() {
             )}
           </>
         ) : (
-          <p className="empty">Select a feature file or create a new one.</p>
+          <>
+            <p className="empty">Select a feature file or create a new one.</p>
+            {/* A stale deep link lands here with a note (specs/navigation.spec.md). */}
+            {status && <p className="status">{status}</p>}
+          </>
         )}
       </section>
       {settingsOpen && (

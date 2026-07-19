@@ -66,6 +66,11 @@ const server = Bun.serve({
   routes: {
     "/": index,
 
+    // Deep links (specs/navigation.spec.md): every /features/... url serves
+    // the app shell; the client resolves it against /api/features/:file.
+    "/features": index,
+    "/features/*": index,
+
     // App start (specs/app-start.spec.md): the client asks for state; if no
     // data repo is recorded, it prompts the user for one. The repo may be a
     // regular GitHub url (https://github.com/SpecDriven/data-insurance).

@@ -1,6 +1,8 @@
 import { readdir } from "node:fs/promises";
 import { pull, theirsVersion, commitAndPush, resolveConflict as gitResolve } from "./git";
-import { parseFeature, markPublished, markSaved } from "./parser";
+import { parseFeature, markPublished, markSaved, slugify } from "./parser";
+
+export { slugify } from "./parser";
 
 export interface PublishResult {
   status: "published" | "conflict";
@@ -9,13 +11,6 @@ export interface PublishResult {
   /** On conflict: the content the user tried to publish. */
   ours?: string;
   message: string;
-}
-
-export function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 function isFeatureFile(fileName: string): boolean {
