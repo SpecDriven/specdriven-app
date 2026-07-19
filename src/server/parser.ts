@@ -32,6 +32,18 @@ export interface Feature {
   scenarios: Scenario[];
 }
 
+/**
+ * Shared identity slug: feature file stems (`<slug>.feature.md`) and deep-link
+ * url segments (specs/navigation.spec.md) both use it. Lives here rather than
+ * features.ts so the frontend can import it without pulling in node:fs.
+ */
+export function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
 const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
