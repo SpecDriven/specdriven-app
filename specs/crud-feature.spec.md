@@ -34,6 +34,9 @@ nicely on GitHub and in any markdown viewer:
 | Silver | yes       |
 ```
 
+Feature files may live in folders — plain directories in the data repo
+(specs/folders.spec.md).
+
 ## Scenario: create new feature
 
 - Given: user is verified to have access to the data GH repo

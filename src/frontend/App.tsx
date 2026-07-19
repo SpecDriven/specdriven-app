@@ -6,6 +6,8 @@ import type { FeatureListing } from "../server/features";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import { buildTree } from "./tree";
+import type { FolderNode } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import type { ScenarioRef } from "./route";
 
@@ -40,6 +42,15 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureListing[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
+  /** Folder paths whose subtree is collapsed in the sidebar. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /** Folder highlighted by a click; "+ New folder" creates inside it. */
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  /** File name of the feature being dragged, if any. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  /** Folder path the drag is hovering over ("" = top level). */
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
   /** Draft for the inline file-name editor; null while not editing. */
@@ -69,6 +80,7 @@ export function App() {
     const data = await res.json();
     if (res.ok) {
       setFeatures(data.features);
+      setFolders(data.folders ?? []);
       setLoadError(null);
     } else {
       setLoadError(data.error ?? "Could not load features");
@@ -292,7 +304,7 @@ export function App() {
   }, []);
 
   const createFeature = async () => {
-    const name = window.prompt("Feature name:");
+    const name = window.prompt("Feature name (use folder/name to create inside a folder):");
     if (!name) return;
     const res = await fetch("/api/features", {
       method: "POST",
@@ -305,6 +317,73 @@ export function App() {
       await openFeature(data.fileName, { push: true });
     } else {
       setStatus(data.error);
+    }
+  };
+
+  // Folders (specs/folders.spec.md): plain directories in the data repo.
+  // With a folder selected, the new folder is created inside it.
+  const createFolder = async () => {
+    const parent = selectedFolder;
+    const input = window.prompt(
+      parent ? `Folder name (inside "${parent}"):` : "Folder name (use / for nesting):",
+    );
+    if (!input) return;
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: parent ? `${parent}/${input}` : input }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      // Reveal and select the new folder, so a follow-up "+ New folder"
+      // nests inside it and a drag has a visible target.
+      if (parent) setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.delete(parent);
+        return next;
+      });
+      setSelectedFolder(data.path);
+      await loadFeatures();
+    } else {
+      setStatus(data.error ?? "Could not create the folder");
+    }
+  };
+
+  // Only empty folders can be deleted (specs/folders.spec.md) — the
+  // server refuses otherwise, and the refusal lands in the status line.
+  const removeFolder = async (path: string) => {
+    if (!window.confirm(`Delete folder "${path}"?`)) return;
+    const res = await fetch(`/api/folders/${encodeURIComponent(path)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (res.ok) {
+      // A selection under the deleted folder points nowhere — drop it.
+      setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
+      await loadFeatures();
+    } else {
+      setStatus(data.error ?? "Could not delete the folder");
+    }
+  };
+
+  // Drag-move (specs/folders.spec.md): the server does a `git mv` into
+  // the target folder, committed and pushed. A selected feature stays
+  // selected under its new path — the canonical-url effect follows along.
+  const moveTo = async (fileName: string, folder: string) => {
+    setDragging(null);
+    setDropTarget(null);
+    const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      await loadFeatures();
+      if (data.fileName !== fileName) {
+        if (selected === fileName) await openFeature(data.fileName);
+        setStatus(`Moved to ${folder || "the top level"} — ${data.message}.`);
+      }
+    } else {
+      setStatus(data.error ?? "Move failed");
     }
   };
 
@@ -550,6 +629,106 @@ export function App() {
     });
   };
 
+  const toggleFolder = (path: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+
+  /** One sidebar entry per feature; the entry is the drag source. */
+  const featureItem = (f: FeatureListing, depth: number) => (
+    // A real link (specs/navigation.spec.md "share a link"): plain clicks
+    // navigate in-app, right-click → Copy Link works. The label is the
+    // feature name, not the file name (specs/ui.spec.md "Main page").
+    <a
+      key={f.fileName}
+      href={featurePath(f.fileName)}
+      className={`tree-feature${f.fileName === selected ? " active" : ""}`}
+      style={{ paddingLeft: `${0.6 + depth * 0.9}rem` }}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", f.fileName);
+        e.dataTransfer.effectAllowed = "move";
+        setDragging(f.fileName);
+      }}
+      onDragEnd={() => {
+        setDragging(null);
+        setDropTarget(null);
+      }}
+      onClick={(e) =>
+        spaClick(e, () => {
+          // Opening a feature is a deliberate move away from the folder.
+          setSelectedFolder(null);
+          void openFeature(f.fileName, { push: true });
+        })
+      }
+    >
+      {f.name}
+    </a>
+  );
+
+  /**
+   * Folders then features, indented per depth (specs/folders.spec.md).
+   * A folder's whole subtree is its drop zone — dropping on a feature drops
+   * into the folder that holds it; nested folders win via stopPropagation.
+   */
+  const renderTree = (node: FolderNode, depth: number) => (
+    <>
+      {node.folders.map((child) => (
+        <div
+          key={child.path}
+          onDragOver={(e) => {
+            if (dragging === null) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "move";
+            setDropTarget(child.path);
+          }}
+          onDragLeave={() => setDropTarget((t) => (t === child.path ? null : t))}
+          onDrop={(e) => {
+            if (dragging === null) return;
+            e.preventDefault();
+            e.stopPropagation();
+            void moveTo(dragging, child.path);
+          }}
+        >
+          <div
+            className={`folder-row${dragging !== null && dropTarget === child.path ? " drop-target" : ""}${
+              child.path === selectedFolder ? " selected" : ""
+            }`}
+            style={{ paddingLeft: `${depth * 0.9}rem` }}
+          >
+            {/* Clicking selects the folder (specs/folders.spec.md — "+ New
+                folder" then creates inside it) and toggles its subtree. */}
+            <button
+              type="button"
+              className="folder-toggle"
+              aria-expanded={!collapsed.has(child.path)}
+              onClick={() => {
+                setSelectedFolder(child.path);
+                toggleFolder(child.path);
+              }}
+            >
+              <span className="twist">{collapsed.has(child.path) ? "▸" : "▾"}</span> {child.name}
+            </button>
+            <button
+              type="button"
+              className="folder-delete"
+              title={`Delete folder ${child.path}`}
+              onClick={() => void removeFolder(child.path)}
+            >
+              ✕
+            </button>
+          </div>
+          {!collapsed.has(child.path) && renderTree(child, depth + 1)}
+        </div>
+      ))}
+      {node.features.map((f) => featureItem(f, depth))}
+    </>
+  );
+
   if (loading) return <main className="centered">Loading…</main>;
 
   if (needsRepo) {
@@ -586,26 +765,38 @@ export function App() {
           <h1>SpecDriven</h1>
           <span className="repo-name">{dataRepo}</span>
         </header>
-        <button onClick={createFeature}>+ New feature</button>
+        <div className="sidebar-actions">
+          <button onClick={createFolder}>+ New folder</button>
+          <button onClick={createFeature}>+ New feature</button>
+        </div>
         {loadError && <p className="error">{loadError}</p>}
-        <ul>
-          {features.map((f) => (
-            <li key={f.fileName}>
-              {/* A real link (specs/navigation.spec.md "share a link"): plain
-                  clicks navigate in-app, right-click → Copy Link works. The
-                  label is the feature name, not the file name
-                  (specs/ui.spec.md "Main page"). */}
-              <a
-                href={featurePath(f.fileName)}
-                className={f.fileName === selected ? "active" : ""}
-                onClick={(e) => spaClick(e, () => void openFeature(f.fileName, { push: true }))}
-              >
-                {f.name}
-              </a>
-            </li>
-          ))}
-          {features.length === 0 && <li className="empty">No feature files yet</li>}
-        </ul>
+        {/* Folder tree (specs/folders.spec.md): folders are drop targets
+            for drag-moving features; the tree background is the top level. */}
+        <div
+          className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
+          onClick={(e) => {
+            // A click on the bare background deselects the folder, so the
+            // next "+ New folder" creates at the top level again.
+            if (e.target === e.currentTarget) setSelectedFolder(null);
+          }}
+          onDragOver={(e) => {
+            if (dragging === null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDropTarget("");
+          }}
+          onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
+          onDrop={(e) => {
+            if (dragging === null) return;
+            e.preventDefault();
+            void moveTo(dragging, "");
+          }}
+        >
+          {renderTree(buildTree(folders, features), 0)}
+          {features.length === 0 && folders.length === 0 && (
+            <p className="empty">No feature files yet</p>
+          )}
+        </div>
         <button className="settings-btn" onClick={openSettings}>
           ⚙ Settings
         </button>

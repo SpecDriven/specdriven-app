@@ -24,6 +24,10 @@ the page.
 - render scenario body as Markdown preview; up to n lines
 - make the number of Markdown lines to render for each scenario in list configurable in Settings dialog
 
+# Folders
+
+Features can be organized into folders — see specs/folders.spec.md.
+
 # Select scenarios via up and down keys
 - Highlight selected scenario
 - Edit on Enter key press

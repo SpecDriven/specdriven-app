@@ -52,6 +52,8 @@ export function slugify(name: string): string {
  */
 export function titleFromFileName(fileName: string): string {
   return fileName
+    .split("/")
+    .pop()!
     .replace(/\.feature(\.md)?$/, "")
     .split("-")
     .filter(Boolean)
