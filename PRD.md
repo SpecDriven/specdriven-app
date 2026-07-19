@@ -35,7 +35,7 @@ Quote is provided
 JUnit test example:
 
 ```java
-@Spec(file = "quote-policy.feature", scenario = "Basic Quote", version = "v1")
+@Spec(file = "quote-policy.feature.md", scenario = "Basic Quote", version = "v1")
 @Test
 void basicQuote_returnsQuoteForCustomerWithAccount() {
     // Given: Potential customer has an account
@@ -52,6 +52,18 @@ void basicQuote_returnsQuoteForCustomerWithAccount() {
 The `@Spec` annotation is the bidirectional link: it points from the test back to the immutable, versioned
 scenario (`quote-policy.feature#Basic Quote@v1`), so tooling can detect when a spec changes without its test
 being updated, or a test existing with no matching spec.
+
+## Scenario headers grammar
+
+Scenario: <name> v<nnn> [proposed | published | deleted | archived]
+
+## Archiving features and scenarios
+
+- If a feature or a scenario are no longer relevant, but we want to keep an easy to find
+history, we will move them into the 'archived' folder.
+
+- We can archive an entire feature or a single scenario.
+
 
 # Traceability maintenance
 
