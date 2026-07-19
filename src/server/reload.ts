@@ -1,8 +1,10 @@
 // Per specs/crud-feature.spec.md ("reload data on a cron job"): automatically
 // reload (git pull) the data repo every n seconds. The frequency comes from
 // the Settings dialog and is persisted in .specdriven (specs/ui.spec.md).
+// After the pull, locally saved scenarios are committed and pushed
+// ("Scenario is automatically saved locally and pushed to GitHub").
 
-import { pull } from "./git";
+import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { readState, needsDataRepo } from "./state";
 
@@ -15,12 +17,17 @@ export function normalizeReloadSeconds(value: unknown): number {
   return Math.floor(n);
 }
 
-/** One tick of the cron job: git pull the configured data repo. */
+/**
+ * One tick of the cron job: git pull the configured data repo, then commit
+ * and push any locally saved scenarios.
+ */
 export async function reloadData(rootDir: string): Promise<string> {
   const state = await readState(rootDir);
   if (needsDataRepo(state)) return "data repo not configured; skipped reload";
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
-  return (await pull(dir)).message;
+  const pulled = await pull(dir);
+  const synced = await syncSavedChanges(dir);
+  return `${pulled.message}; ${synced.message}`;
 }
 
 export interface ReloadScheduler {

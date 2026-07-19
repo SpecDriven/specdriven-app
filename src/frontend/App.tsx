@@ -29,6 +29,7 @@ export function App() {
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [conflictDraft, setConflictDraft] = useState("");
   const [status, setStatus] = useState("");
+  const [savedFlash, setSavedFlash] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
@@ -160,19 +161,44 @@ export function App() {
     }
   };
 
-  const saveScenario = () => {
-    if (!editing || !feature) return;
+  // specs/crud-feature.spec.md ("Scenario is automatically saved locally and
+  // pushed to GitHub"): show 'Saved' on the top banner for 2 sec.
+  const flashSaved = () => {
+    setSavedFlash(true);
+    window.setTimeout(() => setSavedFlash(false), 2000);
+  };
+
+  /**
+   * Saving the dialog auto-saves the whole feature locally (marked [saved],
+   * so no data is lost); the server's reload cron commits and pushes it.
+   */
+  const saveScenario = async () => {
+    if (!editing || !feature || !selected) return;
     const s = editing.scenario;
-    setFeature({
+    const next: Feature = {
       ...feature,
       scenarios:
         editing.index === null
           ? [...feature.scenarios, s]
           : feature.scenarios.map((sc, i) => (i === editing.index ? s : sc)),
-    });
-    setDirty(true);
+    };
+    setFeature(next);
     setEditing(null);
-    setStatus("Unpublished changes — press Publish to commit and push.");
+    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: serializeFeature(next), save: true }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setFeature(parseFeature(data.content));
+      setDirty(false);
+      setStatus("Saved — press Publish to mark scenarios [pub].");
+      flashSaved();
+    } else {
+      setDirty(true);
+      setStatus(data.error ?? "Save failed");
+    }
   };
 
   const openSettings = () => {
@@ -211,7 +237,7 @@ export function App() {
     );
     setEditing({
       index: null,
-      scenario: { ...src, version: maxVersion + 1, published: false },
+      scenario: { ...src, version: maxVersion + 1, published: false, saved: false },
     });
   };
 
@@ -241,9 +267,11 @@ export function App() {
   }
 
   const editingPublished = editing?.scenario.published ?? false;
+  const hasSaved = feature?.scenarios.some((s) => s.saved && !s.published) ?? false;
 
   return (
     <main className="layout">
+      {savedFlash && <div className="saved-banner">Saved</div>}
       <aside>
         <header>
           <h1>SpecDriven</h1>
@@ -270,7 +298,7 @@ export function App() {
           <>
             <div className="editor-bar">
               <h2>{selected}</h2>
-              <button onClick={publish}>{dirty ? "Publish *" : "Publish"}</button>
+              <button onClick={publish}>{dirty || hasSaved ? "Publish *" : "Publish"}</button>
             </div>
             <h3 className="feature-name">Feature: {feature.name}</h3>
             <div className="scenarios">
@@ -280,6 +308,7 @@ export function App() {
                     <span className="scenario-title">
                       {s.name} <span className="version">@v{s.version}</span>
                       {s.published && <span className="badge">published</span>}
+                      {!s.published && s.saved && <span className="badge saved">saved</span>}
                     </span>
                     <span className="card-actions">
                       {s.published && (
@@ -306,7 +335,7 @@ export function App() {
                 onClick={() =>
                   setEditing({
                     index: null,
-                    scenario: { name: "", version: 1, published: false, body: "" },
+                    scenario: { name: "", version: 1, published: false, saved: false, body: "" },
                   })
                 }
               >

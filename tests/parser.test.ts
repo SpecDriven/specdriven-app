@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { parseFeature, serializeFeature, markPublished } from "../src/server/parser";
+import { parseFeature, serializeFeature, markPublished, markSaved } from "../src/server/parser";
 
 const SAMPLE = `Feature: Quote Policy
 
@@ -60,6 +60,36 @@ test("markPublished appends [pub] to unpublished scenario headers only", () => {
   expect(marked).toContain("Scenario: Draft @v2 [pub]");
   expect(marked).toContain("Scenario: Done @v1 [pub]");
   expect(marked).not.toContain("[pub] [pub]");
+});
+
+// crud-feature.spec.md "Scenario is automatically saved locally and pushed to
+// GitHub": [saved] after the version marks a saved, not-yet-published scenario.
+test("parses and serializes the [saved] marker", () => {
+  const text = "Feature: X\n\nScenario: Draft @v2 [saved]\nbody\n";
+  const feature = parseFeature(text);
+  expect(feature.scenarios[0]).toMatchObject({
+    name: "Draft",
+    version: 2,
+    published: false,
+    saved: true,
+  });
+  expect(serializeFeature(feature)).toBe(text);
+});
+
+test("markSaved appends [saved] to unmarked scenario headers only", () => {
+  const marked = markSaved(
+    "Feature: X\n\nScenario: Draft @v2\nbody\n\nScenario: Done @v1 [pub]\nbody\n\nScenario: Kept @v3 [saved]\nbody\n",
+  );
+  expect(marked).toContain("Scenario: Draft @v2 [saved]");
+  expect(marked).toContain("Scenario: Done @v1 [pub]");
+  expect(marked).toContain("Scenario: Kept @v3 [saved]");
+  expect(marked).not.toContain("[saved] [saved]");
+});
+
+test("markPublished upgrades [saved] to [pub]", () => {
+  const marked = markPublished("Feature: X\n\nScenario: Draft @v2 [saved]\nbody\n");
+  expect(marked).toContain("Scenario: Draft @v2 [pub]");
+  expect(marked).not.toContain("[saved]");
 });
 
 test("serialize then parse round-trips", () => {

@@ -7,6 +7,7 @@ import {
   createFeature,
   listFeatures,
   readFeature,
+  saveFeature,
   publishFeature,
   resolveFeatureConflict,
   slugify,
@@ -76,6 +77,43 @@ test("createFeature refuses to overwrite an existing feature", async () => {
 test("path traversal in file names is rejected", async () => {
   expect(readFeature(root, "../evil.feature")).rejects.toThrow("Invalid feature file name");
   expect(publishFeature(root, "no-extension", "x")).rejects.toThrow("Invalid feature file name");
+});
+
+// Scenario: Scenario is automatically saved locally and pushed to GitHub —
+// the save itself only writes locally (no data loss even offline); the reload
+// cron does the commit and push.
+test("saveFeature writes locally with [saved] markers and no commit", async () => {
+  const { a } = await twoClones();
+  const result = await saveFeature(a, "seed.feature", "Feature: Seed\n\nScenario: One @v1\nbody\n");
+  expect(result.status).toBe("saved");
+  expect(result.content).toContain("Scenario: One @v1 [saved]");
+  expect(await readFeature(a, "seed.feature")).toContain("Scenario: One @v1 [saved]");
+  // not committed: the working tree is dirty until the reload cron syncs
+  const status = await git(a, "status", "--porcelain");
+  expect(status.stdout.toString()).toContain("seed.feature");
+});
+
+test("saveFeature keeps published scenarios immutable", async () => {
+  await createFeature(root, "Quote");
+  await publishFeature(root, "quote.feature", "Feature: Quote\n\nScenario: Basic @v1\nold body\n");
+  expect(
+    saveFeature(root, "quote.feature", "Feature: Quote\n\nScenario: Basic @v1 [pub]\nnew body\n"),
+  ).rejects.toThrow("immutable");
+});
+
+// Publishing a saved scenario upgrades [saved] to [pub].
+test("publishFeature upgrades [saved] scenarios to [pub]", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(root, "quote.feature", "Feature: Quote\n\nScenario: Basic @v1\nbody\n");
+  const result = await publishFeature(
+    root,
+    "quote.feature",
+    (await readFeature(root, "quote.feature"))!,
+  );
+  expect(result.status).toBe("published");
+  const text = await readFeature(root, "quote.feature");
+  expect(text).toContain("Scenario: Basic @v1 [pub]");
+  expect(text).not.toContain("[saved]");
 });
 
 // Scenario: Publish feature with successful merge — pull, then save.

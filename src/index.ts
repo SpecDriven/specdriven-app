@@ -6,6 +6,7 @@ import {
   listFeatures,
   readFeature,
   createFeature,
+  saveFeature,
   publishFeature,
   resolveFeatureConflict,
 } from "./server/features";
@@ -131,9 +132,16 @@ const server = Bun.serve({
         return json({ fileName: req.params.file, content, parsed: parseFeature(content) });
       }),
       PUT: withDataDir(async (dir, req: BunRequest<"/api/features/:file">) => {
-        const body = (await req.json()) as { content?: string; resolveConflict?: boolean };
+        const body = (await req.json()) as {
+          content?: string;
+          resolveConflict?: boolean;
+          save?: boolean;
+        };
         if (typeof body.content !== "string") return json({ error: "content is required" }, 400);
         try {
+          // save: auto-save locally with [saved] markers; the reload cron
+          // commits and pushes (specs/crud-feature.spec.md).
+          if (body.save) return json(await saveFeature(dir, req.params.file, body.content));
           const result = body.resolveConflict
             ? await resolveFeatureConflict(dir, req.params.file, body.content)
             : await publishFeature(dir, req.params.file, body.content);

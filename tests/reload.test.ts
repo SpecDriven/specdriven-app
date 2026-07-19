@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { $ } from "bun";
 import {
   DEFAULT_RELOAD_SECONDS,
   normalizeReloadSeconds,
@@ -42,6 +43,44 @@ test("reload without a configured data repo is skipped", async () => {
 test("reload of a non-git data dir skips the pull instead of failing", async () => {
   await writeState({ dataRepo: "data" }, dir);
   expect(await reloadData(dir)).toContain("skipped pull");
+});
+
+// crud-feature.spec.md "Scenario is automatically saved locally and pushed to
+// GitHub": on the reload tick, after the git pull, saved scenarios are
+// committed and pushed.
+test("reload commits and pushes locally saved scenarios after the pull", async () => {
+  const origin = join(dir, "origin.git");
+  await $`git init --bare -b main ${origin}`.quiet();
+  const data = join(dir, "data");
+  await $`git clone ${origin} ${data}`.quiet().nothrow();
+  await $`git -C ${data} config user.email test@example.com`.quiet();
+  await $`git -C ${data} config user.name Test`.quiet();
+  await $`git -C ${data} checkout -B main`.quiet();
+  await Bun.write(join(data, "seed.feature"), "Feature: Seed\n");
+  await $`git -C ${data} add .`.quiet();
+  await $`git -C ${data} commit -m seed`.quiet();
+  await $`git -C ${data} push origin HEAD:main`.quiet();
+  await $`git -C ${data} branch --set-upstream-to=origin/main`.quiet();
+  await writeState({ dataRepo: "data" }, dir);
+
+  // an auto-saved (uncommitted) scenario is waiting in the working tree
+  await Bun.write(join(data, "seed.feature"), "Feature: Seed\n\nScenario: One @v1 [saved]\nbody\n");
+
+  const message = await reloadData(dir);
+  expect(message).toContain("saved scenarios committed and pushed");
+  const status = await $`git -C ${data} status --porcelain`.quiet();
+  expect(status.stdout.toString().trim()).toBe("");
+  const originLog = await $`git -C ${origin} log --oneline -1`.quiet();
+  expect(originLog.stdout.toString()).toContain("Auto-save scenarios");
+});
+
+test("reload with a clean tree has nothing to sync", async () => {
+  const data = join(dir, "data");
+  await $`git init -b main ${data}`.quiet();
+  await $`git -C ${data} config user.email test@example.com`.quiet();
+  await $`git -C ${data} config user.name Test`.quiet();
+  await writeState({ dataRepo: "data" }, dir);
+  expect(await reloadData(dir)).toContain("no saved changes");
 });
 
 test("scheduler runs the task repeatedly at the given frequency", async () => {
