@@ -9,8 +9,8 @@ import { resolve } from "node:path";
 import { isRepoRoot } from "./git";
 
 export interface GitHubRepo {
-  /** Clone URL. */
-  url: string;
+  /** Candidate clone URLs, in probe order (specs/datastore.spec.md). */
+  urls: string[];
   /** Repository name — used as the local clone directory name. */
   name: string;
 }
@@ -25,8 +25,10 @@ export function parseGitHubUrl(input: string): GitHubRepo | null {
   if (!m) return null;
   const [, owner, name] = m;
   if (owner === "." || owner === ".." || name === "." || name === "..") return null;
-  const url = trimmed.startsWith("git@") ? trimmed : `https://github.com/${owner}/${name}`;
-  return { url, name: name! };
+  const https = `https://github.com/${owner}/${name}`;
+  const ssh = `git@github.com:${owner}/${name}.git`;
+  const urls = trimmed.startsWith("git@") ? [ssh, https] : [https, ssh];
+  return { urls, name: name! };
 }
 
 /** Something the user clearly meant as a URL, even if we can't parse it. */
@@ -40,20 +42,25 @@ export function cloneDir(rootDir: string, repoName: string): string {
 }
 
 /**
- * Clone url into dir unless dir is already a git repo (e.g. a pre-existing
- * clone). GIT_TERMINAL_PROMPT=0 makes auth failures fail fast instead of
- * prompting on the server's stdin.
+ * Clone into dir unless dir is already a git repo (e.g. a pre-existing
+ * clone). Urls are probed in order — per specs/datastore.spec.md an https://
+ * clone can fail on auth where ssh succeeds. GIT_TERMINAL_PROMPT=0 makes
+ * auth failures fail fast instead of prompting on the server's stdin; git
+ * removes the target dir on failure, so the next probe starts clean.
  */
-export async function ensureClone(url: string, dir: string): Promise<void> {
+export async function ensureClone(urls: string | string[], dir: string): Promise<void> {
   if (await isRepoRoot(dir)) return;
-  const res = await $`git clone ${url} ${dir}`
-    .env({ ...process.env, GIT_TERMINAL_PROMPT: "0" })
-    .quiet()
-    .nothrow();
-  if (res.exitCode !== 0) {
+  const failures: string[] = [];
+  for (const url of Array.isArray(urls) ? urls : [urls]) {
+    const res = await $`git clone ${url} ${dir}`
+      .env({ ...process.env, GIT_TERMINAL_PROMPT: "0" })
+      .quiet()
+      .nothrow();
+    if (res.exitCode === 0) return;
     const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
-    throw new Error(`Could not clone ${url}: ${detail}`);
+    failures.push(`Could not clone ${url}: ${detail}`);
   }
+  throw new Error(failures.join("\n"));
 }
 
 /**
@@ -66,7 +73,7 @@ export async function resolveDataRepo(dataRepo: string, rootDir: string): Promis
   const gh = parseGitHubUrl(dataRepo);
   if (gh) {
     const dir = cloneDir(rootDir, gh.name);
-    await ensureClone(gh.url, dir);
+    await ensureClone(gh.urls, dir);
     return dir;
   }
   if (looksLikeRepoUrl(dataRepo)) {
