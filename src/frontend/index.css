@@ -164,6 +164,21 @@ aside > button,
   font-family: ui-monospace, monospace;
 }
 
+.editor-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.editor-bar button.secondary {
+  background: none;
+  color: var(--accent);
+}
+
+.editor-bar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .feature-name {
   margin: 0;
   font-size: 1rem;

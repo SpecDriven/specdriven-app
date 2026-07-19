@@ -112,6 +112,20 @@ const server = Bun.serve({
       },
     },
 
+    // Sync button (specs/ui.spec.md "Main page"): immediate data reload —
+    // one reload tick on demand, same as the cron (pull + push saved).
+    "/api/reload": {
+      POST: async () => {
+        try {
+          const message = await reloadData(ROOT);
+          console.log(`[reload] ${message}`);
+          return json({ message });
+        } catch (e) {
+          return json({ error: (e as Error).message }, 502);
+        }
+      },
+    },
+
     "/api/features": {
       GET: withDataDir(async (dir) => json({ features: await listFeatures(dir) })),
       POST: withDataDir(async (dir, req: BunRequest<"/api/features">) => {
