@@ -216,6 +216,13 @@ aside > button,
   border-color: var(--pub-border);
 }
 
+/* Scenario selected with the up/down keys (specs/ui.spec.md); an outline so it
+   stays visible on top of the published shading. */
+.scenario-card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .scenario-card header {
   display: flex;
   align-items: baseline;
