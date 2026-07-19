@@ -6,6 +6,7 @@ import type { FeatureListing } from "../server/features";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import { useFocusTrap } from "./useFocusTrap";
 import type { ScenarioRef } from "./route";
 
 interface Conflict {
@@ -155,6 +156,10 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
+
+  // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
+  const settingsTrapRef = useFocusTrap(settingsOpen);
+  const editingTrapRef = useFocusTrap(editing !== null);
 
   useEffect(() => {
     if (selectedScenario !== null)
@@ -757,7 +762,7 @@ export function App() {
       </section>
       {settingsOpen && (
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="dialog" ref={settingsTrapRef} onClick={(e) => e.stopPropagation()}>
             <h3>Settings</h3>
             <label>
               Data reload frequency (seconds)
@@ -801,7 +806,7 @@ export function App() {
           {/* specs/ui.spec.md "Scenario edit dialog": the scenario name is the
               dialog title (an editable title unless published), the dialog is
               resizable, and the body is an embedded markdown editor. */}
-          <div className="dialog scenario-dialog" onClick={(e) => e.stopPropagation()}>
+          <div className="dialog scenario-dialog" ref={editingTrapRef} onClick={(e) => e.stopPropagation()}>
             {editingPublished ? (
               <h3 className="dialog-title">
                 {editing.scenario.name} <span className="version">v{editing.scenario.version}</span>

@@ -28,6 +28,17 @@ the page.
 - Highlight selected scenario
 - Edit on Enter key press
 
+# Dialogs
+
+Applies to every dialog (scenario edit, Settings, and any future dialog).
+
+- While a dialog is in the foreground, Tab and Shift+Tab must only move focus
+  between the fields inside that dialog. Focus wraps from the last field back to
+  the first, and from the first back to the last.
+- Focus must never reach elements behind the dialog while it is open.
+- On open, focus moves into the dialog; on close, focus returns to the element
+  that opened it.
+
 # Scenario edit dialog
 
 - Name must be the title of the dialog
