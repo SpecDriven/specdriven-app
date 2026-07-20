@@ -5,6 +5,7 @@ import {
   theirsVersion,
   commitAndPush,
   moveAndPush,
+  removeAndPush,
   resolveConflict as gitResolve,
 } from "./git";
 import {
@@ -225,6 +226,49 @@ export async function renameFeature(
   await Bun.write(`${dataDir}/${file}`, renameFeatureName(current, name));
   const sync = await commitAndPush(dataDir, file, `Rename feature: ${oldName} -> ${name}`);
   return { fileName: file, name, message: sync.message };
+}
+
+/**
+ * specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+ * underlying file, keeping its folder and the `.feature.md` extension — the
+ * UI only shows and edits the stem left of the dot. A `git mv`, committed
+ * and pushed like a move; links to the old file name go stale.
+ */
+export async function renameFeatureFile(
+  dataDir: string,
+  fileName: string,
+  newStem: string,
+): Promise<{ fileName: string; message: string }> {
+  const from = safe(fileName);
+  const stem = slugify(newStem);
+  if (!stem) throw new Error("File name is required");
+  const folder = from.split("/").slice(0, -1).join("/");
+  const to = folder ? `${folder}/${stem}.feature.md` : `${stem}.feature.md`;
+  if (to === from) return { fileName: from, message: "file name unchanged" };
+  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
+    throw new Error(`Feature file not found: ${from}`);
+  }
+  if (await Bun.file(`${dataDir}/${to}`).exists()) {
+    throw new Error(`Feature file already exists: ${to}`);
+  }
+  const sync = await moveAndPush(dataDir, from, to, `Rename file: ${from} -> ${to}`);
+  return { fileName: to, message: sync.message };
+}
+
+/**
+ * specs/ui.spec.md "Feature entry menu" (Delete): deletes the feature file —
+ * a `git rm`, committed and pushed. The client asks for confirmation first.
+ */
+export async function deleteFeature(
+  dataDir: string,
+  fileName: string,
+): Promise<{ message: string }> {
+  const file = safe(fileName);
+  if (!(await Bun.file(`${dataDir}/${file}`).exists())) {
+    throw new Error(`Feature file not found: ${file}`);
+  }
+  const sync = await removeAndPush(dataDir, file, `Delete feature: ${file}`);
+  return { message: sync.message };
 }
 
 export interface SaveResult {

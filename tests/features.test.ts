@@ -5,9 +5,11 @@ import { join } from "node:path";
 import { $ } from "bun";
 import {
   createFeature,
+  deleteFeature,
   listFeatures,
   readFeature,
   renameFeature,
+  renameFeatureFile,
   saveFeature,
   publishFeature,
   resolveFeatureConflict,
@@ -154,6 +156,70 @@ test("renameFeature refuses missing files and empty names", async () => {
     name: "One",
     message: "feature name unchanged",
   });
+});
+
+// specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+// underlying file — a `git mv`, committed and pushed; the other clone sees
+// the file under its new name on pull.
+test("renameFeatureFile renames via git mv, commits and pushes", async () => {
+  const { a, b } = await twoClones();
+  const result = await renameFeatureFile(a, "seed.feature.md", "Sprout");
+  expect(result).toEqual({
+    fileName: "sprout.feature.md",
+    message: "renamed, committed and pushed",
+  });
+  expect(await readFeature(a, "seed.feature.md")).toBeNull();
+  expect(await readFeature(a, "sprout.feature.md")).toBe("# Seed\n");
+  const log = await git(a, "log", "-1", "--pretty=%s");
+  expect(log.stdout.toString()).toContain("Rename file: seed.feature.md -> sprout.feature.md");
+  await git(b, "pull");
+  expect(await readFeature(b, "sprout.feature.md")).toBe("# Seed\n");
+  expect(await readFeature(b, "seed.feature.md")).toBeNull();
+});
+
+// The stem is slugified like a created file's; folder and extension are kept.
+test("renameFeatureFile keeps the folder, slugifies the stem, and validates", async () => {
+  await createFeature(root, "billing/Quote");
+  const result = await renameFeatureFile(root, "billing/quote.feature.md", "Better Quote!");
+  expect(result.fileName).toBe("billing/better-quote.feature.md");
+  expect(await readFeature(root, "billing/better-quote.feature.md")).toBe("# Quote\n");
+  expect(renameFeatureFile(root, "billing/better-quote.feature.md", "  ")).rejects.toThrow(
+    "File name is required",
+  );
+  expect(renameFeatureFile(root, "ghost.feature.md", "spirit")).rejects.toThrow("not found");
+  // renaming to the current stem is a no-op, not an error
+  const same = await renameFeatureFile(root, "billing/better-quote.feature.md", "Better Quote");
+  expect(same).toEqual({
+    fileName: "billing/better-quote.feature.md",
+    message: "file name unchanged",
+  });
+  // renaming onto an existing file is refused
+  await createFeature(root, "billing/Other");
+  expect(renameFeatureFile(root, "billing/other.feature.md", "Better Quote")).rejects.toThrow(
+    "already exists",
+  );
+});
+
+// specs/ui.spec.md "Feature entry menu" (Delete): a `git rm`, committed and
+// pushed — the other clone loses the file on pull.
+test("deleteFeature removes the file, commits and pushes", async () => {
+  const { a, b } = await twoClones();
+  const result = await deleteFeature(a, "seed.feature.md");
+  expect(result.message).toBe("deleted, committed and pushed");
+  expect(await readFeature(a, "seed.feature.md")).toBeNull();
+  const log = await git(a, "log", "-1", "--pretty=%s");
+  expect(log.stdout.toString()).toContain("Delete feature: seed.feature.md");
+  await git(b, "pull");
+  expect(await readFeature(b, "seed.feature.md")).toBeNull();
+});
+
+test("deleteFeature works in a plain directory and validates", async () => {
+  await createFeature(root, "Quote");
+  const result = await deleteFeature(root, "quote.feature.md");
+  expect(result.message).toBe("deleted locally (not a git repository)");
+  expect(await listFeatures(root)).toEqual([]);
+  expect(deleteFeature(root, "quote.feature.md")).rejects.toThrow("not found");
+  expect(deleteFeature(root, "../evil.feature.md")).rejects.toThrow("Invalid feature file name");
 });
 
 // Scenario: Scenario is automatically saved locally and pushed to GitHub —

@@ -86,6 +86,20 @@ Customer calls accident hotline and leaves a message with accident info.
 - automatically reload (git pull) data every n seconds
 - specify reload frequency in the Settings screen
 
+## Scenario: rename feature file
+
+- from the feature entry's drop down menu in the left pane: File → Rename
+- only the stem (left of the dot) is edited; the `.feature.md` extension and
+  the folder are kept
+- the rename is a `git mv`, committed and pushed
+- links to the old file name go stale
+
+## Scenario: delete feature
+
+- from the feature entry's drop down menu in the left pane: Delete
+- asks for confirmation first
+- the file is removed with `git rm`, committed and pushed
+
 ## Scenario: publish each scenario individually; support Publish All
 - PM should be able to publish each scenario individually
 - Upper right button will be Publish All

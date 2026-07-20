@@ -1,5 +1,5 @@
 import { $ } from "bun";
-import { rename } from "node:fs/promises";
+import { rename, rm } from "node:fs/promises";
 import { gitSchemeFor, schemeArgs } from "./scheme";
 
 export interface PullResult {
@@ -174,6 +174,32 @@ export async function moveAndPush(
   return {
     pushed: res.pushed,
     message: res.pushed ? "renamed, committed and pushed" : `renamed, committed; ${res.message}`,
+  };
+}
+
+/**
+ * Per specs/ui.spec.md "Feature entry menu": deleting a feature is a
+ * `git rm`, committed and pushed. Outside a standalone git repo the file is
+ * simply removed from disk.
+ */
+export async function removeAndPush(
+  repoDir: string,
+  relPath: string,
+  message: string,
+): Promise<SyncResult> {
+  if (!(await isRepoRoot(repoDir))) {
+    await rm(`${repoDir}/${relPath}`);
+    return { pushed: false, message: "deleted locally (not a git repository)" };
+  }
+  const rmRes = await git(repoDir, "rm", "-f", relPath);
+  if (rmRes.exitCode !== 0) {
+    throw new Error(`git rm failed: ${(rmRes.stderr.toString() + rmRes.stdout.toString()).trim()}`);
+  }
+  await git(repoDir, "commit", "-m", message, "--", relPath);
+  const res = await push(repoDir);
+  return {
+    pushed: res.pushed,
+    message: res.pushed ? "deleted, committed and pushed" : `deleted, committed; ${res.message}`,
   };
 }
 
