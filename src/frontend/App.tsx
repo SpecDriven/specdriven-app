@@ -454,12 +454,14 @@ export function App() {
   };
 
   // specs/ui.spec.md "Main page": the Edit link next to the feature name lets
-  // the user edit the actual feature file name; the server renames with
-  // `git mv`, commits and pushes. The returned name is the normalized one.
+  // the user edit the feature name — the file's `# <name>` heading. The server
+  // rewrites the heading, commits and pushes; the file name (and so the
+  // feature's url) stays the same.
   const renameSelected = async () => {
     if (!selected || renameDraft === null) return;
     const target = renameDraft.trim();
-    if (!target || target === selected) {
+    const currentName = feature ? feature.name || titleFromFileName(selected) : "";
+    if (!target || target === currentName) {
       setRenameDraft(null);
       return;
     }
@@ -468,15 +470,14 @@ export function App() {
       const res = await fetch(`/api/features/${encodeURIComponent(selected)}/rename`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileName: target }),
+        body: JSON.stringify({ name: target }),
       });
       const data = await res.json();
       if (res.ok) {
         setRenameDraft(null);
         await loadFeatures();
-        // The canonical-url effect rewrites the address bar to the new path.
-        await openFeature(data.fileName);
-        setStatus(`Renamed to ${data.fileName} — ${data.message}.`);
+        await openFeature(selected);
+        setStatus(`Renamed to "${data.name}" — ${data.message}.`);
       } else {
         setStatus(data.error ?? "Rename failed");
       }
@@ -933,14 +934,19 @@ export function App() {
           <>
             <div className="editor-bar">
               {/* specs/ui.spec.md "Main page": the top of the page shows
-                  "Feature: <name>", not the file name. The file name appears
-                  only while being edited via the Edit link; a rename is
-                  committed and pushed with `git mv` on the server. */}
+                  "Feature: <name>", not the file name. The Edit link edits
+                  this feature name (the file's `# <name>` heading), committed
+                  and pushed on the server; the file name never changes. */}
               <div className="feature-title">
                 {renameDraft === null ? (
                   <>
                     <h2>Feature: {feature.name || titleFromFileName(selected)}</h2>
-                    <button className="link" onClick={() => setRenameDraft(selected)}>
+                    <button
+                      className="link"
+                      onClick={() =>
+                        setRenameDraft(feature.name || titleFromFileName(selected))
+                      }
+                    >
                       Edit
                     </button>
                     <button className="link" onClick={() => copyLink(featurePath(selected))}>
@@ -958,7 +964,7 @@ export function App() {
                     <input
                       className="rename-input"
                       value={renameDraft}
-                      aria-label="Feature file name"
+                      aria-label="Feature name"
                       autoFocus
                       spellCheck={false}
                       onChange={(e) => setRenameDraft(e.target.value)}

@@ -96,7 +96,7 @@ Identity comes from the data repo, never from session state:
   Copy Link and cmd-click → new tab work natively
 - Every scenario card has a "Copy link" action that puts the absolute
   versioned url on the clipboard; its label flips to "Copied" for 2 sec
-- The feature file name in the editor bar has the same "Copy link" action for
+- The feature name in the editor bar has the same "Copy link" action for
   the feature url
 
 ## Scenario: window title follows the selection

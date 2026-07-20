@@ -95,45 +95,65 @@ test("path traversal and non-.feature.md file names are rejected", async () => {
   expect(readFeature(root, "legacy.feature")).rejects.toThrow("Invalid feature file name");
 });
 
-// specs/ui.spec.md "Main page": an edited file name is committed and pushed
-// to GitHub using `git mv` — the other clone sees the rename on pull.
-test("renameFeature renames via git mv, commits and pushes", async () => {
+// specs/ui.spec.md "Main page": the Edit link edits the feature name — the
+// file's `# <name>` heading — not the file name. The change is committed and
+// pushed; the other clone sees the new name on pull, at the same file.
+test("renameFeature rewrites the heading, commits and pushes", async () => {
   const { a, b } = await twoClones();
   const result = await renameFeature(a, "seed.feature.md", "Sprout Policy");
-  expect(result.fileName).toBe("sprout-policy.feature.md");
-  expect(result.message).toBe("renamed, committed and pushed");
-  expect(await readFeature(a, "seed.feature.md")).toBeNull();
-  expect(await readFeature(a, "sprout-policy.feature.md")).toBe("# Seed\n");
+  expect(result).toEqual({
+    fileName: "seed.feature.md",
+    name: "Sprout Policy",
+    message: "committed and pushed",
+  });
+  expect(await readFeature(a, "seed.feature.md")).toBe("# Sprout Policy\n");
   const log = await git(a, "log", "-1", "--pretty=%s");
-  expect(log.stdout.toString()).toContain("Rename feature: seed.feature.md -> sprout-policy.feature.md");
+  expect(log.stdout.toString()).toContain("Rename feature: Seed -> Sprout Policy");
   await git(b, "pull");
-  expect(await readFeature(b, "seed.feature.md")).toBeNull();
-  expect(await readFeature(b, "sprout-policy.feature.md")).toBe("# Seed\n");
+  expect(await readFeature(b, "seed.feature.md")).toBe("# Sprout Policy\n");
 });
 
 test("renameFeature works in a plain directory (no git repo)", async () => {
   await createFeature(root, "Quote");
-  // The suffix may be omitted or included; the stem is normalized like createFeature.
-  const result = await renameFeature(root, "quote.feature.md", "policy");
-  expect(result.fileName).toBe("policy.feature.md");
-  expect(await readFeature(root, "policy.feature.md")).toBe("# Quote\n");
-  expect(await readFeature(root, "quote.feature.md")).toBeNull();
+  const result = await renameFeature(root, "quote.feature.md", "Policy");
+  expect(result.fileName).toBe("quote.feature.md");
+  expect(result.name).toBe("Policy");
+  expect(await readFeature(root, "quote.feature.md")).toBe("# Policy\n");
+  expect(await listFeatures(root)).toEqual([
+    { fileName: "quote.feature.md", name: "Policy" },
+  ]);
 });
 
-test("renameFeature refuses collisions, missing files and bad names", async () => {
-  await createFeature(root, "One");
-  await createFeature(root, "Two");
-  expect(renameFeature(root, "one.feature.md", "two.feature.md")).rejects.toThrow(
-    "already exists",
+// Scenarios and description survive a rename untouched; a file without a
+// `# <name>` heading gains one.
+test("renameFeature only touches the heading, adding one when missing", async () => {
+  await Bun.write(
+    join(root, "one.feature.md"),
+    "# One\n\nsome description\n\n## First v1 [published]\n\nbody\n",
   );
-  expect(renameFeature(root, "ghost.feature.md", "spirit")).rejects.toThrow("not found");
-  expect(renameFeature(root, "one.feature.md", "???")).rejects.toThrow("required");
-  expect(renameFeature(root, "../evil.feature.md", "fine")).rejects.toThrow(
+  await renameFeature(root, "one.feature.md", "Uno");
+  expect(await readFeature(root, "one.feature.md")).toBe(
+    "# Uno\n\nsome description\n\n## First v1 [published]\n\nbody\n",
+  );
+  await Bun.write(join(root, "bare.feature.md"), "just text\n");
+  await renameFeature(root, "bare.feature.md", "Named Now");
+  expect(await readFeature(root, "bare.feature.md")).toBe("# Named Now\n\njust text\n");
+});
+
+test("renameFeature refuses missing files and empty names", async () => {
+  await createFeature(root, "One");
+  expect(renameFeature(root, "ghost.feature.md", "Spirit")).rejects.toThrow("not found");
+  expect(renameFeature(root, "one.feature.md", "   ")).rejects.toThrow("required");
+  expect(renameFeature(root, "../evil.feature.md", "Fine")).rejects.toThrow(
     "Invalid feature file name",
   );
-  // renaming to the same normalized name is a no-op, not an error
+  // renaming to the current name is a no-op, not an error
   const same = await renameFeature(root, "one.feature.md", "One");
-  expect(same).toEqual({ fileName: "one.feature.md", message: "file name unchanged" });
+  expect(same).toEqual({
+    fileName: "one.feature.md",
+    name: "One",
+    message: "feature name unchanged",
+  });
 });
 
 // Scenario: Scenario is automatically saved locally and pushed to GitHub —

@@ -12,6 +12,7 @@ import {
   markPublished,
   markProposed,
   markScenarioPublished,
+  renameFeatureName,
   slugify,
   titleFromFileName,
 } from "./parser";
@@ -205,36 +206,25 @@ export async function moveFeature(
 
 /**
  * specs/ui.spec.md "Main page": the Edit link next to the feature name edits
- * the actual feature file name. The new name is normalized the same way
- * createFeature builds one (slug stem + `.feature.md`), and the rename is
- * committed and pushed to GitHub using `git mv`.
+ * the feature name — the file's `# <name>` heading — not the file name. The
+ * file (and every link to it) keeps its name; the new heading is committed
+ * and pushed like any other content edit.
  */
 export async function renameFeature(
   dataDir: string,
   fileName: string,
-  newFileName: string,
-): Promise<{ fileName: string; message: string }> {
-  const from = safe(fileName);
-  const input = newFileName.trim().replace(/\.feature\.md$|\.feature$|\.md$/, "");
-  // A plain name renames in place; a `/` path also moves between folders
-  // (specs/folders.spec.md) — segments are slugified like file stems.
-  const segments = input.split("/").map(slugify).filter(Boolean);
-  const slug = segments.pop();
-  if (!slug) throw new Error("Feature file name is required");
-  const folder = input.includes("/")
-    ? segments.join("/")
-    : from.split("/").slice(0, -1).join("/");
-  const to = folder ? `${folder}/${slug}.feature.md` : `${slug}.feature.md`;
-  if (to === from) return { fileName: from, message: "file name unchanged" };
-  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
-    throw new Error(`Feature file not found: ${from}`);
-  }
-  if (await Bun.file(`${dataDir}/${to}`).exists()) {
-    throw new Error(`Feature file already exists: ${to}`);
-  }
-  if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
-  const sync = await moveAndPush(dataDir, from, to, `Rename feature: ${from} -> ${to}`);
-  return { fileName: to, message: sync.message };
+  newName: string,
+): Promise<{ fileName: string; name: string; message: string }> {
+  const file = safe(fileName);
+  const name = newName.trim();
+  if (!name) throw new Error("Feature name is required");
+  const current = await readFeature(dataDir, file);
+  if (current === null) throw new Error(`Feature file not found: ${file}`);
+  const oldName = parseFeature(current).name || titleFromFileName(file);
+  if (name === oldName) return { fileName: file, name, message: "feature name unchanged" };
+  await Bun.write(`${dataDir}/${file}`, renameFeatureName(current, name));
+  const sync = await commitAndPush(dataDir, file, `Rename feature: ${oldName} -> ${name}`);
+  return { fileName: file, name, message: sync.message };
 }
 
 export interface SaveResult {

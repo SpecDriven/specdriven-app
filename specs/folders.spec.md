@@ -32,8 +32,9 @@ data repo, so the structure renders naturally on GitHub too.
   move the features out first. Deleting asks for confirmation; a non-empty
   folder is refused with an explanation. Empty folders being untracked by
   git, deletion is a local filesystem operation.
-- Renaming a feature via the Edit link stays within its folder; giving a
-  `/` path there moves it as well.
+- The Edit link edits the feature name only (specs/ui.spec.md), never the
+  file name or its folder; moving a feature between folders is done by
+  dragging.
 
 ## Scenario: move feature to another folder
 

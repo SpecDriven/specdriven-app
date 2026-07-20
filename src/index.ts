@@ -317,13 +317,14 @@ const server = Bun.serve({
       }),
     },
 
-    // specs/ui.spec.md "Main page": the Edit link renames the actual feature
-    // file; the rename is committed and pushed to GitHub using `git mv`.
+    // specs/ui.spec.md "Main page": the Edit link edits the feature name (the
+    // file's `# <name>` heading), committed and pushed; the file name — and so
+    // every link to the feature — never changes here.
     "/api/features/:file/rename": {
       POST: withDataDir(async (dir, req: BunRequest<"/api/features/:file/rename">) => {
-        const body = (await req.json()) as { fileName?: string };
+        const body = (await req.json()) as { name?: string };
         try {
-          return json(await renameFeature(dir, req.params.file, body.fileName ?? ""));
+          return json(await renameFeature(dir, req.params.file, body.name ?? ""));
         } catch (e) {
           return json({ error: (e as Error).message }, 400);
         }
