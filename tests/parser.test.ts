@@ -98,8 +98,8 @@ test("legacy backtick headings still parse and normalize on write", () => {
     "# X\n\n## Done `v1` `published`\n\nbody\n\n## Kept `v3` `saved`\n\nbody\n\n## Draft `v2`\n\nbody\n",
   );
   expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
-  expect(feature.scenarios[1]).toMatchObject({ name: "Kept", version: 3, proposed: true });
-  expect(feature.scenarios[2]).toMatchObject({ name: "Draft", version: 2, published: false });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
+  expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, proposed: true });
   const text = serializeFeature(feature);
   expect(text).toContain("## Done v1 [published]");
   expect(text).toContain("## Kept v3 [proposed]");
@@ -114,6 +114,19 @@ test("extra spaces before the version and chip are tolerated", () => {
     version: 1,
     published: true,
   });
+});
+
+// specs/ui.spec.md: "Scenarios are ordered by name, then by version" —
+// regardless of the order they appear in the file.
+test("scenarios are ordered by name, then by version", () => {
+  const feature = parseFeature(
+    "# X\n\n## Hotline v1 [published]\n\nbody\n\n## Decline v1 [published]\n\nbody\n\n## Hotline v2 [published]\n\nbody\n",
+  );
+  expect(feature.scenarios.map((s) => `${s.name} v${s.version}`)).toEqual([
+    "Decline v1",
+    "Hotline v1",
+    "Hotline v2",
+  ]);
 });
 
 test("serialize emits the markdown format and round-trips exactly", () => {

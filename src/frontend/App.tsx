@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import { parseFeature, serializeFeature, titleFromFileName } from "../server/parser";
+import { parseFeature, serializeFeature, sortScenarios, titleFromFileName } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { CurrentUser } from "../server/user";
@@ -723,10 +723,11 @@ export function App() {
     const s = { ...editing.scenario, version: draftVersion };
     const next: Feature = {
       ...feature,
-      scenarios:
+      scenarios: sortScenarios(
         editing.index === null
           ? [...feature.scenarios, s]
           : feature.scenarios.map((sc, i) => (i === editing.index ? s : sc)),
+      ),
     };
     setFeature(next);
     setEditing(null);
