@@ -96,7 +96,9 @@ function withDataDir<Req>(
 }
 
 const server = Bun.serve({
-  port: 3000,
+  // 3000 unless PORT says otherwise — the compiled binary is a single file
+  // someone may run alongside a dev server on the same machine.
+  port: Number(process.env.PORT) || 3000,
   routes: {
     "/": index,
 
@@ -314,7 +316,10 @@ const server = Bun.serve({
       }),
     },
   },
-  development: { hmr: true, console: true },
+  // `bun run build` compiles with --production, which inlines NODE_ENV here:
+  // the binary serves the pre-bundled frontend with cache headers, no HMR.
+  development:
+    process.env.NODE_ENV === "production" ? false : { hmr: true, console: true },
 });
 
 console.log(`SpecDriven running at ${server.url}`);
