@@ -612,8 +612,9 @@ export function App() {
       : editing.scenario.version;
 
   /**
-   * Saving the dialog auto-saves the whole feature locally (marked [saved],
-   * so no data is lost); the server's reload cron commits and pushes it.
+   * Saving the dialog auto-saves the whole feature locally (marked
+   * [proposed], so no data is lost); the server's reload cron commits and
+   * pushes it.
    */
   const saveScenario = async () => {
     if (!editing || !feature || !selected) return;
@@ -702,7 +703,7 @@ export function App() {
     setEditing({
       index: null,
       // index null marks it as new, so the version is derived on save.
-      scenario: { ...src, version: nextVersionFor(src.name), published: false, saved: false },
+      scenario: { ...src, version: nextVersionFor(src.name), published: false, proposed: false },
     });
   };
 
@@ -832,7 +833,7 @@ export function App() {
   }
 
   const editingPublished = editing?.scenario.published ?? false;
-  const hasSaved = feature?.scenarios.some((s) => s.saved && !s.published) ?? false;
+  const hasProposed = feature?.scenarios.some((s) => s.proposed && !s.published) ?? false;
 
   return (
     <main className="layout">
@@ -970,7 +971,7 @@ export function App() {
                   {syncing ? "Syncing…" : "Sync"}
                 </button>
                 <button className="secondary" onClick={publish} disabled={publishing}>
-                  {publishing ? "Publishing…" : dirty || hasSaved ? "Publish *" : "Publish"}
+                  {publishing ? "Publishing…" : dirty || hasProposed ? "Publish *" : "Publish"}
                 </button>
               </div>
             </div>
@@ -1003,7 +1004,9 @@ export function App() {
                       </a>{" "}
                       <span className="version">v{s.version}</span>
                       {s.published && <span className="badge">published</span>}
-                      {!s.published && s.saved && <span className="badge saved">saved</span>}
+                      {!s.published && s.proposed && (
+                        <span className="badge proposed">proposed</span>
+                      )}
                     </span>
                     <span className="card-actions">
                       <button
@@ -1038,7 +1041,7 @@ export function App() {
                 onClick={() =>
                   setEditing({
                     index: null,
-                    scenario: { name: "", version: 1, published: false, saved: false, body: "" },
+                    scenario: { name: "", version: 1, published: false, proposed: false, body: "" },
                   })
                 }
               >

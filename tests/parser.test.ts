@@ -3,7 +3,7 @@ import {
   parseFeature,
   serializeFeature,
   markPublished,
-  markSaved,
+  markProposed,
   titleFromFileName,
 } from "../src/server/parser";
 
@@ -67,18 +67,26 @@ test("parses the published chip", () => {
   expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
 });
 
-// crud-feature.spec.md "Scenario is automatically saved locally and pushed to
-// GitHub": a [saved] chip marks a saved, not-yet-published scenario.
-test("parses and serializes the saved chip", () => {
-  const text = "# X\n\n## Draft v2 [saved]\n\nbody\n";
+// crud-feature.spec.md "Feature file format": a [proposed] chip marks a
+// saved, not-yet-published scenario.
+test("parses and serializes the proposed chip", () => {
+  const text = "# X\n\n## Draft v2 [proposed]\n\nbody\n";
   const feature = parseFeature(text);
   expect(feature.scenarios[0]).toMatchObject({
     name: "Draft",
     version: 2,
     published: false,
-    saved: true,
+    proposed: true,
   });
   expect(serializeFeature(feature)).toBe(text);
+});
+
+// Files written before the state was renamed still read: [saved] is the old
+// name of [proposed], normalized when the file is next written.
+test("legacy [saved] chips parse as proposed and normalize on write", () => {
+  const feature = parseFeature("# X\n\n## Kept v3 [saved]\n\nbody\n");
+  expect(feature.scenarios[0]).toMatchObject({ name: "Kept", version: 3, proposed: true });
+  expect(serializeFeature(feature)).toContain("## Kept v3 [proposed]");
 });
 
 // Feature files written before the bracket syntax still read, and are
@@ -88,11 +96,11 @@ test("legacy backtick headings still parse and normalize on write", () => {
     "# X\n\n## Done `v1` `published`\n\nbody\n\n## Kept `v3` `saved`\n\nbody\n\n## Draft `v2`\n\nbody\n",
   );
   expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
-  expect(feature.scenarios[1]).toMatchObject({ name: "Kept", version: 3, saved: true });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Kept", version: 3, proposed: true });
   expect(feature.scenarios[2]).toMatchObject({ name: "Draft", version: 2, published: false });
   const text = serializeFeature(feature);
   expect(text).toContain("## Done v1 [published]");
-  expect(text).toContain("## Kept v3 [saved]");
+  expect(text).toContain("## Kept v3 [proposed]");
   expect(text).toContain("## Draft v2\n");
   expect(text).not.toContain("`v");
 });
@@ -142,25 +150,25 @@ test("markPublished adds the published chip to unpublished headings only", () =>
   expect(marked).not.toContain("[published] [published]");
 });
 
-test("markSaved adds the saved chip to unmarked headings only", () => {
-  const marked = markSaved(
-    "# X\n\n## Draft v2\n\nbody\n\n## Done v1 [published]\n\nbody\n\n## Kept v3 [saved]\n\nbody\n",
+test("markProposed adds the proposed chip to unmarked headings only", () => {
+  const marked = markProposed(
+    "# X\n\n## Draft v2\n\nbody\n\n## Done v1 [published]\n\nbody\n\n## Kept v3 [proposed]\n\nbody\n",
   );
-  expect(marked).toContain("## Draft v2 [saved]");
+  expect(marked).toContain("## Draft v2 [proposed]");
   expect(marked).toContain("## Done v1 [published]");
-  expect(marked).toContain("## Kept v3 [saved]");
-  expect(marked).not.toContain("[saved] [saved]");
+  expect(marked).toContain("## Kept v3 [proposed]");
+  expect(marked).not.toContain("[proposed] [proposed]");
 });
 
-test("markPublished upgrades saved to published", () => {
-  const marked = markPublished("# X\n\n## Draft v2 [saved]\n\nbody\n");
+test("markPublished upgrades proposed to published", () => {
+  const marked = markPublished("# X\n\n## Draft v2 [proposed]\n\nbody\n");
   expect(marked).toContain("## Draft v2 [published]");
-  expect(marked).not.toContain("[saved]");
+  expect(marked).not.toContain("[proposed]");
 });
 
 test("mark helpers leave headings inside code fences alone", () => {
   const text = "# X\n\n## Real v1\n\n```\n## Example v9\n```\n";
-  const marked = markSaved(text);
-  expect(marked).toContain("## Real v1 [saved]");
+  const marked = markProposed(text);
+  expect(marked).toContain("## Real v1 [proposed]");
   expect(marked).toContain("\n## Example v9\n");
 });

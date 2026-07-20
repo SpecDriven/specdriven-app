@@ -139,7 +139,7 @@ test("renameFeature refuses collisions, missing files and bad names", async () =
 // Scenario: Scenario is automatically saved locally and pushed to GitHub —
 // the save itself only writes locally (no data loss even offline); the reload
 // cron does the commit and push.
-test("saveFeature writes locally with saved chips and no commit", async () => {
+test("saveFeature writes locally with proposed chips and no commit", async () => {
   const { a } = await twoClones();
   const result = await saveFeature(
     a,
@@ -147,8 +147,8 @@ test("saveFeature writes locally with saved chips and no commit", async () => {
     "# Seed\n\n## One v1\n\nbody\n",
   );
   expect(result.status).toBe("saved");
-  expect(result.content).toContain("## One v1 [saved]");
-  expect(await readFeature(a, "seed.feature.md")).toContain("## One v1 [saved]");
+  expect(result.content).toContain("## One v1 [proposed]");
+  expect(await readFeature(a, "seed.feature.md")).toContain("## One v1 [proposed]");
   // not committed: the working tree is dirty until the reload cron syncs
   const status = await git(a, "status", "--porcelain");
   expect(status.stdout.toString()).toContain("seed.feature.md");
@@ -170,8 +170,8 @@ test("saveFeature keeps published scenarios immutable", async () => {
   ).rejects.toThrow("immutable");
 });
 
-// Publishing a saved scenario upgrades the saved chip to published.
-test("publishFeature upgrades saved scenarios to published", async () => {
+// Publishing a proposed scenario upgrades the proposed chip to published.
+test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");
   await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic v1\n\nbody\n");
   const result = await publishFeature(
@@ -182,7 +182,7 @@ test("publishFeature upgrades saved scenarios to published", async () => {
   expect(result.status).toBe("published");
   const text = await readFeature(root, "quote.feature.md");
   expect(text).toContain("## Basic v1 [published]");
-  expect(text).not.toContain("[saved]");
+  expect(text).not.toContain("[proposed]");
 });
 
 // Scenario: Publish feature with successful merge — pull, then save.

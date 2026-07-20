@@ -371,8 +371,9 @@ aside > button,
   vertical-align: middle;
 }
 
-/* Saved-but-not-published marker (specs/crud-feature.spec.md, [saved] chip) */
-.badge.saved {
+/* Proposed marker — saved but not yet published (specs/crud-feature.spec.md,
+   [proposed] chip) */
+.badge.proposed {
   background: var(--muted);
   color: var(--bg);
 }

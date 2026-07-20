@@ -7,7 +7,7 @@ import {
   moveAndPush,
   resolveConflict as gitResolve,
 } from "./git";
-import { parseFeature, markPublished, markSaved, slugify, titleFromFileName } from "./parser";
+import { parseFeature, markPublished, markProposed, slugify, titleFromFileName } from "./parser";
 
 export { slugify } from "./parser";
 
@@ -226,7 +226,7 @@ export async function renameFeature(
 
 export interface SaveResult {
   status: "saved";
-  /** The content as written, with unpublished scenarios marked [saved]. */
+  /** The content as written, with unpublished scenarios marked [proposed]. */
   content: string;
   message: string;
 }
@@ -234,7 +234,7 @@ export interface SaveResult {
 /**
  * Scenario "Scenario is automatically saved locally and pushed to GitHub":
  * write the feature to the local filesystem right away (we don't want to lose
- * any data), marking unpublished scenarios [saved]. The reload cron then
+ * any data), marking unpublished scenarios [proposed]. The reload cron then
  * commits and pushes saved scenarios after its git pull.
  */
 export async function saveFeature(
@@ -243,10 +243,10 @@ export async function saveFeature(
   content: string,
 ): Promise<SaveResult> {
   const name = safe(fileName);
-  const saved = markSaved(content);
-  await assertPublishedUnchanged(dataDir, name, saved);
-  await Bun.write(`${dataDir}/${name}`, saved);
-  return { status: "saved", content: saved, message: "saved locally" };
+  const proposed = markProposed(content);
+  await assertPublishedUnchanged(dataDir, name, proposed);
+  await Bun.write(`${dataDir}/${name}`, proposed);
+  return { status: "saved", content: proposed, message: "saved locally" };
 }
 
 /**
