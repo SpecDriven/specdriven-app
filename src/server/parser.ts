@@ -95,6 +95,15 @@ function matchScenario(line: string): HeadingMatch | null {
   };
 }
 
+/**
+ * Canonical scenario order (specs/ui.spec.md): by name, then by version.
+ * parseFeature returns scenarios in this order, so lists always render
+ * sorted and a save writes the file back in canonical order.
+ */
+export function sortScenarios(scenarios: Scenario[]): Scenario[] {
+  return [...scenarios].sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version);
+}
+
 export function parseFeature(text: string): Feature {
   let name = "";
   const preamble: string[] = [];
@@ -138,7 +147,7 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  return { name, description: preamble.join("\n").trim(), scenarios };
+  return { name, description: preamble.join("\n").trim(), scenarios: sortScenarios(scenarios) };
 }
 
 function header(name: string, version: number, status: Status): string {

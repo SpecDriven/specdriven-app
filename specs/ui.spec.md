@@ -1,4 +1,5 @@
 - Feature page lists scenarios, up to 8 lines per scenario.
+- Scenarios are ordered by name, then by version.
 - Published scenarios are shaded differently from un-published, editable scenarios.
 
 Edit scenarios in a separate dialog box.
