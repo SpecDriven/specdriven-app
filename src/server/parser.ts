@@ -157,6 +157,33 @@ export function serializeFeature(feature: Feature): string {
 }
 
 /**
+ * Rewrite the feature's `# <name>` heading — its display name — leaving the
+ * rest of the text untouched (specs/ui.spec.md "Main page": the Edit link
+ * edits the feature name, not the file name). Only the first `#` heading
+ * before any scenario and outside fenced code blocks is the name; a file
+ * without one gets a heading inserted at the top.
+ */
+export function renameFeatureName(text: string, name: string): string {
+  const lines = text.split("\n");
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (matchScenario(line)) break;
+    if (FEATURE_RE.test(line)) {
+      lines[i] = `# ${name}`;
+      return lines.join("\n");
+    }
+  }
+  const body = text.replace(/^\n+/, "");
+  return body ? `# ${name}\n\n${body}` : `# ${name}\n`;
+}
+
+/**
  * Rewrite every scenario heading's status chip with the value chosen by
  * `next`. Works on the raw text line-by-line so body content that doesn't fit
  * the parse model survives untouched, and headings inside fenced code blocks

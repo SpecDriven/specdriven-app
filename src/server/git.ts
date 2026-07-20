@@ -151,9 +151,9 @@ export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
 }
 
 /**
- * Per specs/ui.spec.md "Main page": an edited feature file name is committed
- * and pushed to GitHub using `git mv`. Outside a standalone git repo the file
- * is simply renamed on disk.
+ * Per specs/folders.spec.md: moving a feature between folders is a `git mv`,
+ * committed and pushed. Outside a standalone git repo the file is simply
+ * renamed on disk.
  */
 export async function moveAndPush(
   repoDir: string,

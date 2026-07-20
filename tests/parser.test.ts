@@ -5,6 +5,7 @@ import {
   markPublished,
   markProposed,
   markScenarioPublished,
+  renameFeatureName,
   titleFromFileName,
 } from "../src/server/parser";
 
@@ -184,4 +185,26 @@ test("mark helpers leave headings inside code fences alone", () => {
   const marked = markProposed(text);
   expect(marked).toContain("## Real v1 [proposed]");
   expect(marked).toContain("\n## Example v9\n");
+});
+
+// specs/ui.spec.md "Main page": the Edit link edits the feature name — the
+// `# <name>` heading — leaving everything else in the file untouched.
+test("renameFeatureName rewrites only the feature heading", () => {
+  const text = "# Old\n\ndesc\n\n## Basic v1 [published]\n\nbody\n";
+  expect(renameFeatureName(text, "New Name")).toBe(
+    "# New Name\n\ndesc\n\n## Basic v1 [published]\n\nbody\n",
+  );
+});
+
+test("renameFeatureName inserts a heading when the file has none", () => {
+  expect(renameFeatureName("just text\n", "Named")).toBe("# Named\n\njust text\n");
+  expect(renameFeatureName("", "Named")).toBe("# Named\n");
+});
+
+test("renameFeatureName ignores `#` lines in fences or after scenarios", () => {
+  const fenced = "```\n# comment\n```\n\n## S v1\n\nbody\n";
+  const renamed = renameFeatureName(fenced, "Named");
+  expect(renamed.startsWith("# Named\n\n```\n# comment\n```")).toBe(true);
+  const inBody = "## S v1\n\n# heading in body\n";
+  expect(renameFeatureName(inBody, "Named")).toBe("# Named\n\n## S v1\n\n# heading in body\n");
 });

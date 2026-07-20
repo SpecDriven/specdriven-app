@@ -159,16 +159,14 @@ test("deleteFolder deletes empty folders only", async () => {
   expect(await readFeature(root, "full/one.feature.md")).toBe("# One\n");
 });
 
-// A rename with a `/` path also moves the file (specs/folders.spec.md);
-// a plain rename stays in its folder.
-test("renameFeature keeps the folder unless given a path", async () => {
+// specs/folders.spec.md: the Edit link edits the feature name only — the
+// file keeps its name and folder.
+test("renameFeature edits the name in place, keeping file and folder", async () => {
   await mkdir(join(root, "billing"));
   await Bun.write(join(root, "billing/one.feature.md"), "# One\n");
-  const renamed = await renameFeature(root, "billing/one.feature.md", "uno");
-  expect(renamed.fileName).toBe("billing/uno.feature.md");
-  const moved = await renameFeature(root, "billing/uno.feature.md", "archive/uno");
-  expect(moved.fileName).toBe("archive/uno.feature.md");
-  expect(await readFeature(root, "archive/uno.feature.md")).toBe("# One\n");
+  const renamed = await renameFeature(root, "billing/one.feature.md", "Uno");
+  expect(renamed.fileName).toBe("billing/one.feature.md");
+  expect(await readFeature(root, "billing/one.feature.md")).toBe("# Uno\n");
 });
 
 test("buildTree arranges folders and features, folders first, sorted", () => {
