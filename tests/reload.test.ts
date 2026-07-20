@@ -66,7 +66,7 @@ test("reload commits and pushes locally saved scenarios after the pull", async (
   // an auto-saved (uncommitted) scenario is waiting in the working tree
   await Bun.write(
     join(data, "seed.feature.md"),
-    "# Seed\n\n## One v1 [saved]\n\nbody\n",
+    "# Seed\n\n## One v1 [proposed]\n\nbody\n",
   );
 
   const message = await reloadData(dir);

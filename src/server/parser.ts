@@ -6,7 +6,7 @@
 //   <optional feature description — any markdown>
 //
 //   ## <name of scenario> vNNN              (draft, editable; NNN positive int)
-//   ## <name of scenario> vNNN [saved]      (auto-saved, not yet published)
+//   ## <name of scenario> vNNN [proposed]   (saved, not yet published)
 //   ## <name of scenario> vNNN [published]  (published, immutable)
 //
 //   <scenario body — any markdown up to the next scenario heading;
@@ -21,7 +21,7 @@ export interface Scenario {
   name: string;
   version: number;
   published: boolean;
-  saved: boolean;
+  proposed: boolean;
   body: string;
 }
 
@@ -62,12 +62,12 @@ export function titleFromFileName(fileName: string): string {
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
-const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|saved)\])?\s*$/;
+const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
-const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|saved)`)?\s*$/;
+const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|proposed|saved)`)?\s*$/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 
-type Status = "published" | "saved" | null;
+type Status = "published" | "proposed" | null;
 
 interface HeadingMatch {
   name: string;
@@ -75,14 +75,23 @@ interface HeadingMatch {
   status: Status;
 }
 
-/** Read a scenario heading in either the current or the legacy chip syntax. */
+/**
+ * Read a scenario heading in either the current or the legacy chip syntax.
+ * `saved` is the old name of the proposed state — still read, written back
+ * as `proposed` (specs/crud-feature.spec.md "Feature file format").
+ */
 function matchScenario(line: string): HeadingMatch | null {
   const m = line.match(LEGACY_SCENARIO_RE) ?? line.match(SCENARIO_RE);
   if (!m) return null;
   return {
     name: m[1]!,
     version: Number(m[2]),
-    status: m[3] === "published" || m[3] === "saved" ? m[3] : null,
+    status:
+      m[3] === "published"
+        ? "published"
+        : m[3] === "proposed" || m[3] === "saved"
+          ? "proposed"
+          : null,
   };
 }
 
@@ -118,7 +127,7 @@ export function parseFeature(text: string): Feature {
           name: scenarioMatch.name,
           version: scenarioMatch.version,
           published: scenarioMatch.status === "published",
-          saved: scenarioMatch.status === "saved",
+          proposed: scenarioMatch.status === "proposed",
           body: "",
         };
         continue;
@@ -141,7 +150,7 @@ export function serializeFeature(feature: Feature): string {
   const parts = [`# ${feature.name}`];
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
-    const h = header(s.name, s.version, s.published ? "published" : s.saved ? "saved" : null);
+    const h = header(s.name, s.version, s.published ? "published" : s.proposed ? "proposed" : null);
     parts.push(s.body ? `${h}\n\n${s.body}` : h);
   }
   return parts.join("\n\n") + "\n";
@@ -151,7 +160,8 @@ export function serializeFeature(feature: Feature): string {
  * Rewrite every scenario heading's status chip with the value chosen by
  * `next`. Works on the raw text line-by-line so body content that doesn't fit
  * the parse model survives untouched, and headings inside fenced code blocks
- * are left alone. Legacy headings are normalized to the bracket syntax.
+ * are left alone. Legacy headings are normalized to the bracket syntax, and
+ * old [saved] chips to [proposed].
  */
 function rewriteHeaders(text: string, next: (status: Status) => Status): string {
   let inFence = false;
@@ -171,7 +181,7 @@ function rewriteHeaders(text: string, next: (status: Status) => Status): string 
 }
 
 /**
- * Mark every scenario heading as published: a [saved] chip is upgraded and
+ * Mark every scenario heading as published: a [proposed] chip is upgraded and
  * already-[published] headings stay as they are.
  */
 export function markPublished(text: string): string {
@@ -179,10 +189,10 @@ export function markPublished(text: string): string {
 }
 
 /**
- * Mark every unmarked scenario heading with a [saved] chip
+ * Mark every unmarked scenario heading with a [proposed] chip
  * (specs/crud-feature.spec.md, "Scenario is automatically saved locally and
- * pushed to GitHub"). [published] and [saved] headings are untouched.
+ * pushed to GitHub"). [published] and [proposed] headings are untouched.
  */
-export function markSaved(text: string): string {
-  return rewriteHeaders(text, (status) => status ?? "saved");
+export function markProposed(text: string): string {
+  return rewriteHeaders(text, (status) => status ?? "proposed");
 }

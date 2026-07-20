@@ -250,7 +250,7 @@ const server = Bun.serve({
         };
         if (typeof body.content !== "string") return json({ error: "content is required" }, 400);
         try {
-          // save: auto-save locally with [saved] markers; the reload cron
+          // save: auto-save locally with [proposed] markers; the reload cron
           // commits and pushes (specs/crud-feature.spec.md).
           if (body.save) return json(await saveFeature(dir, req.params.file, body.content));
           const result = body.resolveConflict

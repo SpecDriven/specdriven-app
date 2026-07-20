@@ -6,7 +6,7 @@ const sc = (name: string, version: number): Scenario => ({
   name,
   version,
   published: false,
-  saved: false,
+  proposed: false,
   body: "",
 });
 
