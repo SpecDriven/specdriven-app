@@ -3,3 +3,4 @@ node_modules
 .specdriven
 .claude/settings.local.json
 data-sample
+dist
