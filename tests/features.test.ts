@@ -185,6 +185,73 @@ test("publishFeature upgrades proposed scenarios to published", async () => {
   expect(text).not.toContain("[proposed]");
 });
 
+// Scenario "publish each scenario individually": a targeted publish marks only
+// that scenario [published], leaving the others as they were.
+test("publishFeature with a scenario target publishes only that scenario", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic v1\n\none\n\n## Extra v1\n\ntwo\n",
+  );
+  const result = await publishFeature(
+    root,
+    "quote.feature.md",
+    (await readFeature(root, "quote.feature.md"))!,
+    { name: "Basic", version: 1 },
+  );
+  expect(result.status).toBe("published");
+  const text = await readFeature(root, "quote.feature.md");
+  expect(text).toContain("## Basic v1 [published]");
+  expect(text).toContain("## Extra v1 [proposed]");
+});
+
+// Same scenario name, different versions: only the targeted version flips.
+test("publishFeature with a scenario target is version-specific", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic v1\n\nold\n\n## Basic v2\n\nnew\n",
+  );
+  await publishFeature(
+    root,
+    "quote.feature.md",
+    (await readFeature(root, "quote.feature.md"))!,
+    { name: "Basic", version: 2 },
+  );
+  const text = await readFeature(root, "quote.feature.md");
+  expect(text).toContain("## Basic v1 [proposed]");
+  expect(text).toContain("## Basic v2 [published]");
+});
+
+test("publishFeature rejects a scenario target that is not in the content", async () => {
+  await createFeature(root, "Quote");
+  expect(
+    publishFeature(root, "quote.feature.md", "# Quote\n\n## Basic v1\n\nbody\n", {
+      name: "Missing",
+      version: 3,
+    }),
+  ).rejects.toThrow('Scenario "Missing" v3 not found');
+});
+
+// An individual publish is committed and pushed like a whole-feature publish.
+test("scenario publish commits and pushes to origin", async () => {
+  const { a, b } = await twoClones();
+  const result = await publishFeature(
+    a,
+    "seed.feature.md",
+    "# Seed\n\n## One v1\n\nbody\n\n## Two v1\n\nbody\n",
+    { name: "One", version: 1 },
+  );
+  expect(result.status).toBe("published");
+  expect(result.message).toBe("committed and pushed");
+  await git(b, "pull");
+  const text = await readFeature(b, "seed.feature.md");
+  expect(text).toContain("## One v1 [published]");
+  expect(text).not.toContain("## Two v1 [published]");
+});
+
 // Scenario: Publish feature with successful merge — pull, then save.
 test("publishFeature pulls cleanly and saves when there is no conflict", async () => {
   const { a, b } = await twoClones();

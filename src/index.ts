@@ -30,6 +30,7 @@ import {
   publishFeature,
   resolveFeatureConflict,
 } from "./server/features";
+import type { ScenarioTarget } from "./server/features";
 import { parseFeature } from "./server/parser";
 import {
   createReloadScheduler,
@@ -249,15 +250,28 @@ const server = Bun.serve({
           content?: string;
           resolveConflict?: boolean;
           save?: boolean;
+          // Individual scenario publish (specs/crud-feature.spec.md "publish
+          // each scenario individually"); absent = publish all scenarios.
+          scenario?: { name?: string; version?: number };
         };
         if (typeof body.content !== "string") return json({ error: "content is required" }, 400);
+        let scenario: ScenarioTarget | undefined;
+        if (body.scenario !== undefined) {
+          if (
+            typeof body.scenario?.name !== "string" ||
+            typeof body.scenario.version !== "number"
+          ) {
+            return json({ error: "scenario needs a name and a version" }, 400);
+          }
+          scenario = { name: body.scenario.name, version: body.scenario.version };
+        }
         try {
           // save: auto-save locally with [proposed] markers; the reload cron
           // commits and pushes (specs/crud-feature.spec.md).
           if (body.save) return json(await saveFeature(dir, req.params.file, body.content));
           const result = body.resolveConflict
-            ? await resolveFeatureConflict(dir, req.params.file, body.content)
-            : await publishFeature(dir, req.params.file, body.content);
+            ? await resolveFeatureConflict(dir, req.params.file, body.content, scenario)
+            : await publishFeature(dir, req.params.file, body.content, scenario);
           return json(result, result.status === "conflict" ? 409 : 200);
         } catch (e) {
           return json({ error: (e as Error).message }, 400);

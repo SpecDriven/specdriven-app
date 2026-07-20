@@ -163,7 +163,7 @@ export function serializeFeature(feature: Feature): string {
  * are left alone. Legacy headings are normalized to the bracket syntax, and
  * old [saved] chips to [proposed].
  */
-function rewriteHeaders(text: string, next: (status: Status) => Status): string {
+function rewriteHeaders(text: string, next: (m: HeadingMatch) => Status): string {
   let inFence = false;
   return text
     .split("\n")
@@ -175,7 +175,7 @@ function rewriteHeaders(text: string, next: (status: Status) => Status): string 
       if (inFence) return line;
       const m = matchScenario(line);
       if (!m) return line;
-      return header(m.name, m.version, next(m.status));
+      return header(m.name, m.version, next(m));
     })
     .join("\n");
 }
@@ -189,10 +189,21 @@ export function markPublished(text: string): string {
 }
 
 /**
+ * Mark one scenario (by name and version) as published, leaving every other
+ * heading untouched (specs/crud-feature.spec.md "publish each scenario
+ * individually").
+ */
+export function markScenarioPublished(text: string, name: string, version: number): string {
+  return rewriteHeaders(text, (m) =>
+    m.name === name && m.version === version ? "published" : m.status,
+  );
+}
+
+/**
  * Mark every unmarked scenario heading with a [proposed] chip
  * (specs/crud-feature.spec.md, "Scenario is automatically saved locally and
  * pushed to GitHub"). [published] and [proposed] headings are untouched.
  */
 export function markProposed(text: string): string {
-  return rewriteHeaders(text, (status) => status ?? "proposed");
+  return rewriteHeaders(text, (m) => m.status ?? "proposed");
 }
