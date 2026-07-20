@@ -5,6 +5,7 @@ import {
   writeState,
   needsDataRepo,
   normalizeScenarioPreviewLines,
+  normalizeShowTestLinks,
 } from "./server/state";
 import type { SpecDrivenState } from "./server/state";
 import { dataRepoDir, resolveDataRepo } from "./server/repo";
@@ -121,6 +122,7 @@ const server = Bun.serve({
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
           scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+          showTestLinks: normalizeShowTestLinks(state.showTestLinks),
           ...(await gitSchemeFields(state)),
           // specs/user-info-settings.spec.md: the OS user by default, with
           // the git identity that authors data-repo commits.
@@ -133,17 +135,19 @@ const server = Bun.serve({
           reloadFrequencySeconds?: number;
           scenarioPreviewLines?: number;
           gitScheme?: string | null;
+          showTestLinks?: boolean;
         };
         if (
           body.dataRepo === undefined &&
           body.reloadFrequencySeconds === undefined &&
           body.scenarioPreviewLines === undefined &&
-          body.gitScheme === undefined
+          body.gitScheme === undefined &&
+          body.showTestLinks === undefined
         ) {
           return json(
             {
               error:
-                "dataRepo, reloadFrequencySeconds, scenarioPreviewLines or gitScheme is required",
+                "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitScheme or showTestLinks is required",
             },
             400,
           );
@@ -193,6 +197,15 @@ const server = Bun.serve({
           }
           state.scenarioPreviewLines = Math.floor(n);
         }
+        // Test-links display (specs/traceability.spec.md): optional, default
+        // ON — the default is stored as an absent key.
+        if (body.showTestLinks !== undefined) {
+          if (typeof body.showTestLinks !== "boolean") {
+            return json({ error: "showTestLinks must be a boolean" }, 400);
+          }
+          if (body.showTestLinks) delete state.showTestLinks;
+          else state.showTestLinks = false;
+        }
         await writeState(state, ROOT);
         reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
         return json({
@@ -200,6 +213,7 @@ const server = Bun.serve({
           needsDataRepo: needsDataRepo(state),
           reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
           scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+          showTestLinks: normalizeShowTestLinks(state.showTestLinks),
           ...(await gitSchemeFields(state)),
         });
       },

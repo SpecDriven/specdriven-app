@@ -23,6 +23,9 @@ export interface Scenario {
   published: boolean;
   proposed: boolean;
   body: string;
+  /** GitHub urls of the automated tests covering this scenario
+      (specs/traceability.spec.md). */
+  tests: string[];
 }
 
 export interface Feature {
@@ -59,6 +62,47 @@ export function titleFromFileName(fileName: string): string {
     .filter(Boolean)
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(" ");
+}
+
+/**
+ * Test links are stored inside the scenario as a trailing `### Tests` markdown
+ * table (specs/traceability.spec.md) — like the scenario table, plain markdown
+ * that renders naturally on GitHub. The parser lifts the urls out of that
+ * section into `Scenario.tests`; serializeFeature writes them back.
+ */
+const TESTS_HEADING_RE = /^###\s+Tests\s*$/i;
+const URL_RE = /https?:\/\/\S+/;
+
+/** Only GitHub urls are stored as test links (specs/traceability.spec.md). */
+export function isTestLink(url: string): boolean {
+  return /^https:\/\/(www\.)?github\.com\/.+/.test(url.trim());
+}
+
+/**
+ * Split a scenario body into its content and the test links held by a
+ * trailing `### Tests` section: one url per table row (or list item —
+ * anything with a url on the line counts, markdown punctuation trimmed).
+ * Headings inside fenced code blocks don't start a tests section.
+ */
+export function splitTests(body: string): { body: string; tests: string[] } {
+  const lines = body.split("\n");
+  let inFence = false;
+  let headingAt = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (FENCE_RE.test(lines[i]!)) inFence = !inFence;
+    else if (!inFence && TESTS_HEADING_RE.test(lines[i]!)) headingAt = i;
+  }
+  if (headingAt === -1) return { body, tests: [] };
+  const tests: string[] = [];
+  for (const line of lines.slice(headingAt + 1)) {
+    const m = line.match(URL_RE);
+    if (m) tests.push(m[0]!.replace(/[|)\]>,.]+$/, ""));
+  }
+  return { body: lines.slice(0, headingAt).join("\n").trim(), tests };
+}
+
+function testsTable(tests: string[]): string {
+  return ["### Tests", "", "| Test |", "| --- |", ...tests.map((t) => `| ${t} |`)].join("\n");
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
@@ -114,7 +158,9 @@ export function parseFeature(text: string): Feature {
 
   const flush = () => {
     if (current) {
-      current.body = bodyLines.join("\n").trim();
+      const split = splitTests(bodyLines.join("\n").trim());
+      current.body = split.body;
+      current.tests = split.tests;
       scenarios.push(current);
       bodyLines.length = 0;
     }
@@ -138,6 +184,7 @@ export function parseFeature(text: string): Feature {
           published: scenarioMatch.status === "published",
           proposed: scenarioMatch.status === "proposed",
           body: "",
+          tests: [],
         };
         continue;
       }
@@ -160,7 +207,10 @@ export function serializeFeature(feature: Feature): string {
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
     const h = header(s.name, s.version, s.published ? "published" : s.proposed ? "proposed" : null);
-    parts.push(s.body ? `${h}\n\n${s.body}` : h);
+    const chunks = [h];
+    if (s.body) chunks.push(s.body);
+    if (s.tests.length > 0) chunks.push(testsTable(s.tests));
+    parts.push(chunks.join("\n\n"));
   }
   return parts.join("\n\n") + "\n";
 }

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import { parseFeature, serializeFeature, sortScenarios, titleFromFileName } from "../server/parser";
+import {
+  isTestLink,
+  parseFeature,
+  serializeFeature,
+  sortScenarios,
+  titleFromFileName,
+} from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { CurrentUser } from "../server/user";
@@ -78,9 +84,15 @@ export function App() {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [previewLines, setPreviewLines] = useState(8);
+  // Test links (specs/traceability.spec.md): the table of automated-test
+  // links at the end of each scenario card is optional; default ON.
+  const [showTestLinks, setShowTestLinks] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
+  const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  /** Url being typed into the edit dialog's "Add test link" field. */
+  const [testDraft, setTestDraft] = useState("");
   // Git scheme (specs/git-operations.spec.md): how git authenticates to
   // GitHub. null = auto-discover by probing (https, ssh, gh); the detected
   // value is what probing landed on.
@@ -118,6 +130,9 @@ export function App() {
       }
       if (typeof state.scenarioPreviewLines === "number") {
         setPreviewLines(state.scenarioPreviewLines);
+      }
+      if (typeof state.showTestLinks === "boolean") {
+        setShowTestLinks(state.showTestLinks);
       }
       setGitScheme(state.gitScheme ?? null);
       setGitSchemeDetected(state.gitSchemeDetected ?? null);
@@ -179,6 +194,13 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [feature, editing, settingsOpen, userInfoOpen, selectedScenario]);
+
+  // The dialog's "Add test link" field starts empty each time it opens
+  // (specs/traceability.spec.md).
+  const editingOpen = editing !== null;
+  useEffect(() => {
+    setTestDraft("");
+  }, [editingOpen]);
 
   // specs/ui.spec.md "Scenario edit dialog": ESC returns to the scenario
   // screen — same as Cancel/Close, and it works while a dialog field has focus.
@@ -762,6 +784,7 @@ export function App() {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
     setSettingsSchemeDraft(gitScheme ?? "auto");
+    setSettingsTestLinksDraft(showTestLinks);
     setSettingsError(null);
     setSettingsOpen(true);
   };
@@ -785,12 +808,14 @@ export function App() {
         reloadFrequencySeconds: Math.floor(n),
         scenarioPreviewLines: Math.floor(lines),
         gitScheme: settingsSchemeDraft,
+        showTestLinks: settingsTestLinksDraft,
       }),
     });
     const data = await res.json();
     if (res.ok) {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
+      setShowTestLinks(data.showTestLinks !== false);
       setGitScheme(data.gitScheme ?? null);
       setGitSchemeDetected(data.gitSchemeDetected ?? null);
       setSettingsOpen(false);
@@ -798,6 +823,56 @@ export function App() {
       setSettingsError(data.error ?? "Could not save settings");
     }
   };
+
+  // Test links (specs/traceability.spec.md): shown as the link's path within
+  // GitHub — the `https://github.com/` prefix carries no information.
+  const testLinkLabel = (url: string) => url.replace(/^https:\/\/(www\.)?github\.com\//, "");
+
+  const addTestLink = () => {
+    if (!editing) return;
+    const url = testDraft.trim();
+    if (!isTestLink(url) || editing.scenario.tests.includes(url)) return;
+    setEditing({
+      ...editing,
+      scenario: { ...editing.scenario, tests: [...editing.scenario.tests, url] },
+    });
+    setTestDraft("");
+  };
+
+  const removeTestLink = (url: string) => {
+    if (!editing) return;
+    setEditing({
+      ...editing,
+      scenario: {
+        ...editing.scenario,
+        tests: editing.scenario.tests.filter((t) => t !== url),
+      },
+    });
+  };
+
+  /** The clickable test-links table at the end of a scenario
+      (specs/traceability.spec.md). */
+  const testsTable = (tests: string[]) =>
+    tests.length > 0 && (
+      <table className="scenario-tests">
+        <thead>
+          <tr>
+            <th>Automated tests</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tests.map((t) => (
+            <tr key={t}>
+              <td>
+                <a href={t} target="_blank" rel="noreferrer" title={t}>
+                  {testLinkLabel(t)}
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
 
   /** Draft the next version of a published scenario as a new, editable scenario. */
   const newVersion = (i: number) => {
@@ -1227,6 +1302,10 @@ export function App() {
                   {s.body && (
                     <div className="md-preview scenario-body">{renderMarkdown(s.body)}</div>
                   )}
+                  {/* specs/traceability.spec.md: links to the automated tests,
+                      as a table at the end of the scenario. Optional — the
+                      Settings toggle hides it (default ON). */}
+                  {showTestLinks && testsTable(s.tests)}
                 </article>
               ))}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
@@ -1237,7 +1316,14 @@ export function App() {
                 onClick={() =>
                   setEditing({
                     index: null,
-                    scenario: { name: "", version: 1, published: false, proposed: false, body: "" },
+                    scenario: {
+                      name: "",
+                      version: 1,
+                      published: false,
+                      proposed: false,
+                      body: "",
+                      tests: [],
+                    },
                   })
                 }
               >
@@ -1310,6 +1396,20 @@ export function App() {
             <p className="hint">
               How many lines of the rendered Markdown body each scenario shows in the list.
               Settings are saved to .specdriven.
+            </p>
+            {/* specs/traceability.spec.md: the test-links table is optional,
+                controlled here; default ON. */}
+            <label className="check-label">
+              <input
+                type="checkbox"
+                checked={settingsTestLinksDraft}
+                onChange={(e) => setSettingsTestLinksDraft(e.target.checked)}
+              />
+              Show links to automated tests
+            </label>
+            <p className="hint">
+              Each scenario ends with a table of GitHub links to its automated tests, when it
+              has any.
             </p>
             {/* Git scheme (specs/git-operations.spec.md): https, ssh or gh;
                 auto-discovery probes them in that order. */}
@@ -1417,6 +1517,53 @@ export function App() {
                     setEditing({ ...editing, scenario: { ...editing.scenario, body } })
                   }
                 />
+              </div>
+            )}
+            {/* specs/traceability.spec.md: GitHub links to the automated
+                tests covering this scenario. Published scenarios are
+                immutable — their links render read-only. */}
+            {editingPublished ? (
+              testsTable(editing.scenario.tests)
+            ) : (
+              <div className="tests-field">
+                <span className="field-label">Automated tests</span>
+                {editing.scenario.tests.length > 0 && (
+                  <ul className="test-list">
+                    {editing.scenario.tests.map((t) => (
+                      <li key={t}>
+                        <a href={t} target="_blank" rel="noreferrer" title={t}>
+                          {testLinkLabel(t)}
+                        </a>
+                        <button
+                          type="button"
+                          className="link"
+                          title={`Remove ${t}`}
+                          onClick={() => removeTestLink(t)}
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <form
+                  className="test-add"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    addTestLink();
+                  }}
+                >
+                  <input
+                    value={testDraft}
+                    placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java"
+                    aria-label="Test link (GitHub url)"
+                    spellCheck={false}
+                    onChange={(e) => setTestDraft(e.target.value)}
+                  />
+                  <button type="submit" className="link" disabled={!isTestLink(testDraft)}>
+                    Add
+                  </button>
+                </form>
               </div>
             )}
             <div className="dialog-actions">
