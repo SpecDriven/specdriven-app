@@ -85,3 +85,8 @@ Customer calls accident hotline and leaves a message with accident info.
 
 - automatically reload (git pull) data every n seconds
 - specify reload frequency in the Settings screen
+
+## Scenario: publish each scenario individually; support Publish All
+- PM should be able to publish each scenario individually
+- Upper right button will be Publish All
+- for each 'proposed' scenario, links are 'Edit', 'Publish', 'Copy link' (in that order)

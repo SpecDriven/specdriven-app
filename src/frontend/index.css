@@ -411,6 +411,13 @@ button.link:hover {
   text-decoration: underline;
 }
 
+/* Card Publish links are inert while any publish is running. */
+button.link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 /* Scenario list renders each body as a Markdown preview clamped to n lines;
    n comes from the Settings dialog, default 8 (specs/ui.spec.md "Scenario
    List"). --preview-lines is set on .scenarios by the app. */

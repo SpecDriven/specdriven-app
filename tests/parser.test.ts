@@ -4,6 +4,7 @@ import {
   serializeFeature,
   markPublished,
   markProposed,
+  markScenarioPublished,
   titleFromFileName,
 } from "../src/server/parser";
 
@@ -158,6 +159,18 @@ test("markProposed adds the proposed chip to unmarked headings only", () => {
   expect(marked).toContain("## Done v1 [published]");
   expect(marked).toContain("## Kept v3 [proposed]");
   expect(marked).not.toContain("[proposed] [proposed]");
+});
+
+// specs/crud-feature.spec.md "publish each scenario individually"
+test("markScenarioPublished flips only the named scenario version", () => {
+  const marked = markScenarioPublished(
+    "# X\n\n## Basic v1 [proposed]\n\nold\n\n## Basic v2\n\nnew\n\n## Other v1\n\nbody\n",
+    "Basic",
+    2,
+  );
+  expect(marked).toContain("## Basic v1 [proposed]");
+  expect(marked).toContain("## Basic v2 [published]");
+  expect(marked).toContain("## Other v1\n");
 });
 
 test("markPublished upgrades proposed to published", () => {

@@ -18,6 +18,8 @@ interface Conflict {
   ours: string;
   theirs: string;
   message: string;
+  /** Set when the conflicted publish targeted a single scenario. */
+  scenario?: { name: string; version: number };
 }
 
 /** index === null means a new scenario being added. */
@@ -68,7 +70,8 @@ export function App() {
   const [status, setStatus] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [publishing, setPublishing] = useState(false);
+  /** "all", a scenario key (`name@vN`), or null while no publish is running. */
+  const [publishing, setPublishing] = useState<string | null>(null);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [previewLines, setPreviewLines] = useState(8);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -484,21 +487,25 @@ export function App() {
     }
   };
 
-  // Publish button (specs/ui.spec.md "Main page"): same style and behavior as
+  const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
+
+  // Publish buttons (specs/ui.spec.md "Main page"): same style and behavior as
   // Sync — disabled with a progress label while running, no "Published" status
-  // line at the bottom of the page.
-  const publish = async () => {
+  // line at the bottom of the page. Without a target every scenario is
+  // published (the upper-left "Publish All"); with one, only that scenario
+  // (specs/crud-feature.spec.md "publish each scenario individually").
+  const publish = async (scenario?: { name: string; version: number }) => {
     if (!selected || !feature) return;
-    setPublishing(true);
+    setPublishing(scenario ? scenarioKey(scenario) : "all");
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(feature) }),
+        body: JSON.stringify({ content: serializeFeature(feature), scenario }),
       });
       const data = await res.json();
       if (res.status === 409 && data.status === "conflict") {
-        setConflict({ ours: data.ours, theirs: data.theirs, message: data.message });
+        setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
         setConflictDraft(data.ours);
         setStatus("Merge conflict — choose a resolution below.");
       } else if (res.ok) {
@@ -509,7 +516,7 @@ export function App() {
     } catch {
       setStatus("Publish failed — is the server running?");
     } finally {
-      setPublishing(false);
+      setPublishing(null);
     }
   };
 
@@ -541,7 +548,13 @@ export function App() {
     const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: resolved, resolveConflict: true }),
+      body: JSON.stringify({
+        content: resolved,
+        resolveConflict: true,
+        // Keep an individual publish scoped to its scenario through the
+        // conflict resolution.
+        scenario: conflict?.scenario,
+      }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -637,7 +650,7 @@ export function App() {
     if (res.ok) {
       setFeature(parseFeature(data.content));
       setDirty(false);
-      setStatus("Saved — press Publish to mark scenarios published.");
+      setStatus("Saved — publish scenarios from their cards, or press Publish All.");
       flashSaved();
     } else {
       setDirty(true);
@@ -970,8 +983,19 @@ export function App() {
                 <button className="secondary" onClick={syncNow} disabled={syncing}>
                   {syncing ? "Syncing…" : "Sync"}
                 </button>
-                <button className="secondary" onClick={publish} disabled={publishing}>
-                  {publishing ? "Publishing…" : dirty || hasProposed ? "Publish *" : "Publish"}
+                {/* Publish All, right of Sync (specs/crud-feature.spec.md
+                    "publish each scenario individually"): marks every scenario
+                    published; individual scenarios publish from their cards. */}
+                <button
+                  className="secondary"
+                  onClick={() => void publish()}
+                  disabled={publishing !== null}
+                >
+                  {publishing === "all"
+                    ? "Publishing…"
+                    : dirty || hasProposed
+                      ? "Publish All *"
+                      : "Publish All"}
                 </button>
               </div>
             </div>
@@ -1009,6 +1033,26 @@ export function App() {
                       )}
                     </span>
                     <span className="card-actions">
+                      {/* Unpublished cards: Edit, Publish, Copy link — in that
+                          order (specs/crud-feature.spec.md "publish each
+                          scenario individually"). */}
+                      {!s.published && (
+                        <>
+                          <button
+                            className="link"
+                            onClick={() => setEditing({ index: i, scenario: { ...s } })}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="link"
+                            disabled={publishing !== null}
+                            onClick={() => void publish({ name: s.name, version: s.version })}
+                          >
+                            {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
+                          </button>
+                        </>
+                      )}
                       <button
                         className="link"
                         onClick={() => copyLink(scenarioPath(selected, s))}
@@ -1016,16 +1060,18 @@ export function App() {
                         {copied === scenarioPath(selected, s) ? "Copied" : "Copy link"}
                       </button>
                       {s.published && (
-                        <button className="link" onClick={() => newVersion(i)}>
-                          New version
-                        </button>
+                        <>
+                          <button className="link" onClick={() => newVersion(i)}>
+                            New version
+                          </button>
+                          <button
+                            className="link"
+                            onClick={() => setEditing({ index: i, scenario: { ...s } })}
+                          >
+                            View
+                          </button>
+                        </>
                       )}
-                      <button
-                        className="link"
-                        onClick={() => setEditing({ index: i, scenario: { ...s } })}
-                      >
-                        {s.published ? "View" : "Edit"}
-                      </button>
                     </span>
                   </header>
                   {s.body && (

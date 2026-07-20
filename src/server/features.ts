@@ -7,9 +7,22 @@ import {
   moveAndPush,
   resolveConflict as gitResolve,
 } from "./git";
-import { parseFeature, markPublished, markProposed, slugify, titleFromFileName } from "./parser";
+import {
+  parseFeature,
+  markPublished,
+  markProposed,
+  markScenarioPublished,
+  slugify,
+  titleFromFileName,
+} from "./parser";
 
 export { slugify } from "./parser";
+
+/** A single scenario picked for an individual publish (name + version). */
+export interface ScenarioTarget {
+  name: string;
+  version: number;
+}
 
 export interface PublishResult {
   status: "published" | "conflict";
@@ -250,18 +263,37 @@ export async function saveFeature(
 }
 
 /**
+ * Mark scenarios published: every scenario for a whole-feature publish, or
+ * just the targeted one (specs/crud-feature.spec.md "publish each scenario
+ * individually"). A target that isn't in the content is an error, not a no-op.
+ */
+function markForPublish(content: string, scenario?: ScenarioTarget): string {
+  if (!scenario) return markPublished(content);
+  const exists = parseFeature(content).scenarios.some(
+    (s) => s.name === scenario.name && s.version === scenario.version,
+  );
+  if (!exists) {
+    throw new Error(`Scenario "${scenario.name}" v${scenario.version} not found`);
+  }
+  return markScenarioPublished(content, scenario.name, scenario.version);
+}
+
+/**
  * Scenario "Publish feature": every scenario is marked [published] (published
  * scenarios are immutable — specs/ui.spec.md); git pull first; on a clean
  * merge, save, then git commit and push. On a merge conflict, report both
  * sides so the user can resolve (accept yours / accept theirs / manual edit).
+ * With a scenario target, only that scenario is marked [published]
+ * (specs/crud-feature.spec.md "publish each scenario individually").
  */
 export async function publishFeature(
   dataDir: string,
   fileName: string,
   content: string,
+  scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
   const name = safe(fileName);
-  const published = markPublished(content);
+  const published = markForPublish(content, scenario);
   await assertPublishedUnchanged(dataDir, name, published);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
@@ -269,17 +301,31 @@ export async function publishFeature(
     return { status: "conflict", theirs, ours: published, message: pullResult.message };
   }
   await Bun.write(`${dataDir}/${name}`, published);
-  const sync = await commitAndPush(dataDir, name, `Publish feature: ${name}`);
+  const sync = await commitAndPush(
+    dataDir,
+    name,
+    scenario
+      ? `Publish scenario: ${scenario.name} v${scenario.version} (${name})`
+      : `Publish feature: ${name}`,
+  );
   return { status: "published", message: sync.message };
 }
 
-/** Complete a conflicted publish with the user's chosen resolution, then commit and push. */
+/**
+ * Complete a conflicted publish with the user's chosen resolution, then commit
+ * and push. A scenario target scopes the marking to that scenario; if the
+ * resolution dropped it (e.g. "accept theirs"), nothing is marked.
+ */
 export async function resolveFeatureConflict(
   dataDir: string,
   fileName: string,
   content: string,
+  scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
-  const sync = await gitResolve(dataDir, safe(fileName), markPublished(content));
+  const resolved = scenario
+    ? markScenarioPublished(content, scenario.name, scenario.version)
+    : markPublished(content);
+  const sync = await gitResolve(dataDir, safe(fileName), resolved);
   return { status: "published", message: sync.message };
 }
 
