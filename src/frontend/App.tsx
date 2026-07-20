@@ -54,6 +54,10 @@ export function App() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   /** File name of the feature being dragged, if any. */
   const [dragging, setDragging] = useState<string | null>(null);
+  /** Sidebar entry whose "⋯" menu is open (file name), if any. */
+  const [treeMenu, setTreeMenu] = useState<string | null>(null);
+  /** True while the File submenu of the open tree menu is expanded. */
+  const [treeMenuFile, setTreeMenuFile] = useState(false);
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -212,11 +216,43 @@ export function App() {
     };
   }, [userMenuOpen]);
 
+  // specs/ui.spec.md "Feature entry menu": ESC or a click anywhere else
+  // closes the entry's drop down menu (same behavior as the user menu).
+  useEffect(() => {
+    if (treeMenu === null) return;
+    const close = () => {
+      setTreeMenu(null);
+      setTreeMenuFile(false);
+    };
+    const onDown = (e: Event) => {
+      if (!(e.target instanceof Element) || !e.target.closest(".tree-row-menu")) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [treeMenu]);
+
   // specs/folders.spec.md: ESC deselects the folder, moving the insertion
   // point back to the tree root so "+ New folder" adds a top-level folder.
   // Inert while a dialog is open or while typing (ESC cancels those instead).
   useEffect(() => {
-    if (selectedFolder === null || editing || settingsOpen || userMenuOpen || userInfoOpen)
+    if (
+      selectedFolder === null ||
+      editing ||
+      settingsOpen ||
+      userMenuOpen ||
+      userInfoOpen ||
+      treeMenu !== null
+    )
       return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -232,7 +268,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFolder, editing, settingsOpen, userMenuOpen, userInfoOpen]);
+  }, [selectedFolder, editing, settingsOpen, userMenuOpen, userInfoOpen, treeMenu]);
 
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
   const settingsTrapRef = useFocusTrap(settingsOpen);
@@ -488,6 +524,58 @@ export function App() {
     }
   };
 
+  /** The file name shown in the menu: only the part left of the dot —
+      the `.feature.md` extension is hidden (specs/ui.spec.md "Feature
+      entry menu"). */
+  const fileStem = (fileName: string) => fileName.split("/").pop()!.split(".")[0]!;
+
+  // File → Rename (specs/ui.spec.md "Feature entry menu"): renames the
+  // underlying file. The extension stays; a selected feature follows its
+  // new file name (and so a new url — old links go stale).
+  const renameFile = async (fileName: string) => {
+    const stem = window.prompt(
+      "File name (the .feature.md extension is kept):",
+      fileStem(fileName),
+    );
+    if (!stem || stem.trim() === fileStem(fileName)) return;
+    const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stem }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      await loadFeatures();
+      if (data.fileName !== fileName) {
+        if (selected === fileName) await openFeature(data.fileName);
+        setStatus(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
+      }
+    } else {
+      setStatus(data.error ?? "Rename failed");
+    }
+  };
+
+  // Delete (specs/ui.spec.md "Feature entry menu"): removes the feature file
+  // after a confirmation — a `git rm`, committed and pushed on the server.
+  const removeFeature = async (f: FeatureListing) => {
+    if (!window.confirm(`Delete feature "${f.name}" (${f.fileName})?`)) return;
+    const res = await fetch(`/api/features/${encodeURIComponent(f.fileName)}`, {
+      method: "DELETE",
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (selected === f.fileName) {
+        setSelected(null);
+        setFeature(null);
+        setSelectedScenario(null);
+      }
+      await loadFeatures();
+      setStatus(`Deleted "${f.name}" — ${data.message}.`);
+    } else {
+      setStatus(data.error ?? "Delete failed");
+    }
+  };
+
   const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
 
   // Publish buttons (specs/ui.spec.md "Main page"): same style and behavior as
@@ -731,34 +819,89 @@ export function App() {
 
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => (
-    // A real link (specs/navigation.spec.md "share a link"): plain clicks
-    // navigate in-app, right-click → Copy Link works. The label is the
-    // feature name, not the file name (specs/ui.spec.md "Main page").
-    <a
-      key={f.fileName}
-      href={featurePath(f.fileName)}
-      className={`tree-feature${f.fileName === selected ? " active" : ""}`}
-      style={{ paddingLeft: `${0.6 + depth * 0.9}rem` }}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", f.fileName);
-        e.dataTransfer.effectAllowed = "move";
-        setDragging(f.fileName);
-      }}
-      onDragEnd={() => {
-        setDragging(null);
-        setDropTarget(null);
-      }}
-      onClick={(e) =>
-        spaClick(e, () => {
-          // Opening a feature is a deliberate move away from the folder.
-          setSelectedFolder(null);
-          void openFeature(f.fileName, { push: true });
-        })
-      }
-    >
-      {f.name}
-    </a>
+    <div key={f.fileName} className="tree-row">
+      {/* A real link (specs/navigation.spec.md "share a link"): plain clicks
+          navigate in-app, right-click → Copy Link works. The label is the
+          feature name, not the file name (specs/ui.spec.md "Main page"). */}
+      <a
+        href={featurePath(f.fileName)}
+        className={`tree-feature${f.fileName === selected ? " active" : ""}`}
+        style={{ paddingLeft: `${0.6 + depth * 0.9}rem` }}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", f.fileName);
+          e.dataTransfer.effectAllowed = "move";
+          setDragging(f.fileName);
+        }}
+        onDragEnd={() => {
+          setDragging(null);
+          setDropTarget(null);
+        }}
+        onClick={(e) =>
+          spaClick(e, () => {
+            // Opening a feature is a deliberate move away from the folder.
+            setSelectedFolder(null);
+            void openFeature(f.fileName, { push: true });
+          })
+        }
+      >
+        {f.name}
+      </a>
+      {/* Drop down menu (specs/ui.spec.md "Feature entry menu"): File →
+          Rename edits the underlying file name; Delete removes the file. */}
+      <span className="tree-row-menu">
+        <button
+          type="button"
+          className="tree-menu-btn"
+          title={`Menu for ${f.fileName}`}
+          aria-haspopup="menu"
+          aria-expanded={treeMenu === f.fileName}
+          onClick={() => {
+            setTreeMenuFile(false);
+            setTreeMenu((m) => (m === f.fileName ? null : f.fileName));
+          }}
+        >
+          ⋯
+        </button>
+        {treeMenu === f.fileName && (
+          <div className="tree-menu" role="menu" aria-label={`Menu for ${f.fileName}`}>
+            <button
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-expanded={treeMenuFile}
+              onClick={() => setTreeMenuFile((o) => !o)}
+            >
+              File {treeMenuFile ? "▾" : "▸"}
+            </button>
+            {treeMenuFile && (
+              <div className="tree-submenu" role="menu" aria-label="File">
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setTreeMenu(null);
+                    setTreeMenuFile(false);
+                    void renameFile(f.fileName);
+                  }}
+                >
+                  Rename “{fileStem(f.fileName)}”
+                </button>
+              </div>
+            )}
+            <button
+              role="menuitem"
+              className="danger"
+              onClick={() => {
+                setTreeMenu(null);
+                setTreeMenuFile(false);
+                void removeFeature(f);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </span>
+    </div>
   );
 
   /**

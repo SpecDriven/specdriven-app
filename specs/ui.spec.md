@@ -26,6 +26,22 @@ the page.
 - render scenario body as Markdown preview; up to n lines
 - make the number of Markdown lines to render for each scenario in list configurable in Settings dialog
 
+# Feature entry menu
+
+Each feature entry in the left pane has a drop down menu (a `⋯` button,
+visible on hover) with two items: `File` and `Delete`.
+
+- `File` opens a submenu with `Rename`, which renames the underlying file.
+  - Only the file name to the left of the dot is shown and edited; the
+    `.feature.md` extension is hidden and always kept. The folder is kept too.
+  - The rename is a `git mv`, committed and pushed.
+  - The feature's url follows the file name, so links to the old name go stale.
+  - The feature name (the `# <name>` heading) is untouched — renaming that is
+    the Edit link on the main page.
+- `Delete` deletes the feature file after a confirmation — a `git rm`,
+  committed and pushed.
+- ESC or a click anywhere else closes the menu.
+
 # Folders
 
 Features can be organized into folders — see specs/folders.spec.md.

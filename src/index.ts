@@ -24,8 +24,10 @@ import {
   createFeature,
   createFolder,
   deleteFolder,
+  deleteFeature,
   moveFeature,
   renameFeature,
+  renameFeatureFile,
   saveFeature,
   publishFeature,
   resolveFeatureConflict,
@@ -277,6 +279,15 @@ const server = Bun.serve({
           return json({ error: (e as Error).message }, 400);
         }
       }),
+      // specs/ui.spec.md "Feature entry menu": Delete removes the feature
+      // file — a `git rm`, committed and pushed. The client confirms first.
+      DELETE: withDataDir(async (dir, req: BunRequest<"/api/features/:file">) => {
+        try {
+          return json(await deleteFeature(dir, req.params.file));
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
     },
 
     // Folders (specs/folders.spec.md): directories in the data repo that
@@ -311,6 +322,20 @@ const server = Bun.serve({
         const body = (await req.json()) as { folder?: string };
         try {
           return json(await moveFeature(dir, req.params.file, body.folder ?? ""));
+        } catch (e) {
+          return json({ error: (e as Error).message }, 400);
+        }
+      }),
+    },
+
+    // specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+    // underlying file — a `git mv`, committed and pushed. Only the stem is
+    // taken; the `.feature.md` extension and the folder are kept.
+    "/api/features/:file/rename-file": {
+      POST: withDataDir(async (dir, req: BunRequest<"/api/features/:file/rename-file">) => {
+        const body = (await req.json()) as { stem?: string };
+        try {
+          return json(await renameFeatureFile(dir, req.params.file, body.stem ?? ""));
         } catch (e) {
           return json({ error: (e as Error).message }, 400);
         }
