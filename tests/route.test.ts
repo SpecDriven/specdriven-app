@@ -8,6 +8,7 @@ const sc = (name: string, version: number): Scenario => ({
   published: false,
   proposed: false,
   body: "",
+  tests: [],
 });
 
 describe("parseRoute", () => {

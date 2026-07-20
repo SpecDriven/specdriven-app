@@ -1160,3 +1160,88 @@ button.table-add:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* Test links (specs/traceability.spec.md): a table of GitHub links to the
+   scenario's automated tests, at the end of the card (and read-only in the
+   dialog for published scenarios). Hidden by the Settings toggle. */
+.scenario-tests {
+  margin-top: 0.5rem;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.scenario-tests th,
+.scenario-tests td {
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.6rem;
+  text-align: left;
+}
+
+.scenario-tests th {
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.scenario-tests a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.scenario-tests a:hover {
+  text-decoration: underline;
+}
+
+/* Edit-dialog widget for the links: current links with a remove ✕ each,
+   plus an add field that only accepts GitHub urls. */
+.dialog .tests-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.test-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.test-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.test-list a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.test-list a:hover {
+  text-decoration: underline;
+}
+
+.test-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.test-add input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+}
+
+/* Settings checkbox rows read horizontally, unlike the stacked field labels. */
+.dialog label.check-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}

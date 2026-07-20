@@ -15,6 +15,9 @@ export interface SpecDrivenState {
    * means auto-discover by probing (https, ssh, gh).
    */
   gitScheme?: GitScheme;
+  /** Show the test-links table on scenario cards
+      (specs/traceability.spec.md); absent means ON. */
+  showTestLinks?: boolean;
 }
 
 export const STATE_FILE = ".specdriven";
@@ -26,6 +29,12 @@ export function normalizeScenarioPreviewLines(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < 1) return DEFAULT_SCENARIO_PREVIEW_LINES;
   return Math.floor(n);
+}
+
+/** Effective test-links display setting: ON unless explicitly turned off
+    (specs/traceability.spec.md "default is ON"). */
+export function normalizeShowTestLinks(value: unknown): boolean {
+  return value !== false;
 }
 
 export async function readState(rootDir: string = process.cwd()): Promise<SpecDrivenState> {
