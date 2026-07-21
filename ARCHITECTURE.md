@@ -12,7 +12,8 @@ Users that have read/write access to the repo that stores data.
 
 ## Local state
 
-.specdriven file
+`.specdriven/settings.json`, in the project root or in `$HOME`
+(specs/app-start.spec.md)
 
 # Integration with AI coding agents
 

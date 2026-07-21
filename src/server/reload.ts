@@ -1,6 +1,6 @@
 // Per specs/crud-feature.spec.md ("reload data on a cron job"): automatically
 // reload (git pull) the data repo every n seconds. The frequency comes from
-// the Settings dialog and is persisted in .specdriven (specs/ui.spec.md).
+// the Settings dialog and is persisted in the settings file (specs/ui.spec.md).
 // After the pull, locally saved scenarios are committed and pushed
 // ("Scenario is automatically saved locally and pushed to GitHub").
 

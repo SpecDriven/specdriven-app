@@ -789,7 +789,7 @@ export function App() {
     setSettingsOpen(true);
   };
 
-  // Settings are saved to .specdriven (specs/ui.spec.md).
+  // Settings are saved to the settings file (specs/ui.spec.md).
   const saveSettings = async () => {
     const n = Number(settingsDraft);
     if (!Number.isFinite(n) || n < 0) {
@@ -1395,7 +1395,7 @@ export function App() {
             </label>
             <p className="hint">
               How many lines of the rendered Markdown body each scenario shows in the list.
-              Settings are saved to .specdriven.
+              Settings are saved to .specdriven/settings.json.
             </p>
             {/* specs/traceability.spec.md: the test-links table is optional,
                 controlled here; default ON. */}

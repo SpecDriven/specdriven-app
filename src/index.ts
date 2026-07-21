@@ -44,7 +44,7 @@ import {
 const ROOT = process.cwd();
 
 // Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
-// where n comes from the Settings dialog and is stored in .specdriven.
+// where n comes from the Settings dialog and is stored in the settings file.
 const reloader = createReloadScheduler(async () => {
   try {
     console.log(`[reload] ${await reloadData(ROOT)}`);

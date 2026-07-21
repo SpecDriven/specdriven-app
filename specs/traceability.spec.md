@@ -26,8 +26,8 @@ plain markdown that renders naturally on GitHub:
   with a remove ✕ each, and an add field. Published scenarios are immutable —
   the dialog shows their links read-only.
 - The Settings dialog has a "Show links to automated tests" checkbox; the
-  choice is saved to .specdriven (`showTestLinks`), and only hides the tables
-  on the cards — the stored links are untouched.
+  choice is saved to the settings file (`showTestLinks`), and only hides the
+  tables on the cards — the stored links are untouched.
 
 ## Scenario: add a test link
 
