@@ -27,7 +27,8 @@ plain markdown that renders naturally on GitHub:
   the dialog shows their links read-only.
 - The Settings dialog has a "Show links to automated tests" checkbox; the
   choice is saved to the settings file (`showTestLinks`), and only hides the
-  tables on the cards — the stored links are untouched.
+  tables on the cards and the Automated tests field in the scenario dialog —
+  the stored links are untouched.
 
 ## Scenario: add a test link
 
@@ -44,5 +45,6 @@ plain markdown that renders naturally on GitHub:
 ## Scenario: hide the test links
 
 - When: the user turns "Show links to automated tests" off in Settings
-- Then: the tables disappear from the scenario cards, but the links stay in
-  the feature files
+- Then: the tables disappear from the scenario cards and the Automated tests
+  field disappears from the scenario dialog, but the links stay in the
+  feature files
