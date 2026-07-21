@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import {
-  isTestLink,
-  parseFeature,
-  serializeFeature,
-  sortScenarios,
-  titleFromFileName,
-} from "../server/parser";
+import { parseFeature, serializeFeature, sortScenarios, titleFromFileName } from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { CurrentUser } from "../server/user";
@@ -15,6 +9,14 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
 import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import {
+  addTestLink,
+  canSetTestLink,
+  removeTestLink,
+  resolvePendingTests,
+  testLinkLabel,
+  updateTestLink,
+} from "./testlinks";
 import { buildTree } from "./tree";
 import type { FolderNode } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
@@ -93,6 +95,11 @@ export function App() {
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   /** Url being typed into the edit dialog's "Add test link" field. */
   const [testDraft, setTestDraft] = useState("");
+  /** Index of the test link opened for in-place ✎ editing, if any. */
+  const [testEdit, setTestEdit] = useState<number | null>(null);
+  const [testEditDraft, setTestEditDraft] = useState("");
+  /** Why the last Save was blocked by the tests field, if it was. */
+  const [testsError, setTestsError] = useState<string | null>(null);
   // Git scheme (specs/git-operations.spec.md): how git authenticates to
   // GitHub. null = auto-discover by probing (https, ssh, gh); the detected
   // value is what probing landed on.
@@ -195,12 +202,19 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [feature, editing, settingsOpen, userInfoOpen, selectedScenario]);
 
-  // The dialog's "Add test link" field starts empty each time it opens
-  // (specs/traceability.spec.md).
+  // The dialog's "Add test link" field starts empty each time it opens, with
+  // no row left open for ✎ editing (specs/traceability.spec.md).
   const editingOpen = editing !== null;
   useEffect(() => {
     setTestDraft("");
+    setTestEdit(null);
   }, [editingOpen]);
+
+  // A "Save was blocked" message stops applying the moment the tests widgets
+  // change — typing, adding, or opening/closing an ✎ row.
+  useEffect(() => {
+    setTestsError(null);
+  }, [editingOpen, testDraft, testEditDraft, testEdit]);
 
   // specs/ui.spec.md "Scenario edit dialog": ESC returns to the scenario
   // screen — same as Cancel/Close, and it works while a dialog field has focus.
@@ -742,7 +756,19 @@ export function App() {
    */
   const saveScenario = async () => {
     if (!editing || !feature || !selected) return;
-    const s = { ...editing.scenario, version: draftVersion };
+    // A url still sitting in the add field or an open ✎ row rides along with
+    // the save — Save must never silently drop it — and one that can't join
+    // the list blocks the save instead (specs/traceability.spec.md).
+    const pending = resolvePendingTests(
+      editing.scenario.tests,
+      testEdit === null ? null : { index: testEdit, url: testEditDraft },
+      testDraft,
+    );
+    if (pending.error) {
+      setTestsError(pending.error);
+      return;
+    }
+    const s = { ...editing.scenario, version: draftVersion, tests: pending.tests };
     const next: Feature = {
       ...feature,
       scenarios: sortScenarios(
@@ -762,7 +788,13 @@ export function App() {
     if (res.ok) {
       setFeature(parseFeature(data.content));
       setDirty(false);
-      setStatus("Saved — publish scenarios from their cards, or press Publish All.");
+      // A published scenario's dialog can only have changed its test links
+      // (specs/traceability.spec.md) — there is nothing left to publish.
+      setStatus(
+        s.published
+          ? `Saved the test links of "${s.name}" v${s.version}.`
+          : "Saved — publish scenarios from their cards, or press Publish All.",
+      );
       flashSaved();
     } else {
       setDirty(true);
@@ -824,30 +856,38 @@ export function App() {
     }
   };
 
-  // Test links (specs/traceability.spec.md): shown as the link's path within
-  // GitHub — the `https://github.com/` prefix carries no information.
-  const testLinkLabel = (url: string) => url.replace(/^https:\/\/(www\.)?github\.com\//, "");
-
-  const addTestLink = () => {
+  // The dialog's "Automated tests" list editor (specs/traceability.spec.md);
+  // the rules for what may go in a row live in ./testlinks.
+  const setTests = (tests: string[]) => {
     if (!editing) return;
-    const url = testDraft.trim();
-    if (!isTestLink(url) || editing.scenario.tests.includes(url)) return;
-    setEditing({
-      ...editing,
-      scenario: { ...editing.scenario, tests: [...editing.scenario.tests, url] },
-    });
+    setEditing({ ...editing, scenario: { ...editing.scenario, tests } });
+  };
+
+  const addTest = () => {
+    if (!editing || !canSetTestLink(editing.scenario.tests, null, testDraft)) return;
+    setTests(addTestLink(editing.scenario.tests, testDraft));
     setTestDraft("");
   };
 
-  const removeTestLink = (url: string) => {
+  /** Open a row for in-place editing, seeded with the url it holds. */
+  const startTestEdit = (index: number) => {
     if (!editing) return;
-    setEditing({
-      ...editing,
-      scenario: {
-        ...editing.scenario,
-        tests: editing.scenario.tests.filter((t) => t !== url),
-      },
-    });
+    setTestEdit(index);
+    setTestEditDraft(editing.scenario.tests[index] ?? "");
+  };
+
+  const commitTestEdit = () => {
+    if (!editing || testEdit === null) return;
+    if (!canSetTestLink(editing.scenario.tests, testEdit, testEditDraft)) return;
+    setTests(updateTestLink(editing.scenario.tests, testEdit, testEditDraft));
+    setTestEdit(null);
+  };
+
+  const removeTest = (index: number) => {
+    if (!editing) return;
+    setTests(removeTestLink(editing.scenario.tests, index));
+    // The rows below shift up one, so an open ✎ row would now point elsewhere.
+    setTestEdit(null);
   };
 
   /** The clickable test-links table at the end of a scenario
@@ -1306,23 +1346,29 @@ export function App() {
                     <span className="card-actions">
                       {/* Unpublished cards: Edit, Publish, Copy link — in that
                           order (specs/crud-feature.spec.md "publish each
-                          scenario individually"). */}
+                          scenario individually"). A published card opens the
+                          same dialog: `Edit` while its test links are editable
+                          (specs/traceability.spec.md), `View` when the setting
+                          leaves nothing to change. */}
+                      <button
+                        className="link"
+                        onClick={() => setEditing({ index: i, scenario: { ...s } })}
+                      >
+                        {!s.published || showTestLinks ? "Edit" : "View"}
+                      </button>
                       {!s.published && (
-                        <>
-                          <button
-                            className="link"
-                            onClick={() => setEditing({ index: i, scenario: { ...s } })}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="link"
-                            disabled={publishing !== null}
-                            onClick={() => void publish({ name: s.name, version: s.version })}
-                          >
-                            {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
-                          </button>
-                        </>
+                        <button
+                          className="link"
+                          disabled={publishing !== null}
+                          onClick={() => void publish({ name: s.name, version: s.version })}
+                        >
+                          {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
+                        </button>
+                      )}
+                      {s.published && (
+                        <button className="link" onClick={() => newVersion(i)}>
+                          New version
+                        </button>
                       )}
                       <button
                         className="link"
@@ -1330,19 +1376,6 @@ export function App() {
                       >
                         {copied === scenarioPath(selected, s) ? "Copied" : "Copy link"}
                       </button>
-                      {s.published && (
-                        <>
-                          <button className="link" onClick={() => newVersion(i)}>
-                            New version
-                          </button>
-                          <button
-                            className="link"
-                            onClick={() => setEditing({ index: i, scenario: { ...s } })}
-                          >
-                            View
-                          </button>
-                        </>
-                      )}
                     </span>
                   </header>
                   {s.body && (
@@ -1566,29 +1599,79 @@ export function App() {
               </div>
             )}
             {/* specs/traceability.spec.md: GitHub links to the automated
-                tests covering this scenario. Published scenarios are
-                immutable — their links render read-only. Hidden entirely
-                when the Settings toggle is off. */}
-            {!showTestLinks ? null : editingPublished ? (
-              testsTable(editing.scenario.tests)
-            ) : (
+                tests covering this scenario — added, corrected in place (✎)
+                and removed (✕). Editable even for a published scenario: the
+                links track the tests, not the immutable spec. Hidden
+                entirely when the Settings toggle is off. */}
+            {showTestLinks && (
               <div className="tests-field">
                 <span className="field-label">Automated tests</span>
                 {editing.scenario.tests.length > 0 && (
                   <ul className="test-list">
-                    {editing.scenario.tests.map((t) => (
+                    {editing.scenario.tests.map((t, i) => (
                       <li key={t}>
-                        <a href={t} target="_blank" rel="noreferrer" title={t}>
-                          {testLinkLabel(t)}
-                        </a>
-                        <button
-                          type="button"
-                          className="link"
-                          title={`Remove ${t}`}
-                          onClick={() => removeTestLink(t)}
-                        >
-                          ✕
-                        </button>
+                        {testEdit === i ? (
+                          <form
+                            className="test-edit"
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              commitTestEdit();
+                            }}
+                          >
+                            <input
+                              value={testEditDraft}
+                              aria-label="Test link (GitHub url)"
+                              spellCheck={false}
+                              autoFocus
+                              onChange={(e) => setTestEditDraft(e.target.value)}
+                              // ESC backs out of the row, not out of the
+                              // whole dialog (specs/ui.spec.md).
+                              onKeyDown={(e) => {
+                                if (e.key !== "Escape") return;
+                                e.stopPropagation();
+                                setTestEdit(null);
+                              }}
+                            />
+                            <button
+                              type="submit"
+                              className="link"
+                              disabled={
+                                !canSetTestLink(editing.scenario.tests, i, testEditDraft)
+                              }
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              className="link"
+                              onClick={() => setTestEdit(null)}
+                            >
+                              Cancel
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <a href={t} target="_blank" rel="noreferrer" title={t}>
+                              {testLinkLabel(t)}
+                            </a>
+                            <button
+                              type="button"
+                              className="link"
+                              title={`Edit ${t}`}
+                              onClick={() => startTestEdit(i)}
+                            >
+                              ✎
+                            </button>
+                            <button
+                              type="button"
+                              className="link"
+                              title={`Remove ${t}`}
+                              onClick={() => removeTest(i)}
+                            >
+                              ✕
+                            </button>
+                          </>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -1597,7 +1680,7 @@ export function App() {
                   className="test-add"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    addTestLink();
+                    addTest();
                   }}
                 >
                   <input
@@ -1607,10 +1690,15 @@ export function App() {
                     spellCheck={false}
                     onChange={(e) => setTestDraft(e.target.value)}
                   />
-                  <button type="submit" className="link" disabled={!isTestLink(testDraft)}>
+                  <button
+                    type="submit"
+                    className="link"
+                    disabled={!canSetTestLink(editing.scenario.tests, null, testDraft)}
+                  >
                     Add
                   </button>
                 </form>
+                {testsError && <p className="error">{testsError}</p>}
               </div>
             )}
             <div className="dialog-actions">
@@ -1623,11 +1711,13 @@ export function App() {
                 </button>
               )}
               <button className="secondary" onClick={() => setEditing(null)}>
-                {editingPublished ? "Close" : "Cancel"}
+                {editingPublished && !showTestLinks ? "Close" : "Cancel"}
               </button>
-              {!editingPublished && (
+              {/* A published scenario is read-only apart from its test links,
+                  so it only gets a Save button while those are in play. */}
+              {(!editingPublished || showTestLinks) && (
                 <button onClick={saveScenario} disabled={!editing.scenario.name.trim()}>
-                  Save scenario
+                  {editingPublished ? "Save test links" : "Save scenario"}
                 </button>
               )}
             </div>

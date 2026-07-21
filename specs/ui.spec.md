@@ -4,7 +4,8 @@
 
 Edit scenarios in a separate dialog box.
 
-If a scenario is already published, then it is immutable.
+If a scenario is already published, then it is immutable — apart from its
+links to automated tests, which stay editable (specs/traceability.spec.md).
 
 # Main page
 
@@ -79,7 +80,12 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - A `[proposed]` scenario has a `Delete` button: after a confirmation, the
   scenario is removed from the feature. The removal is saved like any edit —
   auto-saved locally and pushed by the reload cron.
-- Published scenarios have no Delete button — they are immutable.
+- Published scenarios have no Delete button — they are immutable. Their name,
+  version, body and scenario table are read-only; only the Automated tests
+  field can be changed (specs/traceability.spec.md), and the dialog's save
+  button reads `Save test links`.
+- ESC inside a field that is editing one row in place (the ✎ on a test link)
+  backs out of that row; a second ESC closes the dialog.
 
 # Settings
 
