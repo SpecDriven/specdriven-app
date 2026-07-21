@@ -107,7 +107,7 @@ Identity comes from the data repo, never from session state:
 
 ## Scenario: deep link before a data repo is configured
 
-- Given: `.specdriven` has no data repo recorded
+- Given: the settings file has no data repo recorded
 - When: the user opens a deep link
 - Then: the repo prompt shows first (specs/app-start.spec.md); once a repo is
   accepted, the deep link is honored

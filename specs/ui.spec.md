@@ -79,6 +79,7 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 
 # Settings
 
-A settings dialog. Settings are saved to .specdriven
+A settings dialog. Settings are saved to the settings file
+(`.specdriven/settings.json`, specs/app-start.spec.md)
 
 - Data reload frequency

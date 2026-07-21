@@ -8,7 +8,7 @@ credential helper). The data-repo url only identifies the repository; the
 scheme decides how git connects and authenticates.
 
 - The scheme is the `Git scheme` setting in the Settings dialog
-  (specs/user-info-settings.spec.md), stored in `.specdriven` as `gitScheme`.
+  (specs/user-info-settings.spec.md), stored in the settings file as `gitScheme`.
 - With no explicit choice the scheme is auto-discovered: probe the data repo
   in the order https, ssh, gh and use the first scheme that authenticates.
   The discovery holds for the server run; it is not written to settings, so
@@ -25,7 +25,7 @@ scheme decides how git connects and authenticates.
 ## Scenario: choose a scheme in settings
 
 - When: the user picks `ssh` as the Git scheme in the Settings dialog
-- Then: the choice is saved to `.specdriven`
+- Then: the choice is saved to the settings file (specs/app-start.spec.md)
 - and clone, pull and push all use ssh, even for a repo cloned over https
 
 ## Scenario: auto-discover the scheme

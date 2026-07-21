@@ -12,13 +12,22 @@ import {
 import { writeState } from "../src/server/state";
 
 let dir: string;
+let home: string;
+const realHome = process.env.SPECDRIVEN_HOME;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "specdriven-reload-"));
+  // Point the ~/.specdriven fallback (specs/app-start.spec.md) at an empty
+  // temp dir, so a developer's own settings file can't configure these tests.
+  home = await mkdtemp(join(tmpdir(), "specdriven-reload-home-"));
+  process.env.SPECDRIVEN_HOME = home;
 });
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
+  if (realHome === undefined) delete process.env.SPECDRIVEN_HOME;
+  else process.env.SPECDRIVEN_HOME = realHome;
 });
 
 // specs/crud-feature.spec.md: reload frequency is "every n seconds", set in
