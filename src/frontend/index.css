@@ -1171,8 +1171,8 @@ button.table-add:hover {
 }
 
 /* Test links (specs/traceability.spec.md): a table of GitHub links to the
-   scenario's automated tests, at the end of the card (and read-only in the
-   dialog for published scenarios). Hidden by the Settings toggle. */
+   scenario's automated tests, at the end of the card. Hidden by the Settings
+   toggle. */
 .scenario-tests {
   margin-top: 0.5rem;
   border-collapse: collapse;
@@ -1202,8 +1202,8 @@ button.table-add:hover {
   text-decoration: underline;
 }
 
-/* Edit-dialog widget for the links: current links with a remove ✕ each,
-   plus an add field that only accepts GitHub urls. */
+/* Edit-dialog widget for the links: current links with an ✎ and a remove ✕
+   each, plus an add field. Both fields only accept GitHub urls. */
 .dialog .tests-field {
   display: flex;
   flex-direction: column;
@@ -1236,13 +1236,20 @@ button.table-add:hover {
   text-decoration: underline;
 }
 
-.test-add {
+/* The add field, and the ✎ row that replaces a link with the same editor. */
+.test-add,
+.test-edit {
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.test-add input {
+.test-edit {
+  flex: 1;
+}
+
+.test-add input,
+.test-edit input {
   flex: 1;
   font-size: 0.85rem;
   padding: 0.35rem 0.6rem;
