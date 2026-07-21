@@ -1521,8 +1521,9 @@ export function App() {
             )}
             {/* specs/traceability.spec.md: GitHub links to the automated
                 tests covering this scenario. Published scenarios are
-                immutable — their links render read-only. */}
-            {editingPublished ? (
+                immutable — their links render read-only. Hidden entirely
+                when the Settings toggle is off. */}
+            {!showTestLinks ? null : editingPublished ? (
               testsTable(editing.scenario.tests)
             ) : (
               <div className="tests-field">
