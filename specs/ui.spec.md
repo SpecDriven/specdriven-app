@@ -76,6 +76,10 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
   highest version already carrying that name, or v1 when the name is new.
   Retyping the name in the dialog re-derives the version.
 - Editing an existing scenario keeps the version it was already assigned.
+- A `[proposed]` scenario has a `Delete` button: after a confirmation, the
+  scenario is removed from the feature. The removal is saved like any edit —
+  auto-saved locally and pushed by the reload cron.
+- Published scenarios have no Delete button — they are immutable.
 
 # Settings
 
