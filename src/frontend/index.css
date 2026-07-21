@@ -598,6 +598,15 @@ button.link:disabled {
   cursor: not-allowed;
 }
 
+/* Delete in the scenario dialog (specs/ui.spec.md "Scenario edit dialog"):
+   destructive styling, pushed to the far left away from Cancel/Save. */
+.dialog-actions button.danger {
+  margin-right: auto;
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+
 /* Scenario edit dialog (specs/ui.spec.md): resizable via the corner handle;
    the markdown editor absorbs the resized space. */
 .dialog.scenario-dialog {

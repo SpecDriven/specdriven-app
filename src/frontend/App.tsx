@@ -874,6 +874,44 @@ export function App() {
       </table>
     );
 
+  /**
+   * Delete a [proposed] scenario from the dialog (specs/ui.spec.md "Scenario
+   * edit dialog"), after a confirmation. The removal is saved like any edit —
+   * auto-saved locally; the reload cron commits and pushes it.
+   */
+  const deleteScenario = async () => {
+    if (!editing || editing.index === null || !feature || !selected) return;
+    const idx = editing.index;
+    const { name, version } = editing.scenario;
+    if (!window.confirm(`Delete scenario "${name}" v${version}?`)) return;
+    const next: Feature = {
+      ...feature,
+      scenarios: feature.scenarios.filter((_, i) => i !== idx),
+    };
+    setFeature(next);
+    setEditing(null);
+    // The keyboard highlight can't stay on the removed card; later cards
+    // shift up one index.
+    setSelectedScenario((prev) =>
+      prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
+    );
+    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: serializeFeature(next), save: true }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setFeature(parseFeature(data.content));
+      setDirty(false);
+      setStatus(`Deleted scenario "${name}" v${version}.`);
+      flashSaved();
+    } else {
+      setDirty(true);
+      setStatus(data.error ?? "Delete failed");
+    }
+  };
+
   /** Draft the next version of a published scenario as a new, editable scenario. */
   const newVersion = (i: number) => {
     if (!feature) return;
@@ -1066,6 +1104,14 @@ export function App() {
   }
 
   const editingPublished = editing?.scenario.published ?? false;
+  // Delete applies to [proposed] scenarios only (specs/ui.spec.md "Scenario
+  // edit dialog") — not to published ones (immutable), and not to a new
+  // draft that isn't part of the feature yet (index === null).
+  const editingProposed =
+    editing !== null &&
+    editing.index !== null &&
+    editing.scenario.proposed &&
+    !editing.scenario.published;
   const hasProposed = feature?.scenarios.some((s) => s.proposed && !s.published) ?? false;
 
   return (
@@ -1568,6 +1614,14 @@ export function App() {
               </div>
             )}
             <div className="dialog-actions">
+              {/* Proposed scenarios can be deleted (specs/ui.spec.md
+                  "Scenario edit dialog") — confirmed, then saved like any
+                  edit. Kept apart from Cancel/Save on the far left. */}
+              {editingProposed && (
+                <button className="danger" onClick={() => void deleteScenario()}>
+                  Delete
+                </button>
+              )}
               <button className="secondary" onClick={() => setEditing(null)}>
                 {editingPublished ? "Close" : "Cancel"}
               </button>
