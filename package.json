@@ -1,18 +1,27 @@
 {
   "name": "sd_fable",
+  "version": "0.1.0",
   "module": "src/index.ts",
+  "main": "dist/electron/main.js",
   "type": "module",
   "private": true,
+  "trustedDependencies": [
+    "electron"
+  ],
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "start": "bun src/index.ts",
     "build": "bun scripts/build.ts",
-    "build:all": "bun scripts/build.ts --all"
+    "build:all": "bun scripts/build.ts --all",
+    "dev:electron": "bun scripts/dev-electron.ts",
+    "build:desktop": "bun scripts/build-desktop.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
   },
   "peerDependencies": {
     "typescript": "^5"
