@@ -62,6 +62,13 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - Focus must never reach elements behind the dialog while it is open.
 - On open, focus moves into the dialog; on close, focus returns to the element
   that opened it.
+- Native browser prompts and confirms are never used — creating a feature or
+  folder, renaming a file, and every delete confirmation are in-app dialogs.
+  (The desktop runtime has no `prompt()` at all —
+  specs/desktop-app.spec.md.) Prompts submit on Enter and can't submit
+  empty; delete confirmations carry a solid-red destructive button.
+- Dialogs can stack — a delete confirmation above the scenario edit dialog.
+  Tab cycles only the top dialog, and ESC closes only the top dialog.
 
 # Scenario edit dialog
 
