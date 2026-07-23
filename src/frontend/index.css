@@ -1,32 +1,110 @@
+/* Design system (specs/ui.spec.md "Design system"): warm neutrals, a
+   terracotta accent and serif display type. Colors flow only through the
+   tokens below; components never hardcode a color. */
+
 :root {
-  --bg: #ffffff;
-  --fg: #1a1a2e;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #4f46e5;
-  --accent-fg: #ffffff;
-  --panel: #f9fafb;
-  --danger-bg: #fef2f2;
-  --danger-border: #fecaca;
-  --danger-fg: #b91c1c;
-  --pub-bg: #eef2ff;
-  --pub-border: #c7d2fe;
+  color-scheme: light;
+
+  /* Surfaces: app canvas (ivory) → sidebar/toolbars (oat) → cards (white) */
+  --surface-0: #faf9f5;
+  --surface-1: #f0eee6;
+  --surface-2: #ffffff;
+  --code-bg: #f4f2e9;
+  --hover: rgba(33, 32, 28, 0.06);
+
+  --text-1: #21201c;
+  --text-2: #6e6a60;
+  --text-3: #a29d90;
+
+  --border: #e5e1d5;
+  --border-strong: #d5d0c2;
+
+  --accent: #c6613f;
+  --accent-hover: #ac4f2f;
+  --accent-strong: #a44e2e; /* accent that stays readable as small text */
+  --accent-soft: rgba(198, 97, 63, 0.11);
+  --on-accent: #ffffff;
+  --ring: rgba(198, 97, 63, 0.35);
+
+  --danger-fg: #a83a2a;
+  --danger-bg: #fbeeea;
+  --danger-border: #efcfc4;
+
+  /* Published scenarios (specs/ui.spec.md): a parchment wash — "sealed". */
+  --pub-bg: #faf3e3;
+  --pub-border: #e7dab9;
+
+  --shadow-sm: 0 1px 2px rgba(70, 60, 45, 0.06);
+  --shadow-md: 0 2px 10px rgba(70, 60, 45, 0.09), 0 1px 2px rgba(70, 60, 45, 0.05);
+  --shadow-lg: 0 20px 50px rgba(60, 50, 35, 0.22), 0 4px 12px rgba(60, 50, 35, 0.08);
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
+}
+
+/* Dark tokens. Applied two ways — an explicit dark choice, or the OS
+   preference while the choice is "system" (specs/ui.spec.md "Settings").
+   Keep both blocks identical. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #262624;
+  --surface-1: #1e1d1b;
+  --surface-2: #31302d;
+  --code-bg: #282723;
+  --hover: rgba(237, 235, 230, 0.07);
+  --text-1: #edebe6;
+  --text-2: #a7a299;
+  --text-3: #7a756b;
+  --border: #3b3a36;
+  --border-strong: #4d4b45;
+  --accent: #d97757;
+  --accent-hover: #e08662;
+  --accent-strong: #e79877;
+  --accent-soft: rgba(217, 119, 87, 0.16);
+  --on-accent: #ffffff;
+  --ring: rgba(217, 119, 87, 0.45);
+  --danger-fg: #e5806c;
+  --danger-bg: #3b2721;
+  --danger-border: #5c382e;
+  --pub-bg: #322e23;
+  --pub-border: #575038;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #111118;
-    --fg: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #2d2d3a;
-    --accent: #818cf8;
-    --accent-fg: #111118;
-    --panel: #1a1a24;
-    --danger-bg: #2a1518;
-    --danger-border: #7f1d1d;
-    --danger-fg: #f87171;
-    --pub-bg: #1c1c33;
-    --pub-border: #3b3b6b;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface-0: #262624;
+    --surface-1: #1e1d1b;
+    --surface-2: #31302d;
+    --code-bg: #282723;
+    --hover: rgba(237, 235, 230, 0.07);
+    --text-1: #edebe6;
+    --text-2: #a7a299;
+    --text-3: #7a756b;
+    --border: #3b3a36;
+    --border-strong: #4d4b45;
+    --accent: #d97757;
+    --accent-hover: #e08662;
+    --accent-strong: #e79877;
+    --accent-soft: rgba(217, 119, 87, 0.16);
+    --on-accent: #ffffff;
+    --ring: rgba(217, 119, 87, 0.45);
+    --danger-fg: #e5806c;
+    --danger-bg: #3b2721;
+    --danger-border: #5c382e;
+    --pub-bg: #322e23;
+    --pub-border: #575038;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -34,11 +112,46 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--bg);
-  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  background: var(--surface-0);
+  color: var(--text-1);
+}
+
+::selection {
+  background: var(--ring);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-3);
+}
+
+:where(a, button, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .centered {
@@ -46,67 +159,112 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--text-2);
 }
 
 .repo-prompt {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  max-width: 24rem;
+  gap: 0.85rem;
+  max-width: 26rem;
   padding: 2rem;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: var(--panel);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+  color: var(--text-1);
 }
 
 .repo-prompt h1 {
   margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.repo-prompt p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .repo-prompt input {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 1rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.95rem;
 }
 
 .layout {
   display: grid;
   grid-template-columns: 16rem 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 aside {
   border-right: 1px solid var(--border);
-  padding: 1rem;
-  background: var(--panel);
+  padding: 0.9rem 0.75rem;
+  background: var(--surface-1);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+aside header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.1rem 0.35rem 0;
+}
+
+/* Desktop app (specs/desktop-app.spec.md "Window"): the sidebar header makes
+   room for the macOS traffic lights and doubles as the window drag region. */
+:root[data-desktop="darwin"] aside header {
+  padding-top: 2.3rem;
+  -webkit-app-region: drag;
+  user-select: none;
 }
 
 aside header h1 {
   margin: 0;
-  font-size: 1.25rem;
-  line-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 1.05rem;
+}
+
+.wordmark {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 1.13rem;
+  letter-spacing: -0.015em;
+  color: var(--text-1);
 }
 
 .logo {
   display: block;
-  border-radius: 10px;
-  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(172, 79, 47, 0.35);
 }
 
 .repo-name {
-  color: var(--muted);
-  font-size: 0.8rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .sidebar-actions > button {
@@ -118,10 +276,10 @@ aside header h1 {
 .tree {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 1px;
   flex: 1;
   min-height: 4rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 /* Sidebar entries are real links (specs/navigation.spec.md "share a link")
@@ -130,43 +288,43 @@ aside header h1 {
   display: block;
   text-align: left;
   text-decoration: none;
-  padding: 0.4rem 0.6rem;
-  border-radius: 0.375rem;
-  color: var(--fg);
+  padding: 0.38rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
-.tree a.tree-feature:hover {
-  background: var(--border);
+.tree-row:has(> a.tree-feature.active) {
+  background: var(--accent-soft);
 }
 
 .tree a.tree-feature.active {
-  background: var(--accent);
-  color: var(--accent-fg);
+  color: var(--text-1);
+  font-weight: 500;
 }
 
 .folder-row {
   display: flex;
   align-items: center;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .folder-toggle {
   flex: 1;
   display: block;
   text-align: left;
-  padding: 0.4rem 0.3rem;
+  padding: 0.38rem 0.3rem;
   border: none;
   background: transparent;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 600;
-  border-radius: 0.375rem;
+  color: var(--text-2);
+  font-size: 0.845rem;
+  font-weight: 550;
+  border-radius: var(--radius-sm);
 }
 
 .folder-row:hover {
-  background: var(--border);
+  background: var(--hover);
 }
 
 /* The clicked folder (specs/folders.spec.md): "+ New folder" creates inside
@@ -177,13 +335,13 @@ aside header h1 {
 }
 
 .folder-row.selected .folder-toggle {
-  color: var(--fg);
+  color: var(--text-1);
 }
 
 .twist {
   display: inline-block;
   width: 0.9rem;
-  color: var(--muted);
+  color: var(--text-3);
 }
 
 /* Deleting is a quiet affordance: visible only while on the row. */
@@ -191,9 +349,9 @@ aside header h1 {
   visibility: hidden;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-3);
   padding: 0.2rem 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
 }
 
 .folder-row:hover .folder-delete {
@@ -201,7 +359,7 @@ aside header h1 {
 }
 
 .folder-delete:hover {
-  color: var(--error, #dc2626);
+  color: var(--danger-fg);
 }
 
 /* One row per feature: the link plus its "⋯" menu button
@@ -210,7 +368,11 @@ aside header h1 {
   display: flex;
   align-items: center;
   position: relative;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
+}
+
+.tree-row:hover {
+  background: var(--hover);
 }
 
 .tree-row > a.tree-feature {
@@ -226,9 +388,9 @@ aside header h1 {
   visibility: hidden;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-3);
   padding: 0.2rem 0.45rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -238,23 +400,23 @@ aside header h1 {
 }
 
 .tree-menu-btn:hover {
-  color: var(--fg);
-  background: var(--border);
+  color: var(--text-1);
+  background: var(--hover);
 }
 
 /* The drop down: File (submenu with Rename) and Delete. */
 .tree-menu {
   position: absolute;
-  top: calc(100% + 0.15rem);
+  top: calc(100% + 0.2rem);
   right: 0.25rem;
   min-width: 10rem;
-  background: var(--bg);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 0.25rem;
+  border-radius: var(--radius-md);
+  padding: 0.3rem;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg);
   z-index: 10;
 }
 
@@ -262,16 +424,15 @@ aside header h1 {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 0.375rem;
-  padding: 0.45rem 0.6rem;
-  color: var(--fg);
-  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  padding: 0.42rem 0.6rem;
+  color: var(--text-1);
+  font-size: 0.875rem;
   cursor: pointer;
 }
 
 .tree-menu button:hover {
-  background: var(--panel);
-  color: var(--accent);
+  background: var(--hover);
 }
 
 .tree-submenu {
@@ -282,7 +443,8 @@ aside header h1 {
 }
 
 .tree-menu button.danger:hover {
-  color: var(--error, #dc2626);
+  color: var(--danger-fg);
+  background: var(--danger-bg);
 }
 
 /* Where the dragged feature would land (specs/folders.spec.md). */
@@ -295,27 +457,53 @@ aside header h1 {
 button {
   cursor: pointer;
   font: inherit;
+  white-space: nowrap;
 }
 
-aside > button,
-.sidebar-actions > button,
+/* Primary action: filled terracotta. */
 .editor-bar button,
 .conflict-actions button,
-.add-scenario,
 .repo-prompt button {
-  padding: 0.45rem 0.9rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.375rem;
+  padding: 0.46rem 0.95rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.9rem;
+  color: var(--on-accent);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.editor-bar button:hover:not(:disabled),
+.conflict-actions button:hover:not(:disabled),
+.repo-prompt button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* Sidebar actions stay quiet — the loud button on a screen is Publish. */
+.sidebar-actions > button {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.sidebar-actions > button:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  color: var(--text-1);
 }
 
 .editor {
   display: flex;
   flex-direction: column;
-  padding: 1rem 1.5rem;
-  gap: 0.75rem;
+  padding: 1.1rem 1.6rem;
+  gap: 0.8rem;
+  min-height: 0;
 }
 
 .editor-bar {
@@ -327,7 +515,10 @@ aside > button,
 /* "Feature: <name>" heading (specs/ui.spec.md "Main page") */
 .editor-bar h2 {
   margin: 0;
-  font-size: 1.1rem;
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.012em;
 }
 
 /* Feature name + its "Edit" / "Copy link" actions */
@@ -347,13 +538,13 @@ aside > button,
 
 .rename-input {
   min-width: 18rem;
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-monospace, monospace;
-  font-size: 0.95rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
 }
 
 .editor-actions {
@@ -362,8 +553,14 @@ aside > button,
 }
 
 .editor-bar button.secondary {
-  background: none;
-  color: var(--accent);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.editor-bar button.secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--text-3);
 }
 
 .editor-bar button:disabled {
@@ -374,7 +571,7 @@ aside > button,
 /* Free markdown between the feature heading and the first scenario */
 .feature-desc {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 0.85rem;
   white-space: pre-wrap;
   font-family: inherit;
@@ -384,15 +581,24 @@ aside > button,
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.7rem;
   overflow-y: auto;
+  /* keep selection outlines and card shadows unclipped */
+  padding: 3px;
+  margin: -3px;
 }
 
 .scenario-card {
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 0.75rem 1rem;
-  background: var(--panel);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.1rem;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 120ms ease;
+}
+
+.scenario-card:hover {
+  border-color: var(--border-strong);
 }
 
 /* Published scenarios are shaded differently (specs/ui.spec.md) */
@@ -416,6 +622,8 @@ aside > button,
 }
 
 .scenario-title {
+  font-family: var(--font-serif);
+  font-size: 1.02rem;
   font-weight: 600;
 }
 
@@ -427,51 +635,53 @@ aside > button,
 }
 
 .scenario-title a:hover {
-  color: var(--accent);
+  color: var(--accent-strong);
   text-decoration: underline;
 }
 
 .scenario-title .version,
 .dialog-title .version {
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
   font-weight: 400;
 }
 
 .badge {
   margin-left: 0.5rem;
-  padding: 0.1rem 0.45rem;
+  padding: 0.13rem 0.5rem;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.7rem;
-  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: var(--font-sans);
+  font-size: 0.66rem;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   vertical-align: middle;
 }
 
 /* Proposed marker — saved but not yet published (specs/crud-feature.spec.md,
    [proposed] chip) */
 .badge.proposed {
-  background: var(--muted);
-  color: var(--bg);
+  background: var(--hover);
+  color: var(--text-2);
 }
 
-/* Top banner 'Saved' message, shown for 2 sec after an auto-save */
+/* Transient 'Saved' toast, shown for 2 sec after an auto-save */
 .saved-banner {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 20;
-  padding: 0.4rem;
-  text-align: center;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.85rem;
-  font-weight: 600;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  background: var(--text-1);
+  color: var(--surface-0);
+  font-size: 0.8rem;
+  font-weight: 550;
+  box-shadow: var(--shadow-lg);
 }
 
 .card-actions {
@@ -484,8 +694,9 @@ button.link {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent);
-  font-size: 0.85rem;
+  color: var(--accent-strong);
+  font-size: 0.83rem;
+  font-weight: 500;
 }
 
 button.link:hover {
@@ -510,13 +721,14 @@ button.link:disabled {
   overflow: hidden;
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.45);
+  background: rgba(35, 30, 24, 0.45);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -524,53 +736,71 @@ button.link:disabled {
 }
 
 .dialog {
-  background: var(--bg);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: 1.4rem 1.5rem;
   width: min(40rem, 90vw);
   max-height: 85vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.8rem;
+  box-shadow: var(--shadow-lg);
 }
 
 .dialog h3 {
   margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .dialog label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: var(--muted);
+  gap: 0.3rem;
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 .dialog input,
 .dialog select,
 .dialog textarea {
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg);
-  color: var(--fg);
-  font-size: 0.95rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.92rem;
+  font-weight: 400;
+}
+
+.dialog input:focus,
+.dialog select:focus,
+.dialog textarea:focus,
+.repo-prompt input:focus,
+.rename-input:focus,
+.conflict-draft:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .dialog textarea {
   min-height: 14rem;
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.55;
   resize: vertical;
 }
 
 .dialog input:disabled,
 .dialog textarea:disabled {
-  background: var(--panel);
-  color: var(--muted);
+  background: var(--surface-1);
+  color: var(--text-2);
 }
 
 .dialog-actions {
@@ -580,17 +810,29 @@ button.link:disabled {
 }
 
 .dialog-actions button {
-  padding: 0.45rem 0.9rem;
-  border: 1px solid var(--accent);
-  border-radius: 0.375rem;
+  padding: 0.46rem 0.95rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   background: var(--accent);
-  color: var(--accent-fg);
-  font-size: 0.9rem;
+  color: var(--on-accent);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.dialog-actions button:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 
 .dialog-actions button.secondary {
-  background: none;
-  color: var(--accent);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text-1);
+}
+
+.dialog-actions button.secondary:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--text-3);
 }
 
 .dialog-actions button:disabled {
@@ -605,6 +847,11 @@ button.link:disabled {
   border-color: var(--danger-border);
   background: var(--danger-bg);
   color: var(--danger-fg);
+}
+
+.dialog-actions button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger-fg);
 }
 
 /* Scenario edit dialog (specs/ui.spec.md): resizable via the corner handle;
@@ -624,6 +871,7 @@ button.link:disabled {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  font-family: var(--font-serif);
 }
 
 .dialog-title .badge {
@@ -632,25 +880,28 @@ button.link:disabled {
 
 /* The dialog title IS the scenario name (specs/ui.spec.md) */
 .dialog input.dialog-title-input {
-  font-size: 1.2rem;
-  font-weight: 700;
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   padding: 0.15rem 0;
   border: none;
-  border-bottom: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border-strong);
   border-radius: 0;
   background: transparent;
 }
 
 .dialog input.dialog-title-input:focus {
   outline: none;
+  box-shadow: none;
   border-bottom: 1px solid var(--accent);
 }
 
 /* The version is assigned by the app, so it reads as a label, not a field. */
 .dialog .version-field {
   margin: 0;
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--text-2);
+  font-size: 0.83rem;
 }
 
 .dialog .body-field {
@@ -658,24 +909,26 @@ button.link:disabled {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 
 .field-label {
-  font-size: 0.85rem;
-  color: var(--muted);
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* Embedded markdown editor (specs/ui.spec.md "Scenario edit dialog") */
 .md-editor {
   flex: 1;
-  min-height: 0;
+  /* never collapses entirely, however small the resizable dialog gets */
+  min-height: 6.5rem;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  background: var(--bg);
+  background: var(--surface-2);
 }
 
 .md-toolbar {
@@ -685,7 +938,7 @@ button.link:disabled {
   gap: 0.5rem;
   padding: 0.3rem 0.4rem;
   border-bottom: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--surface-1);
 }
 
 .md-tabs {
@@ -696,17 +949,18 @@ button.link:disabled {
 .md-tabs button {
   border: 1px solid transparent;
   background: none;
-  color: var(--muted);
+  color: var(--text-2);
   padding: 0.2rem 0.6rem;
-  border-radius: 0.3rem;
+  border-radius: 7px;
   font-size: 0.8rem;
 }
 
 .md-tabs button.active {
-  background: var(--bg);
+  background: var(--surface-2);
   border-color: var(--border);
-  color: var(--fg);
-  font-weight: 600;
+  color: var(--text-1);
+  font-weight: 550;
+  box-shadow: var(--shadow-sm);
 }
 
 .md-tools {
@@ -718,16 +972,16 @@ button.link:disabled {
   min-width: 1.7rem;
   padding: 0.2rem 0.35rem;
   border: none;
-  border-radius: 0.3rem;
+  border-radius: 7px;
   background: none;
-  color: var(--muted);
+  color: var(--text-2);
   font-size: 0.85rem;
   line-height: 1.2;
 }
 
 .md-tools button:hover {
-  background: var(--border);
-  color: var(--fg);
+  background: var(--hover);
+  color: var(--text-1);
 }
 
 .md-tools button.b {
@@ -739,7 +993,7 @@ button.link:disabled {
 }
 
 .md-tools button.code {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -750,17 +1004,19 @@ button.link:disabled {
   border-radius: 0;
   resize: none;
   padding: 0.6rem 0.75rem;
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
 .md-editor .md-textarea:focus {
   outline: none;
+  box-shadow: none;
+  border: none;
 }
 
 .md-editor .md-textarea:read-only {
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 /* Typography below is shared by every rendered-markdown surface (the editor's
@@ -773,8 +1029,8 @@ button.link:disabled {
 }
 
 .md-preview {
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
 .md-preview > :first-child {
@@ -786,15 +1042,15 @@ button.link:disabled {
 }
 
 .md-preview h1 {
-  font-size: 1.3rem;
+  font-size: 1.25rem;
 }
 
 .md-preview h2 {
-  font-size: 1.15rem;
+  font-size: 1.1rem;
 }
 
 .md-preview h3 {
-  font-size: 1.05rem;
+  font-size: 1rem;
 }
 
 .md-preview h4,
@@ -810,6 +1066,8 @@ button.link:disabled {
 .md-preview h5,
 .md-preview h6 {
   margin: 0.9em 0 0.4em;
+  font-family: var(--font-serif);
+  letter-spacing: -0.008em;
 }
 
 .md-preview p {
@@ -817,18 +1075,18 @@ button.link:disabled {
 }
 
 .md-preview code {
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 0.85em;
-  background: var(--panel);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  padding: 0.05em 0.3em;
+  border-radius: 5px;
+  padding: 0.08em 0.32em;
 }
 
 .md-preview pre {
-  background: var(--panel);
+  background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.6rem 0.75rem;
   overflow-x: auto;
 }
@@ -837,14 +1095,14 @@ button.link:disabled {
   border: none;
   background: none;
   padding: 0;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
 }
 
 .md-preview blockquote {
   margin: 0.4em 0;
   padding: 0.1em 0 0.1em 0.75em;
-  border-left: 3px solid var(--pub-border);
-  color: var(--muted);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
 }
 
 .md-preview ul,
@@ -866,15 +1124,16 @@ button.link:disabled {
 .md-preview th,
 .md-preview td {
   border: 1px solid var(--border);
-  padding: 0.25em 0.6em;
+  padding: 0.28em 0.6em;
 }
 
 .md-preview th {
-  background: var(--panel);
+  background: var(--surface-1);
+  font-weight: 550;
 }
 
 .md-preview a {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .md-preview img {
@@ -888,7 +1147,7 @@ button.link:disabled {
 }
 
 .md-empty {
-  color: var(--muted);
+  color: var(--text-3);
   margin: 0;
 }
 
@@ -896,13 +1155,13 @@ button.link:disabled {
   width: 100%;
   min-height: 8rem;
   margin-top: 0.75rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-monospace, "SF Mono", monospace;
-  font-size: 0.85rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   resize: vertical;
 }
 
@@ -917,33 +1176,34 @@ aside > .user-corner {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.55rem;
   background: none;
   border: 1px solid transparent;
-  border-radius: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  color: var(--fg);
-  font-size: 0.9rem;
+  border-radius: var(--radius-md);
+  padding: 0.38rem 0.5rem;
+  color: var(--text-1);
+  font-size: 0.875rem;
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
 }
 
 .user-chip:hover,
 .user-chip[aria-expanded="true"] {
-  background: var(--panel);
+  background: var(--hover);
   border-color: var(--border);
 }
 
 .user-chip .avatar {
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.65rem;
+  height: 1.65rem;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-fg);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  color: var(--on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 650;
   flex-shrink: 0;
 }
 
@@ -958,13 +1218,13 @@ aside > .user-corner {
   bottom: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  background: var(--bg);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 0.25rem;
+  border-radius: var(--radius-md);
+  padding: 0.3rem;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg);
   z-index: 10;
 }
 
@@ -972,16 +1232,15 @@ aside > .user-corner {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 0.375rem;
-  padding: 0.45rem 0.6rem;
-  color: var(--fg);
-  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  padding: 0.42rem 0.6rem;
+  color: var(--text-1);
+  font-size: 0.875rem;
   cursor: pointer;
 }
 
 .user-menu button:hover {
-  background: var(--panel);
-  color: var(--accent);
+  background: var(--hover);
 }
 
 /* User info dialog */
@@ -994,7 +1253,7 @@ aside > .user-corner {
 }
 
 .user-info dt {
-  color: var(--muted);
+  color: var(--text-2);
 }
 
 .user-info dd {
@@ -1002,19 +1261,21 @@ aside > .user-corner {
 }
 
 .user-info .unset {
-  color: var(--muted);
+  color: var(--text-3);
   font-style: italic;
 }
 
 .hint {
-  color: var(--muted);
-  font-size: 0.8rem;
+  color: var(--text-2);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.45;
   margin: 0;
 }
 
 .status {
-  color: var(--muted);
-  font-size: 0.85rem;
+  color: var(--text-2);
+  font-size: 0.83rem;
   margin: 0;
 }
 
@@ -1025,18 +1286,19 @@ aside > .user-corner {
 }
 
 .empty {
-  color: var(--muted);
+  color: var(--text-3);
 }
 
 .conflict {
   border: 1px solid var(--danger-border);
   background: var(--danger-bg);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   padding: 1rem;
 }
 
 .conflict h3 {
   margin-top: 0;
+  font-family: var(--font-serif);
 }
 
 .conflict-panes {
@@ -1046,12 +1308,13 @@ aside > .user-corner {
 }
 
 .conflict-panes pre {
-  background: var(--bg);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 0.375rem;
+  border-radius: var(--radius-sm);
   padding: 0.5rem;
   overflow-x: auto;
-  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
 }
 
 .conflict-actions {
@@ -1066,15 +1329,16 @@ aside > .user-corner {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 
 .scenario-table {
   max-height: 13rem;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 0.25rem;
+  background: var(--surface-2);
 }
 
 .scenario-table table {
@@ -1089,7 +1353,7 @@ aside > .user-corner {
 }
 
 .scenario-table th {
-  background: var(--panel);
+  background: var(--surface-1);
 }
 
 .scenario-table th .cell {
@@ -1103,24 +1367,26 @@ aside > .user-corner {
   border: none;
   border-radius: 0;
   background: transparent;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.85rem;
+  padding: 0.32rem 0.5rem;
+  font-size: 0.84rem;
 }
 
 .scenario-table th input {
-  font-weight: 600;
+  font-weight: 550;
 }
 
 /* Var-backed columns are owned by the {var} in the body. */
 .scenario-table th input:read-only {
-  color: var(--accent);
-  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
   font-weight: 500;
 }
 
 .dialog .scenario-table input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+  box-shadow: none;
+  border: none;
 }
 
 .scenario-table .edge {
@@ -1133,11 +1399,11 @@ aside > .user-corner {
 .scenario-table button.ghost {
   border: none;
   background: none;
-  color: var(--muted);
+  color: var(--text-3);
   cursor: pointer;
   padding: 0.15rem 0.4rem;
   font-size: 0.8rem;
-  border-radius: 0.25rem;
+  border-radius: 6px;
 }
 
 .scenario-table button.ghost:hover:not(:disabled) {
@@ -1155,19 +1421,38 @@ aside > .user-corner {
 }
 
 button.table-add {
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--border-strong);
   background: none;
-  color: var(--muted);
-  border-radius: 0.375rem;
+  color: var(--text-2);
+  border-radius: var(--radius-sm);
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
   cursor: pointer;
   align-self: flex-start;
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
 button.table-add:hover {
-  color: var(--accent);
+  color: var(--accent-strong);
   border-color: var(--accent);
+}
+
+/* "+ Add scenario": a quiet dashed row, not a loud button. */
+.add-scenario {
+  padding: 0.55rem 0.9rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.add-scenario:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* Test links (specs/traceability.spec.md): a table of GitHub links to the
@@ -1176,24 +1461,24 @@ button.table-add:hover {
 .scenario-tests {
   margin-top: 0.5rem;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .scenario-tests th,
 .scenario-tests td {
   border: 1px solid var(--border);
-  padding: 0.25rem 0.6rem;
+  padding: 0.28rem 0.6rem;
   text-align: left;
 }
 
 .scenario-tests th {
-  background: var(--panel);
-  color: var(--muted);
-  font-weight: 600;
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-weight: 550;
 }
 
 .scenario-tests a {
-  color: var(--accent);
+  color: var(--accent-strong);
   text-decoration: none;
   word-break: break-all;
 }
@@ -1207,7 +1492,7 @@ button.table-add:hover {
 .dialog .tests-field {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 
 .test-list {
@@ -1227,7 +1512,7 @@ button.table-add:hover {
 }
 
 .test-list a {
-  color: var(--accent);
+  color: var(--accent-strong);
   text-decoration: none;
   word-break: break-all;
 }
@@ -1260,4 +1545,8 @@ button.table-add:hover {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
+}
+
+.dialog input[type="checkbox"] {
+  accent-color: var(--accent);
 }
