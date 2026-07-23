@@ -3,9 +3,10 @@
 // Per specs/app-start.spec.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
-import { rename, rm, stat } from "node:fs/promises";
+import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { writeTextFile } from "./fsx";
 import type { GitScheme } from "./scheme";
 
 export interface SpecDrivenState {
@@ -61,7 +62,7 @@ async function isFile(path: string): Promise<boolean> {
 async function readFrom(path: string): Promise<SpecDrivenState | null> {
   if (!(await isFile(path))) return null;
   try {
-    const parsed = await Bun.file(path).json();
+    const parsed = JSON.parse(await readFile(path, "utf8"));
     return typeof parsed === "object" && parsed !== null ? (parsed as SpecDrivenState) : {};
   } catch {
     return {};
@@ -118,13 +119,13 @@ export async function writeState(
     // migration leaves the old settings recoverable instead of gone.
     const aside = `${legacy}.migrating`;
     await rename(legacy, aside);
-    await Bun.write(local, serialize(state));
+    await writeTextFile(local, serialize(state));
     await rm(aside, { force: true });
     return;
   }
   const home = homeStatePath();
   const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
-  await Bun.write(target, serialize(state));
+  await writeTextFile(target, serialize(state));
 }
 
 export function needsDataRepo(state: SpecDrivenState): boolean {

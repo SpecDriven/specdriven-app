@@ -1,5 +1,6 @@
-import { $ } from "bun";
-import { rename, rm } from "node:fs/promises";
+import { realpath, rename, rm } from "node:fs/promises";
+import { writeTextFile } from "./fsx";
+import { run } from "./run";
 import { gitSchemeFor, schemeArgs } from "./scheme";
 
 export interface PullResult {
@@ -19,15 +20,14 @@ export interface SyncResult {
  * cannot authenticate fails fast instead of hanging the server.
  */
 async function git(repoDir: string, ...args: string[]) {
-  return $`git -C ${repoDir} ${schemeArgs(gitSchemeFor(repoDir))} ${args}`
-    .env({ ...process.env, GIT_TERMINAL_PROMPT: "0" })
-    .quiet()
-    .nothrow();
+  return run("git", ["-C", repoDir, ...schemeArgs(gitSchemeFor(repoDir)), ...args], {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
 }
 
 export async function isGitRepo(repoDir: string): Promise<boolean> {
   const res = await git(repoDir, "rev-parse", "--is-inside-work-tree");
-  return res.exitCode === 0 && res.stdout.toString().trim() === "true";
+  return res.exitCode === 0 && res.stdout.trim() === "true";
 }
 
 /**
@@ -38,9 +38,12 @@ export async function isGitRepo(repoDir: string): Promise<boolean> {
 export async function isRepoRoot(repoDir: string): Promise<boolean> {
   const res = await git(repoDir, "rev-parse", "--show-toplevel");
   if (res.exitCode !== 0) return false;
-  const toplevel = res.stdout.toString().trim();
-  const real = await $`realpath ${repoDir}`.quiet().nothrow();
-  return real.exitCode === 0 && real.stdout.toString().trim() === toplevel;
+  const toplevel = res.stdout.trim();
+  try {
+    return (await realpath(repoDir)) === toplevel;
+  } catch {
+    return false;
+  }
 }
 
 export async function hasUpstream(repoDir: string): Promise<boolean> {
@@ -51,7 +54,7 @@ export async function hasUpstream(repoDir: string): Promise<boolean> {
 async function conflictedFiles(repoDir: string): Promise<string[]> {
   const res = await git(repoDir, "diff", "--name-only", "--diff-filter=U");
   if (res.exitCode !== 0) return [];
-  return res.stdout.toString().split("\n").filter(Boolean);
+  return res.stdout.split("\n").filter(Boolean);
 }
 
 /**
@@ -67,20 +70,20 @@ export async function pull(repoDir: string): Promise<PullResult> {
   }
   const res = await git(repoDir, "pull", "--no-rebase");
   if (res.exitCode === 0) {
-    return { ok: true, conflictedFiles: [], message: res.stdout.toString().trim() };
+    return { ok: true, conflictedFiles: [], message: res.stdout.trim() };
   }
   const conflicts = await conflictedFiles(repoDir);
   return {
     ok: false,
     conflictedFiles: conflicts,
-    message: (res.stderr.toString() + res.stdout.toString()).trim(),
+    message: (res.stderr + res.stdout).trim(),
   };
 }
 
 /** Content of a file on the other side of an in-progress merge (theirs). */
 export async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
   const res = await git(repoDir, "show", `MERGE_HEAD:${relPath}`);
-  return res.exitCode === 0 ? res.stdout.toString() : null;
+  return res.exitCode === 0 ? res.stdout : null;
 }
 
 export async function push(repoDir: string): Promise<SyncResult> {
@@ -91,7 +94,7 @@ export async function push(repoDir: string): Promise<SyncResult> {
   if (res.exitCode === 0) return { pushed: true, message: "pushed" };
   return {
     pushed: false,
-    message: `push failed: ${(res.stderr.toString() + res.stdout.toString()).trim()}`,
+    message: `push failed: ${(res.stderr + res.stdout).trim()}`,
   };
 }
 
@@ -105,7 +108,7 @@ export async function resolveConflict(
   relPath: string,
   content: string,
 ): Promise<SyncResult> {
-  await Bun.write(`${repoDir}/${relPath}`, content);
+  await writeTextFile(`${repoDir}/${relPath}`, content);
   await git(repoDir, "add", relPath);
   const remaining = await conflictedFiles(repoDir);
   if (remaining.length > 0) {
@@ -136,7 +139,7 @@ export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
     return { pushed: false, message: "merge conflict in progress; skipped sync" };
   }
   const status = await git(repoDir, "status", "--porcelain");
-  if (status.exitCode !== 0 || status.stdout.toString().trim() === "") {
+  if (status.exitCode !== 0 || status.stdout.trim() === "") {
     return { pushed: false, message: "no saved changes" };
   }
   await git(repoDir, "add", "-A");
@@ -167,7 +170,7 @@ export async function moveAndPush(
   }
   const mv = await git(repoDir, "mv", fromPath, toPath);
   if (mv.exitCode !== 0) {
-    throw new Error(`git mv failed: ${(mv.stderr.toString() + mv.stdout.toString()).trim()}`);
+    throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
   }
   await git(repoDir, "commit", "-m", message, "--", fromPath, toPath);
   const res = await push(repoDir);
@@ -193,7 +196,7 @@ export async function removeAndPush(
   }
   const rmRes = await git(repoDir, "rm", "-f", relPath);
   if (rmRes.exitCode !== 0) {
-    throw new Error(`git rm failed: ${(rmRes.stderr.toString() + rmRes.stdout.toString()).trim()}`);
+    throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
   }
   await git(repoDir, "commit", "-m", message, "--", relPath);
   const res = await push(repoDir);

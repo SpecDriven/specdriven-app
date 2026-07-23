@@ -1,5 +1,6 @@
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import type { Dirent } from "node:fs";
+import { fileExists, readTextFile, writeTextFile } from "./fsx";
 import {
   pull,
   theirsVersion,
@@ -88,7 +89,7 @@ export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
     entries.map(async (fileName) => {
       let name = "";
       try {
-        name = parseFeature(await Bun.file(`${dataDir}/${fileName}`).text()).name;
+        name = parseFeature(await readFile(`${dataDir}/${fileName}`, "utf8")).name;
       } catch {
         // unreadable (e.g. deleted mid-listing): fall back to the stem
       }
@@ -106,8 +107,7 @@ export async function listFolders(dataDir: string): Promise<string[]> {
 }
 
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
-  const file = Bun.file(`${dataDir}/${safe(fileName)}`);
-  return (await file.exists()) ? file.text() : null;
+  return readTextFile(`${dataDir}/${safe(fileName)}`);
 }
 
 /**
@@ -125,11 +125,11 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
     ? `${folder}/${slugify(featureName)}.feature.md`
     : `${slugify(featureName)}.feature.md`;
   const path = `${dataDir}/${safe(fileName)}`;
-  if (await Bun.file(path).exists()) {
+  if (await fileExists(path)) {
     throw new Error(`Feature file already exists: ${fileName}`);
   }
   if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
-  await Bun.write(path, `# ${featureName}\n`);
+  await writeTextFile(path, `# ${featureName}\n`);
   await commitAndPush(dataDir, fileName, `Create feature: ${featureName}`);
   return fileName;
 }
@@ -195,10 +195,10 @@ export async function moveFeature(
   const base = from.split("/").pop()!;
   const to = folder ? `${folder}/${base}` : base;
   if (to === from) return { fileName: from, message: "already there" };
-  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
+  if (!(await fileExists(`${dataDir}/${from}`))) {
     throw new Error(`Feature file not found: ${from}`);
   }
-  if (await Bun.file(`${dataDir}/${to}`).exists()) {
+  if (await fileExists(`${dataDir}/${to}`)) {
     throw new Error(`Feature file already exists: ${to}`);
   }
   const sync = await moveAndPush(dataDir, from, to, `Move feature: ${from} -> ${to}`);
@@ -223,7 +223,7 @@ export async function renameFeature(
   if (current === null) throw new Error(`Feature file not found: ${file}`);
   const oldName = parseFeature(current).name || titleFromFileName(file);
   if (name === oldName) return { fileName: file, name, message: "feature name unchanged" };
-  await Bun.write(`${dataDir}/${file}`, renameFeatureName(current, name));
+  await writeTextFile(`${dataDir}/${file}`, renameFeatureName(current, name));
   const sync = await commitAndPush(dataDir, file, `Rename feature: ${oldName} -> ${name}`);
   return { fileName: file, name, message: sync.message };
 }
@@ -245,10 +245,10 @@ export async function renameFeatureFile(
   const folder = from.split("/").slice(0, -1).join("/");
   const to = folder ? `${folder}/${stem}.feature.md` : `${stem}.feature.md`;
   if (to === from) return { fileName: from, message: "file name unchanged" };
-  if (!(await Bun.file(`${dataDir}/${from}`).exists())) {
+  if (!(await fileExists(`${dataDir}/${from}`))) {
     throw new Error(`Feature file not found: ${from}`);
   }
-  if (await Bun.file(`${dataDir}/${to}`).exists()) {
+  if (await fileExists(`${dataDir}/${to}`)) {
     throw new Error(`Feature file already exists: ${to}`);
   }
   const sync = await moveAndPush(dataDir, from, to, `Rename file: ${from} -> ${to}`);
@@ -264,7 +264,7 @@ export async function deleteFeature(
   fileName: string,
 ): Promise<{ message: string }> {
   const file = safe(fileName);
-  if (!(await Bun.file(`${dataDir}/${file}`).exists())) {
+  if (!(await fileExists(`${dataDir}/${file}`))) {
     throw new Error(`Feature file not found: ${file}`);
   }
   const sync = await removeAndPush(dataDir, file, `Delete feature: ${file}`);
@@ -292,7 +292,7 @@ export async function saveFeature(
   const name = safe(fileName);
   const proposed = markProposed(content);
   await assertPublishedUnchanged(dataDir, name, proposed);
-  await Bun.write(`${dataDir}/${name}`, proposed);
+  await writeTextFile(`${dataDir}/${name}`, proposed);
   return { status: "saved", content: proposed, message: "saved locally" };
 }
 
@@ -334,7 +334,7 @@ export async function publishFeature(
     const theirs = (await theirsVersion(dataDir, name)) ?? "";
     return { status: "conflict", theirs, ours: published, message: pullResult.message };
   }
-  await Bun.write(`${dataDir}/${name}`, published);
+  await writeTextFile(`${dataDir}/${name}`, published);
   const sync = await commitAndPush(
     dataDir,
     name,
