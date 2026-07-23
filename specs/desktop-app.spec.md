@@ -16,9 +16,11 @@ The desktop app has no meaningful working directory, so it anchors itself in
 the OS application-data directory (`~/Library/Application Support/SpecDriven`
 on macOS) via `SPECDRIVEN_ROOT`:
 
-- Settings follow the usual lookup (specs/app-start.spec.md) and land in
-  `~/.specdriven/settings.json` — shared with the web version, so both see
-  the same data repo.
+- Settings follow the usual lookup (specs/app-start.spec.md) with the
+  app-data directory as the "project root": an existing
+  `~/.specdriven/settings.json` is picked up and written back — shared with
+  the web version, so both see the same data repo. With no settings file
+  anywhere, the desktop app keeps its own under the app-data directory.
 - GitHub data repos are cloned under the app-data directory
   (`.../SpecDriven/repos/<name>`) via `SPECDRIVEN_REPOS_DIR`, instead of the
   web version's sibling-of-the-checkout location.
