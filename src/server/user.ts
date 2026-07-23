@@ -1,4 +1,5 @@
 import { userInfo } from "node:os";
+import { run } from "./run";
 
 // Current user (specs/user-info-settings.spec.md): by default the user on
 // the OS, plus the git identity that authors the app's commits to the data
@@ -14,8 +15,8 @@ export interface CurrentUser {
 }
 
 async function gitConfig(key: string): Promise<string | null> {
-  const out = await Bun.$`git config ${key}`.nothrow().quiet();
-  const value = out.stdout.toString().trim();
+  const out = await run("git", ["config", key]);
+  const value = out.stdout.trim();
   return out.exitCode === 0 && value ? value : null;
 }
 
