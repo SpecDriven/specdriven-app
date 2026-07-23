@@ -1,0 +1,56 @@
+// Automates specs/desktop-app.spec.md: the API route table is matched by a
+// runtime-agnostic matcher so Bun.serve (web) and the app:// protocol
+// (desktop) serve identical routes.
+
+import { describe, expect, test } from "bun:test";
+import { matchApi } from "../src/server/api";
+
+describe("matchApi", () => {
+  test("literal routes match by method", () => {
+    expect(matchApi("GET", "/api/state")).not.toBeNull();
+    expect(matchApi("PUT", "/api/state")).not.toBeNull();
+    expect(matchApi("POST", "/api/reload")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/state")).toBeNull();
+    expect(matchApi("GET", "/api/reload")).toBeNull();
+  });
+
+  test("unknown paths do not match", () => {
+    expect(matchApi("GET", "/api/nope")).toBeNull();
+    expect(matchApi("GET", "/features/quote.feature.md")).toBeNull();
+    expect(matchApi("GET", "/")).toBeNull();
+  });
+
+  test("params bind one decoded segment", () => {
+    const m = matchApi("GET", "/api/features/billing%2Fquote.feature.md");
+    expect(m).not.toBeNull();
+    expect(m!.params).toEqual({ file: "billing/quote.feature.md" });
+  });
+
+  test("an unencoded slash is a different route, not a param", () => {
+    // /api/features/billing/quote… has four segments after /api — no route
+    // has that shape, so a client that forgets encodeURIComponent gets a 404
+    // instead of a mangled file name.
+    expect(matchApi("GET", "/api/features/billing/quote.feature.md")).toBeNull();
+  });
+
+  test("nested feature routes are distinct", () => {
+    const move = matchApi("POST", "/api/features/quote.feature.md/move");
+    const rename = matchApi("POST", "/api/features/quote.feature.md/rename");
+    const renameFile = matchApi("POST", "/api/features/quote.feature.md/rename-file");
+    expect(move).not.toBeNull();
+    expect(rename).not.toBeNull();
+    expect(renameFile).not.toBeNull();
+    expect(move!.handler).not.toBe(rename!.handler);
+    expect(rename!.handler).not.toBe(renameFile!.handler);
+    expect(move!.params).toEqual({ file: "quote.feature.md" });
+  });
+
+  test("segment counts must match exactly", () => {
+    expect(matchApi("GET", "/api/features/quote.feature.md/")).toBeNull();
+    expect(matchApi("GET", "/api")).toBeNull();
+  });
+
+  test("malformed percent-encoding does not match", () => {
+    expect(matchApi("GET", "/api/features/%ZZ")).toBeNull();
+  });
+});
