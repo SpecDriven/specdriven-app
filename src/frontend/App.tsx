@@ -30,6 +30,31 @@ interface Conflict {
   scenario?: { name: string; version: number };
 }
 
+// Appearance (specs/ui.spec.md "Settings"): system, light or dark. The
+// choice lives on this device (localStorage), not in the settings file;
+// index.html applies it before first paint, this keeps it in sync after.
+type ThemePref = "system" | "light" | "dark";
+
+function readThemePref(): ThemePref {
+  try {
+    const t = localStorage.getItem("sd-theme");
+    return t === "light" || t === "dark" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function applyThemePref(pref: ThemePref): void {
+  if (pref === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = pref;
+  try {
+    if (pref === "system") localStorage.removeItem("sd-theme");
+    else localStorage.setItem("sd-theme", pref);
+  } catch {
+    // Storage unavailable (private mode): the choice just won't stick.
+  }
+}
+
 /** index === null means a new scenario being added. */
 interface EditState {
   index: number | null;
@@ -107,6 +132,7 @@ export function App() {
   const [gitSchemeDetected, setGitSchemeDetected] = useState<string | null>(null);
   const [settingsSchemeDraft, setSettingsSchemeDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePref>(readThemePref);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
   // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
@@ -1160,7 +1186,8 @@ export function App() {
       <aside>
         <header>
           <h1>
-            <Logo />
+            <Logo size={28} />
+            <span className="wordmark">SpecDriven</span>
           </h1>
           <span className="repo-name">{dataRepo}</span>
         </header>
@@ -1449,12 +1476,32 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
           <div className="dialog" ref={settingsTrapRef} onClick={(e) => e.stopPropagation()}>
             <h3>Settings</h3>
+            {/* Appearance (specs/ui.spec.md "Settings"): applied right away
+                and remembered on this device, not in the settings file. */}
+            <label>
+              Appearance
+              <select
+                autoFocus
+                value={theme}
+                onChange={(e) => {
+                  const pref = e.target.value as ThemePref;
+                  setTheme(pref);
+                  applyThemePref(pref);
+                }}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <p className="hint">
+              Applied immediately and remembered on this device.
+            </p>
             <label>
               Data reload frequency (seconds)
               <input
                 type="number"
                 min={0}
-                autoFocus
                 value={settingsDraft}
                 onChange={(e) => setSettingsDraft(e.target.value)}
               />

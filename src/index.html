@@ -4,6 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SpecDriven</title>
+    <script>
+      // Theme choice (specs/ui.spec.md "Settings"): applied before first
+      // paint so a dark-theme reload never flashes light. "system" is the
+      // absence of the attribute.
+      try {
+        var t = localStorage.getItem("sd-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
     <link rel="stylesheet" href="./frontend/index.css" />
   </head>
   <body>
