@@ -62,6 +62,13 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - Focus must never reach elements behind the dialog while it is open.
 - On open, focus moves into the dialog; on close, focus returns to the element
   that opened it.
+- Native browser prompts and confirms are never used — creating a feature or
+  folder, renaming a file, and every delete confirmation are in-app dialogs.
+  (The desktop runtime has no `prompt()` at all —
+  specs/desktop-app.spec.md.) Prompts submit on Enter and can't submit
+  empty; delete confirmations carry a solid-red destructive button.
+- Dialogs can stack — a delete confirmation above the scenario edit dialog.
+  Tab cycles only the top dialog, and ESC closes only the top dialog.
 
 # Scenario edit dialog
 
@@ -93,3 +100,24 @@ A settings dialog. Settings are saved to the settings file
 (`.specdriven/settings.json`, specs/app-start.spec.md)
 
 - Data reload frequency
+- Appearance: System, Light or Dark. Applied immediately and remembered on
+  the device (browser/app storage), not in the settings file — theme is a
+  per-device preference, not shared team state. "System" follows the OS.
+
+# Design system
+
+Warm, minimal, Claude-like. All colors flow through CSS tokens in
+`src/frontend/index.css` — components never hardcode a color, so both themes
+come from one token block.
+
+- Surfaces: ivory app canvas, oat sidebar, white cards (light); warm
+  charcoal equivalents (dark).
+- Accent: terracotta. Primary buttons are filled terracotta; secondary
+  buttons are quiet outlines; sidebar actions stay muted.
+- Type: serif display faces for feature/scenario/dialog titles (Source
+  Serif 4), Inter for UI text, JetBrains Mono for code and file names. The
+  fonts ship with the app — no network fetch, so the desktop app renders
+  identically offline.
+- Published scenarios keep their distinct shading: a parchment wash.
+- Focus is always visible: accent rings on fields, focus outlines on
+  controls.

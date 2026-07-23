@@ -6,7 +6,7 @@
 // effective scheme via per-command config, so it works no matter which url
 // a clone was created with.
 
-import { $ } from "bun";
+import { run, which } from "./run";
 
 export type GitScheme = "https" | "ssh" | "gh";
 
@@ -52,7 +52,7 @@ export const PROBE_ENV = {
 };
 
 export function ghCliAvailable(): boolean {
-  return Bun.which("gh") !== null;
+  return which("gh") !== null;
 }
 
 /** Schemes worth probing: gh only when the GitHub CLI is installed. */
@@ -121,15 +121,16 @@ export function discoverScheme(repoDir: string): Promise<GitScheme | null> {
 }
 
 async function probeOrigin(repoDir: string): Promise<GitScheme | null> {
-  const origin = await $`git -C ${repoDir} remote get-url origin`.quiet().nothrow();
-  if (origin.exitCode !== 0 || !GITHUB_REMOTE.test(origin.stdout.toString().trim())) {
+  const origin = await run("git", ["-C", repoDir, "remote", "get-url", "origin"]);
+  if (origin.exitCode !== 0 || !GITHUB_REMOTE.test(origin.stdout.trim())) {
     return null;
   }
   for (const scheme of probeSchemes()) {
-    const res = await $`git -C ${repoDir} ${schemeArgs(scheme)} ls-remote origin HEAD`
-      .env(PROBE_ENV)
-      .quiet()
-      .nothrow();
+    const res = await run(
+      "git",
+      ["-C", repoDir, ...schemeArgs(scheme), "ls-remote", "origin", "HEAD"],
+      { env: PROBE_ENV },
+    );
     if (res.exitCode === 0) return scheme;
   }
   return null;

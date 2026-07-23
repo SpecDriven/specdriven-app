@@ -6,6 +6,7 @@ import type { FeatureListing } from "../server/features";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
 import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
@@ -28,6 +29,31 @@ interface Conflict {
   message: string;
   /** Set when the conflicted publish targeted a single scenario. */
   scenario?: { name: string; version: number };
+}
+
+// Appearance (specs/ui.spec.md "Settings"): system, light or dark. The
+// choice lives on this device (localStorage), not in the settings file;
+// index.html applies it before first paint, this keeps it in sync after.
+type ThemePref = "system" | "light" | "dark";
+
+function readThemePref(): ThemePref {
+  try {
+    const t = localStorage.getItem("sd-theme");
+    return t === "light" || t === "dark" ? t : "system";
+  } catch {
+    return "system";
+  }
+}
+
+function applyThemePref(pref: ThemePref): void {
+  if (pref === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = pref;
+  try {
+    if (pref === "system") localStorage.removeItem("sd-theme");
+    else localStorage.setItem("sd-theme", pref);
+  } catch {
+    // Storage unavailable (private mode): the choice just won't stick.
+  }
 }
 
 /** index === null means a new scenario being added. */
@@ -107,6 +133,7 @@ export function App() {
   const [gitSchemeDetected, setGitSchemeDetected] = useState<string | null>(null);
   const [settingsSchemeDraft, setSettingsSchemeDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [theme, setTheme] = useState<ThemePref>(readThemePref);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
   // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
@@ -114,6 +141,9 @@ export function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userInfoOpen, setUserInfoOpen] = useState(false);
+  // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
+  // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
+  const { modal, modalOpen, prompt, confirm } = useModalPrompts();
 
   const loadFeatures = useCallback(async () => {
     const res = await fetch("/api/features");
@@ -169,7 +199,14 @@ export function App() {
   // highlight through the scenario cards, Enter opens the highlighted one in
   // the dialog. Inert while a dialog is open or while typing in a field.
   useEffect(() => {
-    if (!feature || feature.scenarios.length === 0 || editing || settingsOpen || userInfoOpen)
+    if (
+      !feature ||
+      feature.scenarios.length === 0 ||
+      editing ||
+      settingsOpen ||
+      userInfoOpen ||
+      modalOpen
+    )
       return;
     const count = feature.scenarios.length;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -200,7 +237,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [feature, editing, settingsOpen, userInfoOpen, selectedScenario]);
+  }, [feature, editing, settingsOpen, userInfoOpen, modalOpen, selectedScenario]);
 
   // The dialog's "Add test link" field starts empty each time it opens, with
   // no row left open for ✎ editing (specs/traceability.spec.md).
@@ -442,7 +479,12 @@ export function App() {
   }, []);
 
   const createFeature = async () => {
-    const name = window.prompt("Feature name (use folder/name to create inside a folder):");
+    const name = await prompt({
+      title: "New feature",
+      hint: "Use folder/name to create inside a folder.",
+      placeholder: "billing/Basic Quote",
+      confirmLabel: "Create feature",
+    });
     if (!name) return;
     const res = await fetch("/api/features", {
       method: "POST",
@@ -462,9 +504,11 @@ export function App() {
   // With a folder selected, the new folder is created inside it.
   const createFolder = async () => {
     const parent = selectedFolder;
-    const input = window.prompt(
-      parent ? `Folder name (inside "${parent}"):` : "Folder name (use / for nesting):",
-    );
+    const input = await prompt({
+      title: parent ? `New folder in "${parent}"` : "New folder",
+      hint: parent ? undefined : "Use / for nesting.",
+      confirmLabel: "Create folder",
+    });
     if (!input) return;
     const res = await fetch("/api/folders", {
       method: "POST",
@@ -490,7 +534,12 @@ export function App() {
   // Only empty folders can be deleted (specs/folders.spec.md) — the
   // server refuses otherwise, and the refusal lands in the status line.
   const removeFolder = async (path: string) => {
-    if (!window.confirm(`Delete folder "${path}"?`)) return;
+    const ok = await confirm({
+      title: "Delete folder",
+      body: `Delete "${path}"? Only empty folders can be deleted.`,
+      confirmLabel: "Delete folder",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/folders/${encodeURIComponent(path)}`, { method: "DELETE" });
     const data = await res.json();
     if (res.ok) {
@@ -569,10 +618,12 @@ export function App() {
   // underlying file. The extension stays; a selected feature follows its
   // new file name (and so a new url — old links go stale).
   const renameFile = async (fileName: string) => {
-    const stem = window.prompt(
-      "File name (the .feature.md extension is kept):",
-      fileStem(fileName),
-    );
+    const stem = await prompt({
+      title: "Rename file",
+      hint: "The .feature.md extension is kept.",
+      initial: fileStem(fileName),
+      confirmLabel: "Rename",
+    });
     if (!stem || stem.trim() === fileStem(fileName)) return;
     const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
       method: "POST",
@@ -594,7 +645,12 @@ export function App() {
   // Delete (specs/ui.spec.md "Feature entry menu"): removes the feature file
   // after a confirmation — a `git rm`, committed and pushed on the server.
   const removeFeature = async (f: FeatureListing) => {
-    if (!window.confirm(`Delete feature "${f.name}" (${f.fileName})?`)) return;
+    const ok = await confirm({
+      title: "Delete feature",
+      body: `Delete "${f.name}" (${f.fileName})?`,
+      confirmLabel: "Delete feature",
+    });
+    if (!ok) return;
     const res = await fetch(`/api/features/${encodeURIComponent(f.fileName)}`, {
       method: "DELETE",
     });
@@ -923,7 +979,12 @@ export function App() {
     if (!editing || editing.index === null || !feature || !selected) return;
     const idx = editing.index;
     const { name, version } = editing.scenario;
-    if (!window.confirm(`Delete scenario "${name}" v${version}?`)) return;
+    const ok = await confirm({
+      title: "Delete scenario",
+      body: `Delete "${name}" v${version}?`,
+      confirmLabel: "Delete scenario",
+    });
+    if (!ok) return;
     const next: Feature = {
       ...feature,
       scenarios: feature.scenarios.filter((_, i) => i !== idx),
@@ -1160,7 +1221,8 @@ export function App() {
       <aside>
         <header>
           <h1>
-            <Logo />
+            <Logo size={28} />
+            <span className="wordmark">SpecDriven</span>
           </h1>
           <span className="repo-name">{dataRepo}</span>
         </header>
@@ -1449,12 +1511,32 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
           <div className="dialog" ref={settingsTrapRef} onClick={(e) => e.stopPropagation()}>
             <h3>Settings</h3>
+            {/* Appearance (specs/ui.spec.md "Settings"): applied right away
+                and remembered on this device, not in the settings file. */}
+            <label>
+              Appearance
+              <select
+                autoFocus
+                value={theme}
+                onChange={(e) => {
+                  const pref = e.target.value as ThemePref;
+                  setTheme(pref);
+                  applyThemePref(pref);
+                }}
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <p className="hint">
+              Applied immediately and remembered on this device.
+            </p>
             <label>
               Data reload frequency (seconds)
               <input
                 type="number"
                 min={0}
-                autoFocus
                 value={settingsDraft}
                 onChange={(e) => setSettingsDraft(e.target.value)}
               />
@@ -1724,6 +1806,8 @@ export function App() {
           </div>
         </div>
       )}
+      {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
+      {modal}
     </main>
   );
 }

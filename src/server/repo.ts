@@ -4,9 +4,10 @@
 // (../data-insurance), cloning on first use. Plain names/paths keep working
 // as local directories.
 
-import { $ } from "bun";
 import { resolve } from "node:path";
 import { isRepoRoot } from "./git";
+import { cloneBase } from "./paths";
+import { run } from "./run";
 import {
   chosenScheme,
   discoverScheme,
@@ -45,9 +46,13 @@ export function looksLikeRepoUrl(input: string): boolean {
   return /^(https?:\/\/|git@|(www\.)?github\.com\/)/i.test(input.trim());
 }
 
-/** Local directory a GitHub repo is cloned into: a sibling of the app root. */
+/**
+ * Local directory a GitHub repo is cloned into: a sibling of the app root,
+ * unless SPECDRIVEN_REPOS_DIR points somewhere (the desktop app keeps clones
+ * in its own data directory — specs/desktop-app.spec.md).
+ */
 export function cloneDir(rootDir: string, repoName: string): string {
-  return resolve(rootDir, "..", repoName);
+  return resolve(cloneBase(rootDir), repoName);
 }
 
 /** Local directory a configured data repo resolves to, without cloning. */
@@ -76,15 +81,14 @@ export async function ensureClone(url: string, dir: string): Promise<void> {
   const failures: string[] = [];
   for (const scheme of schemes) {
     const probingEnv = scheme && !chosen;
-    const res = await $`git ${schemeArgs(scheme)} clone ${url} ${dir}`
-      .env(probingEnv ? PROBE_ENV : { ...process.env, GIT_TERMINAL_PROMPT: "0" })
-      .quiet()
-      .nothrow();
+    const res = await run("git", [...schemeArgs(scheme), "clone", url, dir], {
+      env: probingEnv ? PROBE_ENV : { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
     if (res.exitCode === 0) {
       if (scheme) recordDiscoveredScheme(dir, scheme);
       return;
     }
-    const detail = res.stderr.toString().trim() || res.stdout.toString().trim();
+    const detail = res.stderr.trim() || res.stdout.trim();
     failures.push(`Could not clone ${url}${scheme ? ` via ${scheme}` : ""}: ${detail}`);
   }
   throw new Error(failures.join("\n"));
