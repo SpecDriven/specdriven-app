@@ -17,6 +17,11 @@ function focusable(container: HTMLElement): HTMLElement[] {
   );
 }
 
+// Dialogs can stack — a delete confirmation above the scenario edit dialog
+// (specs/ui.spec.md "Dialogs"). Only the top-most trap may handle Tab, or
+// the lower one would keep yanking focus out of the foreground dialog.
+const trapStack: HTMLElement[] = [];
+
 /**
  * specs/ui.spec.md "Dialogs": while a dialog is open, Tab and Shift+Tab only
  * cycle its own fields, wrapping at both ends; focus never reaches the page
@@ -52,6 +57,7 @@ export function useFocusTrap(open: boolean) {
     if (!container) return;
 
     const opener = openerRef.current;
+    trapStack.push(container);
 
     // Fields with autoFocus have already claimed focus by this point; only step
     // in when focus is still outside the dialog.
@@ -62,6 +68,7 @@ export function useFocusTrap(open: boolean) {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Tab") return;
+      if (trapStack[trapStack.length - 1] !== container) return;
       const items = focusable(container);
       if (items.length === 0) {
         e.preventDefault();
@@ -86,6 +93,8 @@ export function useFocusTrap(open: boolean) {
     // Capture phase so the trap wins over any field-level Tab handling.
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
+      const i = trapStack.lastIndexOf(container);
+      if (i !== -1) trapStack.splice(i, 1);
       document.removeEventListener("keydown", onKeyDown, true);
       if (opener?.isConnected) opener.focus();
     };

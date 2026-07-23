@@ -29,6 +29,8 @@
   --danger-fg: #a83a2a;
   --danger-bg: #fbeeea;
   --danger-border: #efcfc4;
+  --danger-solid: #b2402e;
+  --danger-solid-hover: #99341f;
 
   /* Published scenarios (specs/ui.spec.md): a parchment wash — "sealed". */
   --pub-bg: #faf3e3;
@@ -71,6 +73,8 @@
   --danger-fg: #e5806c;
   --danger-bg: #3b2721;
   --danger-border: #5c382e;
+  --danger-solid: #c4543f;
+  --danger-solid-hover: #d1614c;
   --pub-bg: #322e23;
   --pub-border: #575038;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
@@ -852,6 +856,37 @@ button.link:disabled {
 .dialog-actions button.danger:hover:not(:disabled) {
   background: var(--danger-bg);
   border-color: var(--danger-fg);
+}
+
+/* The destructive primary of a delete confirmation (specs/ui.spec.md
+   "Dialogs"): solid red, unmistakable. */
+.dialog-actions button.danger-solid {
+  background: var(--danger-solid);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.dialog-actions button.danger-solid:hover:not(:disabled) {
+  background: var(--danger-solid-hover);
+}
+
+/* Prompt/confirm dialogs: compact, one field or one question. */
+.dialog.modal-dialog {
+  width: min(26rem, 90vw);
+}
+
+.modal-dialog .modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.modal-body {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 /* Scenario edit dialog (specs/ui.spec.md): resizable via the corner handle;
