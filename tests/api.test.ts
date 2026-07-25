@@ -14,6 +14,11 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/reload")).toBeNull();
   });
 
+  test("search route matches GET only (specs/search.spec.md)", () => {
+    expect(matchApi("GET", "/api/search")).not.toBeNull();
+    expect(matchApi("POST", "/api/search")).toBeNull();
+  });
+
   test("unknown paths do not match", () => {
     expect(matchApi("GET", "/api/nope")).toBeNull();
     expect(matchApi("GET", "/features/quote.feature.md")).toBeNull();
