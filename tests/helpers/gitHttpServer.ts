@@ -2,9 +2,16 @@
 // repos over a loopback port, so pushes and pulls exercise the transport a
 // real remote uses instead of a local path. Test-only — the server side
 // shells out to git, which dev machines and CI have.
+//
+// It resolves that binary once, at import, and spawns it by absolute path:
+// this is the *remote*, and a test that empties PATH to prove the app works
+// without a local git must not take the server down with it.
 
 import { join, normalize } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { which } from "../../src/server/run";
+
+const GIT = which("git") ?? "git";
 
 export interface GitHttpServer {
   /** Base url; a repo directory <root>/<name> is served at <url>/<name>. */
@@ -38,7 +45,7 @@ export function serveRepos(rootDir: string): GitHttpServer {
         const dir = repoDir(rootDir, refs[1]!);
         if (!SERVICES.has(service) || !dir) return new Response("bad request", { status: 400 });
         const proc = Bun.spawn(
-          ["git", service.slice(4), "--stateless-rpc", "--advertise-refs", dir],
+          [GIT, service.slice(4), "--stateless-rpc", "--advertise-refs", dir],
           { stdout: "pipe", stderr: "ignore" },
         );
         const advertised = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
@@ -65,7 +72,7 @@ export function serveRepos(rootDir: string): GitHttpServer {
         if (req.headers.get("content-encoding") === "gzip") {
           body = new Uint8Array(gunzipSync(body));
         }
-        const proc = Bun.spawn(["git", service.slice(4), "--stateless-rpc", dir], {
+        const proc = Bun.spawn([GIT, service.slice(4), "--stateless-rpc", dir], {
           stdin: "pipe",
           stdout: "pipe",
           stderr: "ignore",

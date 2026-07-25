@@ -6,7 +6,7 @@
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
@@ -17,13 +17,16 @@ import {
   ghAccount,
   ghAvailable,
   ghSignedIn,
+  jsGitAvailable,
   normalizeGitEngine,
   pull,
+  resolveConflict,
   setGitEngine,
+  theirsVersion,
 } from "../src/server/git";
 import { FAKE_GH_ACCOUNT, installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
-import { git } from "./helpers/fixtures";
+import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
 let gh: FakeGh | null = null;
@@ -48,10 +51,10 @@ function withGh(options?: Parameters<typeof installFakeGh>[0]): FakeGh {
   return gh;
 }
 
-test("normalizeGitEngine accepts cli and gh only", () => {
+test("normalizeGitEngine accepts the three engine names only", () => {
   expect(normalizeGitEngine("cli")).toBe("cli");
   expect(normalizeGitEngine("gh")).toBe("gh");
-  expect(normalizeGitEngine("js")).toBeNull(); // the retired built-in engine
+  expect(normalizeGitEngine("js")).toBe("js");
   expect(normalizeGitEngine("https")).toBeNull(); // older scheme values
   expect(normalizeGitEngine(undefined)).toBeNull();
 });
@@ -67,8 +70,19 @@ test("the default engine follows what is installed; the setting overrides it", (
 
   setGitEngine("cli");
   expect(currentEngine()).toBe("cli");
+  setGitEngine("js");
+  expect(currentEngine()).toBe("js");
   setGitEngine(null);
   expect(currentEngine()).toBe("gh");
+});
+
+// Scenario: the bundled engine is the default when no git is installed.
+test("with no git binary the bundled engine takes over by default", () => {
+  process.env.PATH = "/nonexistent";
+  expect(cliGitAvailable()).toBe(false);
+  expect(ghAvailable()).toBe(false);
+  expect(jsGitAvailable()).toBe(true); // it ships with the app
+  expect(currentEngine()).toBe("js");
 });
 
 test("gh reports its sign-in state and account", async () => {
@@ -169,13 +183,128 @@ test("choosing the GitHub CLI engine without gh installed is a clear error", asy
   expect(ghAvailable()).toBe(false);
   setGitEngine("gh");
   expect(pull(root)).rejects.toThrow(
-    "GitHub CLI selected but no gh found — switch Git engine to System git in Settings",
+    "GitHub CLI selected but no gh found — switch Git engine in Settings",
   );
 });
 
-test("without any git binary every operation fails with one clear error", async () => {
+// An engine named in the settings file but no longer installed stays an
+// error rather than silently becoming the bundled one.
+test("choosing system git without a git binary is a clear error", async () => {
   expect(cliGitAvailable()).toBe(true); // sanity: the preloaded PATH has git
   process.env.PATH = "/nonexistent";
   expect(cliGitAvailable()).toBe(false);
-  expect(pull(root)).rejects.toThrow("No git found — install git to work with repositories");
+  setGitEngine("cli");
+  expect(pull(root)).rejects.toThrow(
+    "System git selected but no git found — switch Git engine to Built-in in Settings",
+  );
+});
+
+// Scenario: the bundled engine works without git installed. The fixture is
+// built with the real binary, then PATH is emptied — everything after this
+// point is the app's own git.
+test("the bundled engine clones, commits and pushes with no git on PATH", async () => {
+  const { a, originDir, server } = await twoClones(root);
+  const noGit = join(root, "no-git-clone");
+  process.env.PATH = "/nonexistent";
+  expect(cliGitAvailable()).toBe(false);
+  setGitEngine("js");
+
+  await clone(`${server.url}/origin.git`, noGit);
+  expect(await Bun.file(join(noGit, "seed.feature.md")).exists()).toBe(true);
+
+  await Bun.write(join(noGit, "added.feature.md"), "# Added\n");
+  const res = await commitAndPush(noGit, "added.feature.md", "Add one");
+  expect(res).toEqual({ pushed: true, message: "committed and pushed" });
+
+  // The other clone, and the real git binary, see what the engine pushed.
+  process.env.PATH = realPath!;
+  const log = await git(originDir, "log", "-1", "--pretty=%s");
+  expect(log.stdout.toString().trim()).toBe("Add one");
+  await git(a, "pull");
+  expect(await Bun.file(join(a, "added.feature.md")).exists()).toBe(true);
+  stopServers();
+});
+
+// specs/git-operations.spec.md: the signed-in account authors the commits on
+// the bundled engine too. Signed out, the repository's own git config does.
+test("with no sign-in the bundled engine leaves the repo's git identity alone", async () => {
+  const repo = join(root, "local");
+  await $`git init -b main ${repo}`.quiet();
+  await git(repo, "config", "user.email", "repo@example.com");
+  await git(repo, "config", "user.name", "Repo Config");
+  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+
+  setGitEngine("js");
+  const res = await commitAndPush(repo, "one.feature.md", "Add one");
+  expect(res.pushed).toBe(false); // no upstream on a local-only repo
+  const author = await git(repo, "log", "-1", "--format=%an <%ae>");
+  expect(author.stdout.toString().trim()).toBe("Repo Config <repo@example.com>");
+});
+
+// Below the repository's own config comes the user's global one: choosing
+// this engine must not stop honouring the identity the rest of the machine's
+// git already uses.
+test("the bundled engine falls back to the global git identity", async () => {
+  const repo = join(root, "local");
+  await $`git init -b main ${repo}`.quiet(); // no user.* in this repo's config
+  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  const globalConfig = join(root, "gitconfig");
+  await Bun.write(
+    globalConfig,
+    "# a comment\n[core]\n\teditor = vi\n[user]\n\tname = Global Person\n\temail = global@example.com\n",
+  );
+  const before = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = globalConfig;
+
+  setGitEngine("js");
+  await commitAndPush(repo, "one.feature.md", "Add one");
+  process.env.GIT_CONFIG_GLOBAL = before;
+
+  const author = await git(repo, "log", "-1", "--format=%an <%ae>");
+  expect(author.stdout.toString().trim()).toBe("Global Person <global@example.com>");
+});
+
+// With no git config anywhere — the machine this engine exists for — a
+// commit must still succeed rather than fail for want of an author.
+test("the bundled engine still commits with no git identity configured at all", async () => {
+  const repo = join(root, "local");
+  await $`git init -b main ${repo}`.quiet();
+  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  const before = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = join(root, "no-such-gitconfig");
+
+  setGitEngine("js");
+  await commitAndPush(repo, "one.feature.md", "Add one");
+  process.env.GIT_CONFIG_GLOBAL = before;
+
+  const author = await git(repo, "log", "-1", "--format=%an");
+  expect(author.stdout.toString().trim()).toBe(userInfo().username);
+});
+
+// The bundled engine reads and writes the same on-disk format, so the real
+// binary and the app agree about a repository either of them touched.
+test("a merge conflict raised by the bundled engine is a real git conflict", async () => {
+  const { a, b } = await twoClones(root);
+  setGitEngine("js");
+
+  await Bun.write(join(b, "seed.feature.md"), "# Seed\n\nfrom b\n");
+  await git(b, "add", ".");
+  await git(b, "commit", "-m", "b edit");
+  await git(b, "push");
+
+  await Bun.write(join(a, "seed.feature.md"), "# Seed\n\nfrom a\n");
+  await commitAndPush(a, "seed.feature.md", "a edit");
+
+  const res = await pull(a);
+  expect(res.ok).toBe(false);
+  expect(res.conflictedFiles).toEqual(["seed.feature.md"]);
+  // The real binary sees the same unmerged state the app reported.
+  const status = await git(a, "status", "--porcelain");
+  expect(status.stdout.toString()).toContain("UU seed.feature.md");
+  expect(await theirsVersion(a, "seed.feature.md")).toBe("# Seed\n\nfrom b\n");
+
+  const resolved = await resolveConflict(a, "seed.feature.md", "# Seed\n\nmerged\n");
+  expect(resolved.pushed).toBe(true);
+  expect((await git(a, "status", "--porcelain")).stdout.toString().trim()).toBe("");
+  stopServers();
 });

@@ -10,6 +10,7 @@ without them fails fast with the sign-in hint instead of hanging on a
 credential prompt. Public repos clone without signing in.
 
 The clone runs on the selected git engine: `gh repo clone` on the GitHub
-CLI engine, `git clone` on the system-git one. Anything that is not a
-github.com repository url — an ssh remote, a local path — is cloned by git
-either way.
+CLI engine, `git clone` on the system-git one, and the app's own clone on
+the built-in one. Anything that is not a github.com repository url — an
+ssh remote, a local path — is cloned by git itself on either of the two
+engines that have one.

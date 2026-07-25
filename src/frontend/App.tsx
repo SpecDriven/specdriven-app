@@ -180,7 +180,8 @@ export function App() {
   /** Why the last Save was blocked by the tests field, if it was. */
   const [testsError, setTestsError] = useState<string | null>(null);
   // Git engine (specs/git-operations.spec.md): the GitHub CLI (the default
-  // wherever gh is installed) or plain system git.
+  // wherever gh is installed), plain system git, or the bundled JavaScript
+  // one — which is always available, so it needs no availability flag.
   const [gitEngine, setGitEngineState] = useState<string | null>(null);
   const [gitEngineEffective, setGitEngineEffective] = useState<string>("cli");
   const [cliGitAvailable, setCliGitAvailable] = useState(false);
@@ -1031,7 +1032,9 @@ export function App() {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
     // No stored choice is "auto": whichever engine this machine can run.
-    setSettingsEngineDraft(gitEngine === "cli" || gitEngine === "gh" ? gitEngine : "auto");
+    setSettingsEngineDraft(
+      gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
+    );
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsError(null);
     setAuthStatus(null);
@@ -1972,8 +1975,8 @@ export function App() {
               Each scenario ends with a table of GitHub links to its automated tests, when it
               has any.
             </p>
-            {/* Git engine (specs/git-operations.spec.md): both run the git
-                binary; the engine picks who supplies GitHub credentials. */}
+            {/* Git engine (specs/git-operations.spec.md): which one carries
+                the operations out and who supplies GitHub credentials. */}
             <label>
               Git engine
               <select
@@ -1989,13 +1992,16 @@ export function App() {
                 <option value="cli" disabled={!cliGitAvailable}>
                   System git{cliGitAvailable ? "" : " — not installed"}
                 </option>
+                {/* Bundled with the app, so never disabled. */}
+                <option value="js">Built-in (no git needed)</option>
               </select>
             </label>
             <p className="hint">
-              Both engines run the git binary on this machine.{" "}
               {gitEngineEffective === "gh"
-                ? "The GitHub CLI is in use: gh supplies the credentials and clones."
-                : "System git authenticates with the account signed in below, or with git's own credentials."}
+                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
+                : gitEngineEffective === "js"
+                  ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
+                  : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
             </p>
             {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
                 when that engine is in effect, else the device flow. */}
@@ -2052,7 +2058,7 @@ export function App() {
             </div>
             <p className="hint">
               Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
-              sign-in on system git. Local folders work without either.
+              sign-in on the system git and built-in ones. Local folders work without either.
             </p>
             {settingsError && <p className="error">{settingsError}</p>}
             <div className="dialog-actions">
