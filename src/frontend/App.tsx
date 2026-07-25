@@ -92,6 +92,18 @@ interface EditState {
   scenario: Scenario;
 }
 
+/**
+ * Parse a feature file with its name resolved the way the page shows it — the
+ * `# <name>` heading, or the file stem when the heading is missing
+ * (specs/ui.spec.md "Main page"). Resolving it here and not only at render
+ * time matters: every save serializes this object back to the file, and a
+ * blank name would write a nameless `# ` heading over the real one.
+ */
+function parseFeatureFile(content: string, fileName: string): Feature {
+  const parsed = parseFeature(content);
+  return parsed.name ? parsed : { ...parsed, name: titleFromFileName(fileName) };
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -538,7 +550,7 @@ export function App() {
     const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
     if (res.ok) {
       const data = await res.json();
-      const parsed = parseFeature(data.content);
+      const parsed = parseFeatureFile(data.content, file);
       setSelected(file);
       setFeature(parsed);
       let missingScenario: string | null = null;
@@ -989,7 +1001,7 @@ export function App() {
     });
     const data = await res.json();
     if (res.ok) {
-      setFeature(parseFeature(data.content));
+      setFeature(parseFeatureFile(data.content, selected));
       setDirty(false);
       // A published scenario's dialog can only have changed its test links
       // (specs/traceability.spec.md) — there is nothing left to publish.
@@ -1224,7 +1236,7 @@ export function App() {
     });
     const data = await res.json();
     if (res.ok) {
-      setFeature(parseFeature(data.content));
+      setFeature(parseFeatureFile(data.content, selected));
       setDirty(false);
       setStatus(`Deleted scenario "${name}" v${version}.`);
       flashSaved();

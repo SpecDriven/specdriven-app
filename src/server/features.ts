@@ -11,6 +11,7 @@ import {
 } from "./git";
 import {
   parseFeature,
+  featureTextError,
   markPublished,
   markProposed,
   markScenarioPublished,
@@ -129,7 +130,7 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
     throw new Error(`Feature file already exists: ${fileName}`);
   }
   if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
-  await writeTextFile(path, `# ${featureName}\n`);
+  await writeFeatureFile(dataDir, safe(fileName), `# ${featureName}\n`);
   await commitAndPush(dataDir, fileName, `Create feature: ${featureName}`);
   return fileName;
 }
@@ -223,7 +224,7 @@ export async function renameFeature(
   if (current === null) throw new Error(`Feature file not found: ${file}`);
   const oldName = parseFeature(current).name || titleFromFileName(file);
   if (name === oldName) return { fileName: file, name, message: "feature name unchanged" };
-  await writeTextFile(`${dataDir}/${file}`, renameFeatureName(current, name));
+  await writeFeatureFile(dataDir, file, renameFeatureName(current, name));
   const sync = await commitAndPush(dataDir, file, `Rename feature: ${oldName} -> ${name}`);
   return { fileName: file, name, message: sync.message };
 }
@@ -291,8 +292,9 @@ export async function saveFeature(
 ): Promise<SaveResult> {
   const name = safe(fileName);
   const proposed = markProposed(content);
+  assertFeatureText(name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
-  await writeTextFile(`${dataDir}/${name}`, proposed);
+  await writeFeatureFile(dataDir, name, proposed);
   return { status: "saved", content: proposed, message: "saved locally" };
 }
 
@@ -328,13 +330,16 @@ export async function publishFeature(
 ): Promise<PublishResult> {
   const name = safe(fileName);
   const published = markForPublish(content, scenario);
+  // Checked before the pull: content we would refuse to write must not leave
+  // a merge behind for the user to resolve.
+  assertFeatureText(name, published);
   await assertPublishedUnchanged(dataDir, name, published);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
     const theirs = (await theirsVersion(dataDir, name)) ?? "";
     return { status: "conflict", theirs, ours: published, message: pullResult.message };
   }
-  await writeTextFile(`${dataDir}/${name}`, published);
+  await writeFeatureFile(dataDir, name, published);
   const sync = await commitAndPush(
     dataDir,
     name,
@@ -356,10 +361,14 @@ export async function resolveFeatureConflict(
   content: string,
   scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
+  const name = safe(fileName);
   const resolved = scenario
     ? markScenarioPublished(content, scenario.name, scenario.version)
     : markPublished(content);
-  const sync = await gitResolve(dataDir, safe(fileName), resolved);
+  // A hand-edited resolution is user-typed text like any other: it goes
+  // through the same check before it reaches the repo.
+  assertFeatureText(name, resolved);
+  const sync = await gitResolve(dataDir, name, resolved);
   return { status: "published", message: sync.message };
 }
 
@@ -380,6 +389,22 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
       throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);
     }
   }
+}
+
+/**
+ * The one door into the data repo for feature content: the text is checked
+ * against the file format before it lands on disk, so a malformed feature —
+ * a lost `# <name>` heading, junk above it — is an error the user sees rather
+ * than a file the next sync commits and pushes.
+ */
+async function writeFeatureFile(dataDir: string, fileName: string, text: string): Promise<void> {
+  assertFeatureText(fileName, text);
+  await writeTextFile(`${dataDir}/${fileName}`, text);
+}
+
+function assertFeatureText(fileName: string, text: string): void {
+  const problem = featureTextError(text);
+  if (problem) throw new Error(`Refusing to write ${fileName} — ${problem}`);
 }
 
 /** Segments that would escape or hide inside the data repo are rejected. */
