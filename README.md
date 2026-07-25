@@ -1,19 +1,24 @@
-# SpecDriven
+# SpecdrivenApp
 
-An application to support Enterprise Spec-driven Development — see [PRD.md](PRD.md)
+Desktop application in support of Enterprise Spec-driven Development — see [PRD.md](PRD.md)
 for the problem it solves and [ARCHITECTURE.md](ARCHITECTURE.md) for the shape of
 the solution.
 
-The app is a local React UI served by [Bun](https://bun.sh); specs live as
+A local Electron / React app built by [Bun](https://bun.sh); specs live as
 markdown feature files in a separate **data repo** on GitHub, which the app
-clones and git-pulls on a timer.
+clones and git-pulls on a timer. One backend serves it two ways: a web app via
+`Bun.serve()` for development testing, and a packaged Electron desktop app that serves the same routes
+over its `app://` protocol and registers `specdriven://` deep links with the
+OS.
 
 # Development
 
 ## Prerequisites
 
 - [Bun](https://bun.sh) — currently developed against 1.3.14. It is the runtime,
-  the bundler, and the test runner; there is no Node.js, npm, vite, or jest here.
+  the bundler, and the test runner; there is no npm, vite, or jest here, and no
+  Node.js to install. (The server code does stick to Node APIs so it can also
+  run inside Electron's main process — on the Node that Electron bundles.)
 - Access to the data repo you intend to open. Git itself is built in (a bundled
   JavaScript implementation over HTTPS); a system `git` binary is optional and
   only used when selected in Settings or as automatic fallback. Running the
@@ -28,13 +33,15 @@ bun install
 ## Run the app
 
 ```sh
-bun run dev     # bun --hot src/index.ts — HMR on, restarts on change
-bun run start   # no hot reload
+bun run dev            # bun --hot src/index.ts — HMR on, restarts on change
+bun run start          # no hot reload
+bun run dev:electron   # desktop shell; expects `bun run dev` in another terminal
 ```
 
 The server listens on <http://localhost:3000>; set `PORT` to move it. Setting
 `NODE_ENV=production` disables HMR and serves the pre-bundled frontend, which is
-what the compiled binary does.
+what the compiled binary does. `dev:electron` points the desktop window at the
+running dev server, so edits hot-reload inside the desktop shell too.
 
 On first start the app asks for a data repo, because no settings file names one
 yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; it
@@ -57,7 +64,10 @@ bun test tests/parser.test.ts # one file
 ```
 
 Tests are colocated under [tests/](tests) and run against the server and frontend
-modules directly — no browser, no fixtures server.
+modules directly — no browser. The git tests do start a server: a loopback git
+smart-HTTP fixture ([tests/helpers/gitHttpServer.ts](tests/helpers/gitHttpServer.ts))
+serves bare origin repos to both engines, since the built-in engine cannot talk
+to local-path remotes.
 
 ## Build a binary
 
@@ -86,6 +96,20 @@ fetches exactly these and verifies them against `SHASUMS256.txt`. The baseline
 Linux build exists for CPUs without AVX2, where the default x64 build dies with
 an illegal instruction. See [scripts/build.ts](scripts/build.ts).
 
+## Build the desktop app
+
+```sh
+bun run build:desktop   # -> release/SpecDriven-<version>-arm64.dmg (+ .zip)
+```
+
+Three steps: bundle the frontend into static files (served over the `app://`
+protocol), bundle the Electron main process for Node, then hand both to
+electron-builder. See [scripts/build-desktop.ts](scripts/build-desktop.ts); add
+`x64` to the arch lists under `"build"` in package.json for Intel artifacts.
+The bundle registers the `specdriven://` url scheme with the OS, so spec links
+launch or focus the installed app. Builds are unsigned for now — first launch
+needs Gatekeeper approval.
+
 ## Distribution
 
 Users install with:
@@ -106,12 +130,14 @@ Asset hosting and versioning are not wired up yet —
 ## Layout
 
 ```
-src/index.ts        Bun.serve() — routes, static frontend, reload scheduler
-src/server/         features, parser, git/ (js + cli engines), auth, repo, state, user, reload
-src/frontend/       React app (App.tsx, markdown editor, scenario table, routing)
+src/index.ts        web entry — Bun.serve() over the shared route table
+src/server/         api (routes shared by web + desktop), features, parser, search,
+                    git/ (js + cli engines), auth, github, tokenStore, repo, state, user, reload
+src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
+src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
 specs/*.spec.md     specifications for this app's own behavior
 tests/              bun test suite
-scripts/build.ts    host + cross-compile builds
+scripts/            build.ts (binaries), build-desktop.ts (dmg), dev-electron.ts
 roadmap/            work not started yet
 ```
 
