@@ -148,6 +148,26 @@ export function sortScenarios(scenarios: Scenario[]): Scenario[] {
   return [...scenarios].sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version);
 }
 
+/**
+ * Why a text is not a well-formed feature file, or null when it is
+ * (specs/crud-feature.spec.md "Feature file format"): it opens with the
+ * feature heading — `# ` followed by the feature name — and nothing above it.
+ * Reading stays lenient (a file with no heading still lists, named after its
+ * stem); writing does not, so a bug upstream cannot commit a broken file.
+ */
+export function featureTextError(text: string): string | null {
+  const first = text.split("\n").find((line) => line.trim() !== "");
+  if (first === undefined) return "the file is empty";
+  if (FEATURE_RE.test(first)) return null;
+  if (/^#\s*$/.test(first)) return "the feature heading has no name";
+  return `it must start with the feature heading "# <name>", not ${JSON.stringify(clip(first))}`;
+}
+
+/** Enough of a line to recognize it in an error message. */
+function clip(line: string): string {
+  return line.length > 40 ? `${line.slice(0, 40)}…` : line;
+}
+
 export function parseFeature(text: string): Feature {
   let name = "";
   const preamble: string[] = [];
