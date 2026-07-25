@@ -39,6 +39,21 @@ interface Conflict {
   scenario?: { name: string; version: number };
 }
 
+/** Signed-in GitHub account as reported by /api/state (never the token). */
+interface AuthInfo {
+  signedIn: boolean;
+  login?: string;
+  name?: string | null;
+  email?: string | null;
+}
+
+/** A device flow in progress: the code to enter and where to enter it. */
+interface DeviceFlow {
+  userCode: string;
+  verificationUri: string;
+  interval: number;
+}
+
 // Appearance (specs/ui.spec.md "Settings"): system, light or dark. The
 // choice lives on this device (localStorage), not in the settings file;
 // index.html applies it before first paint, this keeps it in sync after.
@@ -143,13 +158,17 @@ export function App() {
   const [testEditDraft, setTestEditDraft] = useState("");
   /** Why the last Save was blocked by the tests field, if it was. */
   const [testsError, setTestsError] = useState<string | null>(null);
-  // Git scheme (specs/git-operations.spec.md): how git authenticates to
-  // GitHub. null = auto-discover by probing (https, ssh, gh); the detected
-  // value is what probing landed on.
-  const [gitScheme, setGitScheme] = useState<string | null>(null);
-  const [gitSchemeDetected, setGitSchemeDetected] = useState<string | null>(null);
-  const [settingsSchemeDraft, setSettingsSchemeDraft] = useState("auto");
+  // Git engine (specs/git-operations.spec.md): the built-in JavaScript git
+  // (default, no installation needed) or the system git binary.
+  const [gitEngine, setGitEngineState] = useState<string | null>(null);
+  const [cliGitAvailable, setCliGitAvailable] = useState(false);
+  const [settingsEngineDraft, setSettingsEngineDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  // GitHub sign-in (specs/git-operations.spec.md): device flow — the user
+  // enters the shown code at github.com/login/device while we poll.
+  const [auth, setAuth] = useState<AuthInfo | null>(null);
+  const [deviceFlow, setDeviceFlow] = useState<DeviceFlow | null>(null);
+  const [authStatus, setAuthStatus] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePref>(readThemePref);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
@@ -188,8 +207,9 @@ export function App() {
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
       }
-      setGitScheme(state.gitScheme ?? null);
-      setGitSchemeDetected(state.gitSchemeDetected ?? null);
+      setGitEngineState(state.gitEngine ?? null);
+      setCliGitAvailable(Boolean(state.cliGitAvailable));
+      setAuth(state.auth ?? null);
       if (state.user) setUser(state.user);
       if (!state.needsDataRepo) {
         await loadFeatures();
@@ -953,11 +973,79 @@ export function App() {
   const openSettings = () => {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
-    setSettingsSchemeDraft(gitScheme ?? "auto");
+    // Both "auto" (no choice) and an explicit "js" mean the built-in engine.
+    setSettingsEngineDraft(gitEngine === "cli" ? "cli" : "auto");
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsError(null);
+    setAuthStatus(null);
     setSettingsOpen(true);
   };
+
+  // GitHub sign-in (specs/git-operations.spec.md): start the device flow,
+  // show the code, and poll until GitHub reports a decision. The poll
+  // lives in an effect so closing the dialog stops it.
+  const startSignIn = async () => {
+    setAuthStatus(null);
+    const res = await fetch("/api/auth/github/start", { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      setDeviceFlow({
+        userCode: data.userCode,
+        verificationUri: data.verificationUri,
+        interval: data.interval || 5,
+      });
+    } else {
+      setAuthStatus(data.error ?? "Could not start GitHub sign-in");
+    }
+  };
+
+  const refreshUser = async () => {
+    const state = await (await fetch("/api/state")).json();
+    if (state.user) setUser(state.user);
+  };
+
+  const signOutGitHub = async () => {
+    await fetch("/api/auth/github", { method: "DELETE" });
+    setAuth({ signedIn: false });
+    await refreshUser();
+  };
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      setDeviceFlow(null);
+      setAuthStatus(null);
+    }
+  }, [settingsOpen]);
+
+  useEffect(() => {
+    if (!deviceFlow) return;
+    let stopped = false;
+    const id = setInterval(async () => {
+      const res = await fetch("/api/auth/github/poll", { method: "POST" });
+      const data = await res.json();
+      if (stopped) return;
+      if (!res.ok) {
+        setDeviceFlow(null);
+        setAuthStatus(data.error ?? "GitHub sign-in failed");
+        return;
+      }
+      if (data.status === "authorized") {
+        setDeviceFlow(null);
+        setAuth({ signedIn: true, ...data.user });
+        void refreshUser();
+      } else if (data.status === "denied") {
+        setDeviceFlow(null);
+        setAuthStatus("Sign-in was denied on GitHub.");
+      } else if (data.status === "expired") {
+        setDeviceFlow(null);
+        setAuthStatus("The sign-in code expired — try again.");
+      }
+    }, deviceFlow.interval * 1000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [deviceFlow]);
 
   // Settings are saved to the settings file (specs/ui.spec.md).
   const saveSettings = async () => {
@@ -977,7 +1065,7 @@ export function App() {
       body: JSON.stringify({
         reloadFrequencySeconds: Math.floor(n),
         scenarioPreviewLines: Math.floor(lines),
-        gitScheme: settingsSchemeDraft,
+        gitEngine: settingsEngineDraft,
         showTestLinks: settingsTestLinksDraft,
       }),
     });
@@ -986,8 +1074,8 @@ export function App() {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
       setShowTestLinks(data.showTestLinks !== false);
-      setGitScheme(data.gitScheme ?? null);
-      setGitSchemeDetected(data.gitSchemeDetected ?? null);
+      setGitEngineState(data.gitEngine ?? null);
+      setCliGitAvailable(Boolean(data.cliGitAvailable));
       setSettingsOpen(false);
     } else {
       setSettingsError(data.error ?? "Could not save settings");
@@ -1758,26 +1846,59 @@ export function App() {
               Each scenario ends with a table of GitHub links to its automated tests, when it
               has any.
             </p>
-            {/* Git scheme (specs/git-operations.spec.md): https, ssh or gh;
-                auto-discovery probes them in that order. */}
+            {/* Git engine (specs/git-operations.spec.md): the built-in
+                JavaScript git or the system git binary; the built-in engine
+                falls back to system git when it cannot handle an operation. */}
             <label>
-              Git scheme
+              Git engine
               <select
-                value={settingsSchemeDraft}
-                onChange={(e) => setSettingsSchemeDraft(e.target.value)}
+                value={settingsEngineDraft}
+                onChange={(e) => setSettingsEngineDraft(e.target.value)}
               >
-                <option value="auto">
-                  Auto-discover
-                  {gitScheme === null && gitSchemeDetected ? ` (using ${gitSchemeDetected})` : ""}
+                <option value="auto">Built-in (recommended)</option>
+                <option value="cli" disabled={!cliGitAvailable}>
+                  System git{cliGitAvailable ? "" : " — not installed"}
                 </option>
-                <option value="https">https</option>
-                <option value="ssh">ssh</option>
-                <option value="gh">gh (GitHub CLI)</option>
               </select>
             </label>
             <p className="hint">
-              How git authenticates to GitHub for clone, pull and push. Auto-discover probes
-              https, then ssh, then gh.
+              Built-in needs no git installation. System git uses the git binary on this
+              machine.
+            </p>
+            {/* GitHub sign-in (specs/git-operations.spec.md): device flow. */}
+            <div className="auth-section">
+              <span className="auth-title">GitHub account</span>
+              {auth?.signedIn ? (
+                <div className="auth-row">
+                  <span>
+                    Signed in as <strong>{auth.login}</strong>
+                  </span>
+                  <button className="secondary" onClick={signOutGitHub}>
+                    Sign out
+                  </button>
+                </div>
+              ) : deviceFlow ? (
+                <div className="auth-device">
+                  <p>
+                    Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
+                    <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
+                      {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
+                    </a>
+                  </p>
+                  <p className="hint">Waiting for GitHub…</p>
+                </div>
+              ) : (
+                <div className="auth-row">
+                  <button className="secondary" onClick={startSignIn}>
+                    Sign in with GitHub
+                  </button>
+                </div>
+              )}
+              {authStatus && <p className="error">{authStatus}</p>}
+            </div>
+            <p className="hint">
+              Publishing to GitHub uses your account over HTTPS on either engine. Local
+              folders work without signing in.
             </p>
             {settingsError && <p className="error">{settingsError}</p>}
             <div className="dialog-actions">
@@ -1796,13 +1917,16 @@ export function App() {
             <dl className="user-info">
               <dt>OS user</dt>
               <dd>{user?.username ?? "unknown"}</dd>
-              <dt>Git name</dt>
+              <dt>GitHub account</dt>
+              <dd>{user?.login ?? <span className="unset">not signed in</span>}</dd>
+              <dt>Name</dt>
               <dd>{user?.name ?? <span className="unset">not set</span>}</dd>
-              <dt>Git email</dt>
+              <dt>Email</dt>
               <dd>{user?.email ?? <span className="unset">not set</span>}</dd>
             </dl>
             <p className="hint">
-              Commits to the data repo are authored with this git identity.
+              Commits to the data repo are authored with this identity — the signed-in
+              GitHub account, or the system git identity when signed out.
             </p>
             <div className="dialog-actions">
               <button autoFocus onClick={() => setUserInfoOpen(false)}>
