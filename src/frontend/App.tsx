@@ -1,10 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent } from "react";
-import { parseFeature, serializeFeature, sortScenarios, titleFromFileName } from "../server/parser";
+import {
+  parseFeature,
+  serializeFeature,
+  slugify,
+  sortScenarios,
+  titleFromFileName,
+} from "../server/parser";
 import type { Feature, Scenario } from "../server/parser";
 import type { FeatureListing } from "../server/features";
+import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
+import { SearchIcon } from "./SearchIcon";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -94,6 +102,15 @@ export function App() {
   const [treeMenuFile, setTreeMenuFile] = useState(false);
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  // Full-text search (specs/search.spec.md): while the query is non-empty
+  // the sidebar tree is replaced by ranked results.
+  const [query, setQuery] = useState("");
+  /** null until a search for the current session has completed. */
+  const [searchResults, setSearchResults] = useState<SearchResultItem[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  /** Result row the ↑/↓ highlight is on. */
+  const [activeResult, setActiveResult] = useState(0);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
   /** Draft for the inline file-name editor; null while not editing. */
@@ -342,6 +359,71 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedFolder, editing, settingsOpen, userMenuOpen, userInfoOpen, treeMenu]);
+
+  // Search as the user types, debounced (specs/search.spec.md); the
+  // AbortController keeps a stale response from overwriting a newer query.
+  useEffect(() => {
+    const q = query.trim();
+    setActiveResult(0);
+    if (!q) {
+      setSearchResults(null);
+      setSearchError(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setSearchResults(data.results);
+          setSearchError(null);
+        } else {
+          setSearchResults([]);
+          setSearchError(data.error ?? "Search failed");
+        }
+      } catch {
+        // Aborted by a newer keystroke or unmount; anything else (server
+        // gone mid-typing) leaves the previous results standing.
+      }
+    }, 200);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  // specs/search.spec.md: "/" and Cmd/Ctrl+F focus the search field from
+  // anywhere — except while a dialog is open or typing in another field.
+  useEffect(() => {
+    if (editing || settingsOpen || userInfoOpen || modalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey;
+      const find =
+        e.key.toLowerCase() === "f" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
+      if (!slash && !find) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement ||
+        (t instanceof HTMLElement && t.isContentEditable)
+      )
+        return;
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [editing, settingsOpen, userInfoOpen, modalOpen]);
+
+  // Keep the ↑/↓ highlight visible while it walks the result list.
+  useEffect(() => {
+    document.querySelector(".search-result.active")?.scrollIntoView({ block: "nearest" });
+  }, [activeResult]);
 
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
   const settingsTrapRef = useFocusTrap(settingsOpen);
@@ -1032,6 +1114,29 @@ export function App() {
       return next;
     });
 
+  /** Open a search hit exactly like its deep link (specs/search.spec.md). */
+  const openResult = (r: SearchResultItem) => {
+    setSelectedFolder(null);
+    void openFeature(r.fileName, {
+      push: true,
+      scenario: r.scenario
+        ? { slug: slugify(r.scenario.name), version: r.scenario.version }
+        : null,
+    });
+  };
+
+  const resultHref = (r: SearchResultItem) =>
+    r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
+
+  /** Snippet text with the matched terms wrapped in <mark>. */
+  const markSnippet = (snippet: string, terms: string[]) => {
+    const escaped = terms.filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (escaped.length === 0) return snippet;
+    // Split on the terms with a capture group: odd indices are the matches.
+    const parts = snippet.split(new RegExp(`(${escaped.join("|")})`, "gi"));
+    return parts.map((part, i) => (i % 2 === 1 ? <mark key={i}>{part}</mark> : part));
+  };
+
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => (
     <div key={f.fileName} className="tree-row">
@@ -1226,38 +1331,119 @@ export function App() {
           </h1>
           <span className="repo-name">{dataRepo}</span>
         </header>
+        {/* Search field (specs/search.spec.md): top-left, under the header
+            so the macOS drag region above it stays draggable. */}
+        <div className="sidebar-search">
+          <SearchIcon />
+          <input
+            ref={searchRef}
+            type="text"
+            placeholder="Search specs"
+            aria-label="Search specs"
+            enterKeyHint="search"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setQuery("");
+                e.currentTarget.blur();
+              } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                if (!searchResults || searchResults.length === 0) return;
+                e.preventDefault();
+                const max = searchResults.length - 1;
+                setActiveResult((i) =>
+                  e.key === "ArrowDown" ? Math.min(i + 1, max) : Math.max(i - 1, 0),
+                );
+              } else if (e.key === "Enter") {
+                const r = searchResults?.[activeResult];
+                if (r) openResult(r);
+              }
+            }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="search-clear"
+              aria-label="Clear search"
+              onClick={() => {
+                setQuery("");
+                searchRef.current?.focus();
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
           <button onClick={createFeature}>+ New feature</button>
         </div>
         {loadError && <p className="error">{loadError}</p>}
-        {/* Folder tree (specs/folders.spec.md): folders are drop targets
-            for drag-moving features; the tree background is the top level. */}
-        <div
-          className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
-          onClick={(e) => {
-            // A click on the bare background deselects the folder, so the
-            // next "+ New folder" creates at the top level again.
-            if (e.target === e.currentTarget) setSelectedFolder(null);
-          }}
-          onDragOver={(e) => {
-            if (dragging === null) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDropTarget("");
-          }}
-          onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
-          onDrop={(e) => {
-            if (dragging === null) return;
-            e.preventDefault();
-            void moveTo(dragging, "");
-          }}
-        >
-          {renderTree(buildTree(folders, features), 0)}
-          {features.length === 0 && folders.length === 0 && (
-            <p className="empty">No feature files yet</p>
-          )}
-        </div>
+        {query.trim() ? (
+          /* Ranked results take the tree's slot while a query is active
+             (specs/search.spec.md); clearing the query restores the tree. */
+          <div className="search-results" role="listbox" aria-label="Search results">
+            {searchError && <p className="error">{searchError}</p>}
+            {(searchResults ?? []).map((r, i) => (
+              <a
+                key={`${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`}
+                href={resultHref(r)}
+                role="option"
+                aria-selected={i === activeResult}
+                className={`search-result${i === activeResult ? " active" : ""}`}
+                onClick={(e) => spaClick(e, () => openResult(r))}
+                onMouseEnter={() => setActiveResult(i)}
+              >
+                <span className="search-result-title">
+                  {r.featureName}
+                  {r.scenario && (
+                    <span className="crumb">
+                      {" "}
+                      › {r.scenario.name} v{r.scenario.version}
+                    </span>
+                  )}
+                </span>
+                {r.snippet && (
+                  <span className="search-result-snippet">
+                    {markSnippet(r.snippet, r.terms)}
+                  </span>
+                )}
+              </a>
+            ))}
+            {searchResults !== null && !searchError && searchResults.length === 0 && (
+              <p className="empty">No matches for "{query.trim()}"</p>
+            )}
+          </div>
+        ) : (
+          /* Folder tree (specs/folders.spec.md): folders are drop targets
+             for drag-moving features; the tree background is the top level. */
+          <div
+            className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
+            onClick={(e) => {
+              // A click on the bare background deselects the folder, so the
+              // next "+ New folder" creates at the top level again.
+              if (e.target === e.currentTarget) setSelectedFolder(null);
+            }}
+            onDragOver={(e) => {
+              if (dragging === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDropTarget("");
+            }}
+            onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
+            onDrop={(e) => {
+              if (dragging === null) return;
+              e.preventDefault();
+              void moveTo(dragging, "");
+            }}
+          >
+            {renderTree(buildTree(folders, features), 0)}
+            {features.length === 0 && folders.length === 0 && (
+              <p className="empty">No feature files yet</p>
+            )}
+          </div>
+        )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">

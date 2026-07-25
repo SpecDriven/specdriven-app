@@ -38,6 +38,7 @@ import {
 } from "./features";
 import type { ScenarioTarget } from "./features";
 import { parseFeature } from "./parser";
+import { searchSpecs } from "./search";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -228,6 +229,18 @@ const getFeatures = withDataDir(async (dir) =>
   json({ features: await listFeatures(dir), folders: await listFolders(dir) }),
 );
 
+// Full-text search (specs/search.spec.md): ranked hits over feature
+// names/descriptions and scenario names/bodies, each with a snippet
+// around its first match. An empty query is no results, not an error.
+const getSearch = withDataDir(async (dir, req) => {
+  const url = new URL(req.url);
+  const q = url.searchParams.get("q") ?? "";
+  const rawLimit = Number(url.searchParams.get("limit"));
+  const limit =
+    Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 50) : 20;
+  return json({ query: q, results: await searchSpecs(dir, q, limit) });
+});
+
 const postFeatures = withDataDir(async (dir, req) => {
   const body = (await req.json()) as { name?: string };
   try {
@@ -354,6 +367,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/reload", postReload],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
+  ["GET", "/api/search", getSearch],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

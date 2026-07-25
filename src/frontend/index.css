@@ -275,6 +275,112 @@ aside header h1 {
   flex: 1;
 }
 
+/* Sidebar search (specs/search.spec.md): magnifier icon inside the field's
+   left edge, ✕ clear button inside its right. */
+.sidebar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-search .search-icon {
+  position: absolute;
+  left: 0.6rem;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.42rem 1.7rem 0.42rem 1.9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.845rem;
+}
+
+.sidebar-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.search-clear {
+  position: absolute;
+  right: 0.3rem;
+  padding: 0.1rem 0.35rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+
+.search-clear:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+/* Search results (specs/search.spec.md): ranked rows in the tree's sidebar
+   slot — same flex so the user corner stays pinned to the bottom. */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-height: 4rem;
+}
+
+.search-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--text-1);
+}
+
+.search-result:hover {
+  background: var(--hover);
+}
+
+.search-result.active {
+  background: var(--accent-soft);
+}
+
+.search-result-title {
+  font-size: 0.845rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-title .crumb {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.search-result-snippet {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search-result-snippet mark {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
 /* Folder tree (specs/folders.spec.md). The tree fills the sidebar so
    its background doubles as the top-level drop zone. */
 .tree {
