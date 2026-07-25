@@ -219,6 +219,48 @@ test("publishFeature with a scenario target is version-specific", async () => {
   expect(text).toContain("## Basic v2 [published]");
 });
 
+// specs/crud-feature.spec.md "Feature file format": content that is not a
+// well-formed feature file never reaches the data repo — the file on disk is
+// left exactly as it was, so there is nothing for the next sync to push.
+describe("content is validated before it is written to the data repo", () => {
+  const GOOD = "# Quote\n\n## Basic v1 [published]\n\nbody\n";
+  const BROKEN: Record<string, string> = {
+    "the heading lost its name": "# \n\n## Basic v1 [published]\n\nbody\n",
+    "text sits above the heading": "git diff# Quote\n\n## Basic v1 [published]\n\nbody\n",
+    "there is no feature heading": "## Basic v1 [published]\n\nbody\n",
+    "the file is empty": "",
+  };
+
+  beforeEach(async () => {
+    await createFeature(root, "Quote");
+    await publishFeature(root, "quote.feature.md", GOOD);
+  });
+
+  for (const [why, content] of Object.entries(BROKEN)) {
+    test(`saveFeature refuses content where ${why}`, async () => {
+      expect(saveFeature(root, "quote.feature.md", content)).rejects.toThrow(
+        "Refusing to write quote.feature.md",
+      );
+      expect(await readFeature(root, "quote.feature.md")).toBe(GOOD);
+    });
+
+    test(`publishFeature refuses content where ${why}`, async () => {
+      expect(publishFeature(root, "quote.feature.md", content)).rejects.toThrow(
+        "Refusing to write quote.feature.md",
+      );
+      expect(await readFeature(root, "quote.feature.md")).toBe(GOOD);
+    });
+  }
+
+  // The bug this guards against: a feature whose name was lost round-tripped
+  // through parse → serialize, prepending one more nameless `# ` per save.
+  test("a save cannot append a second feature heading", async () => {
+    expect(saveFeature(root, "quote.feature.md", `# \n\n${GOOD}`)).rejects.toThrow(
+      "Refusing to write",
+    );
+  });
+});
+
 test("publishFeature rejects a scenario target that is not in the content", async () => {
   await createFeature(root, "Quote");
   expect(

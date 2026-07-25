@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import {
+  featureTextError,
   parseFeature,
   serializeFeature,
   markPublished,
@@ -31,6 +32,24 @@ test("titleFromFileName derives a display name from the file stem", () => {
   expect(titleFromFileName("quote-policy.feature.md")).toBe("Quote Policy");
   expect(titleFromFileName("legacy.feature")).toBe("Legacy");
   expect(titleFromFileName("a.feature.md")).toBe("A");
+});
+
+// specs/crud-feature.spec.md "Feature file format": a feature file opens with
+// `# ` followed by the feature name, and nothing above it.
+test("featureTextError accepts a well-formed feature file", () => {
+  expect(featureTextError(SAMPLE)).toBeNull();
+  expect(featureTextError("# Onboard Employee\n")).toBeNull();
+  expect(featureTextError("\n\n# Onboard Employee\n")).toBeNull();
+  expect(featureTextError("# Onboard Employee")).toBeNull();
+});
+
+test("featureTextError names what is wrong with a malformed feature file", () => {
+  expect(featureTextError("")).toBe("the file is empty");
+  expect(featureTextError("\n \n")).toBe("the file is empty");
+  expect(featureTextError("# \n\n## Basic v1\n")).toBe("the feature heading has no name");
+  expect(featureTextError("git diff# Quote Policy\n")).toContain('"git diff# Quote Policy"');
+  expect(featureTextError("## Basic v1\n\nbody\n")).toContain("must start with");
+  expect(featureTextError("#Onboard Employee\n")).toContain("must start with");
 });
 
 test("parses feature name, description, and versioned scenarios", () => {
