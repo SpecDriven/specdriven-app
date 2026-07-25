@@ -107,11 +107,13 @@ test("reload frequency round-trips through the settings file", async () => {
   expect(state.reloadFrequencySeconds).toBe(30);
 });
 
-// specs/git-operations.spec.md: the chosen git engine is a setting in
-// the settings file; absent means the default (built-in).
+// specs/git-operations.spec.md: the chosen git engine is a setting in the
+// settings file; absent means the default (gh wherever it is installed).
 test("git engine round-trips through the settings file", async () => {
   await writeState({ dataRepo: "data", gitEngine: "cli" }, dir);
   expect((await readState(dir)).gitEngine).toBe("cli");
+  await writeState({ dataRepo: "data", gitEngine: "gh" }, dir);
+  expect((await readState(dir)).gitEngine).toBe("gh");
   await writeState({ dataRepo: "data" }, dir);
   expect((await readState(dir)).gitEngine).toBeUndefined();
 });

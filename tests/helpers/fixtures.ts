@@ -1,8 +1,7 @@
 // Shared git fixtures: a bare origin served over smart-HTTP (see
-// gitHttpServer.ts) plus clones made from the http url, so the exact same
-// fixture exercises both git engines — the built-in engine cannot talk to
-// local-path remotes. Setup and verification shell out to CLI git, which
-// test machines have; only the shipped app must not require it.
+// gitHttpServer.ts) plus clones made from the http url, so pushes and pulls
+// go over the same transport a real remote uses rather than a local path.
+// Setup and verification shell out to git directly.
 
 import { $ } from "bun";
 import { join } from "node:path";
@@ -27,8 +26,8 @@ export interface TwoClones {
 
 /**
  * A bare origin (served over http) plus two clones a and b, so pulls and
- * pushes hit real transport machinery on either engine. Callers must stop
- * the returned server (an afterEach calling stopServers is simplest).
+ * pushes hit real transport machinery. Callers must stop the returned server
+ * (an afterEach calling stopServers is simplest).
  */
 export async function twoClones(
   root: string,

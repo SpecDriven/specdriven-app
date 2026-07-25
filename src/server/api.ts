@@ -14,6 +14,9 @@ import { resolveDataRepo } from "./repo";
 import {
   cliGitAvailable,
   currentEngine,
+  ghAccount,
+  ghAvailable,
+  ghSignedIn,
   normalizeGitEngine,
   setGitEngine,
 } from "./git";
@@ -58,8 +61,8 @@ export const reloader = createReloadScheduler(async () => {
 export async function applyStartupState(): Promise<void> {
   const state = await readState(getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
-  // Git engine (specs/git-operations.spec.md): built-in JS git by default,
-  // system git when chosen in Settings.
+  // Git engine (specs/git-operations.spec.md): the GitHub CLI when this
+  // machine has one, or whichever engine Settings names.
   setGitEngine(normalizeGitEngine(state.gitEngine));
 }
 
@@ -70,24 +73,35 @@ function json(body: unknown, status = 200): Response {
 /**
  * Git-engine fields for /api/state (specs/git-operations.spec.md): the
  * engine chosen in Settings (null = default), the engine actually in
- * effect, and whether a system git binary exists (the cli option is only
- * offered when it does).
+ * effect, and which binaries exist — each engine is only offered when its
+ * own is installed.
  */
 function gitEngineFields(state: SpecDrivenState) {
   return {
     gitEngine: normalizeGitEngine(state.gitEngine),
     gitEngineEffective: currentEngine(),
     cliGitAvailable: cliGitAvailable(),
+    ghAvailable: ghAvailable(),
   };
 }
 
-/** Signed-in GitHub account for /api/state; never includes the token. */
+/**
+ * GitHub accounts for /api/state; never includes a token. `auth` is the
+ * app's own device-flow sign-in, `gh` what the GitHub CLI reports — the
+ * Settings dialog shows both, since either can be the one that authenticates.
+ */
 async function authFields() {
   const auth = await getAuth();
+  const gh = ghAvailable() ? await ghAccount() : null;
   return {
     auth: auth
       ? { signedIn: true, login: auth.login, name: auth.name, email: auth.email }
       : { signedIn: false as const },
+    gh: {
+      available: ghAvailable(),
+      signedIn: ghAvailable() ? await ghSignedIn() : false,
+      login: gh?.login ?? null,
+    },
   };
 }
 
@@ -163,16 +177,19 @@ const putState: Handler = async (req) => {
     );
   }
   const state = await readState(getAppRoot());
-  // Git engine (specs/git-operations.spec.md): "js" (built-in) or "cli"
+  // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI) or "cli"
   // (system git); "auto" clears the choice back to the default. Applied
   // before a dataRepo change so a first clone already uses the new engine.
   if (body.gitEngine !== undefined) {
     const engine = normalizeGitEngine(body.gitEngine);
     if (engine === null && body.gitEngine !== "auto" && body.gitEngine !== null) {
-      return json({ error: "gitEngine must be js, cli or auto" }, 400);
+      return json({ error: "gitEngine must be cli, gh or auto" }, 400);
     }
     if (engine === "cli" && !cliGitAvailable()) {
-      return json({ error: "the cli engine needs git installed" }, 400);
+      return json({ error: "the system git engine needs git installed" }, 400);
+    }
+    if (engine === "gh" && !ghAvailable()) {
+      return json({ error: "the GitHub CLI engine needs gh installed" }, 400);
     }
     if (engine) state.gitEngine = engine;
     else delete state.gitEngine;

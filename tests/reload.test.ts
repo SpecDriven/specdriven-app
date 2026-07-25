@@ -12,11 +12,14 @@ import {
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
 import { writeState } from "../src/server/state";
+import { installFakeGh } from "./helpers/binPath";
+import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers } from "./helpers/fixtures";
 import { serveRepos } from "./helpers/gitHttpServer";
 
 let dir: string;
 let home: string;
+let fakeGh: FakeGh | null = null;
 const realHome = process.env.SPECDRIVEN_HOME;
 
 beforeEach(async () => {
@@ -29,6 +32,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stopServers();
+  fakeGh?.restore();
+  fakeGh = null;
   setGitEngine(null);
   await rm(dir, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
@@ -86,9 +91,10 @@ test("setting the scheduler to 0 stops it", async () => {
 
 // The reload tick (pull + commit/push) runs on both git engines
 // (specs/git-operations.spec.md), against a smart-HTTP-served origin.
-for (const engine of ["js", "cli"] as GitEngine[]) {
+for (const engine of ["cli", "gh"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
+      if (engine === "gh") fakeGh = installFakeGh();
       setGitEngine(engine);
     });
 

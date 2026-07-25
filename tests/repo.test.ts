@@ -11,11 +11,14 @@ import {
   ensureClone,
   resolveDataRepo,
 } from "../src/server/repo";
-import { engineFor, setGitEngine } from "../src/server/git";
+import { currentEngine, setGitEngine } from "../src/server/git";
+import { installFakeGh } from "./helpers/binPath";
+import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers } from "./helpers/fixtures";
 import { serveRepos } from "./helpers/gitHttpServer";
 
 let root: string;
+let fakeGh: FakeGh | null = null;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-repo-"));
@@ -23,6 +26,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stopServers();
+  fakeGh?.restore();
+  fakeGh = null;
   setGitEngine(null);
   delete process.env.SPECDRIVEN_GITHUB_URL;
   delete process.env.SPECDRIVEN_REPOS_DIR;
@@ -121,15 +126,11 @@ async function seededOrigin(at = "origin.git"): Promise<string> {
   return origin;
 }
 
-// A local-path origin cannot be reached by the built-in engine — the facade
-// falls back to system git (specs/git-operations.spec.md), so pre-existing
-// setups keep working.
 test("ensureClone clones on first use and reuses an existing clone", async () => {
   const origin = await seededOrigin();
   const dir = join(root, "clone");
   await ensureClone(origin, dir);
   expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
-  expect(engineFor(dir)).toBe("cli"); // pinned by the fallback
   // second call is a no-op on the pre-existing clone
   await ensureClone(origin, dir);
   expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
@@ -141,18 +142,18 @@ test("ensureClone surfaces clone failures (no access / no such repo)", async () 
   );
 });
 
-// specs/git-operations.spec.md: a GitHub data repo url is cloned over
-// smart-HTTP by the built-in engine — no git installation involved.
-test("resolveDataRepo clones a GitHub url with the built-in engine", async () => {
+// specs/git-operations.spec.md: a data repo url is cloned over smart-HTTP by
+// the system-git engine, and the clone is where the configured repo resolves.
+test("resolveDataRepo clones a repo url on the system-git engine", async () => {
   await seededOrigin("test/origin.git");
   const server = serveRepos(root);
   process.env.SPECDRIVEN_GITHUB_URL = server.url;
   process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
   try {
+    expect(currentEngine()).toBe("cli"); // no gh on the tests' PATH
     const dir = await resolveDataRepo("https://github.com/test/origin", root);
     expect(dir).toBe(join(root, "repos", "origin"));
     expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
-    expect(engineFor(dir)).toBe("js"); // no fallback needed over http
     // reuse without re-cloning
     expect(await resolveDataRepo("https://github.com/test/origin", root)).toBe(dir);
   } finally {
@@ -160,24 +161,15 @@ test("resolveDataRepo clones a GitHub url with the built-in engine", async () =>
   }
 });
 
-// Clones from the old ssh-scheme era: the app-managed clone's origin is
-// rewritten to https once, so both engines can keep talking to GitHub.
-test("ensureClone rewrites an ssh-form origin to https", async () => {
+// specs/git-operations.spec.md: on the GitHub CLI engine the clone that backs
+// a configured data repo is `gh repo clone`, so it carries gh's credentials.
+test("resolveDataRepo clones through gh on the GitHub CLI engine", async () => {
   const origin = await seededOrigin();
-  const dir = join(root, "clone");
-  await ensureClone(origin, dir); // makes the clone (system git fallback)
-  await git(dir, "remote", "set-url", "origin", "git@github.com:owner/data.git");
-  await ensureClone("https://github.com/owner/data", dir);
-  const url = await git(dir, "remote", "get-url", "origin");
-  expect(url.stdout.toString().trim()).toBe("https://github.com/owner/data.git");
-});
-
-// A non-GitHub origin is left untouched by the migration.
-test("ensureClone leaves non-GitHub origins alone", async () => {
-  const origin = await seededOrigin();
-  const dir = join(root, "clone");
-  await ensureClone(origin, dir);
-  await ensureClone(origin, dir);
-  const url = await git(dir, "remote", "get-url", "origin");
-  expect(url.stdout.toString().trim()).toBe(origin);
+  fakeGh = installFakeGh({ origin });
+  setGitEngine("gh");
+  process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
+  const dir = await resolveDataRepo("https://github.com/test/origin", root);
+  expect(dir).toBe(join(root, "repos", "origin"));
+  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(fakeGh.calls()).toContain("repo clone");
 });
