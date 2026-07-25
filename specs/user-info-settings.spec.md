@@ -12,10 +12,14 @@ the server reports it via `/api/state`.
   "User info" and "Settings". Settings opens the existing Settings dialog
   (which moved here from the old corner button).
 - ESC or a click elsewhere closes the menu.
-- "User info" opens a dialog showing the OS user and the git identity
-  (user.name / user.email from git config) — the identity that authors the
-  app's commits to the data repo. A missing git identity shows "not set".
-- Initials come from the git name when set, otherwise from the OS user name.
+- "User info" opens a dialog showing the OS user, the signed-in GitHub
+  account, and the name/email that author the app's commits to the data
+  repo — the GitHub identity when signed in
+  (specs/git-operations.spec.md), else the system git identity
+  (user.name / user.email from git config). Missing values show "not
+  set"; no GitHub account shows "not signed in".
+- Initials come from the identity name when set, otherwise from the OS
+  user name.
 
 ## Scenario: see the current user
 
@@ -31,12 +35,22 @@ the server reports it via `/api/state`.
 ## Scenario: view user info
 
 - When: the user picks "User info" from the menu
-- Then: a dialog shows the OS user and the git name and email used for
-  commits to the data repo
+- Then: a dialog shows the OS user, the GitHub account, and the name and
+  email used for commits to the data repo
 
-## Git scheme [https | ssh | gh]
+## Git engine [built-in | system git]
 
-- Logged in user uses one of the 3 schemes [https | ssh | gh]
-- Support choosing a scheme in the settings dialog box
-- Auto-discover current scheme by probing
-  - order: https, ssh, gh
+- The Settings dialog offers the Git engine: `Built-in (recommended)` or
+  `System git` (specs/git-operations.spec.md)
+- `System git` is disabled when no git binary is installed
+- The Settings dialog holds the GitHub account section: "Sign in with
+  GitHub" starts the device flow; signed in, it shows the account and a
+  "Sign out" button
+
+## Scenario: sign in from settings
+
+- When: the user clicks "Sign in with GitHub" in Settings
+- Then: the dialog shows the one-time code and a link to
+  github.com/login/device
+- and once the user authorizes there, the dialog shows
+  "Signed in as <login>"

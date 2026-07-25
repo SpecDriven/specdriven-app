@@ -19,6 +19,16 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/search")).toBeNull();
   });
 
+  // GitHub sign-in routes (specs/git-operations.spec.md): device-flow
+  // start and poll, plus sign-out.
+  test("auth routes match by method", () => {
+    expect(matchApi("POST", "/api/auth/github/start")).not.toBeNull();
+    expect(matchApi("POST", "/api/auth/github/poll")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/auth/github")).not.toBeNull();
+    expect(matchApi("GET", "/api/auth/github")).toBeNull();
+    expect(matchApi("POST", "/api/auth/github")).toBeNull();
+  });
+
   test("unknown paths do not match", () => {
     expect(matchApi("GET", "/api/nope")).toBeNull();
     expect(matchApi("GET", "/features/quote.feature.md")).toBeNull();

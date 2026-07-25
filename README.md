@@ -14,7 +14,10 @@ clones and git-pulls on a timer.
 
 - [Bun](https://bun.sh) — currently developed against 1.3.14. It is the runtime,
   the bundler, and the test runner; there is no Node.js, npm, vite, or jest here.
-- `git`, and access to the data repo you intend to open
+- Access to the data repo you intend to open. Git itself is built in (a bundled
+  JavaScript implementation over HTTPS); a system `git` binary is optional and
+  only used when selected in Settings or as automatic fallback. Running the
+  test suite does require `git` (fixtures are built with it).
 
 ## Install dependencies
 
@@ -37,8 +40,9 @@ On first start the app asks for a data repo, because no settings file names one
 yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; it
 is cloned into a sibling directory of this repo (`../data-insurance`). A plain
 relative path to an existing local clone works too. The same file also holds the
-reload interval, the scenario preview length, the git scheme, and the test-links
-toggle — all editable from the Settings dialog.
+reload interval, the scenario preview length, the git engine, and the test-links
+toggle — all editable from the Settings dialog, which also holds the GitHub
+sign-in (device flow) used to authenticate pushes.
 
 Settings are read from `./.specdriven/settings.json` (git-ignored, per-checkout)
 and fall back to `~/.specdriven/settings.json`, so one settings file can serve
@@ -103,7 +107,7 @@ Asset hosting and versioning are not wired up yet —
 
 ```
 src/index.ts        Bun.serve() — routes, static frontend, reload scheduler
-src/server/         features, parser, git, repo, scheme, state, user, reload
+src/server/         features, parser, git/ (js + cli engines), auth, repo, state, user, reload
 src/frontend/       React app (App.tsx, markdown editor, scenario table, routing)
 specs/*.spec.md     specifications for this app's own behavior
 tests/              bun test suite

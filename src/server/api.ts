@@ -10,15 +10,14 @@ import {
   normalizeShowTestLinks,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import { dataRepoDir, resolveDataRepo } from "./repo";
-import { isRepoRoot } from "./git";
+import { resolveDataRepo } from "./repo";
 import {
-  discoverScheme,
-  ghCliAvailable,
-  normalizeGitScheme,
-  setGitScheme,
-} from "./scheme";
-import type { GitScheme } from "./scheme";
+  cliGitAvailable,
+  currentEngine,
+  normalizeGitEngine,
+  setGitEngine,
+} from "./git";
+import { getAuth, pollDeviceFlow, signOut, startDeviceFlow } from "./auth";
 import { getCurrentUser } from "./user";
 import { getAppRoot } from "./paths";
 import {
@@ -59,9 +58,9 @@ export const reloader = createReloadScheduler(async () => {
 export async function applyStartupState(): Promise<void> {
   const state = await readState(getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
-  // Git scheme (specs/git-operations.spec.md): apply the chosen scheme to
-  // every git command; unset means auto-discover by probing on first use.
-  setGitScheme(normalizeGitScheme(state.gitScheme));
+  // Git engine (specs/git-operations.spec.md): built-in JS git by default,
+  // system git when chosen in Settings.
+  setGitEngine(normalizeGitEngine(state.gitEngine));
 }
 
 function json(body: unknown, status = 200): Response {
@@ -69,19 +68,27 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Git-scheme fields for /api/state (specs/git-operations.spec.md): the
- * scheme chosen in Settings (null = auto-discover), plus the scheme
- * auto-discovery found by probing the existing clone. A GET never clones —
- * without a local clone the detected scheme is simply unknown.
+ * Git-engine fields for /api/state (specs/git-operations.spec.md): the
+ * engine chosen in Settings (null = default), the engine actually in
+ * effect, and whether a system git binary exists (the cli option is only
+ * offered when it does).
  */
-async function gitSchemeFields(state: SpecDrivenState) {
-  const gitScheme = normalizeGitScheme(state.gitScheme);
-  let detected: GitScheme | null = null;
-  if (!gitScheme && !needsDataRepo(state)) {
-    const dir = dataRepoDir(state.dataRepo!, getAppRoot());
-    if (await isRepoRoot(dir)) detected = await discoverScheme(dir);
-  }
-  return { gitScheme, gitSchemeDetected: detected };
+function gitEngineFields(state: SpecDrivenState) {
+  return {
+    gitEngine: normalizeGitEngine(state.gitEngine),
+    gitEngineEffective: currentEngine(),
+    cliGitAvailable: cliGitAvailable(),
+  };
+}
+
+/** Signed-in GitHub account for /api/state; never includes the token. */
+async function authFields() {
+  const auth = await getAuth();
+  return {
+    auth: auth
+      ? { signedIn: true, login: auth.login, name: auth.name, email: auth.email }
+      : { signedIn: false as const },
+  };
 }
 
 type Params = Record<string, string>;
@@ -114,7 +121,8 @@ async function stateFields(state: SpecDrivenState) {
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
-    ...(await gitSchemeFields(state)),
+    ...gitEngineFields(state),
+    ...(await authFields()),
   };
 }
 
@@ -136,40 +144,39 @@ const putState: Handler = async (req) => {
     dataRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
-    gitScheme?: string | null;
+    gitEngine?: string | null;
     showTestLinks?: boolean;
   };
   if (
     body.dataRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
-    body.gitScheme === undefined &&
+    body.gitEngine === undefined &&
     body.showTestLinks === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitScheme or showTestLinks is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine or showTestLinks is required",
       },
       400,
     );
   }
   const state = await readState(getAppRoot());
-  // Git scheme (specs/git-operations.spec.md): https, ssh or gh;
-  // "auto" clears the choice so the scheme is re-discovered by
-  // probing. Applied before a dataRepo change so a first clone
-  // already follows the new scheme.
-  if (body.gitScheme !== undefined) {
-    const scheme = normalizeGitScheme(body.gitScheme);
-    if (scheme === null && body.gitScheme !== "auto" && body.gitScheme !== null) {
-      return json({ error: "gitScheme must be https, ssh, gh or auto" }, 400);
+  // Git engine (specs/git-operations.spec.md): "js" (built-in) or "cli"
+  // (system git); "auto" clears the choice back to the default. Applied
+  // before a dataRepo change so a first clone already uses the new engine.
+  if (body.gitEngine !== undefined) {
+    const engine = normalizeGitEngine(body.gitEngine);
+    if (engine === null && body.gitEngine !== "auto" && body.gitEngine !== null) {
+      return json({ error: "gitEngine must be js, cli or auto" }, 400);
     }
-    if (scheme === "gh" && !ghCliAvailable()) {
-      return json({ error: "the gh scheme needs the GitHub CLI (gh) installed" }, 400);
+    if (engine === "cli" && !cliGitAvailable()) {
+      return json({ error: "the cli engine needs git installed" }, 400);
     }
-    if (scheme) state.gitScheme = scheme;
-    else delete state.gitScheme;
-    setGitScheme(scheme);
+    if (engine) state.gitEngine = engine;
+    else delete state.gitEngine;
+    setGitEngine(engine);
   }
   if (body.dataRepo !== undefined) {
     const dataRepo = body.dataRepo.trim();
@@ -223,6 +230,30 @@ const postReload: Handler = async () => {
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
+};
+
+// GitHub sign-in (specs/git-operations.spec.md): device flow — start
+// returns the code the user enters at github.com/login/device; the client
+// polls until GitHub reports the authorization.
+const postAuthStart: Handler = async () => {
+  try {
+    return json(await startDeviceFlow());
+  } catch (e) {
+    return json({ error: (e as Error).message }, 502);
+  }
+};
+
+const postAuthPoll: Handler = async () => {
+  try {
+    return json(await pollDeviceFlow());
+  } catch (e) {
+    return json({ error: (e as Error).message }, 502);
+  }
+};
+
+const deleteAuth: Handler = async () => {
+  await signOut();
+  return json({ message: "signed out" });
 };
 
 const getFeatures = withDataDir(async (dir) =>
@@ -365,6 +396,9 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
   ["POST", "/api/reload", postReload],
+  ["POST", "/api/auth/github/start", postAuthStart],
+  ["POST", "/api/auth/github/poll", postAuthPoll],
+  ["DELETE", "/api/auth/github", deleteAuth],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
   ["GET", "/api/search", getSearch],

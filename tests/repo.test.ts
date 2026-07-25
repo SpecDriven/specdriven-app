@@ -11,7 +11,9 @@ import {
   ensureClone,
   resolveDataRepo,
 } from "../src/server/repo";
-import { setGitScheme } from "../src/server/scheme";
+import { engineFor, setGitEngine } from "../src/server/git";
+import { git, stopServers } from "./helpers/fixtures";
+import { serveRepos } from "./helpers/gitHttpServer";
 
 let root: string;
 
@@ -20,16 +22,19 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  stopServers();
+  setGitEngine(null);
+  delete process.env.SPECDRIVEN_GITHUB_URL;
+  delete process.env.SPECDRIVEN_REPOS_DIR;
   await rm(root, { recursive: true, force: true });
 });
 
 // specs/app-start.spec.md: data repo format is a regular gitHub url,
 // e.g. https://github.com/SpecDriven/data-insurance.
-// specs/git-operations.spec.md: the url only identifies the repository —
-// the git scheme decides the transport, so parsing yields one canonical url.
 test("parses a regular GitHub url", () => {
   expect(parseGitHubUrl("https://github.com/SpecDriven/data-insurance")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    owner: "SpecDriven",
     name: "data-insurance",
   });
 });
@@ -43,13 +48,15 @@ test("accepts .git suffix, trailing slash, and scheme-less variants", () => {
   );
   expect(parseGitHubUrl("github.com/SpecDriven/data-insurance")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    owner: "SpecDriven",
     name: "data-insurance",
   });
 });
 
-test("accepts ssh remotes; the url form does not pick the scheme", () => {
+test("accepts ssh remotes; the url form does not pick the transport", () => {
   expect(parseGitHubUrl("git@github.com:SpecDriven/data-insurance.git")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    owner: "SpecDriven",
     name: "data-insurance",
   });
 });
@@ -98,26 +105,31 @@ test("url-shaped input that is not a GitHub repo url is rejected, not treated as
 });
 
 /** A local origin with one commit, standing in for a GitHub remote. */
-async function seededOrigin(): Promise<string> {
-  const origin = join(root, "origin.git");
+async function seededOrigin(at = "origin.git"): Promise<string> {
+  const origin = join(root, at);
   await $`git init --bare -b main ${origin}`.quiet();
   const seed = join(root, "seed");
   await $`git clone ${origin} ${seed}`.quiet().nothrow();
-  await $`git -C ${seed} config user.email test@example.com`.quiet();
-  await $`git -C ${seed} config user.name Test`.quiet();
-  await $`git -C ${seed} checkout -B main`.quiet().nothrow();
+  await git(seed, "config", "user.email", "test@example.com");
+  await git(seed, "config", "user.name", "Test");
+  await git(seed, "checkout", "-B", "main");
   await Bun.write(join(seed, "seed.feature.md"), "# Seed\n");
-  await $`git -C ${seed} add .`.quiet();
-  await $`git -C ${seed} commit -m seed`.quiet();
-  await $`git -C ${seed} push origin main`.quiet();
+  await git(seed, "add", ".");
+  await git(seed, "commit", "-m", "seed");
+  await git(seed, "push", "origin", "main");
+  await rm(seed, { recursive: true, force: true });
   return origin;
 }
 
+// A local-path origin cannot be reached by the built-in engine — the facade
+// falls back to system git (specs/git-operations.spec.md), so pre-existing
+// setups keep working.
 test("ensureClone clones on first use and reuses an existing clone", async () => {
   const origin = await seededOrigin();
   const dir = join(root, "clone");
   await ensureClone(origin, dir);
   expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(engineFor(dir)).toBe("cli"); // pinned by the fallback
   // second call is a no-op on the pre-existing clone
   await ensureClone(origin, dir);
   expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
@@ -129,16 +141,43 @@ test("ensureClone surfaces clone failures (no access / no such repo)", async () 
   );
 });
 
-// specs/git-operations.spec.md: local paths have no scheme — a scheme
-// chosen in Settings must not disturb cloning them.
-test("ensureClone clones local origins unchanged under a chosen scheme", async () => {
-  setGitScheme("ssh");
+// specs/git-operations.spec.md: a GitHub data repo url is cloned over
+// smart-HTTP by the built-in engine — no git installation involved.
+test("resolveDataRepo clones a GitHub url with the built-in engine", async () => {
+  await seededOrigin("test/origin.git");
+  const server = serveRepos(root);
+  process.env.SPECDRIVEN_GITHUB_URL = server.url;
+  process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
   try {
-    const origin = await seededOrigin();
-    const dir = join(root, "clone");
-    await ensureClone(origin, dir);
+    const dir = await resolveDataRepo("https://github.com/test/origin", root);
+    expect(dir).toBe(join(root, "repos", "origin"));
     expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+    expect(engineFor(dir)).toBe("js"); // no fallback needed over http
+    // reuse without re-cloning
+    expect(await resolveDataRepo("https://github.com/test/origin", root)).toBe(dir);
   } finally {
-    setGitScheme(null);
+    server.stop();
   }
+});
+
+// Clones from the old ssh-scheme era: the app-managed clone's origin is
+// rewritten to https once, so both engines can keep talking to GitHub.
+test("ensureClone rewrites an ssh-form origin to https", async () => {
+  const origin = await seededOrigin();
+  const dir = join(root, "clone");
+  await ensureClone(origin, dir); // makes the clone (system git fallback)
+  await git(dir, "remote", "set-url", "origin", "git@github.com:owner/data.git");
+  await ensureClone("https://github.com/owner/data", dir);
+  const url = await git(dir, "remote", "get-url", "origin");
+  expect(url.stdout.toString().trim()).toBe("https://github.com/owner/data.git");
+});
+
+// A non-GitHub origin is left untouched by the migration.
+test("ensureClone leaves non-GitHub origins alone", async () => {
+  const origin = await seededOrigin();
+  const dir = join(root, "clone");
+  await ensureClone(origin, dir);
+  await ensureClone(origin, dir);
+  const url = await git(dir, "remote", "get-url", "origin");
+  expect(url.stdout.toString().trim()).toBe(origin);
 });

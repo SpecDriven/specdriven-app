@@ -7,7 +7,7 @@ import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeTextFile } from "./fsx";
-import type { GitScheme } from "./scheme";
+import type { GitEngine } from "./git";
 
 export interface SpecDrivenState {
   dataRepo?: string;
@@ -16,10 +16,11 @@ export interface SpecDrivenState {
   /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
   scenarioPreviewLines?: number;
   /**
-   * Scheme git uses with GitHub (specs/git-operations.spec.md); absent
-   * means auto-discover by probing (https, ssh, gh).
+   * Git engine (specs/git-operations.spec.md): "js" is the built-in
+   * JavaScript implementation, "cli" the system git binary; absent means
+   * the default (built-in).
    */
-  gitScheme?: GitScheme;
+  gitEngine?: GitEngine;
   /** Show the test-links table on scenario cards
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;

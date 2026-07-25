@@ -61,6 +61,12 @@ dialogs the web version shows.
 
 # Git
 
-The desktop app shells out to the same `git` (and optionally `gh`) CLI as
-the web version. A packaged macOS app launches with a minimal PATH, so the
-usual Homebrew locations are appended before the first git command runs.
+Git is built in: the app bundles a JavaScript git implementation
+(specs/git-operations.spec.md), so no git or gh installation is needed.
+The system git binary is used only when selected in Settings or as
+automatic fallback; a packaged macOS app launches with a minimal PATH, so
+the usual Homebrew locations are appended in case that binary is needed.
+
+The GitHub sign-in token is stored OS-encrypted (Electron safeStorage,
+keychain-backed on macOS); when the OS offers no key store it falls back
+to the user-only token file next to the home settings file.
