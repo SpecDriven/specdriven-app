@@ -104,11 +104,13 @@ dialogs the web version shows.
 
 # Git
 
-Git operations shell out to the machine's binaries
-(specs/git-operations.spec.md): git is required, and the GitHub CLI is
-used for GitHub credentials and clones wherever it is installed. A
-packaged macOS app launches with a minimal PATH, so the usual Homebrew
-locations are appended — that is where both binaries usually live.
+Git operations shell out to the machine's binaries where it has them
+(specs/git-operations.spec.md): the GitHub CLI is used for GitHub
+credentials and clones wherever it is installed, plain git where only that
+is, and the built-in engine on a machine with neither — so the desktop app
+works on a fresh machine with nothing installed. A packaged macOS app
+launches with a minimal PATH, so the usual Homebrew locations are appended
+— that is where both binaries usually live.
 
 The GitHub sign-in token is stored OS-encrypted (Electron safeStorage,
 keychain-backed on macOS); when the OS offers no key store it falls back

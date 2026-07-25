@@ -1,8 +1,9 @@
 // Git operation surface (specs/git-operations.spec.md): every git operation
-// the app performs, as one interface with two implementations. Both drive the
-// system `git` binary; they differ only in where GitHub credentials come from
-// and how a GitHub repo is cloned — the app's own sign-in (cli.ts) or the
-// GitHub CLI (gh.ts).
+// the app performs, as one interface with three implementations. Two drive
+// the system `git` binary and differ only in where GitHub credentials come
+// from and how a GitHub repo is cloned — the app's own sign-in (cli.ts) or
+// the GitHub CLI (gh.ts). The third (js.ts) needs no binary at all: it is
+// git implemented in JavaScript, running in this process.
 
 export interface PullResult {
   ok: boolean;
@@ -16,7 +17,7 @@ export interface SyncResult {
 }
 
 export interface GitBackend {
-  readonly name: "cli" | "gh";
+  readonly name: "cli" | "gh" | "js";
   /** Clone url into dir; throws with a user-facing message on failure. */
   clone(url: string, dir: string): Promise<void>;
   pull(repoDir: string): Promise<PullResult>;
