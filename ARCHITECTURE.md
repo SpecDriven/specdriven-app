@@ -1,6 +1,6 @@
 # TL;DR
 
-Local React app using Bun as runtime, just like how Claude Code.
+Electron app built using Bun, just like how Claude Code and Codex.
 
 ## Language: TypeScript
 
