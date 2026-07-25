@@ -63,6 +63,19 @@ export function parseRoute(pathname: string): Route {
   return route;
 }
 
+/**
+ * Scheme the desktop app registers with the OS (specs/navigation.spec.md
+ * "links from outside the app"). Inside the desktop window the origin is
+ * `app://specdriven`, which nothing else on the machine can reach, so links
+ * meant to be shared use this scheme over the same paths.
+ */
+export const DESKTOP_SCHEME = "specdriven";
+
+/** `/features/quotes` -> `specdriven://features/quotes`. */
+export function desktopLink(path: string): string {
+  return `${DESKTOP_SCHEME}://${path.replace(/^\/+/, "")}`;
+}
+
 export function featurePath(fileName: string): string {
   const stem = fileName.replace(/\.feature\.md$/, "");
   // Folder segments keep their `/`s; anything a url can't carry is escaped.

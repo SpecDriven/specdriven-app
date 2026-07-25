@@ -5,9 +5,11 @@
 
 import { app, BrowserWindow, nativeTheme, protocol, session, shell } from "electron";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { applyStartupState, handleApi } from "../server/api";
 import { setTokenBackend } from "../server/tokenStore";
+import { DESKTOP_SCHEME } from "../frontend/route";
+import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
 import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 
@@ -45,6 +47,19 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
 ]);
+
+// specdriven:// is the public face of the same paths (specs/navigation.spec.md
+// "links from outside the app"): registering it with the OS is what makes a
+// link in chat, email or a browser launch this app. The packaged app declares
+// it in its Info.plist too (package.json "build.protocols"); an unpackaged dev
+// run has to point the OS at the electron binary plus this project.
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(DESKTOP_SCHEME, process.execPath, [resolve(process.argv[1]!)]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(DESKTOP_SCHEME);
+}
 
 // The built frontend sits next to the built main process: dist/renderer
 // relative to the app root (the project in dev, app.asar when packaged).
@@ -87,6 +102,47 @@ function openExternally(url: string): void {
 }
 
 let win: BrowserWindow | null = null;
+/** A deep link that arrived before there was a window to show it in. */
+let pendingDeepLink: string | null = null;
+
+/**
+ * Show an app path that came from outside (specs/navigation.spec.md "open a
+ * link from outside the app"). With a window up this is the same history jump
+ * a sidebar click makes, so back returns to what was on screen; otherwise the
+ * path is held and becomes the window's entry url.
+ */
+function openDeepLink(path: string): void {
+  if (!win || win.isDestroyed()) {
+    pendingDeepLink = path;
+    // Running with every window closed (macOS): nothing else will open one.
+    if (app.isReady()) createWindow();
+    return;
+  }
+  const target = win;
+  if (target.isMinimized()) target.restore();
+  target.focus();
+  const jump = () => {
+    // JSON.stringify keeps a hostile url from breaking out of the string
+    // literal; from there the renderer routes it like any other popstate.
+    void target.webContents.executeJavaScript(
+      `history.pushState(null, "", ${JSON.stringify(path)});` +
+        `dispatchEvent(new PopStateEvent("popstate"));`,
+    );
+  };
+  if (target.webContents.isLoadingMainFrame()) {
+    target.webContents.once("did-finish-load", jump);
+  } else {
+    jump();
+  }
+}
+
+// macOS delivers deep links here, both while the app runs and on a cold start
+// — registered before whenReady so a launch-by-link isn't missed.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  const path = parseDesktopLink(url);
+  if (path) openDeepLink(path);
+});
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -115,19 +171,28 @@ function createWindow(): void {
 
   // specs/desktop-app.spec.md "External links": target=_blank and plain
   // navigations away from the app both land in the default browser.
+  // A specdriven:// link pasted into a spec body is one of ours: follow it
+  // in place rather than handing the OS a link back to this same window.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    openExternally(url);
+    const deep = parseDesktopLink(url);
+    if (deep) openDeepLink(deep);
+    else openExternally(url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, url) => {
     const inside = url.startsWith(`${APP_ORIGIN}/`) || (DEV_URL && url.startsWith(DEV_URL));
-    if (!inside) {
-      event.preventDefault();
-      openExternally(url);
-    }
+    if (inside) return;
+    event.preventDefault();
+    const deep = parseDesktopLink(url);
+    if (deep) openDeepLink(deep);
+    else openExternally(url);
   });
 
-  void win.loadURL(DEV_URL ?? `${APP_ORIGIN}/`);
+  // A link that arrived before the window existed becomes its entry url —
+  // App.tsx resolves it on boot like any other deep link.
+  const entryPath = pendingDeepLink ?? "/";
+  pendingDeepLink = null;
+  void win.loadURL(DEV_URL ? `${DEV_URL}${entryPath}` : `${APP_ORIGIN}${entryPath}`);
 }
 
 // One main window (specs/desktop-app.spec.md "Window"): a second launch
@@ -135,7 +200,14 @@ function createWindow(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
+    // Windows and Linux deliver a deep link as an argument to the second
+    // launch; macOS sends open-url to the running instance instead.
+    const path = deepLinkFromArgv(argv);
+    if (path) {
+      openDeepLink(path);
+      return;
+    }
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.focus();
@@ -155,6 +227,8 @@ if (!app.requestSingleInstanceLock()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
     }
     await applyStartupState();
+    // Launched by a link on Windows or Linux; on macOS open-url already ran.
+    pendingDeepLink ??= deepLinkFromArgv(process.argv);
     createWindow();
 
     app.on("activate", () => {
