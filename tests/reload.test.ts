@@ -89,9 +89,9 @@ test("setting the scheduler to 0 stops it", async () => {
   expect(runs).toBe(0);
 });
 
-// The reload tick (pull + commit/push) runs on both git engines
+// The reload tick (pull + commit/push) runs on all three git engines
 // (specs/git-operations.spec.md), against a smart-HTTP-served origin.
-for (const engine of ["cli", "gh"] as GitEngine[]) {
+for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
       if (engine === "gh") fakeGh = installFakeGh();

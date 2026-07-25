@@ -19,11 +19,14 @@ OS.
   the bundler, and the test runner; there is no npm, vite, or jest here, and no
   Node.js to install. (The server code does stick to Node APIs so it can also
   run inside Electron's main process — on the Node that Electron bundles.)
-- A `git` binary — every git operation the app performs shells out to it.
+- Optionally a `git` binary. Git operations shell out to it when it is there;
+  when it is not, the built-in engine ([just-git](https://github.com/blindmansion/just-git),
+  git implemented in JavaScript and bundled with the app) does the same work
+  in-process, against the same on-disk repositories.
 - Optionally the [GitHub CLI](https://cli.github.com) (`gh`). When it is
   installed the app uses it by default for GitHub credentials and clones, so
   `gh auth login` is all the authentication setup there is; without it, sign in
-  from the Settings dialog instead. Either is switchable in Settings.
+  from the Settings dialog instead. All three are switchable in Settings.
 - Access to the data repo you intend to open.
 
 ## Install dependencies
@@ -161,7 +164,7 @@ Asset hosting and versioning are not wired up yet —
 ```
 src/index.ts        web entry — Bun.serve() over the shared route table
 src/server/         api (routes shared by web + desktop), features, parser, search,
-                    git/ (js + cli engines), auth, github, tokenStore, repo, state, user, reload
+                    git/ (gh + cli + js engines), auth, github, tokenStore, repo, state, user, reload
 src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
 specs/*.spec.md     specifications for this app's own behavior

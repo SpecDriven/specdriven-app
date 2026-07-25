@@ -1,28 +1,27 @@
 // Git engine facade (specs/git-operations.spec.md). Callers keep one
-// function surface; behind it, the Git engine setting picks who supplies the
-// GitHub credentials. Both engines run the system `git` binary — the GitHub
-// CLI engine adds gh's credential helper and `gh repo clone` on top — so git
-// itself is required either way.
+// function surface; behind it, the Git engine setting picks which engine
+// carries the operation out and who supplies the GitHub credentials. Two
+// engines run the system `git` binary — the GitHub CLI engine adds gh's
+// credential helper and `gh repo clone` on top — and the third is git
+// implemented in JavaScript, bundled with the app and always available.
 
 import type { GitBackend, PullResult, SyncResult } from "./backend";
 import { cliBackend, cliGitAvailable } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
+import { jsBackend } from "./js";
 
 export type { PullResult, SyncResult } from "./backend";
 export { cliGitAvailable } from "./cli";
 export { ghAccount, ghAvailable, ghSignedIn } from "./gh";
 export type { GhAccount } from "./gh";
+export { jsGitAvailable } from "./js";
 export { isRepoRoot } from "./repoRoot";
 
-export type GitEngine = "cli" | "gh";
+export type GitEngine = "cli" | "gh" | "js";
 
-/**
- * The engine a stored or posted value names; null for anything else — which
- * includes the retired `js` of the old built-in engine, so an existing
- * settings file simply reads as "no choice made".
- */
+/** The engine a stored or posted value names; null for anything else. */
 export function normalizeGitEngine(value: unknown): GitEngine | null {
-  return value === "cli" || value === "gh" ? value : null;
+  return value === "cli" || value === "gh" || value === "js" ? value : null;
 }
 
 // The engine chosen in Settings; null means "decide from what is installed".
@@ -35,29 +34,46 @@ export function setGitEngine(engine: GitEngine | null): void {
   resetGhCache();
 }
 
-/** The engine in effect: the Settings choice, else gh when this machine has it. */
+/**
+ * The engine in effect: the Settings choice, else the best of what this
+ * machine has — the GitHub CLI, then the system git it builds on, and
+ * failing both the bundled engine, which needs neither.
+ */
 export function currentEngine(): GitEngine {
-  return chosen ?? (ghAvailable() ? "gh" : "cli");
+  if (chosen) return chosen;
+  if (ghAvailable()) return "gh";
+  return cliGitAvailable() ? "cli" : "js";
 }
 
 /**
- * The backend every operation runs on. Both engines shell out to git, so a
- * machine without git cannot do any of this — and an engine explicitly
- * chosen in Settings but no longer installed is an error, not a silent swap.
+ * The backend every operation runs on. An engine explicitly chosen in
+ * Settings but no longer installed is an error, not a silent swap to
+ * another one.
  */
 function backend(): GitBackend {
-  if (!cliGitAvailable()) {
-    throw new Error("No git found — install git to work with repositories");
+  switch (currentEngine()) {
+    case "js":
+      return jsBackend;
+    case "gh":
+      if (!ghAvailable()) {
+        throw new Error(
+          "GitHub CLI selected but no gh found — switch Git engine in Settings",
+        );
+      }
+      if (!cliGitAvailable()) {
+        throw new Error(
+          "GitHub CLI selected but no git found — switch Git engine to Built-in in Settings",
+        );
+      }
+      return ghBackend;
+    default:
+      if (!cliGitAvailable()) {
+        throw new Error(
+          "System git selected but no git found — switch Git engine to Built-in in Settings",
+        );
+      }
+      return cliBackend;
   }
-  if (currentEngine() === "gh") {
-    if (!ghAvailable()) {
-      throw new Error(
-        "GitHub CLI selected but no gh found — switch Git engine to System git in Settings",
-      );
-    }
-    return ghBackend;
-  }
-  return cliBackend;
 }
 
 export async function pull(repoDir: string): Promise<PullResult> {

@@ -17,6 +17,7 @@ import {
   ghAccount,
   ghAvailable,
   ghSignedIn,
+  jsGitAvailable,
   normalizeGitEngine,
   setGitEngine,
 } from "./git";
@@ -74,7 +75,7 @@ function json(body: unknown, status = 200): Response {
  * Git-engine fields for /api/state (specs/git-operations.spec.md): the
  * engine chosen in Settings (null = default), the engine actually in
  * effect, and which binaries exist — each engine is only offered when its
- * own is installed.
+ * own is installed, which for the bundled one is always.
  */
 function gitEngineFields(state: SpecDrivenState) {
   return {
@@ -82,6 +83,7 @@ function gitEngineFields(state: SpecDrivenState) {
     gitEngineEffective: currentEngine(),
     cliGitAvailable: cliGitAvailable(),
     ghAvailable: ghAvailable(),
+    jsGitAvailable: jsGitAvailable(),
   };
 }
 
@@ -177,13 +179,14 @@ const putState: Handler = async (req) => {
     );
   }
   const state = await readState(getAppRoot());
-  // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI) or "cli"
-  // (system git); "auto" clears the choice back to the default. Applied
-  // before a dataRepo change so a first clone already uses the new engine.
+  // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"
+  // (system git) or "js" (the bundled engine, which needs nothing installed);
+  // "auto" clears the choice back to the default. Applied before a dataRepo
+  // change so a first clone already uses the new engine.
   if (body.gitEngine !== undefined) {
     const engine = normalizeGitEngine(body.gitEngine);
     if (engine === null && body.gitEngine !== "auto" && body.gitEngine !== null) {
-      return json({ error: "gitEngine must be cli, gh or auto" }, 400);
+      return json({ error: "gitEngine must be cli, gh, js or auto" }, 400);
     }
     if (engine === "cli" && !cliGitAvailable()) {
       return json({ error: "the system git engine needs git installed" }, 400);

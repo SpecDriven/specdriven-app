@@ -8,6 +8,12 @@
 // (fed through the environment, never argv); signed out, git runs unchanged
 // with the system's own configuration — exactly the behavior a user with
 // working git auth already has.
+//
+// createGitBackend() below is the workflow shared by all three engines: it
+// knows the order of operations for a pull, a conflict resolution or a save,
+// and nothing about how a git command is carried out. Engines supply that as
+// a GitRun — a subprocess here and in gh.ts, the bundled implementation in
+// js.ts. Every command it issues is therefore one all three understand.
 
 import { rename, rm } from "node:fs/promises";
 import { getAuth } from "../auth";
@@ -71,10 +77,12 @@ export async function appContext(): Promise<GitContext> {
  * Whether failing output is a credential problem rather than a repository
  * one — including GitHub's "not found" for a private repo the caller cannot
  * see. Such failures are reported with the sign-in hint instead of git's
- * plumbing message.
+ * plumbing message. The bare `HTTP 4xx` forms are how the bundled engine
+ * reports the same three answers, which it gets from the transport rather
+ * than from a git binary's stderr.
  */
 export function isAuthFailure(output: string): boolean {
-  return /could not read username|authentication failed|terminal prompts disabled|invalid username or password|403 forbidden|401 unauthorized|repository not found/i.test(
+  return /could not read username|authentication failed|terminal prompts disabled|invalid username or password|403 forbidden|401 unauthorized|repository not found|http (401|403|404) /i.test(
     output,
   );
 }
@@ -90,36 +98,60 @@ export async function gitClone(git: GitRun, url: string, dir: string): Promise<v
   }
 }
 
-export interface BackendOptions {
-  name: GitBackend["name"];
-  /** Config and environment for every command; resolved per command. */
-  context(): Promise<GitContext>;
-  /** Replaces the default `git clone`; receives this engine's runner. */
-  clone?(git: GitRun, url: string, dir: string): Promise<void>;
-}
-
-export function createGitBackend({ name, context, clone: cloneWith }: BackendOptions): GitBackend {
-  /**
-   * Run git with prompts disabled, so a command that cannot authenticate
-   * fails fast instead of hanging the server.
-   */
-  const git: GitRun = async (repoDir, ...args) => {
+/**
+ * A GitRun that shells out to the git binary, with prompts disabled so a
+ * command that cannot authenticate fails fast instead of hanging the server.
+ * The context is resolved per command, so a sign-in mid-session is picked up
+ * by the next operation.
+ */
+export function subprocessRun(context: () => Promise<GitContext>): GitRun {
+  return async (repoDir, ...args) => {
     const { config, env } = await context();
     const base = repoDir ? ["-C", repoDir] : [];
     return run("git", [...base, ...config, ...args], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env },
     });
   };
+}
 
+export interface BackendOptions {
+  name: GitBackend["name"];
+  /** How this engine carries out one git command. */
+  git: GitRun;
+  /** Replaces the default `git clone`; receives this engine's runner. */
+  clone?(git: GitRun, url: string, dir: string): Promise<void>;
+}
+
+export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions): GitBackend {
+  /**
+   * Whether the checked-out branch tracks a remote one. Read from config
+   * rather than resolved as the `@{u}` revision, which the bundled engine
+   * does not implement — and config is the more direct answer to the
+   * question actually being asked, which is whether an upstream is
+   * *configured* to push to and pull from.
+   */
   async function hasUpstream(repoDir: string): Promise<boolean> {
-    const res = await git(repoDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
-    return res.exitCode === 0;
+    const branch = await git(repoDir, "rev-parse", "--abbrev-ref", "HEAD");
+    if (branch.exitCode !== 0) return false;
+    const name = branch.stdout.trim();
+    if (!name || name === "HEAD") return false; // detached, or no commit yet
+    return (await git(repoDir, "config", "--get", `branch.${name}.remote`)).exitCode === 0;
   }
 
+  /**
+   * Files left conflicted by a merge — the unmerged index entries, which is
+   * git's own definition of the set. `ls-files -u` prints one line per stage
+   * (base, ours, theirs), so the same path arrives up to three times.
+   */
   async function conflictedFiles(repoDir: string): Promise<string[]> {
-    const res = await git(repoDir, "diff", "--name-only", "--diff-filter=U");
+    const res = await git(repoDir, "ls-files", "-u");
     if (res.exitCode !== 0) return [];
-    return res.stdout.split("\n").filter(Boolean);
+    const paths = res.stdout
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t").slice(1).join("\t"))
+      .filter(Boolean);
+    return [...new Set(paths)];
   }
 
   /**
@@ -150,6 +182,20 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
   async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
     const res = await git(repoDir, "show", `MERGE_HEAD:${relPath}`);
     return res.exitCode === 0 ? res.stdout : null;
+  }
+
+  /**
+   * Commit, refusing to pretend. A commit that fails leaves the work
+   * uncommitted, so reporting it as saved would be the worst kind of wrong
+   * for an app whose promise is that specs reach the repository — the one
+   * benign failure is there being nothing staged to commit.
+   */
+  async function commit(repoDir: string, ...args: string[]): Promise<void> {
+    const res = await git(repoDir, "commit", ...args);
+    if (res.exitCode === 0) return;
+    const output = (res.stderr + res.stdout).trim();
+    if (/nothing to commit|no changes added/i.test(output)) return;
+    throw new Error(`git commit failed: ${output}`);
   }
 
   async function push(repoDir: string): Promise<SyncResult> {
@@ -184,7 +230,7 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
         message: `conflict resolved; ${remaining.length} conflicted file(s) remain`,
       };
     }
-    await git(repoDir, "commit", "--no-edit");
+    await commit(repoDir, "--no-edit");
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -210,7 +256,7 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
       return { pushed: false, message: "no saved changes" };
     }
     await git(repoDir, "add", "-A");
-    await git(repoDir, "commit", "-m", "Auto-save scenarios");
+    await commit(repoDir, "-m", "Auto-save scenarios");
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -239,7 +285,7 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
     if (mv.exitCode !== 0) {
       throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
     }
-    await git(repoDir, "commit", "-m", message, "--", fromPath, toPath);
+    await commit(repoDir, "-m", message, "--", fromPath, toPath);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -265,7 +311,7 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
     if (rmRes.exitCode !== 0) {
       throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
     }
-    await git(repoDir, "commit", "-m", message, "--", relPath);
+    await commit(repoDir, "-m", message, "--", relPath);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -285,7 +331,7 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
       return { pushed: false, message: "saved locally (not a git repository)" };
     }
     await git(repoDir, "add", relPath);
-    await git(repoDir, "commit", "-m", message, "--", relPath);
+    await commit(repoDir, "-m", message, "--", relPath);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -308,4 +354,4 @@ export function createGitBackend({ name, context, clone: cloneWith }: BackendOpt
   };
 }
 
-export const cliBackend = createGitBackend({ name: "cli", context: appContext });
+export const cliBackend = createGitBackend({ name: "cli", git: subprocessRun(appContext) });

@@ -145,8 +145,8 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
 });
 
-// The move flow runs on both git engines (specs/git-operations.spec.md).
-for (const engine of ["cli", "gh"] as GitEngine[]) {
+// The move flow runs on all three git engines (specs/git-operations.spec.md).
+for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
       if (engine === "gh") fakeGh = installFakeGh();

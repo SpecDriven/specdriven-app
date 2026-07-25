@@ -311,10 +311,11 @@ test("published scenarios are immutable, but new versions may be added", async (
   expect(await readFeature(root, "quote.feature.md")).toContain("## Basic v2 [published]");
 });
 
-// Every push/pull flow runs on both git engines (specs/git-operations.spec.md):
-// plain system git and the GitHub CLI (a stub gh on PATH), against the same
-// smart-HTTP-served origin.
-for (const engine of ["cli", "gh"] as GitEngine[]) {
+// Every push/pull flow runs on all three git engines
+// (specs/git-operations.spec.md): plain system git, the GitHub CLI (a stub gh
+// on PATH) and the bundled JavaScript one, against the same smart-HTTP-served
+// origin.
+for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
       if (engine === "gh") fakeGh = installFakeGh();
