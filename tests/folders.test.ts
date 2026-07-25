@@ -15,9 +15,12 @@ import {
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
 import { buildTree } from "../src/frontend/tree";
+import { installFakeGh } from "./helpers/binPath";
+import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
+let fakeGh: FakeGh | null = null;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-folders-"));
@@ -25,6 +28,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stopServers();
+  fakeGh?.restore();
+  fakeGh = null;
   setGitEngine(null);
   await rm(root, { recursive: true, force: true });
 });
@@ -141,9 +146,10 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
 });
 
 // The move flow runs on both git engines (specs/git-operations.spec.md).
-for (const engine of ["js", "cli"] as GitEngine[]) {
+for (const engine of ["cli", "gh"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
+      if (engine === "gh") fakeGh = installFakeGh();
       setGitEngine(engine);
     });
 

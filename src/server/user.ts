@@ -1,13 +1,13 @@
 import { userInfo } from "node:os";
 import { getAuth } from "./auth";
-import { cliGitAvailable } from "./git";
+import { cliGitAvailable, currentEngine, ghAccount } from "./git";
 import { run } from "./run";
 
 // Current user (specs/user-info-settings.spec.md): by default the user on
 // the OS, plus the identity that authors the app's commits to the data
-// repo — the signed-in GitHub account, or the system git identity when
-// signed out and git is installed. Reported via /api/state and shown in
-// the sidebar's user corner.
+// repo — the signed-in GitHub account, the GitHub CLI's account when that
+// engine is in effect, or the system git identity. Reported via /api/state
+// and shown in the sidebar's user corner.
 
 export interface CurrentUser {
   /** OS account name — the default identity. */
@@ -28,17 +28,24 @@ async function gitConfig(key: string): Promise<string | null> {
 }
 
 export async function getCurrentUser(): Promise<CurrentUser> {
+  const username = userInfo().username;
   const auth = await getAuth();
   if (auth) {
     return {
-      username: userInfo().username,
+      username,
       login: auth.login,
       name: auth.name ?? auth.login,
       email: auth.email,
     };
   }
+  // Only when gh is the engine in effect: on system git the gh account
+  // authors nothing, so reporting it would misname the commits.
+  const gh = currentEngine() === "gh" ? await ghAccount() : null;
+  if (gh) {
+    return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
+  }
   return {
-    username: userInfo().username,
+    username,
     login: null,
     name: await gitConfig("user.name"),
     email: await gitConfig("user.email"),

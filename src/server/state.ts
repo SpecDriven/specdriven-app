@@ -16,9 +16,9 @@ export interface SpecDrivenState {
   /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
   scenarioPreviewLines?: number;
   /**
-   * Git engine (specs/git-operations.spec.md): "js" is the built-in
-   * JavaScript implementation, "cli" the system git binary; absent means
-   * the default (built-in).
+   * Git engine (specs/git-operations.spec.md): "gh" authenticates through
+   * the GitHub CLI, "cli" through the app's own sign-in; absent means the
+   * default — gh when it is installed.
    */
   gitEngine?: GitEngine;
   /** Show the test-links table on scenario cards
