@@ -472,6 +472,29 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       expect(again.status).toBe("published");
     });
 
+    // A pull that fails outright — here for want of credentials — is an
+    // error, not a merge conflict: publish must not open a conflict dialog
+    // whose "theirs" pane claims the file is missing on the remote.
+    test("publish reports a failed pull as an error, not a conflict", async () => {
+      const { a } = await twoClones(root);
+      const wall = Bun.serve({
+        port: 0,
+        fetch: () =>
+          new Response("auth required", {
+            status: 401,
+            headers: { "WWW-Authenticate": 'Basic realm="wall"' },
+          }),
+      });
+      try {
+        await git(a, "remote", "set-url", "origin", `http://127.0.0.1:${wall.port}/origin.git`);
+        await expect(publishFeature(a, "seed.feature.md", "# Seed v2\n")).rejects.toThrow(
+          "Publish failed — git pull:",
+        );
+      } finally {
+        wall.stop(true);
+      }
+    });
+
     // The resolution is a true merge: a two-parent commit both clones converge
     // on, not a plain commit that abandons one side's history.
     test("conflict resolution creates a merge commit both clones converge on", async () => {

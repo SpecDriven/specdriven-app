@@ -35,12 +35,27 @@ they would on plain git — the machine's own credentials keep working — and
 anything that is not a github.com repository url is cloned with
 `git clone`.
 
-## GitHub sign-in (device flow)
+## GitHub sign-in
 
-Independently of gh, the user can sign in from the Settings dialog via the
-GitHub App device flow: the app shows a short code, the user enters it at
-github.com/login/device, and the app polls until GitHub confirms. The
-resulting user token
+Independently of gh, the user can sign in from the Settings dialog, two
+ways over the same GitHub App:
+
+- **Connect to GitHub** (browser OAuth, the web application flow): the
+  browser opens github.com's authorize page and GitHub redirects back to
+  the app server's `/api/auth/github/callback`, which exchanges the code
+  for the token (with PKCE and a state nonce). It needs
+  `SPECDRIVEN_GITHUB_CLIENT_SECRET` alongside the client id — GitHub
+  requires the App's client secret to exchange the code — and the GitHub
+  App must list the app's callback url (for example
+  `http://127.0.0.1:3000/api/auth/github/callback`) among its callback
+  URLs. Offered only where the app runs on an http(s) origin; the desktop
+  app's `app://` pages have no url GitHub could redirect to, so they offer
+  the device flow alone.
+- **Device flow**: the app shows a short code, the user enters it at
+  github.com/login/device, and the app polls until GitHub confirms. Needs
+  only the client id.
+
+Either way the resulting user token
 
 - is the HTTPS credential the `cli` and `js` engines authenticate with
   (`x-access-token:<token>`, fed to git through an environment-fed
@@ -102,10 +117,30 @@ was committed and pushed when it was not.
 - and what it writes is an ordinary git repository, which the git binary
   reads normally once there is one
 
-## Scenario: sign in with GitHub
+## Scenario: connect to GitHub via the browser
 
-- When: the user clicks "Sign in with GitHub" in the Settings dialog
+- When: the user clicks "Connect to GitHub" in the Settings dialog
+- Then: the browser opens GitHub's authorize page
+- and after the user approves there, GitHub redirects to the app's
+  callback url, the tab says it is done, and the dialog shows the
+  signed-in account
+- and pushes on the system-git and built-in engines authenticate with
+  that account
+- and a callback with a wrong or reused state nonce is refused and does
+  not cancel the sign-in in progress
+
+## Scenario: sign in with GitHub (device code)
+
+- When: the user clicks "Use a device code instead" in the Settings dialog
 - Then: a short code appears with a link to github.com/login/device
 - and after the user authorizes there, the dialog shows the signed-in
   account
 - and pushes on the system-git engine authenticate with that account
+
+## Scenario: a failed pull is an error, not a merge conflict
+
+- When: a publish's `git pull` fails without leaving conflicted files —
+  no credentials, no network, a missing remote
+- Then: the publish reports that failure as an error
+- and no merge-conflict dialog opens claiming the file is missing on the
+  remote
