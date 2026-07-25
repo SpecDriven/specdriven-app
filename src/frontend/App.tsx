@@ -47,6 +47,13 @@ interface AuthInfo {
   email?: string | null;
 }
 
+/** What the GitHub CLI reports (specs/git-operations.spec.md). */
+interface GhInfo {
+  available: boolean;
+  signedIn: boolean;
+  login: string | null;
+}
+
 /** A device flow in progress: the code to enter and where to enter it. */
 interface DeviceFlow {
   userCode: string;
@@ -160,10 +167,12 @@ export function App() {
   const [testEditDraft, setTestEditDraft] = useState("");
   /** Why the last Save was blocked by the tests field, if it was. */
   const [testsError, setTestsError] = useState<string | null>(null);
-  // Git engine (specs/git-operations.spec.md): the built-in JavaScript git
-  // (default, no installation needed) or the system git binary.
+  // Git engine (specs/git-operations.spec.md): the GitHub CLI (the default
+  // wherever gh is installed) or plain system git.
   const [gitEngine, setGitEngineState] = useState<string | null>(null);
+  const [gitEngineEffective, setGitEngineEffective] = useState<string>("cli");
   const [cliGitAvailable, setCliGitAvailable] = useState(false);
+  const [gh, setGh] = useState<GhInfo | null>(null);
   const [settingsEngineDraft, setSettingsEngineDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   // GitHub sign-in (specs/git-operations.spec.md): device flow — the user
@@ -210,7 +219,9 @@ export function App() {
         setShowTestLinks(state.showTestLinks);
       }
       setGitEngineState(state.gitEngine ?? null);
+      setGitEngineEffective(state.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(state.cliGitAvailable));
+      setGh(state.gh ?? null);
       setAuth(state.auth ?? null);
       if (state.user) setUser(state.user);
       if (!state.needsDataRepo) {
@@ -1007,8 +1018,8 @@ export function App() {
   const openSettings = () => {
     setSettingsDraft(String(reloadSeconds));
     setSettingsLinesDraft(String(previewLines));
-    // Both "auto" (no choice) and an explicit "js" mean the built-in engine.
-    setSettingsEngineDraft(gitEngine === "cli" ? "cli" : "auto");
+    // No stored choice is "auto": whichever engine this machine can run.
+    setSettingsEngineDraft(gitEngine === "cli" || gitEngine === "gh" ? gitEngine : "auto");
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsError(null);
     setAuthStatus(null);
@@ -1036,6 +1047,7 @@ export function App() {
   const refreshUser = async () => {
     const state = await (await fetch("/api/state")).json();
     if (state.user) setUser(state.user);
+    setGh(state.gh ?? null);
   };
 
   const signOutGitHub = async () => {
@@ -1109,7 +1121,12 @@ export function App() {
       setPreviewLines(data.scenarioPreviewLines);
       setShowTestLinks(data.showTestLinks !== false);
       setGitEngineState(data.gitEngine ?? null);
+      setGitEngineEffective(data.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(data.cliGitAvailable));
+      setGh(data.gh ?? null);
+      // The engine decides which account authors commits, so the user corner
+      // can be showing the wrong one now.
+      await refreshUser();
       setSettingsOpen(false);
     } else {
       setSettingsError(data.error ?? "Could not save settings");
@@ -1943,28 +1960,56 @@ export function App() {
               Each scenario ends with a table of GitHub links to its automated tests, when it
               has any.
             </p>
-            {/* Git engine (specs/git-operations.spec.md): the built-in
-                JavaScript git or the system git binary; the built-in engine
-                falls back to system git when it cannot handle an operation. */}
+            {/* Git engine (specs/git-operations.spec.md): both run the git
+                binary; the engine picks who supplies GitHub credentials. */}
             <label>
               Git engine
               <select
                 value={settingsEngineDraft}
                 onChange={(e) => setSettingsEngineDraft(e.target.value)}
               >
-                <option value="auto">Built-in (recommended)</option>
+                <option value="auto">
+                  Automatic — GitHub CLI when installed (recommended)
+                </option>
+                <option value="gh" disabled={!gh?.available}>
+                  GitHub CLI (gh){gh?.available ? "" : " — not installed"}
+                </option>
                 <option value="cli" disabled={!cliGitAvailable}>
                   System git{cliGitAvailable ? "" : " — not installed"}
                 </option>
               </select>
             </label>
             <p className="hint">
-              Built-in needs no git installation. System git uses the git binary on this
-              machine.
+              Both engines run the git binary on this machine.{" "}
+              {gitEngineEffective === "gh"
+                ? "The GitHub CLI is in use: gh supplies the credentials and clones."
+                : "System git authenticates with the account signed in below, or with git's own credentials."}
             </p>
-            {/* GitHub sign-in (specs/git-operations.spec.md): device flow. */}
+            {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
+                when that engine is in effect, else the device flow. */}
             <div className="auth-section">
               <span className="auth-title">GitHub account</span>
+              {gh?.available && (
+                <p className="hint">
+                  {gh.signedIn ? (
+                    <>
+                      GitHub CLI signed in
+                      {gh.login ? (
+                        <>
+                          {" "}
+                          as <strong>{gh.login}</strong>
+                        </>
+                      ) : null}
+                      .
+                    </>
+                  ) : (
+                    <>
+                      GitHub CLI installed but signed out — run <code>gh auth login</code>,
+                      then save these settings.
+                    </>
+                  )}
+                </p>
+              )}
               {auth?.signedIn ? (
                 <div className="auth-row">
                   <span>
@@ -1994,8 +2039,8 @@ export function App() {
               {authStatus && <p className="error">{authStatus}</p>}
             </div>
             <p className="hint">
-              Publishing to GitHub uses your account over HTTPS on either engine. Local
-              folders work without signing in.
+              Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
+              sign-in on system git. Local folders work without either.
             </p>
             {settingsError && <p className="error">{settingsError}</p>}
             <div className="dialog-actions">

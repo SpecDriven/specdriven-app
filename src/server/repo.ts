@@ -5,7 +5,7 @@
 // as local directories.
 
 import { resolve } from "node:path";
-import { clone, isRepoRoot, rewriteSshOrigin } from "./git";
+import { clone, isRepoRoot } from "./git";
 import { remoteUrl } from "./github";
 import { cloneBase } from "./paths";
 
@@ -53,16 +53,11 @@ export function dataRepoDir(dataRepo: string, rootDir: string): string {
 /**
  * Clone into dir unless dir is already a git repo (e.g. a pre-existing
  * clone). Cloning goes through the git engine facade
- * (specs/git-operations.spec.md) — the built-in engine by default, system
- * git when chosen or as fallback. A pre-existing app-managed clone from
- * the old ssh-scheme era gets its origin rewritten to https once, so both
- * engines can keep talking to it.
+ * (specs/git-operations.spec.md): `gh repo clone` on the GitHub CLI engine,
+ * `git clone` on the system-git one.
  */
 export async function ensureClone(url: string, dir: string): Promise<void> {
-  if (await isRepoRoot(dir)) {
-    await rewriteSshOrigin(dir);
-    return;
-  }
+  if (await isRepoRoot(dir)) return;
   await clone(url, dir);
 }
 

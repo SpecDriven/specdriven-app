@@ -1,9 +1,7 @@
-// Minimal git smart-HTTP server for tests. isomorphic-git speaks only
-// smart-HTTP (no local-path transport), so fixtures serve their bare
-// origin repos over a loopback port; the same URL also works for CLI git,
-// letting one fixture drive both engines. Test-only: the server side
-// shells out to git, which dev machines and CI have — only the shipped
-// app must not require it.
+// Minimal git smart-HTTP server for tests: fixtures serve their bare origin
+// repos over a loopback port, so pushes and pulls exercise the transport a
+// real remote uses instead of a local path. Test-only — the server side
+// shells out to git, which dev machines and CI have.
 
 import { join, normalize } from "node:path";
 import { gunzipSync } from "node:zlib";

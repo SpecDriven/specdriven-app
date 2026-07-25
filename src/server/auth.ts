@@ -1,7 +1,8 @@
 // GitHub sign-in via the GitHub App device flow
 // (specs/git-operations.spec.md): the user enters a short code at
 // github.com/login/device; the resulting user token is the HTTPS credential
-// for both git engines and the identity that authors data-repo commits.
+// the system-git engine authenticates with, and the identity that authors
+// data-repo commits. The GitHub CLI engine gets both from gh instead.
 // Tokens are stored through tokenStore (OS-encrypted in the desktop app).
 
 import { CLIENT_ID_PLACEHOLDER, githubApiBase, githubClientId, githubWebBase } from "./github";
@@ -151,17 +152,4 @@ export function getAuth(): Promise<TokenRecord | null> {
 export async function signOut(): Promise<void> {
   pending = null;
   await clearToken();
-}
-
-/**
- * isomorphic-git onAuth callback: GitHub App tokens ride HTTPS basic auth
- * as x-access-token. Signed out, the request is cancelled so a private
- * repo fails fast with a message instead of retrying.
- */
-export function gitOnAuth() {
-  return async () => {
-    const record = await loadToken();
-    if (!record) return { cancel: true };
-    return { username: "x-access-token", password: record.token };
-  };
 }

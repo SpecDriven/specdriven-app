@@ -16,9 +16,12 @@ import {
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
+import { installFakeGh } from "./helpers/binPath";
+import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
+let fakeGh: FakeGh | null = null;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-feat-"));
@@ -26,6 +29,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stopServers();
+  fakeGh?.restore();
+  fakeGh = null;
   setGitEngine(null);
   await rm(root, { recursive: true, force: true });
 });
@@ -265,11 +270,12 @@ test("published scenarios are immutable, but new versions may be added", async (
 });
 
 // Every push/pull flow runs on both git engines (specs/git-operations.spec.md):
-// the built-in JavaScript engine and the system git binary, against the same
+// plain system git and the GitHub CLI (a stub gh on PATH), against the same
 // smart-HTTP-served origin.
-for (const engine of ["js", "cli"] as GitEngine[]) {
+for (const engine of ["cli", "gh"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
+      if (engine === "gh") fakeGh = installFakeGh();
       setGitEngine(engine);
     });
 
