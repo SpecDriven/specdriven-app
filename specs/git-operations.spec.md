@@ -109,3 +109,11 @@ was committed and pushed when it was not.
 - and after the user authorizes there, the dialog shows the signed-in
   account
 - and pushes on the system-git engine authenticate with that account
+
+## Scenario: a failed pull is an error, not a merge conflict
+
+- When: a publish's `git pull` fails without leaving conflicted files —
+  no credentials, no network, a missing remote
+- Then: the publish reports that failure as an error
+- and no merge-conflict dialog opens claiming the file is missing on the
+  remote
