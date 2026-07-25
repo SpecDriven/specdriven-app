@@ -20,10 +20,14 @@ describe("matchApi", () => {
   });
 
   // GitHub sign-in routes (specs/git-operations.spec.md): device-flow
-  // start and poll, plus sign-out.
+  // start and poll, browser-flow start/poll/callback, plus sign-out.
   test("auth routes match by method", () => {
     expect(matchApi("POST", "/api/auth/github/start")).not.toBeNull();
     expect(matchApi("POST", "/api/auth/github/poll")).not.toBeNull();
+    expect(matchApi("POST", "/api/auth/github/web/start")).not.toBeNull();
+    expect(matchApi("POST", "/api/auth/github/web/poll")).not.toBeNull();
+    expect(matchApi("GET", "/api/auth/github/callback")).not.toBeNull();
+    expect(matchApi("POST", "/api/auth/github/callback")).toBeNull();
     expect(matchApi("DELETE", "/api/auth/github")).not.toBeNull();
     expect(matchApi("GET", "/api/auth/github")).toBeNull();
     expect(matchApi("POST", "/api/auth/github")).toBeNull();
