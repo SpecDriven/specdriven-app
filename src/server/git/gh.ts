@@ -18,6 +18,7 @@ import {
   gitClone,
   identityConfig,
   isAuthFailure,
+  subprocessRun,
 } from "./cli";
 import type { GitContext, GitRun } from "./cli";
 
@@ -145,6 +146,6 @@ async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
 
 export const ghBackend: GitBackend = createGitBackend({
   name: "gh",
-  context: ghContext,
+  git: subprocessRun(ghContext),
   clone: ghClone,
 });

@@ -17,8 +17,9 @@ export interface SpecDrivenState {
   scenarioPreviewLines?: number;
   /**
    * Git engine (specs/git-operations.spec.md): "gh" authenticates through
-   * the GitHub CLI, "cli" through the app's own sign-in; absent means the
-   * default — gh when it is installed.
+   * the GitHub CLI, "cli" through the app's own sign-in, "js" is the
+   * bundled JavaScript git; absent means the default — gh when it is
+   * installed, then cli, then js on a machine with no git at all.
    */
   gitEngine?: GitEngine;
   /** Show the test-links table on scenario cards

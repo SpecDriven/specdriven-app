@@ -1,23 +1,33 @@
 # git engine and GitHub authentication
 
-- use the GitHub CLI when the machine has one; plain git otherwise
+- use the GitHub CLI when the machine has one; plain git otherwise; and
+  the app's own git when the machine has neither
 
 Every git operation the app performs — clone, pull, push, commit, mv, rm —
-runs the system `git` binary, so git is required. What the `Git engine`
-setting in the Settings dialog picks (stored in the settings file as
-`gitEngine`) is who supplies the GitHub credentials:
+runs through one of three engines. The `Git engine` setting in the Settings
+dialog picks which (stored in the settings file as `gitEngine`):
 
-- `gh` — the GitHub CLI. Credentials come from gh's own credential helper,
-  scoped to github.com so helpers configured for other hosts are left
-  alone, and a GitHub repo is cloned with `gh repo clone`. It cannot be
-  chosen when no gh is installed.
+- `gh` — the GitHub CLI, on top of the system git binary. Credentials come
+  from gh's own credential helper, scoped to github.com so helpers
+  configured for other hosts are left alone, and a GitHub repo is cloned
+  with `gh repo clone`. It cannot be chosen when no gh is installed.
 - `cli` — plain system git, authenticating with the app's own GitHub
-  sign-in below, or with whatever credentials the machine already has.
+  sign-in below, or with whatever credentials the machine already has. It
+  cannot be chosen when no git is installed.
+- `js` — the built-in engine: git implemented in JavaScript, running
+  inside the app against the ordinary files on disk. It needs nothing
+  installed, so it can always be chosen, and it authenticates with the
+  app's own GitHub sign-in.
 
-With no choice recorded the engine is `gh` wherever gh is installed, and
-`cli` otherwise. An engine named in the settings file but no longer
-installed is an error on the next operation, not a silent switch to the
-other one.
+With no choice recorded the engine is the best of what the machine has:
+`gh` wherever gh is installed, then `cli` wherever git is, and `js` when
+neither is. An engine named in the settings file but no longer installed
+is an error on the next operation, not a silent switch to another one.
+
+The three are interchangeable, not layered: they read and write the same
+repositories in the same on-disk format, so a repository the built-in
+engine cloned, committed to or merged is an ordinary git repository that
+the git binary — and any other tool — reads normally, and vice versa.
 
 The GitHub CLI engine only takes over what gh can actually do. Installed
 but signed out, gh has nothing to contribute, so commands run exactly as
@@ -32,9 +42,10 @@ GitHub App device flow: the app shows a short code, the user enters it at
 github.com/login/device, and the app polls until GitHub confirms. The
 resulting user token
 
-- is the HTTPS credential the `cli` engine authenticates with
+- is the HTTPS credential the `cli` and `js` engines authenticate with
   (`x-access-token:<token>`, fed to git through an environment-fed
-  credential helper, never on the command line),
+  credential helper on `cli`, handed straight to the built-in engine on
+  `js`, and never on a command line),
 - provides the identity that authors data-repo commits (name, email —
   falling back to the account's noreply address when the email is
   private), shown in the User info dialog.
@@ -46,19 +57,28 @@ never the token.
 
 On the `gh` engine the same two things come from gh instead: its
 credential helper authenticates, and `gh api user` gives the account that
-authors the commits. Neither engine writes to the machine's git config;
+authors the commits. No engine writes to the machine's git config;
 credentials and commit identity are passed per command.
+
+Signed out, each engine leaves the machine's own git identity to author:
+the repository's git config, then the user's global one. The built-in
+engine may be running where there is no git config at all, so below both
+it falls back to the OS user rather than failing for want of an author.
 
 With no credentials at all, public repos still work and a private one
 fails fast with `authentication required — sign in with GitHub in
 Settings` instead of hanging on a credential prompt.
+
+A commit that fails is reported as a failure. The app never says a spec
+was committed and pushed when it was not.
 
 ## Scenario: choose the engine in settings
 
 - When: the user picks `System git` as the Git engine in the Settings dialog
 - Then: the choice is saved to the settings file (specs/app-start.spec.md)
 - and clone, pull and push authenticate with the app's own sign-in
-- and each engine's option is refused when its binary is not installed
+- and each engine's option is refused when its binary is not installed,
+  which never refuses the built-in one
 
 ## Scenario: the GitHub CLI is the default when installed
 
@@ -73,6 +93,14 @@ Settings` instead of hanging on a credential prompt.
 - Then: git runs with the machine's own credentials and git identity, as
   it would on the system-git engine
 - and the Settings dialog says gh is signed out and how to fix it
+
+## Scenario: the built-in engine is the default with no git installed
+
+- When: no Git engine is chosen and the machine has neither gh nor git
+- Then: the built-in engine is in effect
+- and clone, pull, push, commit, move and delete all still work
+- and what it writes is an ordinary git repository, which the git binary
+  reads normally once there is one
 
 ## Scenario: sign in with GitHub
 
