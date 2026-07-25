@@ -50,6 +50,24 @@ Identity comes from the data repo, never from session state:
 - The server serves the app shell for every `/features/...` path; resolution
   happens in the client via `/api/features/:file`.
 
+## Links from outside the app
+
+The desktop app (specs/desktop-app.spec.md) serves the frontend from an
+internal `app://specdriven` origin that nothing outside its own window can
+reach, so it also registers `specdriven://` with the operating system. The two
+carry the same paths — the scheme is a prefix swap, and every rule above
+applies to both:
+
+| Where the link is used       | Form                               |
+| ---------------------------- | ---------------------------------- |
+| Web version                  | `http://<host>/features/<feature>` |
+| Desktop app, shared anywhere | `specdriven://features/<feature>`  |
+
+So `specdriven://features/accidents/record-car-accident` addresses exactly
+what `/features/accidents/record-car-accident` does, versioned scenario
+permalinks included. Registering the scheme is what lets the OS route such a
+link — clicked in chat, email, a browser or a terminal — to the app.
+
 ## Scenario: open a feature link
 
 - Given: the data repo contains `navigation.feature.md`
@@ -98,6 +116,23 @@ Identity comes from the data repo, never from session state:
   versioned url on the clipboard; its label flips to "Copied" for 2 sec
 - The feature name in the editor bar has the same "Copy link" action for
   the feature url
+- In the desktop app those actions copy the `specdriven://` form, so what
+  lands on the clipboard is a link that works anywhere else on the machine
+
+## Scenario: open a link from outside the app
+
+- Given: the desktop app is installed and a data repo is configured
+- When: the user clicks a `specdriven://features/<feature>` link in another
+  app — chat, email, a browser, the terminal
+- Then: SpecDriven comes to the front showing that feature, launching first if
+  it wasn't running; the app the link was clicked in stays where it was
+
+## Scenario: a second link reuses the running app
+
+- Given: the desktop app is already open on some other feature
+- When: another `specdriven://` link is opened
+- Then: the same window moves to the linked feature — no second window and no
+  reload — and Back returns to what was on screen before
 
 ## Scenario: window title follows the selection
 

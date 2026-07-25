@@ -37,6 +37,15 @@
       "dist/**/*",
       "package.json"
     ],
+    "protocols": [
+      {
+        "name": "SpecDriven spec link",
+        "schemes": [
+          "specdriven"
+        ],
+        "role": "Viewer"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [

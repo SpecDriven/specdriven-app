@@ -17,7 +17,7 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
-import { featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import { desktopLink, featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
 import {
   addTestLink,
   canSetTestLink,
@@ -857,8 +857,10 @@ export function App() {
 
   // "Copy link" (specs/navigation.spec.md "share a link"): absolute url on
   // the clipboard; the pressed control's label flips to "Copied" for 2 sec.
+  // The desktop app's own origin (app://specdriven) means nothing outside its
+  // window, so there the shared url is the registered specdriven:// scheme.
   const copyLink = async (path: string) => {
-    const url = location.origin + path;
+    const url = location.protocol === "app:" ? desktopLink(path) : location.origin + path;
     try {
       await navigator.clipboard.writeText(url);
     } catch {

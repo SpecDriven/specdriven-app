@@ -39,6 +39,10 @@ on macOS) via `SPECDRIVEN_ROOT`:
   inside the sidebar header, and the header doubles as the drag region.
 - Deep links (specs/navigation.spec.md) keep working inside the app: the
   internal protocol serves the app shell for every `/features/...` url.
+- The app registers the `specdriven://` scheme with the OS, so a link shared
+  by chat or email launches it, or focuses the running window, on that spec
+  (specs/navigation.spec.md "links from outside the app"). A second launch
+  carrying a link still focuses the one window rather than opening another.
 
 # External links
 
