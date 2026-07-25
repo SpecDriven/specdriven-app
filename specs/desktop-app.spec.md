@@ -104,11 +104,11 @@ dialogs the web version shows.
 
 # Git
 
-Git is built in: the app bundles a JavaScript git implementation
-(specs/git-operations.spec.md), so no git or gh installation is needed.
-The system git binary is used only when selected in Settings or as
-automatic fallback; a packaged macOS app launches with a minimal PATH, so
-the usual Homebrew locations are appended in case that binary is needed.
+Git operations shell out to the machine's binaries
+(specs/git-operations.spec.md): git is required, and the GitHub CLI is
+used for GitHub credentials and clones wherever it is installed. A
+packaged macOS app launches with a minimal PATH, so the usual Homebrew
+locations are appended — that is where both binaries usually live.
 
 The GitHub sign-in token is stored OS-encrypted (Electron safeStorage,
 keychain-backed on macOS); when the OS offers no key store it falls back

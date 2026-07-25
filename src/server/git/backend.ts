@@ -1,8 +1,8 @@
-// Git engine strategy (specs/git-operations.spec.md): every git operation
-// the app performs, as one interface with two implementations — the
-// bundled JavaScript engine (js.ts, isomorphic-git) and the system git
-// binary (cli.ts, subprocess). The facade in index.ts picks the engine and
-// falls back from js to cli when the JS engine cannot handle an operation.
+// Git operation surface (specs/git-operations.spec.md): every git operation
+// the app performs, as one interface with two implementations. Both drive the
+// system `git` binary; they differ only in where GitHub credentials come from
+// and how a GitHub repo is cloned — the app's own sign-in (cli.ts) or the
+// GitHub CLI (gh.ts).
 
 export interface PullResult {
   ok: boolean;
@@ -16,7 +16,7 @@ export interface SyncResult {
 }
 
 export interface GitBackend {
-  readonly name: "js" | "cli";
+  readonly name: "cli" | "gh";
   /** Clone url into dir; throws with a user-facing message on failure. */
   clone(url: string, dir: string): Promise<void>;
   pull(repoDir: string): Promise<PullResult>;
@@ -29,20 +29,4 @@ export interface GitBackend {
   removeAndPush(repoDir: string, relPath: string, message: string): Promise<SyncResult>;
   commitAndPush(repoDir: string, relPath: string, message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
-  /** True while this engine has an unfinished merge in repoDir. */
-  mergeInProgress(repoDir: string): Promise<boolean>;
-}
-
-/**
- * Thrown by an engine when the engine itself — not the repository state —
- * cannot perform the operation. The facade retries such operations on the
- * system git engine. Domain outcomes (merge conflicts, auth failures, no
- * upstream) are results, never this error: the other engine would fail the
- * same way.
- */
-export class GitUnsupportedError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "GitUnsupportedError";
-  }
 }

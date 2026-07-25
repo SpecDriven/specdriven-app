@@ -1,35 +1,40 @@
 # git engine and GitHub authentication
 
-- use built-in git by default; fall back to the system git binary
+- use the GitHub CLI when the machine has one; plain git otherwise
 
-The app talks to git through one of two engines, selected by the `Git
-engine` setting in the Settings dialog (stored in the settings file as
-`gitEngine`):
+Every git operation the app performs — clone, pull, push, commit, mv, rm —
+runs the system `git` binary, so git is required. What the `Git engine`
+setting in the Settings dialog picks (stored in the settings file as
+`gitEngine`) is who supplies the GitHub credentials:
 
-- `js` — the built-in JavaScript git implementation (the default). It is
-  bundled with the app, needs no git installation, and speaks HTTPS
-  (smart-HTTP) only.
-- `cli` — the system `git` binary, run as a subprocess. It cannot be
-  chosen when no git is installed.
+- `gh` — the GitHub CLI. Credentials come from gh's own credential helper,
+  scoped to github.com so helpers configured for other hosts are left
+  alone, and a GitHub repo is cloned with `gh repo clone`. It cannot be
+  chosen when no gh is installed.
+- `cli` — plain system git, authenticating with the app's own GitHub
+  sign-in below, or with whatever credentials the machine already has.
 
-Every operation — clone, pull, push, commit, mv, rm — goes through the
-selected engine. When the built-in engine cannot handle an operation (an
-unsupported merge case, a non-HTTPS remote such as an ssh url or a local
-path), the operation is retried on system git if one is installed, and
-that repo stays on system git for the rest of the server run. Domain
-outcomes — merge conflicts, authentication failures, "no upstream" — never
-fall back: the other engine would answer the same. A repo with an
-unfinished merge stays on the engine that started it.
+With no choice recorded the engine is `gh` wherever gh is installed, and
+`cli` otherwise. An engine named in the settings file but no longer
+installed is an error on the next operation, not a silent switch to the
+other one.
+
+The GitHub CLI engine only takes over what gh can actually do. Installed
+but signed out, gh has nothing to contribute, so commands run exactly as
+they would on plain git — the machine's own credentials keep working — and
+anything that is not a github.com repository url is cloned with
+`git clone`.
 
 ## GitHub sign-in (device flow)
 
-The user signs in from the Settings dialog via the GitHub App device flow:
-the app shows a short code, the user enters it at github.com/login/device,
-and the app polls until GitHub confirms. The resulting user token
+Independently of gh, the user can sign in from the Settings dialog via the
+GitHub App device flow: the app shows a short code, the user enters it at
+github.com/login/device, and the app polls until GitHub confirms. The
+resulting user token
 
-- is the HTTPS credential for both engines (`x-access-token:<token>`; the
-  system engine receives it through an environment-fed credential helper,
-  never on the command line),
+- is the HTTPS credential the `cli` engine authenticates with
+  (`x-access-token:<token>`, fed to git through an environment-fed
+  credential helper, never on the command line),
 - provides the identity that authors data-repo commits (name, email —
   falling back to the account's noreply address when the email is
   private), shown in the User info dialog.
@@ -39,35 +44,35 @@ safeStorage in the desktop app, a user-only (0600) file next to the home
 settings file otherwise. `/api/state` reports the signed-in account but
 never the token.
 
-Signed out, the built-in engine works for public repos (reads) and fails
-fast with a sign-in hint on private ones; the system engine runs git
-unchanged, with whatever credentials the machine already has.
+On the `gh` engine the same two things come from gh instead: its
+credential helper authenticates, and `gh api user` gives the account that
+authors the commits. Neither engine writes to the machine's git config;
+credentials and commit identity are passed per command.
 
-The built-in engine tracks an in-progress merge in
-`.git/specdriven-merge.json` (the system engine uses git's own
-MERGE_HEAD); it survives an app restart mid-conflict and can never be
-committed.
+With no credentials at all, public repos still work and a private one
+fails fast with `authentication required — sign in with GitHub in
+Settings` instead of hanging on a credential prompt.
 
 ## Scenario: choose the engine in settings
 
 - When: the user picks `System git` as the Git engine in the Settings dialog
 - Then: the choice is saved to the settings file (specs/app-start.spec.md)
-- and clone, pull and push all shell out to the system git binary
-- and the option is refused when no git is installed
+- and clone, pull and push authenticate with the app's own sign-in
+- and each engine's option is refused when its binary is not installed
 
-## Scenario: built-in engine needs no git installation
+## Scenario: the GitHub CLI is the default when installed
 
-- When: no Git engine is chosen and no git binary is installed
-- Then: clone, pull, push, commit and delete all work through the
-  built-in engine over HTTPS
+- When: no Git engine is chosen and gh is installed
+- Then: clone, pull, push, commit and delete all run with gh's credentials
+- and cloning a GitHub repo goes through `gh repo clone`
+- and the commits are authored by the gh account
 
-## Scenario: fall back to system git
+## Scenario: gh installed but signed out
 
-- When: the built-in engine hits an operation it cannot handle (e.g. a
-  local-path or ssh remote) and a git binary is installed
-- Then: the operation reruns on system git and succeeds
-- and the result notes `(used system git)`
-- and the repo stays on system git for the rest of the server run
+- When: the GitHub CLI engine is in effect and `gh auth token` has nothing
+- Then: git runs with the machine's own credentials and git identity, as
+  it would on the system-git engine
+- and the Settings dialog says gh is signed out and how to fix it
 
 ## Scenario: sign in with GitHub
 
@@ -75,4 +80,4 @@ committed.
 - Then: a short code appears with a link to github.com/login/device
 - and after the user authorizes there, the dialog shows the signed-in
   account
-- and pushes authenticate with the account's token on either engine
+- and pushes on the system-git engine authenticate with that account

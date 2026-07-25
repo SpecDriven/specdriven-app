@@ -19,10 +19,12 @@ OS.
   the bundler, and the test runner; there is no npm, vite, or jest here, and no
   Node.js to install. (The server code does stick to Node APIs so it can also
   run inside Electron's main process — on the Node that Electron bundles.)
-- Access to the data repo you intend to open. Git itself is built in (a bundled
-  JavaScript implementation over HTTPS); a system `git` binary is optional and
-  only used when selected in Settings or as automatic fallback. Running the
-  test suite does require `git` (fixtures are built with it).
+- A `git` binary — every git operation the app performs shells out to it.
+- Optionally the [GitHub CLI](https://cli.github.com) (`gh`). When it is
+  installed the app uses it by default for GitHub credentials and clones, so
+  `gh auth login` is all the authentication setup there is; without it, sign in
+  from the Settings dialog instead. Either is switchable in Settings.
+- Access to the data repo you intend to open.
 
 ## Install dependencies
 
@@ -48,8 +50,9 @@ yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; i
 is cloned into a sibling directory of this repo (`../data-insurance`). A plain
 relative path to an existing local clone works too. The same file also holds the
 reload interval, the scenario preview length, the git engine, and the test-links
-toggle — all editable from the Settings dialog, which also holds the GitHub
-sign-in (device flow) used to authenticate pushes.
+toggle — all editable from the Settings dialog, which also reports what the
+GitHub CLI is signed in as and holds the app's own GitHub sign-in (device flow)
+for machines without `gh`.
 
 Settings are read from `./.specdriven/settings.json` (git-ignored, per-checkout)
 and fall back to `~/.specdriven/settings.json`, so one settings file can serve
@@ -66,8 +69,12 @@ bun test tests/parser.test.ts # one file
 Tests are colocated under [tests/](tests) and run against the server and frontend
 modules directly — no browser. The git tests do start a server: a loopback git
 smart-HTTP fixture ([tests/helpers/gitHttpServer.ts](tests/helpers/gitHttpServer.ts))
-serves bare origin repos to both engines, since the built-in engine cannot talk
-to local-path remotes.
+serves bare origin repos, so pushes and pulls go over the transport a real remote
+uses. Every test process runs on a pinned PATH holding git and no `gh`
+([tests/helpers/binPath.ts](tests/helpers/binPath.ts), preloaded via
+[bunfig.toml](bunfig.toml)), so your own GitHub CLI can never decide which engine
+the suite exercises or authenticate anything; the gh-engine tests put a stub `gh`
+on PATH themselves.
 
 ## Build a binary
 

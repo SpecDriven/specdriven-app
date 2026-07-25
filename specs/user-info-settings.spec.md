@@ -38,14 +38,15 @@ the server reports it via `/api/state`.
 - Then: a dialog shows the OS user, the GitHub account, and the name and
   email used for commits to the data repo
 
-## Git engine [built-in | system git]
+## Git engine [automatic | GitHub CLI | system git]
 
-- The Settings dialog offers the Git engine: `Built-in (recommended)` or
-  `System git` (specs/git-operations.spec.md)
-- `System git` is disabled when no git binary is installed
-- The Settings dialog holds the GitHub account section: "Sign in with
-  GitHub" starts the device flow; signed in, it shows the account and a
-  "Sign out" button
+- The Settings dialog offers the Git engine: `Automatic — GitHub CLI when
+  installed (recommended)`, `GitHub CLI (gh)` or `System git`
+  (specs/git-operations.spec.md)
+- each option is disabled when its binary is not installed
+- The Settings dialog holds the GitHub account section: it reports what
+  the GitHub CLI is signed in as, and "Sign in with GitHub" starts the
+  device flow; signed in, it shows the account and a "Sign out" button
 
 ## Scenario: sign in from settings
 
