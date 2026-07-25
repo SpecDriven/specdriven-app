@@ -7,6 +7,8 @@ import { app, BrowserWindow, nativeTheme, protocol, session, shell } from "elect
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyStartupState, handleApi } from "../server/api";
+import { setTokenBackend } from "../server/tokenStore";
+import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 
 const APP_ORIGIN = "app://specdriven";
@@ -25,8 +27,8 @@ process.env.SPECDRIVEN_ROOT = userData;
 process.env.SPECDRIVEN_REPOS_DIR ||= join(userData, "repos");
 
 // A packaged macOS app launches with a minimal PATH; append the usual
-// Homebrew locations so `gh` (and any non-system git) can be found
-// (specs/desktop-app.spec.md "Git").
+// Homebrew locations so a non-system git can be found when the System git
+// engine is selected or used as fallback (specs/desktop-app.spec.md "Git").
 if (process.platform === "darwin") {
   const parts = (process.env.PATH || "").split(":");
   for (const dir of ["/usr/local/bin", "/opt/homebrew/bin"]) {
@@ -146,6 +148,12 @@ if (!app.requestSingleInstanceLock()) {
       respond(permission === "clipboard-sanitized-write");
     });
     protocol.handle("app", serveApp);
+    // GitHub token storage (specs/desktop-app.spec.md): OS-encrypted via
+    // safeStorage; without a key store the server's 0600-file backend
+    // stays in place. safeStorage needs the ready app, hence here.
+    if (safeStorageAvailable()) {
+      setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
+    }
     await applyStartupState();
     createWindow();
 

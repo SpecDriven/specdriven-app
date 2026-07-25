@@ -1,52 +1,51 @@
-import { realpath, rename, rm } from "node:fs/promises";
-import { writeTextFile } from "./fsx";
-import { run } from "./run";
-import { gitSchemeFor, schemeArgs } from "./scheme";
+// System-git engine (specs/git-operations.spec.md): the pre-existing
+// subprocess implementation, kept as the fallback strategy and as an
+// explicit choice in Settings. Signed in, every command carries the GitHub
+// token as an HTTPS credential (fed through the environment, never argv);
+// signed out, git runs unchanged with the system's own configuration —
+// exactly the behavior a user with working git auth already has.
 
-export interface PullResult {
-  ok: boolean;
-  conflictedFiles: string[];
-  message: string;
-}
+import { rename, rm } from "node:fs/promises";
+import { getAuth } from "../auth";
+import { writeTextFile } from "../fsx";
+import { run, which } from "../run";
+import type { GitBackend, PullResult, SyncResult } from "./backend";
+import { isRepoRoot } from "./repoRoot";
 
-export interface SyncResult {
-  pushed: boolean;
-  message: string;
+export function cliGitAvailable(): boolean {
+  return which("git") !== null;
 }
 
 /**
- * Every git command follows the repo's effective git scheme
- * (specs/git-operations.spec.md). Prompts are disabled so a scheme that
- * cannot authenticate fails fast instead of hanging the server.
+ * Per-command config carrying the sign-in token: GitHub remotes are
+ * rewritten to https and the only credential helper echoes the token from
+ * the environment. The empty helper entry resets inherited helpers.
  */
-async function git(repoDir: string, ...args: string[]) {
-  return run("git", ["-C", repoDir, ...schemeArgs(gitSchemeFor(repoDir)), ...args], {
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+const TOKEN_CONFIG = [
+  "-c", "url.https://github.com/.insteadOf=git@github.com:",
+  "-c", "url.https://github.com/.insteadOf=ssh://git@github.com/",
+  "-c", "credential.helper=",
+  "-c",
+  "credential.helper=!f(){ echo username=x-access-token; echo \"password=$SPECDRIVEN_GIT_TOKEN\"; };f",
+];
+
+/**
+ * Run git with prompts disabled, so a command that cannot authenticate
+ * fails fast instead of hanging the server.
+ */
+async function git(repoDir: string | null, ...args: string[]) {
+  const auth = await getAuth();
+  const base = repoDir ? ["-C", repoDir] : [];
+  return run("git", [...base, ...(auth ? TOKEN_CONFIG : []), ...args], {
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      ...(auth ? { SPECDRIVEN_GIT_TOKEN: auth.token } : {}),
+    },
   });
 }
 
-export async function isGitRepo(repoDir: string): Promise<boolean> {
-  const res = await git(repoDir, "rev-parse", "--is-inside-work-tree");
-  return res.exitCode === 0 && res.stdout.trim() === "true";
-}
-
-/**
- * True only when repoDir is itself the root of a git repo. The starter setup
- * (a data/ folder inside the app repo) must not trigger pulls or commits on
- * the containing repo as a side effect of saving specs.
- */
-export async function isRepoRoot(repoDir: string): Promise<boolean> {
-  const res = await git(repoDir, "rev-parse", "--show-toplevel");
-  if (res.exitCode !== 0) return false;
-  const toplevel = res.stdout.trim();
-  try {
-    return (await realpath(repoDir)) === toplevel;
-  } catch {
-    return false;
-  }
-}
-
-export async function hasUpstream(repoDir: string): Promise<boolean> {
+async function hasUpstream(repoDir: string): Promise<boolean> {
   const res = await git(repoDir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}");
   return res.exitCode === 0;
 }
@@ -61,7 +60,7 @@ async function conflictedFiles(repoDir: string): Promise<string[]> {
  * Per specs/crud-feature.spec.md: before saving, do a `git pull` and merge.
  * A repo with no upstream (e.g. the local-only starter setup) counts as ok.
  */
-export async function pull(repoDir: string): Promise<PullResult> {
+async function pull(repoDir: string): Promise<PullResult> {
   if (!(await isRepoRoot(repoDir))) {
     return { ok: true, conflictedFiles: [], message: "not a standalone git repository; skipped pull" };
   }
@@ -81,12 +80,12 @@ export async function pull(repoDir: string): Promise<PullResult> {
 }
 
 /** Content of a file on the other side of an in-progress merge (theirs). */
-export async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
+async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
   const res = await git(repoDir, "show", `MERGE_HEAD:${relPath}`);
   return res.exitCode === 0 ? res.stdout : null;
 }
 
-export async function push(repoDir: string): Promise<SyncResult> {
+async function push(repoDir: string): Promise<SyncResult> {
   if (!(await hasUpstream(repoDir))) {
     return { pushed: false, message: "no upstream configured; skipped push" };
   }
@@ -103,7 +102,7 @@ export async function push(repoDir: string): Promise<SyncResult> {
  * then commit and push (specs/crud-feature.spec.md, "save feature with merge
  * conflict").
  */
-export async function resolveConflict(
+async function resolveConflict(
   repoDir: string,
   relPath: string,
   content: string,
@@ -131,7 +130,7 @@ export async function resolveConflict(
  * saved scenarios so no data is lost. Skipped while a merge conflict is being
  * resolved so conflict markers are never auto-committed.
  */
-export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
+async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
   if (!(await isRepoRoot(repoDir))) {
     return { pushed: false, message: "not a standalone git repository; skipped sync" };
   }
@@ -158,7 +157,7 @@ export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
  * committed and pushed. Outside a standalone git repo the file is simply
  * renamed on disk.
  */
-export async function moveAndPush(
+async function moveAndPush(
   repoDir: string,
   fromPath: string,
   toPath: string,
@@ -185,7 +184,7 @@ export async function moveAndPush(
  * `git rm`, committed and pushed. Outside a standalone git repo the file is
  * simply removed from disk.
  */
-export async function removeAndPush(
+async function removeAndPush(
   repoDir: string,
   relPath: string,
   message: string,
@@ -209,7 +208,7 @@ export async function removeAndPush(
 /**
  * Per specs/crud-feature.spec.md, saving ends with "do a git commit and push".
  */
-export async function commitAndPush(
+async function commitAndPush(
   repoDir: string,
   relPath: string,
   message: string,
@@ -225,3 +224,26 @@ export async function commitAndPush(
     message: res.pushed ? "committed and pushed" : `committed; ${res.message}`,
   };
 }
+
+async function clone(url: string, dir: string): Promise<void> {
+  const res = await git(null, "clone", url, dir);
+  if (res.exitCode !== 0) {
+    const detail = res.stderr.trim() || res.stdout.trim();
+    throw new Error(`Could not clone ${url}: ${detail}`);
+  }
+}
+
+export const cliBackend: GitBackend = {
+  name: "cli",
+  clone,
+  pull,
+  push,
+  theirsVersion,
+  resolveConflict,
+  syncSavedChanges,
+  moveAndPush,
+  removeAndPush,
+  commitAndPush,
+  hasUpstream,
+  mergeInProgress: async (repoDir) => (await conflictedFiles(repoDir)).length > 0,
+};
