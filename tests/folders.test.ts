@@ -1,8 +1,7 @@
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { $ } from "bun";
 import {
   createFeature,
   createFolder,
@@ -13,7 +12,10 @@ import {
   readFeature,
   renameFeature,
 } from "../src/server/features";
+import { setGitEngine } from "../src/server/git";
+import type { GitEngine } from "../src/server/git";
 import { buildTree } from "../src/frontend/tree";
+import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
 
@@ -22,41 +24,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  stopServers();
+  setGitEngine(null);
   await rm(root, { recursive: true, force: true });
 });
-
-async function git(dir: string, ...args: string[]) {
-  const res = await $`git -C ${dir} ${args}`.quiet().nothrow();
-  if (res.exitCode !== 0 && args[0] !== "pull") {
-    throw new Error(`git ${args.join(" ")} failed: ${res.stderr.toString()}`);
-  }
-  return res;
-}
-
-/** Create an origin repo plus two clones, so moves hit real git machinery. */
-async function twoClones() {
-  const origin = join(root, "origin.git");
-  await $`git init --bare -b main ${origin}`.quiet();
-  const a = join(root, "a");
-  const b = join(root, "b");
-  await $`git clone ${origin} ${a}`.quiet().nothrow();
-  await $`git clone ${origin} ${b}`.quiet().nothrow();
-  for (const dir of [a, b]) {
-    await git(dir, "config", "user.email", "test@example.com");
-    await git(dir, "config", "user.name", "Test");
-    await git(dir, "checkout", "-B", "main");
-  }
-  await mkdir(join(a, "billing"));
-  await Bun.write(join(a, "seed.feature.md"), "# Seed\n");
-  await Bun.write(join(a, "billing/quotes.feature.md"), "# Quotes\n");
-  await git(a, "add", ".");
-  await git(a, "commit", "-m", "seed");
-  await git(a, "push", "origin", "HEAD:main");
-  await git(a, "branch", "--set-upstream-to=origin/main");
-  await git(b, "pull", "origin", "main");
-  await git(b, "branch", "--set-upstream-to=origin/main");
-  return { a, b };
-}
 
 // specs/folders.spec.md: feature files anywhere in the tree are listed
 // with folder-relative paths; hidden directories are not part of the tree.
@@ -92,28 +63,6 @@ test("createFeature places a feature inside a folder via a / path", async () => 
   expect(fileName).toBe("billing/basic-quote.feature.md");
   expect(await readFeature(root, fileName)).toBe("# Basic Quote\n");
   expect(await listFolders(root)).toEqual(["billing"]);
-});
-
-// specs/folders.spec.md: drag-move is a `git mv` into the target
-// directory, committed and pushed — the other clone sees it on pull.
-test("moveFeature moves between folders via git mv, commits and pushes", async () => {
-  const { a, b } = await twoClones();
-  const result = await moveFeature(a, "seed.feature.md", "billing");
-  expect(result.fileName).toBe("billing/seed.feature.md");
-  expect(result.message).toBe("renamed, committed and pushed");
-  expect(await readFeature(a, "seed.feature.md")).toBeNull();
-  expect(await readFeature(a, "billing/seed.feature.md")).toBe("# Seed\n");
-  const log = await git(a, "log", "-1", "--pretty=%s");
-  expect(log.stdout.toString()).toContain(
-    "Move feature: seed.feature.md -> billing/seed.feature.md",
-  );
-  await git(b, "pull");
-  expect(await readFeature(b, "billing/seed.feature.md")).toBe("# Seed\n");
-
-  // and back out to the top level
-  const back = await moveFeature(a, "billing/seed.feature.md", "");
-  expect(back.fileName).toBe("seed.feature.md");
-  expect(await readFeature(a, "seed.feature.md")).toBe("# Seed\n");
 });
 
 test("moveFeature refuses missing folders, collisions and traversal", async () => {
@@ -190,3 +139,37 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.features.map((f) => f.name)).toEqual(["Quotes"]);
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
 });
+
+// The move flow runs on both git engines (specs/git-operations.spec.md).
+for (const engine of ["js", "cli"] as GitEngine[]) {
+  describe(`git engine: ${engine}`, () => {
+    beforeEach(() => {
+      setGitEngine(engine);
+    });
+
+    // specs/folders.spec.md: drag-move is a `git mv` into the target
+    // directory, committed and pushed — the other clone sees it on pull.
+    test("moveFeature moves between folders via git mv, commits and pushes", async () => {
+      const { a, b } = await twoClones(root, {
+        "seed.feature.md": "# Seed\n",
+        "billing/quotes.feature.md": "# Quotes\n",
+      });
+      const result = await moveFeature(a, "seed.feature.md", "billing");
+      expect(result.fileName).toBe("billing/seed.feature.md");
+      expect(result.message).toBe("renamed, committed and pushed");
+      expect(await readFeature(a, "seed.feature.md")).toBeNull();
+      expect(await readFeature(a, "billing/seed.feature.md")).toBe("# Seed\n");
+      const log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain(
+        "Move feature: seed.feature.md -> billing/seed.feature.md",
+      );
+      await git(b, "pull");
+      expect(await readFeature(b, "billing/seed.feature.md")).toBe("# Seed\n");
+
+      // and back out to the top level
+      const back = await moveFeature(a, "billing/seed.feature.md", "");
+      expect(back.fileName).toBe("seed.feature.md");
+      expect(await readFeature(a, "seed.feature.md")).toBe("# Seed\n");
+    });
+  });
+}

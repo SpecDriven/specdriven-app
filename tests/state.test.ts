@@ -107,13 +107,13 @@ test("reload frequency round-trips through the settings file", async () => {
   expect(state.reloadFrequencySeconds).toBe(30);
 });
 
-// specs/git-operations.spec.md: the chosen git scheme is a setting in
-// the settings file; absent means auto-discover by probing.
-test("git scheme round-trips through the settings file", async () => {
-  await writeState({ dataRepo: "data", gitScheme: "ssh" }, dir);
-  expect((await readState(dir)).gitScheme).toBe("ssh");
+// specs/git-operations.spec.md: the chosen git engine is a setting in
+// the settings file; absent means the default (built-in).
+test("git engine round-trips through the settings file", async () => {
+  await writeState({ dataRepo: "data", gitEngine: "cli" }, dir);
+  expect((await readState(dir)).gitEngine).toBe("cli");
   await writeState({ dataRepo: "data" }, dir);
-  expect((await readState(dir)).gitScheme).toBeUndefined();
+  expect((await readState(dir)).gitEngine).toBeUndefined();
 });
 
 // specs/ui.spec.md "Scenario List": the number of Markdown lines rendered per
