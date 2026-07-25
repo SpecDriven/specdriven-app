@@ -1292,20 +1292,6 @@ button.link:disabled {
   margin: 0;
 }
 
-.conflict-draft {
-  width: 100%;
-  min-height: 8rem;
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font-family: var(--font-mono);
-  font-size: 0.82rem;
-  resize: vertical;
-}
-
 /* User corner (specs/user-info-settings.spec.md): the lower left shows the
    current user; clicking the chip pops the User Menu above it. */
 aside > .user-corner {
@@ -1484,38 +1470,149 @@ aside > .user-corner {
   color: var(--text-3);
 }
 
-.conflict {
-  border: 1px solid var(--danger-border);
-  background: var(--danger-bg);
-  border-radius: var(--radius-md);
-  padding: 1rem;
-}
-
-.conflict h3 {
-  margin-top: 0;
-  font-family: var(--font-serif);
+/* Merge conflict dialog (specs/ui.spec.md "Merge conflict dialog"): a
+   window-sized dialog, resizable like the scenario dialog. Nothing here grows
+   with the feature — the dialog owns the height and the panes scroll inside
+   it, so the resolutions at the bottom are never pushed off screen. */
+.dialog.conflict-dialog {
+  resize: both;
+  overflow: hidden;
+  width: min(60rem, 92vw);
+  height: min(42rem, 85vh);
+  min-width: 22rem;
+  min-height: 20rem;
+  max-width: 96vw;
+  max-height: 92vh;
+  border-color: var(--danger-border);
+  gap: 0.6rem;
 }
 
 .conflict-panes {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.75rem;
+  /* Takes the slack the header, editor and actions leave; min-height lets the
+     panes shrink below their content so their own scrollbars take over. */
+  flex: 1;
+  min-height: 0;
 }
 
-.conflict-panes pre {
-  background: var(--surface-2);
+.conflict-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-height: 0;
+  min-width: 0;
+}
+
+.conflict-pane > header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.conflict-pane h4,
+.conflict-edit h4 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.conflict-pane > header .hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-pane pre {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.5rem;
-  overflow-x: auto;
+  overflow: auto;
   font-family: var(--font-mono);
   font-size: 0.78rem;
+  line-height: 1.5;
 }
 
-.conflict-actions {
+.conflict-pane pre.conflict-missing {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.conflict-edit {
   display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.conflict-edit > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+}
+
+/* Scoped past `.dialog textarea`, whose 14rem minimum would eat the panes. */
+.dialog .conflict-draft {
+  width: 100%;
+  height: 7rem;
+  min-height: 3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* Pinned below the scrolling panes — the three resolutions are always in
+   view (specs/crud-feature.spec.md "Publish feature with merge conflict"). */
+.conflict-actions {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+/* Cancel sits away from the three resolutions, like the scenario dialog's
+   Delete. */
+.conflict-actions button.secondary {
+  margin-right: auto;
+}
+
+.conflict-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Too narrow for two columns (a small window, or the sides dragged in) —
+   stack them, still one scroller each so the dialog itself never scrolls. */
+@media (max-width: 44rem) {
+  .conflict-panes {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
+/* Short window: the fixed parts give their room back to the panes, which are
+   the reason the dialog is open. */
+@media (max-height: 44rem) {
+  .dialog.conflict-dialog {
+    height: 92vh;
+    padding: 1rem 1.1rem;
+  }
+
+  .dialog .conflict-draft {
+    height: 4rem;
+  }
 }
 
 /* Scenario table widget (specs/scenario-table.spec.md): a grid over the

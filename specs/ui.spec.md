@@ -94,6 +94,26 @@ Applies to every dialog (scenario edit, Settings, and any future dialog).
 - ESC inside a field that is editing one row in place (the ✎ on a test link)
   backs out of that row; a second ESC closes the dialog.
 
+# Merge conflict dialog
+
+A publish that hits a merge conflict (specs/crud-feature.spec.md "Publish
+feature with merge conflict") opens a dialog — not a strip appended to the
+feature page, where a long feature pushes the resolutions out of sight.
+
+- The dialog is sized to the window and resizable; it never grows with the
+  feature.
+- `Yours` and `Theirs` sit side by side, each scrolling in its own pane. A
+  file that does not exist on the remote says so instead of showing an
+  empty pane.
+- Below them, a `Manual edit` box, pre-filled with yours, that can also be
+  reset to either side.
+- The three resolutions — `Accept yours`, `Accept theirs`, `Publish manual
+  edit` — are pinned at the bottom and always visible, no matter how long
+  the two sides are. They disable with a progress label while one runs.
+- `Cancel`, ESC, or a click outside closes the dialog without resolving. The
+  unfinished merge stays in the repo (specs/git-operations.spec.md), so
+  Publish brings the same choices back.
+
 # Settings
 
 A settings dialog. Settings are saved to the settings file
