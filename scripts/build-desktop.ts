@@ -1,27 +1,77 @@
 #!/usr/bin/env bun
 /**
- * Builds the macOS desktop app (specs/desktop-app.spec.md):
+ * Builds the desktop app (specs/desktop-app.spec.md "Packaging"):
  *
- *   bun run build:desktop    ->  release/SpecDriven-<version>-arm64.dmg (+ zip)
+ *   bun run build:desktop            this machine's platform
+ *   bun run build:desktop --mac      release/SpecDriven-<version>-arm64.dmg (+ zip)
+ *   bun run build:desktop --linux    release/SpecDriven-<version>-<arch>.AppImage (+ deb)
+ *   bun run build:desktop --all      both
  *
  * Three steps: bundle the frontend into static files (served over the
  * app:// protocol), bundle the Electron main process, then hand both to
  * electron-builder. The web build (`bun run build`) is separate and
- * untouched. Add "x64" to the arch lists in package.json's "build" key for
- * Intel artifacts.
+ * untouched. Targets and architectures live under "build" in package.json.
  */
 import { $ } from "bun";
 import { rm } from "node:fs/promises";
 
-console.log("Building renderer…");
-await rm("dist/renderer", { recursive: true, force: true });
-await $`bun build src/index.html --outdir dist/renderer --production`.quiet();
+export type Platform = "mac" | "linux";
 
-console.log("Building main process…");
-await rm("dist/electron", { recursive: true, force: true });
-await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
+const PLATFORMS: Platform[] = ["mac", "linux"];
 
-console.log("Packaging with electron-builder…");
-await $`bunx electron-builder --mac`;
+/** Which platform a given `process.platform` builds for by default. */
+export function hostPlatform(osPlatform: string): Platform | null {
+  if (osPlatform === "darwin") return "mac";
+  if (osPlatform === "linux") return "linux";
+  return null;
+}
 
-console.log("Done — artifacts in release/");
+/**
+ * Resolves `--mac` / `--linux` / `--all` against the host, and rejects what
+ * this machine cannot build. macOS artifacts need macOS tooling (hdiutil,
+ * codesign); Linux ones cross-build from macOS.
+ */
+export function selectPlatforms(args: string[], osPlatform: string): Platform[] {
+  const known = ["--all", ...PLATFORMS.map((p) => `--${p}`)];
+  const unknown = args.find((arg) => !known.includes(arg));
+  if (unknown) throw new Error(`unknown option ${unknown} — expected ${known.join(", ")}`);
+
+  const host = hostPlatform(osPlatform);
+  let selected = args.includes("--all")
+    ? [...PLATFORMS]
+    : PLATFORMS.filter((p) => args.includes(`--${p}`));
+  if (selected.length === 0) {
+    if (!host) throw new Error(`no desktop build for ${osPlatform} — pass --mac or --linux`);
+    selected = [host];
+  }
+  if (selected.includes("mac") && host !== "mac") {
+    throw new Error("the macOS app can only be built on macOS");
+  }
+  return selected;
+}
+
+async function build(platforms: Platform[]): Promise<void> {
+  console.log("Building renderer…");
+  await rm("dist/renderer", { recursive: true, force: true });
+  await $`bun build src/index.html --outdir dist/renderer --production`.quiet();
+
+  console.log("Building main process…");
+  await rm("dist/electron", { recursive: true, force: true });
+  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
+
+  console.log(`Packaging with electron-builder (${platforms.join(", ")})…`);
+  await $`bunx electron-builder ${platforms.map((p) => `--${p}`)}`;
+
+  console.log("Done — artifacts in release/");
+}
+
+if (import.meta.main) {
+  let platforms: Platform[];
+  try {
+    platforms = selectPlatforms(process.argv.slice(2), process.platform);
+  } catch (e) {
+    console.error(`build:desktop: ${(e as Error).message}`);
+    process.exit(1);
+  }
+  await build(platforms);
+}

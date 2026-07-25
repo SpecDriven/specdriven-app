@@ -99,16 +99,38 @@ an illegal instruction. See [scripts/build.ts](scripts/build.ts).
 ## Build the desktop app
 
 ```sh
-bun run build:desktop   # -> release/SpecDriven-<version>-arm64.dmg (+ .zip)
+bun run build:desktop           # this machine's platform
+bun run build:desktop --mac     # dmg + zip
+bun run build:desktop --linux   # AppImage + deb, x64 and arm64
+bun run build:desktop --all     # both
 ```
+
+| platform | artifacts in `release/` |
+| --- | --- |
+| macOS | `SpecDriven-<version>-arm64.dmg`, `SpecDriven-<version>-arm64-mac.zip` |
+| Linux | `SpecDriven-<version>-{x86_64,arm64}.AppImage`, `specdriven_<version>_{amd64,arm64}.deb` |
 
 Three steps: bundle the frontend into static files (served over the `app://`
 protocol), bundle the Electron main process for Node, then hand both to
-electron-builder. See [scripts/build-desktop.ts](scripts/build-desktop.ts); add
-`x64` to the arch lists under `"build"` in package.json for Intel artifacts.
-The bundle registers the `specdriven://` url scheme with the OS, so spec links
-launch or focus the installed app. Builds are unsigned for now — first launch
-needs Gatekeeper approval.
+electron-builder. See [scripts/build-desktop.ts](scripts/build-desktop.ts);
+targets and architectures live under `"build"` in package.json — add `x64` to
+the mac arch list for Intel artifacts. Linux cross-builds from macOS, so one
+machine can cut a full release; macOS artifacts need macOS.
+
+The bundle registers the `specdriven://` url scheme with the OS — through
+`Info.plist` on macOS, through the desktop entry's `MimeType` on Linux — so
+spec links launch or focus the installed app. Builds are unsigned for now:
+first launch needs Gatekeeper approval on macOS, and the `.deb` is installed
+with `sudo apt install ./specdriven_<version>_amd64.deb` (the AppImage just
+needs `chmod +x`).
+
+Two Linux settings are load-bearing and easy to lose, both verified by
+installing the artifacts in bare Debian and Ubuntu containers:
+`deb.depends` adds `libasound2t64 | libasound2` (Electron loads ALSA;
+electron-builder's default list omits it, and the t64 name has to come first
+or apt picks an OSS stub with missing symbols), and `toolsets.appimage` pins
+the static AppImage runtime — the legacy default builds an arm64 runtime
+linked against `libz.so`, which no ordinary desktop has.
 
 ## Distribution
 
@@ -137,7 +159,7 @@ src/electron/       desktop shell — main, app:// static serving, deep links, t
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
 specs/*.spec.md     specifications for this app's own behavior
 tests/              bun test suite
-scripts/            build.ts (binaries), build-desktop.ts (dmg), dev-electron.ts
+scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts
 roadmap/            work not started yet
 ```
 

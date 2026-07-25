@@ -77,16 +77,16 @@ test("looksLikeRepoUrl separates urls from local paths", () => {
 });
 
 test("a GitHub repo maps to a sibling directory of the app root", () => {
-  expect(cloneDir("/home/user/dev/sd_fable", "data-insurance")).toBe(
+  expect(cloneDir("/home/user/dev/specdriven", "data-insurance")).toBe(
     "/home/user/dev/data-insurance",
   );
 });
 
 test("dataRepoDir resolves urls and paths to their local directory without cloning", () => {
-  expect(dataRepoDir("https://github.com/SpecDriven/data-insurance", "/home/user/dev/sd_fable")).toBe(
+  expect(dataRepoDir("https://github.com/SpecDriven/data-insurance", "/home/user/dev/specdriven")).toBe(
     "/home/user/dev/data-insurance",
   );
-  expect(dataRepoDir("data", "/home/user/dev/sd_fable")).toBe("/home/user/dev/sd_fable/data");
+  expect(dataRepoDir("data", "/home/user/dev/specdriven")).toBe("/home/user/dev/specdriven/data");
 });
 
 test("resolveDataRepo resolves plain names and paths against the app root", async () => {
