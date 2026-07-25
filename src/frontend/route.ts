@@ -69,7 +69,10 @@ export function featurePath(fileName: string): string {
   return `/features/${stem.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-export function scenarioPath(fileName: string, scenario: Scenario): string {
+export function scenarioPath(
+  fileName: string,
+  scenario: Pick<Scenario, "name" | "version">,
+): string {
   return `${featurePath(fileName)}/scenarios/${slugify(scenario.name)}/v${scenario.version}`;
 }
 
