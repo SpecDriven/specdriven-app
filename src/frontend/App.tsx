@@ -1388,10 +1388,10 @@ export function App() {
           }}
         >
           <h1>SpecDriven</h1>
-          <p>No data repo configured yet. Enter the GitHub url of the data repo (or a local path):</p>
-          <input name="repo" placeholder="https://github.com/SpecDriven/data-insurance" autoFocus />
+          <p>No spec data directory configured yet. Enter the path to the spec data directory:</p>
+          <input name="repo" placeholder="/path/to/spec-data" autoFocus />
           <button type="submit" disabled={settingRepo}>
-            {settingRepo ? "Checking access…" : "Use this repo"}
+            {settingRepo ? "Checking access…" : "Use this directory"}
           </button>
           {repoError && <p className="error">{repoError}</p>}
         </form>
