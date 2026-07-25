@@ -336,6 +336,13 @@ export async function publishFeature(
   await assertPublishedUnchanged(dataDir, name, published);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
+    // A pull can fail without leaving a merge behind — no credentials, no
+    // network, a missing remote. That is an error to report, not a conflict
+    // to resolve: a conflict dialog here would claim the file is missing on
+    // the remote when the truth is we could not reach the remote at all.
+    if (pullResult.conflictedFiles.length === 0) {
+      throw new Error(`Publish failed — git pull: ${pullResult.message}`);
+    }
     const theirs = (await theirsVersion(dataDir, name)) ?? "";
     return { status: "conflict", theirs, ours: published, message: pullResult.message };
   }
