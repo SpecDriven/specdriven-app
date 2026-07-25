@@ -51,7 +51,7 @@ export interface FeatureListing {
  * Folders are plain directories in the data repo (specs/folders.spec.md).
  * Hidden entries (`.git` and friends) are not part of the tree.
  */
-async function walk(
+export async function walk(
   dataDir: string,
   rel = "",
 ): Promise<{ files: string[]; folders: string[] }> {
