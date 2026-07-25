@@ -137,6 +137,8 @@ export function App() {
   const [editing, setEditing] = useState<EditState | null>(null);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [conflictDraft, setConflictDraft] = useState("");
+  /** Which resolution is being published, if any — the buttons disable while it runs. */
+  const [resolving, setResolving] = useState<"ours" | "theirs" | "draft" | null>(null);
   const [status, setStatus] = useState("");
   const [savedFlash, setSavedFlash] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -304,6 +306,20 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
+  // specs/ui.spec.md "Dialogs": ESC closes the merge conflict dialog. The
+  // merge itself lives in the repo (specs/git-operations.spec.md), so nothing
+  // is lost — the note below says Publish brings the choices back.
+  useEffect(() => {
+    if (!conflict) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || resolving) return;
+      e.preventDefault();
+      dismissConflict();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [conflict, resolving]);
+
   // specs/user-info-settings.spec.md: ESC or a click anywhere else closes
   // the user menu.
   useEffect(() => {
@@ -449,6 +465,7 @@ export function App() {
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const editingTrapRef = useFocusTrap(editing !== null);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
+  const conflictTrapRef = useFocusTrap(conflict !== null);
 
   useEffect(() => {
     if (selectedScenario !== null)
@@ -825,26 +842,41 @@ export function App() {
     }
   };
 
-  const resolveWith = async (resolved: string) => {
-    if (!selected) return;
+  const resolveWith = async (which: "ours" | "theirs" | "draft", resolved: string) => {
+    if (!selected || resolving) return;
+    setResolving(which);
     setStatus("Publishing resolution…");
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: resolved,
-        resolveConflict: true,
-        // Keep an individual publish scoped to its scenario through the
-        // conflict resolution.
-        scenario: conflict?.scenario,
-      }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      await openFeature(selected);
-    } else {
-      setStatus(data.error ?? "Publish failed");
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: resolved,
+          resolveConflict: true,
+          // Keep an individual publish scoped to its scenario through the
+          // conflict resolution.
+          scenario: conflict?.scenario,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        // openFeature closes the dialog by clearing the conflict.
+        await openFeature(selected);
+      } else {
+        setStatus(data.error ?? "Publish failed");
+      }
+    } catch {
+      setStatus("Publish failed — is the server running?");
+    } finally {
+      setResolving(null);
     }
+  };
+
+  /** Close the conflict dialog without resolving. The unfinished merge stays
+      in the repo, so Publish brings the same choices back. */
+  const dismissConflict = () => {
+    setConflict(null);
+    setStatus("Merge conflict left unresolved — Publish again to pick a resolution.");
   };
 
   /** Handle a link in-app on a plain click; cmd/ctrl/shift-clicks keep their
@@ -1748,32 +1780,6 @@ export function App() {
               </button>
             </div>
             {status && <p className="status">{status}</p>}
-            {conflict && (
-              <div className="conflict">
-                <h3>Merge conflict</h3>
-                <div className="conflict-panes">
-                  <div>
-                    <h4>Yours</h4>
-                    <pre>{conflict.ours}</pre>
-                  </div>
-                  <div>
-                    <h4>Theirs</h4>
-                    <pre>{conflict.theirs}</pre>
-                  </div>
-                </div>
-                <textarea
-                  className="conflict-draft"
-                  value={conflictDraft}
-                  onChange={(e) => setConflictDraft(e.target.value)}
-                  spellCheck={false}
-                />
-                <div className="conflict-actions">
-                  <button onClick={() => resolveWith(conflict.ours)}>Accept yours</button>
-                  <button onClick={() => resolveWith(conflict.theirs)}>Accept theirs</button>
-                  <button onClick={() => resolveWith(conflictDraft)}>Publish manual edit</button>
-                </div>
-              </div>
-            )}
           </>
         ) : (
           <>
@@ -1783,6 +1789,95 @@ export function App() {
           </>
         )}
       </section>
+      {/* specs/crud-feature.spec.md "Publish feature with merge conflict": a
+          dialog rather than a strip appended to the page, so the two sides
+          never push the resolutions out of view. The dialog is capped to the
+          window; each side scrolls inside its own pane and the three
+          resolutions stay pinned at the bottom (specs/ui.spec.md "Merge
+          conflict dialog"). */}
+      {conflict && (
+        <div className="dialog-backdrop" onClick={() => resolving === null && dismissConflict()}>
+          <div
+            className="dialog conflict-dialog"
+            ref={conflictTrapRef}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Merge conflict</h3>
+            <p className="hint">
+              Compare the two sides, then accept one or publish an edit that combines them.
+              {conflict.message ? ` — ${conflict.message}` : ""}
+            </p>
+            <div className="conflict-panes">
+              <section className="conflict-pane">
+                <header>
+                  <h4>Yours</h4>
+                  <span className="hint">what you are publishing</span>
+                </header>
+                <pre>{conflict.ours}</pre>
+              </section>
+              <section className="conflict-pane">
+                <header>
+                  <h4>Theirs</h4>
+                  <span className="hint">what is on the remote</span>
+                </header>
+                {conflict.theirs ? (
+                  <pre>{conflict.theirs}</pre>
+                ) : (
+                  <pre className="conflict-missing">No such file on the remote.</pre>
+                )}
+              </section>
+            </div>
+            <section className="conflict-edit">
+              <header>
+                <h4>Manual edit</h4>
+                <span className="hint">
+                  Start from{" "}
+                  <button className="link" onClick={() => setConflictDraft(conflict.ours)}>
+                    yours
+                  </button>{" "}
+                  or{" "}
+                  <button className="link" onClick={() => setConflictDraft(conflict.theirs)}>
+                    theirs
+                  </button>
+                </span>
+              </header>
+              <textarea
+                className="conflict-draft"
+                value={conflictDraft}
+                onChange={(e) => setConflictDraft(e.target.value)}
+                spellCheck={false}
+              />
+            </section>
+            <div className="dialog-actions conflict-actions">
+              <button
+                className="secondary"
+                onClick={dismissConflict}
+                disabled={resolving !== null}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void resolveWith("ours", conflict.ours)}
+                disabled={resolving !== null}
+              >
+                {resolving === "ours" ? "Publishing…" : "Accept yours"}
+              </button>
+              <button
+                onClick={() => void resolveWith("theirs", conflict.theirs)}
+                disabled={resolving !== null}
+              >
+                {resolving === "theirs" ? "Publishing…" : "Accept theirs"}
+              </button>
+              <button
+                onClick={() => void resolveWith("draft", conflictDraft)}
+                disabled={resolving !== null}
+              >
+                {resolving === "draft" ? "Publishing…" : "Publish manual edit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {settingsOpen && (
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
           <div className="dialog" ref={settingsTrapRef} onClick={(e) => e.stopPropagation()}>
