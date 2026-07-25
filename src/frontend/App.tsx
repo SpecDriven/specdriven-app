@@ -188,10 +188,13 @@ export function App() {
   const [gh, setGh] = useState<GhInfo | null>(null);
   const [settingsEngineDraft, setSettingsEngineDraft] = useState("auto");
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  // GitHub sign-in (specs/git-operations.spec.md): device flow — the user
-  // enters the shown code at github.com/login/device while we poll.
+  // GitHub sign-in (specs/git-operations.spec.md): the browser flow — GitHub
+  // opens in a tab and redirects back to the server while we poll — with the
+  // device flow (enter the shown code at github.com/login/device) as the
+  // fallback, and the only path on the desktop app's app:// pages.
   const [auth, setAuth] = useState<AuthInfo | null>(null);
   const [deviceFlow, setDeviceFlow] = useState<DeviceFlow | null>(null);
+  const [webConnecting, setWebConnecting] = useState(false);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePref>(readThemePref);
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
@@ -1041,11 +1044,30 @@ export function App() {
     setSettingsOpen(true);
   };
 
+  // Browser sign-in (specs/git-operations.spec.md "connect to GitHub via the
+  // browser"): the server hands back GitHub's authorize url, the browser
+  // opens it in a new tab, and GitHub redirects back to the server. In the
+  // desktop shell the window-open handler sends the url to the default
+  // browser. Not offered on app:// pages — there is no http callback there.
+  const canConnectViaBrowser = /^https?:$/.test(window.location.protocol);
+  const connectGitHub = async () => {
+    setAuthStatus(null);
+    const res = await fetch("/api/auth/github/web/start", { method: "POST" });
+    const data = await res.json();
+    if (res.ok) {
+      window.open(data.authorizeUrl, "_blank", "noopener");
+      setWebConnecting(true);
+    } else {
+      setAuthStatus(data.error ?? "Could not start GitHub sign-in");
+    }
+  };
+
   // GitHub sign-in (specs/git-operations.spec.md): start the device flow,
   // show the code, and poll until GitHub reports a decision. The poll
   // lives in an effect so closing the dialog stops it.
   const startSignIn = async () => {
     setAuthStatus(null);
+    setWebConnecting(false);
     const res = await fetch("/api/auth/github/start", { method: "POST" });
     const data = await res.json();
     if (res.ok) {
@@ -1074,9 +1096,41 @@ export function App() {
   useEffect(() => {
     if (!settingsOpen) {
       setDeviceFlow(null);
+      setWebConnecting(false);
       setAuthStatus(null);
     }
   }, [settingsOpen]);
+
+  // While the browser tab is with GitHub, poll for the callback's outcome.
+  useEffect(() => {
+    if (!webConnecting) return;
+    let stopped = false;
+    const id = setInterval(async () => {
+      const res = await fetch("/api/auth/github/web/poll", { method: "POST" });
+      const data = await res.json();
+      if (stopped) return;
+      if (!res.ok) {
+        setWebConnecting(false);
+        setAuthStatus(data.error ?? "GitHub sign-in failed");
+        return;
+      }
+      if (data.status === "authorized") {
+        setWebConnecting(false);
+        setAuth({ signedIn: true, ...data.user });
+        void refreshUser();
+      } else if (data.status === "denied") {
+        setWebConnecting(false);
+        setAuthStatus(data.error ?? "Sign-in was denied on GitHub.");
+      } else if (data.status === "expired") {
+        setWebConnecting(false);
+        setAuthStatus("The sign-in expired — try again.");
+      }
+    }, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+  }, [webConnecting]);
 
   useEffect(() => {
     if (!deviceFlow) return;
@@ -2047,10 +2101,25 @@ export function App() {
                   </p>
                   <p className="hint">Waiting for GitHub…</p>
                 </div>
+              ) : webConnecting ? (
+                <div className="auth-device">
+                  <p>Finish signing in to GitHub in your browser, then come back here.</p>
+                  <p className="hint">Waiting for GitHub…</p>
+                  <button className="secondary" onClick={() => setWebConnecting(false)}>
+                    Cancel
+                  </button>
+                </div>
               ) : (
                 <div className="auth-row">
-                  <button className="secondary" onClick={startSignIn}>
-                    Sign in with GitHub
+                  {/* Browser OAuth needs an http(s) callback; the desktop
+                      app:// pages offer the device code only. */}
+                  {canConnectViaBrowser && (
+                    <button className="secondary" onClick={connectGitHub}>
+                      Connect to GitHub
+                    </button>
+                  )}
+                  <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
+                    {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
                   </button>
                 </div>
               )}

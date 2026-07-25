@@ -14,6 +14,16 @@ export function githubClientId(): string {
   return process.env.SPECDRIVEN_GITHUB_CLIENT_ID || CLIENT_ID_PLACEHOLDER;
 }
 
+/**
+ * GitHub App client secret, needed only by the browser (web application)
+ * sign-in flow: GitHub requires it when exchanging the authorization code,
+ * even with PKCE. Empty when not configured — the device flow still works
+ * without it.
+ */
+export function githubClientSecret(): string {
+  return process.env.SPECDRIVEN_GITHUB_CLIENT_SECRET || "";
+}
+
 /** Base url for github.com itself: sign-in pages and git smart-HTTP. */
 export function githubWebBase(): string {
   return (process.env.SPECDRIVEN_GITHUB_URL || "https://github.com").replace(/\/+$/, "");

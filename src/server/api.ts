@@ -21,7 +21,15 @@ import {
   normalizeGitEngine,
   setGitEngine,
 } from "./git";
-import { getAuth, pollDeviceFlow, signOut, startDeviceFlow } from "./auth";
+import {
+  getAuth,
+  handleWebCallback,
+  pollDeviceFlow,
+  pollWebFlow,
+  signOut,
+  startDeviceFlow,
+  startWebFlow,
+} from "./auth";
 import { getCurrentUser } from "./user";
 import { getAppRoot } from "./paths";
 import {
@@ -276,6 +284,51 @@ const deleteAuth: Handler = async () => {
   return json({ message: "signed out" });
 };
 
+// Browser sign-in (specs/git-operations.spec.md "connect to GitHub via the
+// browser"): start hands back the GitHub authorize url for the browser;
+// GitHub redirects to the callback below; the Settings dialog polls until
+// the outcome arrives. Needs an http(s) origin for GitHub to redirect to —
+// the desktop app's app:// pages use the device flow instead.
+const postAuthWebStart: Handler = async (req) => {
+  const origin = new URL(req.url).origin;
+  if (!/^https?:\/\//.test(origin)) {
+    return json(
+      { error: "Browser sign-in needs the web app — sign in with a device code instead" },
+      400,
+    );
+  }
+  try {
+    return json(startWebFlow(origin));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 502);
+  }
+};
+
+const postAuthWebPoll: Handler = async () => json(pollWebFlow());
+
+/** Minimal page for the browser tab GitHub redirects back to. */
+function callbackPage(ok: boolean, message: string): Response {
+  const esc = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const body = `<!doctype html>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>SpecDriven — GitHub sign-in</title>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem;">
+<h1 style="font-size: 1.25rem;">${ok ? "Connected to GitHub" : "GitHub sign-in did not finish"}</h1>
+<p>${esc}</p>
+<p>You can close this tab and return to SpecDriven.</p>
+</body>`;
+  return new Response(body, {
+    status: ok ? 200 : 400,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
+
+const getAuthWebCallback: Handler = async (req) => {
+  const result = await handleWebCallback(new URL(req.url).searchParams);
+  return callbackPage(result.ok, result.message);
+};
+
 const getFeatures = withDataDir(async (dir) =>
   json({ features: await listFeatures(dir), folders: await listFolders(dir) }),
 );
@@ -418,6 +471,9 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/reload", postReload],
   ["POST", "/api/auth/github/start", postAuthStart],
   ["POST", "/api/auth/github/poll", postAuthPoll],
+  ["POST", "/api/auth/github/web/start", postAuthWebStart],
+  ["POST", "/api/auth/github/web/poll", postAuthWebPoll],
+  ["GET", "/api/auth/github/callback", getAuthWebCallback],
   ["DELETE", "/api/auth/github", deleteAuth],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
