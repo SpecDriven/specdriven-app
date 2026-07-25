@@ -1,20 +1,55 @@
 # Desktop app
 
 SpecDriven also runs as a native desktop app (Electron), installed from a
-macOS dmg. It is the same application as the web version: one React frontend,
-one API, one git-backed data store. The desktop shell serves the frontend and
-the API over an internal `app://` protocol — no localhost port is opened, so
-nothing else on the machine can reach the API.
+macOS dmg or a Linux AppImage or deb. It is the same application as the web
+version: one React frontend, one API, one git-backed data store. The desktop
+shell serves the frontend and the API over an internal `app://` protocol — no
+localhost port is opened, so nothing else on the machine can reach the API.
 
 The web version keeps working unchanged (`bun run dev`, the compiled binary).
 Server code is written against Node APIs only, so the same modules run under
 Bun on the web and under Electron's runtime on the desktop.
 
+# Packaging
+
+One command builds the installable artifacts, for the platform the build runs
+on unless told otherwise (`bun run build:desktop [--mac | --linux | --all]`):
+
+- macOS: a dmg and a zip.
+- Linux: an AppImage and a deb, for x64 and arm64. Both cross-build from
+  macOS, so a release can be cut from one machine.
+
+The macOS artifacts need macOS tooling, so `--mac` off a Linux machine stops
+with that as the reason rather than producing a broken build.
+
+A Linux artifact has to start on a machine that has never seen Electron:
+
+- The deb names every shared library Electron loads. ALSA is the one the
+  packaging defaults miss, and it is spelled `libasound2t64 | libasound2` —
+  the t64 name first, because on releases that renamed it, plain
+  `libasound2` resolves to an OSS compatibility stub that is missing symbols
+  Electron calls.
+- The AppImage carries the static runtime, so it needs neither FUSE nor a
+  dynamically linked zlib on the host.
+
+## Scenario: the packaged Linux app opens on a clean machine
+
+- Given: a Linux system with no Electron and no developer tooling installed
+- When: the user installs the deb, or marks the AppImage executable and runs it
+- Then: the app window opens on the internal `app://` origin, the same as on
+  macOS
+
+## Scenario: building the Linux app from a Mac
+
+- Given: a developer on macOS
+- When: they run `bun run build:desktop --linux`
+- Then: an AppImage and a deb for each architecture appear in `release/`
+
 # Data locations
 
 The desktop app has no meaningful working directory, so it anchors itself in
 the OS application-data directory (`~/Library/Application Support/SpecDriven`
-on macOS) via `SPECDRIVEN_ROOT`:
+on macOS, `~/.config/SpecDriven` on Linux) via `SPECDRIVEN_ROOT`:
 
 - Settings follow the usual lookup (specs/app-start.spec.md) with the
   app-data directory as the "project root": an existing
@@ -37,12 +72,16 @@ on macOS) via `SPECDRIVEN_ROOT`:
   window instead of opening another.
 - On macOS the window uses the hidden-inset title bar: the traffic lights sit
   inside the sidebar header, and the header doubles as the drag region.
+  Elsewhere the window wears the system title bar and the sidebar header is
+  an ordinary header.
 - Deep links (specs/navigation.spec.md) keep working inside the app: the
   internal protocol serves the app shell for every `/features/...` url.
 - The app registers the `specdriven://` scheme with the OS, so a link shared
   by chat or email launches it, or focuses the running window, on that spec
   (specs/navigation.spec.md "links from outside the app"). A second launch
   carrying a link still focuses the one window rather than opening another.
+  The installed bundle declares the scheme to the OS — in `Info.plist` on
+  macOS, in the desktop entry's `MimeType` on Linux.
 
 # External links
 
