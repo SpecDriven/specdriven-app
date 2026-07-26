@@ -17,6 +17,7 @@
     "build:all": "bun scripts/build.ts --all",
     "dev:electron": "bun scripts/dev-electron.ts",
     "build:desktop": "bun scripts/build-desktop.ts",
+    "bump": "bun scripts/bump-version.ts",
     "test": "bun test"
   },
   "devDependencies": {
