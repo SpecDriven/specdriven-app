@@ -203,10 +203,50 @@ body {
 }
 
 .layout {
+  /* Sidebar column follows the divider drag (specs/ui.spec.md "Sidebar
+     resize"); the 70vw guard keeps a width stored on a big window from
+     swallowing the editor on a small one. */
+  --sw: min(var(--sidebar-w, 16rem), 70vw);
   display: grid;
-  grid-template-columns: 16rem 1fr;
+  grid-template-columns: var(--sw) 1fr;
   height: 100vh;
   overflow: hidden;
+  position: relative;
+}
+
+.layout.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Sidebar divider (specs/ui.spec.md "Sidebar resize"): a 7px grab strip
+   straddling the aside/editor border. Invisible at rest — the 1px border
+   stays the only line — it lights up on hover, focus and drag. */
+.sidebar-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sw) - 4px);
+  width: 7px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.sidebar-divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 3px;
+  background: transparent;
+  transition: background 0.15s ease 0.1s;
+}
+
+.sidebar-divider:hover::after,
+.sidebar-divider:focus-visible::after,
+.layout.resizing .sidebar-divider::after {
+  background: var(--ring);
 }
 
 aside {

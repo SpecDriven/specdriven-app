@@ -48,6 +48,19 @@ visible on hover) with two items: `File` and `Delete`.
 
 Features can be organized into folders — see specs/folders.spec.md.
 
+# Sidebar resize
+
+A deep folder hierarchy needs more room than the default left-pane width.
+
+- The divider between the left pane and the editor is draggable; dragging it
+  resizes the left pane.
+- The width is clamped: the pane can never collapse away nor swallow the
+  editor.
+- Double-clicking the divider restores the default width. The divider is
+  focusable, and arrow keys nudge the width.
+- The chosen width is remembered on the device (browser/app storage), like
+  the theme — a per-device preference, not shared team state.
+
 # Select scenarios via up and down keys
 - Highlight selected scenario
 - Edit on Enter key press

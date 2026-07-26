@@ -86,6 +86,38 @@ function applyThemePref(pref: ThemePref): void {
   }
 }
 
+// Sidebar width (specs/ui.spec.md "Sidebar resize"): dragged via the divider
+// so a deep folder tree gets room. Device-local, like the theme.
+const SIDEBAR_MIN = 180;
+const SIDEBAR_DEFAULT = 256; // keep in sync with the 16rem fallback in index.css
+
+function clampSidebarWidth(w: number): number {
+  // The editor keeps at least 40% of the window. Only called while the user
+  // drags or nudges, when the window has its real size — at startup the
+  // window can be transiently tiny (restoring, embedded), so stored widths
+  // are never clamped against it; the 70vw guard in index.css covers that
+  // responsively instead.
+  const max = Math.max(SIDEBAR_MIN, Math.round(window.innerWidth * 0.6));
+  return Math.min(Math.max(Math.round(w), SIDEBAR_MIN), max);
+}
+
+function readSidebarWidth(): number {
+  try {
+    const w = Number(localStorage.getItem("sd-sidebar-width"));
+    return Number.isFinite(w) && w >= SIDEBAR_MIN ? Math.round(w) : SIDEBAR_DEFAULT;
+  } catch {
+    return SIDEBAR_DEFAULT;
+  }
+}
+
+function storeSidebarWidth(w: number): void {
+  try {
+    localStorage.setItem("sd-sidebar-width", String(w));
+  } catch {
+    // Storage unavailable (private mode): the width just won't stick.
+  }
+}
+
 /** index === null means a new scenario being added. */
 interface EditState {
   index: number | null;
@@ -126,6 +158,10 @@ export function App() {
   const [folders, setFolders] = useState<string[]>([]);
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /** Sidebar width in px (specs/ui.spec.md "Sidebar resize"). */
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  /** True while the sidebar divider is being dragged. */
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   /** Folder highlighted by a click; "+ New folder" creates inside it. */
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   /** File name of the feature being dragged, if any. */
@@ -1529,7 +1565,10 @@ export function App() {
   const hasProposed = feature?.scenarios.some((s) => s.proposed && !s.published) ?? false;
 
   return (
-    <main className="layout">
+    <main
+      className={resizingSidebar ? "layout resizing" : "layout"}
+      style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
+    >
       {savedFlash && <div className="saved-banner">Saved</div>}
       <aside>
         <header>
@@ -1690,6 +1729,43 @@ export function App() {
           </button>
         </div>
       </aside>
+      {/* Divider (specs/ui.spec.md "Sidebar resize"): drag to resize the
+          left pane, double-click to restore the default width. */}
+      <div
+        className="sidebar-divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize sidebar"
+        aria-valuemin={SIDEBAR_MIN}
+        aria-valuenow={sidebarWidth}
+        tabIndex={0}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setResizingSidebar(true);
+        }}
+        onPointerMove={(e) => {
+          if (resizingSidebar) setSidebarWidth(clampSidebarWidth(e.clientX));
+        }}
+        onPointerUp={(e) => {
+          if (!resizingSidebar) return;
+          setResizingSidebar(false);
+          storeSidebarWidth(clampSidebarWidth(e.clientX));
+        }}
+        onLostPointerCapture={() => setResizingSidebar(false)}
+        onDoubleClick={() => {
+          setSidebarWidth(SIDEBAR_DEFAULT);
+          storeSidebarWidth(SIDEBAR_DEFAULT);
+        }}
+        onKeyDown={(e) => {
+          const delta = e.key === "ArrowRight" ? 16 : e.key === "ArrowLeft" ? -16 : 0;
+          if (delta === 0) return;
+          e.preventDefault();
+          const w = clampSidebarWidth(sidebarWidth + delta);
+          setSidebarWidth(w);
+          storeSidebarWidth(w);
+        }}
+      />
       <section className="editor">
         {selected && feature ? (
           <>
