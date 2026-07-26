@@ -37,13 +37,28 @@ user nothing to go on.
 
 Windows is rejected with a pointer to the `.exe`; `curl | sh` can't serve it.
 
+## Versioning (done)
+
+`package.json`'s `version` is the one place the release version lives — it is
+what electron-builder names the desktop artifacts after, and what the installer
+looks for under `$BASE_URL/$VERSION`.
+
+`bun run bump <major|minor|patch|1.2.3>` moves it, commits that one file, and
+tags `v<version>`. It refuses a dirty tree (so the release commit is the bump
+alone), a tag that already exists, and a version that doesn't come after the
+current one — released versions name immutable artifacts. `--no-git` writes
+`package.json` alone; `--dry-run` shows the move without making it.
+
+Pushing is deliberately left to the caller, since pushing the tag is what
+publishes the release: `git push origin main --follow-tags`.
+
 ## Still to do
 
 - **Host the assets.** The repo is private, so GitHub Release assets need auth
   and can't be `curl`ed anonymously — R2 behind specdriven.app is the way,
   which is also why `BASE_URL` defaults to `https://specdriven.app/dist`.
-- **Versioning.** `package.json` has no `version` field. The installer defaults
-  to `latest`, so something has to publish to `dist/latest/` (and ideally
+- **Publish on tag.** Nothing yet uploads a build: the installer defaults to
+  `latest`, so a tagged version has to land in `dist/latest/` (and ideally
   `dist/v1.2.3/` alongside it).
 - **Serve `install.sh`** at the domain root from the same bucket.
 - No `--version` flag on the binary, so an installed copy can't report what it
