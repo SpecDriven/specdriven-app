@@ -256,7 +256,9 @@ aside {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  overflow-y: auto;
+  /* The aside itself never scrolls: the tree/results slot is the scroll
+     region, so the user corner stays pinned below it. */
+  overflow: hidden;
   min-height: 0;
 }
 
@@ -364,13 +366,14 @@ aside header h1 {
 }
 
 /* Search results (specs/search.spec.md): ranked rows in the tree's sidebar
-   slot — same flex so the user corner stays pinned to the bottom. */
+   slot — same flex and scroll so the user corner stays pinned below. */
 .search-results {
   display: flex;
   flex-direction: column;
   gap: 2px;
   flex: 1;
   min-height: 4rem;
+  overflow-y: auto;
 }
 
 .search-result {
@@ -422,7 +425,8 @@ aside header h1 {
 }
 
 /* Folder tree (specs/folders.spec.md). The tree fills the sidebar so
-   its background doubles as the top-level drop zone. */
+   its background doubles as the top-level drop zone; it scrolls on its
+   own so long trees stop above the user corner instead of under it. */
 .tree {
   display: flex;
   flex-direction: column;
@@ -430,6 +434,7 @@ aside header h1 {
   flex: 1;
   min-height: 4rem;
   border-radius: var(--radius-sm);
+  overflow-y: auto;
 }
 
 /* Sidebar entries are real links (specs/navigation.spec.md "share a link")
