@@ -5,8 +5,10 @@
 - User Menu will have user info and settings options
 
 The lower left corner of the sidebar shows a user chip: an avatar circle with
-the user's initials and the user name. The name is the OS user by default;
-the server reports it via `/api/state`.
+the user's initials and the user name. The name is the GitHub account when
+one is known — the signed-in login, or the GitHub CLI's account when that
+engine is in effect — and falls back to the OS user otherwise; the server
+reports both via `/api/state`.
 
 - Clicking the chip opens the User Menu just above it, with two options:
   "User info" and "Settings". Settings opens the existing Settings dialog
@@ -23,8 +25,13 @@ the server reports it via `/api/state`.
 
 ## Scenario: see the current user
 
-- When: the app is open
+- When: the app is open and no GitHub account is known
 - Then: the lower left corner shows the OS user behind a small avatar chip
+
+## Scenario: see the GitHub account
+
+- When: a GitHub account is known
+- Then: the chip shows that login instead of the OS user
 
 ## Scenario: open the user menu
 
