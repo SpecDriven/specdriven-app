@@ -120,7 +120,7 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       // an auto-saved (uncommitted) scenario is waiting in the working tree
       await Bun.write(
         join(data, "seed.feature.md"),
-        "# Seed\n\n## One v1 [proposed]\n\nbody\n",
+        "# Seed\n\n## One @v1 [proposed]\n\nbody\n",
       );
 
       try {

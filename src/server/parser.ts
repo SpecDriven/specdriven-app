@@ -5,15 +5,17 @@
 //
 //   <optional feature description — any markdown>
 //
-//   ## <name of scenario> vNNN              (draft, editable; NNN positive int)
-//   ## <name of scenario> vNNN [proposed]   (saved, not yet published)
-//   ## <name of scenario> vNNN [published]  (published, immutable)
+//   ## <name of scenario> @vNNN              (draft, editable; NNN positive int)
+//   ## <name of scenario> @vNNN [proposed]   (saved, not yet published)
+//   ## <name of scenario> @vNNN [published]  (published, immutable)
 //
 //   <scenario body — any markdown up to the next scenario heading;
 //    Gherkin tables are written as markdown tables>
 //
 // The first `#` heading is the feature name; a `##` heading that ends with a
-// version starts a scenario. Scenarios are atomic, immutable, and versioned.
+// version starts a scenario. The `@` marks where the name ends and the version
+// begins, so a name that itself contains a version ("Migrate to v2 API @v1")
+// stays unambiguous. Scenarios are atomic, immutable, and versioned.
 // `##` headings without a version, and headings inside fenced code blocks
 // (``` or ~~~), are ordinary content, not scenario boundaries.
 
@@ -106,7 +108,9 @@ function testsTable(tests: string[]): string {
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
-const SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
+const SCENARIO_RE = /^##\s+(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
+/** Feature files written before the `@` version prefix: ``## <name> v1 [published]``. */
+const LEGACY_PLAIN_SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
 const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|proposed|saved)`)?\s*$/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
@@ -120,12 +124,17 @@ interface HeadingMatch {
 }
 
 /**
- * Read a scenario heading in either the current or the legacy chip syntax.
- * `saved` is the old name of the proposed state — still read, written back
- * as `proposed` (specs/crud-feature.spec.md "Feature file format").
+ * Read a scenario heading in the current `@vN` syntax or either legacy one —
+ * the un-prefixed `vN` version and the backtick chips. Both are read and
+ * written back in the current syntax, so an old feature file normalizes the
+ * first time it is saved. `saved` is the old name of the proposed state
+ * (specs/crud-feature.spec.md "Feature file format").
  */
 function matchScenario(line: string): HeadingMatch | null {
-  const m = line.match(LEGACY_SCENARIO_RE) ?? line.match(SCENARIO_RE);
+  const m =
+    line.match(SCENARIO_RE) ??
+    line.match(LEGACY_SCENARIO_RE) ??
+    line.match(LEGACY_PLAIN_SCENARIO_RE);
   if (!m) return null;
   return {
     name: m[1]!,
@@ -219,7 +228,7 @@ export function parseFeature(text: string): Feature {
 
 function header(name: string, version: number, status: Status): string {
   const chip = status ? ` [${status}]` : "";
-  return `## ${name} v${version}${chip}`;
+  return `## ${name} @v${version}${chip}`;
 }
 
 export function serializeFeature(feature: Feature): string {
@@ -266,8 +275,8 @@ export function renameFeatureName(text: string, name: string): string {
  * Rewrite every scenario heading's status chip with the value chosen by
  * `next`. Works on the raw text line-by-line so body content that doesn't fit
  * the parse model survives untouched, and headings inside fenced code blocks
- * are left alone. Legacy headings are normalized to the bracket syntax, and
- * old [saved] chips to [proposed].
+ * are left alone. Legacy headings are normalized to the `@vN` and bracket
+ * syntax, and old [saved] chips to [proposed].
  */
 function rewriteHeaders(text: string, next: (m: HeadingMatch) => Status): string {
   let inFence = false;
