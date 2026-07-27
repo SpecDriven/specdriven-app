@@ -1810,7 +1810,7 @@ export function App() {
             <span className="avatar" aria-hidden="true">
               {initials}
             </span>
-            <span className="user-name">{user?.username ?? "…"}</span>
+            <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
           </button>
         </div>
       </aside>
