@@ -11,6 +11,7 @@ import {
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { resolveDataRepo } from "./repo";
+import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   cliGitAvailable,
   currentEngine,
@@ -145,6 +146,9 @@ async function stateFields(state: SpecDrivenState) {
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    // Whether the runtime can open a native folder chooser
+    // (specs/app-start.spec.md) — gates the Browse… buttons.
+    canChooseFolder: canChooseFolder(),
     ...gitEngineFields(state),
     ...(await authFields()),
   };
@@ -464,10 +468,22 @@ const postRename = withDataDir(async (dir, req, params) => {
   }
 });
 
+// Native folder chooser (specs/app-start.spec.md "picking the data directory
+// with the native folder chooser"): opens the OS dialog on the machine the
+// app runs on. 501 on runtimes with no native chooser — the client hides
+// Browse… then (canChooseFolder in /api/state).
+const postChooseFolder: Handler = async () => {
+  if (!canChooseFolder()) {
+    return json({ error: "no native folder chooser on this runtime" }, 501);
+  }
+  return json({ path: await chooseFolder() });
+};
+
 /** Pattern segments starting with `:` bind the (decoded) path segment. */
 const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
+  ["POST", "/api/choose-folder", postChooseFolder],
   ["POST", "/api/reload", postReload],
   ["POST", "/api/auth/github/start", postAuthStart],
   ["POST", "/api/auth/github/poll", postAuthPoll],

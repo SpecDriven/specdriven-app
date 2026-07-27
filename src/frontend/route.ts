@@ -76,6 +76,15 @@ export function desktopLink(path: string): string {
   return `${DESKTOP_SCHEME}://${path.replace(/^\/+/, "")}`;
 }
 
+/**
+ * Sidebar display name for the configured data repo
+ * (specs/app-start.spec.md): just the folder or GitHub repo name — the
+ * parent folders stay in the header's tooltip and in the edit dialog.
+ */
+export function repoDisplayName(repo: string): string {
+  return repo.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/, "") || repo;
+}
+
 export function featurePath(fileName: string): string {
   const stem = fileName.replace(/\.feature\.md$/, "");
   // Folder segments keep their `/`s; anything a url can't carry is escaped.

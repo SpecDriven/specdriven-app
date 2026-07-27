@@ -14,6 +14,13 @@ export interface PromptOptions {
   initial?: string;
   placeholder?: string;
   confirmLabel?: string;
+  /**
+   * Native picker (specs/app-start.spec.md "picking the data directory with
+   * the native folder chooser"): shown as a Browse… button beside the input;
+   * a non-null result replaces the draft, null (canceled) leaves it alone.
+   */
+  browse?: () => Promise<string | null>;
+  browseLabel?: string;
 }
 
 export interface ConfirmOptions {
@@ -59,6 +66,18 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
   const [draft, setDraft] = useState(
     request.kind === "prompt" ? (request.opts.initial ?? "") : "",
   );
+  const [browsing, setBrowsing] = useState(false);
+
+  const browse = async () => {
+    if (request.kind !== "prompt" || !request.opts.browse) return;
+    setBrowsing(true);
+    try {
+      const picked = await request.opts.browse();
+      if (picked) setDraft(picked);
+    } finally {
+      setBrowsing(false);
+    }
+  };
 
   const cancel = () => {
     close();
@@ -98,12 +117,24 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
                 confirm();
               }}
             >
-              <input
-                autoFocus
-                value={draft}
-                placeholder={request.opts.placeholder}
-                onChange={(e) => setDraft(e.target.value)}
-              />
+              <div className="input-row">
+                <input
+                  autoFocus
+                  value={draft}
+                  placeholder={request.opts.placeholder}
+                  onChange={(e) => setDraft(e.target.value)}
+                />
+                {request.opts.browse && (
+                  <button
+                    type="button"
+                    className="browse"
+                    disabled={browsing}
+                    onClick={() => void browse()}
+                  >
+                    {request.opts.browseLabel ?? "Browse…"}
+                  </button>
+                )}
+              </div>
               <div className="dialog-actions">
                 <button type="button" className="secondary" onClick={cancel}>
                   Cancel

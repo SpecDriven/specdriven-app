@@ -102,6 +102,11 @@ The desktop runtime has no native `prompt()`, so every prompt and
 confirmation is an in-app dialog (specs/ui.spec.md "Dialogs") — the same
 dialogs the web version shows.
 
+The one native dialog is the data-directory folder chooser
+(specs/app-start.spec.md "picking the data directory with the native folder
+chooser"): the desktop app parents the OS picker to its window, replacing
+the osascript chooser the local web server falls back to on macOS.
+
 # Git
 
 Git operations shell out to the machine's binaries where it has them

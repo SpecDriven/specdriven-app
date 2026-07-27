@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { featurePath, parseRoute, resolveScenario, scenarioPath } from "../src/frontend/route";
+import {
+  featurePath,
+  parseRoute,
+  repoDisplayName,
+  resolveScenario,
+  scenarioPath,
+} from "../src/frontend/route";
 import type { Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number): Scenario => ({
@@ -129,5 +135,32 @@ describe("resolveScenario", () => {
     const colliding = [sc("Add user!", 1), sc("Add User", 1)];
     expect(resolveScenario(colliding, { slug: "add-user", version: 1 })).toBe(0);
     expect(resolveScenario(colliding, { slug: "add-user" })).toBe(0);
+  });
+});
+
+// Sidebar header (specs/app-start.spec.md): only the data repo's own name
+// shows; parent folders live in the tooltip.
+describe("repoDisplayName", () => {
+  test("absolute path shows the last folder", () => {
+    expect(repoDisplayName("/Users/x/dev/specs-insurance")).toBe("specs-insurance");
+    expect(repoDisplayName("/Users/x/dev/specs-insurance/")).toBe("specs-insurance");
+  });
+
+  test("relative path and bare name", () => {
+    expect(repoDisplayName("../specs-insurance")).toBe("specs-insurance");
+    expect(repoDisplayName("data")).toBe("data");
+  });
+
+  test("GitHub url shows the repo name", () => {
+    expect(repoDisplayName("https://github.com/SpecDriven/data-insurance")).toBe(
+      "data-insurance",
+    );
+    expect(repoDisplayName("https://github.com/SpecDriven/data-insurance.git")).toBe(
+      "data-insurance",
+    );
+  });
+
+  test("windows separators", () => {
+    expect(repoDisplayName("C:\\dev\\specs-insurance")).toBe("specs-insurance");
   });
 });
