@@ -17,7 +17,14 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { ScenarioTable } from "./ScenarioTable";
-import { desktopLink, featurePath, parseRoute, resolveScenario, scenarioPath } from "./route";
+import {
+  desktopLink,
+  featurePath,
+  parseRoute,
+  repoDisplayName,
+  resolveScenario,
+  scenarioPath,
+} from "./route";
 import {
   addTestLink,
   canSetTestLink,
@@ -152,6 +159,9 @@ export function App() {
   const [needsRepo, setNeedsRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [settingRepo, setSettingRepo] = useState(false);
+  // Whether the runtime offers a native folder chooser (specs/app-start.spec.md).
+  const [canChooseFolder, setCanChooseFolder] = useState(false);
+  const repoInputRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureListing[]>([]);
@@ -270,6 +280,7 @@ export function App() {
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
       }
+      setCanChooseFolder(Boolean(state.canChooseFolder));
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(state.cliGitAvailable));
@@ -580,6 +591,58 @@ export function App() {
         await openFromLocation(entryPath);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
+      }
+    } finally {
+      setSettingRepo(false);
+    }
+  };
+
+  // Native OS folder chooser (specs/app-start.spec.md): the server (or the
+  // desktop shell) owns the dialog; null means canceled or unavailable.
+  const chooseFolderNative = async (): Promise<string | null> => {
+    const res = await fetch("/api/choose-folder", { method: "POST" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.path ?? null;
+  };
+
+  // First-run form (specs/app-start.spec.md): the picker fills the path
+  // field; the user still confirms with the submit button.
+  const browseIntoRepoInput = async () => {
+    const picked = await chooseFolderNative();
+    if (picked && repoInputRef.current) repoInputRef.current.value = picked;
+  };
+
+  // Change the data dir from the sidebar header (specs/app-start.spec.md
+  // "changing the data repo"): pre-filled prompt; on success the view resets
+  // to home, since the current selection belonged to the old repo.
+  const changeRepo = async () => {
+    const input = await prompt({
+      title: "Data directory",
+      hint: "Path or GitHub url of the spec data repo.",
+      initial: dataRepo ?? "",
+      confirmLabel: "Use this directory",
+      browse: canChooseFolder ? chooseFolderNative : undefined,
+    });
+    const next = input?.trim();
+    if (!next || next === dataRepo) return;
+    setSettingRepo(true);
+    try {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataRepo: next }),
+      });
+      const state = await res.json();
+      if (res.ok) {
+        setDataRepo(state.dataRepo);
+        setSelected(null);
+        setFeature(null);
+        setSelectedScenario(null);
+        setStatus("");
+        await loadFeatures();
+      } else {
+        setStatus(state.error ?? "Could not use this directory");
       }
     } finally {
       setSettingRepo(false);
@@ -1543,7 +1606,14 @@ export function App() {
         >
           <h1>SpecDriven</h1>
           <p>No spec data directory configured yet. Enter the path to the spec data directory:</p>
-          <input name="repo" placeholder="/path/to/spec-data" autoFocus />
+          <div className="input-row">
+            <input ref={repoInputRef} name="repo" placeholder="/path/to/spec-data" autoFocus />
+            {canChooseFolder && (
+              <button type="button" className="browse" onClick={() => void browseIntoRepoInput()}>
+                Browse…
+              </button>
+            )}
+          </div>
           <button type="submit" disabled={settingRepo}>
             {settingRepo ? "Checking access…" : "Use this directory"}
           </button>
@@ -1574,9 +1644,24 @@ export function App() {
         <header>
           <h1>
             <Logo size={28} />
-            <span className="wordmark">SpecDriven</span>
           </h1>
-          <span className="repo-name">{dataRepo}</span>
+          {/* The data repo name sits beside the mark rather than under it, so
+              the header costs a single row of vertical space. */}
+          <div className="repo-row">
+            <span className="repo-name" title={dataRepo ?? undefined}>
+              {dataRepo && repoDisplayName(dataRepo)}
+            </span>
+            <button
+              type="button"
+              className="repo-edit"
+              title="Change data directory"
+              aria-label="Change data directory"
+              disabled={settingRepo}
+              onClick={() => void changeRepo()}
+            >
+              ✎
+            </button>
+          </div>
         </header>
         {/* Search field (specs/search.spec.md): top-left, under the header
             so the macOS drag region above it stays draggable. */}

@@ -3,10 +3,11 @@
 // app:// protocol — no localhost port is opened. In development
 // (ELECTRON_DEV=1) it loads the running Bun dev server instead, for HMR.
 
-import { app, BrowserWindow, nativeTheme, protocol, session, shell } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, protocol, session, shell } from "electron";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { applyStartupState, handleApi } from "../server/api";
+import { setFolderChooser } from "../server/folderChooser";
 import { setTokenBackend } from "../server/tokenStore";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
@@ -227,6 +228,19 @@ if (!app.requestSingleInstanceLock()) {
     if (safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
     }
+    // Data-directory picker (specs/app-start.spec.md): replace the server's
+    // osascript fallback with the native dialog, parented to the window.
+    setFolderChooser(async () => {
+      const opts: Electron.OpenDialogOptions = {
+        title: "Choose the spec data directory",
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const picked =
+        win && !win.isDestroyed()
+          ? await dialog.showOpenDialog(win, opts)
+          : await dialog.showOpenDialog(opts);
+      return picked.canceled ? null : (picked.filePaths[0] ?? null);
+    });
     await applyStartupState();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
     pendingDeepLink ??= deepLinkFromArgv(process.argv);

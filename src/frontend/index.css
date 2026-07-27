@@ -202,6 +202,41 @@ body {
   font-size: 0.95rem;
 }
 
+/* Path field + native "Browse…" chooser (specs/app-start.spec.md), used in
+   the first-run form and the Data directory dialog. Secondary styling: the
+   picker fills the field, it never submits. */
+.input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-row button.browse {
+  flex-shrink: 0;
+  padding: 0.46rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.input-row button.browse:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--text-3);
+}
+
+.input-row button.browse:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .layout {
   /* Sidebar column follows the divider drag (specs/ui.spec.md "Sidebar
      resize"); the 70vw guard keeps a width stored on a big window from
@@ -264,8 +299,8 @@ aside {
 
 aside header {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  align-items: center;
+  gap: 0.55rem;
   padding: 0.1rem 0.35rem 0;
 }
 
@@ -281,16 +316,8 @@ aside header h1 {
   margin: 0;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  flex-shrink: 0;
   font-size: 1.05rem;
-}
-
-.wordmark {
-  font-family: var(--font-serif);
-  font-weight: 600;
-  font-size: 1.13rem;
-  letter-spacing: -0.015em;
-  color: var(--text-1);
 }
 
 .logo {
@@ -299,13 +326,37 @@ aside header h1 {
   box-shadow: 0 1px 3px rgba(172, 79, 47, 0.35);
 }
 
+.repo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex: 1;
+  min-width: 0;
+}
+
 .repo-name {
-  color: var(--text-3);
+  color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.repo-edit {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  /* Stays clickable inside the macOS drag-region header (desktop app). */
+  -webkit-app-region: no-drag;
+}
+
+.repo-edit:hover {
+  color: var(--text-1);
+  background: var(--hover);
 }
 
 .sidebar-actions {
