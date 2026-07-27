@@ -23,12 +23,12 @@ const QUOTES = `# Quotes
 
 Pricing specs for the quoting engine.
 
-## Basic quote v1 [published]
+## Basic quote @v1 [published]
 
 - Given: a standard customer
 - Then: the monthly premium is computed from the base rate
 
-## Basic quote v2
+## Basic quote @v2
 
 - Given: a standard customer
 - Then: the monthly premium is computed from the base rate and a rider
@@ -71,11 +71,11 @@ test("a scenario named for the term outranks a body-only mention", async () => {
     join(root, "rules.feature.md"),
     `# Rules
 
-## Premium rules v1
+## Premium rules @v1
 
 - Then: name-boosted scenarios rank first
 
-## Discounts v1
+## Discounts @v1
 
 - Then: a discount reduces the premium a little
 `,
@@ -112,16 +112,16 @@ test("the tests table is not indexed", async () => {
 // Scenario: the index follows external file changes
 test("an overwritten file is reindexed", async () => {
   const file = join(root, "a.feature.md");
-  await Bun.write(file, "# A\n\n## S v1\n\nthe old banana paragraph\n");
+  await Bun.write(file, "# A\n\n## S @v1\n\nthe old banana paragraph\n");
   expect((await searchSpecs(root, "banana")).length).toBe(1);
-  await Bun.write(file, "# A\n\n## S v1\n\na brand new cucumber sentence instead\n");
+  await Bun.write(file, "# A\n\n## S @v1\n\na brand new cucumber sentence instead\n");
   expect(await searchSpecs(root, "banana")).toEqual([]);
   expect((await searchSpecs(root, "cucumber")).length).toBe(1);
 });
 
 test("a deleted file drops out of the results", async () => {
-  await Bun.write(join(root, "a.feature.md"), "# A\n\n## S v1\n\nshared target word\n");
-  await Bun.write(join(root, "b.feature.md"), "# B\n\n## S v1\n\nshared target word\n");
+  await Bun.write(join(root, "a.feature.md"), "# A\n\n## S @v1\n\nshared target word\n");
+  await Bun.write(join(root, "b.feature.md"), "# B\n\n## S @v1\n\nshared target word\n");
   expect((await searchSpecs(root, "target")).length).toBe(2);
   await rm(join(root, "a.feature.md"));
   const results = await searchSpecs(root, "target");
@@ -137,7 +137,7 @@ test("an empty or whitespace query returns no results", async () => {
 
 test("the limit caps the result list", async () => {
   for (const stem of ["a", "b", "c"]) {
-    await Bun.write(join(root, `${stem}.feature.md`), `# ${stem}\n\n## S v1\n\ncommon word\n`);
+    await Bun.write(join(root, `${stem}.feature.md`), `# ${stem}\n\n## S @v1\n\ncommon word\n`);
   }
   expect((await searchSpecs(root, "common")).length).toBe(3);
   expect((await searchSpecs(root, "common", 2)).length).toBe(2);

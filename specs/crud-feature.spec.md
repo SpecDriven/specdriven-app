@@ -14,15 +14,19 @@ nicely on GitHub and in any markdown viewer:
 
 <optional feature description — any markdown>
 
-## <name of scenario> vNNN [proposed | published | archived]
+## <name of scenario> @vNNN [proposed | published | archived]
 
 <scenario body — any markdown up to the next scenario heading>
 ```
 
-
+The `@` prefixes the version so the scenario name and its version are easy to
+tell apart, by eye and by parser — a name that itself ends in a version
+(`## Migrate to v2 API @v1`) stays unambiguous. Headings written before the
+prefix (`## Basic Quote v1 [published]`) are still read, and are rewritten with
+the `@` the next time the feature is saved.
 
 ```markdown
-## Basic Quote v1 [proposed]
+## Basic Quote @v1 [proposed]
 
 - **Given** a potential customer has an account
 - **When** the customer requests a quote
@@ -51,7 +55,7 @@ the version.
 Ex:
 
 ```markdown
-## Basic Quote v1 [published]
+## Basic Quote @v1 [published]
 ```
 
 ## Scenario: Scenario is automatically saved locally and pushed to GitHub
@@ -64,7 +68,7 @@ Ex:
 Ex:
 
 ```markdown
-## Customer calls accident hotline and talks to a live agent v1 [proposed]
+## Customer calls accident hotline and talks to a live agent @v1 [proposed]
 
 Customer calls accident hotline and leaves a message with accident info.
 ```

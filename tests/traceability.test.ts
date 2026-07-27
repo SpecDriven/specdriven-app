@@ -29,14 +29,14 @@ test("only GitHub urls are test links", () => {
 
 test("a trailing Tests table is lifted out of the scenario body", () => {
   const feature = parseFeature(
-    `# F\n\n## S v1\n\n- **Given** a thing\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n| ${URL_B} |\n`,
+    `# F\n\n## S @v1\n\n- **Given** a thing\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n| ${URL_B} |\n`,
   );
   expect(feature.scenarios[0]!.tests).toEqual([URL_A, URL_B]);
   expect(feature.scenarios[0]!.body).toBe("- **Given** a thing");
 });
 
 test("test links survive a parse/serialize round trip", () => {
-  const feature = parseFeature(`# F\n\n## S v1 [published]\n\nbody\n`);
+  const feature = parseFeature(`# F\n\n## S @v1 [published]\n\nbody\n`);
   feature.scenarios[0]!.tests = [URL_A];
   const text = serializeFeature(feature);
   expect(text).toContain("### Tests");
@@ -45,7 +45,7 @@ test("test links survive a parse/serialize round trip", () => {
 });
 
 test("scenarios without test links serialize without a Tests section", () => {
-  const feature = parseFeature("# F\n\n## S v1\n\nbody\n");
+  const feature = parseFeature("# F\n\n## S @v1\n\nbody\n");
   expect(feature.scenarios[0]!.tests).toEqual([]);
   expect(serializeFeature(feature)).not.toContain("### Tests");
 });
@@ -65,7 +65,7 @@ test("a Tests heading inside a code fence is ordinary content", () => {
 
 test("the Tests table only affects its own scenario", () => {
   const feature = parseFeature(
-    `# F\n\n## A v1\n\na-body\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n\n## B v1\n\nb-body\n`,
+    `# F\n\n## A @v1\n\na-body\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n\n## B @v1\n\nb-body\n`,
   );
   expect(feature.scenarios[0]!.tests).toEqual([URL_A]);
   expect(feature.scenarios[0]!.body).toBe("a-body");

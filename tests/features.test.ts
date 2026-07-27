@@ -89,11 +89,11 @@ test("renameFeature works in a plain directory (no git repo)", async () => {
 test("renameFeature only touches the heading, adding one when missing", async () => {
   await Bun.write(
     join(root, "one.feature.md"),
-    "# One\n\nsome description\n\n## First v1 [published]\n\nbody\n",
+    "# One\n\nsome description\n\n## First @v1 [published]\n\nbody\n",
   );
   await renameFeature(root, "one.feature.md", "Uno");
   expect(await readFeature(root, "one.feature.md")).toBe(
-    "# Uno\n\nsome description\n\n## First v1 [published]\n\nbody\n",
+    "# Uno\n\nsome description\n\n## First @v1 [published]\n\nbody\n",
   );
   await Bun.write(join(root, "bare.feature.md"), "just text\n");
   await renameFeature(root, "bare.feature.md", "Named Now");
@@ -153,13 +153,13 @@ test("saveFeature keeps published scenarios immutable", async () => {
   await publishFeature(
     root,
     "quote.feature.md",
-    "# Quote\n\n## Basic v1\n\nold body\n",
+    "# Quote\n\n## Basic @v1\n\nold body\n",
   );
   expect(
     saveFeature(
       root,
       "quote.feature.md",
-      "# Quote\n\n## Basic v1 [published]\n\nnew body\n",
+      "# Quote\n\n## Basic @v1 [published]\n\nnew body\n",
     ),
   ).rejects.toThrow("immutable");
 });
@@ -167,7 +167,7 @@ test("saveFeature keeps published scenarios immutable", async () => {
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic v1\n\nbody\n");
+  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
   const result = await publishFeature(
     root,
     "quote.feature.md",
@@ -175,7 +175,7 @@ test("publishFeature upgrades proposed scenarios to published", async () => {
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "quote.feature.md");
-  expect(text).toContain("## Basic v1 [published]");
+  expect(text).toContain("## Basic @v1 [published]");
   expect(text).not.toContain("[proposed]");
 });
 
@@ -186,7 +186,7 @@ test("publishFeature with a scenario target publishes only that scenario", async
   await saveFeature(
     root,
     "quote.feature.md",
-    "# Quote\n\n## Basic v1\n\none\n\n## Extra v1\n\ntwo\n",
+    "# Quote\n\n## Basic @v1\n\none\n\n## Extra @v1\n\ntwo\n",
   );
   const result = await publishFeature(
     root,
@@ -196,8 +196,8 @@ test("publishFeature with a scenario target publishes only that scenario", async
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "quote.feature.md");
-  expect(text).toContain("## Basic v1 [published]");
-  expect(text).toContain("## Extra v1 [proposed]");
+  expect(text).toContain("## Basic @v1 [published]");
+  expect(text).toContain("## Extra @v1 [proposed]");
 });
 
 // Same scenario name, different versions: only the targeted version flips.
@@ -206,7 +206,7 @@ test("publishFeature with a scenario target is version-specific", async () => {
   await saveFeature(
     root,
     "quote.feature.md",
-    "# Quote\n\n## Basic v1\n\nold\n\n## Basic v2\n\nnew\n",
+    "# Quote\n\n## Basic @v1\n\nold\n\n## Basic @v2\n\nnew\n",
   );
   await publishFeature(
     root,
@@ -215,19 +215,19 @@ test("publishFeature with a scenario target is version-specific", async () => {
     { name: "Basic", version: 2 },
   );
   const text = await readFeature(root, "quote.feature.md");
-  expect(text).toContain("## Basic v1 [proposed]");
-  expect(text).toContain("## Basic v2 [published]");
+  expect(text).toContain("## Basic @v1 [proposed]");
+  expect(text).toContain("## Basic @v2 [published]");
 });
 
 // specs/crud-feature.spec.md "Feature file format": content that is not a
 // well-formed feature file never reaches the data repo — the file on disk is
 // left exactly as it was, so there is nothing for the next sync to push.
 describe("content is validated before it is written to the data repo", () => {
-  const GOOD = "# Quote\n\n## Basic v1 [published]\n\nbody\n";
+  const GOOD = "# Quote\n\n## Basic @v1 [published]\n\nbody\n";
   const BROKEN: Record<string, string> = {
-    "the heading lost its name": "# \n\n## Basic v1 [published]\n\nbody\n",
-    "text sits above the heading": "git diff# Quote\n\n## Basic v1 [published]\n\nbody\n",
-    "there is no feature heading": "## Basic v1 [published]\n\nbody\n",
+    "the heading lost its name": "# \n\n## Basic @v1 [published]\n\nbody\n",
+    "text sits above the heading": "git diff# Quote\n\n## Basic @v1 [published]\n\nbody\n",
+    "there is no feature heading": "## Basic @v1 [published]\n\nbody\n",
     "the file is empty": "",
   };
 
@@ -264,7 +264,7 @@ describe("content is validated before it is written to the data repo", () => {
 test("publishFeature rejects a scenario target that is not in the content", async () => {
   await createFeature(root, "Quote");
   expect(
-    publishFeature(root, "quote.feature.md", "# Quote\n\n## Basic v1\n\nbody\n", {
+    publishFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n", {
       name: "Missing",
       version: 3,
     }),
@@ -284,10 +284,10 @@ test("published scenarios are immutable, but new versions may be added", async (
   await publishFeature(
     root,
     "quote.feature.md",
-    "# Quote\n\n## Basic v1\n\nold body\n",
+    "# Quote\n\n## Basic @v1\n\nold body\n",
   );
   expect(await readFeature(root, "quote.feature.md")).toContain(
-    "## Basic v1 [published]",
+    "## Basic @v1 [published]",
   );
 
   // changing a published scenario's body is rejected
@@ -295,7 +295,7 @@ test("published scenarios are immutable, but new versions may be added", async (
     publishFeature(
       root,
       "quote.feature.md",
-      "# Quote\n\n## Basic v1 [published]\n\nnew body\n",
+      "# Quote\n\n## Basic @v1 [published]\n\nnew body\n",
     ),
   ).rejects.toThrow("immutable");
   // dropping a published scenario is rejected
@@ -305,10 +305,10 @@ test("published scenarios are immutable, but new versions may be added", async (
   const result = await publishFeature(
     root,
     "quote.feature.md",
-    "# Quote\n\n## Basic v1 [published]\n\nold body\n\n## Basic v2\n\nnew body\n",
+    "# Quote\n\n## Basic @v1 [published]\n\nold body\n\n## Basic @v2\n\nnew body\n",
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic v2 [published]");
+  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v2 [published]");
 });
 
 // Every push/pull flow runs on all three git engines
@@ -382,11 +382,11 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const result = await saveFeature(
         a,
         "seed.feature.md",
-        "# Seed\n\n## One v1\n\nbody\n",
+        "# Seed\n\n## One @v1\n\nbody\n",
       );
       expect(result.status).toBe("saved");
-      expect(result.content).toContain("## One v1 [proposed]");
-      expect(await readFeature(a, "seed.feature.md")).toContain("## One v1 [proposed]");
+      expect(result.content).toContain("## One @v1 [proposed]");
+      expect(await readFeature(a, "seed.feature.md")).toContain("## One @v1 [proposed]");
       // not committed: the working tree is dirty until the reload cron syncs
       const status = await git(a, "status", "--porcelain");
       expect(status.stdout.toString()).toContain("seed.feature.md");
@@ -398,15 +398,15 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const result = await publishFeature(
         a,
         "seed.feature.md",
-        "# Seed\n\n## One v1\n\nbody\n\n## Two v1\n\nbody\n",
+        "# Seed\n\n## One @v1\n\nbody\n\n## Two @v1\n\nbody\n",
         { name: "One", version: 1 },
       );
       expect(result.status).toBe("published");
       expect(result.message).toBe("committed and pushed");
       await git(b, "pull");
       const text = await readFeature(b, "seed.feature.md");
-      expect(text).toContain("## One v1 [published]");
-      expect(text).not.toContain("## Two v1 [published]");
+      expect(text).toContain("## One @v1 [published]");
+      expect(text).not.toContain("## Two @v1 [published]");
     });
 
     // Scenario: Publish feature with successful merge — pull, then save.
@@ -421,11 +421,11 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const result = await publishFeature(
         a,
         "seed.feature.md",
-        "# Seed\n\n## One v1\n\nbody\n",
+        "# Seed\n\n## One @v1\n\nbody\n",
       );
       expect(result.status).toBe("published");
       expect(await readFeature(a, "other.feature.md")).toBe("# Other\n");
-      expect(await readFeature(a, "seed.feature.md")).toContain("## One v1 [published]");
+      expect(await readFeature(a, "seed.feature.md")).toContain("## One @v1 [published]");
     });
 
     // crud-feature.spec.md "Publish feature with successful merge": after saving,
