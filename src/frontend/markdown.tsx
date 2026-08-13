@@ -274,6 +274,20 @@ export function toggleHeading(text: string, start: number, end: number, level = 
   return { text: text.slice(0, ls) + next + text.slice(le), start: ls, end: ls + next.length };
 }
 
+/**
+ * Insert an image reference at the caret (specs/images.spec.md). A non-empty
+ * selection becomes the alt text; the caret lands after the inserted markdown
+ * so consecutive pastes line up one after another.
+ */
+export function insertImage(text: string, start: number, end: number, alt: string, url: string): Edit {
+  const md = `![${text.slice(start, end) || alt}](${url})`;
+  return {
+    text: text.slice(0, start) + md + text.slice(end),
+    start: start + md.length,
+    end: start + md.length,
+  };
+}
+
 /** Turn the selection into a markdown link, leaving "url" selected. */
 export function insertLink(text: string, start: number, end: number): Edit {
   const sel = text.slice(start, end) || "text";

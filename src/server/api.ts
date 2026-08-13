@@ -49,6 +49,7 @@ import {
   resolveFeatureConflict,
 } from "./features";
 import type { ScenarioTarget } from "./features";
+import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { parseFeature } from "./parser";
 import { searchSpecs } from "./search";
 import {
@@ -468,6 +469,47 @@ const postRename = withDataDir(async (dir, req, params) => {
   }
 });
 
+// Image upload (specs/images.spec.md): the editor posts a pasted or chosen
+// file as multipart form data; the image lands in the data repo's `.images/`
+// folder, committed and pushed, and the response carries the url the
+// markdown `![...](...)` should reference.
+const postImage = withDataDir(async (dir, req) => {
+  let file: File;
+  try {
+    const form = await req.formData();
+    const entry = form.get("file");
+    if (!(entry instanceof File)) throw new Error("no file");
+    file = entry;
+  } catch {
+    return json({ error: "multipart form data with a 'file' field is required" }, 400);
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return json({ error: `Image is too large (limit ${MAX_IMAGE_BYTES / 1024 / 1024} MB)` }, 413);
+  }
+  try {
+    const name = await storeImage(dir, file.name, new Uint8Array(await file.arrayBuffer()));
+    return json({ name, path: `/api/images/${encodeURIComponent(name)}` }, 201);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// Stored images referenced from scenario bodies. Names are content-addressed,
+// so a hit never changes: cache forever. The CSP header keeps an uploaded
+// svg inert if the url is opened directly rather than via <img>.
+const getImage = withDataDir(async (dir, _req, params) => {
+  const bytes = await readImage(dir, params.name!);
+  if (bytes === null) return json({ error: "not found" }, 404);
+  return new Response(bytes, {
+    headers: {
+      "content-type": imageMime(params.name!),
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
+
 // Native folder chooser (specs/app-start.spec.md "picking the data directory
 // with the native folder chooser"): opens the OS dialog on the machine the
 // app runs on. 501 on runtimes with no native chooser — the client hides
@@ -493,6 +535,8 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/auth/github", deleteAuth],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
+  ["POST", "/api/images", postImage],
+  ["GET", "/api/images/:name", getImage],
   ["GET", "/api/search", getSearch],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
