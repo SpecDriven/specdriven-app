@@ -33,6 +33,16 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/auth/github")).toBeNull();
   });
 
+  // Image upload + serving (specs/images.spec.md).
+  test("image routes match by method", () => {
+    expect(matchApi("POST", "/api/images")).not.toBeNull();
+    expect(matchApi("GET", "/api/images")).toBeNull();
+    const get = matchApi("GET", "/api/images/shot-1a2b3c4d.png");
+    expect(get).not.toBeNull();
+    expect(get!.params).toEqual({ name: "shot-1a2b3c4d.png" });
+    expect(matchApi("POST", "/api/images/shot-1a2b3c4d.png")).toBeNull();
+  });
+
   test("unknown paths do not match", () => {
     expect(matchApi("GET", "/api/nope")).toBeNull();
     expect(matchApi("GET", "/features/quote.feature.md")).toBeNull();

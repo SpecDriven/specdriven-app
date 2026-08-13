@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  insertImage,
   insertLink,
   renderMarkdown,
   toggleHeading,
@@ -165,5 +166,20 @@ describe("insertLink", () => {
     const r = insertLink("", 0, 0);
     expect(r.text).toBe("[text](url)");
     expect(r.text.slice(r.start, r.end)).toBe("url");
+  });
+});
+
+// specs/images.spec.md: uploads insert `![alt](url)` at the caret.
+describe("insertImage", () => {
+  test("inserts at the caret and leaves the caret after it", () => {
+    const r = insertImage("before after", 7, 7, "shot", "/api/images/shot-1a2b3c4d.png");
+    expect(r.text).toBe("before ![shot](/api/images/shot-1a2b3c4d.png)after");
+    expect(r.start).toBe(r.end);
+    expect(r.text.slice(0, r.start)).toBe("before ![shot](/api/images/shot-1a2b3c4d.png)");
+  });
+
+  test("a selection becomes the alt text", () => {
+    const r = insertImage("the diagram", 4, 11, "ignored", "/api/images/d-1.png");
+    expect(r.text).toBe("the ![diagram](/api/images/d-1.png)");
   });
 });
