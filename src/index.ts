@@ -9,6 +9,9 @@ const server = Bun.serve({
   // 3000 unless PORT says otherwise — the compiled binary is a single file
   // someone may run alongside a dev server on the same machine.
   port: Number(process.env.PORT) || 3000,
+  // Bun idles a connection out after 10s by default, which is short for the
+  // git clone/push and sync requests this server handles.
+  idleTimeout: 60,
   routes: {
     "/": index,
 
