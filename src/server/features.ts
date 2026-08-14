@@ -1,5 +1,7 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { isFeatureFile, walk } from "./walk";
+import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
+import { threeWayFeature } from "./automerge/merge";
 import { projectFeature } from "./automerge/project";
 import { importFeatureDoc, reconcile } from "./automerge/reconcile";
 import {
@@ -24,6 +26,7 @@ import {
   markPublished,
   markProposed,
   markScenarioPublished,
+  serializeFeature,
   renameFeatureName,
   slugify,
   titleFromFileName,
@@ -46,46 +49,13 @@ export interface PublishResult {
   message: string;
 }
 
-function isFeatureFile(fileName: string): boolean {
-  return fileName.endsWith(".feature.md");
-}
+export { walk };
 
 export interface FeatureListing {
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
   /** Display name: the file's `# <name>` heading, or derived from the stem. */
   name: string;
-}
-
-/**
- * Folders are plain directories in the data repo (specs/folders.spec.md).
- * Hidden entries (`.git` and friends) are not part of the tree.
- */
-export async function walk(
-  dataDir: string,
-  rel = "",
-): Promise<{ files: string[]; folders: string[] }> {
-  const files: string[] = [];
-  const folders: string[] = [];
-  let entries: Dirent[];
-  try {
-    entries = await readdir(`${dataDir}/${rel}`, { withFileTypes: true });
-  } catch {
-    return { files, folders };
-  }
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-    const path = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      folders.push(path);
-      const sub = await walk(dataDir, path);
-      files.push(...sub.files);
-      folders.push(...sub.folders);
-    } else if (isFeatureFile(entry.name)) {
-      files.push(path);
-    }
-  }
-  return { files, folders };
 }
 
 /**
@@ -357,11 +327,14 @@ export async function publishFeature(
   scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
   const name = safe(fileName);
-  const published = markForPublish(content, scenario);
+  let published = markForPublish(content, scenario);
   // Checked before the pull: content we would refuse to write must not leave
   // a merge behind for the user to resolve.
   assertFeatureText(name, published);
   await assertPublishedUnchanged(dataDir, name, published);
+  // The pre-pull file is the merge base for the user's buffer if the pull
+  // brings a conflict this tick can auto-merge.
+  const baseText = await readFeature(dataDir, name);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
     // A pull can fail without leaving a merge behind — no credentials, no
@@ -371,8 +344,28 @@ export async function publishFeature(
     if (pullResult.conflictedFiles.length === 0) {
       throw new Error(`Publish failed — git pull: ${pullResult.message}`);
     }
-    const theirs = (await theirsVersion(dataDir, name)) ?? "";
-    return { status: "conflict", theirs, ours: published, message: pullResult.message };
+    // The merged documents (or a scenario-level three-way merge) resolve
+    // what they can before a human is asked to.
+    await autoResolveMergeConflicts(dataDir, pullResult.conflictedFiles);
+    if (await mergeInProgress(dataDir)) {
+      const theirs = (await theirsVersion(dataDir, name)) ?? "";
+      return { status: "conflict", theirs, ours: published, message: pullResult.message };
+    }
+  }
+  // The pull (clean or auto-merged) may have moved the file past the buffer's
+  // base. Fold the buffer in three-way so a publish never silently reverts
+  // what a peer landed in the meantime.
+  const pulledText = await readFeature(dataDir, name);
+  if (pulledText !== null && pulledText !== (baseText ?? "") && pulledText !== published) {
+    const folded = threeWayFeature(
+      parseFeature(baseText ?? ""),
+      parseFeature(published),
+      parseFeature(pulledText),
+    );
+    if (!folded.ok) {
+      return { status: "conflict", theirs: pulledText, ours: published, message: folded.conflict };
+    }
+    published = serializeFeature(folded.feature);
   }
   await writeFeatureFile(dataDir, name, published);
   const sync = await commitAndPush(
