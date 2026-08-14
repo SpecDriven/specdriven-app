@@ -22,6 +22,12 @@ on unless told otherwise (`bun run build:desktop [--mac | --linux | --all]`):
 The macOS artifacts need macOS tooling, so `--mac` off a Linux machine stops
 with that as the reason rather than producing a broken build.
 
+The main process is bundled before packaging and no native addon is loaded at
+runtime, so packaging never rebuilds node_modules (`npmRebuild: false`).
+Without that, a build machine is asked to compile optional native accelerators
+pulled in transitively — `cbor-extract`, say — against Electron's C++20
+headers, and a host with an older toolchain fails a build it did not need.
+
 A Linux artifact has to start on a machine that has never seen Electron:
 
 - The deb names every shared library Electron loads. ALSA is the one the
