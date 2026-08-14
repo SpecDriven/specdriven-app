@@ -222,6 +222,8 @@ export function App() {
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState("");
+  /** The Settings switch: off saves an empty url, which turns live sync off. */
+  const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
   /** Url being typed into the edit dialog's "Add test link" field. */
   const [testDraft, setTestDraft] = useState("");
   /** Index of the test link opened for in-place ✎ editing, if any. */
@@ -1144,6 +1146,7 @@ export function App() {
     );
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsSyncDraft(syncServerUrl ?? "");
+    setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
     setAuthStatus(null);
     setSettingsOpen(true);
@@ -1279,9 +1282,12 @@ export function App() {
       setSettingsError("Enter how many preview lines to show per scenario (at least 1).");
       return;
     }
-    const syncUrl = settingsSyncDraft.trim();
-    if (syncUrl && !/^wss?:\/\//.test(syncUrl)) {
-      setSettingsError("The sync server must be a ws:// or wss:// url, or empty for off.");
+    // The switch decides on/off; the url only travels when it is on.
+    const syncUrl = settingsSyncOnDraft ? settingsSyncDraft.trim() : "";
+    if (settingsSyncOnDraft && !/^wss?:\/\//.test(syncUrl)) {
+      setSettingsError(
+        "Enter a ws:// or wss:// sync server url, or switch live sync off.",
+      );
       return;
     }
     const res = await fetch("/api/state", {
@@ -2178,19 +2184,31 @@ export function App() {
             </p>
             {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
                 accelerator on top of git, with an explicit privacy warning. */}
-            <label>
-              Live sync server (optional)
+            <label className="switch-label">
+              <span>Live sync server (optional)</span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settingsSyncOnDraft}
+                  onChange={(e) => setSettingsSyncOnDraft(e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+            {settingsSyncOnDraft && (
               <input
                 type="text"
+                aria-label="Live sync server url"
                 value={settingsSyncDraft}
                 onChange={(e) => setSettingsSyncDraft(e.target.value)}
                 placeholder="wss://sync.automerge.org"
               />
-            </label>
+            )}
             <p className="hint">
               Syncs edits between running apps in near-real time over websocket; git remains
               the source of record. On a public server such as wss://sync.automerge.org,
-              anyone who has a document&apos;s id can read that document — leave empty to
+              anyone who has a document&apos;s id can read that document — leave it off to
               keep specs in the git repo only.
             </p>
             <label>
