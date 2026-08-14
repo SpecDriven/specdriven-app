@@ -6,7 +6,7 @@
 
 import { stat } from "node:fs/promises";
 import MiniSearch from "minisearch";
-import { walk } from "./features";
+import { walk } from "./walk";
 import { readTextFile } from "./fsx";
 import { parseFeature, titleFromFileName } from "./parser";
 
