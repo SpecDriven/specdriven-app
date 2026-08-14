@@ -3,7 +3,13 @@
 // the Settings dialog and is persisted in the settings file (specs/ui.spec.md).
 // After the pull, locally saved scenarios are committed and pushed
 // ("Scenario is automatically saved locally and pushed to GitHub").
+//
+// With the Automerge documents as system of record, one tick also: resolves
+// what a pull conflict left behind from the merged documents, and absorbs
+// markdown drift (external edits, pre-document repos) into the documents —
+// see src/server/automerge/driftSync.ts.
 
+import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { readState, needsDataRepo } from "./state";
@@ -25,9 +31,24 @@ export async function reloadData(rootDir: string): Promise<string> {
   const state = await readState(rootDir);
   if (needsDataRepo(state)) return "data repo not configured; skipped reload";
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
+  return syncDataDir(dir);
+}
+
+/** The tick itself, on an already-resolved data dir (shared with tests). */
+export async function syncDataDir(dir: string): Promise<string> {
   const pulled = await pull(dir);
+  const parts = [pulled.message];
+  if (!pulled.ok && pulled.conflictedFiles.length > 0) {
+    parts.push((await autoResolveMergeConflicts(dir, pulled.conflictedFiles)).message);
+  }
+  // Drift must not be read while conflict markers may sit in the files.
+  if (!(await mergeInProgress(dir))) {
+    const drifted = await importDrift(dir);
+    if (drifted) parts.push(drifted);
+  }
   const synced = await syncSavedChanges(dir);
-  return `${pulled.message}; ${synced.message}`;
+  parts.push(synced.message);
+  return parts.filter(Boolean).join("; ");
 }
 
 export interface ReloadScheduler {

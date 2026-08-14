@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createFeature,
+  createFolder,
   deleteFeature,
   listFeatures,
+  moveFeature,
   readFeature,
   renameFeature,
   renameFeatureFile,
@@ -14,6 +16,8 @@ import {
   resolveFeatureConflict,
   slugify,
 } from "../src/server/features";
+import { projectFeature } from "../src/server/automerge/project";
+import { loadFeatureDoc } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
 import { installFakeGh } from "./helpers/binPath";
@@ -275,7 +279,9 @@ test("saving into a plain directory (no standalone git repo) still works", async
   await createFeature(root, "Standalone");
   const result = await publishFeature(root, "standalone.feature.md", "# Standalone\nedited\n");
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "standalone.feature.md")).toBe("# Standalone\nedited\n");
+  // The file holds the doc's canonical projection: parse-equal to the input,
+  // normalized formatting (blank line after the heading, trailing newline).
+  expect(await readFeature(root, "standalone.feature.md")).toBe("# Standalone\n\nedited\n");
 });
 
 // specs/ui.spec.md: "If a scenario is already published, then it is immutable."
@@ -519,3 +525,57 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     });
   });
 }
+
+// The Automerge document is the system of record; the markdown file is its
+// projection (src/server/automerge/). After every mutation through the CRUD
+// layer the two must agree — a peer must never receive one without the other.
+describe("doc/markdown lockstep", () => {
+  const lockstep = async (fileName: string) => {
+    const md = await readFeature(root, fileName);
+    const loaded = await loadFeatureDoc(root, fileName);
+    expect(loaded).not.toBeNull();
+    expect(md).not.toBeNull();
+    expect(projectFeature(loaded!.doc)).toBe(md!);
+  };
+
+  test("create, save, publish and rename keep doc and markdown in lockstep", async () => {
+    const file = await createFeature(root, "Quote");
+    await lockstep(file);
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    await lockstep(file);
+    await publishFeature(root, file, (await readFeature(root, file))!);
+    await lockstep(file);
+    await renameFeature(root, file, "Quote 2");
+    await lockstep(file);
+  });
+
+  test("a scenario keeps its doc identity across saves", async () => {
+    const file = await createFeature(root, "Quote");
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    const before = (await loadFeatureDoc(root, file))!.doc.scenarios[0]!;
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody, edited\n");
+    const after = (await loadFeatureDoc(root, file))!.doc.scenarios[0]!;
+    expect(after.id).toBe(before.id);
+  });
+
+  test("moving a feature moves its doc directory along", async () => {
+    const file = await createFeature(root, "Quote");
+    await createFolder(root, "billing");
+    const moved = await moveFeature(root, file, "billing");
+    expect(await loadFeatureDoc(root, file)).toBeNull();
+    await lockstep(moved.fileName);
+  });
+
+  test("renaming a feature file moves its doc directory along", async () => {
+    const file = await createFeature(root, "Quote");
+    const renamed = await renameFeatureFile(root, file, "quotation");
+    expect(await loadFeatureDoc(root, file)).toBeNull();
+    await lockstep(renamed.fileName);
+  });
+
+  test("deleting a feature deletes its doc directory", async () => {
+    const file = await createFeature(root, "Quote");
+    await deleteFeature(root, file);
+    expect(await loadFeatureDoc(root, file)).toBeNull();
+  });
+});

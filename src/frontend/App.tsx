@@ -214,10 +214,14 @@ export function App() {
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
+  // Live sync (specs/automerge-store.spec.md): optional websocket sync
+  // server; empty means off — git stays the only transport.
+  const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState("60");
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  const [settingsSyncDraft, setSettingsSyncDraft] = useState("");
   /** Url being typed into the edit dialog's "Add test link" field. */
   const [testDraft, setTestDraft] = useState("");
   /** Index of the test link opened for in-place ✎ editing, if any. */
@@ -280,6 +284,7 @@ export function App() {
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
       }
+      setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -1138,6 +1143,7 @@ export function App() {
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
+    setSettingsSyncDraft(syncServerUrl ?? "");
     setSettingsError(null);
     setAuthStatus(null);
     setSettingsOpen(true);
@@ -1273,6 +1279,11 @@ export function App() {
       setSettingsError("Enter how many preview lines to show per scenario (at least 1).");
       return;
     }
+    const syncUrl = settingsSyncDraft.trim();
+    if (syncUrl && !/^wss?:\/\//.test(syncUrl)) {
+      setSettingsError("The sync server must be a ws:// or wss:// url, or empty for off.");
+      return;
+    }
     const res = await fetch("/api/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1281,6 +1292,7 @@ export function App() {
         scenarioPreviewLines: Math.floor(lines),
         gitEngine: settingsEngineDraft,
         showTestLinks: settingsTestLinksDraft,
+        syncServerUrl: syncUrl,
       }),
     });
     const data = await res.json();
@@ -1288,6 +1300,7 @@ export function App() {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
       setShowTestLinks(data.showTestLinks !== false);
+      setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
       setGitEngineState(data.gitEngine ?? null);
       setGitEngineEffective(data.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(data.cliGitAvailable));
@@ -2162,6 +2175,23 @@ export function App() {
             <p className="hint">
               The data repo is git-pulled automatically at this interval. Use 0 to disable
               automatic reload.
+            </p>
+            {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
+                accelerator on top of git, with an explicit privacy warning. */}
+            <label>
+              Live sync server (optional)
+              <input
+                type="text"
+                value={settingsSyncDraft}
+                onChange={(e) => setSettingsSyncDraft(e.target.value)}
+                placeholder="wss://sync.automerge.org"
+              />
+            </label>
+            <p className="hint">
+              Syncs edits between running apps in near-real time over websocket; git remains
+              the source of record. On a public server such as wss://sync.automerge.org,
+              anyone who has a document&apos;s id can read that document — leave empty to
+              keep specs in the git repo only.
             </p>
             <label>
               Scenario preview lines

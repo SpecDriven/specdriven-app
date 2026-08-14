@@ -1,5 +1,16 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { isFeatureFile, walk } from "./walk";
+import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
+import { threeWayFeature } from "./automerge/merge";
+import { projectFeature } from "./automerge/project";
+import { importFeatureDoc, reconcile } from "./automerge/reconcile";
+import {
+  createFeatureDoc,
+  docDirRel,
+  hasFeatureDoc,
+  loadFeatureDoc,
+  saveFeatureDoc,
+} from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
 import {
   pull,
@@ -15,6 +26,7 @@ import {
   markPublished,
   markProposed,
   markScenarioPublished,
+  serializeFeature,
   renameFeatureName,
   slugify,
   titleFromFileName,
@@ -37,46 +49,13 @@ export interface PublishResult {
   message: string;
 }
 
-function isFeatureFile(fileName: string): boolean {
-  return fileName.endsWith(".feature.md");
-}
+export { walk };
 
 export interface FeatureListing {
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
   /** Display name: the file's `# <name>` heading, or derived from the stem. */
   name: string;
-}
-
-/**
- * Folders are plain directories in the data repo (specs/folders.spec.md).
- * Hidden entries (`.git` and friends) are not part of the tree.
- */
-export async function walk(
-  dataDir: string,
-  rel = "",
-): Promise<{ files: string[]; folders: string[] }> {
-  const files: string[] = [];
-  const folders: string[] = [];
-  let entries: Dirent[];
-  try {
-    entries = await readdir(`${dataDir}/${rel}`, { withFileTypes: true });
-  } catch {
-    return { files, folders };
-  }
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-    const path = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) {
-      folders.push(path);
-      const sub = await walk(dataDir, path);
-      files.push(...sub.files);
-      folders.push(...sub.folders);
-    } else if (isFeatureFile(entry.name)) {
-      files.push(path);
-    }
-  }
-  return { files, folders };
 }
 
 /**
@@ -131,7 +110,7 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
   }
   if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
   await writeFeatureFile(dataDir, safe(fileName), `# ${featureName}\n`);
-  await commitAndPush(dataDir, fileName, `Create feature: ${featureName}`);
+  await commitAndPush(dataDir, await featurePaths(dataDir, fileName), `Create feature: ${featureName}`);
   return fileName;
 }
 
@@ -202,7 +181,7 @@ export async function moveFeature(
   if (await fileExists(`${dataDir}/${to}`)) {
     throw new Error(`Feature file already exists: ${to}`);
   }
-  const sync = await moveAndPush(dataDir, from, to, `Move feature: ${from} -> ${to}`);
+  const sync = await moveAndPush(dataDir, from, to, `Move feature: ${from} -> ${to}`, await docMoves(dataDir, from, to));
   return { fileName: to, message: sync.message };
 }
 
@@ -225,7 +204,11 @@ export async function renameFeature(
   const oldName = parseFeature(current).name || titleFromFileName(file);
   if (name === oldName) return { fileName: file, name, message: "feature name unchanged" };
   await writeFeatureFile(dataDir, file, renameFeatureName(current, name));
-  const sync = await commitAndPush(dataDir, file, `Rename feature: ${oldName} -> ${name}`);
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, file),
+    `Rename feature: ${oldName} -> ${name}`,
+  );
   return { fileName: file, name, message: sync.message };
 }
 
@@ -252,7 +235,7 @@ export async function renameFeatureFile(
   if (await fileExists(`${dataDir}/${to}`)) {
     throw new Error(`Feature file already exists: ${to}`);
   }
-  const sync = await moveAndPush(dataDir, from, to, `Rename file: ${from} -> ${to}`);
+  const sync = await moveAndPush(dataDir, from, to, `Rename file: ${from} -> ${to}`, await docMoves(dataDir, from, to));
   return { fileName: to, message: sync.message };
 }
 
@@ -268,8 +251,23 @@ export async function deleteFeature(
   if (!(await fileExists(`${dataDir}/${file}`))) {
     throw new Error(`Feature file not found: ${file}`);
   }
-  const sync = await removeAndPush(dataDir, file, `Delete feature: ${file}`);
+  const sync = await removeAndPush(
+    dataDir,
+    await featurePaths(dataDir, file),
+    `Delete feature: ${file}`,
+  );
   return { message: sync.message };
+}
+
+/** The doc-directory rename that rides along when a feature file moves. */
+async function docMoves(
+  dataDir: string,
+  from: string,
+  to: string,
+): Promise<{ from: string; to: string }[]> {
+  return (await hasFeatureDoc(dataDir, from))
+    ? [{ from: docDirRel(from), to: docDirRel(to) }]
+    : [];
 }
 
 export interface SaveResult {
@@ -294,8 +292,8 @@ export async function saveFeature(
   const proposed = markProposed(content);
   assertFeatureText(name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
-  await writeFeatureFile(dataDir, name, proposed);
-  return { status: "saved", content: proposed, message: "saved locally" };
+  const written = await writeFeatureFile(dataDir, name, proposed);
+  return { status: "saved", content: written, message: "saved locally" };
 }
 
 /**
@@ -329,11 +327,14 @@ export async function publishFeature(
   scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
   const name = safe(fileName);
-  const published = markForPublish(content, scenario);
+  let published = markForPublish(content, scenario);
   // Checked before the pull: content we would refuse to write must not leave
   // a merge behind for the user to resolve.
   assertFeatureText(name, published);
   await assertPublishedUnchanged(dataDir, name, published);
+  // The pre-pull file is the merge base for the user's buffer if the pull
+  // brings a conflict this tick can auto-merge.
+  const baseText = await readFeature(dataDir, name);
   const pullResult = await pull(dataDir);
   if (!pullResult.ok) {
     // A pull can fail without leaving a merge behind — no credentials, no
@@ -343,13 +344,33 @@ export async function publishFeature(
     if (pullResult.conflictedFiles.length === 0) {
       throw new Error(`Publish failed — git pull: ${pullResult.message}`);
     }
-    const theirs = (await theirsVersion(dataDir, name)) ?? "";
-    return { status: "conflict", theirs, ours: published, message: pullResult.message };
+    // The merged documents (or a scenario-level three-way merge) resolve
+    // what they can before a human is asked to.
+    await autoResolveMergeConflicts(dataDir, pullResult.conflictedFiles);
+    if (await mergeInProgress(dataDir)) {
+      const theirs = (await theirsVersion(dataDir, name)) ?? "";
+      return { status: "conflict", theirs, ours: published, message: pullResult.message };
+    }
+  }
+  // The pull (clean or auto-merged) may have moved the file past the buffer's
+  // base. Fold the buffer in three-way so a publish never silently reverts
+  // what a peer landed in the meantime.
+  const pulledText = await readFeature(dataDir, name);
+  if (pulledText !== null && pulledText !== (baseText ?? "") && pulledText !== published) {
+    const folded = threeWayFeature(
+      parseFeature(baseText ?? ""),
+      parseFeature(published),
+      parseFeature(pulledText),
+    );
+    if (!folded.ok) {
+      return { status: "conflict", theirs: pulledText, ours: published, message: folded.conflict };
+    }
+    published = serializeFeature(folded.feature);
   }
   await writeFeatureFile(dataDir, name, published);
   const sync = await commitAndPush(
     dataDir,
-    name,
+    await featurePaths(dataDir, name),
     scenario
       ? `Publish scenario: ${scenario.name} v${scenario.version} (${name})`
       : `Publish feature: ${name}`,
@@ -375,7 +396,15 @@ export async function resolveFeatureConflict(
   // A hand-edited resolution is user-typed text like any other: it goes
   // through the same check before it reaches the repo.
   assertFeatureText(name, resolved);
-  const sync = await gitResolve(dataDir, name, resolved);
+  // The human chose this resolution, so it overrides the doc's published
+  // state (force) — the same authority a hand-edited merge has today.
+  const projection = await absorbIntoDoc(dataDir, name, resolved, { force: true });
+  const sync = await gitResolve(
+    dataDir,
+    name,
+    projection,
+    (await hasFeatureDoc(dataDir, name)) ? [docDirRel(name)] : [],
+  );
   return { status: "published", message: sync.message };
 }
 
@@ -399,14 +428,52 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
 }
 
 /**
- * The one door into the data repo for feature content: the text is checked
- * against the file format before it lands on disk, so a malformed feature —
- * a lost `# <name>` heading, junk above it — is an error the user sees rather
- * than a file the next sync commits and pushes.
+ * The one door into the data repo for feature content. The text is checked
+ * against the file format first, so a malformed feature — a lost `# <name>`
+ * heading, junk above it — is an error the user sees rather than a file the
+ * next sync commits and pushes. Then the Automerge document (the system of
+ * record) absorbs the edit — reconciled as CRDT operations, or imported
+ * whole for a feature that predates its document — and what lands in the
+ * `.feature.md` is the document's projection: parse-equal to the input,
+ * canonically formatted, identical on every peer that merges the same edits.
  */
-async function writeFeatureFile(dataDir: string, fileName: string, text: string): Promise<void> {
+async function writeFeatureFile(dataDir: string, fileName: string, text: string): Promise<string> {
   assertFeatureText(fileName, text);
-  await writeTextFile(`${dataDir}/${fileName}`, text);
+  const projection = await absorbIntoDoc(dataDir, fileName, text);
+  await writeTextFile(`${dataDir}/${fileName}`, projection);
+  return projection;
+}
+
+/**
+ * Feed a feature text into its Automerge document — reconciled as CRDT
+ * operations, or imported whole for a feature that predates its document —
+ * and return the projection the markdown file must now hold. `force` skips
+ * the published-immutability gate for an explicit human conflict resolution.
+ */
+async function absorbIntoDoc(
+  dataDir: string,
+  fileName: string,
+  text: string,
+  { force = false } = {},
+): Promise<string> {
+  const feature = parseFeature(text);
+  const loaded = await loadFeatureDoc(dataDir, fileName);
+  if (loaded === null) {
+    const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
+    return projectFeature(created.doc);
+  }
+  const next = reconcile(loaded.doc, feature, { force });
+  await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
+  return projectFeature(next);
+}
+
+/**
+ * What a mutation commits for a feature: the markdown projection plus the
+ * document directory that is the system of record behind it, so a peer never
+ * receives one without the other.
+ */
+async function featurePaths(dataDir: string, fileName: string): Promise<string[]> {
+  return (await hasFeatureDoc(dataDir, fileName)) ? [fileName, docDirRel(fileName)] : [fileName];
 }
 
 function assertFeatureText(fileName: string, text: string): void {
