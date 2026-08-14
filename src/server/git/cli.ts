@@ -15,12 +15,13 @@
 // a GitRun — a subprocess here and in gh.ts, the bundled implementation in
 // js.ts. Every command it issues is therefore one all three understand.
 
-import { rename, rm } from "node:fs/promises";
+import { mkdir, rename, rm } from "node:fs/promises";
+import { dirname } from "node:path";
 import { getAuth } from "../auth";
 import { writeTextFile } from "../fsx";
 import { run, which } from "../run";
 import type { RunResult } from "../run";
-import type { GitBackend, PullResult, SyncResult } from "./backend";
+import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { isRepoRoot } from "./repoRoot";
 
 export function cliGitAvailable(): boolean {
@@ -185,6 +186,45 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
+   * One merge stage of a conflicted file, read via its blob hash from
+   * `ls-files -u` — the `:N:path` shorthand isn't in the bundled engine's
+   * vocabulary, but `show <hash>` is in all three.
+   */
+  async function stageVersion(
+    repoDir: string,
+    relPath: string,
+    stage: 1 | 2 | 3,
+  ): Promise<string | null> {
+    const res = await git(repoDir, "ls-files", "-u", "--", relPath);
+    if (res.exitCode !== 0) return null;
+    for (const line of res.stdout.split("\n")) {
+      const m = line.match(/^\d+ ([0-9a-f]+) ([123])\t(.*)$/);
+      if (m && Number(m[2]) === stage && m[3] === relPath) {
+        const show = await git(repoDir, "show", m[1]!);
+        return show.exitCode === 0 ? show.stdout : null;
+      }
+    }
+    return null;
+  }
+
+  /** Paths under pathspec that differ between two commits (either direction). */
+  async function diffNames(
+    repoDir: string,
+    from: string,
+    to: string,
+    pathspec: string,
+  ): Promise<string[]> {
+    const res = await git(repoDir, "diff", "--name-only", from, to, "--", pathspec);
+    if (res.exitCode !== 0) return [];
+    return res.stdout.split("\n").filter(Boolean);
+  }
+
+  /** Whether a path exists in a commit's tree. */
+  async function existsIn(repoDir: string, ref: string, relPath: string): Promise<boolean> {
+    return (await git(repoDir, "show", `${ref}:${relPath}`)).exitCode === 0;
+  }
+
+  /**
    * Commit, refusing to pretend. A commit that fails leaves the work
    * uncommitted, so reporting it as saved would be the worst kind of wrong
    * for an app whose promise is that specs reach the repository — the one
@@ -220,9 +260,10 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     repoDir: string,
     relPath: string,
     content: string,
+    alsoAdd: string[] = [],
   ): Promise<SyncResult> {
     await writeTextFile(`${repoDir}/${relPath}`, content);
-    await git(repoDir, "add", relPath);
+    await git(repoDir, "add", relPath, ...alsoAdd);
     const remaining = await conflictedFiles(repoDir);
     if (remaining.length > 0) {
       return {
@@ -276,16 +317,24 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     fromPath: string,
     toPath: string,
     message: string,
+    extraMoves: PathMove[] = [],
   ): Promise<SyncResult> {
+    const moves = [{ from: fromPath, to: toPath }, ...extraMoves];
+    // A doc directory can move into a folder that has never held one — its
+    // destination parent (e.g. `.specdriven/automerge/features/billing/`)
+    // must exist before the rename, for git mv and plain rename alike.
+    for (const m of moves) await mkdir(dirname(`${repoDir}/${m.to}`), { recursive: true });
     if (!(await isRepoRoot(repoDir))) {
-      await rename(`${repoDir}/${fromPath}`, `${repoDir}/${toPath}`);
+      for (const m of moves) await rename(`${repoDir}/${m.from}`, `${repoDir}/${m.to}`);
       return { pushed: false, message: "renamed locally (not a git repository)" };
     }
-    const mv = await git(repoDir, "mv", fromPath, toPath);
-    if (mv.exitCode !== 0) {
-      throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
+    for (const m of moves) {
+      const mv = await git(repoDir, "mv", m.from, m.to);
+      if (mv.exitCode !== 0) {
+        throw new Error(`git mv failed: ${(mv.stderr + mv.stdout).trim()}`);
+      }
     }
-    await commit(repoDir, "-m", message, "--", fromPath, toPath);
+    await commit(repoDir, "-m", message, "--", ...moves.flatMap((m) => [m.from, m.to]));
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -300,18 +349,20 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
    */
   async function removeAndPush(
     repoDir: string,
-    relPath: string,
+    paths: string | string[],
     message: string,
   ): Promise<SyncResult> {
+    const all = Array.isArray(paths) ? paths : [paths];
     if (!(await isRepoRoot(repoDir))) {
-      await rm(`${repoDir}/${relPath}`);
+      for (const p of all) await rm(`${repoDir}/${p}`, { recursive: true, force: true });
       return { pushed: false, message: "deleted locally (not a git repository)" };
     }
-    const rmRes = await git(repoDir, "rm", "-f", relPath);
+    // -r for the Automerge doc directory that rides along with a feature.
+    const rmRes = await git(repoDir, "rm", "-f", "-r", ...all);
     if (rmRes.exitCode !== 0) {
       throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
     }
-    await commit(repoDir, "-m", message, "--", relPath);
+    await commit(repoDir, "-m", message, "--", ...all);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -324,14 +375,15 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
    */
   async function commitAndPush(
     repoDir: string,
-    relPath: string,
+    paths: string | string[],
     message: string,
   ): Promise<SyncResult> {
+    const all = Array.isArray(paths) ? paths : [paths];
     if (!(await isRepoRoot(repoDir))) {
       return { pushed: false, message: "saved locally (not a git repository)" };
     }
-    await git(repoDir, "add", relPath);
-    await commit(repoDir, "-m", message, "--", relPath);
+    await git(repoDir, "add", ...all);
+    await commit(repoDir, "-m", message, "--", ...all);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -345,6 +397,10 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     pull,
     push,
     theirsVersion,
+    conflictedFiles,
+    stageVersion,
+    diffNames,
+    existsIn,
     resolveConflict,
     syncSavedChanges,
     moveAndPush,

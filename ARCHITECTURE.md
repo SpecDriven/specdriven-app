@@ -7,6 +7,19 @@ Electron app built using Bun, just like how Claude Code and Codex.
 ## Storage: GitHub
 (initially using 'data' folder in this repo)
 
+The system of record inside the data repo is a set of Automerge (CRDT)
+documents, one per feature, stored as content-addressed binary chunks under
+`.specdriven/automerge/` and synced through the same git pull/push as
+everything else. The `.feature.md` files are deterministic projections of
+those documents — still the human-readable, PR-reviewable artifact on
+GitHub. Concurrent edits merge at the CRDT level (character-level for
+scenario bodies) instead of surfacing as git conflicts; markdown edited
+outside the app (an older app version, a GitHub PR) is reconciled back into
+the documents on the next sync tick. Optionally, Settings can name a
+websocket sync server (e.g. wss://sync.automerge.org) that delivers the
+same operations in near-real time — off by default, git stays the source of
+record. See specs/automerge-store.spec.md.
+
 ## Authorized users:
 Users that have read/write access to the repo that stores data. 
 
