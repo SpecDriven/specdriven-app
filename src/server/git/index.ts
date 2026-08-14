@@ -88,6 +88,31 @@ export async function theirsVersion(repoDir: string, relPath: string): Promise<s
   return backend().theirsVersion(repoDir, relPath);
 }
 
+export async function conflictedFiles(repoDir: string): Promise<string[]> {
+  return backend().conflictedFiles(repoDir);
+}
+
+export async function stageVersion(
+  repoDir: string,
+  relPath: string,
+  stage: 1 | 2 | 3,
+): Promise<string | null> {
+  return backend().stageVersion(repoDir, relPath, stage);
+}
+
+export async function diffNames(
+  repoDir: string,
+  from: string,
+  to: string,
+  pathspec: string,
+): Promise<string[]> {
+  return backend().diffNames(repoDir, from, to, pathspec);
+}
+
+export async function existsIn(repoDir: string, ref: string, relPath: string): Promise<boolean> {
+  return backend().existsIn(repoDir, ref, relPath);
+}
+
 export async function resolveConflict(
   repoDir: string,
   relPath: string,

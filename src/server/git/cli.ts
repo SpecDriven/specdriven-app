@@ -186,6 +186,45 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
+   * One merge stage of a conflicted file, read via its blob hash from
+   * `ls-files -u` — the `:N:path` shorthand isn't in the bundled engine's
+   * vocabulary, but `show <hash>` is in all three.
+   */
+  async function stageVersion(
+    repoDir: string,
+    relPath: string,
+    stage: 1 | 2 | 3,
+  ): Promise<string | null> {
+    const res = await git(repoDir, "ls-files", "-u", "--", relPath);
+    if (res.exitCode !== 0) return null;
+    for (const line of res.stdout.split("\n")) {
+      const m = line.match(/^\d+ ([0-9a-f]+) ([123])\t(.*)$/);
+      if (m && Number(m[2]) === stage && m[3] === relPath) {
+        const show = await git(repoDir, "show", m[1]!);
+        return show.exitCode === 0 ? show.stdout : null;
+      }
+    }
+    return null;
+  }
+
+  /** Paths under pathspec that differ between two commits (either direction). */
+  async function diffNames(
+    repoDir: string,
+    from: string,
+    to: string,
+    pathspec: string,
+  ): Promise<string[]> {
+    const res = await git(repoDir, "diff", "--name-only", from, to, "--", pathspec);
+    if (res.exitCode !== 0) return [];
+    return res.stdout.split("\n").filter(Boolean);
+  }
+
+  /** Whether a path exists in a commit's tree. */
+  async function existsIn(repoDir: string, ref: string, relPath: string): Promise<boolean> {
+    return (await git(repoDir, "show", `${ref}:${relPath}`)).exitCode === 0;
+  }
+
+  /**
    * Commit, refusing to pretend. A commit that fails leaves the work
    * uncommitted, so reporting it as saved would be the worst kind of wrong
    * for an app whose promise is that specs reach the repository — the one
@@ -358,6 +397,10 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     pull,
     push,
     theirsVersion,
+    conflictedFiles,
+    stageVersion,
+    diffNames,
+    existsIn,
     resolveConflict,
     syncSavedChanges,
     moveAndPush,

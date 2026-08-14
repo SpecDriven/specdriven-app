@@ -30,6 +30,14 @@ export interface GitBackend {
   push(repoDir: string): Promise<SyncResult>;
   /** Content of a file on the other side of an in-progress merge. */
   theirsVersion(repoDir: string, relPath: string): Promise<string | null>;
+  /** Files left conflicted by an in-progress merge. */
+  conflictedFiles(repoDir: string): Promise<string[]>;
+  /** One merge stage of a conflicted file: 1 = base, 2 = ours, 3 = theirs. */
+  stageVersion(repoDir: string, relPath: string, stage: 1 | 2 | 3): Promise<string | null>;
+  /** Paths under pathspec that differ between two commits (either direction). */
+  diffNames(repoDir: string, from: string, to: string, pathspec: string): Promise<string[]>;
+  /** Whether a path exists in a commit's tree. */
+  existsIn(repoDir: string, ref: string, relPath: string): Promise<boolean>;
   /** Extra paths (e.g. doc chunk dirs) may be staged into the merge commit. */
   resolveConflict(
     repoDir: string,

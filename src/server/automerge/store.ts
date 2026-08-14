@@ -168,6 +168,34 @@ export async function removeFeatureDoc(dataDir: string, fileName: string): Promi
   await rm(docDir(dataDir, fileName), { recursive: true, force: true });
 }
 
+/**
+ * Every feature (by repo-relative file name) that has a document directory
+ * with at least one chunk — the doc-side counterpart of features.ts walk().
+ */
+export async function listFeatureDocs(dataDir: string): Promise<string[]> {
+  const rootDir = join(dataDir, ".specdriven", "automerge", "features");
+  const found: string[] = [];
+  const visit = async (rel: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(join(rootDir, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const path = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.name.endsWith(".feature.md")) {
+        if (await hasFeatureDoc(dataDir, path)) found.push(path);
+      } else {
+        await visit(path);
+      }
+    }
+  };
+  await visit("");
+  return found.sort();
+}
+
 /** Mint an empty feature document with a fresh identity. */
 export function newFeatureDoc(init: Omit<FeatureDoc, "schemaVersion" | "id">): A.Doc<FeatureDoc> {
   return A.from<FeatureDoc>({

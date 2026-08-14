@@ -1,0 +1,214 @@
+// The sync-tick side of the Automerge system-of-record (see reload.ts):
+//
+// - autoResolveMergeConflicts: a git pull that conflicts on `.feature.md`
+//   files no longer goes straight to the resolution dialog. Peers on this
+//   app version shipped their edits as chunk files too, which merged cleanly
+//   in the same pull — so the merged document already holds both sides, and
+//   the conflicted markdown is just the projection needing to be rewritten.
+//   Plain-markdown edits (older app versions, GitHub PRs) have no ops to
+//   merge, so they go through a scenario-level three-way merge against the
+//   git merge base. Only both-sides-edited-the-same-scenario remains a human
+//   decision, surfaced through the existing conflict UI.
+//
+// - importDrift: markdown that changed without its document — an external
+//   GitHub edit, an old-version peer's push, or a feature that predates its
+//   document — is absorbed (or first imported) into the doc, and the file is
+//   rewritten to the doc's projection. Drift that would tamper with a
+//   published scenario is refused and the file repaired from the doc.
+
+import { fileExists, readTextFile, writeTextFile } from "../fsx";
+import {
+  conflictedFiles,
+  diffNames,
+  existsIn,
+  resolveConflict,
+  stageVersion,
+  theirsVersion,
+} from "../git";
+import { featureTextError, parseFeature } from "../parser";
+import { threeWayFeature } from "./merge";
+import { docToFeature, projectFeature } from "./project";
+import { importFeatureDoc, reconcile } from "./reconcile";
+import {
+  createFeatureDoc,
+  docDirRel,
+  listFeatureDocs,
+  loadFeatureDoc,
+  removeFeatureDoc,
+  saveFeatureDoc,
+} from "./store";
+import { walk } from "../walk";
+
+const DOC_DIR_PREFIX = ".specdriven/automerge/features/";
+
+const EMPTY = { name: "", description: "", scenarios: [] };
+
+export interface AutoResolveResult {
+  /** Conflicted files this pass resolved. */
+  resolved: string[];
+  /** Conflicted files left for the resolution dialog, with the reason. */
+  remaining: Map<string, string>;
+  message: string;
+}
+
+/**
+ * Resolve what a merged document (or a three-way merge) can resolve of a
+ * conflicted pull. Resolving the last conflicted file completes the merge
+ * commit and pushes (backend resolveConflict semantics).
+ */
+export async function autoResolveMergeConflicts(
+  dataDir: string,
+  conflicted: string[],
+): Promise<AutoResolveResult> {
+  const conflictedSet = new Set(conflicted);
+  const resolved: string[] = [];
+  const remaining = new Map<string, string>();
+  for (const path of conflicted) {
+    const why = await autoResolveOne(dataDir, path, conflictedSet);
+    if (why === null) resolved.push(path);
+    else remaining.set(path, why);
+  }
+  const parts = [];
+  if (resolved.length > 0) parts.push(`auto-merged ${resolved.length} conflicted file(s)`);
+  for (const [path, why] of remaining) parts.push(`${path}: ${why}`);
+  return { resolved, remaining, message: parts.join("; ") };
+}
+
+/** True when the other side of the merge added chunk files for this feature. */
+async function theirsBroughtChunks(dataDir: string, fileName: string): Promise<boolean> {
+  const changed = await diffNames(dataDir, "HEAD", "MERGE_HEAD", docDirRel(fileName));
+  for (const path of changed) {
+    if (!path.endsWith(".bin")) continue;
+    // The diff lists differences in both directions; a chunk of theirs is one
+    // that exists in MERGE_HEAD and not in our HEAD.
+    if ((await existsIn(dataDir, "MERGE_HEAD", path)) && !(await existsIn(dataDir, "HEAD", path))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Resolve one conflicted path; null on success, else why it was left.
+ *
+ * For a conflicted `.feature.md` the decision tree is:
+ * - The other peer runs this app version (its pull delivered chunk files for
+ *   this feature): both sides' markdown is derivative — the merged document
+ *   already holds both sides' operations, and its projection is the
+ *   resolution. This is the common case, and it merges concurrent edits to
+ *   the same scenario at character level.
+ * - The other peer sent only markdown (older app version, GitHub edit): its
+ *   changes have no operations to merge, so they fold in through a
+ *   scenario-level three-way merge against the git merge base.
+ * - Concurrent first import (signature: this feature's docid file conflicted
+ *   in the same merge): merging the two lineages' chunks picked one side's
+ *   content wholesale, so both sides' markdown folds back in three-way.
+ */
+async function autoResolveOne(
+  dataDir: string,
+  path: string,
+  conflictedSet: Set<string>,
+): Promise<string | null> {
+  if (path.startsWith(DOC_DIR_PREFIX) && path.endsWith("/docid")) {
+    // Two peers imported the same feature concurrently and minted different
+    // identities. The chunks of both lineages merged in this same pull, and
+    // Automerge already picked the winning lineage deterministically — the
+    // docid file just records that winner's identity.
+    const fileName = path.slice(DOC_DIR_PREFIX.length, -"/docid".length);
+    const loaded = await loadFeatureDoc(dataDir, fileName);
+    if (loaded === null) return "document did not load";
+    await resolveConflict(dataDir, path, `${loaded.doc.id}\n`);
+    return null;
+  }
+  if (!path.endsWith(".feature.md") || path.startsWith(DOC_DIR_PREFIX)) {
+    return "not a feature file";
+  }
+  const loaded = await loadFeatureDoc(dataDir, path);
+  if (loaded === null) return "no document behind it";
+  const theirsText = (await stageVersion(dataDir, path, 3)) ?? (await theirsVersion(dataDir, path));
+  if (theirsText === null) return "deleted on one side";
+  const baseText = await stageVersion(dataDir, path, 1);
+  const base = baseText === null ? EMPTY : parseFeature(baseText);
+  const lineageRace = conflictedSet.has(`${docDirRel(path)}/docid`);
+  const opsArrived = await theirsBroughtChunks(dataDir, path);
+
+  let doc = loaded.doc;
+  try {
+    if (lineageRace) {
+      const oursText = await stageVersion(dataDir, path, 2);
+      if (oursText !== null && projectFeature(doc) !== oursText) {
+        const own = threeWayFeature(base, docToFeature(doc), parseFeature(oursText));
+        if (!own.ok) return own.conflict;
+        doc = reconcile(doc, own.feature);
+      }
+    }
+    if (!opsArrived || lineageRace) {
+      const merged = threeWayFeature(base, docToFeature(doc), parseFeature(theirsText));
+      if (!merged.ok) return merged.conflict;
+      doc = reconcile(doc, merged.feature);
+    }
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  await saveFeatureDoc(dataDir, path, doc, loaded.heads);
+  await resolveConflict(dataDir, path, projectFeature(doc), [docDirRel(path)]);
+  return null;
+}
+
+/**
+ * One drift pass over the whole data repo. Returns a human-readable summary
+ * ("" when nothing drifted). Never runs during an in-progress merge — the
+ * caller checks — since conflict markers must not be absorbed as content.
+ */
+export async function importDrift(dataDir: string): Promise<string> {
+  const files = (await walk(dataDir)).files;
+  let imported = 0;
+  let absorbed = 0;
+  let repaired = 0;
+  for (const fileName of files) {
+    const text = await readTextFile(`${dataDir}/${fileName}`);
+    // Unreadable or malformed markdown never reaches the document.
+    if (text === null || featureTextError(text) !== null) continue;
+    const loaded = await loadFeatureDoc(dataDir, fileName);
+    if (loaded === null) {
+      const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(parseFeature(text)));
+      const projection = projectFeature(created.doc);
+      if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
+      imported++;
+      continue;
+    }
+    const projection = projectFeature(loaded.doc);
+    if (text === projection) continue;
+    try {
+      const next = reconcile(loaded.doc, parseFeature(text));
+      await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
+      await writeTextFile(`${dataDir}/${fileName}`, projectFeature(next));
+      absorbed++;
+    } catch {
+      // The drifted markdown tampered with a published scenario: the document
+      // wins, and the file is repaired to its projection.
+      await writeTextFile(`${dataDir}/${fileName}`, projection);
+      repaired++;
+    }
+  }
+  // A document whose markdown is gone was deleted externally: the markdown
+  // is the interchange format, so the deletion stands.
+  let removed = 0;
+  for (const fileName of await listFeatureDocs(dataDir)) {
+    if (!(await fileExists(`${dataDir}/${fileName}`))) {
+      await removeFeatureDoc(dataDir, fileName);
+      removed++;
+    }
+  }
+  const parts = [];
+  if (imported > 0) parts.push(`imported ${imported} feature(s) into documents`);
+  if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited file(s)`);
+  if (repaired > 0) parts.push(`repaired ${repaired} file(s) from their documents`);
+  if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
+  return parts.join("; ");
+}
+
+/** True while a merge with unresolved conflicts is in progress. */
+export async function mergeInProgress(dataDir: string): Promise<boolean> {
+  return (await conflictedFiles(dataDir)).length > 0;
+}
