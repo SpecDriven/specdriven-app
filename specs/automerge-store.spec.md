@@ -62,10 +62,23 @@ versions — their plain-markdown pushes keep working and are absorbed as
 drift. If two peers import the same feature concurrently, the merge picks
 one document identity deterministically and folds both sides' content in.
 
+## Scenario: optional live sync over websocket
+
+Settings can name a sync server (e.g. wss://sync.automerge.org). While one
+is named, every feature document is announced to it under an identity all
+peers derive from the docid file, local saves stream out as CRDT operations
+in near-real time, and arriving operations merge into the chunk store and
+rewrite the markdown projection — the next sync tick commits them, so git
+remains the source of record. Double delivery over both transports is
+harmless: merging the same operations twice is a no-op. The setting is off
+by default and the Settings dialog warns that on a public server anyone
+holding a document's id can read that document; peers with private data
+point it at a self-hosted sync server instead.
+
 ## Decisions
 
-Git stays the only transport and GitHub access stays the whole
+Git stays the required transport and GitHub access stays the whole
 authorization model (ARCHITECTURE.md): the documents ride the same clone,
-pull and push as the markdown. No sync server is required; an optional
-real-time accelerator can sync the same documents over websocket without
-changing the source of record.
+pull and push as the markdown. No sync server is required; the optional
+websocket sync above accelerates delivery without changing the source of
+record.

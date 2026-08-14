@@ -26,6 +26,24 @@ import { SCHEMA_VERSION, type FeatureDoc } from "./schema";
 /** Change files tolerated before the next save folds them into a snapshot. */
 const COMPACT_AT = 12;
 
+/**
+ * Fired after a document gains chunks on disk (created, saved, or absorbed
+ * from a pull). The optional network sync bridge (netsync.ts) listens so a
+ * local edit reaches websocket peers without polling.
+ */
+export type DocSavedListener = (dataDir: string, fileName: string) => void;
+
+const docSavedListeners = new Set<DocSavedListener>();
+
+export function onDocSaved(listener: DocSavedListener): () => void {
+  docSavedListeners.add(listener);
+  return () => docSavedListeners.delete(listener);
+}
+
+function emitDocSaved(dataDir: string, fileName: string): void {
+  for (const listener of docSavedListeners) listener(dataDir, fileName);
+}
+
 export interface LoadedDoc {
   doc: A.Doc<FeatureDoc>;
   /** Heads as loaded — pass to saveFeatureDoc so it writes only the delta. */
@@ -119,6 +137,7 @@ export async function createFeatureDoc(
   await writeFile(join(dir, `snapshot-${contentHash(bytes)}.bin`), bytes);
   const docId = doc.id;
   await writeFile(join(dir, "docid"), `${docId}\n`);
+  emitDocSaved(dataDir, fileName);
   return { doc, heads: A.getHeads(doc), docId, skippedChunks: [] };
 }
 
@@ -139,6 +158,7 @@ export async function saveFeatureDoc(
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `changes-${contentHash(delta)}.bin`), delta);
   await compactFeatureDoc(dataDir, fileName);
+  emitDocSaved(dataDir, fileName);
 }
 
 /**

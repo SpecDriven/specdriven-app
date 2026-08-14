@@ -25,6 +25,20 @@ export interface SpecDrivenState {
   /** Show the test-links table on scenario cards
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;
+  /**
+   * Optional websocket sync server for near-real-time document sync
+   * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
+   * or empty means OFF — git stays the only transport. On a public server,
+   * anyone holding a document's id can read that document.
+   */
+  syncServerUrl?: string;
+}
+
+/** Effective sync server url for a stored value; null means off. */
+export function normalizeSyncServerUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const url = value.trim();
+  return url.startsWith("ws://") || url.startsWith("wss://") ? url : null;
 }
 
 /** Directory holding the settings, in the project root or in $HOME. */

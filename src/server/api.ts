@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
+  normalizeSyncServerUrl,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { resolveDataRepo } from "./repo";
@@ -56,6 +57,8 @@ import {
   normalizeReloadSeconds,
   reloadData,
 } from "./reload";
+import { startNetSyncClient } from "./automerge/netsync";
+import type { NetSync } from "./automerge/netsync";
 
 // Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
 // where n comes from the Settings dialog and is stored in the settings file.
@@ -67,6 +70,50 @@ export const reloader = createReloadScheduler(async () => {
   }
 });
 
+// Optional websocket document sync (specs/automerge-store.spec.md): a bridge
+// between the data repo's chunk store and the sync server named in Settings,
+// running only while one is named. Off by default — git is the transport.
+let netSync: NetSync | null = null;
+/** What the running bridge was started with, to skip no-op re-applies. */
+let netSyncKey: string | null = null;
+/** Start/stop must not interleave; applies queue behind one another. */
+let netSyncTurn: Promise<void> = Promise.resolve();
+
+export function applyNetSync(state: SpecDrivenState): Promise<void> {
+  netSyncTurn = netSyncTurn.then(async () => {
+    const url = normalizeSyncServerUrl(state.syncServerUrl);
+    let dir: string | null = null;
+    if (url && !needsDataRepo(state)) {
+      try {
+        dir = await resolveDataRepo(state.dataRepo!, getAppRoot());
+      } catch {
+        // No reachable data repo means no bridge — the next apply retries.
+      }
+    }
+    const key = url && dir ? `${url}\n${dir}` : null;
+    if (key === netSyncKey) return;
+    const old = netSync;
+    netSync = null;
+    netSyncKey = null;
+    if (old) {
+      try {
+        await old.stop();
+      } catch {
+        // A bridge that fails to stop cleanly is abandoned, not kept.
+      }
+    }
+    if (!url || !dir) return;
+    try {
+      netSync = await startNetSyncClient(dir, url);
+      netSyncKey = key;
+      console.log(`[netsync] syncing with ${url}`);
+    } catch (e) {
+      console.error(`[netsync] ${(e as Error).message}`);
+    }
+  });
+  return netSyncTurn;
+}
+
 /** Apply the persisted settings a server run starts from. */
 export async function applyStartupState(): Promise<void> {
   const state = await readState(getAppRoot());
@@ -74,6 +121,9 @@ export async function applyStartupState(): Promise<void> {
   // Git engine (specs/git-operations.spec.md): the GitHub CLI when this
   // machine has one, or whichever engine Settings names.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  // Not awaited: resolving the data repo may clone it, and startup must not
+  // wait on the network for an optional accelerator.
+  void applyNetSync(state);
 }
 
 function json(body: unknown, status = 200): Response {
@@ -146,6 +196,7 @@ async function stateFields(state: SpecDrivenState) {
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    syncServerUrl: state.syncServerUrl ?? null,
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
     canChooseFolder: canChooseFolder(),
@@ -174,18 +225,20 @@ const putState: Handler = async (req) => {
     scenarioPreviewLines?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
+    syncServerUrl?: string | null;
   };
   if (
     body.dataRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
     body.gitEngine === undefined &&
-    body.showTestLinks === undefined
+    body.showTestLinks === undefined &&
+    body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine or showTestLinks is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine, showTestLinks or syncServerUrl is required",
       },
       400,
     );
@@ -247,8 +300,22 @@ const putState: Handler = async (req) => {
     if (body.showTestLinks) delete state.showTestLinks;
     else state.showTestLinks = false;
   }
+  // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
+  // or null turns it off — the default, stored as an absent key.
+  if (body.syncServerUrl !== undefined) {
+    if (body.syncServerUrl !== null && typeof body.syncServerUrl !== "string") {
+      return json({ error: "syncServerUrl must be a string or null" }, 400);
+    }
+    const url = (body.syncServerUrl ?? "").trim();
+    if (url && normalizeSyncServerUrl(url) === null) {
+      return json({ error: "syncServerUrl must be a ws:// or wss:// url" }, 400);
+    }
+    if (url) state.syncServerUrl = url;
+    else delete state.syncServerUrl;
+  }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  await applyNetSync(state);
   return json(await stateFields(state));
 };
 
