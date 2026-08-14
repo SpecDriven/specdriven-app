@@ -1202,7 +1202,28 @@ button.link:disabled {
 
 .md-tools {
   display: flex;
+  align-items: center;
   gap: 0.15rem;
+}
+
+/* Image uploads (specs/images.spec.md): progress and failure sit in the
+   toolbar, left of the buttons, without moving them. */
+.md-upload-status,
+.md-upload-error {
+  font-size: 0.75rem;
+  margin-right: 0.4rem;
+  white-space: nowrap;
+}
+
+.md-upload-status {
+  color: var(--text-3);
+}
+
+.md-upload-error {
+  color: var(--danger-fg);
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .md-tools button {
