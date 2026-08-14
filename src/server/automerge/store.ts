@@ -35,8 +35,19 @@ export interface LoadedDoc {
   skippedChunks: string[];
 }
 
+/** Repo-relative path of a feature's doc directory, for git pathspecs. */
+export function docDirRel(fileName: string): string {
+  return `.specdriven/automerge/features/${fileName}`;
+}
+
 export function docDir(dataDir: string, fileName: string): string {
-  return join(dataDir, ".specdriven", "automerge", "features", fileName);
+  return join(dataDir, docDirRel(fileName));
+}
+
+/** True when the feature has a doc directory with at least one chunk. */
+export async function hasFeatureDoc(dataDir: string, fileName: string): Promise<boolean> {
+  const { snapshots, changes } = await chunkFiles(docDir(dataDir, fileName));
+  return snapshots.length > 0 || changes.length > 0;
 }
 
 function contentHash(bytes: Uint8Array): string {

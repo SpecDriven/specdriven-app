@@ -6,7 +6,10 @@
 
 export const SCHEMA_VERSION = 1;
 
-export interface ScenarioEntry {
+// Type aliases rather than interfaces: Automerge's Doc/from constraints want
+// the implicit index signature only aliases carry.
+
+export type ScenarioEntry = {
   /** Stable identity across renames and merges; minted at import. */
   id: string;
   name: string;
@@ -17,9 +20,9 @@ export interface ScenarioEntry {
   body: string;
   /** GitHub urls of the automated tests covering this scenario. */
   tests: string[];
-}
+};
 
-export interface FeatureDoc {
+export type FeatureDoc = {
   schemaVersion: number;
   /** Stable identity of the feature, independent of its file path. */
   id: string;
@@ -27,4 +30,4 @@ export interface FeatureDoc {
   /** Free markdown between the feature heading and the first scenario. */
   description: string;
   scenarios: ScenarioEntry[];
-}
+};

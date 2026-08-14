@@ -16,6 +16,12 @@ export interface SyncResult {
   message: string;
 }
 
+/** A path rename carried alongside a move (e.g. a feature's Automerge doc dir). */
+export interface PathMove {
+  from: string;
+  to: string;
+}
+
 export interface GitBackend {
   readonly name: "cli" | "gh" | "js";
   /** Clone url into dir; throws with a user-facing message on failure. */
@@ -24,10 +30,23 @@ export interface GitBackend {
   push(repoDir: string): Promise<SyncResult>;
   /** Content of a file on the other side of an in-progress merge. */
   theirsVersion(repoDir: string, relPath: string): Promise<string | null>;
-  resolveConflict(repoDir: string, relPath: string, content: string): Promise<SyncResult>;
+  /** Extra paths (e.g. doc chunk dirs) may be staged into the merge commit. */
+  resolveConflict(
+    repoDir: string,
+    relPath: string,
+    content: string,
+    alsoAdd?: string[],
+  ): Promise<SyncResult>;
   syncSavedChanges(repoDir: string): Promise<SyncResult>;
-  moveAndPush(repoDir: string, fromPath: string, toPath: string, message: string): Promise<SyncResult>;
-  removeAndPush(repoDir: string, relPath: string, message: string): Promise<SyncResult>;
-  commitAndPush(repoDir: string, relPath: string, message: string): Promise<SyncResult>;
+  /** Extra renames ride along in the same commit (a feature's doc dir). */
+  moveAndPush(
+    repoDir: string,
+    fromPath: string,
+    toPath: string,
+    message: string,
+    extraMoves?: PathMove[],
+  ): Promise<SyncResult>;
+  removeAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
+  commitAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
 }
