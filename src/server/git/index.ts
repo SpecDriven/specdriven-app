@@ -5,12 +5,12 @@
 // credential helper and `gh repo clone` on top — and the third is git
 // implemented in JavaScript, bundled with the app and always available.
 
-import type { GitBackend, PullResult, SyncResult } from "./backend";
+import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { cliBackend, cliGitAvailable } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
 
-export type { PullResult, SyncResult } from "./backend";
+export type { PathMove, PullResult, SyncResult } from "./backend";
 export { cliGitAvailable } from "./cli";
 export { ghAccount, ghAvailable, ghSignedIn } from "./gh";
 export type { GhAccount } from "./gh";
@@ -92,8 +92,9 @@ export async function resolveConflict(
   repoDir: string,
   relPath: string,
   content: string,
+  alsoAdd?: string[],
 ): Promise<SyncResult> {
-  return backend().resolveConflict(repoDir, relPath, content);
+  return backend().resolveConflict(repoDir, relPath, content, alsoAdd);
 }
 
 export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
@@ -105,24 +106,25 @@ export async function moveAndPush(
   fromPath: string,
   toPath: string,
   message: string,
+  extraMoves?: PathMove[],
 ): Promise<SyncResult> {
-  return backend().moveAndPush(repoDir, fromPath, toPath, message);
+  return backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves);
 }
 
 export async function removeAndPush(
   repoDir: string,
-  relPath: string,
+  paths: string | string[],
   message: string,
 ): Promise<SyncResult> {
-  return backend().removeAndPush(repoDir, relPath, message);
+  return backend().removeAndPush(repoDir, paths, message);
 }
 
 export async function commitAndPush(
   repoDir: string,
-  relPath: string,
+  paths: string | string[],
   message: string,
 ): Promise<SyncResult> {
-  return backend().commitAndPush(repoDir, relPath, message);
+  return backend().commitAndPush(repoDir, paths, message);
 }
 
 export async function hasUpstream(repoDir: string): Promise<boolean> {

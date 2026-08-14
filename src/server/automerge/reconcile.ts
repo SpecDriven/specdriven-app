@@ -58,9 +58,16 @@ function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
  * rename, keeping the entry's id and its body's edit history. The match plan
  * is computed from plain copies up front, then applied by index inside one
  * change: updates first, removals in descending order, additions last.
+ *
+ * `force` skips the published-immutability gate — only for an explicit human
+ * decision (the conflict-resolution dialog), never for an automated write.
  */
-export function reconcile(doc: A.Doc<FeatureDoc>, target: Feature): A.Doc<FeatureDoc> {
-  assertPublishedKept(doc, target);
+export function reconcile(
+  doc: A.Doc<FeatureDoc>,
+  target: Feature,
+  { force = false } = {},
+): A.Doc<FeatureDoc> {
+  if (!force) assertPublishedKept(doc, target);
 
   const entries: Scenario[] = doc.scenarios.map((e) => ({
     name: e.name,
