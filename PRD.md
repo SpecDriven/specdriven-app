@@ -1,4 +1,4 @@
-An application to support Enterprise Spec-driven Development.
+Local-first Enterprise Spec-driven Development app.
 
 # Problem
 

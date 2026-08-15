@@ -93,6 +93,16 @@ function applyThemePref(pref: ThemePref): void {
   }
 }
 
+// Live sync (specs/automerge-store.spec.md): the url the Settings field is
+// pre-filled with, so turning the switch on needs no typing. Sync itself stays
+// opt-in — nothing is sent anywhere until the switch is on and saved.
+const DEFAULT_SYNC_SERVER_URL = "wss://sync.automerge.org";
+
+// Autosync (specs/ui.spec.md "Settings"): the frequency the seconds field
+// falls back to when the switch is turned back on. Autosync is on by default,
+// so a stored 0 is the only way it is off.
+const DEFAULT_AUTOSYNC_SECONDS = 60;
+
 // Sidebar width (specs/ui.spec.md "Sidebar resize"): dragged via the divider
 // so a deep folder tree gets room. Device-local, like the theme.
 const SIDEBAR_MIN = 180;
@@ -218,10 +228,12 @@ export function App() {
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsDraft, setSettingsDraft] = useState("60");
+  const [settingsDraft, setSettingsDraft] = useState(String(DEFAULT_AUTOSYNC_SECONDS));
+  /** The autosync switch: off saves a frequency of 0, which stops the reload. */
+  const [settingsAutosyncOnDraft, setSettingsAutosyncOnDraft] = useState(true);
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
-  const [settingsSyncDraft, setSettingsSyncDraft] = useState("");
+  const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
   /** Url being typed into the edit dialog's "Add test link" field. */
@@ -1138,14 +1150,17 @@ export function App() {
     .toUpperCase();
 
   const openSettings = () => {
-    setSettingsDraft(String(reloadSeconds));
+    // A stored 0 means autosync is off; the field keeps a usable frequency so
+    // switching it back on needs no typing.
+    setSettingsAutosyncOnDraft(reloadSeconds > 0);
+    setSettingsDraft(String(reloadSeconds > 0 ? reloadSeconds : DEFAULT_AUTOSYNC_SECONDS));
     setSettingsLinesDraft(String(previewLines));
     // No stored choice is "auto": whichever engine this machine can run.
     setSettingsEngineDraft(
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
-    setSettingsSyncDraft(syncServerUrl ?? "");
+    setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
     setAuthStatus(null);
@@ -1272,9 +1287,10 @@ export function App() {
 
   // Settings are saved to the settings file (specs/ui.spec.md).
   const saveSettings = async () => {
-    const n = Number(settingsDraft);
-    if (!Number.isFinite(n) || n < 0) {
-      setSettingsError("Enter a number of seconds (0 disables automatic reload).");
+    // The switch decides whether autosync runs; a frequency of 0 stops it.
+    const n = settingsAutosyncOnDraft ? Number(settingsDraft) : 0;
+    if (!Number.isFinite(n) || (settingsAutosyncOnDraft && n < 1)) {
+      setSettingsError("Enter an autosync frequency of at least 1 second, or switch autosync off.");
       return;
     }
     const lines = Number(settingsLinesDraft);
@@ -2169,18 +2185,35 @@ export function App() {
             <p className="hint">
               Applied immediately and remembered on this device.
             </p>
-            <label>
-              Data reload frequency (seconds)
-              <input
-                type="number"
-                min={0}
-                value={settingsDraft}
-                onChange={(e) => setSettingsDraft(e.target.value)}
-              />
+            {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
+                default; off stores a frequency of 0, which stops the reload. */}
+            <label className="switch-label">
+              <span>Autosync</span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settingsAutosyncOnDraft}
+                  onChange={(e) => setSettingsAutosyncOnDraft(e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
             </label>
+            {settingsAutosyncOnDraft && (
+              <label>
+                Autosync frequency (seconds)
+                <input
+                  type="number"
+                  min={1}
+                  value={settingsDraft}
+                  onChange={(e) => setSettingsDraft(e.target.value)}
+                />
+              </label>
+            )}
             <p className="hint">
-              The data repo is git-pulled automatically at this interval. Use 0 to disable
-              automatic reload.
+              {settingsAutosyncOnDraft
+                ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
+                : "Autosync is off: the data repo is only pulled and pushed when you publish."}
             </p>
             {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
                 accelerator on top of git, with an explicit privacy warning. */}
