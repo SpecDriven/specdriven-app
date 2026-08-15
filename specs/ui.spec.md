@@ -138,6 +138,7 @@ A settings dialog. Settings are saved to the settings file
 - Appearance: System, Light or Dark. Applied immediately and remembered on
   the device (browser/app storage), not in the settings file — theme is a
   per-device preference, not shared team state. "System" follows the OS.
+- ESC closes the dialog without saving, same as Cancel.
 # Design system
 
 Warm, minimal, Claude-like. All colors flow through CSS tokens in

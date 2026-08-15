@@ -399,6 +399,20 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
+  // specs/ui.spec.md "Settings": ESC closes the settings dialog without
+  // saving — same as Cancel, and it works while a dialog field has focus.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSettingsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen]);
+
   // specs/ui.spec.md "Dialogs": ESC closes the merge conflict dialog. The
   // merge itself lives in the repo (specs/git-operations.spec.md), so nothing
   // is lost — the note below says Publish brings the choices back.
