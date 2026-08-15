@@ -52,33 +52,27 @@ current one — released versions name immutable artifacts. `--no-git` writes
 Pushing is deliberately left to the caller, since pushing the tag is what
 publishes the release: `git push origin main --follow-tags`.
 
-## Release on tag — macOS (done)
+## Release — macOS dmg (built locally)
 
-`.github/workflows/release-macos.yml` runs on a pushed `v*` tag: it checks the
-tag against `package.json` (electron-builder names the dmg after the latter, so
-a mismatch would publish a mislabelled asset), runs the suite, builds with
-`bun run build:desktop --mac`, and attaches `SpecDriven-<version>-arm64.dmg` to
-a GitHub Release for the tag. `workflow_dispatch` rebuilds an existing tag and
-replaces the asset.
+The dmg is built on a local Mac, not in CI: `bun run build:desktop --mac` at the
+tagged commit produces `SpecDriven-<version>-arm64.dmg`, which is then attached
+to the GitHub Release by hand. electron-builder names the artifact after
+`package.json`'s `version`, so build from the commit the tag points at or the
+asset is mislabelled.
 
-The workflow at the *tagged commit* is the one that runs, so a tag cut before
-this file existed will not trigger it.
-
-The dmg is unsigned and un-notarized — there is no certificate in CI, and
-`CSC_IDENTITY_AUTO_DISCOVERY=false` keeps that a decision rather than a
-property of the runner image. Gatekeeper blocks it on first launch; the release
-notes say how to get past that. Signing needs a Developer ID cert and an
-app-specific password in repo secrets.
+The dmg is unsigned and un-notarized, so Gatekeeper blocks it on first launch;
+the release notes say how to get past that. Signing needs a Developer ID cert.
 
 ## Still to do
 
 - **Host the assets.** The repo is private, so GitHub Release assets need auth
   and can't be `curl`ed anonymously — R2 behind specdriven.app is the way,
   which is also why `BASE_URL` defaults to `https://specdriven.app/dist`.
-- **Publish the `curl | sh` binaries on tag.** The macOS dmg is released, but
-  nothing uploads the `bun run build:all` matrix: the installer defaults to
-  `latest`, so a tagged version has to land in `dist/latest/` (and ideally
-  `dist/v1.2.3/` alongside it). Linux AppImage/deb are likewise unreleased.
+- **Publish the `curl | sh` binaries on tag.** The macOS dmg is built and
+  uploaded by hand; nothing uploads the `bun run build:all` matrix: the
+  installer defaults to `latest`, so a tagged version has to land in
+  `dist/latest/` (and ideally `dist/v1.2.3/` alongside it). Linux AppImage/deb
+  are likewise unreleased.
 - **Sign and notarize the dmg**, so macOS opens it without a right-click.
 - **Serve `install.sh`** at the domain root from the same bucket.
 - No `--version` flag on the binary, so an installed copy can't report what it
