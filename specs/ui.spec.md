@@ -132,11 +132,12 @@ feature page, where a long feature pushes the resolutions out of sight.
 A settings dialog. Settings are saved to the settings file
 (`.specdriven/settings.json`, specs/app-start.spec.md)
 
-- Data reload frequency
+- Autosync: a sliding switch, on by default, with the autosync frequency in
+  seconds below it while it is on. Off stores a frequency of 0, which stops
+  the automatic pull/push.
 - Appearance: System, Light or Dark. Applied immediately and remembered on
   the device (browser/app storage), not in the settings file — theme is a
   per-device preference, not shared team state. "System" follows the OS.
-
 # Design system
 
 Warm, minimal, Claude-like. All colors flow through CSS tokens in
