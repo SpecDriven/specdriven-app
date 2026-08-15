@@ -29,6 +29,21 @@ OS.
   from the Settings dialog instead. All three are switchable in Settings.
 - Access to the data repo you intend to open.
 
+## Clone the spec repo
+
+This app's own specs live in a separate repo, [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven),
+and `specs/` here is a checked-in symlink to `../specs-specdriven`. Clone it as a
+sibling of this checkout, or `specs/` dangles:
+
+```sh
+gh repo clone SpecDriven/specs-specdriven ../specs-specdriven
+```
+
+Without `gh`, `git clone https://github.com/SpecDriven/specs-specdriven.git ../specs-specdriven`
+does the same. Nothing at runtime reads `specs/` — it is there for the workflow
+below — so a dangling symlink breaks neither the build nor the tests, only the
+links in this README and the spec references in the code.
+
 ## Install dependencies
 
 ```sh
@@ -167,7 +182,8 @@ src/server/         api (routes shared by web + desktop), features, parser, sear
                     git/ (gh + cli + js engines), auth, github, tokenStore, repo, state, user, reload
 src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
-specs/*.spec.md     specifications for this app's own behavior
+specs/*.spec.md     specifications for this app's own behavior — a symlink to the
+                    ../specs-specdriven clone, see "Clone the spec repo"
 tests/              bun test suite
 scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts
 roadmap/            work not started yet
