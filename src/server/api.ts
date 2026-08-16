@@ -60,14 +60,18 @@ import {
 } from "./reload";
 import { startNetSyncClient } from "./automerge/netsync";
 import type { NetSync } from "./automerge/netsync";
+import { errorAttributes, getLogger } from "./telemetry";
+
+const reloadLog = getLogger("reload");
+const netsyncLog = getLogger("netsync");
 
 // Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
 // where n comes from the Settings dialog and is stored in the settings file.
 export const reloader = createReloadScheduler(async () => {
   try {
-    console.log(`[reload] ${await reloadData(getAppRoot())}`);
+    reloadLog.info(await reloadData(getAppRoot()));
   } catch (e) {
-    console.error(`[reload] ${(e as Error).message}`);
+    reloadLog.error((e as Error).message, errorAttributes(e));
   }
 });
 
@@ -99,17 +103,18 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
     if (old) {
       try {
         await old.stop();
-      } catch {
+      } catch (e) {
         // A bridge that fails to stop cleanly is abandoned, not kept.
+        netsyncLog.warn("bridge did not stop cleanly; abandoning it", errorAttributes(e));
       }
     }
     if (!url || !dir) return;
     try {
       netSync = await startNetSyncClient(dir, url);
       netSyncKey = key;
-      console.log(`[netsync] syncing with ${url}`);
+      netsyncLog.info(`syncing with ${url}`);
     } catch (e) {
-      console.error(`[netsync] ${(e as Error).message}`);
+      netsyncLog.error((e as Error).message, errorAttributes(e));
     }
   });
   return netSyncTurn;
@@ -325,9 +330,10 @@ const putState: Handler = async (req) => {
 const postReload: Handler = async () => {
   try {
     const message = await reloadData(getAppRoot());
-    console.log(`[reload] ${message}`);
+    reloadLog.info(message);
     return json({ message });
   } catch (e) {
+    reloadLog.error((e as Error).message, errorAttributes(e));
     return json({ error: (e as Error).message }, 502);
   }
 };

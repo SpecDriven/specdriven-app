@@ -77,6 +77,40 @@ and fall back to `~/.specdriven/settings.json`, so one settings file can serve
 every checkout; `SPECDRIVEN_HOME` overrides that home directory. Settings are saved
 back to whichever file was read.
 
+## Observability
+
+The server (web and desktop) is instrumented with OpenTelemetry around the
+sync engine: every reload tick, git operation, conflict auto-resolution,
+drift import, Automerge document write, and websocket sync event produces
+spans and log records. Export is off by default and opt-in through the
+standard OTEL environment variables ([src/server/telemetry.ts](src/server/telemetry.ts)):
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 bun run dev
+```
+
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
+override per signal (naming just one exports only that signal),
+`OTEL_SERVICE_NAME` renames the service (default `specdriven`), and
+`OTEL_SDK_DISABLED=true` is a hard off switch. Without an endpoint the
+instrumentation is a no-op.
+
+Console logging is unaffected by OTEL: sync activity always prints as
+`[reload] …` / `[netsync] …` / `[git] …` lines. Set `SPECDRIVEN_DEBUG=1` to
+also print the debug-level detail (per-file drift decisions, chunk saves,
+document announcements) that otherwise skips the console.
+
+Every entry — debug included — also lands in a rotating log file, on by
+default, so the packaged desktop app (whose stdout goes nowhere) still leaves
+a trail. Files live in `~/.specdriven/logs/` (`$SPECDRIVEN_HOME/logs` when
+that override is set): `specdriven.log` is current, `specdriven.log.1 … .4`
+are older. Lines carry a timestamp, level, component, attributes, and —
+when a trace is being exported — the `trace=`/`span=` ids to jump from a log
+line to its trace. `SPECDRIVEN_LOG_DIR` moves the directory,
+`SPECDRIVEN_LOG_MAX_BYTES` (default 5 MB) and `SPECDRIVEN_LOG_MAX_FILES`
+(default 5) tune rotation, and `SPECDRIVEN_LOG_FILE=0` turns file logging
+off.
+
 ## Tests
 
 ```sh

@@ -5,6 +5,8 @@
 // credential helper and `gh repo clone` on top — and the third is git
 // implemented in JavaScript, bundled with the app and always available.
 
+import type { Attributes } from "@opentelemetry/api";
+import { getLogger, withSpan } from "../telemetry";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { cliBackend, cliGitAvailable } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
@@ -76,12 +78,47 @@ function backend(): GitBackend {
   }
 }
 
+const log = getLogger("git");
+
+function gitAttrs(repoDir: string): Attributes {
+  return { "git.engine": currentEngine(), "specdriven.dir": repoDir };
+}
+
+/**
+ * Span + logs around one git operation that commits or talks to the remote —
+ * the whole sync surface funnels through here. Read-only helpers (stage
+ * versions, diffs, …) stay untraced; they run inside these spans anyway.
+ */
+async function traced<T>(
+  op: string,
+  repoDir: string,
+  run: () => Promise<T>,
+  outcome: (result: T) => Attributes,
+): Promise<T> {
+  return withSpan(`git.${op}`, gitAttrs(repoDir), async (span) => {
+    const result = await run();
+    const attrs = outcome(result);
+    span.setAttributes(attrs);
+    log.debug(op, { "specdriven.dir": repoDir, ...attrs });
+    return result;
+  });
+}
+
+const syncOutcome = (result: SyncResult): Attributes => ({
+  "git.pushed": result.pushed,
+  "git.message": result.message,
+});
+
 export async function pull(repoDir: string): Promise<PullResult> {
-  return backend().pull(repoDir);
+  return traced("pull", repoDir, () => backend().pull(repoDir), (result) => ({
+    "git.pull.ok": result.ok,
+    "git.pull.conflicted_files": result.conflictedFiles.length,
+    "git.message": result.message,
+  }));
 }
 
 export async function push(repoDir: string): Promise<SyncResult> {
-  return backend().push(repoDir);
+  return traced("push", repoDir, () => backend().push(repoDir), syncOutcome);
 }
 
 export async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
@@ -119,11 +156,20 @@ export async function resolveConflict(
   content: string,
   alsoAdd?: string[],
 ): Promise<SyncResult> {
-  return backend().resolveConflict(repoDir, relPath, content, alsoAdd);
+  return withSpan(
+    "git.resolve_conflict",
+    { ...gitAttrs(repoDir), "specdriven.file": relPath },
+    async (span) => {
+      const result = await backend().resolveConflict(repoDir, relPath, content, alsoAdd);
+      span.setAttributes(syncOutcome(result));
+      log.info(`resolved conflict on ${relPath}`, { "git.pushed": result.pushed });
+      return result;
+    },
+  );
 }
 
 export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
-  return backend().syncSavedChanges(repoDir);
+  return traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
 }
 
 export async function moveAndPush(
@@ -133,7 +179,12 @@ export async function moveAndPush(
   message: string,
   extraMoves?: PathMove[],
 ): Promise<SyncResult> {
-  return backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves);
+  return traced(
+    "move_and_push",
+    repoDir,
+    () => backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves),
+    (result) => ({ ...syncOutcome(result), "git.from": fromPath, "git.to": toPath }),
+  );
 }
 
 export async function removeAndPush(
@@ -141,7 +192,7 @@ export async function removeAndPush(
   paths: string | string[],
   message: string,
 ): Promise<SyncResult> {
-  return backend().removeAndPush(repoDir, paths, message);
+  return traced("remove_and_push", repoDir, () => backend().removeAndPush(repoDir, paths, message), syncOutcome);
 }
 
 export async function commitAndPush(
@@ -149,7 +200,7 @@ export async function commitAndPush(
   paths: string | string[],
   message: string,
 ): Promise<SyncResult> {
-  return backend().commitAndPush(repoDir, paths, message);
+  return traced("commit_and_push", repoDir, () => backend().commitAndPush(repoDir, paths, message), syncOutcome);
 }
 
 export async function hasUpstream(repoDir: string): Promise<boolean> {
@@ -157,5 +208,8 @@ export async function hasUpstream(repoDir: string): Promise<boolean> {
 }
 
 export async function clone(url: string, dir: string): Promise<void> {
-  return backend().clone(url, dir);
+  return withSpan("git.clone", { ...gitAttrs(dir), "git.url": url }, async () => {
+    log.info(`cloning ${url}`, { "specdriven.dir": dir });
+    await backend().clone(url, dir);
+  });
 }

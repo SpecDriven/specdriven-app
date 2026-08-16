@@ -30,6 +30,9 @@ import { readTextFile, writeTextFile } from "../fsx";
 import { projectFeature } from "./project";
 import type { FeatureDoc } from "./schema";
 import { docDir, listFeatureDocs, loadFeatureDoc, onDocSaved, saveFeatureDoc } from "./store";
+import { errorAttributes, getLogger, withSpan } from "../telemetry";
+
+const log = getLogger("netsync");
 
 /**
  * The automerge-repo DocumentId every peer derives from a feature document's
@@ -96,13 +99,16 @@ export async function startNetSync(
     if (disk === null) return;
     const merged = A.merge(A.clone(disk.doc), A.clone(networkDoc));
     if (A.getHeads(merged).join() === disk.heads.join()) return; // nothing new
-    writing.add(fileName);
-    try {
-      await saveFeatureDoc(dataDir, fileName, merged, disk.heads);
-      await writeTextFile(join(dataDir, fileName), projectFeature(merged));
-    } finally {
-      writing.delete(fileName);
-    }
+    await withSpan("netsync.absorb_remote", { "specdriven.file": fileName }, async () => {
+      writing.add(fileName);
+      try {
+        await saveFeatureDoc(dataDir, fileName, merged, disk.heads);
+        await writeTextFile(join(dataDir, fileName), projectFeature(merged));
+        log.info(`absorbed remote operations into ${fileName}`);
+      } finally {
+        writing.delete(fileName);
+      }
+    });
   }
 
   /** Announce a feature's document, or push its latest disk state. */
@@ -116,39 +122,52 @@ export async function startNetSync(
       // drift pass resolves.
       docId = documentIdForDoc(loaded.docId);
     } catch {
-      return; // corrupt docid file — git sync still works, network sync waits
+      // Corrupt docid file — git sync still works, network sync waits.
+      log.warn(`not announcing ${fileName}: its docid file is not a document uuid`);
+      return;
     }
     fileNames.set(docId, fileName);
     const existing = handles.get(docId);
     if (existing) {
+      log.debug(`pushed local state of ${fileName} to the sync server`);
       existing.update((d) => A.merge(d, A.clone(loaded.doc)));
       return;
     }
+    log.debug(`announced ${fileName} to the sync server`, { "automerge.doc_id": loaded.docId });
     const handle = repo.import<FeatureDoc>(A.save(loaded.doc), { docId });
     handles.set(docId, handle);
     handle.on("change", ({ doc }) => {
       if (doc === undefined) return;
-      void absorbRemote(docId, doc).catch(() => {
+      void absorbRemote(docId, doc).catch((e) => {
         // A failed absorb is not fatal: git delivers the same operations.
+        log.warn(`failed to absorb remote operations`, errorAttributes(e));
       });
     });
   }
 
   const unsubscribe = onDocSaved((dir, fileName) => {
     if (dir !== dataDir || writing.has(fileName)) return;
-    void attach(fileName).catch(() => {});
+    void attach(fileName).catch((e) => {
+      log.warn(`failed to announce ${fileName} after a save`, errorAttributes(e));
+    });
   });
 
-  for (const fileName of await listFeatureDocs(dataDir)) {
-    await attach(fileName);
-  }
+  return withSpan("netsync.start", { "specdriven.dir": dataDir }, async (span) => {
+    const fileList = await listFeatureDocs(dataDir);
+    for (const fileName of fileList) {
+      await attach(fileName);
+    }
+    span.setAttribute("netsync.documents", fileList.length);
+    log.info(`bridging ${fileList.length} feature document(s)`);
 
-  return {
-    async stop() {
-      unsubscribe();
-      for (const handle of handles.values()) handle.removeAllListeners("change");
-      handles.clear();
-      await repo.shutdown();
-    },
-  };
+    return {
+      async stop() {
+        unsubscribe();
+        for (const handle of handles.values()) handle.removeAllListeners("change");
+        handles.clear();
+        await repo.shutdown();
+        log.info("stopped");
+      },
+    };
+  });
 }

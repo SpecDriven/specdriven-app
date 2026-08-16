@@ -1,5 +1,10 @@
 import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
+import { initTelemetry } from "./server/telemetry";
+
+// OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
+// be up before the first sync or API call so nothing escapes the pipeline.
+initTelemetry();
 
 // The API itself lives in server/api.ts so the desktop app can serve the
 // same routes over its app:// protocol (specs/desktop-app.spec.md).
