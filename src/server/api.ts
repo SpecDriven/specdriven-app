@@ -61,6 +61,7 @@ import {
   createReloadScheduler,
   normalizeReloadSeconds,
   reloadData,
+  syncDataDir,
 } from "./reload";
 import { startNetSyncClient } from "./automerge/netsync";
 import type { NetSync } from "./automerge/netsync";
@@ -69,15 +70,43 @@ import { errorAttributes, getLogger } from "./telemetry";
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
 
-// Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
-// where n comes from the Settings dialog and is stored in the settings file.
-export const reloader = createReloadScheduler(async () => {
+/** One sync tick (pull + push saved), logged; a failed tick never throws. */
+async function syncTick(run: () => Promise<string>): Promise<void> {
   try {
-    reloadLog.info(await reloadData(getAppRoot()));
+    reloadLog.info(await run());
   } catch (e) {
     reloadLog.error((e as Error).message, errorAttributes(e));
   }
-});
+}
+
+// Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
+// where n comes from the Settings dialog and is stored in the settings file.
+export const reloader = createReloadScheduler(() => syncTick(() => reloadData(getAppRoot())));
+
+// App start (specs/app-start.spec.md "the data repo is pulled on start"): one
+// sync tick before the app is read, so it opens on the latest data instead of
+// on whatever the last run left behind. Startup itself does not wait on the
+// network — reads of the data repo wait on this handle instead.
+let startupSync: Promise<void> = Promise.resolve();
+
+/** How long a data read waits for the app-start pull before serving anyway. */
+export const STARTUP_SYNC_WAIT_MS = 15_000;
+
+function after(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref?.();
+  });
+}
+
+/**
+ * Wait for the app-start sync, so the first screen shows pulled data. A pull
+ * that hangs — an unreachable remote, a remote asking for credentials — must
+ * not wedge the app, so the wait is bounded: past it the read is served from
+ * what is on disk, and the pull finishes into the next reload tick.
+ */
+export function syncedOnStart(): Promise<void> {
+  return Promise.race([startupSync, after(STARTUP_SYNC_WAIT_MS)]);
+}
 
 // Optional websocket document sync (specs/automerge-store.spec.md): a bridge
 // between the data repo's chunk store and the sync server named in Settings,
@@ -129,8 +158,12 @@ export async function applyStartupState(): Promise<void> {
   const state = await readState(getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
   // Git engine (specs/git-operations.spec.md): the GitHub CLI when this
-  // machine has one, or whichever engine Settings names.
+  // machine has one, or whichever engine Settings names — decided before the
+  // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  // specs/app-start.spec.md: pull the data repo on start. Not awaited here —
+  // reads wait for it through syncedOnStart(); everything else starts now.
+  startupSync = syncTick(() => reloadData(getAppRoot()));
   // Not awaited: resolving the data repo may clone it, and startup must not
   // wait on the network for an optional accelerator.
   void applyNetSync(state);
@@ -181,12 +214,14 @@ type Handler = (req: Request, params: Params) => Response | Promise<Response>;
 
 /**
  * Resolve the configured data repo (local path or GitHub url, cloned on first
- * use) and hand its local directory to the handler.
+ * use) and hand its local directory to the handler. Nothing reads the repo
+ * before the app-start pull has had its turn (specs/app-start.spec.md).
  */
 function withDataDir(
   handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
 ): Handler {
   return async (req, params) => {
+    await syncedOnStart();
     const state = await readState(getAppRoot());
     if (needsDataRepo(state)) return json({ error: "data repo not configured" }, 409);
     let dir: string;
@@ -276,6 +311,9 @@ const putState: Handler = async (req) => {
     else delete state.gitEngine;
     setGitEngine(engine);
   }
+  // The directory a newly picked data repo resolves to; null when this
+  // request leaves the data repo alone.
+  let pickedDir: string | null = null;
   if (body.dataRepo !== undefined) {
     const dataRepo = body.dataRepo.trim();
     if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
@@ -283,7 +321,7 @@ const putState: Handler = async (req) => {
     // (specs/crud-feature.spec.md: "user is verified to have access to the
     // data GH repo").
     try {
-      await resolveDataRepo(dataRepo, getAppRoot());
+      pickedDir = await resolveDataRepo(dataRepo, getAppRoot());
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
@@ -337,6 +375,14 @@ const putState: Handler = async (req) => {
   }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  // specs/app-start.spec.md "changing the data repo": a newly picked folder is
+  // pulled before the response, so the client's first read of it — which
+  // follows this response — already shows the latest data. A pull that fails
+  // is logged and the switch still stands; the folder is configured either way.
+  if (pickedDir) {
+    const dir = pickedDir;
+    await syncTick(() => syncDataDir(dir));
+  }
   await applyNetSync(state);
   return json(await stateFields(state));
 };
