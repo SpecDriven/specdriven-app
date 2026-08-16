@@ -7,7 +7,7 @@ import {
   sortScenarios,
   titleFromFileName,
 } from "../server/parser";
-import type { Feature, Scenario } from "../server/parser";
+import type { Feature, Scenario, ScenarioPick } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
@@ -186,6 +186,16 @@ export function App() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   /** File name of the feature being dragged, if any. */
   const [dragging, setDragging] = useState<string | null>(null);
+  // Code gen sessions (specs/agents/claude.spec.md): specs checked in the
+  // sidebar, and scenarios checked on their cards, go into a named session
+  // that runs the Claude CLI. Per file the selection is the whole spec
+  // ("all") or a set of scenario keys.
+  const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
+  const [sessionRunning, setSessionRunning] = useState(false);
+  /** Outcome line under the Start session button (started/finished). */
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  /** A failed session's message, shown in an error box until dismissed. */
+  const [sessionError, setSessionError] = useState<string | null>(null);
   /** Sidebar entry whose "⋯" menu is open (file name), if any. */
   const [treeMenu, setTreeMenu] = useState<string | null>(null);
   /** True while the File submenu of the open tree menu is expanded. */
@@ -224,6 +234,8 @@ export function App() {
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
+  /** Code gen sessions offered at all (specs/agents/claude.spec.md). */
+  const [codeGen, setCodeGen] = useState(true);
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -233,6 +245,7 @@ export function App() {
   const [settingsAutosyncOnDraft, setSettingsAutosyncOnDraft] = useState(true);
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -297,6 +310,9 @@ export function App() {
       }
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
+      }
+      if (typeof state.codeGen === "boolean") {
+        setCodeGen(state.codeGen);
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
@@ -778,6 +794,131 @@ export function App() {
     }
   };
 
+  /** A scenario's identity within its file: the `<name>@v<version>` heading
+      syntax, used as both a publish-progress and a selection key. Declared
+      before the selection helpers that call it during render. */
+  const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
+
+  // The spec's own checkbox: none or some scenarios → the whole spec;
+  // the whole spec → cleared.
+  const toggleSpecSelected = (fileName: string) =>
+    setSpecSelection((prev) => {
+      const next = new Map(prev);
+      if (next.get(fileName) === "all") next.delete(fileName);
+      else next.set(fileName, "all");
+      return next;
+    });
+
+  // A scenario's checkbox on its card: unchecking one of a whole-spec
+  // selection keeps the rest; checking the last missing one promotes back to
+  // the whole spec. `all` is every scenario the file has, so "the whole
+  // spec" and "all of its scenarios" stay the same selection.
+  const toggleScenarioSelected = (
+    fileName: string,
+    all: { name: string; version: number }[],
+    key: string,
+  ) =>
+    setSpecSelection((prev) => {
+      const next = new Map(prev);
+      const entry = next.get(fileName);
+      const picked = new Set(entry === "all" ? all.map(scenarioKey) : (entry ?? []));
+      if (picked.has(key)) picked.delete(key);
+      else picked.add(key);
+      if (picked.size === 0) next.delete(fileName);
+      else if (all.every((s) => picked.has(scenarioKey(s)))) next.set(fileName, "all");
+      else next.set(fileName, picked);
+      return next;
+    });
+
+  /** True when this scenario is in the session selection. */
+  const scenarioSelected = (fileName: string, s: { name: string; version: number }) => {
+    const entry = specSelection.get(fileName);
+    return entry === "all" || (entry instanceof Set && entry.has(scenarioKey(s)));
+  };
+
+  // What the current selection sends to a session. Selections can outlive
+  // the list (a checked spec deleted elsewhere, a scenario replaced by a new
+  // version) — only specs and scenarios still listed go in.
+  const sessionFiles = (): { fileName: string; scenarios?: ScenarioPick[] }[] => {
+    const files: { fileName: string; scenarios?: ScenarioPick[] }[] = [];
+    for (const f of features) {
+      const entry = specSelection.get(f.fileName);
+      if (entry === undefined) continue;
+      if (entry === "all") {
+        files.push({ fileName: f.fileName });
+        continue;
+      }
+      const picked = f.scenarios.filter((s) => entry.has(scenarioKey(s)));
+      if (picked.length > 0) {
+        files.push({
+          fileName: f.fileName,
+          scenarios: picked.map(({ name, version }) => ({ name, version })),
+        });
+      }
+    }
+    return files;
+  };
+
+  /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
+      dialog both say what a session would run over. */
+  const describeSelection = (files: { scenarios?: ScenarioPick[] }[]): string => {
+    const whole = files.filter((f) => !f.scenarios).length;
+    const partial = files.length - whole;
+    const scenarios = files.reduce((n, f) => n + (f.scenarios?.length ?? 0), 0);
+    const parts: string[] = [];
+    if (whole > 0) parts.push(`${whole} whole spec${whole === 1 ? "" : "s"}`);
+    if (partial > 0) {
+      parts.push(
+        `${scenarios} scenario${scenarios === 1 ? "" : "s"} from ` +
+          `${partial} spec${partial === 1 ? "" : "s"}`,
+      );
+    }
+    return parts.join(" and ");
+  };
+
+  const selectionLabel = describeSelection(sessionFiles());
+
+  // Code gen session (specs/agents/claude.spec.md): with specs or single
+  // scenarios selected, "Start session" asks for a name, then the server
+  // builds a prompt from the selection and passes it to the Claude CLI to
+  // execute and exit. An error code lands in the error box.
+  const startSession = async () => {
+    const files = sessionFiles();
+    if (files.length === 0 || sessionRunning) return;
+    const name = await prompt({
+      title: "Name the session",
+      hint: `Runs Claude over ${describeSelection(files)}.`,
+      placeholder: "e.g. implement billing quotes",
+      confirmLabel: "Start session",
+    });
+    if (name === null || !name.trim()) return;
+    const sessionName = name.trim();
+    setSessionRunning(true);
+    setSessionNotice(`Session "${sessionName}" running…`);
+    try {
+      const res = await fetch("/api/agent/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: sessionName, files }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSessionNotice(`Session "${sessionName}" finished.`);
+        setSpecSelection(new Map());
+        // The session may have edited specs — show what it left behind.
+        await loadFeatures();
+      } else {
+        setSessionNotice(null);
+        setSessionError(data.error ?? "Code gen session failed");
+      }
+    } catch (e) {
+      setSessionNotice(null);
+      setSessionError((e as Error).message);
+    } finally {
+      setSessionRunning(false);
+    }
+  };
+
   // Folders (specs/folders.spec.md): plain directories in the data repo.
   // With a folder selected, the new folder is created inside it.
   const createFolder = async () => {
@@ -945,8 +1086,6 @@ export function App() {
       setStatus(data.error ?? "Delete failed");
     }
   };
-
-  const scenarioKey = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
 
   // Publish buttons (specs/ui.spec.md "Main page"): same style and behavior as
   // Sync — disabled with a progress label while running, no "Published" status
@@ -1174,6 +1313,7 @@ export function App() {
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
+    setSettingsCodeGenDraft(codeGen);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -1328,6 +1468,7 @@ export function App() {
         scenarioPreviewLines: Math.floor(lines),
         gitEngine: settingsEngineDraft,
         showTestLinks: settingsTestLinksDraft,
+        codeGen: settingsCodeGenDraft,
         syncServerUrl: syncUrl,
       }),
     });
@@ -1336,6 +1477,10 @@ export function App() {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
       setShowTestLinks(data.showTestLinks !== false);
+      // Switched off, a selection left over from before must not linger as a
+      // session waiting to be started.
+      if (data.codeGen === false) setSpecSelection(new Map());
+      setCodeGen(data.codeGen !== false);
       setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
       setGitEngineState(data.gitEngine ?? null);
       setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -1494,15 +1639,41 @@ export function App() {
   };
 
   /** One sidebar entry per feature; the entry is the drag source. */
-  const featureItem = (f: FeatureListing, depth: number) => (
-    <div key={f.fileName} className="tree-row">
-      {/* A real link (specs/navigation.spec.md "share a link"): plain clicks
+  const featureItem = (f: FeatureListing, depth: number) => {
+    const entry = specSelection.get(f.fileName);
+    return (
+      <div key={f.fileName}>
+        <div className="tree-row">
+          {/* Code gen selection (specs/agents/claude.spec.md): checking a
+              spec here takes the whole thing; a dash means some of its
+              scenarios are picked, which is done on the scenario cards.
+              Gone entirely when the Settings switch is off. */}
+          {codeGen && (
+            <input
+              type="checkbox"
+              className="tree-check"
+              style={{ marginLeft: `${0.4 + depth * 0.9}rem` }}
+              checked={entry === "all"}
+              ref={(el) => {
+                if (el) el.indeterminate = entry !== undefined && entry !== "all";
+              }}
+              onChange={() => toggleSpecSelected(f.fileName)}
+              aria-label={`Select ${f.name} for a code gen session`}
+              title={
+                entry !== undefined && entry !== "all"
+                  ? "Some scenarios of this spec are selected"
+                  : `Select all of ${f.name} for a code gen session`
+              }
+            />
+          )}
+          {/* A real link (specs/navigation.spec.md "share a link"): plain clicks
           navigate in-app, right-click → Copy Link works. The label is the
           feature name, not the file name (specs/ui.spec.md "Main page"). */}
       <a
         href={featurePath(f.fileName)}
         className={`tree-feature${f.fileName === selected ? " active" : ""}`}
-        style={{ paddingLeft: `${0.6 + depth * 0.9}rem` }}
+        /* The checkbox carries the depth indent; without it the link does. */
+        style={{ paddingLeft: codeGen ? "0.4rem" : `${0.6 + depth * 0.9}rem` }}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData("text/plain", f.fileName);
@@ -1577,8 +1748,10 @@ export function App() {
           </div>
         )}
       </span>
-    </div>
-  );
+        </div>
+      </div>
+    );
+  };
 
   /**
    * Folders then features, indented per depth (specs/folders.spec.md).
@@ -1760,6 +1933,34 @@ export function App() {
           <button onClick={createFolder}>+ New folder</button>
           <button onClick={createFeature}>+ New feature</button>
         </div>
+        {/* Code gen session (specs/agents/claude.spec.md): check whole specs
+            here or single scenarios on their cards, then Start session asks
+            for a name and runs. The Settings switch takes it all away. */}
+        {codeGen && (
+          <>
+            <div className="sidebar-actions">
+              <button
+                onClick={() => void startSession()}
+                disabled={sessionRunning || specSelection.size === 0}
+                title={
+                  specSelection.size === 0
+                    ? "Select a spec here, or single scenarios on their cards"
+                    : `Start a code gen session with ${selectionLabel}`
+                }
+              >
+                {sessionRunning
+                  ? "Session running…"
+                  : `▶ Start session${specSelection.size > 0 ? ` (${specSelection.size})` : ""}`}
+              </button>
+            </div>
+            {/* What a session would run over, so a scenario checked on a card
+                two clicks away is still visible from here. */}
+            {selectionLabel && !sessionRunning && (
+              <p className="session-notice">Selected: {selectionLabel}</p>
+            )}
+          </>
+        )}
+        {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
         {loadError && <p className="error">{loadError}</p>}
         {query.trim() ? (
           /* Ranked results take the tree's slot while a query is active
@@ -1995,6 +2196,22 @@ export function App() {
                 >
                   <header>
                     <span className="scenario-title">
+                      {/* Code gen selection (specs/agents/claude.spec.md): a
+                          session takes whole specs, checked in the sidebar,
+                          or single scenarios, checked here. Gone when the
+                          Settings switch is off. */}
+                      {codeGen && (
+                        <input
+                          type="checkbox"
+                          className="scenario-check"
+                          checked={scenarioSelected(selected, s)}
+                          onChange={() =>
+                            toggleScenarioSelected(selected, feature.scenarios, scenarioKey(s))
+                          }
+                          aria-label={`Select scenario ${s.name} for a code gen session`}
+                          title="Include this scenario in a code gen session"
+                        />
+                      )}
                       {/* The title is the scenario's permalink
                           (specs/navigation.spec.md "share a link"). */}
                       <a
@@ -2284,6 +2501,26 @@ export function App() {
             <p className="hint">
               Each scenario ends with a table of GitHub links to its automated tests, when it
               has any.
+            </p>
+            {/* Code gen (specs/agents/claude.spec.md): off takes the selection
+                checkboxes and Start session away, and the server refuses a
+                session, so no spec can reach the Claude CLI. */}
+            <label className="switch-label">
+              <span>Code generation</span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settingsCodeGenDraft}
+                  onChange={(e) => setSettingsCodeGenDraft(e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+            <p className="hint">
+              {settingsCodeGenDraft
+                ? "Specs and scenarios can be selected and handed to the Claude CLI, which implements them in the data repo."
+                : "Code generation is off: no selection checkboxes, and sessions are refused."}
             </p>
             {/* Git engine (specs/git-operations.spec.md): which one carries
                 the operations out and who supplies GitHub credentials. */}
@@ -2597,6 +2834,24 @@ export function App() {
                   {editingPublished ? "Save test links" : "Save scenario"}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Error box (specs/agents/claude.spec.md): what the Claude CLI said
+          when it exited with an error code. */}
+      {sessionError && (
+        <div className="dialog-backdrop" onClick={() => setSessionError(null)}>
+          <div
+            className="dialog"
+            role="alertdialog"
+            aria-label="Code gen session failed"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Code gen session failed</h3>
+            <p className="error session-error">{sessionError}</p>
+            <div className="dialog-actions">
+              <button onClick={() => setSessionError(null)}>Close</button>
             </div>
           </div>
         </div>

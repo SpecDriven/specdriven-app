@@ -368,6 +368,29 @@ aside header h1 {
   flex: 1;
 }
 
+/* Code gen session (specs/agents/claude.spec.md): per-spec and per-scenario
+   checkboxes in the tree, and the outcome line under the Start session
+   button. */
+.tree-check {
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.session-notice {
+  color: var(--text-2);
+  font-size: 0.8rem;
+  margin: 0.3rem 0 0;
+}
+
+/* CLI output can be long and unbroken — keep the error box scrollable. */
+.session-error {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 /* Sidebar search (specs/search.spec.md): magnifier icon inside the field's
    left edge, ✕ clear button inside its right. */
 .sidebar-search {
@@ -831,6 +854,15 @@ button {
   font-family: var(--font-serif);
   font-size: 1.02rem;
   font-weight: 600;
+}
+
+/* Code gen selection (specs/agents/claude.spec.md): picks this scenario for
+   a session. Sits left of the title, on the title's own baseline. */
+.scenario-check {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* The scenario title is its permalink (specs/navigation.spec.md): quiet by

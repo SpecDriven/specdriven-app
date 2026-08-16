@@ -45,9 +45,9 @@ test("listFeatures recurses into folders; listFolders sees empty ones", async ()
   await Bun.write(join(root, "billing/sub/deep.feature.md"), "# Deep\n");
   await Bun.write(join(root, ".git/objects/x.feature.md"), "# Hidden\n");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "billing/quotes.feature.md", name: "Quotes" },
-    { fileName: "billing/sub/deep.feature.md", name: "Deep" },
-    { fileName: "top.feature.md", name: "Top" },
+    { fileName: "billing/quotes.feature.md", name: "Quotes", scenarios: [] },
+    { fileName: "billing/sub/deep.feature.md", name: "Deep", scenarios: [] },
+    { fileName: "top.feature.md", name: "Top", scenarios: [] },
   ]);
   expect(await listFolders(root)).toEqual(["billing", "billing/sub", "empty"]);
 });
@@ -127,12 +127,12 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   const tree = buildTree(
     ["billing", "billing/sub", "empty"],
     [
-      { fileName: "zeta.feature.md", name: "Zeta" },
-      { fileName: "billing/quotes.feature.md", name: "Quotes" },
-      { fileName: "billing/sub/deep.feature.md", name: "Deep" },
-      { fileName: "alpha.feature.md", name: "Alpha" },
+      { fileName: "zeta.feature.md", name: "Zeta", scenarios: [] },
+      { fileName: "billing/quotes.feature.md", name: "Quotes", scenarios: [] },
+      { fileName: "billing/sub/deep.feature.md", name: "Deep", scenarios: [] },
+      { fileName: "alpha.feature.md", name: "Alpha", scenarios: [] },
       // a feature whose folder is missing from the folder list still lands
-      { fileName: "implied/one.feature.md", name: "One" },
+      { fileName: "implied/one.feature.md", name: "One", scenarios: [] },
     ],
   );
   expect(tree.path).toBe("");

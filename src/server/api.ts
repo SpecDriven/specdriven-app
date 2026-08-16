@@ -6,6 +6,7 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeCodeGen,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -50,8 +51,11 @@ import {
   resolveFeatureConflict,
 } from "./features";
 import type { ScenarioTarget } from "./features";
+import { claudeAvailable, runCodeGenSession } from "./agent";
+import type { SpecInput } from "./agent";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
-import { parseFeature } from "./parser";
+import { extractScenarios, parseFeature } from "./parser";
+import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
 import {
   createReloadScheduler,
@@ -202,6 +206,7 @@ async function stateFields(state: SpecDrivenState) {
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    codeGen: normalizeCodeGen(state.codeGen),
     syncServerUrl: state.syncServerUrl ?? null,
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
@@ -231,6 +236,7 @@ const putState: Handler = async (req) => {
     scenarioPreviewLines?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
+    codeGen?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -239,12 +245,13 @@ const putState: Handler = async (req) => {
     body.scenarioPreviewLines === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
+    body.codeGen === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine, showTestLinks or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
       },
       400,
     );
@@ -305,6 +312,15 @@ const putState: Handler = async (req) => {
     }
     if (body.showTestLinks) delete state.showTestLinks;
     else state.showTestLinks = false;
+  }
+  // Code gen sessions (specs/agents/claude.spec.md): switched off here, the
+  // app offers no way to run one — the default ON is an absent key.
+  if (body.codeGen !== undefined) {
+    if (typeof body.codeGen !== "boolean") {
+      return json({ error: "codeGen must be a boolean" }, 400);
+    }
+    if (body.codeGen) delete state.codeGen;
+    else state.codeGen = false;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -583,6 +599,84 @@ const getImage = withDataDir(async (dir, _req, params) => {
   });
 });
 
+// One selected spec in a session request: the whole file when `scenarios`
+// is absent, otherwise just the named scenarios of it.
+interface SessionFile {
+  fileName: string;
+  scenarios?: ScenarioPick[];
+}
+
+/** The request's `files`, validated into shape — or null when malformed. */
+function parseSessionFiles(value: unknown): SessionFile[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const files: SessionFile[] = [];
+  for (const entry of value) {
+    const { fileName, scenarios } = (entry ?? {}) as { fileName?: unknown; scenarios?: unknown };
+    if (typeof fileName !== "string") return null;
+    if (scenarios === undefined) {
+      files.push({ fileName });
+      continue;
+    }
+    if (!Array.isArray(scenarios) || scenarios.length === 0) return null;
+    const picks: ScenarioPick[] = [];
+    for (const s of scenarios) {
+      const { name, version } = (s ?? {}) as { name?: unknown; version?: unknown };
+      if (typeof name !== "string" || !Number.isInteger(version) || (version as number) < 1) {
+        return null;
+      }
+      picks.push({ name, version: version as number });
+    }
+    files.push({ fileName, scenarios: picks });
+  }
+  return files;
+}
+
+// Code gen session (specs/agents/claude.spec.md): the client sends the
+// session name and the selected specs — whole files or per-file scenario
+// subsets; we build one prompt from them and pass it to the Claude CLI to
+// execute and exit. A non-zero exit comes back as an error for the client's
+// error box.
+const postAgentSession = withDataDir(async (dir, req) => {
+  // The Settings switch is the gate, enforced here and not only in the UI:
+  // switched off, nothing can hand a spec to the CLI.
+  if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
+    return json({ error: "Code generation is switched off in Settings" }, 403);
+  }
+  const body = (await req.json()) as { name?: string; files?: unknown };
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return json({ error: "name is required" }, 400);
+  const files = parseSessionFiles(body.files);
+  if (files === null) {
+    return json({ error: "files must name at least one spec or scenario" }, 400);
+  }
+  const specs: SpecInput[] = [];
+  for (const { fileName, scenarios } of files) {
+    let content: string | null;
+    try {
+      content = await readFeature(dir, fileName);
+    } catch {
+      content = null;
+    }
+    if (content === null) return json({ error: `spec not found: ${fileName}` }, 400);
+    if (scenarios) {
+      try {
+        content = extractScenarios(content, scenarios);
+      } catch (e) {
+        return json({ error: `${fileName}: ${(e as Error).message}` }, 400);
+      }
+    }
+    specs.push({ fileName, content, partial: scenarios !== undefined });
+  }
+  if (!claudeAvailable()) {
+    return json({ error: "Claude CLI not found — install the `claude` command" }, 502);
+  }
+  try {
+    return json(await runCodeGenSession(dir, name, specs));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 502);
+  }
+});
+
 // Native folder chooser (specs/app-start.spec.md "picking the data directory
 // with the native folder chooser"): opens the OS dialog on the machine the
 // app runs on. 501 on runtimes with no native chooser — the client hides
@@ -619,6 +713,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
+  ["POST", "/api/agent/session", postAgentSession],
 ];
 
 export interface ApiMatch {
