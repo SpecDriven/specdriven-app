@@ -244,6 +244,36 @@ export function serializeFeature(feature: Feature): string {
   return parts.join("\n\n") + "\n";
 }
 
+/** Identity of one scenario inside a feature file: heading name + version. */
+export interface ScenarioPick {
+  name: string;
+  version: number;
+}
+
+/**
+ * Serialize just the picked scenarios of a feature file — the heading and
+ * description stay, every unpicked scenario drops out
+ * (specs/agents/claude.spec.md: a code gen session can take a whole spec or
+ * a subset of its scenarios). Throws when a pick names a scenario the file
+ * doesn't have, so a stale client selection fails loudly instead of running
+ * Claude over less than the user chose.
+ */
+export function extractScenarios(text: string, picks: ScenarioPick[]): string {
+  const feature = parseFeature(text);
+  const key = (s: ScenarioPick) => `${s.name}@v${s.version}`;
+  const have = new Set(feature.scenarios.map(key));
+  for (const pick of picks) {
+    if (!have.has(key(pick))) {
+      throw new Error(`scenario not found: ${pick.name} @v${pick.version}`);
+    }
+  }
+  const wanted = new Set(picks.map(key));
+  return serializeFeature({
+    ...feature,
+    scenarios: feature.scenarios.filter((s) => wanted.has(key(s))),
+  });
+}
+
 /**
  * Rewrite the feature's `# <name>` heading — its display name — leaving the
  * rest of the text untouched (specs/ui.spec.md "Main page": the Edit link

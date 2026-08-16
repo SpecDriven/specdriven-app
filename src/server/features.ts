@@ -32,6 +32,7 @@ import {
   slugify,
   titleFromFileName,
 } from "./parser";
+import type { ScenarioPick } from "./parser";
 
 export { slugify } from "./parser";
 
@@ -57,6 +58,9 @@ export interface FeatureListing {
   fileName: string;
   /** Display name: the file's `# <name>` heading, or derived from the stem. */
   name: string;
+  /** The file's scenarios, for scenario-level code gen selection
+      (specs/agents/claude.spec.md). */
+  scenarios: ScenarioPick[];
 }
 
 /**
@@ -69,12 +73,15 @@ export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
   return Promise.all(
     entries.map(async (fileName) => {
       let name = "";
+      let scenarios: ScenarioPick[] = [];
       try {
-        name = parseFeature(await readFile(`${dataDir}/${fileName}`, "utf8")).name;
+        const parsed = parseFeature(await readFile(`${dataDir}/${fileName}`, "utf8"));
+        name = parsed.name;
+        scenarios = parsed.scenarios.map(({ name, version }) => ({ name, version }));
       } catch {
         // unreadable (e.g. deleted mid-listing): fall back to the stem
       }
-      return { fileName, name: name || titleFromFileName(fileName) };
+      return { fileName, name: name || titleFromFileName(fileName), scenarios };
     }),
   );
 }

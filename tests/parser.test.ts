@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import {
+  extractScenarios,
   featureTextError,
   parseFeature,
   serializeFeature,
@@ -256,4 +257,30 @@ test("renameFeatureName ignores `#` lines in fences or after scenarios", () => {
   expect(renamed.startsWith("# Named\n\n```\n# comment\n```")).toBe(true);
   const inBody = "## S @v1\n\n# heading in body\n";
   expect(renameFeatureName(inBody, "Named")).toBe("# Named\n\n## S @v1\n\n# heading in body\n");
+});
+
+// Scenario-level code gen selection (specs/agents/claude.spec.md): a session
+// can take a whole spec or a subset of its scenarios — extractScenarios
+// keeps the heading and description and drops every unpicked scenario.
+test("extractScenarios keeps only the picked scenarios", () => {
+  const text = extractScenarios(SAMPLE, [{ name: "Declined Quote", version: 2 }]);
+  expect(text).toBe(
+    "# Quote Policy\n\nQuotes for potential customers.\n\n" +
+      "## Declined Quote @v2\n\n" +
+      "- **Given** the customer has no account\n- **Then** the quote is declined\n",
+  );
+});
+
+test("extractScenarios distinguishes versions of the same scenario name", () => {
+  const text = "# F\n\n## S @v1\n\nold\n\n## S @v2\n\nnew\n";
+  expect(extractScenarios(text, [{ name: "S", version: 2 }])).toBe("# F\n\n## S @v2\n\nnew\n");
+});
+
+test("extractScenarios throws when a pick names a missing scenario", () => {
+  expect(() => extractScenarios(SAMPLE, [{ name: "Basic Quote", version: 9 }])).toThrow(
+    "scenario not found: Basic Quote @v9",
+  );
+  expect(() => extractScenarios(SAMPLE, [{ name: "Nope", version: 1 }])).toThrow(
+    "scenario not found: Nope @v1",
+  );
 });

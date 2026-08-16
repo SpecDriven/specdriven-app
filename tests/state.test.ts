@@ -6,6 +6,7 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeCodeGen,
   normalizeScenarioPreviewLines,
   DEFAULT_SCENARIO_PREVIEW_LINES,
   LEGACY_STATE_FILE,
@@ -133,4 +134,18 @@ test("scenario preview lines default to 8 and are at least 1", () => {
   expect(normalizeScenarioPreviewLines(-3)).toBe(DEFAULT_SCENARIO_PREVIEW_LINES);
   expect(normalizeScenarioPreviewLines(4.9)).toBe(4);
   expect(normalizeScenarioPreviewLines(1)).toBe(1);
+});
+
+// Code gen switch (specs/agents/claude.spec.md): on unless switched off, so
+// the default is an absent key and only `false` turns it off.
+test("code generation is on unless explicitly switched off", () => {
+  expect(normalizeCodeGen(undefined)).toBe(true);
+  expect(normalizeCodeGen(true)).toBe(true);
+  expect(normalizeCodeGen("nope")).toBe(true);
+  expect(normalizeCodeGen(false)).toBe(false);
+});
+
+test("the code gen switch round-trips through the settings file", async () => {
+  await writeState({ dataRepo: "data", codeGen: false }, dir);
+  expect(normalizeCodeGen((await readState(dir)).codeGen)).toBe(false);
 });
