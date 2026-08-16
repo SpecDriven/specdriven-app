@@ -75,7 +75,7 @@ test("a version-like word inside the name is not the scenario version", () => {
   expect(feature.scenarios[0]).toMatchObject({
     name: "Migrate to v2 API",
     version: 1,
-    published: true,
+    status: "published",
   });
 });
 
@@ -85,8 +85,8 @@ test("parses the published chip", () => {
   const feature = parseFeature(
     "# X\n\n## Done @v1 [published]\n\nbody\n\n## Draft @v2\n\nbody\n",
   );
-  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
-  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
+  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, status: "published" });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, status: "draft" });
 });
 
 // crud-feature.spec.md "Feature file format": a [proposed] chip marks a
@@ -97,8 +97,7 @@ test("parses and serializes the proposed chip", () => {
   expect(feature.scenarios[0]).toMatchObject({
     name: "Draft",
     version: 2,
-    published: false,
-    proposed: true,
+    status: "proposed",
   });
   expect(serializeFeature(feature)).toBe(text);
 });
@@ -107,7 +106,7 @@ test("parses and serializes the proposed chip", () => {
 // name of [proposed], normalized when the file is next written.
 test("legacy [saved] chips parse as proposed and normalize on write", () => {
   const feature = parseFeature("# X\n\n## Kept @v3 [saved]\n\nbody\n");
-  expect(feature.scenarios[0]).toMatchObject({ name: "Kept", version: 3, proposed: true });
+  expect(feature.scenarios[0]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
   expect(serializeFeature(feature)).toContain("## Kept @v3 [proposed]");
 });
 
@@ -119,9 +118,9 @@ test("legacy un-prefixed versions still parse and normalize on write", () => {
   const feature = parseFeature(
     "# X\n\n## Done v1 [published]\n\nbody\n\n## Kept v3 [saved]\n\nbody\n\n## Draft v2\n\nbody\n",
   );
-  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
-  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
-  expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, proposed: true });
+  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, status: "published" });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, status: "draft" });
+  expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
   const text = serializeFeature(feature);
   expect(text).toContain("## Done @v1 [published]");
   expect(text).toContain("## Kept @v3 [proposed]");
@@ -134,9 +133,9 @@ test("legacy backtick headings still parse and normalize on write", () => {
   const feature = parseFeature(
     "# X\n\n## Done `v1` `published`\n\nbody\n\n## Kept `v3` `saved`\n\nbody\n\n## Draft `v2`\n\nbody\n",
   );
-  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, published: true });
-  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, published: false });
-  expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, proposed: true });
+  expect(feature.scenarios[0]).toMatchObject({ name: "Done", version: 1, status: "published" });
+  expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, status: "draft" });
+  expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
   const text = serializeFeature(feature);
   expect(text).toContain("## Done @v1 [published]");
   expect(text).toContain("## Kept @v3 [proposed]");
@@ -149,7 +148,7 @@ test("extra spaces before the version and chip are tolerated", () => {
   expect(feature.scenarios[0]).toMatchObject({
     name: "Talks to a live agent",
     version: 1,
-    published: true,
+    status: "published",
   });
 });
 

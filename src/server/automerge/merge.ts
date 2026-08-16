@@ -34,6 +34,9 @@ function mergeText(base: string, ours: string, theirs: string): string {
   return A.merge(oursDoc, theirsDoc).t;
 }
 
+/** draft → proposed → published: the lifecycle only moves forward. */
+const STATUS_RANK = { draft: 0, proposed: 1, published: 2 } as const;
+
 /** Merge one scenario present on both sides. */
 function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
@@ -41,13 +44,12 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     theirs.tests.join("\n") !== baseTests && ours.tests.join("\n") === baseTests
       ? theirs.tests
       : ours.tests;
-  // published is a one-way latch: a concurrent publish on either side wins.
-  const published = ours.published || theirs.published;
   return {
     name: ours.name,
     version: ours.version,
-    published,
-    proposed: !published && (ours.proposed || theirs.proposed),
+    // status is a one-way latch: the side further along the lifecycle wins,
+    // so a concurrent publish (or propose) on either side sticks.
+    status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
   };
@@ -103,9 +105,6 @@ export function threeWayFeature(
 
 function sameScenario(a: Scenario, b: Scenario): boolean {
   return (
-    a.body === b.body &&
-    a.published === b.published &&
-    a.proposed === b.proposed &&
-    a.tests.join("\n") === b.tests.join("\n")
+    a.body === b.body && a.status === b.status && a.tests.join("\n") === b.tests.join("\n")
   );
 }
