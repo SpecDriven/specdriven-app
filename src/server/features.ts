@@ -280,7 +280,7 @@ async function docMoves(
 
 export interface SaveResult {
   status: "saved";
-  /** The content as written, with unpublished scenarios marked [proposed]. */
+  /** The content as written, with draft scenarios marked [proposed]. */
   content: string;
   message: string;
 }
@@ -427,7 +427,7 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
   const before = parseFeature(existingText);
   const after = parseFeature(next);
   for (const old of before.scenarios) {
-    if (!old.published) continue;
+    if (old.status !== "published") continue;
     const match = after.scenarios.find((s) => s.name === old.name && s.version === old.version);
     if (!match || match.body !== old.body) {
       throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);

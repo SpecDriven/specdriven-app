@@ -4,7 +4,11 @@
 // CRDT level instead of surfacing as git conflicts. Scenario identity in the
 // projection stays (name, version) — the ids below never appear in markdown.
 
-export const SCHEMA_VERSION = 1;
+import type { ScenarioStatus } from "../parser";
+
+// v2: `status` replaced the `published`/`proposed` booleans of v1 and added
+// the doc-only `draft` state. loadFeatureDoc migrates v1 docs on load.
+export const SCHEMA_VERSION = 2;
 
 // Type aliases rather than interfaces: Automerge's Doc/from constraints want
 // the implicit index signature only aliases carry.
@@ -14,8 +18,11 @@ export type ScenarioEntry = {
   id: string;
   name: string;
   version: number;
-  published: boolean;
-  proposed: boolean;
+  /**
+   * draft | proposed | published. Only proposed and published scenarios are
+   * projected into the `.feature.md`; a draft lives in the document alone.
+   */
+  status: ScenarioStatus;
   /** Scenario markdown (tests section excluded) — collaborative text. */
   body: string;
   /** GitHub urls of the automated tests covering this scenario. */

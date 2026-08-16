@@ -22,7 +22,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
-import { SCHEMA_VERSION, type FeatureDoc } from "./schema";
+import { SCHEMA_VERSION, type FeatureDoc, type ScenarioEntry } from "./schema";
 
 const log = getLogger("automerge");
 
@@ -54,6 +54,32 @@ export interface LoadedDoc {
   docId: string;
   /** Chunk files that could not be applied (foreign lineage or corrupt). */
   skippedChunks: string[];
+}
+
+/** A v1 scenario entry: statuses as booleans instead of the status field. */
+type LegacyScenarioEntry = ScenarioEntry & { published?: boolean; proposed?: boolean };
+
+/**
+ * Fold a v1 document's `published`/`proposed` booleans into `status`
+ * (schema v2). Applied on load; the heads returned by loadFeatureDoc are the
+ * pre-migration heads, so the migration ops ride whatever delta the caller
+ * saves next — a load that never saves just migrates again next time.
+ */
+function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
+  const entries = doc.scenarios as LegacyScenarioEntry[];
+  const stale =
+    doc.schemaVersion < SCHEMA_VERSION || entries.some((s) => s.status === undefined);
+  if (!stale) return doc;
+  return A.change(doc, (d) => {
+    if (d.schemaVersion < SCHEMA_VERSION) d.schemaVersion = SCHEMA_VERSION;
+    for (const entry of d.scenarios as LegacyScenarioEntry[]) {
+      if (entry.status === undefined) {
+        entry.status = entry.published ? "published" : entry.proposed ? "proposed" : "draft";
+        delete entry.published;
+        delete entry.proposed;
+      }
+    }
+  });
 }
 
 /** Repo-relative path of a feature's doc directory, for git pathspecs. */
@@ -131,7 +157,9 @@ export async function loadFeatureDoc(
     });
   }
   const docId = (await readTextFile(join(dir, "docid")))?.trim() ?? doc.id;
-  return { doc, heads: A.getHeads(doc), docId, skippedChunks };
+  // Heads are captured before the schema migration on purpose — see migrated.
+  const heads = A.getHeads(doc);
+  return { doc: migrated(doc), heads, docId, skippedChunks };
 }
 
 /**

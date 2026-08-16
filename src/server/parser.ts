@@ -9,6 +9,12 @@
 //   ## <name of scenario> @vNNN [proposed]   (saved, not yet published)
 //   ## <name of scenario> @vNNN [published]  (published, immutable)
 //
+// Only [published] and [proposed] scenarios belong in a `.feature.md` on
+// disk: draft is an internal status that lives in the Automerge document
+// alone (specs/automerge-store.spec.md). Chipless headings still parse (the
+// editor round-trips new scenarios that way, and hand edits may write them)
+// — they enter as drafts and the projection leaves them out of the file.
+//
 //   <scenario body — any markdown up to the next scenario heading;
 //    Gherkin tables are written as markdown tables>
 //
@@ -19,11 +25,17 @@
 // `##` headings without a version, and headings inside fenced code blocks
 // (``` or ~~~), are ordinary content, not scenario boundaries.
 
+/**
+ * Scenario lifecycle: draft → proposed → published, advancing one way.
+ * draft never appears in feature files — it is stored only in the Automerge
+ * document; the other two are written as `[...]` chips on the heading.
+ */
+export type ScenarioStatus = "published" | "proposed" | "draft";
+
 export interface Scenario {
   name: string;
   version: number;
-  published: boolean;
-  proposed: boolean;
+  status: ScenarioStatus;
   body: string;
   /** GitHub urls of the automated tests covering this scenario
       (specs/traceability.spec.md). */
@@ -115,12 +127,10 @@ const LEGACY_PLAIN_SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|pr
 const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|proposed|saved)`)?\s*$/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 
-type Status = "published" | "proposed" | null;
-
 interface HeadingMatch {
   name: string;
   version: number;
-  status: Status;
+  status: ScenarioStatus;
 }
 
 /**
@@ -144,7 +154,7 @@ function matchScenario(line: string): HeadingMatch | null {
         ? "published"
         : m[3] === "proposed" || m[3] === "saved"
           ? "proposed"
-          : null,
+          : "draft",
   };
 }
 
@@ -210,8 +220,7 @@ export function parseFeature(text: string): Feature {
         current = {
           name: scenarioMatch.name,
           version: scenarioMatch.version,
-          published: scenarioMatch.status === "published",
-          proposed: scenarioMatch.status === "proposed",
+          status: scenarioMatch.status,
           body: "",
           tests: [],
         };
@@ -226,8 +235,8 @@ export function parseFeature(text: string): Feature {
   return { name, description: preamble.join("\n").trim(), scenarios: sortScenarios(scenarios) };
 }
 
-function header(name: string, version: number, status: Status): string {
-  const chip = status ? ` [${status}]` : "";
+function header(name: string, version: number, status: ScenarioStatus): string {
+  const chip = status === "draft" ? "" : ` [${status}]`;
   return `## ${name} @v${version}${chip}`;
 }
 
@@ -235,8 +244,7 @@ export function serializeFeature(feature: Feature): string {
   const parts = [`# ${feature.name}`];
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
-    const h = header(s.name, s.version, s.published ? "published" : s.proposed ? "proposed" : null);
-    const chunks = [h];
+    const chunks = [header(s.name, s.version, s.status)];
     if (s.body) chunks.push(s.body);
     if (s.tests.length > 0) chunks.push(testsTable(s.tests));
     parts.push(chunks.join("\n\n"));
@@ -308,7 +316,7 @@ export function renameFeatureName(text: string, name: string): string {
  * are left alone. Legacy headings are normalized to the `@vN` and bracket
  * syntax, and old [saved] chips to [proposed].
  */
-function rewriteHeaders(text: string, next: (m: HeadingMatch) => Status): string {
+function rewriteHeaders(text: string, next: (m: HeadingMatch) => ScenarioStatus): string {
   let inFence = false;
   return text
     .split("\n")
@@ -350,5 +358,5 @@ export function markScenarioPublished(text: string, name: string, version: numbe
  * pushed to GitHub"). [published] and [proposed] headings are untouched.
  */
 export function markProposed(text: string): string {
-  return rewriteHeaders(text, (m) => m.status ?? "proposed");
+  return rewriteHeaders(text, (m) => (m.status === "draft" ? "proposed" : m.status));
 }

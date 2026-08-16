@@ -24,8 +24,7 @@ function newEntry(s: Scenario): ScenarioEntry {
     id: randomUUID(),
     name: s.name,
     version: s.version,
-    published: s.published,
-    proposed: s.proposed,
+    status: s.status,
     body: s.body,
     tests: [...s.tests],
   };
@@ -43,7 +42,7 @@ const sameScenario = (e: { name: string; version: number }, s: Scenario) =>
  */
 function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
   for (const entry of doc.scenarios) {
-    if (!entry.published) continue;
+    if (entry.status !== "published") continue;
     const match = target.scenarios.find((s) => sameScenario(entry, s));
     if (!match || match.body !== entry.body) {
       throw new Error(`Scenario "${entry.name}" @v${entry.version} is published and immutable`);
@@ -52,12 +51,17 @@ function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
 }
 
 /**
- * Mutate the doc so its projection equals `serializeFeature` of the target.
+ * Mutate the doc so its projection equals the projection of the target.
  * Scenarios are matched by (name, version) — the projection's identity — with
  * a second pass that treats an unmatched pair with identical bodies as a
  * rename, keeping the entry's id and its body's edit history. The match plan
  * is computed from plain copies up front, then applied by index inside one
  * change: updates first, removals in descending order, additions last.
+ *
+ * A draft entry the target doesn't claim is kept, not removed: drafts are
+ * doc-only, so a markdown-derived target cannot see them — and what markdown
+ * cannot see it must not delete. A target scenario that does claim one (same
+ * name and version, or same body) promotes or renames it in place.
  *
  * `force` skips the published-immutability gate — only for an explicit human
  * decision (the conflict-resolution dialog), never for an automated write.
@@ -72,8 +76,7 @@ export function reconcile(
   const entries: Scenario[] = doc.scenarios.map((e) => ({
     name: e.name,
     version: e.version,
-    published: e.published,
-    proposed: e.proposed,
+    status: e.status,
     body: e.body,
     tests: [...e.tests],
   }));
@@ -104,15 +107,14 @@ export function reconcile(
       const live = d.scenarios[i]!;
       if (entry.name !== match.name) A.updateText(d, ["scenarios", i, "name"], match.name);
       if (entry.version !== match.version) live.version = match.version;
-      if (entry.published !== match.published) live.published = match.published;
-      if (entry.proposed !== match.proposed) live.proposed = match.proposed;
+      if (entry.status !== match.status) live.status = match.status;
       if (entry.body !== match.body) A.updateText(d, ["scenarios", i, "body"], match.body);
       if (entry.tests.join("\n") !== match.tests.join("\n")) {
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
     }
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (!matchAt.has(i)) A.deleteAt(d.scenarios, i);
+      if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.scenarios, i);
     }
     for (const s of additions) d.scenarios.push(newEntry(s));
   });

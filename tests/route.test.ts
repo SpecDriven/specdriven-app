@@ -11,8 +11,7 @@ import type { Scenario } from "../src/server/parser";
 const sc = (name: string, version: number): Scenario => ({
   name,
   version,
-  published: false,
-  proposed: false,
+  status: "draft",
   body: "",
   tests: [],
 });
