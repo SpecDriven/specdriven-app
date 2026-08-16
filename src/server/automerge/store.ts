@@ -21,7 +21,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTextFile } from "../fsx";
+import { getLogger, withSpan } from "../telemetry";
 import { SCHEMA_VERSION, type FeatureDoc } from "./schema";
+
+const log = getLogger("automerge");
 
 /** Change files tolerated before the next save folds them into a snapshot. */
 const COMPACT_AT = 12;
@@ -118,6 +121,15 @@ export async function loadFeatureDoc(
   }
   if (doc === null) return null;
 
+  if (skippedChunks.length > 0) {
+    // Skipping is deliberately non-fatal, but it must not be invisible: a
+    // chunk that never loads anywhere means edits living only in that chunk
+    // are not reaching this peer.
+    log.warn(`skipped ${skippedChunks.length} unreadable chunk(s) for ${fileName}`, {
+      "specdriven.file": fileName,
+      "automerge.skipped_chunks": skippedChunks.join(","),
+    });
+  }
   const docId = (await readTextFile(join(dir, "docid")))?.trim() ?? doc.id;
   return { doc, heads: A.getHeads(doc), docId, skippedChunks };
 }
@@ -131,14 +143,18 @@ export async function createFeatureDoc(
   fileName: string,
   doc: A.Doc<FeatureDoc>,
 ): Promise<LoadedDoc> {
-  const dir = docDir(dataDir, fileName);
-  await mkdir(dir, { recursive: true });
-  const bytes = A.save(doc);
-  await writeFile(join(dir, `snapshot-${contentHash(bytes)}.bin`), bytes);
-  const docId = doc.id;
-  await writeFile(join(dir, "docid"), `${docId}\n`);
-  emitDocSaved(dataDir, fileName);
-  return { doc, heads: A.getHeads(doc), docId, skippedChunks: [] };
+  return withSpan("automerge.create_doc", { "specdriven.file": fileName }, async (span) => {
+    const dir = docDir(dataDir, fileName);
+    await mkdir(dir, { recursive: true });
+    const bytes = A.save(doc);
+    await writeFile(join(dir, `snapshot-${contentHash(bytes)}.bin`), bytes);
+    const docId = doc.id;
+    await writeFile(join(dir, "docid"), `${docId}\n`);
+    span.setAttributes({ "automerge.doc_id": docId, "automerge.snapshot_bytes": bytes.length });
+    log.debug(`created document for ${fileName}`, { "automerge.doc_id": docId });
+    emitDocSaved(dataDir, fileName);
+    return { doc, heads: A.getHeads(doc), docId, skippedChunks: [] };
+  });
 }
 
 /**
@@ -155,10 +171,19 @@ export async function saveFeatureDoc(
   const dir = docDir(dataDir, fileName);
   const delta = A.saveSince(doc, sinceHeads);
   if (delta.length === 0) return;
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, `changes-${contentHash(delta)}.bin`), delta);
-  await compactFeatureDoc(dataDir, fileName);
-  emitDocSaved(dataDir, fileName);
+  await withSpan(
+    "automerge.save_doc",
+    { "specdriven.file": fileName, "automerge.delta_bytes": delta.length },
+    async () => {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, `changes-${contentHash(delta)}.bin`), delta);
+      log.debug(`saved incremental chunk for ${fileName}`, {
+        "automerge.delta_bytes": delta.length,
+      });
+      await compactFeatureDoc(dataDir, fileName);
+      emitDocSaved(dataDir, fileName);
+    },
+  );
 }
 
 /**
@@ -171,21 +196,31 @@ export async function compactFeatureDoc(dataDir: string, fileName: string): Prom
   const dir = docDir(dataDir, fileName);
   const { snapshots, changes } = await chunkFiles(dir);
   if (changes.length < COMPACT_AT) return;
-  const loaded = await loadFeatureDoc(dataDir, fileName);
-  if (loaded === null) return;
-  const bytes = A.save(loaded.doc);
-  const name = `snapshot-${contentHash(bytes)}.bin`;
-  await writeFile(join(dir, name), bytes);
-  const applied = new Set(loaded.skippedChunks);
-  for (const file of [...snapshots, ...changes]) {
-    // Only chunks that actually loaded are covered by the new snapshot.
-    if (file !== name && !applied.has(file)) await rm(join(dir, file), { force: true });
-  }
+  await withSpan(
+    "automerge.compact_doc",
+    { "specdriven.file": fileName, "automerge.change_chunks": changes.length },
+    async () => {
+      const loaded = await loadFeatureDoc(dataDir, fileName);
+      if (loaded === null) return;
+      const bytes = A.save(loaded.doc);
+      const name = `snapshot-${contentHash(bytes)}.bin`;
+      await writeFile(join(dir, name), bytes);
+      const applied = new Set(loaded.skippedChunks);
+      for (const file of [...snapshots, ...changes]) {
+        // Only chunks that actually loaded are covered by the new snapshot.
+        if (file !== name && !applied.has(file)) await rm(join(dir, file), { force: true });
+      }
+      log.debug(`compacted ${changes.length} change chunk(s) into a snapshot for ${fileName}`, {
+        "automerge.snapshot_bytes": bytes.length,
+      });
+    },
+  );
 }
 
 /** Remove a feature's document directory (feature deleted). */
 export async function removeFeatureDoc(dataDir: string, fileName: string): Promise<void> {
   await rm(docDir(dataDir, fileName), { recursive: true, force: true });
+  log.debug(`removed document for ${fileName}`);
 }
 
 /**

@@ -37,7 +37,10 @@ import {
   removeFeatureDoc,
   saveFeatureDoc,
 } from "./store";
+import { errorAttributes, getLogger, withSpan } from "../telemetry";
 import { walk } from "../walk";
+
+const log = getLogger("sync");
 
 const DOC_DIR_PREFIX = ".specdriven/automerge/features/";
 
@@ -60,18 +63,33 @@ export async function autoResolveMergeConflicts(
   dataDir: string,
   conflicted: string[],
 ): Promise<AutoResolveResult> {
-  const conflictedSet = new Set(conflicted);
-  const resolved: string[] = [];
-  const remaining = new Map<string, string>();
-  for (const path of conflicted) {
-    const why = await autoResolveOne(dataDir, path, conflictedSet);
-    if (why === null) resolved.push(path);
-    else remaining.set(path, why);
-  }
-  const parts = [];
-  if (resolved.length > 0) parts.push(`auto-merged ${resolved.length} conflicted file(s)`);
-  for (const [path, why] of remaining) parts.push(`${path}: ${why}`);
-  return { resolved, remaining, message: parts.join("; ") };
+  return withSpan(
+    "sync.auto_resolve_conflicts",
+    { "specdriven.dir": dataDir, "sync.conflicted_files": conflicted.length },
+    async (span) => {
+      const conflictedSet = new Set(conflicted);
+      const resolved: string[] = [];
+      const remaining = new Map<string, string>();
+      for (const path of conflicted) {
+        const why = await autoResolveOne(dataDir, path, conflictedSet);
+        if (why === null) {
+          resolved.push(path);
+          log.info(`auto-merged conflicted ${path}`);
+        } else {
+          remaining.set(path, why);
+          log.warn(`conflict on ${path} left for manual resolution`, { "sync.reason": why });
+        }
+      }
+      span.setAttributes({
+        "sync.resolved_files": resolved.length,
+        "sync.remaining_files": remaining.size,
+      });
+      const parts = [];
+      if (resolved.length > 0) parts.push(`auto-merged ${resolved.length} conflicted file(s)`);
+      for (const [path, why] of remaining) parts.push(`${path}: ${why}`);
+      return { resolved, remaining, message: parts.join("; ") };
+    },
+  );
 }
 
 /** True when the other side of the merge added chunk files for this feature. */
@@ -161,51 +179,63 @@ async function autoResolveOne(
  * caller checks — since conflict markers must not be absorbed as content.
  */
 export async function importDrift(dataDir: string): Promise<string> {
-  const files = (await walk(dataDir)).files;
-  let imported = 0;
-  let absorbed = 0;
-  let repaired = 0;
-  for (const fileName of files) {
-    const text = await readTextFile(`${dataDir}/${fileName}`);
-    // Unreadable or malformed markdown never reaches the document.
-    if (text === null || featureTextError(text) !== null) continue;
-    const loaded = await loadFeatureDoc(dataDir, fileName);
-    if (loaded === null) {
-      const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(parseFeature(text)));
-      const projection = projectFeature(created.doc);
-      if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
-      imported++;
-      continue;
+  return withSpan("sync.import_drift", { "specdriven.dir": dataDir }, async (span) => {
+    const files = (await walk(dataDir)).files;
+    let imported = 0;
+    let absorbed = 0;
+    let repaired = 0;
+    for (const fileName of files) {
+      const text = await readTextFile(`${dataDir}/${fileName}`);
+      // Unreadable or malformed markdown never reaches the document.
+      if (text === null || featureTextError(text) !== null) continue;
+      const loaded = await loadFeatureDoc(dataDir, fileName);
+      if (loaded === null) {
+        const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(parseFeature(text)));
+        const projection = projectFeature(created.doc);
+        if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
+        imported++;
+        log.debug(`imported ${fileName} into a document`);
+        continue;
+      }
+      const projection = projectFeature(loaded.doc);
+      if (text === projection) continue;
+      try {
+        const next = reconcile(loaded.doc, parseFeature(text));
+        await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(next));
+        absorbed++;
+        log.debug(`absorbed drifted ${fileName} into its document`);
+      } catch (e) {
+        // The drifted markdown tampered with a published scenario: the document
+        // wins, and the file is repaired to its projection.
+        await writeTextFile(`${dataDir}/${fileName}`, projection);
+        repaired++;
+        log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(e));
+      }
     }
-    const projection = projectFeature(loaded.doc);
-    if (text === projection) continue;
-    try {
-      const next = reconcile(loaded.doc, parseFeature(text));
-      await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
-      await writeTextFile(`${dataDir}/${fileName}`, projectFeature(next));
-      absorbed++;
-    } catch {
-      // The drifted markdown tampered with a published scenario: the document
-      // wins, and the file is repaired to its projection.
-      await writeTextFile(`${dataDir}/${fileName}`, projection);
-      repaired++;
+    // A document whose markdown is gone was deleted externally: the markdown
+    // is the interchange format, so the deletion stands.
+    let removed = 0;
+    for (const fileName of await listFeatureDocs(dataDir)) {
+      if (!(await fileExists(`${dataDir}/${fileName}`))) {
+        await removeFeatureDoc(dataDir, fileName);
+        removed++;
+        log.debug(`dropped document for deleted ${fileName}`);
+      }
     }
-  }
-  // A document whose markdown is gone was deleted externally: the markdown
-  // is the interchange format, so the deletion stands.
-  let removed = 0;
-  for (const fileName of await listFeatureDocs(dataDir)) {
-    if (!(await fileExists(`${dataDir}/${fileName}`))) {
-      await removeFeatureDoc(dataDir, fileName);
-      removed++;
-    }
-  }
-  const parts = [];
-  if (imported > 0) parts.push(`imported ${imported} feature(s) into documents`);
-  if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited file(s)`);
-  if (repaired > 0) parts.push(`repaired ${repaired} file(s) from their documents`);
-  if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
-  return parts.join("; ");
+    span.setAttributes({
+      "sync.imported": imported,
+      "sync.absorbed": absorbed,
+      "sync.repaired": repaired,
+      "sync.removed": removed,
+    });
+    const parts = [];
+    if (imported > 0) parts.push(`imported ${imported} feature(s) into documents`);
+    if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited file(s)`);
+    if (repaired > 0) parts.push(`repaired ${repaired} file(s) from their documents`);
+    if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
+    return parts.join("; ");
+  });
 }
 
 /** True while a merge with unresolved conflicts is in progress. */

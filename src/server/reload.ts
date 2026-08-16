@@ -13,6 +13,7 @@ import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./autom
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { readState, needsDataRepo } from "./state";
+import { getLogger, withSpan } from "./telemetry";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
 
@@ -23,32 +24,50 @@ export function normalizeReloadSeconds(value: unknown): number {
   return Math.floor(n);
 }
 
+const log = getLogger("reload");
+
 /**
  * One tick of the cron job: git pull the configured data repo, then commit
  * and push any locally saved scenarios.
  */
 export async function reloadData(rootDir: string): Promise<string> {
   const state = await readState(rootDir);
-  if (needsDataRepo(state)) return "data repo not configured; skipped reload";
+  if (needsDataRepo(state)) {
+    log.debug("data repo not configured; skipped reload");
+    return "data repo not configured; skipped reload";
+  }
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
   return syncDataDir(dir);
 }
 
 /** The tick itself, on an already-resolved data dir (shared with tests). */
 export async function syncDataDir(dir: string): Promise<string> {
-  const pulled = await pull(dir);
-  const parts = [pulled.message];
-  if (!pulled.ok && pulled.conflictedFiles.length > 0) {
-    parts.push((await autoResolveMergeConflicts(dir, pulled.conflictedFiles)).message);
-  }
-  // Drift must not be read while conflict markers may sit in the files.
-  if (!(await mergeInProgress(dir))) {
-    const drifted = await importDrift(dir);
-    if (drifted) parts.push(drifted);
-  }
-  const synced = await syncSavedChanges(dir);
-  parts.push(synced.message);
-  return parts.filter(Boolean).join("; ");
+  return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
+    const pulled = await pull(dir);
+    if (!pulled.ok) {
+      log.warn(`pull needs attention: ${pulled.message}`, {
+        "git.pull.conflicted_files": pulled.conflictedFiles.length,
+      });
+    }
+    const parts = [pulled.message];
+    if (!pulled.ok && pulled.conflictedFiles.length > 0) {
+      parts.push((await autoResolveMergeConflicts(dir, pulled.conflictedFiles)).message);
+    }
+    // Drift must not be read while conflict markers may sit in the files.
+    const merging = await mergeInProgress(dir);
+    if (!merging) {
+      const drifted = await importDrift(dir);
+      if (drifted) parts.push(drifted);
+    }
+    const synced = await syncSavedChanges(dir);
+    parts.push(synced.message);
+    span.setAttributes({
+      "sync.pull.ok": pulled.ok,
+      "sync.merge_in_progress": merging,
+      "sync.pushed": synced.pushed,
+    });
+    return parts.filter(Boolean).join("; ");
+  });
 }
 
 export interface ReloadScheduler {
