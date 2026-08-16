@@ -12,6 +12,7 @@ import {
   saveFeatureDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
+import { withSpan } from "./telemetry";
 import {
   pull,
   theirsVersion,
@@ -456,15 +457,18 @@ async function absorbIntoDoc(
   text: string,
   { force = false } = {},
 ): Promise<string> {
-  const feature = parseFeature(text);
-  const loaded = await loadFeatureDoc(dataDir, fileName);
-  if (loaded === null) {
-    const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
-    return projectFeature(created.doc);
-  }
-  const next = reconcile(loaded.doc, feature, { force });
-  await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
-  return projectFeature(next);
+  return withSpan("automerge.absorb_edit", { "specdriven.file": fileName }, async (span) => {
+    const feature = parseFeature(text);
+    const loaded = await loadFeatureDoc(dataDir, fileName);
+    if (loaded === null) {
+      span.setAttribute("automerge.imported", true);
+      const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
+      return projectFeature(created.doc);
+    }
+    const next = reconcile(loaded.doc, feature, { force });
+    await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
+    return projectFeature(next);
+  });
 }
 
 /**

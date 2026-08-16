@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { applyStartupState, handleApi } from "../server/api";
 import { setFolderChooser } from "../server/folderChooser";
+import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
@@ -28,6 +29,19 @@ app.setName("SpecDriven");
 const userData = app.getPath("userData");
 process.env.SPECDRIVEN_ROOT = userData;
 process.env.SPECDRIVEN_REPOS_DIR ||= join(userData, "repos");
+
+// OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
+// be up before the first sync or app:// API call so nothing escapes the
+// pipeline. Quitting waits once for the final flush; with telemetry off both
+// calls are no-ops and quit is untouched.
+initTelemetry();
+let telemetryFlushed = false;
+app.on("will-quit", (event) => {
+  if (telemetryFlushed || !telemetryActive()) return;
+  telemetryFlushed = true;
+  event.preventDefault();
+  void shutdownTelemetry().finally(() => app.quit());
+});
 
 // A packaged macOS app launches with a minimal PATH; append the usual
 // Homebrew locations so git and gh can be found there — every git operation
