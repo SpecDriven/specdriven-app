@@ -49,7 +49,7 @@ test("createFeature writes a new .feature.md file and lists it", async () => {
   const fileName = await createFeature(root, "Quote Policy");
   expect(fileName).toBe("quote-policy.feature.md");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "quote-policy.feature.md", name: "Quote Policy" },
+    { fileName: "quote-policy.feature.md", name: "Quote Policy", scenarios: [] },
   ]);
   expect(await readFeature(root, fileName)).toBe("# Quote Policy\n");
 });
@@ -61,8 +61,28 @@ test("listFeatures returns display names, falling back to the stem", async () =>
   await Bun.write(join(root, "quote-policy.feature.md"), "# Quote & Policy!\n");
   await Bun.write(join(root, "no-heading.feature.md"), "just text\n");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "no-heading.feature.md", name: "No Heading" },
-    { fileName: "quote-policy.feature.md", name: "Quote & Policy!" },
+    { fileName: "no-heading.feature.md", name: "No Heading", scenarios: [] },
+    { fileName: "quote-policy.feature.md", name: "Quote & Policy!", scenarios: [] },
+  ]);
+});
+
+// Scenario-level code gen selection (specs/agents/claude.spec.md): the
+// listing carries each file's scenario names and versions, so the sidebar
+// can offer them for selection.
+test("listFeatures carries each file's scenario names and versions", async () => {
+  await Bun.write(
+    join(root, "quotes.feature.md"),
+    "# Quotes\n\n## Basic @v1 [published]\n\nbody\n\n## Renewal @v2\n\nbody\n",
+  );
+  expect(await listFeatures(root)).toEqual([
+    {
+      fileName: "quotes.feature.md",
+      name: "Quotes",
+      scenarios: [
+        { name: "Basic", version: 1 },
+        { name: "Renewal", version: 2 },
+      ],
+    },
   ]);
 });
 
@@ -84,7 +104,7 @@ test("renameFeature works in a plain directory (no git repo)", async () => {
   expect(result.name).toBe("Policy");
   expect(await readFeature(root, "quote.feature.md")).toBe("# Policy\n");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "quote.feature.md", name: "Policy" },
+    { fileName: "quote.feature.md", name: "Policy", scenarios: [] },
   ]);
 });
 

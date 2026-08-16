@@ -43,6 +43,13 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/images/shot-1a2b3c4d.png")).toBeNull();
   });
 
+  // Code gen session (specs/agents/claude.spec.md): the client posts the
+  // session name and the selected specs.
+  test("agent session route matches POST only", () => {
+    expect(matchApi("POST", "/api/agent/session")).not.toBeNull();
+    expect(matchApi("GET", "/api/agent/session")).toBeNull();
+  });
+
   test("unknown paths do not match", () => {
     expect(matchApi("GET", "/api/nope")).toBeNull();
     expect(matchApi("GET", "/features/quote.feature.md")).toBeNull();

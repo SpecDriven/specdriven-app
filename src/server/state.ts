@@ -25,6 +25,10 @@ export interface SpecDrivenState {
   /** Show the test-links table on scenario cards
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;
+  /** Offer code gen sessions (specs/agents/claude.spec.md); absent means ON.
+      Off hides the selection checkboxes and refuses the session endpoint, so
+      nothing in the app can hand a spec to the Claude CLI. */
+  codeGen?: boolean;
   /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
@@ -101,6 +105,12 @@ export function normalizeScenarioPreviewLines(value: unknown): number {
 /** Effective test-links display setting: ON unless explicitly turned off
     (specs/traceability.spec.md "default is ON"). */
 export function normalizeShowTestLinks(value: unknown): boolean {
+  return value !== false;
+}
+
+/** Effective code gen setting: ON unless explicitly turned off
+    (specs/agents/claude.spec.md). */
+export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
 }
 
