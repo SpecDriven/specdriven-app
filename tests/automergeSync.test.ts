@@ -126,6 +126,25 @@ test("external drift is absorbed into the doc on a clean pull", async () => {
   expect(projectFeature(doc)).toBe((await readFeature(a, "seed.feature.md"))!);
 });
 
+// A hand edit may add a chipless heading; it parses as a draft, and drafts
+// are doc-only — the scenario is absorbed into the document while the
+// projection rewrites the file without it.
+test("a chipless hand-added scenario is absorbed as a doc-only draft", async () => {
+  const { a, b } = await seededClones();
+
+  await Bun.write(join(b, "seed.feature.md"), SEED + "\n## Sketch @v1\n\nan idea\n");
+  await git(b, "add", "seed.feature.md");
+  await git(b, "commit", "-m", "hand-added draft");
+  await git(b, "push");
+
+  await syncDataDir(a);
+  const doc = (await loadFeatureDoc(a, "seed.feature.md"))!.doc;
+  expect(doc.scenarios.find((s) => s.name === "Sketch")?.status).toBe("draft");
+  const md = await readFeature(a, "seed.feature.md");
+  expect(md).not.toContain("Sketch");
+  expect(projectFeature(doc)).toBe(md!);
+});
+
 test("drift that tampers with a published scenario is repaired from the doc", async () => {
   const { a, b } = await seededClones();
   await publishFeature(a, "seed.feature.md", (await readFeature(a, "seed.feature.md"))!);

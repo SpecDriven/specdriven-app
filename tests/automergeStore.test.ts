@@ -38,8 +38,7 @@ function sampleDoc() {
         id: crypto.randomUUID(),
         name: "Basic Quote",
         version: 1,
-        published: false,
-        proposed: true,
+        status: "proposed",
         body: "- **Given** an account\n- **Then** a quote",
         tests: [],
       },
@@ -166,4 +165,56 @@ test("removeFeatureDoc deletes the directory", async () => {
   await createFeatureDoc(root, FILE, sampleDoc());
   await removeFeatureDoc(root, FILE);
   expect(await loadFeatureDoc(root, FILE)).toBeNull();
+});
+
+// A schema v1 document — statuses as `published`/`proposed` booleans —
+// migrates on load: `status` appears, the booleans go, the version bumps.
+// loadFeatureDoc returns pre-migration heads, so the next save persists the
+// migration ops and a reload needs no second migration.
+test("a v1 document's booleans migrate to the status field on load", async () => {
+  type V1Entry = {
+    id: string;
+    name: string;
+    version: number;
+    published: boolean;
+    proposed: boolean;
+    body: string;
+    tests: string[];
+  };
+  type V1Doc = {
+    schemaVersion: number;
+    id: string;
+    name: string;
+    description: string;
+    scenarios: V1Entry[];
+  };
+  const v1 = A.from<V1Doc>({
+    schemaVersion: 1,
+    id: crypto.randomUUID(),
+    name: "Quote Policy",
+    description: "",
+    scenarios: [
+      { id: crypto.randomUUID(), name: "Done", version: 1, published: true, proposed: false, body: "done", tests: [] },
+      { id: crypto.randomUUID(), name: "Pending", version: 1, published: false, proposed: true, body: "pending", tests: [] },
+      { id: crypto.randomUUID(), name: "Idea", version: 1, published: false, proposed: false, body: "idea", tests: [] },
+    ],
+  });
+  await createFeatureDoc(root, FILE, v1 as unknown as Parameters<typeof createFeatureDoc>[2]);
+
+  const loaded = (await loadFeatureDoc(root, FILE))!;
+  expect(loaded.doc.schemaVersion).toBe(2);
+  const plain = A.toJS(loaded.doc);
+  expect(
+    Object.fromEntries(plain.scenarios.map((s) => [s.name, s.status])),
+  ).toEqual({ Done: "published", Pending: "proposed", Idea: "draft" });
+  for (const s of plain.scenarios) {
+    expect(Object.keys(s)).not.toContain("published");
+    expect(Object.keys(s)).not.toContain("proposed");
+  }
+
+  await saveFeatureDoc(root, FILE, loaded.doc, loaded.heads);
+  const reloaded = (await loadFeatureDoc(root, FILE))!;
+  expect(reloaded.doc.schemaVersion).toBe(2);
+  expect(reloaded.heads).toEqual(A.getHeads(reloaded.doc));
+  expect(A.getHeads(reloaded.doc)).toEqual(A.getHeads(loaded.doc));
 });

@@ -1281,7 +1281,7 @@ export function App() {
       // A published scenario's dialog can only have changed its test links
       // (specs/traceability.spec.md) — there is nothing left to publish.
       setStatus(
-        s.published
+        s.status === "published"
           ? `Saved the test links of "${s.name}" v${s.version}.`
           : "Saved — publish scenarios from their cards, or press Publish All.",
       );
@@ -1603,7 +1603,7 @@ export function App() {
     setEditing({
       index: null,
       // index null marks it as new, so the version is derived on save.
-      scenario: { ...src, version: nextVersionFor(src.name), published: false, proposed: false },
+      scenario: { ...src, version: nextVersionFor(src.name), status: "draft" },
     });
   };
 
@@ -1845,16 +1845,13 @@ export function App() {
     );
   }
 
-  const editingPublished = editing?.scenario.published ?? false;
+  const editingPublished = editing?.scenario.status === "published";
   // Delete applies to [proposed] scenarios only (specs/ui.spec.md "Scenario
   // edit dialog") — not to published ones (immutable), and not to a new
   // draft that isn't part of the feature yet (index === null).
   const editingProposed =
-    editing !== null &&
-    editing.index !== null &&
-    editing.scenario.proposed &&
-    !editing.scenario.published;
-  const hasProposed = feature?.scenarios.some((s) => s.proposed && !s.published) ?? false;
+    editing !== null && editing.index !== null && editing.scenario.status === "proposed";
+  const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
   return (
     <main
@@ -2190,7 +2187,7 @@ export function App() {
                   ref={(el) => {
                     scenarioRefs.current[i] = el;
                   }}
-                  className={`scenario-card${s.published ? " published" : ""}${
+                  className={`scenario-card${s.status === "published" ? " published" : ""}${
                     i === selectedScenario ? " selected" : ""
                   }`}
                 >
@@ -2221,8 +2218,8 @@ export function App() {
                         {s.name}
                       </a>{" "}
                       <span className="version">v{s.version}</span>
-                      {s.published && <span className="badge">published</span>}
-                      {!s.published && s.proposed && (
+                      {s.status === "published" && <span className="badge">published</span>}
+                      {s.status === "proposed" && (
                         <span className="badge proposed">proposed</span>
                       )}
                     </span>
@@ -2237,9 +2234,9 @@ export function App() {
                         className="link"
                         onClick={() => setEditing({ index: i, scenario: { ...s } })}
                       >
-                        {!s.published || showTestLinks ? "Edit" : "View"}
+                        {s.status !== "published" || showTestLinks ? "Edit" : "View"}
                       </button>
-                      {!s.published && (
+                      {s.status !== "published" && (
                         <button
                           className="link"
                           disabled={publishing !== null}
@@ -2248,7 +2245,7 @@ export function App() {
                           {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
                         </button>
                       )}
-                      {s.published && (
+                      {s.status === "published" && (
                         <button className="link" onClick={() => newVersion(i)}>
                           New version
                         </button>
@@ -2281,8 +2278,7 @@ export function App() {
                     scenario: {
                       name: "",
                       version: 1,
-                      published: false,
-                      proposed: false,
+                      status: "draft",
                       body: "",
                       tests: [],
                     },
