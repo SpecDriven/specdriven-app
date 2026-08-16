@@ -38,7 +38,7 @@ import { getAppRoot } from "./paths";
 import {
   listFeatures,
   listFolders,
-  readFeature,
+  readFeatureForEditor,
   createFeature,
   createFolder,
   deleteFolder,
@@ -452,9 +452,11 @@ const postFeatures = withDataDir(async (dir, req) => {
 const getFeature = withDataDir(async (dir, _req, params) => {
   // A name readFeature refuses — a legacy `<slug>.feature` still held by
   // an open tab, or a traversal attempt — is "not found", not a 500.
+  // The editor view: file content plus the document's draft scenarios,
+  // which are never in the file (specs/automerge-store.spec.md).
   let content: string | null;
   try {
-    content = await readFeature(dir, params.file!);
+    content = await readFeatureForEditor(dir, params.file!);
   } catch {
     return json({ error: "not found" }, 404);
   }
@@ -651,9 +653,11 @@ const postAgentSession = withDataDir(async (dir, req) => {
   }
   const specs: SpecInput[] = [];
   for (const { fileName, scenarios } of files) {
+    // The editor view, so a draft scenario the user picked in the UI is
+    // there for extractScenarios to find.
     let content: string | null;
     try {
-      content = await readFeature(dir, fileName);
+      content = await readFeatureForEditor(dir, fileName);
     } catch {
       content = null;
     }
