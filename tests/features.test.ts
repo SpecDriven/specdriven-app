@@ -9,6 +9,7 @@ import {
   listFeatures,
   moveFeature,
   readFeature,
+  readFeatureForEditor,
   renameFeature,
   renameFeatureFile,
   saveFeature,
@@ -222,6 +223,65 @@ test("publishFeature with a scenario target publishes only that scenario", async
   const text = await readFeature(root, "quote.feature.md");
   expect(text).toContain("## Basic @v1 [published]");
   expect(text).toContain("## Extra @v1 [proposed]");
+});
+
+// specs/crud-feature.spec.md "Scenario status": a scenario saved with an
+// explicit [draft] chip lands in the Automerge document but never in the
+// .feature.md — and the save result / editor read still hand it back, so the
+// client keeps showing it.
+test("saveFeature keeps a [draft] scenario out of the file but not out of the editor", async () => {
+  await createFeature(root, "Quote");
+  const result = await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
+  );
+  const text = await readFeature(root, "quote.feature.md");
+  expect(text).toContain("## Basic @v1 [proposed]");
+  expect(text).not.toContain("Idea");
+  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  expect(loaded!.doc.scenarios.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
+  expect(result.content).toContain("## Idea @v1 [draft]");
+  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+});
+
+// Publish All leaves drafts alone: they stay drafts, out of the file.
+test("publishFeature leaves drafts unpublished and out of the file", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
+  );
+  const result = await publishFeature(
+    root,
+    "quote.feature.md",
+    (await readFeatureForEditor(root, "quote.feature.md"))!,
+  );
+  expect(result.status).toBe("published");
+  const text = await readFeature(root, "quote.feature.md");
+  expect(text).toContain("## Basic @v1 [published]");
+  expect(text).not.toContain("Idea");
+  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+});
+
+// Publishing a draft from its own card is an explicit action on that
+// scenario: it promotes into the file as [published].
+test("a draft publishes when targeted individually", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Idea @v1 [draft]\n\nwip\n",
+  );
+  const result = await publishFeature(
+    root,
+    "quote.feature.md",
+    (await readFeatureForEditor(root, "quote.feature.md"))!,
+    { name: "Idea", version: 1 },
+  );
+  expect(result.status).toBe("published");
+  expect(await readFeature(root, "quote.feature.md")).toContain("## Idea @v1 [published]");
 });
 
 // Same scenario name, different versions: only the targeted version flips.

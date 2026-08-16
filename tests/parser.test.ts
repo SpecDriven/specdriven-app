@@ -124,7 +124,7 @@ test("legacy un-prefixed versions still parse and normalize on write", () => {
   const text = serializeFeature(feature);
   expect(text).toContain("## Done @v1 [published]");
   expect(text).toContain("## Kept @v3 [proposed]");
-  expect(text).toContain("## Draft @v2\n");
+  expect(text).toContain("## Draft @v2 [draft]");
 });
 
 // Feature files written before the bracket syntax still read, and are
@@ -139,7 +139,7 @@ test("legacy backtick headings still parse and normalize on write", () => {
   const text = serializeFeature(feature);
   expect(text).toContain("## Done @v1 [published]");
   expect(text).toContain("## Kept @v3 [proposed]");
-  expect(text).toContain("## Draft @v2\n");
+  expect(text).toContain("## Draft @v2 [draft]");
   expect(text).not.toContain("`v");
 });
 
@@ -167,12 +167,20 @@ test("scenarios are ordered by name, then by version", () => {
 
 test("serialize emits the markdown format and round-trips exactly", () => {
   const feature = parseFeature(SAMPLE);
-  expect(serializeFeature(feature)).toBe(SAMPLE);
+  // Chipless headings are drafts; serializing writes the status back as an
+  // explicit [draft] chip — the editor wire format. (The on-disk projection
+  // filters drafts out before serializing, so the chip never hits a file.)
+  const chipped = SAMPLE.replace(
+    "## Basic Quote @v1",
+    "## Basic Quote @v1 [draft]",
+  ).replace("## Declined Quote @v2", "## Declined Quote @v2 [draft]");
+  expect(serializeFeature(feature)).toBe(chipped);
   expect(parseFeature(serializeFeature(feature))).toEqual(feature);
 });
 
 test("a scenario with an empty body serializes as a bare heading", () => {
-  const text = "# X\n\n## Empty @v1\n";
+  const text = "# X\n\n## Empty @v1 [draft]\n";
+  expect(serializeFeature(parseFeature("# X\n\n## Empty @v1\n"))).toBe(text);
   expect(serializeFeature(parseFeature(text))).toBe(text);
 });
 
@@ -220,13 +228,42 @@ test("markScenarioPublished flips only the named scenario version", () => {
   );
   expect(marked).toContain("## Basic @v1 [proposed]");
   expect(marked).toContain("## Basic @v2 [published]");
-  expect(marked).toContain("## Other @v1\n");
+  expect(marked).toContain("## Other @v1 [draft]");
 });
 
 test("markPublished upgrades proposed to published", () => {
   const marked = markPublished("# X\n\n## Draft @v2 [proposed]\n\nbody\n");
   expect(marked).toContain("## Draft @v2 [published]");
   expect(marked).not.toContain("[proposed]");
+});
+
+// crud-feature.spec.md "Scenario status": an explicit [draft] chip is the
+// editor asking for the scenario to stay a draft — save must not promote it,
+// and a whole-feature publish must not publish it.
+test("parses the draft chip", () => {
+  const feature = parseFeature("# X\n\n## Idea @v1 [draft]\n\nbody\n");
+  expect(feature.scenarios[0]).toMatchObject({ name: "Idea", version: 1, status: "draft" });
+});
+
+test("markProposed keeps an explicit [draft] chip while promoting chipless headings", () => {
+  const marked = markProposed("# X\n\n## Idea @v1 [draft]\n\nbody\n\n## New @v1\n\nbody\n");
+  expect(marked).toContain("## Idea @v1 [draft]");
+  expect(marked).toContain("## New @v1 [proposed]");
+});
+
+test("markPublished leaves an explicit [draft] chip alone", () => {
+  const marked = markPublished(
+    "# X\n\n## Idea @v1 [draft]\n\nbody\n\n## Ready @v1 [proposed]\n\nbody\n",
+  );
+  expect(marked).toContain("## Idea @v1 [draft]");
+  expect(marked).toContain("## Ready @v1 [published]");
+});
+
+// Publishing a draft from its own card is an explicit action on that
+// scenario, and that door stays open.
+test("markScenarioPublished publishes a targeted draft", () => {
+  const marked = markScenarioPublished("# X\n\n## Idea @v1 [draft]\n\nbody\n", "Idea", 1);
+  expect(marked).toContain("## Idea @v1 [published]");
 });
 
 test("mark helpers leave headings inside code fences alone", () => {
@@ -265,14 +302,16 @@ test("extractScenarios keeps only the picked scenarios", () => {
   const text = extractScenarios(SAMPLE, [{ name: "Declined Quote", version: 2 }]);
   expect(text).toBe(
     "# Quote Policy\n\nQuotes for potential customers.\n\n" +
-      "## Declined Quote @v2\n\n" +
+      "## Declined Quote @v2 [draft]\n\n" +
       "- **Given** the customer has no account\n- **Then** the quote is declined\n",
   );
 });
 
 test("extractScenarios distinguishes versions of the same scenario name", () => {
   const text = "# F\n\n## S @v1\n\nold\n\n## S @v2\n\nnew\n";
-  expect(extractScenarios(text, [{ name: "S", version: 2 }])).toBe("# F\n\n## S @v2\n\nnew\n");
+  expect(extractScenarios(text, [{ name: "S", version: 2 }])).toBe(
+    "# F\n\n## S @v2 [draft]\n\nnew\n",
+  );
 });
 
 test("extractScenarios throws when a pick names a missing scenario", () => {

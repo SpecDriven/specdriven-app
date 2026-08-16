@@ -6,14 +6,17 @@
 //   <optional feature description — any markdown>
 //
 //   ## <name of scenario> @vNNN              (draft, editable; NNN positive int)
+//   ## <name of scenario> @vNNN [draft]      (draft the user chose to keep)
 //   ## <name of scenario> @vNNN [proposed]   (saved, not yet published)
 //   ## <name of scenario> @vNNN [published]  (published, immutable)
 //
 // Only [published] and [proposed] scenarios belong in a `.feature.md` on
 // disk: draft is an internal status that lives in the Automerge document
-// alone (specs/automerge-store.spec.md). Chipless headings still parse (the
-// editor round-trips new scenarios that way, and hand edits may write them)
-// — they enter as drafts and the projection leaves them out of the file.
+// alone (specs/automerge-store.spec.md). The [draft] chip is a wire format
+// between the editor and the server — the projection drops draft scenarios,
+// so the chip never lands in a file. Chipless headings still parse (hand
+// edits may write them) — they enter as drafts, save promotes them to
+// [proposed], and the projection leaves whatever stays draft out of the file.
 //
 //   <scenario body — any markdown up to the next scenario heading;
 //    Gherkin tables are written as markdown tables>
@@ -120,7 +123,7 @@ function testsTable(tests: string[]): string {
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
-const SCENARIO_RE = /^##\s+(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
+const SCENARIO_RE = /^##\s+(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved|draft)\])?\s*$/;
 /** Feature files written before the `@` version prefix: ``## <name> v1 [published]``. */
 const LEGACY_PLAIN_SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
@@ -131,6 +134,12 @@ interface HeadingMatch {
   name: string;
   version: number;
   status: ScenarioStatus;
+  /**
+   * Whether the status was written as a chip. A chipless heading is a draft
+   * too, but an explicit [draft] chip is a user's choice the save path keeps,
+   * while a chipless draft is promoted to [proposed] on save.
+   */
+  explicit: boolean;
 }
 
 /**
@@ -155,6 +164,7 @@ function matchScenario(line: string): HeadingMatch | null {
         : m[3] === "proposed" || m[3] === "saved"
           ? "proposed"
           : "draft",
+    explicit: m[3] !== undefined,
   };
 }
 
@@ -236,8 +246,7 @@ export function parseFeature(text: string): Feature {
 }
 
 function header(name: string, version: number, status: ScenarioStatus): string {
-  const chip = status === "draft" ? "" : ` [${status}]`;
-  return `## ${name} @v${version}${chip}`;
+  return `## ${name} @v${version} [${status}]`;
 }
 
 export function serializeFeature(feature: Feature): string {
@@ -335,10 +344,13 @@ function rewriteHeaders(text: string, next: (m: HeadingMatch) => ScenarioStatus)
 
 /**
  * Mark every scenario heading as published: a [proposed] chip is upgraded and
- * already-[published] headings stay as they are.
+ * already-[published] headings stay as they are. An explicit [draft] chip is
+ * the user's choice to keep the scenario out of the feature file, so a
+ * whole-feature publish leaves it alone — a draft publishes only through
+ * markScenarioPublished, an explicit action on that one scenario.
  */
 export function markPublished(text: string): string {
-  return rewriteHeaders(text, () => "published");
+  return rewriteHeaders(text, (m) => (m.status === "draft" && m.explicit ? "draft" : "published"));
 }
 
 /**
@@ -355,8 +367,12 @@ export function markScenarioPublished(text: string, name: string, version: numbe
 /**
  * Mark every unmarked scenario heading with a [proposed] chip
  * (specs/crud-feature.spec.md, "Scenario is automatically saved locally and
- * pushed to GitHub"). [published] and [proposed] headings are untouched.
+ * pushed to GitHub"). [published] and [proposed] headings are untouched, and
+ * so is an explicit [draft] chip — that is the editor asking for the scenario
+ * to stay a draft, stored in the document and kept out of the file.
  */
 export function markProposed(text: string): string {
-  return rewriteHeaders(text, (m) => (m.status === "draft" ? "proposed" : m.status));
+  return rewriteHeaders(text, (m) =>
+    m.status === "draft" && !m.explicit ? "proposed" : m.status,
+  );
 }
