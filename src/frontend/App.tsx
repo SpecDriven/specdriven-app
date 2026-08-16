@@ -1283,7 +1283,9 @@ export function App() {
       setStatus(
         s.status === "published"
           ? `Saved the test links of "${s.name}" v${s.version}.`
-          : "Saved — publish scenarios from their cards, or press Publish All.",
+          : s.status === "draft"
+            ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
+            : "Saved — publish scenarios from their cards, or press Publish All.",
       );
       flashSaved();
     } else {
@@ -1603,7 +1605,7 @@ export function App() {
     setEditing({
       index: null,
       // index null marks it as new, so the version is derived on save.
-      scenario: { ...src, version: nextVersionFor(src.name), status: "draft" },
+      scenario: { ...src, version: nextVersionFor(src.name), status: "proposed" },
     });
   };
 
@@ -1851,6 +1853,15 @@ export function App() {
   // draft that isn't part of the feature yet (index === null).
   const editingProposed =
     editing !== null && editing.index !== null && editing.scenario.status === "proposed";
+  // The Draft checkbox: a draft is stored in the app (the Automerge document)
+  // but kept out of the .feature.md. The lifecycle moves one way — draft →
+  // proposed → published — so once a scenario has been saved as proposed the
+  // box locks; only a new scenario or an existing draft can toggle it.
+  const editingSavedStatus =
+    editing !== null && editing.index !== null
+      ? (feature?.scenarios[editing.index]?.status ?? null)
+      : null;
+  const draftLocked = editingSavedStatus !== null && editingSavedStatus !== "draft";
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
   return (
@@ -2222,6 +2233,7 @@ export function App() {
                       {s.status === "proposed" && (
                         <span className="badge proposed">proposed</span>
                       )}
+                      {s.status === "draft" && <span className="badge draft">draft</span>}
                     </span>
                     <span className="card-actions">
                       {/* Unpublished cards: Edit, Publish, Copy link — in that
@@ -2278,7 +2290,9 @@ export function App() {
                     scenario: {
                       name: "",
                       version: 1,
-                      status: "draft",
+                      // proposed unless the dialog's Draft checkbox says
+                      // otherwise — save then writes it to the feature file.
+                      status: "proposed",
                       body: "",
                       tests: [],
                     },
@@ -2683,6 +2697,35 @@ export function App() {
               <p className="version-field">
                 Version <span className="version">v{draftVersion}</span>
               </p>
+            )}
+            {!editingPublished && (
+              // Draft scenarios are saved into the feature's document but
+              // never written to the .feature.md. One-way lifecycle: the box
+              // locks once the scenario has been saved as proposed.
+              <label
+                className="draft-field"
+                title={
+                  draftLocked
+                    ? "A saved proposed scenario can no longer go back to draft"
+                    : "A draft is saved in the app but kept out of the .feature.md"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={editing.scenario.status === "draft"}
+                  disabled={draftLocked}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      scenario: {
+                        ...editing.scenario,
+                        status: e.target.checked ? "draft" : "proposed",
+                      },
+                    })
+                  }
+                />
+                Draft
+              </label>
             )}
             <div className="body-field">
               <span className="field-label">Body</span>

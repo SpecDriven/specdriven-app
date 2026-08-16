@@ -28,6 +28,7 @@ import {
   markProposed,
   markScenarioPublished,
   serializeFeature,
+  sortScenarios,
   renameFeatureName,
   slugify,
   titleFromFileName,
@@ -96,6 +97,50 @@ export async function listFolders(dataDir: string): Promise<string[]> {
 
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
   return readTextFile(`${dataDir}/${safe(fileName)}`);
+}
+
+/**
+ * The feature as the editor should see it: the `.feature.md` content plus the
+ * draft scenarios that live only in the Automerge document
+ * (specs/automerge-store.spec.md "draft scenarios live in the document
+ * only"), serialized with explicit [draft] chips so a later save keeps them
+ * drafts. The file stays the source for everything it holds — the document
+ * only contributes what the file cannot see.
+ */
+export async function readFeatureForEditor(
+  dataDir: string,
+  fileName: string,
+): Promise<string | null> {
+  const content = await readFeature(dataDir, fileName);
+  if (content === null) return null;
+  return withDocDrafts(dataDir, safe(fileName), content);
+}
+
+/** Fold the document's draft scenarios into a feature text for the editor. */
+async function withDocDrafts(
+  dataDir: string,
+  fileName: string,
+  content: string,
+): Promise<string> {
+  const loaded = await loadFeatureDoc(dataDir, fileName);
+  if (loaded === null) return content;
+  const feature = parseFeature(content);
+  const key = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
+  const have = new Set(feature.scenarios.map(key));
+  const drafts = loaded.doc.scenarios
+    .filter((s) => s.status === "draft" && !have.has(key(s)))
+    .map((s) => ({
+      name: s.name,
+      version: s.version,
+      status: s.status,
+      body: s.body,
+      tests: [...s.tests],
+    }));
+  if (drafts.length === 0) return content;
+  return serializeFeature({
+    ...feature,
+    scenarios: sortScenarios([...feature.scenarios, ...drafts]),
+  });
 }
 
 /**
@@ -280,7 +325,11 @@ async function docMoves(
 
 export interface SaveResult {
   status: "saved";
-  /** The content as written, with draft scenarios marked [proposed]. */
+  /**
+   * The editor's view of what was saved: the written file content — chipless
+   * scenarios marked [proposed] — plus the [draft] scenarios, which land in
+   * the Automerge document but never in the file.
+   */
   content: string;
   message: string;
 }
@@ -288,8 +337,10 @@ export interface SaveResult {
 /**
  * Scenario "Scenario is automatically saved locally and pushed to GitHub":
  * write the feature to the local filesystem right away (we don't want to lose
- * any data), marking unpublished scenarios [proposed]. The reload cron then
- * commits and pushes saved scenarios after its git pull.
+ * any data), marking unpublished scenarios [proposed]. Scenarios sent with an
+ * explicit [draft] chip stay drafts: absorbed into the Automerge document,
+ * left out of the `.feature.md`. The reload cron then commits and pushes
+ * saved scenarios after its git pull.
  */
 export async function saveFeature(
   dataDir: string,
@@ -301,7 +352,13 @@ export async function saveFeature(
   assertFeatureText(name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
   const written = await writeFeatureFile(dataDir, name, proposed);
-  return { status: "saved", content: written, message: "saved locally" };
+  // Hand the drafts back with the file content, or the client would see the
+  // scenario it just saved vanish.
+  return {
+    status: "saved",
+    content: await withDocDrafts(dataDir, name, written),
+    message: "saved locally",
+  };
 }
 
 /**

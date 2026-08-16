@@ -906,6 +906,14 @@ button {
   color: var(--text-2);
 }
 
+/* Draft marker — stored in the app only, never in the .feature.md
+   (specs/crud-feature.spec.md "Scenario status") */
+.badge.draft {
+  background: transparent;
+  color: var(--text-3);
+  border: 1px dashed var(--text-3);
+}
+
 /* Transient 'Saved' toast, shown for 2 sec after an auto-save */
 .saved-banner {
   position: fixed;
@@ -1171,6 +1179,30 @@ button.link:disabled {
   margin: 0;
   color: var(--text-2);
   font-size: 0.83rem;
+}
+
+/* Draft checkbox — a draft is saved in the app but kept out of the
+   .feature.md (specs/crud-feature.spec.md "Scenario status"). */
+.dialog .draft-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-2);
+  font-size: 0.83rem;
+  cursor: pointer;
+  user-select: none;
+  align-self: flex-start;
+}
+
+.dialog .draft-field input {
+  accent-color: var(--accent-strong);
+  margin: 0;
+}
+
+.dialog .draft-field:has(input:disabled) {
+  cursor: default;
+  color: var(--text-3);
 }
 
 .dialog .body-field {
