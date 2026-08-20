@@ -16,6 +16,12 @@ export interface SpecDrivenState {
   /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
   scenarioPreviewLines?: number;
   /**
+   * How often (seconds) the open editor saves itself
+   * (specs/editor-autosave.feature.md). At least 3 seconds; absent means the
+   * 6 second default.
+   */
+  autosaveIntervalSeconds?: number;
+  /**
    * Git engine (specs/git-operations.spec.md): "gh" authenticates through
    * the GitHub CLI, "cli" through the app's own sign-in, "js" is the
    * bundled JavaScript git; absent means the default — gh when it is
@@ -99,6 +105,20 @@ export const DEFAULT_SCENARIO_PREVIEW_LINES = 8;
 export function normalizeScenarioPreviewLines(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < 1) return DEFAULT_SCENARIO_PREVIEW_LINES;
+  return Math.floor(n);
+}
+
+// Editor autosave (specs/editor-autosave.feature.md): the interval the open
+// editor is saved at. Autosave is always on — the setting is how often, and
+// the floor keeps a save from firing between two keystrokes.
+export const DEFAULT_AUTOSAVE_SECONDS = 6;
+export const MIN_AUTOSAVE_SECONDS = 3;
+
+/** Effective autosave interval for a stored value; anything absent, unusable
+    or below the 3 second minimum falls back to the 6 second default. */
+export function normalizeAutosaveSeconds(value: unknown): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n) || n < MIN_AUTOSAVE_SECONDS) return DEFAULT_AUTOSAVE_SECONDS;
   return Math.floor(n);
 }
 
