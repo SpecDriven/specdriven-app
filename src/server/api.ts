@@ -44,6 +44,7 @@ import {
   createFeature,
   createFolder,
   deleteFolder,
+  deleteDraftScenario,
   deleteFeature,
   moveFeature,
   renameFeature,
@@ -558,6 +559,25 @@ const putFeature = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/ui.spec.md "Scenario edit dialog" (Delete on a draft): a draft lives
+// in the Automerge document only, so it is deleted from the document rather
+// than by saving the feature without it — a save cannot express the absence
+// of something the markdown never held. Proposed scenarios keep going through
+// the ordinary save. POST, not DELETE, because the target rides in a body:
+// a scenario is identified by name and version, and a name is free text.
+const postDeleteDraft = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { scenario?: { name?: string; version?: number } };
+  if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
+    return json({ error: "scenario needs a name and a version" }, 400);
+  }
+  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  try {
+    return json(await deleteDraftScenario(dir, params.file!, target));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/ui.spec.md "Feature entry menu": Delete removes the feature
 // file — a `git rm`, committed and pushed. The client confirms first.
 const deleteFeatureRoute = withDataDir(async (dir, _req, params) => {
@@ -781,6 +801,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
+  ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["POST", "/api/agent/session", postAgentSession],
 ];
 
