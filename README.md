@@ -67,7 +67,8 @@ On first start the app asks for a data repo, because no settings file names one
 yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; it
 is cloned into a sibling directory of this repo (`../data-insurance`). A plain
 relative path to an existing local clone works too. The same file also holds the
-reload interval, the scenario preview length, the git engine, and the test-links
+reload interval, the editor autosave interval, the scenario preview length, the
+git engine, and the test-links
 toggle — all editable from the Settings dialog, which also reports what the
 GitHub CLI is signed in as and holds the app's own GitHub sign-in (device flow)
 for machines without `gh`.
