@@ -73,12 +73,26 @@ describe("matchApi", () => {
     const move = matchApi("POST", "/api/features/quote.feature.md/move");
     const rename = matchApi("POST", "/api/features/quote.feature.md/rename");
     const renameFile = matchApi("POST", "/api/features/quote.feature.md/rename-file");
+    const deleteDraft = matchApi("POST", "/api/features/quote.feature.md/delete-draft");
     expect(move).not.toBeNull();
     expect(rename).not.toBeNull();
     expect(renameFile).not.toBeNull();
+    expect(deleteDraft).not.toBeNull();
     expect(move!.handler).not.toBe(rename!.handler);
     expect(rename!.handler).not.toBe(renameFile!.handler);
+    expect(deleteDraft!.handler).not.toBe(move!.handler);
     expect(move!.params).toEqual({ file: "quote.feature.md" });
+  });
+
+  // Draft deletion (specs/ui.spec.md "Scenario edit dialog"): POST, so the
+  // scenario's name and version can ride in the body.
+  test("the draft delete route matches POST only", () => {
+    expect(matchApi("POST", "/api/features/quote.feature.md/delete-draft")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/features/quote.feature.md/delete-draft")).toBeNull();
+    expect(matchApi("GET", "/api/features/quote.feature.md/delete-draft")).toBeNull();
+    expect(
+      matchApi("POST", "/api/features/billing%2Fquote.feature.md/delete-draft")!.params,
+    ).toEqual({ file: "billing/quote.feature.md" });
   });
 
   test("segment counts must match exactly", () => {
