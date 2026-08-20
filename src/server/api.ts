@@ -6,10 +6,12 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
+  MIN_AUTOSAVE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { resolveDataRepo } from "./repo";
@@ -240,6 +242,7 @@ async function stateFields(state: SpecDrivenState) {
     needsDataRepo: needsDataRepo(state),
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+    autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -269,6 +272,7 @@ const putState: Handler = async (req) => {
     dataRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
+    autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
     codeGen?: boolean;
@@ -278,6 +282,7 @@ const putState: Handler = async (req) => {
     body.dataRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
+    body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
     body.codeGen === undefined &&
@@ -286,7 +291,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
       },
       400,
     );
@@ -341,6 +346,19 @@ const putState: Handler = async (req) => {
       return json({ error: "scenarioPreviewLines must be a number >= 1" }, 400);
     }
     state.scenarioPreviewLines = Math.floor(n);
+  }
+  // Editor autosave (specs/editor-autosave.feature.md): how often the open
+  // editor saves itself. Autosave cannot be switched off here — only slowed
+  // down — and never below the 3 second floor.
+  if (body.autosaveIntervalSeconds !== undefined) {
+    const n = body.autosaveIntervalSeconds;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < MIN_AUTOSAVE_SECONDS) {
+      return json(
+        { error: `autosaveIntervalSeconds must be a number >= ${MIN_AUTOSAVE_SECONDS}` },
+        400,
+      );
+    }
+    state.autosaveIntervalSeconds = Math.floor(n);
   }
   // Test-links display (specs/traceability.spec.md): optional, default
   // ON — the default is stored as an absent key.
