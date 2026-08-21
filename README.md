@@ -192,6 +192,37 @@ or apt picks an OSS stub with missing symbols), and `toolsets.appimage` pins
 the static AppImage runtime — the legacy default builds an arm64 runtime
 linked against `libz.so`, which no ordinary desktop has.
 
+## Versioning
+
+`package.json`'s `version` is the one place the release version lives — it is
+what electron-builder names the desktop artifacts after, and what the installer
+looks for under `$BASE_URL/$VERSION`.
+
+```sh
+bun run bump patch    # 0.1.4 -> 0.1.5
+bun run bump minor    # 0.1.4 -> 0.2.0
+bun run bump major    # 0.1.4 -> 1.0.0
+bun run bump 1.2.3    # an explicit version
+```
+
+The bump rewrites that one line in `package.json`, commits it, and tags
+`v<version>`. It refuses a dirty tree — so the release commit is the bump
+alone — a tag that already exists, and a version that does not come after the
+current one, since a released version names artifacts people already have.
+`--dry-run` shows the move without making it; `--no-git` writes `package.json`
+and stops there. See [scripts/bump-version.ts](scripts/bump-version.ts).
+
+Pushing is deliberately left to you, because pushing the tag is what publishes
+the release:
+
+```sh
+git push origin main --follow-tags
+```
+
+Build the desktop artifacts from the tagged commit, not from whatever is
+checked out — electron-builder reads the version out of `package.json`, so a
+build from any other commit is mislabelled.
+
 ## Distribution
 
 Users install with:
@@ -206,7 +237,8 @@ It fails closed: a mismatch, a missing `SHASUMS256.txt`, or a 404 aborts without
 writing anything. Override with `SPECDRIVEN_VERSION`, `SPECDRIVEN_BASE_URL`, or
 `SPECDRIVEN_HOME`.
 
-Asset hosting and versioning are not wired up yet —
+Asset hosting is not wired up yet — nothing uploads the build matrix, so there
+is nothing at `$BASE_URL` for the installer to fetch.
 [roadmap/deployment.md](roadmap/deployment.md) tracks what is left.
 
 ## Layout
@@ -220,7 +252,8 @@ src/frontend/       React app (App.tsx, markdown editor, scenario table, search,
 specs/*.spec.md     specifications for this app's own behavior — a symlink to the
                     ../specs-specdriven clone, see "Clone the spec repo"
 tests/              bun test suite
-scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts
+scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts,
+                    bump-version.ts (version, commit, tag)
 roadmap/            work not started yet
 ```
 
