@@ -5,6 +5,7 @@
 - GitHub integration for free
 - Local file integration for free
 - Tracking using URLs for free
+- Recommended workflow and examples
 
 ## Premium (Paid, Enterprise) Features
 - Integrations with enterprise services (LDAP auth, other auth, task tracking, product and spec tracking)
@@ -14,3 +15,7 @@
 - Management of versions of coding agents
 - Telemetry integration into enterprise services
 
+## What Level?
+- User Community
+- Contributions / Integration of Work
+- Support (Discord or other)
