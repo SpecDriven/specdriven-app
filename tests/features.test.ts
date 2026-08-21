@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   createFeature,
   createFolder,
+  deleteDraftScenario,
   deleteFeature,
   listFeatures,
   moveFeature,
@@ -242,6 +243,72 @@ test("saveFeature keeps a [draft] scenario out of the file but not out of the ed
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
   expect(loaded!.doc.scenarios.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
   expect(result.content).toContain("## Idea @v1 [draft]");
+  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+});
+
+// Why draft deletion needs a route of its own: markdown cannot say a draft
+// is gone, so saving the feature without it removes nothing.
+test("saving a feature without its draft leaves the draft in place", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
+  );
+  const result = await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  expect(result.content).toContain("## Idea @v1 [draft]");
+});
+
+// specs/ui.spec.md "Scenario edit dialog": Delete on a draft removes it from
+// the document — the file never held it, and the editor stops showing it.
+test("deleteDraftScenario removes the draft from the document", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
+  );
+  const result = await deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 1 });
+  expect(result.status).toBe("saved");
+  expect(result.content).not.toContain("Idea");
+  expect(result.content).toContain("## Basic @v1 [proposed]");
+  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  expect(loaded!.doc.scenarios.map((s) => s.name)).toEqual(["Basic"]);
+  expect(await readFeatureForEditor(root, "quote.feature.md")).not.toContain("Idea");
+  // The scenario the file does hold is untouched.
+  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
+});
+
+// The delete is version-specific: two drafts under one name are two scenarios.
+test("deleteDraftScenario deletes only the targeted version", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(
+    root,
+    "quote.feature.md",
+    "# Quote\n\n## Idea @v1 [draft]\n\nold\n\n## Idea @v2 [draft]\n\nnew\n",
+  );
+  const result = await deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 1 });
+  expect(result.content).not.toContain("## Idea @v1");
+  expect(result.content).toContain("## Idea @v2 [draft]");
+});
+
+// Drafts only: a proposed or published scenario is deleted by saving the
+// feature without it, and a published one cannot be deleted at all.
+test("deleteDraftScenario refuses a scenario that is not a draft", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  expect(
+    deleteDraftScenario(root, "quote.feature.md", { name: "Basic", version: 1 }),
+  ).rejects.toThrow(/not found/);
+  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
+});
+
+test("deleteDraftScenario reports an unknown scenario rather than deleting nothing quietly", async () => {
+  await createFeature(root, "Quote");
+  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
+  expect(
+    deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 7 }),
+  ).rejects.toThrow(/not found/);
   expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
 

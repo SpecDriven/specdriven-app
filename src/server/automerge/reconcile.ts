@@ -119,3 +119,26 @@ export function reconcile(
     for (const s of additions) d.scenarios.push(newEntry(s));
   });
 }
+
+/**
+ * Delete one draft scenario, by the (name, version) identity the editor shows
+ * it under. The one removal reconciliation cannot express: a draft is never
+ * projected into the `.feature.md`, so markdown that leaves it out is exactly
+ * what markdown always looks like, and reconcile keeps the entry. Deleting a
+ * draft is therefore a direct document operation, asked for explicitly.
+ *
+ * Drafts only — a proposed or published scenario is removed by saving the
+ * feature without it. Null when no draft carries that name and version.
+ */
+export function removeDraftScenario(
+  doc: A.Doc<FeatureDoc>,
+  target: { name: string; version: number },
+): A.Doc<FeatureDoc> | null {
+  const at = doc.scenarios.findIndex(
+    (s) => s.status === "draft" && s.name === target.name && s.version === target.version,
+  );
+  if (at === -1) return null;
+  return A.change(doc, (d) => {
+    A.deleteAt(d.scenarios, at);
+  });
+}
