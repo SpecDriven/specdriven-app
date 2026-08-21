@@ -3,7 +3,7 @@ import { isFeatureFile, walk } from "./walk";
 import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature } from "./automerge/merge";
 import { projectFeature } from "./automerge/project";
-import { importFeatureDoc, reconcile } from "./automerge/reconcile";
+import { importFeatureDoc, reconcile, removeDraftScenario } from "./automerge/reconcile";
 import {
   createFeatureDoc,
   docDirRel,
@@ -358,6 +358,35 @@ export async function saveFeature(
     status: "saved",
     content: await withDocDrafts(dataDir, name, written),
     message: "saved locally",
+  };
+}
+
+/**
+ * Delete a draft scenario (specs/ui.spec.md "Scenario edit dialog"): drafts
+ * live in the Automerge document only, so this is a document operation rather
+ * than a save of the feature without them — markdown cannot express a draft's
+ * absence, and the next read would fold the draft straight back in. Local like
+ * every other edit; the reload cron commits and pushes the document. The
+ * result is the editor's view of the feature with the draft gone.
+ */
+export async function deleteDraftScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const loaded = await loadFeatureDoc(dataDir, name);
+  const next = loaded === null ? null : removeDraftScenario(loaded.doc, target);
+  if (loaded === null || next === null) {
+    throw new Error(`Draft scenario "${target.name}" @v${target.version} not found`);
+  }
+  await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  return {
+    status: "saved",
+    content: await withDocDrafts(dataDir, name, content),
+    message: "draft deleted locally",
   };
 }
 
