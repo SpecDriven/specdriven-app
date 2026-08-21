@@ -1,5 +1,15 @@
 # Start sessions in Claude or Codex
 
+## Recording Session Information
+ - Follow the example of Claude, saving current session information as JSON data locally (not in Automerge, not persisted in Git/GitHub).
+
+## Options for Starting Sessions
+
+ - Take the scenario text and put it in the system clipboard, paste into any coding agent as a prompt.
+ - Claude in terminal mode - paste the scenario as a prompt. We may want to make copying a widget/button operation to be easier. We might be able to hand off via a by-convention file name.
+ - Claude in CLI mode, "one-shot". Use the scenario as a prompt and resume the session by ID. A resumed session in Claude Terminal can be used to do interactive work like refining the result, and/or capturing new specs.
+ - Claude Desktop - (see the other roadmap for details)
+
 ## Claude Examples
 
 `claude -p "Extract the main function names from auth.py" \
