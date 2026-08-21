@@ -2018,26 +2018,12 @@ button.table-add:hover {
   padding: 0.35rem 0.6rem;
 }
 
-/* Settings checkbox rows read horizontally, unlike the stacked field labels. */
-.dialog label.check-label {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .dialog input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
 /* Sliding on/off switch: the checkbox itself is invisible but still the
    focus and click target, sized over the track it draws. */
-.dialog label.switch-label {
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
 .switch {
   position: relative;
   display: inline-flex;
@@ -2092,4 +2078,149 @@ button.table-add:hover {
 
 .switch input:focus-visible ~ .switch-track {
   box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* macOS-style settings dialog (specs/ui.spec.md "Settings"): grouped rows on
+   a muted ground, label left and control right, each control saving itself
+   the moment it changes — no Save button. */
+.dialog.settings-dialog {
+  background: var(--surface-1);
+  gap: 0.85rem;
+  padding-top: 0;
+}
+
+/* Title bar with the ✕, sticky so closing never needs a scroll back up. */
+.settings-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  /* The padding + negative margin let the background cover the flex gap, so
+     rows scrolling under the header can't peek through it. */
+  padding: 1.4rem 0 0.85rem;
+  margin-bottom: -0.85rem;
+  background: var(--surface-1);
+}
+
+/* Small round close control in the top-right corner, macOS-window style. */
+.settings-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.55rem;
+  height: 1.55rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.settings-close:hover {
+  background: var(--border-strong);
+  color: var(--text-1);
+}
+
+.settings-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 0.9rem;
+}
+
+.dialog .settings-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid var(--border);
+}
+
+.settings-row-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+/* Long option labels must not squeeze the label column out of its half. */
+.settings-row select {
+  max-width: 50%;
+}
+
+.settings-row-hint {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-2);
+  max-width: 24rem;
+}
+
+.settings-row input[type="number"] {
+  width: 5.5rem;
+  text-align: right;
+}
+
+.settings-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The GitHub account block stacks its own rows but still reads as one row
+   of the group it sits in. */
+.dialog .settings-row.auth-section {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+}
+
+.settings-footnote {
+  text-align: center;
+  color: var(--text-3);
+}
+
+.settings-footnote kbd {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 0.3rem;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-2);
+}
+
+/* A server-rejected change surfaces here, pinned so the scrolling dialog
+   can't hide it. */
+.settings-error {
+  position: sticky;
+  bottom: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
 }
