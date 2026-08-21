@@ -5,9 +5,9 @@
 
 import { test, expect } from "bun:test";
 import * as A from "@automerge/automerge";
-import { parseFeature, serializeFeature } from "../src/server/parser";
-import { docToFeature, projectFeature } from "../src/server/automerge/project";
-import { importFeatureDoc, reconcile } from "../src/server/automerge/reconcile";
+import { parseFeature, serializeFeature } from "../../src/server/parser";
+import { docToFeature, projectFeature } from "../../src/server/automerge/project";
+import { importFeatureDoc, reconcile } from "../../src/server/automerge/reconcile";
 
 const SAMPLE = `# Quote Policy
 

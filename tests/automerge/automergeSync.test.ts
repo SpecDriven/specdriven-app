@@ -8,12 +8,12 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadFeatureDoc } from "../src/server/automerge/store";
-import { projectFeature } from "../src/server/automerge/project";
-import { publishFeature, readFeature, saveFeature } from "../src/server/features";
-import { conflictedFiles } from "../src/server/git";
-import { syncDataDir } from "../src/server/reload";
-import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { projectFeature } from "../../src/server/automerge/project";
+import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
+import { conflictedFiles } from "../../src/server/git";
+import { syncDataDir } from "../../src/server/reload";
+import { git, stopServers, twoClones } from "../helpers/fixtures";
 
 let root: string;
 
