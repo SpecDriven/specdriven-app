@@ -14,14 +14,14 @@ import {
   WebSocketServerAdapter,
 } from "@automerge/automerge-repo-network-websocket";
 import { WebSocketServer } from "ws";
-import { documentIdForDoc, startNetSync } from "../src/server/automerge/netsync";
-import type { NetSync } from "../src/server/automerge/netsync";
-import { importFeatureDoc } from "../src/server/automerge/reconcile";
-import { createFeatureDoc, docDir, loadFeatureDoc } from "../src/server/automerge/store";
-import { projectFeature } from "../src/server/automerge/project";
-import { parseFeature } from "../src/server/parser";
-import { readFeature, saveFeature } from "../src/server/features";
-import { writeTextFile } from "../src/server/fsx";
+import { documentIdForDoc, startNetSync } from "../../src/server/automerge/netsync";
+import type { NetSync } from "../../src/server/automerge/netsync";
+import { importFeatureDoc } from "../../src/server/automerge/reconcile";
+import { createFeatureDoc, docDir, loadFeatureDoc } from "../../src/server/automerge/store";
+import { projectFeature } from "../../src/server/automerge/project";
+import { parseFeature } from "../../src/server/parser";
+import { readFeature, saveFeature } from "../../src/server/features";
+import { writeTextFile } from "../../src/server/fsx";
 
 let root: string;
 let wss: WebSocketServer | null = null;

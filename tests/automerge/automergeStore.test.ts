@@ -15,7 +15,7 @@ import {
   newFeatureDoc,
   removeFeatureDoc,
   saveFeatureDoc,
-} from "../src/server/automerge/store";
+} from "../../src/server/automerge/store";
 
 let root: string;
 
