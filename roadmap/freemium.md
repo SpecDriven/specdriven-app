@@ -11,4 +11,6 @@
 - Reading and writing from enterprise services
 - Extensions using integration extension points
 - Sign-off in workflow, roles enforced in workflow
+- Management of versions of coding agents
+- Telemetry integration into enterprise services
 
