@@ -6,10 +6,12 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
+  MIN_AUTOSAVE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { resolveDataRepo } from "./repo";
@@ -42,6 +44,7 @@ import {
   createFeature,
   createFolder,
   deleteFolder,
+  deleteDraftScenario,
   deleteFeature,
   moveFeature,
   renameFeature,
@@ -240,6 +243,7 @@ async function stateFields(state: SpecDrivenState) {
     needsDataRepo: needsDataRepo(state),
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
+    autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -269,6 +273,7 @@ const putState: Handler = async (req) => {
     dataRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
+    autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
     codeGen?: boolean;
@@ -278,6 +283,7 @@ const putState: Handler = async (req) => {
     body.dataRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
+    body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
     body.codeGen === undefined &&
@@ -286,7 +292,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
       },
       400,
     );
@@ -341,6 +347,19 @@ const putState: Handler = async (req) => {
       return json({ error: "scenarioPreviewLines must be a number >= 1" }, 400);
     }
     state.scenarioPreviewLines = Math.floor(n);
+  }
+  // Editor autosave (specs/editor-autosave.feature.md): how often the open
+  // editor saves itself. Autosave cannot be switched off here — only slowed
+  // down — and never below the 3 second floor.
+  if (body.autosaveIntervalSeconds !== undefined) {
+    const n = body.autosaveIntervalSeconds;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < MIN_AUTOSAVE_SECONDS) {
+      return json(
+        { error: `autosaveIntervalSeconds must be a number >= ${MIN_AUTOSAVE_SECONDS}` },
+        400,
+      );
+    }
+    state.autosaveIntervalSeconds = Math.floor(n);
   }
   // Test-links display (specs/traceability.spec.md): optional, default
   // ON — the default is stored as an absent key.
@@ -535,6 +554,25 @@ const putFeature = withDataDir(async (dir, req, params) => {
       ? await resolveFeatureConflict(dir, params.file!, body.content, scenario)
       : await publishFeature(dir, params.file!, body.content, scenario);
     return json(result, result.status === "conflict" ? 409 : 200);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/ui.spec.md "Scenario edit dialog" (Delete on a draft): a draft lives
+// in the Automerge document only, so it is deleted from the document rather
+// than by saving the feature without it — a save cannot express the absence
+// of something the markdown never held. Proposed scenarios keep going through
+// the ordinary save. POST, not DELETE, because the target rides in a body:
+// a scenario is identified by name and version, and a name is free text.
+const postDeleteDraft = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { scenario?: { name?: string; version?: number } };
+  if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
+    return json({ error: "scenario needs a name and a version" }, 400);
+  }
+  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  try {
+    return json(await deleteDraftScenario(dir, params.file!, target));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -763,6 +801,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
+  ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["POST", "/api/agent/session", postAgentSession],
 ];
 

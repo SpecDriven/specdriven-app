@@ -103,6 +103,13 @@ const DEFAULT_SYNC_SERVER_URL = "wss://sync.automerge.org";
 // so a stored 0 is the only way it is off.
 const DEFAULT_AUTOSYNC_SECONDS = 60;
 
+// Editor autosave (specs/editor-autosave.feature.md): the open editor saves
+// itself every n seconds. Always on — the setting is only how often — and
+// never faster than the floor, which keeps a save off the keystrokes.
+// Mirrors the server's defaults in src/server/state.ts.
+const DEFAULT_AUTOSAVE_SECONDS = 6;
+const MIN_AUTOSAVE_SECONDS = 3;
+
 // Sidebar width (specs/ui.spec.md "Sidebar resize"): dragged via the divider
 // so a deep folder tree gets room. Device-local, like the theme.
 const SIDEBAR_MIN = 180;
@@ -135,10 +142,22 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
-/** index === null means a new scenario being added. */
+/**
+ * index === null means a new scenario being added; every save — autosave
+ * included — points it at the entry it wrote, so the next save rewrites that
+ * entry instead of appending a second one.
+ */
 interface EditState {
   index: number | null;
   scenario: Scenario;
+  /**
+   * True while this dialog is creating a scenario, which it stays even after
+   * autosave (specs/editor-autosave.feature.md) has put the scenario in the
+   * feature and given `index` a value. The dialog keeps its new-scenario
+   * behavior for as long as it is open: retyping the name re-derives the
+   * version, and the Draft checkbox stays unlocked.
+   */
+  isNew?: boolean;
 }
 
 /**
@@ -151,6 +170,15 @@ interface EditState {
 function parseFeatureFile(content: string, fileName: string): Feature {
   const parsed = parseFeature(content);
   return parsed.name ? parsed : { ...parsed, name: titleFromFileName(fileName) };
+}
+
+/**
+ * What autosave (specs/editor-autosave.feature.md) compares to decide whether
+ * the editor is holding anything new: everything a save would write, under
+ * the version the dialog will save it as rather than the one on the object.
+ */
+export function scenarioSignature(s: Scenario, version: number): string {
+  return JSON.stringify([s.name, version, s.status, s.body, s.tests]);
 }
 
 interface OpenOptions {
@@ -220,6 +248,18 @@ export function App() {
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
+  // Editor autosave (specs/editor-autosave.feature.md): the signature of what
+  // the open dialog last had saved, and whether a tick is still saving. Refs,
+  // because a tick reads them between renders and must not cause one.
+  const autosaved = useRef<string | null>(null);
+  const autosaveInFlight = useRef(false);
+  /** True from the moment Delete is pressed until the removal is away, so no
+      tick saves the scenario back while the confirmation is on screen — and
+      so nothing re-sorts the feature under the entry being deleted. */
+  const deletingScenario = useRef(false);
+  /** Bumped every time the dialog opens or closes, so a save that lands after
+      the user has moved on cannot stamp its result onto another scenario. */
+  const editorSession = useRef(0);
   const [conflict, setConflict] = useState<Conflict | null>(null);
   const [conflictDraft, setConflictDraft] = useState("");
   /** Which resolution is being published, if any — the buttons disable while it runs. */
@@ -231,6 +271,8 @@ export function App() {
   const [publishing, setPublishing] = useState<string | null>(null);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [previewLines, setPreviewLines] = useState(8);
+  /** How often the open editor saves itself (specs/editor-autosave.feature.md). */
+  const [autosaveSeconds, setAutosaveSeconds] = useState(DEFAULT_AUTOSAVE_SECONDS);
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
@@ -244,6 +286,9 @@ export function App() {
   /** The autosync switch: off saves a frequency of 0, which stops the reload. */
   const [settingsAutosyncOnDraft, setSettingsAutosyncOnDraft] = useState(true);
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
+  const [settingsAutosaveDraft, setSettingsAutosaveDraft] = useState(
+    String(DEFAULT_AUTOSAVE_SECONDS),
+  );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
@@ -307,6 +352,9 @@ export function App() {
       }
       if (typeof state.scenarioPreviewLines === "number") {
         setPreviewLines(state.scenarioPreviewLines);
+      }
+      if (typeof state.autosaveIntervalSeconds === "number") {
+        setAutosaveSeconds(state.autosaveIntervalSeconds);
       }
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
@@ -393,6 +441,20 @@ export function App() {
   useEffect(() => {
     setTestDraft("");
     setTestEdit(null);
+  }, [editingOpen]);
+
+  // Autosave measures against what the dialog opened with, so a scenario that
+  // is opened and read but not edited is never re-saved
+  // (specs/editor-autosave.feature.md).
+  useEffect(() => {
+    editorSession.current += 1;
+    autosaved.current = editing
+      ? scenarioSignature(editing.scenario, editing.scenario.version)
+      : null;
+    autosaveInFlight.current = false;
+    // The delete that closed the dialog may still be in flight, but with no
+    // dialog open there is no tick for the flag to hold back.
+    deletingScenario.current = false;
   }, [editingOpen]);
 
   // A "Save was blocked" message stops applying the moment the tests widgets
@@ -1225,27 +1287,88 @@ export function App() {
    * one past the highest version already carrying that name, or 1 when the
    * name is new. Editing an existing entry keeps the version it was given.
    */
-  const nextVersionFor = (name: string) => {
+  const nextVersionFor = (name: string, ignoreIndex?: number) => {
     const versions = (feature?.scenarios ?? [])
-      .filter((s) => s.name.trim() === name.trim())
+      .filter((s, i) => i !== ignoreIndex && s.name.trim() === name.trim())
       .map((s) => s.version);
     return versions.length ? Math.max(...versions) + 1 : 1;
   };
 
-  /** The version the open dialog will save under; shown read-only in the dialog. */
+  /** The version the open dialog will save under; shown read-only in the dialog.
+      A new scenario autosave has already placed in the feature keeps deriving
+      its version, with its own entry left out — or it would bump past itself
+      on every tick. */
   const draftVersion = !editing
     ? 1
-    : editing.index === null
-      ? nextVersionFor(editing.scenario.name)
+    : editing.isNew || editing.index === null
+      ? nextVersionFor(editing.scenario.name, editing.index ?? undefined)
       : editing.scenario.version;
 
   /**
-   * Saving the dialog auto-saves the whole feature locally (marked
-   * [proposed], so no data is lost); the server's reload cron commits and
-   * pushes it.
+   * Write the dialog's scenario into the feature and save the feature locally
+   * (marked [proposed], so no data is lost); the server's reload cron commits
+   * and pushes it. `close` false is the autosave path
+   * (specs/editor-autosave.feature.md): the dialog stays open and follows its
+   * scenario into the saved feature. Reports whether the save landed.
    */
+  const commitScenario = async (tests: string[], close: boolean): Promise<boolean> => {
+    if (!editing || !feature || !selected) return false;
+    const s = { ...editing.scenario, version: draftVersion, tests };
+    // Where this scenario sits in the feature: the entry the dialog opened
+    // on, or the one a previous autosave placed — never appended twice.
+    const at = editing.index;
+    const next: Feature = {
+      ...feature,
+      scenarios: sortScenarios(
+        at === null
+          ? [...feature.scenarios, s]
+          : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
+      ),
+    };
+    setFeature(next);
+    if (close) setEditing(null);
+    const session = editorSession.current;
+    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: serializeFeature(next), save: true }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      const saved = parseFeatureFile(data.content, selected);
+      setFeature(saved);
+      setDirty(false);
+      // A still-open dialog has to find its scenario again: the feature comes
+      // back in canonical order, so a renamed scenario has moved. Not finding
+      // it (the entry was dropped underneath us) leaves the dialog new, so
+      // the next save re-adds the work rather than overwriting a neighbour.
+      if (!close && session === editorSession.current) {
+        const moved = saved.scenarios.findIndex(
+          (sc) => sc.name === s.name && sc.version === s.version,
+        );
+        setEditing((prev) =>
+          prev === null ? null : { ...prev, index: moved === -1 ? null : moved },
+        );
+      }
+      // A published scenario's dialog can only have changed its test links
+      // (specs/traceability.spec.md) — there is nothing left to publish.
+      setStatus(
+        s.status === "published"
+          ? `Saved the test links of "${s.name}" v${s.version}.`
+          : s.status === "draft"
+            ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
+            : "Saved — publish scenarios from their cards, or press Publish All.",
+      );
+      flashSaved();
+      return true;
+    }
+    setDirty(true);
+    setStatus(data.error ?? "Save failed");
+    return false;
+  };
+
   const saveScenario = async () => {
-    if (!editing || !feature || !selected) return;
+    if (!editing) return;
     // A url still sitting in the add field or an open ✎ row rides along with
     // the save — Save must never silently drop it — and one that can't join
     // the list blocks the save instead (specs/traceability.spec.md).
@@ -1258,41 +1381,49 @@ export function App() {
       setTestsError(pending.error);
       return;
     }
-    const s = { ...editing.scenario, version: draftVersion, tests: pending.tests };
-    const next: Feature = {
-      ...feature,
-      scenarios: sortScenarios(
-        editing.index === null
-          ? [...feature.scenarios, s]
-          : feature.scenarios.map((sc, i) => (i === editing.index ? s : sc)),
-      ),
-    };
-    setFeature(next);
-    setEditing(null);
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: serializeFeature(next), save: true }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setFeature(parseFeatureFile(data.content, selected));
-      setDirty(false);
-      // A published scenario's dialog can only have changed its test links
-      // (specs/traceability.spec.md) — there is nothing left to publish.
-      setStatus(
-        s.status === "published"
-          ? `Saved the test links of "${s.name}" v${s.version}.`
-          : s.status === "draft"
-            ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
-            : "Saved — publish scenarios from their cards, or press Publish All.",
-      );
-      flashSaved();
-    } else {
-      setDirty(true);
-      setStatus(data.error ?? "Save failed");
+    await commitScenario(pending.tests, true);
+  };
+
+  /**
+   * One autosave tick (specs/editor-autosave.feature.md "Autosave Triggered at
+   * Defined Interval"): save what the editor holds, unless it holds nothing
+   * new. A url still being typed into the test-link fields stays out — those
+   * join the scenario when the user adds them, or on an explicit Save.
+   */
+  const autosaveScenario = async () => {
+    if (!editing || !feature || !selected) return;
+    if (autosaveInFlight.current) return; // the previous tick is still saving
+    if (deletingScenario.current) return; // a delete is being confirmed or sent
+    // A scenario with no name has nothing to be saved under; the Save button
+    // is disabled for the same reason.
+    if (!editing.scenario.name.trim()) return;
+    const signature = scenarioSignature(editing.scenario, draftVersion);
+    if (signature === autosaved.current) return;
+    autosaveInFlight.current = true;
+    const session = editorSession.current;
+    try {
+      // Only a landed save may mark the content saved — a failed one is
+      // retried by the next tick, and reported on the banner meanwhile. A
+      // save that lands after the dialog closed belongs to nothing.
+      const ok = await commitScenario(editing.scenario.tests, false);
+      if (ok && session === editorSession.current) autosaved.current = signature;
+    } finally {
+      autosaveInFlight.current = false;
     }
   };
+
+  // The tick runs off a plain interval, so it fires on the defined cadence
+  // however long the user keeps typing — a timer restarted per keystroke
+  // would never come round while an edit is in flow.
+  const autosaveTick = useRef(autosaveScenario);
+  useEffect(() => {
+    autosaveTick.current = autosaveScenario;
+  });
+  useEffect(() => {
+    if (!editingOpen) return;
+    const id = setInterval(() => void autosaveTick.current(), autosaveSeconds * 1000);
+    return () => clearInterval(id);
+  }, [editingOpen, autosaveSeconds]);
 
   // Avatar initials: from the git name when set, else the OS user name
   // (specs/user-info-settings.spec.md).
@@ -1310,6 +1441,7 @@ export function App() {
     setSettingsAutosyncOnDraft(reloadSeconds > 0);
     setSettingsDraft(String(reloadSeconds > 0 ? reloadSeconds : DEFAULT_AUTOSYNC_SECONDS));
     setSettingsLinesDraft(String(previewLines));
+    setSettingsAutosaveDraft(String(autosaveSeconds));
     // No stored choice is "auto": whichever engine this machine can run.
     setSettingsEngineDraft(
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
@@ -1454,6 +1586,15 @@ export function App() {
       setSettingsError("Enter how many preview lines to show per scenario (at least 1).");
       return;
     }
+    // Autosave has no off switch (specs/editor-autosave.feature.md) — only a
+    // frequency, floored so a save can't land between two keystrokes.
+    const autosave = Number(settingsAutosaveDraft);
+    if (!Number.isFinite(autosave) || autosave < MIN_AUTOSAVE_SECONDS) {
+      setSettingsError(
+        `Enter an autosave interval of at least ${MIN_AUTOSAVE_SECONDS} seconds.`,
+      );
+      return;
+    }
     // The switch decides on/off; the url only travels when it is on.
     const syncUrl = settingsSyncOnDraft ? settingsSyncDraft.trim() : "";
     if (settingsSyncOnDraft && !/^wss?:\/\//.test(syncUrl)) {
@@ -1468,6 +1609,7 @@ export function App() {
       body: JSON.stringify({
         reloadFrequencySeconds: Math.floor(n),
         scenarioPreviewLines: Math.floor(lines),
+        autosaveIntervalSeconds: Math.floor(autosave),
         gitEngine: settingsEngineDraft,
         showTestLinks: settingsTestLinksDraft,
         codeGen: settingsCodeGenDraft,
@@ -1478,6 +1620,7 @@ export function App() {
     if (res.ok) {
       setReloadSeconds(data.reloadFrequencySeconds);
       setPreviewLines(data.scenarioPreviewLines);
+      setAutosaveSeconds(data.autosaveIntervalSeconds);
       setShowTestLinks(data.showTestLinks !== false);
       // Switched off, a selection left over from before must not linger as a
       // session waiting to be started.
@@ -1556,20 +1699,36 @@ export function App() {
     );
 
   /**
-   * Delete a [proposed] scenario from the dialog (specs/ui.spec.md "Scenario
-   * edit dialog"), after a confirmation. The removal is saved like any edit —
-   * auto-saved locally; the reload cron commits and pushes it.
+   * Delete the dialog's scenario (specs/ui.spec.md "Scenario edit dialog"),
+   * after a confirmation. Two removals, by what the scenario is: a [proposed]
+   * one is saved out of the feature like any other edit, while a draft — which
+   * the `.feature.md` never held, so leaving it out of a save would remove
+   * nothing — is deleted from the Automerge document through its own route.
+   * Either way it is local; the reload cron commits and pushes it.
    */
   const deleteScenario = async () => {
     if (!editing || editing.index === null || !feature || !selected) return;
     const idx = editing.index;
-    const { name, version } = editing.scenario;
+    // The entry as last saved, not the dialog's unsaved edits: that is what
+    // the delete removes, and its name and version identify it to the server.
+    const saved = feature.scenarios[idx];
+    if (!saved) return;
+    const { name, version } = saved;
+    // From here on autosave stands down: a tick landing while the
+    // confirmation is up could re-sort the feature under `idx`.
+    deletingScenario.current = true;
     const ok = await confirm({
       title: "Delete scenario",
-      body: `Delete "${name}" v${version}?`,
+      body:
+        saved.status === "draft"
+          ? `Delete the draft "${name}" v${version}?`
+          : `Delete "${name}" v${version}?`,
       confirmLabel: "Delete scenario",
     });
-    if (!ok) return;
+    if (!ok) {
+      deletingScenario.current = false;
+      return;
+    }
     const next: Feature = {
       ...feature,
       scenarios: feature.scenarios.filter((_, i) => i !== idx),
@@ -1581,13 +1740,23 @@ export function App() {
     setSelectedScenario((prev) =>
       prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
     );
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: serializeFeature(next), save: true }),
-    });
+    const url = `/api/features/${encodeURIComponent(selected)}`;
+    const res =
+      saved.status === "draft"
+        ? await fetch(`${url}/delete-draft`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scenario: { name, version } }),
+          })
+        : await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: serializeFeature(next), save: true }),
+          });
     const data = await res.json();
     if (res.ok) {
+      // Both routes answer with the editor's view of the feature — the file
+      // content with the remaining drafts folded back in.
       setFeature(parseFeatureFile(data.content, selected));
       setDirty(false);
       setStatus(`Deleted scenario "${name}" v${version}.`);
@@ -1604,8 +1773,11 @@ export function App() {
     const src = feature.scenarios[i]!;
     setEditing({
       index: null,
-      // index null marks it as new, so the version is derived on save.
-      scenario: { ...src, version: nextVersionFor(src.name), status: "proposed" },
+      // isNew marks it as new, so the version is derived on save.
+      isNew: true,
+      // Draft like any other new scenario, so autosave can't propose the next
+      // version of a published scenario on the user's behalf.
+      scenario: { ...src, version: nextVersionFor(src.name), status: "draft" },
     });
   };
 
@@ -1848,19 +2020,24 @@ export function App() {
   }
 
   const editingPublished = editing?.scenario.status === "published";
-  // Delete applies to [proposed] scenarios only (specs/ui.spec.md "Scenario
-  // edit dialog") — not to published ones (immutable), and not to a new
-  // draft that isn't part of the feature yet (index === null).
-  const editingProposed =
-    editing !== null && editing.index !== null && editing.scenario.status === "proposed";
+  // The scenario as last saved into the feature: what a delete removes, and
+  // what the Draft checkbox is locked against — neither follows the dialog's
+  // unsaved edits.
+  const savedEntry =
+    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
+  // Delete applies to [proposed] scenarios and to drafts (specs/ui.spec.md
+  // "Scenario edit dialog") — not to published ones (immutable), and not to a
+  // scenario that isn't part of the feature yet (index === null). A new one
+  // autosave has already placed does have an index, and can be deleted.
+  const editingDeletable = savedEntry !== null && savedEntry.status !== "published";
   // The Draft checkbox: a draft is stored in the app (the Automerge document)
   // but kept out of the .feature.md. The lifecycle moves one way — draft →
   // proposed → published — so once a scenario has been saved as proposed the
   // box locks; only a new scenario or an existing draft can toggle it.
-  const editingSavedStatus =
-    editing !== null && editing.index !== null
-      ? (feature?.scenarios[editing.index]?.status ?? null)
-      : null;
+  // A scenario this dialog created stays "new" for as long as it is open, so
+  // unchecking Draft and letting autosave write it out must not lock the box
+  // against checking it again.
+  const editingSavedStatus = editing?.isNew ? null : (savedEntry?.status ?? null);
   const draftLocked = editingSavedStatus !== null && editingSavedStatus !== "draft";
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
@@ -2287,12 +2464,16 @@ export function App() {
                 onClick={() =>
                   setEditing({
                     index: null,
+                    isNew: true,
                     scenario: {
                       name: "",
                       version: 1,
-                      // proposed unless the dialog's Draft checkbox says
-                      // otherwise — save then writes it to the feature file.
-                      status: "proposed",
+                      // A new scenario starts as a draft: autosave
+                      // (specs/editor-autosave.feature.md) writes the dialog
+                      // out every few seconds, and a draft stays in the
+                      // document. Proposing it — into the .feature.md — takes
+                      // clearing the dialog's Draft checkbox, an explicit act.
+                      status: "draft",
                       body: "",
                       tests: [],
                     },
@@ -2455,6 +2636,23 @@ export function App() {
               {settingsAutosyncOnDraft
                 ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
                 : "Autosync is off: the data repo is only pulled and pushed when you publish."}
+            </p>
+            {/* Editor autosave (specs/editor-autosave.feature.md): the open
+                editor saves itself at this interval. There is no off switch —
+                only how often, at least 3 seconds. */}
+            <label>
+              Autosave interval (seconds)
+              <input
+                type="number"
+                min={MIN_AUTOSAVE_SECONDS}
+                value={settingsAutosaveDraft}
+                onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
+              />
+            </label>
+            <p className="hint">
+              An open scenario editor saves itself this often, so an unsaved edit is never more
+              than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds; the default is{" "}
+              {DEFAULT_AUTOSAVE_SECONDS}.
             </p>
             {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
                 accelerator on top of git, with an explicit privacy warning. */}
@@ -2855,10 +3053,11 @@ export function App() {
               </div>
             )}
             <div className="dialog-actions">
-              {/* Proposed scenarios can be deleted (specs/ui.spec.md
-                  "Scenario edit dialog") — confirmed, then saved like any
-                  edit. Kept apart from Cancel/Save on the far left. */}
-              {editingProposed && (
+              {/* Proposed scenarios and drafts can be deleted (specs/ui.spec.md
+                  "Scenario edit dialog") — confirmed first, then saved out of
+                  the feature or removed from the document. Kept apart from
+                  Cancel/Save on the far left. */}
+              {editingDeletable && (
                 <button className="danger" onClick={() => void deleteScenario()}>
                   Delete
                 </button>
