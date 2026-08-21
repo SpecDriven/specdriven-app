@@ -2544,7 +2544,11 @@ export function App() {
                 </button>
               </div>
             </div>
-            {feature.description && <pre className="feature-desc">{feature.description}</pre>}
+            {feature.description && (
+              <div className="feature-desc md-preview">
+                {renderMarkdown(feature.description)}
+              </div>
+            )}
             {/* specs/ui.spec.md "Scenario List": each card renders its body as
                 a Markdown preview, clamped to n lines (n set in Settings). */}
             <div
