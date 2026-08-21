@@ -543,8 +543,8 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
-  // specs/ui.spec.md "Settings": ESC closes the settings dialog without
-  // saving — same as Cancel, and it works while a dialog field has focus.
+  // specs/ui.spec.md "Settings": ESC closes the settings dialog — every
+  // change is already saved — and it works while a dialog field has focus.
   useEffect(() => {
     if (!settingsOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1642,71 +1642,114 @@ export function App() {
     };
   }, [deviceFlow]);
 
-  // Settings are saved to the settings file (specs/ui.spec.md).
-  const saveSettings = async () => {
-    // The switch decides whether autosync runs; a frequency of 0 stops it.
-    const n = settingsAutosyncOnDraft ? Number(settingsDraft) : 0;
-    if (!Number.isFinite(n) || (settingsAutosyncOnDraft && n < 1)) {
-      setSettingsError("Enter an autosync frequency of at least 1 second, or switch autosync off.");
-      return;
-    }
-    const lines = Number(settingsLinesDraft);
-    if (!Number.isFinite(lines) || lines < 1) {
-      setSettingsError("Enter how many preview lines to show per scenario (at least 1).");
-      return;
-    }
-    // Autosave has no off switch (specs/editor-autosave.feature.md) — only a
-    // frequency, floored so a save can't land between two keystrokes.
-    const autosave = Number(settingsAutosaveDraft);
-    if (!Number.isFinite(autosave) || autosave < MIN_AUTOSAVE_SECONDS) {
-      setSettingsError(
-        `Enter an autosave interval of at least ${MIN_AUTOSAVE_SECONDS} seconds.`,
-      );
-      return;
-    }
-    // The switch decides on/off; the url only travels when it is on.
-    const syncUrl = settingsSyncOnDraft ? settingsSyncDraft.trim() : "";
-    if (settingsSyncOnDraft && !/^wss?:\/\//.test(syncUrl)) {
-      setSettingsError(
-        "Enter a ws:// or wss:// sync server url, or switch live sync off.",
-      );
-      return;
-    }
+  // Settings save themselves the moment a control changes (macOS style —
+  // there is no Save button; specs/ui.spec.md "Settings"). Each change PUTs
+  // only its own field; the response carries the full normalized state, so
+  // local state follows whatever the server accepted.
+  const patchSettings = async (patch: Record<string, unknown>): Promise<boolean> => {
+    setSettingsError(null);
     const res = await fetch("/api/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        reloadFrequencySeconds: Math.floor(n),
-        scenarioPreviewLines: Math.floor(lines),
-        autosaveIntervalSeconds: Math.floor(autosave),
-        gitEngine: settingsEngineDraft,
-        showTestLinks: settingsTestLinksDraft,
-        codeGen: settingsCodeGenDraft,
-        syncServerUrl: syncUrl,
-      }),
+      body: JSON.stringify(patch),
     });
     const data = await res.json();
-    if (res.ok) {
-      setReloadSeconds(data.reloadFrequencySeconds);
-      setPreviewLines(data.scenarioPreviewLines);
-      setAutosaveSeconds(data.autosaveIntervalSeconds);
-      setShowTestLinks(data.showTestLinks !== false);
-      // Switched off, a selection left over from before must not linger as a
-      // session waiting to be started.
-      if (data.codeGen === false) setSpecSelection(new Map());
-      setCodeGen(data.codeGen !== false);
-      setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
-      setGitEngineState(data.gitEngine ?? null);
-      setGitEngineEffective(data.gitEngineEffective ?? "cli");
-      setCliGitAvailable(Boolean(data.cliGitAvailable));
-      setGh(data.gh ?? null);
-      // The engine decides which account authors commits, so the user corner
-      // can be showing the wrong one now.
-      await refreshUser();
-      setSettingsOpen(false);
-    } else {
+    if (!res.ok) {
       setSettingsError(data.error ?? "Could not save settings");
+      return false;
     }
+    setReloadSeconds(data.reloadFrequencySeconds);
+    setPreviewLines(data.scenarioPreviewLines);
+    setAutosaveSeconds(data.autosaveIntervalSeconds);
+    setShowTestLinks(data.showTestLinks !== false);
+    // Switched off, a selection left over from before must not linger as a
+    // session waiting to be started.
+    if (data.codeGen === false) setSpecSelection(new Map());
+    setCodeGen(data.codeGen !== false);
+    setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
+    setGitEngineState(data.gitEngine ?? null);
+    setGitEngineEffective(data.gitEngineEffective ?? "cli");
+    setCliGitAvailable(Boolean(data.cliGitAvailable));
+    setGh(data.gh ?? null);
+    // The engine decides which account authors commits, so the user corner
+    // can be showing the wrong one now.
+    if (patch.gitEngine !== undefined) await refreshUser();
+    return true;
+  };
+
+  /** A number field's usable value: floored, at least min, else the fallback. */
+  const clampDraft = (draft: string, min: number, fallback: number) => {
+    const n = Math.floor(Number(draft));
+    return Number.isFinite(n) && n >= min ? n : fallback;
+  };
+
+  // The number fields clamp and save when the field is left (blur or Enter),
+  // never mid-typing — otherwise "15" would save as "1" on the way.
+  const commitAutosyncSeconds = async () => {
+    const n = clampDraft(settingsDraft, 1, DEFAULT_AUTOSYNC_SECONDS);
+    setSettingsDraft(String(n));
+    if (settingsAutosyncOnDraft) await patchSettings({ reloadFrequencySeconds: n });
+  };
+
+  // The switch decides whether autosync runs; a frequency of 0 stops it. The
+  // field keeps its frequency while off, so switching back on needs no typing.
+  const toggleAutosync = async (on: boolean) => {
+    setSettingsAutosyncOnDraft(on);
+    const n = clampDraft(settingsDraft, 1, DEFAULT_AUTOSYNC_SECONDS);
+    setSettingsDraft(String(n));
+    if (!(await patchSettings({ reloadFrequencySeconds: on ? n : 0 }))) {
+      setSettingsAutosyncOnDraft(!on);
+    }
+  };
+
+  const commitAutosaveSeconds = async () => {
+    const n = clampDraft(settingsAutosaveDraft, MIN_AUTOSAVE_SECONDS, DEFAULT_AUTOSAVE_SECONDS);
+    setSettingsAutosaveDraft(String(n));
+    await patchSettings({ autosaveIntervalSeconds: n });
+  };
+
+  const commitPreviewLines = async () => {
+    const n = clampDraft(settingsLinesDraft, 1, previewLines);
+    setSettingsLinesDraft(String(n));
+    await patchSettings({ scenarioPreviewLines: n });
+  };
+
+  // The switch decides on/off; the url only travels while it is on. An empty
+  // url is the stored form of "off" (specs/automerge-store.spec.md).
+  const toggleLiveSync = async (on: boolean) => {
+    setSettingsSyncOnDraft(on);
+    if (!on) {
+      if (!(await patchSettings({ syncServerUrl: "" }))) setSettingsSyncOnDraft(true);
+      return;
+    }
+    const url = settingsSyncDraft.trim();
+    if (/^wss?:\/\//.test(url)) await patchSettings({ syncServerUrl: url });
+  };
+
+  const commitSyncUrl = async () => {
+    if (!settingsSyncOnDraft) return;
+    const url = settingsSyncDraft.trim();
+    if (!/^wss?:\/\//.test(url)) {
+      setSettingsError("Enter a ws:// or wss:// sync server url, or switch live sync off.");
+      return;
+    }
+    await patchSettings({ syncServerUrl: url });
+  };
+
+  const toggleTestLinks = async (on: boolean) => {
+    setSettingsTestLinksDraft(on);
+    if (!(await patchSettings({ showTestLinks: on }))) setSettingsTestLinksDraft(!on);
+  };
+
+  const toggleCodeGen = async (on: boolean) => {
+    setSettingsCodeGenDraft(on);
+    if (!(await patchSettings({ codeGen: on }))) setSettingsCodeGenDraft(!on);
+  };
+
+  const pickGitEngine = async (engine: string) => {
+    const prev = settingsEngineDraft;
+    setSettingsEngineDraft(engine);
+    if (!(await patchSettings({ gitEngine: engine }))) setSettingsEngineDraft(prev);
   };
 
   // The dialog's "Automated tests" list editor (specs/traceability.spec.md);
@@ -2770,259 +2813,323 @@ export function App() {
       )}
       {settingsOpen && (
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="dialog" ref={settingsTrapRef} onClick={(e) => e.stopPropagation()}>
-            <h3>Settings</h3>
-            {/* Appearance (specs/ui.spec.md "Settings"): applied right away
-                and remembered on this device, not in the settings file. */}
-            <label>
-              Appearance
-              <select
-                autoFocus
-                value={theme}
-                onChange={(e) => {
-                  const pref = e.target.value as ThemePref;
-                  setTheme(pref);
-                  applyThemePref(pref);
-                }}
+          <div
+            className="dialog settings-dialog"
+            ref={settingsTrapRef}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* macOS-style: every control saves itself the moment it changes,
+                so there is no Save button — the ✕, ESC or a click outside
+                closes. The header sticks so the ✕ stays reachable while the
+                dialog scrolls. */}
+            <div className="settings-header">
+              <h3>Settings</h3>
+              <button
+                className="settings-close"
+                aria-label="Close settings"
+                onClick={() => setSettingsOpen(false)}
               >
-                <option value="system">System</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
-              </select>
-            </label>
-            <p className="hint">
-              Applied immediately and remembered on this device.
-            </p>
-            {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
-                default; off stores a frequency of 0, which stops the reload. */}
-            <label className="switch-label">
-              <span>Autosync</span>
-              <span className="switch">
+                ✕
+              </button>
+            </div>
+            <section className="settings-group">
+              {/* Appearance (specs/ui.spec.md "Settings"): applied right away
+                  and remembered on this device, not in the settings file. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Appearance
+                  <span className="settings-row-hint">
+                    Applied immediately and remembered on this device.
+                  </span>
+                </span>
+                <select
+                  autoFocus
+                  value={theme}
+                  onChange={(e) => {
+                    const pref = e.target.value as ThemePref;
+                    setTheme(pref);
+                    applyThemePref(pref);
+                  }}
+                >
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </label>
+            </section>
+            <section className="settings-group">
+              {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
+                  default; off stores a frequency of 0, which stops the reload. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Autosync
+                  <span className="settings-row-hint">
+                    {settingsAutosyncOnDraft
+                      ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
+                      : "Autosync is off: the data repo is only pulled and pushed when you publish."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsAutosyncOnDraft}
+                    onChange={(e) => void toggleAutosync(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {settingsAutosyncOnDraft && (
+                <label className="settings-row">
+                  <span className="settings-row-label">Autosync frequency (seconds)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={settingsDraft}
+                    onChange={(e) => setSettingsDraft(e.target.value)}
+                    onBlur={() => void commitAutosyncSeconds()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                  />
+                </label>
+              )}
+              {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
+                  accelerator on top of git, with an explicit privacy warning. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Live sync server (optional)
+                  <span className="settings-row-hint">
+                    Syncs edits between running apps in near-real time over websocket; git
+                    remains the source of record. On a public server such as
+                    wss://sync.automerge.org, anyone who has a document&apos;s id can read
+                    that document — leave it off to keep specs in the git repo only.
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsSyncOnDraft}
+                    onChange={(e) => void toggleLiveSync(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {settingsSyncOnDraft && (
+                <div className="settings-row">
+                  <input
+                    type="text"
+                    aria-label="Live sync server url"
+                    value={settingsSyncDraft}
+                    onChange={(e) => setSettingsSyncDraft(e.target.value)}
+                    onBlur={() => void commitSyncUrl()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                    placeholder="wss://sync.automerge.org"
+                  />
+                </div>
+              )}
+            </section>
+            <section className="settings-group">
+              {/* Editor autosave (specs/editor-autosave.feature.md): the open
+                  editor saves itself at this interval. There is no off switch —
+                  only how often, at least 3 seconds. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Autosave interval (seconds)
+                  <span className="settings-row-hint">
+                    An open scenario editor saves itself this often, so an unsaved edit is
+                    never more than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds;
+                    the default is {DEFAULT_AUTOSAVE_SECONDS}.
+                  </span>
+                </span>
                 <input
-                  type="checkbox"
-                  role="switch"
-                  checked={settingsAutosyncOnDraft}
-                  onChange={(e) => setSettingsAutosyncOnDraft(e.target.checked)}
+                  type="number"
+                  min={MIN_AUTOSAVE_SECONDS}
+                  value={settingsAutosaveDraft}
+                  onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
+                  onBlur={() => void commitAutosaveSeconds()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                 />
-                <span className="switch-track" aria-hidden="true" />
-              </span>
-            </label>
-            {settingsAutosyncOnDraft && (
-              <label>
-                Autosync frequency (seconds)
+              </label>
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Scenario preview lines
+                  <span className="settings-row-hint">
+                    How many lines of the rendered Markdown body each scenario shows in the
+                    list.
+                  </span>
+                </span>
                 <input
                   type="number"
                   min={1}
-                  value={settingsDraft}
-                  onChange={(e) => setSettingsDraft(e.target.value)}
+                  value={settingsLinesDraft}
+                  onChange={(e) => setSettingsLinesDraft(e.target.value)}
+                  onBlur={() => void commitPreviewLines()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                 />
               </label>
-            )}
-            <p className="hint">
-              {settingsAutosyncOnDraft
-                ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
-                : "Autosync is off: the data repo is only pulled and pushed when you publish."}
-            </p>
-            {/* Editor autosave (specs/editor-autosave.feature.md): the open
-                editor saves itself at this interval. There is no off switch —
-                only how often, at least 3 seconds. */}
-            <label>
-              Autosave interval (seconds)
-              <input
-                type="number"
-                min={MIN_AUTOSAVE_SECONDS}
-                value={settingsAutosaveDraft}
-                onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
-              />
-            </label>
-            <p className="hint">
-              An open scenario editor saves itself this often, so an unsaved edit is never more
-              than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds; the default is{" "}
-              {DEFAULT_AUTOSAVE_SECONDS}.
-            </p>
-            {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
-                accelerator on top of git, with an explicit privacy warning. */}
-            <label className="switch-label">
-              <span>Live sync server (optional)</span>
-              <span className="switch">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={settingsSyncOnDraft}
-                  onChange={(e) => setSettingsSyncOnDraft(e.target.checked)}
-                />
-                <span className="switch-track" aria-hidden="true" />
-              </span>
-            </label>
-            {settingsSyncOnDraft && (
-              <input
-                type="text"
-                aria-label="Live sync server url"
-                value={settingsSyncDraft}
-                onChange={(e) => setSettingsSyncDraft(e.target.value)}
-                placeholder="wss://sync.automerge.org"
-              />
-            )}
-            <p className="hint">
-              Syncs edits between running apps in near-real time over websocket; git remains
-              the source of record. On a public server such as wss://sync.automerge.org,
-              anyone who has a document&apos;s id can read that document — leave it off to
-              keep specs in the git repo only.
-            </p>
-            <label>
-              Scenario preview lines
-              <input
-                type="number"
-                min={1}
-                value={settingsLinesDraft}
-                onChange={(e) => setSettingsLinesDraft(e.target.value)}
-              />
-            </label>
-            <p className="hint">
-              How many lines of the rendered Markdown body each scenario shows in the list.
-              Settings are saved to .specdriven/settings.json.
-            </p>
-            {/* specs/traceability.spec.md: the test-links table is optional,
-                controlled here; default ON. */}
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={settingsTestLinksDraft}
-                onChange={(e) => setSettingsTestLinksDraft(e.target.checked)}
-              />
-              Show links to automated tests
-            </label>
-            <p className="hint">
-              Each scenario ends with a table of GitHub links to its automated tests, when it
-              has any.
-            </p>
-            {/* Code gen (specs/agents/claude.spec.md): off takes the selection
-                checkboxes and Start session away, and the server refuses a
-                session, so no spec can reach the Claude CLI. */}
-            <label className="switch-label">
-              <span>Code generation</span>
-              <span className="switch">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={settingsCodeGenDraft}
-                  onChange={(e) => setSettingsCodeGenDraft(e.target.checked)}
-                />
-                <span className="switch-track" aria-hidden="true" />
-              </span>
-            </label>
-            <p className="hint">
-              {settingsCodeGenDraft
-                ? "Specs and scenarios can be selected and handed to the Claude CLI, which implements them in the data repo."
-                : "Code generation is off: no selection checkboxes, and sessions are refused."}
-            </p>
-            {/* Git engine (specs/git-operations.spec.md): which one carries
-                the operations out and who supplies GitHub credentials. */}
-            <label>
-              Git engine
-              <select
-                value={settingsEngineDraft}
-                onChange={(e) => setSettingsEngineDraft(e.target.value)}
-              >
-                <option value="auto">
-                  Automatic — GitHub CLI when installed (recommended)
-                </option>
-                <option value="gh" disabled={!gh?.available}>
-                  GitHub CLI (gh){gh?.available ? "" : " — not installed"}
-                </option>
-                <option value="cli" disabled={!cliGitAvailable}>
-                  System git{cliGitAvailable ? "" : " — not installed"}
-                </option>
-                {/* Bundled with the app, so never disabled. */}
-                <option value="js">Built-in (no git needed)</option>
-              </select>
-            </label>
-            <p className="hint">
-              {gitEngineEffective === "gh"
-                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
-                : gitEngineEffective === "js"
-                  ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
-                  : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
-            </p>
-            {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
-                when that engine is in effect, else the device flow. */}
-            <div className="auth-section">
-              <span className="auth-title">GitHub account</span>
-              {gh?.available && (
-                <p className="hint">
-                  {gh.signedIn ? (
-                    <>
-                      GitHub CLI signed in
-                      {gh.login ? (
-                        <>
-                          {" "}
-                          as <strong>{gh.login}</strong>
-                        </>
-                      ) : null}
-                      .
-                    </>
-                  ) : (
-                    <>
-                      GitHub CLI installed but signed out — run <code>gh auth login</code>,
-                      then save these settings.
-                    </>
-                  )}
-                </p>
-              )}
-              {auth?.signedIn ? (
-                <div className="auth-row">
-                  <span>
-                    Signed in as <strong>{auth.login}</strong>
+              {/* specs/traceability.spec.md: the test-links table is optional,
+                  controlled here; default ON. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Show links to automated tests
+                  <span className="settings-row-hint">
+                    Each scenario ends with a table of GitHub links to its automated tests,
+                    when it has any.
                   </span>
-                  <button className="secondary" onClick={signOutGitHub}>
-                    Sign out
-                  </button>
-                </div>
-              ) : deviceFlow ? (
-                <div className="auth-device">
-                  <p>
-                    Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
-                    <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
-                      {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
-                    </a>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsTestLinksDraft}
+                    onChange={(e) => void toggleTestLinks(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+            </section>
+            <section className="settings-group">
+              {/* Code gen (specs/agents/claude.spec.md): off takes the selection
+                  checkboxes and Start session away, and the server refuses a
+                  session, so no spec can reach the Claude CLI. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Code generation
+                  <span className="settings-row-hint">
+                    {settingsCodeGenDraft
+                      ? "Specs and scenarios can be selected and handed to the Claude CLI, which implements them in the data repo."
+                      : "Code generation is off: no selection checkboxes, and sessions are refused."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsCodeGenDraft}
+                    onChange={(e) => void toggleCodeGen(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* Git engine (specs/git-operations.spec.md): which one carries
+                  the operations out and who supplies GitHub credentials. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Git engine
+                  <span className="settings-row-hint">
+                    {gitEngineEffective === "gh"
+                      ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
+                      : gitEngineEffective === "js"
+                        ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
+                        : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
+                  </span>
+                </span>
+                <select
+                  value={settingsEngineDraft}
+                  onChange={(e) => void pickGitEngine(e.target.value)}
+                >
+                  <option value="auto">
+                    Automatic — GitHub CLI when installed (recommended)
+                  </option>
+                  <option value="gh" disabled={!gh?.available}>
+                    GitHub CLI (gh){gh?.available ? "" : " — not installed"}
+                  </option>
+                  <option value="cli" disabled={!cliGitAvailable}>
+                    System git{cliGitAvailable ? "" : " — not installed"}
+                  </option>
+                  {/* Bundled with the app, so never disabled. */}
+                  <option value="js">Built-in (no git needed)</option>
+                </select>
+              </label>
+              {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
+                  when that engine is in effect, else the device flow. */}
+              <div className="settings-row auth-section">
+                <span className="auth-title">GitHub account</span>
+                {gh?.available && (
+                  <p className="hint">
+                    {gh.signedIn ? (
+                      <>
+                        GitHub CLI signed in
+                        {gh.login ? (
+                          <>
+                            {" "}
+                            as <strong>{gh.login}</strong>
+                          </>
+                        ) : null}
+                        .
+                      </>
+                    ) : (
+                      <>
+                        GitHub CLI installed but signed out — run <code>gh auth login</code>,
+                        then reopen this dialog.
+                      </>
+                    )}
                   </p>
-                  <p className="hint">Waiting for GitHub…</p>
-                </div>
-              ) : webConnecting ? (
-                <div className="auth-device">
-                  <p>Finish signing in to GitHub in your browser, then come back here.</p>
-                  <p className="hint">Waiting for GitHub…</p>
-                  <button className="secondary" onClick={() => setWebConnecting(false)}>
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="auth-row">
-                  {/* Browser OAuth needs an http(s) callback; the desktop
-                      app:// pages offer the device code only. */}
-                  {canConnectViaBrowser && (
-                    <button className="secondary" onClick={connectGitHub}>
-                      Connect to GitHub
+                )}
+                {auth?.signedIn ? (
+                  <div className="auth-row">
+                    <span>
+                      Signed in as <strong>{auth.login}</strong>
+                    </span>
+                    <button className="secondary" onClick={signOutGitHub}>
+                      Sign out
                     </button>
-                  )}
-                  <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
-                    {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
-                  </button>
-                </div>
-              )}
-              {authStatus && <p className="error">{authStatus}</p>}
-            </div>
-            <p className="hint">
-              Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
-              sign-in on the system git and built-in ones. Local folders work without either.
+                  </div>
+                ) : deviceFlow ? (
+                  <div className="auth-device">
+                    <p>
+                      Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
+                      <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
+                        {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
+                      </a>
+                    </p>
+                    <p className="hint">Waiting for GitHub…</p>
+                  </div>
+                ) : webConnecting ? (
+                  <div className="auth-device">
+                    <p>Finish signing in to GitHub in your browser, then come back here.</p>
+                    <p className="hint">Waiting for GitHub…</p>
+                    <button className="secondary" onClick={() => setWebConnecting(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="auth-row">
+                    {/* Browser OAuth needs an http(s) callback; the desktop
+                        app:// pages offer the device code only. */}
+                    {canConnectViaBrowser && (
+                      <button className="secondary" onClick={connectGitHub}>
+                        Connect to GitHub
+                      </button>
+                    )}
+                    <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
+                      {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
+                    </button>
+                  </div>
+                )}
+                {authStatus && <p className="error">{authStatus}</p>}
+                <p className="hint">
+                  Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
+                  sign-in on the system git and built-in ones. Local folders work without
+                  either.
+                </p>
+              </div>
+            </section>
+            <p className="hint settings-footnote">
+              Changes are saved to .specdriven/settings.json as you make them.
             </p>
-            {settingsError && <p className="error">{settingsError}</p>}
-            <div className="dialog-actions">
-              <button className="secondary" onClick={() => setSettingsOpen(false)}>
-                Cancel
-              </button>
-              <button onClick={saveSettings}>Save settings</button>
-            </div>
+            <p className="hint settings-footnote">
+              <kbd>esc</kbd> to exit
+            </p>
+            {settingsError && <p className="error settings-error">{settingsError}</p>}
           </div>
         </div>
       )}
