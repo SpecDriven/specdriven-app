@@ -1139,6 +1139,8 @@ button.link:disabled {
 /* Scenario edit dialog (specs/ui.spec.md): resizable via the corner handle;
    the markdown editor absorbs the resized space. */
 .dialog.scenario-dialog {
+  /* Anchors the close-editor widget to the dialog's corner. */
+  position: relative;
   resize: both;
   overflow: hidden;
   width: min(46rem, 92vw);
@@ -1147,6 +1149,27 @@ button.link:disabled {
   min-height: 20rem;
   max-width: 96vw;
   max-height: 92vh;
+}
+
+/* The close-editor widget (specs/editor/spec-editor.feature.md): closing —
+   there or with ESC — leaves the scenario in its autosaved state. */
+.dialog .dialog-close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.35rem;
+  cursor: pointer;
+}
+
+.dialog .dialog-close:hover {
+  color: var(--text-1);
+  background: var(--surface-1);
 }
 
 .dialog-title {
@@ -1179,35 +1202,16 @@ button.link:disabled {
   border-bottom: 1px solid var(--accent);
 }
 
-/* The version is assigned by the app, so it reads as a label, not a field. */
+/* The version is assigned by the app, so it reads as a label, not a field.
+   The badge beside it is the scenario's status — draft until Propose or
+   Publish advances it (specs/editor/spec-editor.feature.md). */
 .dialog .version-field {
   margin: 0;
   color: var(--text-2);
   font-size: 0.83rem;
-}
-
-/* Draft checkbox — a draft is saved in the app but kept out of the
-   .feature.md (specs/crud-feature.spec.md "Scenario status"). */
-.dialog .draft-field {
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--text-2);
-  font-size: 0.83rem;
-  cursor: pointer;
-  user-select: none;
-  align-self: flex-start;
-}
-
-.dialog .draft-field input {
-  accent-color: var(--accent-strong);
-  margin: 0;
-}
-
-.dialog .draft-field:has(input:disabled) {
-  cursor: default;
-  color: var(--text-3);
+  align-items: baseline;
+  gap: 0.5rem;
 }
 
 .dialog .body-field {
@@ -2197,12 +2201,16 @@ button.table-add:hover {
   gap: 0.4rem;
 }
 
-.settings-footnote {
+/* The "esc to exit" note pinned to the bottom of the Settings and scenario
+   edit dialogs (specs/editor/spec-editor.feature.md). */
+.settings-footnote,
+.dialog-footnote {
   text-align: center;
   color: var(--text-3);
 }
 
-.settings-footnote kbd {
+.settings-footnote kbd,
+.dialog-footnote kbd {
   padding: 0.05rem 0.35rem;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
