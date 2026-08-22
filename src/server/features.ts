@@ -33,15 +33,10 @@ import {
   slugify,
   titleFromFileName,
 } from "./parser";
-import type { ScenarioPick } from "./parser";
+import type { Feature, ScenarioPick, ScenarioTarget } from "./parser";
 
 export { slugify } from "./parser";
-
-/** A single scenario picked for an individual publish (name + version). */
-export interface ScenarioTarget {
-  name: string;
-  version: number;
-}
+export type { ScenarioTarget } from "./parser";
 
 export interface PublishResult {
   status: "published" | "conflict";
@@ -104,43 +99,66 @@ export async function readFeature(dataDir: string, fileName: string): Promise<st
  * draft scenarios that live only in the Automerge document
  * (specs/automerge-store.spec.md "draft scenarios live in the document
  * only"), serialized with explicit [draft] chips so a later save keeps them
- * drafts. The file stays the source for everything it holds — the document
- * only contributes what the file cannot see.
+ * drafts — and the same thing parsed, each scenario carrying the document's
+ * id for it (`Scenario.id`), which the markdown never does. The file stays
+ * the source for everything it holds — the document only contributes what
+ * the file cannot see.
  */
+export interface FeatureView {
+  content: string;
+  parsed: Feature;
+}
+
+export async function readFeatureView(
+  dataDir: string,
+  fileName: string,
+): Promise<FeatureView | null> {
+  const content = await readFeature(dataDir, fileName);
+  if (content === null) return null;
+  return featureView(dataDir, safe(fileName), content);
+}
+
+/** The editor's view as text alone — a code gen session's input. */
 export async function readFeatureForEditor(
   dataDir: string,
   fileName: string,
 ): Promise<string | null> {
-  const content = await readFeature(dataDir, fileName);
-  if (content === null) return null;
-  return withDocDrafts(dataDir, safe(fileName), content);
+  return (await readFeatureView(dataDir, fileName))?.content ?? null;
 }
 
-/** Fold the document's draft scenarios into a feature text for the editor. */
-async function withDocDrafts(
+/** Fold the document's drafts, and its ids, into a feature text for the editor. */
+async function featureView(
   dataDir: string,
   fileName: string,
   content: string,
-): Promise<string> {
-  const loaded = await loadFeatureDoc(dataDir, fileName);
-  if (loaded === null) return content;
+): Promise<FeatureView> {
   const feature = parseFeature(content);
+  const loaded = await loadFeatureDoc(dataDir, fileName);
+  if (loaded === null) return { content, parsed: feature };
   const key = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
+  const ids = new Map(loaded.doc.specs.map((s) => [key(s), s.id] as const));
   const have = new Set(feature.scenarios.map(key));
-  const drafts = loaded.doc.scenarios
+  const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
     .map((s) => ({
+      id: s.id,
       name: s.name,
       version: s.version,
       status: s.status,
       body: s.body,
       tests: [...s.tests],
     }));
-  if (drafts.length === 0) return content;
-  return serializeFeature({
+  const parsed: Feature = {
     ...feature,
-    scenarios: sortScenarios([...feature.scenarios, ...drafts]),
-  });
+    scenarios: sortScenarios([
+      ...feature.scenarios.map((s) => {
+        const id = ids.get(key(s));
+        return id === undefined ? s : { ...s, id };
+      }),
+      ...drafts,
+    ]),
+  };
+  return { content: drafts.length === 0 ? content : serializeFeature(parsed), parsed };
 }
 
 /**
@@ -323,14 +341,14 @@ async function docMoves(
     : [];
 }
 
-export interface SaveResult {
+/**
+ * The editor's view of what was saved (FeatureView): the written file content
+ * — chipless scenarios marked [proposed] — plus the [draft] scenarios, which
+ * land in the Automerge document but never in the file, and the parsed form
+ * carrying each scenario's document id.
+ */
+export interface SaveResult extends FeatureView {
   status: "saved";
-  /**
-   * The editor's view of what was saved: the written file content — chipless
-   * scenarios marked [proposed] — plus the [draft] scenarios, which land in
-   * the Automerge document but never in the file.
-   */
-  content: string;
   message: string;
 }
 
@@ -341,24 +359,28 @@ export interface SaveResult {
  * explicit [draft] chip stay drafts: absorbed into the Automerge document,
  * left out of the `.feature.md`. The reload cron then commits and pushes
  * saved scenarios after its git pull.
+ *
+ * `scenario` is the one the editor is saving, with the document id it read it
+ * under: a scenario going out under a new name or version is then a rename
+ * of that entry, not a second scenario beside it
+ * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
+ * Twice") — the only way a draft gets out from under its old name, since a
+ * save that leaves a draft out removes nothing.
  */
 export async function saveFeature(
   dataDir: string,
   fileName: string,
   content: string,
+  scenario?: ScenarioTarget,
 ): Promise<SaveResult> {
   const name = safe(fileName);
   const proposed = markProposed(content);
   assertFeatureText(name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
-  const written = await writeFeatureFile(dataDir, name, proposed);
-  // Hand the drafts back with the file content, or the client would see the
-  // scenario it just saved vanish.
-  return {
-    status: "saved",
-    content: await withDocDrafts(dataDir, name, written),
-    message: "saved locally",
-  };
+  const written = await writeFeatureFile(dataDir, name, proposed, scenario);
+  // Hand the drafts (and the ids) back with the file content, or the client
+  // would see the scenario it just saved vanish.
+  return { status: "saved", ...(await featureView(dataDir, name, written)), message: "saved locally" };
 }
 
 /**
@@ -385,8 +407,52 @@ export async function deleteDraftScenario(
   if (content === null) throw new Error(`Feature file not found: ${name}`);
   return {
     status: "saved",
-    content: await withDocDrafts(dataDir, name, content),
+    ...(await featureView(dataDir, name, content)),
     message: "draft deleted locally",
+  };
+}
+
+/**
+ * Delete a published scenario (specs/editor/spec-editor.feature.md "Delete
+ * Published Spec"): the one removal a plain save must never perform —
+ * published scenarios are immutable, and both immutability gates would refuse
+ * it. Called only from its own route, which the user-settings switch guards;
+ * the client has already shown the Danger Zone confirmation. The doc absorbs
+ * the removal with `force`, the same authority a human conflict resolution
+ * has, and the change is committed and pushed right away like every other
+ * edit to published content.
+ */
+export async function deletePublishedScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const current = await readFeature(dataDir, name);
+  if (current === null) throw new Error(`Feature file not found: ${name}`);
+  const feature = parseFeature(current);
+  const at = feature.scenarios.findIndex(
+    (s) => s.status === "published" && s.name === target.name && s.version === target.version,
+  );
+  if (at === -1) {
+    throw new Error(`Published scenario "${target.name}" @v${target.version} not found`);
+  }
+  const next = serializeFeature({
+    ...feature,
+    scenarios: feature.scenarios.filter((_, i) => i !== at),
+  });
+  assertFeatureText(name, next);
+  const projection = await absorbIntoDoc(dataDir, name, next, { force: true });
+  await writeTextFile(`${dataDir}/${name}`, projection);
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, name),
+    `Delete published scenario: ${target.name} v${target.version} (${name})`,
+  );
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, projection)),
+    message: sync.message,
   };
 }
 
@@ -413,6 +479,9 @@ function markForPublish(content: string, scenario?: ScenarioTarget): string {
  * sides so the user can resolve (accept yours / accept theirs / manual edit).
  * With a scenario target, only that scenario is marked [published]
  * (specs/crud-feature.spec.md "publish each scenario individually").
+ * The target's document id, when the editor sends one, is how the dialog's
+ * Publish of a retyped title publishes the draft it came from rather than a
+ * second scenario beside it (saveFeature).
  */
 export async function publishFeature(
   dataDir: string,
@@ -461,7 +530,7 @@ export async function publishFeature(
     }
     published = serializeFeature(folded.feature);
   }
-  await writeFeatureFile(dataDir, name, published);
+  await writeFeatureFile(dataDir, name, published, scenario);
   const sync = await commitAndPush(
     dataDir,
     await featurePaths(dataDir, name),
@@ -475,7 +544,9 @@ export async function publishFeature(
 /**
  * Complete a conflicted publish with the user's chosen resolution, then commit
  * and push. A scenario target scopes the marking to that scenario; if the
- * resolution dropped it (e.g. "accept theirs"), nothing is marked.
+ * resolution dropped it (e.g. "accept theirs"), nothing is marked. Its
+ * document id rides along from the publish that conflicted, so a renamed
+ * scenario is still renamed by the resolution rather than doubled.
  */
 export async function resolveFeatureConflict(
   dataDir: string,
@@ -492,7 +563,7 @@ export async function resolveFeatureConflict(
   assertFeatureText(name, resolved);
   // The human chose this resolution, so it overrides the doc's published
   // state (force) — the same authority a hand-edited merge has today.
-  const projection = await absorbIntoDoc(dataDir, name, resolved, { force: true });
+  const projection = await absorbIntoDoc(dataDir, name, resolved, { force: true, scenario });
   const sync = await gitResolve(
     dataDir,
     name,
@@ -531,9 +602,14 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
  * `.feature.md` is the document's projection: parse-equal to the input,
  * canonically formatted, identical on every peer that merges the same edits.
  */
-async function writeFeatureFile(dataDir: string, fileName: string, text: string): Promise<string> {
+async function writeFeatureFile(
+  dataDir: string,
+  fileName: string,
+  text: string,
+  scenario?: ScenarioTarget,
+): Promise<string> {
   assertFeatureText(fileName, text);
-  const projection = await absorbIntoDoc(dataDir, fileName, text);
+  const projection = await absorbIntoDoc(dataDir, fileName, text, { scenario });
   await writeTextFile(`${dataDir}/${fileName}`, projection);
   return projection;
 }
@@ -542,13 +618,15 @@ async function writeFeatureFile(dataDir: string, fileName: string, text: string)
  * Feed a feature text into its Automerge document — reconciled as CRDT
  * operations, or imported whole for a feature that predates its document —
  * and return the projection the markdown file must now hold. `force` skips
- * the published-immutability gate for an explicit human conflict resolution.
+ * the published-immutability gate for an explicit human conflict resolution;
+ * `scenario` carries the editor's document id for the scenario it is saving
+ * (reconcile).
  */
 async function absorbIntoDoc(
   dataDir: string,
   fileName: string,
   text: string,
-  { force = false } = {},
+  { force = false, scenario }: { force?: boolean; scenario?: ScenarioTarget } = {},
 ): Promise<string> {
   return withSpan("automerge.absorb_edit", { "specdriven.file": fileName }, async (span) => {
     const feature = parseFeature(text);
@@ -558,7 +636,7 @@ async function absorbIntoDoc(
       const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
       return projectFeature(created.doc);
     }
-    const next = reconcile(loaded.doc, feature, { force });
+    const next = reconcile(loaded.doc, feature, { force, scenario });
     await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
     return projectFeature(next);
   });

@@ -241,7 +241,7 @@ test("saveFeature keeps a [draft] scenario out of the file but not out of the ed
   expect(text).toContain("## Basic @v1 [proposed]");
   expect(text).not.toContain("Idea");
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
-  expect(loaded!.doc.scenarios.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
+  expect(loaded!.doc.specs.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
   expect(result.content).toContain("## Idea @v1 [draft]");
   expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
@@ -273,7 +273,7 @@ test("deleteDraftScenario removes the draft from the document", async () => {
   expect(result.content).not.toContain("Idea");
   expect(result.content).toContain("## Basic @v1 [proposed]");
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
-  expect(loaded!.doc.scenarios.map((s) => s.name)).toEqual(["Basic"]);
+  expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Basic"]);
   expect(await readFeatureForEditor(root, "quote.feature.md")).not.toContain("Idea");
   // The scenario the file does hold is untouched.
   expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
@@ -699,9 +699,9 @@ describe("doc/markdown lockstep", () => {
   test("a scenario keeps its doc identity across saves", async () => {
     const file = await createFeature(root, "Quote");
     await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
-    const before = (await loadFeatureDoc(root, file))!.doc.scenarios[0]!;
+    const before = (await loadFeatureDoc(root, file))!.doc.specs[0]!;
     await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody, edited\n");
-    const after = (await loadFeatureDoc(root, file))!.doc.scenarios[0]!;
+    const after = (await loadFeatureDoc(root, file))!.doc.specs[0]!;
     expect(after.id).toBe(before.id);
   });
 
