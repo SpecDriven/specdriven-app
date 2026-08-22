@@ -155,8 +155,9 @@ export function reconcile(
  * what markdown always looks like, and reconcile keeps the entry. Deleting a
  * draft is therefore a direct document operation, asked for explicitly.
  *
- * Drafts only — a proposed or published scenario is removed by saving the
- * feature without it. Null when no draft carries that name and version.
+ * Drafts only — a proposed scenario is removed by saving the feature without
+ * it, and a published one through deletePublishedScenario in features.ts.
+ * Null when no draft carries that name and version.
  */
 export function removeDraftScenario(
   doc: A.Doc<FeatureDoc>,

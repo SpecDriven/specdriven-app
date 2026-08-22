@@ -413,6 +413,50 @@ export async function deleteDraftScenario(
 }
 
 /**
+ * Delete a published scenario (specs/editor/spec-editor.feature.md "Delete
+ * Published Spec"): the one removal a plain save must never perform —
+ * published scenarios are immutable, and both immutability gates would refuse
+ * it. Called only from its own route, which the user-settings switch guards;
+ * the client has already shown the Danger Zone confirmation. The doc absorbs
+ * the removal with `force`, the same authority a human conflict resolution
+ * has, and the change is committed and pushed right away like every other
+ * edit to published content.
+ */
+export async function deletePublishedScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const current = await readFeature(dataDir, name);
+  if (current === null) throw new Error(`Feature file not found: ${name}`);
+  const feature = parseFeature(current);
+  const at = feature.scenarios.findIndex(
+    (s) => s.status === "published" && s.name === target.name && s.version === target.version,
+  );
+  if (at === -1) {
+    throw new Error(`Published scenario "${target.name}" @v${target.version} not found`);
+  }
+  const next = serializeFeature({
+    ...feature,
+    scenarios: feature.scenarios.filter((_, i) => i !== at),
+  });
+  assertFeatureText(name, next);
+  const projection = await absorbIntoDoc(dataDir, name, next, { force: true });
+  await writeTextFile(`${dataDir}/${name}`, projection);
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, name),
+    `Delete published scenario: ${target.name} v${target.version} (${name})`,
+  );
+  return {
+    status: "saved",
+    content: await withDocDrafts(dataDir, name, projection),
+    message: sync.message,
+  };
+}
+
+/**
  * Mark scenarios published: every scenario for a whole-feature publish, or
  * just the targeted one (specs/crud-feature.spec.md "publish each scenario
  * individually"). A target that isn't in the content is an error, not a no-op.

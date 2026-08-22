@@ -202,6 +202,16 @@ export function scenarioSignature(s: Scenario, version: number): string {
   return JSON.stringify([s.name, version, s.status, s.body, s.tests]);
 }
 
+/**
+ * Whether the scenario's name is still being typed — the dialog's title field
+ * holds the caret (specs/editor-autosave.feature.md "Autosave Waits While the
+ * Name Is Being Typed"). A tick that fires mid-word would save the half-typed
+ * name as a draft, so it stands down until focus moves on.
+ */
+export function namingInProgress(nameField: Element | null, active: Element | null): boolean {
+  return nameField !== null && nameField === active;
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -274,6 +284,10 @@ export function App() {
   // because a tick reads them between renders and must not cause one.
   const autosaved = useRef<string | null>(null);
   const autosaveInFlight = useRef(false);
+  /** The dialog's title field, so a tick can see whether the name is still
+      being typed (specs/editor-autosave.feature.md). Null once the scenario
+      is published, when the name is no longer editable. */
+  const nameFieldRef = useRef<HTMLInputElement | null>(null);
   /** Close, for the handlers that close the dialog from outside the render
       that defines it (ESC). Kept in a ref so they always run the current one. */
   const closeEditorRef = useRef<() => void>(() => {});
@@ -302,6 +316,10 @@ export function App() {
   const [showTestLinks, setShowTestLinks] = useState(true);
   /** Code gen sessions offered at all (specs/agents/claude.spec.md). */
   const [codeGen, setCodeGen] = useState(true);
+  // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
+  // Published Spec"): opt-in — published scenarios stay immutable until the
+  // Settings switch turns deletion on.
+  const [deletePublished, setDeletePublished] = useState(false);
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -315,6 +333,7 @@ export function App() {
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
+  const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -385,6 +404,9 @@ export function App() {
       }
       if (typeof state.codeGen === "boolean") {
         setCodeGen(state.codeGen);
+      }
+      if (typeof state.deletePublished === "boolean") {
+        setDeletePublished(state.deletePublished);
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
@@ -1502,6 +1524,10 @@ export function App() {
     if (!editing || !feature || !selected) return;
     if (autosaveInFlight.current) return; // the previous tick is still saving
     if (deletingScenario.current) return; // a delete is being confirmed or sent
+    // The name is still being typed: saving now would put a half-typed name
+    // on the draft (specs/editor-autosave.feature.md "Autosave Waits While the
+    // Name Is Being Typed"). The tick after focus moves on saves it.
+    if (namingInProgress(nameFieldRef.current, document.activeElement)) return;
     // A scenario with no name has nothing to be saved under; the Save button
     // is disabled for the same reason.
     if (!editing.scenario.name.trim()) return;
@@ -1556,6 +1582,7 @@ export function App() {
     );
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsCodeGenDraft(codeGen);
+    setSettingsDeletePublishedDraft(deletePublished);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -1705,6 +1732,7 @@ export function App() {
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
+    setDeletePublished(data.deletePublished === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -1785,6 +1813,11 @@ export function App() {
     if (!(await patchSettings({ codeGen: on }))) setSettingsCodeGenDraft(!on);
   };
 
+  const toggleDeletePublished = async (on: boolean) => {
+    setSettingsDeletePublishedDraft(on);
+    if (!(await patchSettings({ deletePublished: on }))) setSettingsDeletePublishedDraft(!on);
+  };
+
   const pickGitEngine = async (engine: string) => {
     const prev = settingsEngineDraft;
     setSettingsEngineDraft(engine);
@@ -1851,11 +1884,13 @@ export function App() {
 
   /**
    * Delete the dialog's scenario (specs/ui.spec.md "Scenario edit dialog"),
-   * after a confirmation. Two removals, by what the scenario is: a [proposed]
-   * one is saved out of the feature like any other edit, while a draft — which
-   * the `.feature.md` never held, so leaving it out of a save would remove
-   * nothing — is deleted from the Automerge document through its own route.
-   * Either way it is local; the reload cron commits and pushes it.
+   * after a confirmation. Three removals, by what the scenario is: a
+   * [proposed] one is saved out of the feature like any other edit; a draft —
+   * which the `.feature.md` never held, so leaving it out of a save would
+   * remove nothing — is deleted from the Automerge document through its own
+   * route; and a [published] one (offered only while Settings allows it —
+   * specs/editor/spec-editor.feature.md "Delete Published Spec") goes through
+   * its own route too, which commits and pushes the removal right away.
    */
   const deleteScenario = async () => {
     if (!editing || editing.index === null || !feature || !selected) return;
@@ -1868,14 +1903,25 @@ export function App() {
     // From here on autosave stands down: a tick landing while the
     // confirmation is up could re-sort the feature under `idx`.
     deletingScenario.current = true;
-    const ok = await confirm({
-      title: "Delete scenario",
-      body:
-        saved.status === "draft"
-          ? `Delete the draft "${name}" v${version}?`
-          : `Delete "${name}" v${version}?`,
-      confirmLabel: "Delete scenario",
-    });
+    // A published scenario gets the Danger Zone wording and a Confirm button
+    // (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
+    // published, immutable content, deletable only because Settings says so.
+    const ok = await confirm(
+      saved.status === "published"
+        ? {
+            title: "Danger Zone!",
+            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
+            confirmLabel: "Confirm",
+          }
+        : {
+            title: "Delete scenario",
+            body:
+              saved.status === "draft"
+                ? `Delete the draft "${name}" v${version}?`
+                : `Delete "${name}" v${version}?`,
+            confirmLabel: "Delete scenario",
+          },
+    );
     if (!ok) {
       deletingScenario.current = false;
       return;
@@ -1886,10 +1932,12 @@ export function App() {
 
   /**
    * Take a scenario back out of the open feature, by what it is: a [proposed]
-   * one is saved out of the feature like any other edit, while a draft — which
-   * the `.feature.md` never held — is deleted from the Automerge document
-   * through its own route. Local either way; the reload cron commits and
-   * pushes it. `saved` is the entry as last saved, at `idx` in the feature.
+   * one is saved out of the feature like any other edit; a draft — which the
+   * `.feature.md` never held — is deleted from the Automerge document through
+   * its own route; a [published] one through the delete-published route,
+   * which commits and pushes right away. The first two are local, picked up
+   * by the reload cron. `saved` is the entry as last saved, at `idx` in the
+   * feature.
    */
   const removeScenario = async (idx: number, saved: Scenario, done: string) => {
     if (!feature || !selected) return;
@@ -1904,9 +1952,13 @@ export function App() {
       prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
     );
     const url = `/api/features/${encodeURIComponent(selected)}`;
+    // Drafts and published scenarios go through their own routes — a draft
+    // because the file never held it, a published one because both
+    // immutability gates refuse a save without it
+    // (specs/editor/spec-editor.feature.md "Delete Published Spec").
     const res =
-      saved.status === "draft"
-        ? await fetch(`${url}/delete-draft`, {
+      saved.status === "draft" || saved.status === "published"
+        ? await fetch(`${url}/${saved.status === "draft" ? "delete-draft" : "delete-published"}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ scenario: { name: saved.name, version: saved.version } }),
@@ -2218,10 +2270,13 @@ export function App() {
   const savedEntry =
     editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
   // Delete applies to [proposed] scenarios and to drafts (specs/ui.spec.md
-  // "Scenario edit dialog") — not to published ones (immutable), and not to a
-  // scenario that isn't part of the feature yet (index === null). A new one
-  // autosave has already placed does have an index, and can be deleted.
-  const editingDeletable = savedEntry !== null && savedEntry.status !== "published";
+  // "Scenario edit dialog") — not to a scenario that isn't part of the
+  // feature yet (index === null; a new one autosave has already placed does
+  // have an index, and can be deleted). Published ones are immutable, unless
+  // deletion is turned on in Settings (specs/editor/spec-editor.feature.md
+  // "Delete Published Spec").
+  const editingDeletable =
+    savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
   return (
@@ -2977,6 +3032,29 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              {/* Deleting published scenarios
+                  (specs/editor/spec-editor.feature.md "Delete Published
+                  Spec"): opt-in — with the switch off published scenarios
+                  stay immutable and the editor offers no Delete for them. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Allow deleting published specs
+                  <span className="settings-row-hint">
+                    {settingsDeletePublishedDraft
+                      ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
+                      : "Published scenarios are immutable and cannot be deleted."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsDeletePublishedDraft}
+                    onChange={(e) => void toggleDeletePublished(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
               {/* Git engine (specs/git-operations.spec.md): which one carries
                   the operations out and who supplies GitHub credentials. */}
               <label className="settings-row">
@@ -3142,6 +3220,9 @@ export function App() {
             ) : (
               <input
                 className="dialog-title-input"
+                // While this field has the caret autosave stands down, so the
+                // name is saved once, whole (specs/editor-autosave.feature.md).
+                ref={nameFieldRef}
                 value={editing.scenario.name}
                 placeholder="Scenario name"
                 aria-label="Scenario name"
@@ -3294,9 +3375,11 @@ export function App() {
             )}
             <div className="dialog-actions">
               {/* Proposed scenarios and drafts can be deleted
-                  (specs/editor/spec-editor.feature.md) — confirmed first, then
-                  saved out of the feature or removed from the document. Kept
-                  apart from Propose/Publish on the far left. */}
+                  (specs/editor/spec-editor.feature.md) — published ones too
+                  while Settings allows it ("Delete Published Spec") —
+                  confirmed first, then saved out of the feature or removed
+                  from the document. Kept apart from Propose/Publish on the
+                  far left. */}
               {editingDeletable && (
                 <button className="danger" onClick={() => void deleteScenario()}>
                   Delete
