@@ -9,6 +9,7 @@ import {
   normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeDeletePublished,
+  normalizePublishExternalLinks,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -52,6 +53,7 @@ import {
   moveFeature,
   renameFeature,
   renameFeatureFile,
+  reprojectFeatures,
   saveFeature,
   publishFeature,
   resolveFeatureConflict,
@@ -70,6 +72,7 @@ import {
   syncDataDir,
 } from "./reload";
 import { startNetSyncClient } from "./automerge/netsync";
+import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
 
@@ -167,6 +170,12 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  // External links go into the markdown projections only while the setting
+  // says so (specs/external-links/project-management-jira-linear-etc.
+  // feature.md) — decided before the first sync tick writes a projection.
+  setProjectionOptions({
+    publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
+  });
   // specs/app-start.spec.md: pull the data repo on start. Not awaited here —
   // reads wait for it through syncedOnStart(); everything else starts now.
   startupSync = syncTick(() => reloadData(getAppRoot()));
@@ -248,6 +257,7 @@ async function stateFields(state: SpecDrivenState) {
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -280,6 +290,7 @@ const putState: Handler = async (req) => {
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
+    publishExternalLinks?: boolean;
     codeGen?: boolean;
     deletePublished?: boolean;
     syncServerUrl?: string | null;
@@ -291,6 +302,7 @@ const putState: Handler = async (req) => {
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
+    body.publishExternalLinks === undefined &&
     body.codeGen === undefined &&
     body.deletePublished === undefined &&
     body.syncServerUrl === undefined
@@ -298,7 +310,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen, deletePublished or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, publishExternalLinks, codeGen, deletePublished or syncServerUrl is required",
       },
       400,
     );
@@ -376,6 +388,19 @@ const putState: Handler = async (req) => {
     if (body.showTestLinks) delete state.showTestLinks;
     else state.showTestLinks = false;
   }
+  // External links in the markdown (specs/external-links/project-management-
+  // jira-linear-etc.feature.md): optional, default ON — stored as an absent
+  // key. Flipping it rewrites every feature file to the new form below.
+  let linksChanged = false;
+  if (body.publishExternalLinks !== undefined) {
+    if (typeof body.publishExternalLinks !== "boolean") {
+      return json({ error: "publishExternalLinks must be a boolean" }, 400);
+    }
+    linksChanged =
+      body.publishExternalLinks !== normalizePublishExternalLinks(state.publishExternalLinks);
+    if (body.publishExternalLinks) delete state.publishExternalLinks;
+    else state.publishExternalLinks = false;
+  }
   // Code gen sessions (specs/agents/claude.spec.md): switched off here, the
   // app offers no way to run one — the default ON is an absent key.
   if (body.codeGen !== undefined) {
@@ -409,6 +434,22 @@ const putState: Handler = async (req) => {
   }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  setProjectionOptions({
+    publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
+  });
+  if (linksChanged && !needsDataRepo(state)) {
+    // The switch takes effect on every `.feature.md` at once; the reload
+    // cron commits and pushes the rewritten files like any saved change.
+    try {
+      const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
+      const changed = await reprojectFeatures(dir);
+      reloadLog.info(
+        `external links ${state.publishExternalLinks === false ? "withheld from" : "written into"} ${changed} feature file(s)`,
+      );
+    } catch (e) {
+      reloadLog.error((e as Error).message, errorAttributes(e));
+    }
+  }
   // specs/app-start.spec.md "changing the data repo": a newly picked folder is
   // pulled before the response, so the client's first read of it — which
   // follows this response — already shows the latest data. A pull that fails

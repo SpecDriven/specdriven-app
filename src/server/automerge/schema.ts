@@ -7,7 +7,7 @@
 // handles (parser.ts `Scenario.id`) and hands them back on a save, so a
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
-import type { ScenarioStatus } from "../parser";
+import type { ExternalLink, ScenarioStatus } from "../parser";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
 // the doc-only `draft` state.
@@ -36,6 +36,14 @@ export type SpecEntry = {
   body: string;
   /** GitHub urls of the automated tests covering this spec. */
   tests: string[];
+  /**
+   * The ticket tracking this scenario in a project management tool
+   * (specs/external-links/project-management-jira-linear-etc.feature.md).
+   * Absent when there is none; set whole, so concurrent edits resolve to
+   * one link rather than a mix of two. Added after schema v2 as an optional
+   * key — older documents simply lack it, no migration needed.
+   */
+  link?: ExternalLink;
 };
 
 export type FeatureDoc = {
@@ -46,4 +54,6 @@ export type FeatureDoc = {
   /** Free markdown between the feature heading and the first spec. */
   description: string;
   specs: SpecEntry[];
+  /** The ticket tracking the feature as a whole, if any (see SpecEntry.link). */
+  link?: ExternalLink;
 };

@@ -31,6 +31,13 @@ export interface SpecDrivenState {
   /** Show the test-links table on scenario cards
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;
+  /**
+   * Write external links — the Jira/Linear ticket of a feature or scenario
+   * — into the `.feature.md` files
+   * (specs/external-links/project-management-jira-linear-etc.feature.md);
+   * absent means ON. Off keeps the links in the app's documents only.
+   */
+  publishExternalLinks?: boolean;
   /** Offer code gen sessions (specs/agents/claude.spec.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to the Claude CLI. */
@@ -142,6 +149,12 @@ export function normalizeCodeGen(value: unknown): boolean {
     (specs/editor/spec-editor.feature.md "Delete Published Spec"). */
 export function normalizeDeletePublished(value: unknown): boolean {
   return value === true;
+}
+
+/** Effective "Publish external links" setting: ON unless explicitly turned
+    off (specs/external-links/project-management-jira-linear-etc.feature.md). */
+export function normalizePublishExternalLinks(value: unknown): boolean {
+  return value !== false;
 }
 
 /**
