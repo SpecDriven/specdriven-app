@@ -44,3 +44,16 @@ export function buildTree(folders: string[], features: FeatureListing[]): Folder
   }
   return root;
 }
+
+/**
+ * The first feature in sidebar order — folders before features, depth first,
+ * mirroring how the tree renders. Used to open something rather than a blank
+ * pane after a new data folder is picked (specs/app-start.spec.md).
+ */
+export function firstFeature(node: FolderNode): FeatureListing | undefined {
+  for (const child of node.folders) {
+    const found = firstFeature(child);
+    if (found) return found;
+  }
+  return node.features[0];
+}

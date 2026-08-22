@@ -42,7 +42,7 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree } from "./tree";
+import { buildTree, firstFeature } from "./tree";
 import type { FolderNode } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import type { ScenarioRef } from "./route";
@@ -232,6 +232,12 @@ interface OpenOptions {
   scenario?: ScenarioRef | null;
 }
 
+/** What /api/features returns: the flat feature list plus the folder list. */
+interface Listing {
+  features: FeatureListing[];
+  folders: string[];
+}
+
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
   const [needsRepo, setNeedsRepo] = useState(false);
@@ -395,16 +401,19 @@ export function App() {
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
   const { modal, modalOpen, prompt, confirm } = useModalPrompts();
 
-  const loadFeatures = useCallback(async () => {
+  /** Returns the listing it loaded, so callers can act on it before state settles. */
+  const loadFeatures = useCallback(async (): Promise<Listing | null> => {
     const res = await fetch("/api/features");
     const data = await res.json();
     if (res.ok) {
-      setFeatures(data.features);
-      setFolders(data.folders ?? []);
+      const listing: Listing = { features: data.features, folders: data.folders ?? [] };
+      setFeatures(listing.features);
+      setFolders(listing.folders);
       setLoadError(null);
-    } else {
-      setLoadError(data.error ?? "Could not load features");
+      return listing;
     }
+    setLoadError(data.error ?? "Could not load features");
+    return null;
   }, []);
 
   useEffect(() => {
@@ -775,6 +784,15 @@ export function App() {
           : `SpecDriven — ${name}`;
   }, [selected, feature, selectedScenario]);
 
+  // A freshly picked data folder has no selection of its own, and an empty
+  // spec pane says nothing about the folder. Open its topmost feature — the
+  // first one the sidebar lists — so the specs list has content.
+  const openFirstFeature = async (listing: Listing | null) => {
+    if (!listing) return;
+    const first = firstFeature(buildTree(listing.folders, listing.features));
+    if (first) await openFeature(first.fileName);
+  };
+
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
     // effect would rewrite a deep link before we get to honor it
@@ -792,8 +810,11 @@ export function App() {
       if (res.ok) {
         setDataRepo(state.dataRepo);
         setNeedsRepo(false);
-        await loadFeatures();
+        const listing = await loadFeatures();
         await openFromLocation(entryPath);
+        // No deep link to honor: open the first feature rather than the empty
+        // pane a bare "/" would leave (specs/app-start.spec.md).
+        if (!parseRoute(entryPath).feature) await openFirstFeature(listing);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
       }
@@ -845,7 +866,7 @@ export function App() {
         setFeature(null);
         setSelectedScenario(null);
         setStatus("");
-        await loadFeatures();
+        await openFirstFeature(await loadFeatures());
       } else {
         setStatus(state.error ?? "Could not use this directory");
       }
