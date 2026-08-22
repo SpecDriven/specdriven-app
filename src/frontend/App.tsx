@@ -3653,16 +3653,20 @@ export function App() {
               {/* The two ways forward (specs/editor/spec-editor.feature.md):
                   Propose moves the draft into the .feature.md as [proposed];
                   Publish takes it straight to [published], committed and
-                  pushed. Closing without either keeps the autosaved draft. */}
+                  pushed. Closing without either keeps the autosaved draft.
+                  Propose is only offered on a draft — an already proposed
+                  scenario has nowhere left to go but Publish. */}
               {!editingPublished && (
                 <>
-                  <button
-                    className="secondary"
-                    onClick={() => void proposeScenario()}
-                    disabled={!editing.scenario.name.trim()}
-                  >
-                    Propose
-                  </button>
+                  {editing.scenario.status === "draft" && (
+                    <button
+                      className="secondary"
+                      onClick={() => void proposeScenario()}
+                      disabled={!editing.scenario.name.trim()}
+                    >
+                      Propose
+                    </button>
+                  )}
                   <button
                     onClick={() => void publishScenario()}
                     disabled={!editing.scenario.name.trim() || publishing !== null}
