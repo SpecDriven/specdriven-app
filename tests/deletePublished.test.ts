@@ -133,7 +133,7 @@ test("with the setting on, a confirmed delete removes the published spec", async
     "## Extra @v1 [proposed]",
   );
   const loaded = await loadFeatureDoc(data, "quote.feature.md");
-  expect(loaded!.doc.scenarios.map((s) => s.name)).toEqual(["Extra"]);
+  expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Extra"]);
 });
 
 // Only a published scenario goes through this door — drafts and proposed

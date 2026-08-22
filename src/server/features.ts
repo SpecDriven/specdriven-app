@@ -136,9 +136,9 @@ async function featureView(
   const loaded = await loadFeatureDoc(dataDir, fileName);
   if (loaded === null) return { content, parsed: feature };
   const key = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
-  const ids = new Map(loaded.doc.scenarios.map((s) => [key(s), s.id] as const));
+  const ids = new Map(loaded.doc.specs.map((s) => [key(s), s.id] as const));
   const have = new Set(feature.scenarios.map(key));
-  const drafts = loaded.doc.scenarios
+  const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
     .map((s) => ({
       id: s.id,
@@ -451,7 +451,7 @@ export async function deletePublishedScenario(
   );
   return {
     status: "saved",
-    content: await withDocDrafts(dataDir, name, projection),
+    ...(await featureView(dataDir, name, projection)),
     message: sync.message,
   };
 }
