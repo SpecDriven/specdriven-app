@@ -3,6 +3,9 @@
 // document (src/server/automerge/project.ts); concurrent edits merge at the
 // CRDT level instead of surfacing as git conflicts. Scenario identity in the
 // projection stays (name, version) — the ids below never appear in markdown.
+// They are private to the document: the editor only ever holds them as opaque
+// handles (parser.ts `Scenario.id`) and hands them back on a save, so a
+// scenario renamed in the dialog stays one scenario (reconcile.ts).
 
 import type { ScenarioStatus } from "../parser";
 

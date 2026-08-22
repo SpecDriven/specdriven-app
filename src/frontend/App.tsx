@@ -7,7 +7,7 @@ import {
   sortScenarios,
   titleFromFileName,
 } from "../server/parser";
-import type { Feature, Scenario, ScenarioPick } from "../server/parser";
+import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
@@ -42,8 +42,9 @@ interface Conflict {
   ours: string;
   theirs: string;
   message: string;
-  /** Set when the conflicted publish targeted a single scenario. */
-  scenario?: { name: string; version: number };
+  /** Set when the conflicted publish targeted a single scenario — with its
+      document id, so the resolution still renames rather than doubles it. */
+  scenario?: ScenarioTarget;
 }
 
 /** Signed-in GitHub account as reported by /api/state (never the token). */
@@ -145,7 +146,12 @@ function storeSidebarWidth(w: number): void {
 /**
  * index === null means a new scenario being added; every save — autosave
  * included — points it at the entry it wrote, so the next save rewrites that
- * entry instead of appending a second one.
+ * entry instead of appending a second one. `scenario.id` — the document id
+ * the server reads the scenario under, adopted from a new scenario's first
+ * landed save — goes out with every save, so a retyped title or a re-derived
+ * version renames that entry rather than filing a second one
+ * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
+ * Twice").
  */
 export interface EditState {
   index: number | null;
@@ -161,15 +167,30 @@ export interface EditState {
 }
 
 /**
- * Parse a feature file with its name resolved the way the page shows it — the
- * `# <name>` heading, or the file stem when the heading is missing
- * (specs/ui.spec.md "Main page"). Resolving it here and not only at render
- * time matters: every save serializes this object back to the file, and a
- * blank name would write a nameless `# ` heading over the real one.
+ * The feature as the server sent it — its parsed form, which carries each
+ * scenario's document id (the markdown never does) — with its name resolved
+ * the way the page shows it: the `# <name>` heading, or the file stem when
+ * the heading is missing (specs/ui.spec.md "Main page"). Resolving it here
+ * and not only at render time matters: every save serializes this object
+ * back to the file, and a blank name would write a nameless `# ` heading
+ * over the real one.
  */
-function parseFeatureFile(content: string, fileName: string): Feature {
-  const parsed = parseFeature(content);
+function featureFromResponse(
+  data: { content: string; parsed?: Feature },
+  fileName: string,
+): Feature {
+  const parsed = data.parsed ?? parseFeature(data.content);
   return parsed.name ? parsed : { ...parsed, name: titleFromFileName(fileName) };
+}
+
+/**
+ * How a save or publish names its scenario to the server: the heading
+ * identity plus the document id the editor holds for it, which keeps the
+ * scenario one scenario through a rename (specs/editor-autosave.feature.md
+ * "Autosave Never Adds the Same Scenario Twice").
+ */
+function scenarioTarget(s: Scenario): ScenarioTarget {
+  return { name: s.name, version: s.version, id: s.id };
 }
 
 /**
@@ -768,7 +789,7 @@ export function App() {
     const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
     if (res.ok) {
       const data = await res.json();
-      const parsed = parseFeatureFile(data.content, file);
+      const parsed = featureFromResponse(data, file);
       setSelected(file);
       setFeature(parsed);
       let missingScenario: string | null = null;
@@ -1160,7 +1181,9 @@ export function App() {
   // (specs/crud-feature.spec.md "publish each scenario individually").
   // `over` carries content the state hasn't caught up with yet: the dialog's
   // Publish saves its scenario into the feature and publishes in one motion.
-  const publish = async (scenario?: { name: string; version: number }, over?: Feature) => {
+  // The target carries the scenario's document id, so one going out under a
+  // new name or version is published as itself, not as a second scenario.
+  const publish = async (scenario?: ScenarioTarget, over?: Feature) => {
     const content = over ?? feature;
     if (!selected || !content) return;
     setPublishing(scenario ? scenarioKey(scenario) : "all");
@@ -1220,7 +1243,8 @@ export function App() {
         body: JSON.stringify({
           content: resolved,
           resolveConflict: true,
-          // Keep an individual publish scoped to its scenario through the
+          // Keep an individual publish scoped to its scenario — and, by its
+          // document id, renaming rather than doubling — through the
           // conflict resolution.
           scenario: conflict?.scenario,
         }),
@@ -1344,23 +1368,39 @@ export function App() {
     const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      // The scenario goes out with its document id, so a retyped title or a
+      // re-derived version renames the saved entry instead of leaving a draft
+      // behind under its old name.
+      body: JSON.stringify({
+        content: serializeFeature(next),
+        save: true,
+        scenario: scenarioTarget(s),
+      }),
     });
     const data = await res.json();
     if (res.ok) {
-      const saved = parseFeatureFile(data.content, selected);
+      const saved = featureFromResponse(data, selected);
       setFeature(saved);
       setDirty(false);
       // A still-open dialog has to find its scenario again: the feature comes
       // back in canonical order, so a renamed scenario has moved. Not finding
       // it (the entry was dropped underneath us) leaves the dialog new, so
       // the next save re-adds the work rather than overwriting a neighbour.
+      // The entry's document id comes back with it: a new scenario adopts it
+      // here, and every later save names the entry by it.
       if (!close && session === editorSession.current) {
         const moved = saved.scenarios.findIndex(
           (sc) => sc.name === s.name && sc.version === s.version,
         );
+        const id = moved === -1 ? undefined : saved.scenarios[moved]!.id;
         setEditing((prev) =>
-          prev === null ? null : { ...prev, index: moved === -1 ? null : moved },
+          prev === null
+            ? null
+            : {
+                ...prev,
+                index: moved === -1 ? null : moved,
+                scenario: id === undefined ? prev.scenario : { ...prev.scenario, id },
+              },
         );
       }
       // A published scenario's dialog can only have changed its test links
@@ -1428,7 +1468,10 @@ export function App() {
    * Publish straight from the dialog (specs/editor/spec-editor.feature.md):
    * the dialog's scenario goes into the feature and that one scenario is
    * published — marked [published], committed and pushed, exactly like a
-   * card's Publish. A merge conflict opens the usual resolution dialog.
+   * card's Publish. The target carries the draft's document id, so a title
+   * retyped since autosave filed it publishes that draft — renamed — rather
+   * than a second scenario beside it. A merge conflict opens the usual
+   * resolution dialog.
    */
   const publishScenario = async () => {
     if (!editing || !feature || !selected) return;
@@ -1446,7 +1489,7 @@ export function App() {
     };
     setFeature(next);
     setEditing(null);
-    await publish({ name: s.name, version: s.version }, next);
+    await publish(scenarioTarget(s), next);
   };
 
   /**
@@ -1877,7 +1920,7 @@ export function App() {
     if (res.ok) {
       // Both routes answer with the editor's view of the feature — the file
       // content with the remaining drafts folded back in.
-      setFeature(parseFeatureFile(data.content, selected));
+      setFeature(featureFromResponse(data, selected));
       setDirty(false);
       setStatus(done);
       flashSaved();
@@ -1924,8 +1967,9 @@ export function App() {
       // isNew marks it as new, so the version is derived on save.
       isNew: true,
       // Draft like any other new scenario, so autosave can't propose the next
-      // version of a published scenario on the user's behalf.
-      scenario: { ...src, version: nextVersionFor(src.name), status: "draft" },
+      // version of a published scenario on the user's behalf — and without
+      // the source's document id: this is a new scenario, not that one renamed.
+      scenario: { ...src, id: undefined, version: nextVersionFor(src.name), status: "draft" },
     });
   };
 
@@ -2572,7 +2616,7 @@ export function App() {
                         <button
                           className="link"
                           disabled={publishing !== null}
-                          onClick={() => void publish({ name: s.name, version: s.version })}
+                          onClick={() => void publish(scenarioTarget(s))}
                         >
                           {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
                         </button>
