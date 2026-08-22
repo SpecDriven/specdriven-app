@@ -18,7 +18,7 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
     name: doc.name,
     description: doc.description,
     scenarios: sortScenarios(
-      doc.scenarios.map((s) => ({
+      doc.specs.map((s) => ({
         name: s.name,
         version: s.version,
         status: s.status,

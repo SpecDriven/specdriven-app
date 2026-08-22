@@ -38,7 +38,7 @@ test("a new draft is persisted in the Automerge document, out of the file", asyn
   expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
   expect(loaded).not.toBeNull();
-  expect(loaded!.doc.scenarios.map((s) => [s.name, s.status])).toEqual([["Idea", "draft"]]);
+  expect(loaded!.doc.specs.map((s) => [s.name, s.status])).toEqual([["Idea", "draft"]]);
 });
 
 // "The user can use Delete which removes the draft spec." — a draft is

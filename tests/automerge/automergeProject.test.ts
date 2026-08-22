@@ -65,8 +65,8 @@ test("a reconciled edit merges with a concurrent doc edit", () => {
     parseFeature(SAMPLE.replace("a quote is provided", "a quote is provided within a day")),
   );
   const concurrent = A.change(A.clone(base), (d) => {
-    const i = d.scenarios.findIndex((s) => s.name === "Basic Quote");
-    A.splice(d, ["scenarios", i, "body"], 0, 0, "- **Given** a sunny day\n");
+    const i = d.specs.findIndex((s) => s.name === "Basic Quote");
+    A.splice(d, ["specs", i, "body"], 0, 0, "- **Given** a sunny day\n");
   });
 
   const merged = docToFeature(A.merge(reconciled, concurrent));
@@ -102,10 +102,10 @@ test("tests links on a published scenario may still change", () => {
 
 test("a rename with an unchanged body keeps the scenario's identity", () => {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
-  const idBefore = doc.scenarios.find((s) => s.name === "Basic Quote")!.id;
+  const idBefore = doc.specs.find((s) => s.name === "Basic Quote")!.id;
   const renamed = parseFeature(SAMPLE.replace("## Basic Quote @v1", "## Fast Quote @v1"));
   const next = reconcile(doc, renamed);
-  const after = next.scenarios.find((s) => s.name === "Fast Quote")!;
+  const after = next.specs.find((s) => s.name === "Fast Quote")!;
   expect(after.id).toBe(idBefore);
 });
 
@@ -119,7 +119,7 @@ test("added and removed scenarios reconcile", () => {
   );
   const next = reconcile(doc, target);
   expect(projectFeature(next)).toBe(serializeFeature(target));
-  expect(next.scenarios.some((s) => s.name === "Renewal Quote")).toBe(true);
+  expect(next.specs.some((s) => s.name === "Renewal Quote")).toBe(true);
 });
 
 // Draft scenarios are doc-only (specs/automerge-store.spec.md): they enter
@@ -130,7 +130,7 @@ test("a draft scenario lands in the doc but stays out of the projection", () => 
   const target = parseFeature(SAMPLE + "\n## Idea @v1\n\nsketch\n");
   expect(target.scenarios.find((s) => s.name === "Idea")!.status).toBe("draft");
   const next = reconcile(doc, target);
-  expect(next.scenarios.find((s) => s.name === "Idea")!.status).toBe("draft");
+  expect(next.specs.find((s) => s.name === "Idea")!.status).toBe("draft");
   expect(projectFeature(next)).not.toContain("Idea");
   expect(projectFeature(next)).toBe(serializeFeature(parseFeature(SAMPLE)));
 });
@@ -141,7 +141,7 @@ test("reconcile keeps a doc-only draft the target does not mention", () => {
   const withDraft = parseFeature(SAMPLE + "\n## Idea @v1\n\nsketch\n");
   const doc = reconcile(importFeatureDoc(parseFeature(SAMPLE)), withDraft);
   const next = reconcile(doc, parseFeature(SAMPLE.replace("Quotes for", "Insurance quotes for")));
-  const draft = next.scenarios.find((s) => s.name === "Idea");
+  const draft = next.specs.find((s) => s.name === "Idea");
   expect(draft).toBeDefined();
   expect(draft!.status).toBe("draft");
   expect(projectFeature(next)).not.toContain("Idea");
@@ -152,10 +152,10 @@ test("reconcile keeps a doc-only draft the target does not mention", () => {
 test("a draft promotes to proposed when the markdown claims it", () => {
   const withDraft = parseFeature(SAMPLE + "\n## Idea @v1\n\nsketch\n");
   const doc = reconcile(importFeatureDoc(parseFeature(SAMPLE)), withDraft);
-  const idBefore = doc.scenarios.find((s) => s.name === "Idea")!.id;
+  const idBefore = doc.specs.find((s) => s.name === "Idea")!.id;
   const promoted = parseFeature(SAMPLE + "\n## Idea @v1 [proposed]\n\nsketch\n");
   const next = reconcile(doc, promoted);
-  const after = next.scenarios.find((s) => s.name === "Idea")!;
+  const after = next.specs.find((s) => s.name === "Idea")!;
   expect(after.id).toBe(idBefore);
   expect(after.status).toBe("proposed");
   expect(projectFeature(next)).toContain("## Idea @v1 [proposed]");

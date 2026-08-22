@@ -2603,7 +2603,7 @@ export function App() {
             </div>
             <div>
               <button
-                className="add-scenario"
+                className="add-spec"
                 onClick={() =>
                   setEditing({
                     index: null,
@@ -2623,7 +2623,7 @@ export function App() {
                   })
                 }
               >
-                + Add scenario
+                + Add Spec
               </button>
             </div>
             {status && <p className="status">{status}</p>}

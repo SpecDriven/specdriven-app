@@ -127,7 +127,7 @@ async function withDocDrafts(
   const feature = parseFeature(content);
   const key = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
   const have = new Set(feature.scenarios.map(key));
-  const drafts = loaded.doc.scenarios
+  const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
     .map((s) => ({
       name: s.name,

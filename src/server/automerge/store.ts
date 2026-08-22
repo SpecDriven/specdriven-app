@@ -22,7 +22,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
-import { SCHEMA_VERSION, type FeatureDoc, type ScenarioEntry } from "./schema";
+import { SCHEMA_VERSION, type FeatureDoc, type SpecEntry, type SpecType } from "./schema";
 
 const log = getLogger("automerge");
 
@@ -56,28 +56,75 @@ export interface LoadedDoc {
   skippedChunks: string[];
 }
 
-/** A v1 scenario entry: statuses as booleans instead of the status field. */
-type LegacyScenarioEntry = ScenarioEntry & { published?: boolean; proposed?: boolean };
+/**
+ * A pre-v3 entry: v1 carried `published`/`proposed` booleans instead of
+ * `status`, and nothing before v3 carried `type`.
+ */
+type LegacySpecEntry = Omit<SpecEntry, "type"> & {
+  type?: SpecType;
+  published?: boolean;
+  proposed?: boolean;
+};
+
+/** A document as any schema version may have left it on disk. */
+type LegacyFeatureDoc = Omit<FeatureDoc, "specs"> & {
+  specs?: LegacySpecEntry[];
+  /** The v1/v2 list, renamed to `specs` in v3. */
+  scenarios?: LegacySpecEntry[];
+};
+
+function legacyStatus(entry: LegacySpecEntry): SpecEntry["status"] {
+  if (entry.status !== undefined) return entry.status;
+  return entry.published ? "published" : entry.proposed ? "proposed" : "draft";
+}
 
 /**
- * Fold a v1 document's `published`/`proposed` booleans into `status`
- * (schema v2). Applied on load; the heads returned by loadFeatureDoc are the
- * pre-migration heads, so the migration ops ride whatever delta the caller
- * saves next — a load that never saves just migrates again next time.
+ * Bring a document loaded from disk up to SCHEMA_VERSION: fold a v1 entry's
+ * `published`/`proposed` booleans into `status` (v2), move the `scenarios`
+ * list to `specs` and stamp each entry `type: "Scenario"` (v3). Applied on
+ * load; the heads returned by loadFeatureDoc are the pre-migration heads, so
+ * the migration ops ride whatever delta the caller saves next — a load that
+ * never saves just migrates again next time.
+ *
+ * The v3 list move copies entries (ids kept) into a new list, so two peers
+ * migrating the same document concurrently produce two `specs` lists and
+ * Automerge picks the same winner on every peer — the foreign-lineage case
+ * described at the top of this file, repaired by the markdown drift pass.
  */
 function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
-  const entries = doc.scenarios as LegacyScenarioEntry[];
+  const legacy = doc as unknown as A.Doc<LegacyFeatureDoc>;
+  const entries = [...(legacy.specs ?? []), ...(legacy.scenarios ?? [])];
   const stale =
-    doc.schemaVersion < SCHEMA_VERSION || entries.some((s) => s.status === undefined);
+    doc.schemaVersion < SCHEMA_VERSION ||
+    legacy.scenarios !== undefined ||
+    legacy.specs === undefined ||
+    entries.some((s) => s.status === undefined || s.type === undefined);
   if (!stale) return doc;
-  return A.change(doc, (d) => {
+  return A.change(doc, (raw) => {
+    const d = raw as unknown as LegacyFeatureDoc;
     if (d.schemaVersion < SCHEMA_VERSION) d.schemaVersion = SCHEMA_VERSION;
-    for (const entry of d.scenarios as LegacyScenarioEntry[]) {
+    if (d.specs === undefined) d.specs = [];
+    if (d.scenarios !== undefined) {
+      for (const entry of d.scenarios) {
+        d.specs.push({
+          id: entry.id,
+          type: entry.type ?? "Scenario",
+          name: entry.name,
+          version: entry.version,
+          status: legacyStatus(entry),
+          body: entry.body,
+          tests: [...entry.tests],
+        });
+      }
+      delete d.scenarios;
+    }
+    for (const entry of d.specs) {
       if (entry.status === undefined) {
-        entry.status = entry.published ? "published" : entry.proposed ? "proposed" : "draft";
+        entry.status = legacyStatus(entry);
         delete entry.published;
         delete entry.proposed;
       }
+      if (entry.type === undefined) entry.type = "Scenario";
     }
   });
 }

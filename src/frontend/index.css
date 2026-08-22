@@ -1919,8 +1919,8 @@ button.table-add:hover {
   border-color: var(--accent);
 }
 
-/* "+ Add scenario": a quiet dashed row, not a loud button. */
-.add-scenario {
+/* "+ Add Spec": a quiet dashed row, not a loud button. */
+.add-spec {
   padding: 0.55rem 0.9rem;
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-md);
@@ -1931,7 +1931,7 @@ button.table-add:hover {
   transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
-.add-scenario:hover {
+.add-spec:hover {
   color: var(--accent-strong);
   border-color: var(--accent);
   background: var(--accent-soft);
