@@ -43,6 +43,13 @@ export interface Scenario {
   /** GitHub urls of the automated tests covering this scenario
       (specs/traceability.spec.md). */
   tests: string[];
+  /**
+   * The document's id for the scenario
+   * (specs/datastore/automerge-store.feature.md) — the identity that survives
+   * a rename, carried only on what the editor reads from the server. Private
+   * to the document: never parsed from or written to markdown.
+   */
+  id?: string;
 }
 
 export interface Feature {
@@ -265,6 +272,21 @@ export function serializeFeature(feature: Feature): string {
 export interface ScenarioPick {
   name: string;
   version: number;
+}
+
+/**
+ * A scenario the editor is saving or publishing: its heading identity, plus
+ * the document's id for it when the editor holds one (`Scenario.id`). The id
+ * is what keeps the scenario one scenario through a rename — the document
+ * renames that entry rather than filing the new name as a second scenario
+ * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
+ * Twice"), which matters most for a draft: the file never held it, so a save
+ * that leaves it out removes nothing
+ * (specs/datastore/automerge-store.feature.md "draft scenarios live in the
+ * document only").
+ */
+export interface ScenarioTarget extends ScenarioPick {
+  id?: string;
 }
 
 /**
