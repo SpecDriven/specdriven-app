@@ -6,7 +6,7 @@
 
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
-import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../parser";
+import type { ExternalLink, Feature, Scenario, ScenarioPick, ScenarioTarget } from "../parser";
 import type { FeatureDoc, SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
@@ -16,6 +16,7 @@ export function importFeatureDoc(feature: Feature): A.Doc<FeatureDoc> {
     name: feature.name,
     description: feature.description,
     specs: feature.scenarios.map(newEntry),
+    ...(feature.link ? { link: { ...feature.link } } : {}),
   });
 }
 
@@ -28,7 +29,28 @@ function newEntry(s: Scenario): SpecEntry {
     status: s.status,
     body: s.body,
     tests: [...s.tests],
+    ...(s.link ? { link: { ...s.link } } : {}),
   };
+}
+
+/** Identity of a link for change detection; none is the empty string. */
+function linkKey(link: ExternalLink | undefined): string {
+  return link ? `${link.program}\n${link.ticket}\n${link.url}` : "";
+}
+
+/**
+ * Set or clear a `link` key on a doc map. A link is replaced whole (it is
+ * one ticket, not text to merge), and concurrent replacements resolve to
+ * one winner the same way on every peer.
+ */
+function assignLink(
+  target: { link?: ExternalLink },
+  before: ExternalLink | undefined,
+  after: ExternalLink | undefined,
+): void {
+  if (linkKey(before) === linkKey(after)) return;
+  if (after) target.link = { program: after.program, ticket: after.ticket, url: after.url };
+  else delete target.link;
 }
 
 const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
@@ -95,7 +117,11 @@ export function reconcile(
     status: e.status,
     body: e.body,
     tests: [...e.tests],
+    ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
   }));
+  const docLink = doc.link
+    ? { program: doc.link.program, ticket: doc.link.ticket, url: doc.link.url }
+    : undefined;
   const matchAt = new Map<number, Scenario>();
   const matched = new Set<Scenario>();
   const claim = (candidate: (s: Scenario, i: number) => boolean) => {
@@ -131,6 +157,7 @@ export function reconcile(
     if (d.description !== target.description) {
       A.updateText(d, ["description"], target.description);
     }
+    assignLink(d, docLink, target.link);
     for (const [i, match] of matchAt) {
       const entry = entries[i]!;
       const live = d.specs[i]!;
@@ -141,6 +168,7 @@ export function reconcile(
       if (entry.tests.join("\n") !== match.tests.join("\n")) {
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
+      assignLink(live, entry.link, match.link);
     }
     for (let i = entries.length - 1; i >= 0; i--) {
       if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.specs, i);

@@ -68,8 +68,9 @@ yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; i
 is cloned into a sibling directory of this repo (`../data-insurance`). A plain
 relative path to an existing local clone works too. The same file also holds the
 reload interval, the editor autosave interval, the scenario preview length, the
-git engine, and the test-links
-toggle — all editable from the Settings dialog, which also reports what the
+git engine, the test-links toggle, and the external-links toggle (whether
+Jira/Linear ticket links are written into the `.feature.md` files) — all
+editable from the Settings dialog, which also reports what the
 GitHub CLI is signed in as and holds the app's own GitHub sign-in (device flow)
 for machines without `gh`.
 

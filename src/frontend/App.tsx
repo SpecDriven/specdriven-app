@@ -16,6 +16,15 @@ import { SearchIcon } from "./SearchIcon";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
+import { ExternalLinkField } from "./ExternalLinkField";
+import {
+  EMPTY_LINK_DRAFT,
+  externalLinkLabel,
+  isBlankLinkDraft,
+  linkDraftOf,
+  resolveLinkDraft,
+} from "./externallinks";
+import type { LinkDraft } from "./externallinks";
 import { ScenarioTable } from "./ScenarioTable";
 import {
   desktopLink,
@@ -199,7 +208,7 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  * the version the dialog will save it as rather than the one on the object.
  */
 export function scenarioSignature(s: Scenario, version: number): string {
-  return JSON.stringify([s.name, version, s.status, s.body, s.tests]);
+  return JSON.stringify([s.name, version, s.status, s.body, s.tests, s.link ?? null]);
 }
 
 /**
@@ -314,6 +323,9 @@ export function App() {
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
+  // External links (specs/external-links/project-management-jira-linear-etc.
+  // feature.md): whether ticket links are written into the .feature.md files.
+  const [publishExternalLinks, setPublishExternalLinks] = useState(true);
   /** Code gen sessions offered at all (specs/agents/claude.spec.md). */
   const [codeGen, setCodeGen] = useState(true);
   // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
@@ -332,6 +344,7 @@ export function App() {
     String(DEFAULT_AUTOSAVE_SECONDS),
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  const [settingsPublishLinksDraft, setSettingsPublishLinksDraft] = useState(true);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
@@ -344,6 +357,15 @@ export function App() {
   const [testEditDraft, setTestEditDraft] = useState("");
   /** Why the last Save was blocked by the tests field, if it was. */
   const [testsError, setTestsError] = useState<string | null>(null);
+  /** The edit dialog's "Ticket link" fields as typed
+      (specs/external-links/project-management-jira-linear-etc.feature.md). */
+  const [linkDraft, setLinkDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
+  /** Why the last Save was blocked by the ticket-link fields, if it was. */
+  const [linkError, setLinkError] = useState<string | null>(null);
+  /** The feature's ticket-link dialog: its fields while open, else null. */
+  const [featureLinkDraft, setFeatureLinkDraft] = useState<LinkDraft | null>(null);
+  const [featureLinkError, setFeatureLinkError] = useState<string | null>(null);
+  const [featureLinkSaving, setFeatureLinkSaving] = useState(false);
   // Git engine (specs/git-operations.spec.md): the GitHub CLI (the default
   // wherever gh is installed), plain system git, or the bundled JavaScript
   // one — which is always available, so it needs no availability flag.
@@ -401,6 +423,9 @@ export function App() {
       }
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
+      }
+      if (typeof state.publishExternalLinks === "boolean") {
+        setPublishExternalLinks(state.publishExternalLinks);
       }
       if (typeof state.codeGen === "boolean") {
         setCodeGen(state.codeGen);
@@ -487,6 +512,8 @@ export function App() {
   useEffect(() => {
     setTestDraft("");
     setTestEdit(null);
+    // The ticket-link fields open showing the scenario's link, if any.
+    setLinkDraft(linkDraftOf(editing?.scenario.link));
   }, [editingOpen]);
 
   // Autosave measures against what the dialog opened with, so a scenario that
@@ -508,6 +535,25 @@ export function App() {
   useEffect(() => {
     setTestsError(null);
   }, [editingOpen, testDraft, testEditDraft, testEdit]);
+
+  useEffect(() => {
+    setLinkError(null);
+  }, [editingOpen, linkDraft]);
+
+  // ESC closes the feature's ticket-link dialog without saving, like Cancel
+  // (specs/ui.spec.md "Dialogs").
+  const featureLinkOpen = featureLinkDraft !== null;
+  useEffect(() => {
+    if (!featureLinkOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setFeatureLinkDraft(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [featureLinkOpen]);
 
   // specs/editor/spec-editor.feature.md: ESC returns to the scenario screen,
   // leaving the scenario in its autosaved state — same as the close widget —
@@ -697,6 +743,7 @@ export function App() {
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const editingTrapRef = useFocusTrap(editing !== null);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
+  const featureLinkTrapRef = useFocusTrap(featureLinkOpen);
   const conflictTrapRef = useFocusTrap(conflict !== null);
 
   useEffect(() => {
@@ -1425,11 +1472,12 @@ export function App() {
               },
         );
       }
-      // A published scenario's dialog can only have changed its test links
-      // (specs/traceability.spec.md) — there is nothing left to publish.
+      // A published scenario's dialog can only have changed its links — test
+      // links (specs/traceability.spec.md) and its ticket link — so there is
+      // nothing left to publish.
       setStatus(
         s.status === "published"
-          ? `Saved the test links of "${s.name}" v${s.version}.`
+          ? `Saved the links of "${s.name}" v${s.version}.`
           : s.status === "draft"
             ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
             : "Saved — publish scenarios from their cards, or press Publish All.",
@@ -1446,10 +1494,18 @@ export function App() {
    * A url still sitting in the add field or an open ✎ row rides along with
    * any explicit save — it must never be silently dropped — and one that
    * can't join the list blocks the save instead (specs/traceability.spec.md).
+   * The ticket-link fields gate the save the same way: a half-filled link is
+   * not written half-done, it blocks with a message
+   * (specs/external-links/project-management-jira-linear-etc.feature.md).
    * Null means blocked, with the reason already on screen.
    */
   const pendingTests = (): string[] | null => {
     if (!editing) return null;
+    const link = resolveLinkDraft(linkDraft);
+    if (link.error) {
+      setLinkError(link.error);
+      return null;
+    }
     const pending = resolvePendingTests(
       editing.scenario.tests,
       testEdit === null ? null : { index: testEdit, url: testEditDraft },
@@ -1462,8 +1518,9 @@ export function App() {
     return pending.tests;
   };
 
-  /** Save a published scenario's test links — the only thing its dialog can
-      change (specs/traceability.spec.md). */
+  /** Save a published scenario's links — test links and its ticket link are
+      all its dialog can change (specs/traceability.spec.md,
+      specs/external-links/project-management-jira-linear-etc.feature.md). */
   const saveScenario = async () => {
     const tests = pendingTests();
     if (tests === null) return;
@@ -1581,6 +1638,7 @@ export function App() {
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
+    setSettingsPublishLinksDraft(publishExternalLinks);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
@@ -1728,6 +1786,7 @@ export function App() {
     setPreviewLines(data.scenarioPreviewLines);
     setAutosaveSeconds(data.autosaveIntervalSeconds);
     setShowTestLinks(data.showTestLinks !== false);
+    setPublishExternalLinks(data.publishExternalLinks !== false);
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -1808,6 +1867,18 @@ export function App() {
     if (!(await patchSettings({ showTestLinks: on }))) setSettingsTestLinksDraft(!on);
   };
 
+  // Publish external links (specs/external-links/project-management-jira-
+  // linear-etc.feature.md): the server rewrites every feature file to the
+  // new form at once; the open feature is re-read so the page follows.
+  const toggleExternalLinks = async (on: boolean) => {
+    setSettingsPublishLinksDraft(on);
+    if (!(await patchSettings({ publishExternalLinks: on }))) {
+      setSettingsPublishLinksDraft(!on);
+    } else if (selected) {
+      await openFeature(selected);
+    }
+  };
+
   const toggleCodeGen = async (on: boolean) => {
     setSettingsCodeGenDraft(on);
     if (!(await patchSettings({ codeGen: on }))) setSettingsCodeGenDraft(!on);
@@ -1829,6 +1900,63 @@ export function App() {
   const setTests = (tests: string[]) => {
     if (!editing) return;
     setEditing({ ...editing, scenario: { ...editing.scenario, tests } });
+  };
+
+  // The dialog's "Ticket link" fields (specs/external-links/project-
+  // management-jira-linear-etc.feature.md): typed into a draft; the moment
+  // the fields make a whole link — or are all cleared — the scenario follows,
+  // so autosave and closing carry the link like any other edit. A half-filled
+  // draft stays in the fields until an explicit save, which it blocks.
+  const changeLinkDraft = (draft: LinkDraft) => {
+    setLinkDraft(draft);
+    if (!editing) return;
+    const resolved = resolveLinkDraft(draft);
+    if (resolved.error) return;
+    const { link: _previous, ...rest } = editing.scenario;
+    setEditing({ ...editing, scenario: resolved.link ? { ...rest, link: resolved.link } : rest });
+  };
+
+  /**
+   * Save the feature's own ticket link (specs/external-links/project-
+   * management-jira-linear-etc.feature.md "Add link to feature"): the feature
+   * is saved like any scenario edit — locally, marked [proposed] where
+   * applicable, pushed by the reload cron — with the link set or cleared.
+   */
+  const saveFeatureLink = async () => {
+    if (!feature || !selected || featureLinkDraft === null) return;
+    const resolved = resolveLinkDraft(featureLinkDraft);
+    if (resolved.error) {
+      setFeatureLinkError(resolved.error);
+      return;
+    }
+    const { link: _previous, ...rest } = feature;
+    const next: Feature = resolved.link ? { ...rest, link: resolved.link } : rest;
+    setFeatureLinkSaving(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        setFeatureLinkDraft(null);
+        setStatus(
+          resolved.link
+            ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
+            : `Ticket link removed — ${data.message}.`,
+        );
+        flashSaved();
+      } else {
+        setFeatureLinkError(data.error ?? "Could not save the ticket link");
+      }
+    } catch {
+      setFeatureLinkError("Could not save the ticket link — is the server running?");
+    } finally {
+      setFeatureLinkSaving(false);
+    }
   };
 
   const addTest = () => {
@@ -2547,6 +2675,30 @@ export function App() {
                     <button className="link" onClick={() => copyLink(featurePath(selected))}>
                       {copied === featurePath(selected) ? "Copied" : "Copy link"}
                     </button>
+                    {/* The feature's ticket (specs/external-links/project-
+                        management-jira-linear-etc.feature.md "Add link to
+                        feature"): a chip opening the ticket, and the dialog
+                        that sets or clears it. */}
+                    {feature.link && (
+                      <a
+                        className="ext-link"
+                        href={feature.link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={feature.link.url}
+                      >
+                        {externalLinkLabel(feature.link)}
+                      </a>
+                    )}
+                    <button
+                      className="link"
+                      onClick={() => {
+                        setFeatureLinkError(null);
+                        setFeatureLinkDraft(linkDraftOf(feature.link));
+                      }}
+                    >
+                      {feature.link ? "Edit ticket" : "Link ticket"}
+                    </button>
                   </>
                 ) : (
                   <form
@@ -2653,19 +2805,33 @@ export function App() {
                         <span className="badge proposed">proposed</span>
                       )}
                       {s.status === "draft" && <span className="badge draft">draft</span>}
+                      {/* The scenario's ticket (specs/external-links/project-
+                          management-jira-linear-etc.feature.md "Add link at
+                          spec level"), opening in a new tab. */}
+                      {s.link && (
+                        <a
+                          className="ext-link"
+                          href={s.link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={s.link.url}
+                        >
+                          {externalLinkLabel(s.link)}
+                        </a>
+                      )}
                     </span>
                     <span className="card-actions">
                       {/* Unpublished cards: Edit, Publish, Copy link — in that
                           order (specs/crud-feature.spec.md "publish each
                           scenario individually"). A published card opens the
-                          same dialog: `Edit` while its test links are editable
-                          (specs/traceability.spec.md), `View` when the setting
-                          leaves nothing to change. */}
+                          same dialog as `Edit`: its test links
+                          (specs/traceability.spec.md) and its ticket link
+                          stay editable. */}
                       <button
                         className="link"
                         onClick={() => setEditing({ index: i, scenario: { ...s } })}
                       >
-                        {s.status !== "published" || showTestLinks ? "Edit" : "View"}
+                        Edit
                       </button>
                       {s.status !== "published" && (
                         <button
@@ -3008,6 +3174,29 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              {/* specs/external-links/project-management-jira-linear-etc.
+                  feature.md "Publishing links into projected feature (.md)
+                  files": the ticket links go into the markdown only while
+                  this is on; default ON. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Publish external links
+                  <span className="settings-row-hint">
+                    Write each feature's and scenario's ticket link (Jira, Linear…) into the
+                    .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
+                    keeps the links in the app only.
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsPublishLinksDraft}
+                    onChange={(e) => void toggleExternalLinks(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
             </section>
             <section className="settings-group">
               {/* Code gen (specs/agents/claude.spec.md): off takes the selection
@@ -3195,6 +3384,53 @@ export function App() {
           </div>
         </div>
       )}
+      {/* The feature's ticket-link dialog (specs/external-links/project-
+          management-jira-linear-etc.feature.md "Add link to feature"). */}
+      {featureLinkDraft !== null && feature && (
+        <div className="dialog-backdrop" onClick={() => setFeatureLinkDraft(null)}>
+          <div
+            className="dialog link-dialog"
+            ref={featureLinkTrapRef}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveFeatureLink();
+              }}
+            >
+              <h3>Ticket for this feature</h3>
+              <p className="hint">
+                The Jira, Linear… ticket that tracks “{feature.name || titleFromFileName(selected!)}
+                ”. Leave every field empty to remove the link.
+              </p>
+              <div className="link-field">
+                <ExternalLinkField
+                  draft={featureLinkDraft}
+                  onChange={(draft) => {
+                    setFeatureLinkError(null);
+                    setFeatureLinkDraft(draft);
+                  }}
+                  error={featureLinkError}
+                  autoFocus
+                />
+              </div>
+              <div className="dialog-actions">
+                <button type="button" className="secondary" onClick={() => setFeatureLinkDraft(null)}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={featureLinkSaving}>
+                  {featureLinkSaving
+                    ? "Saving…"
+                    : feature.link && isBlankLinkDraft(featureLinkDraft)
+                      ? "Remove link"
+                      : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {editing && (
         <div className="dialog-backdrop" onClick={() => closeEditor()}>
           {/* specs/ui.spec.md "Scenario edit dialog": the scenario name is the
@@ -3275,6 +3511,14 @@ export function App() {
                 and removed (✕). Editable even for a published scenario: the
                 links track the tests, not the immutable spec. Hidden
                 entirely when the Settings toggle is off. */}
+            {/* specs/external-links/project-management-jira-linear-etc.
+                feature.md "Add link at spec level": the ticket tracking this
+                scenario. Editable on a published scenario too — like the test
+                links, it is bookkeeping around the spec, not the spec. */}
+            <div className="link-field">
+              <span className="field-label">Ticket link</span>
+              <ExternalLinkField draft={linkDraft} onChange={changeLinkDraft} error={linkError} />
+            </div>
             {showTestLinks && (
               <div className="tests-field">
                 <span className="field-label">Automated tests</span>
@@ -3406,11 +3650,9 @@ export function App() {
                   </button>
                 </>
               )}
-              {/* A published scenario is read-only apart from its test links,
-                  so it only gets a Save button while those are in play. */}
-              {editingPublished && showTestLinks && (
-                <button onClick={saveScenario}>Save test links</button>
-              )}
+              {/* A published scenario is read-only apart from its links —
+                  test links and its ticket — so that is what its Save saves. */}
+              {editingPublished && <button onClick={saveScenario}>Save links</button>}
             </div>
             {/* Like the Settings dialog, the way out is ESC (or the ✕): the
                 scenario stays in its autosaved state

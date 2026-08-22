@@ -27,7 +27,7 @@ import {
 } from "../git";
 import { featureTextError, parseFeature } from "../parser";
 import { threeWayFeature } from "./merge";
-import { docToFeature, projectFeature } from "./project";
+import { docToFeature, isProjectionOf, projectFeature } from "./project";
 import { importFeatureDoc, reconcile } from "./reconcile";
 import {
   createFeatureDoc,
@@ -154,7 +154,7 @@ async function autoResolveOne(
   try {
     if (lineageRace) {
       const oursText = await stageVersion(dataDir, path, 2);
-      if (oursText !== null && projectFeature(doc) !== oursText) {
+      if (oursText !== null && !isProjectionOf(oursText, doc)) {
         const own = threeWayFeature(base, docToFeature(doc), parseFeature(oursText));
         if (!own.ok) return own.conflict;
         doc = reconcile(doc, own.feature);
@@ -197,8 +197,9 @@ export async function importDrift(dataDir: string): Promise<string> {
         log.debug(`imported ${fileName} into a document`);
         continue;
       }
-      const projection = projectFeature(loaded.doc);
-      if (text === projection) continue;
+      // A file in the document's other form — external links written by a
+      // peer whose setting differs — is not drift (project.ts).
+      if (isProjectionOf(text, loaded.doc)) continue;
       try {
         const next = reconcile(loaded.doc, parseFeature(text));
         await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
@@ -208,7 +209,7 @@ export async function importDrift(dataDir: string): Promise<string> {
       } catch (e) {
         // The drifted markdown tampered with a published scenario: the document
         // wins, and the file is repaired to its projection.
-        await writeTextFile(`${dataDir}/${fileName}`, projection);
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(loaded.doc));
         repaired++;
         log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(e));
       }
