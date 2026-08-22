@@ -181,6 +181,16 @@ export function scenarioSignature(s: Scenario, version: number): string {
   return JSON.stringify([s.name, version, s.status, s.body, s.tests]);
 }
 
+/**
+ * Whether the scenario's name is still being typed — the dialog's title field
+ * holds the caret (specs/editor-autosave.feature.md "Autosave Waits While the
+ * Name Is Being Typed"). A tick that fires mid-word would save the half-typed
+ * name as a draft, so it stands down until focus moves on.
+ */
+export function namingInProgress(nameField: Element | null, active: Element | null): boolean {
+  return nameField !== null && nameField === active;
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -253,6 +263,10 @@ export function App() {
   // because a tick reads them between renders and must not cause one.
   const autosaved = useRef<string | null>(null);
   const autosaveInFlight = useRef(false);
+  /** The dialog's title field, so a tick can see whether the name is still
+      being typed (specs/editor-autosave.feature.md). Null once the scenario
+      is published, when the name is no longer editable. */
+  const nameFieldRef = useRef<HTMLInputElement | null>(null);
   /** Close, for the handlers that close the dialog from outside the render
       that defines it (ESC). Kept in a ref so they always run the current one. */
   const closeEditorRef = useRef<() => void>(() => {});
@@ -1467,6 +1481,10 @@ export function App() {
     if (!editing || !feature || !selected) return;
     if (autosaveInFlight.current) return; // the previous tick is still saving
     if (deletingScenario.current) return; // a delete is being confirmed or sent
+    // The name is still being typed: saving now would put a half-typed name
+    // on the draft (specs/editor-autosave.feature.md "Autosave Waits While the
+    // Name Is Being Typed"). The tick after focus moves on saves it.
+    if (namingInProgress(nameFieldRef.current, document.activeElement)) return;
     // A scenario with no name has nothing to be saved under; the Save button
     // is disabled for the same reason.
     if (!editing.scenario.name.trim()) return;
@@ -3158,6 +3176,9 @@ export function App() {
             ) : (
               <input
                 className="dialog-title-input"
+                // While this field has the caret autosave stands down, so the
+                // name is saved once, whole (specs/editor-autosave.feature.md).
+                ref={nameFieldRef}
                 value={editing.scenario.name}
                 placeholder="Scenario name"
                 aria-label="Scenario name"
