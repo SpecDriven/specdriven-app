@@ -21,6 +21,13 @@
 //   <scenario body — any markdown up to the next scenario heading;
 //    Gherkin tables are written as markdown tables>
 //
+// A feature or a scenario may carry a link to the ticket tracking it
+// (specs/external-links/project-management-jira-linear-etc.feature.md): one
+// `[<program>:<ticket>](<url>)` line right under its heading, e.g.
+// `[Jira:ABC-123](https://acme.atlassian.net/browse/ABC-123)`. The parser
+// lifts it into `link`; whether the projection writes it is the "Publish
+// external links" setting.
+//
 // The first `#` heading is the feature name; a `##` heading that ends with a
 // version starts a scenario. The `@` marks where the name ends and the version
 // begins, so a name that itself contains a version ("Migrate to v2 API @v1")
@@ -34,6 +41,38 @@
  * document; the other two are written as `[...]` chips on the heading.
  */
 export type ScenarioStatus = "published" | "proposed" | "draft";
+
+/**
+ * A link to the ticket that tracks a feature or a scenario in a project
+ * management tool — Jira, Linear, etc.
+ * (specs/external-links/project-management-jira-linear-etc.feature.md).
+ * Written into the markdown as `[<program>:<ticket>](<url>)`, e.g.
+ * `[Jira:ABC-123](https://acme.atlassian.net/browse/ABC-123)`.
+ */
+export interface ExternalLink {
+  /**
+   * Short name of the tool: "Jira", "Linear", "GitHub"… One of the
+   * `EXTERNAL_LINK_TYPES` the editor offers by name, or — for "Other" — the
+   * name the user gave it.
+   */
+  program: string;
+  /** The ticket id as the tool shows it: "ABC-123", "ENG-42", "#17". */
+  ticket: string;
+  url: string;
+}
+
+/**
+ * The tools the editor's "Tool" dropdown offers; a link to any other tool is
+ * "Other", and keeps the tool's own name in `program`.
+ */
+export const EXTERNAL_LINK_TYPES = ["GitHub", "Jira", "Linear", "Other"] as const;
+export type ExternalLinkType = (typeof EXTERNAL_LINK_TYPES)[number];
+
+/** The dropdown entry a link's program is — "Other" for any tool not offered by name. */
+export function externalLinkTypeOf(program: string): ExternalLinkType {
+  const name = program.trim().toLowerCase();
+  return EXTERNAL_LINK_TYPES.find((t) => t !== "Other" && t.toLowerCase() === name) ?? "Other";
+}
 
 export interface Scenario {
   name: string;
@@ -50,6 +89,8 @@ export interface Scenario {
    * to the document: never parsed from or written to markdown.
    */
   id?: string;
+  /** The ticket tracking this scenario, if it has one. */
+  link?: ExternalLink;
 }
 
 export interface Feature {
@@ -57,6 +98,8 @@ export interface Feature {
   /** Free markdown between the feature heading and the first scenario. */
   description: string;
   scenarios: Scenario[];
+  /** The ticket tracking the feature as a whole, if it has one. */
+  link?: ExternalLink;
 }
 
 /**
@@ -127,6 +170,63 @@ export function splitTests(body: string): { body: string; tests: string[] } {
 
 function testsTable(tests: string[]): string {
   return ["### Tests", "", "| Test |", "| --- |", ...tests.map((t) => `| ${t} |`)].join("\n");
+}
+
+/**
+ * External links (specs/external-links/project-management-jira-linear-etc.
+ * feature.md) are written as one markdown link on a line of its own —
+ * `[Jira:ABC-123](https://acme.atlassian.net/browse/ABC-123)` — right under
+ * the heading it belongs to: the feature's `# <name>` or the scenario's.
+ * Plain markdown, so GitHub renders it as a clickable ticket link. The
+ * parser lifts that first line out into `link`; serializeFeature writes it
+ * back, and the projection leaves it out when "Publish external links" is
+ * off in Settings.
+ */
+const EXTERNAL_LINK_RE = /^\s{0,3}\[([^\[\]:\n]+):([^\[\]\n]+)\]\((https?:\/\/[^\s()]+)\)\s*$/;
+
+/** The markdown line an external link is written as. */
+export function formatExternalLink(link: ExternalLink): string {
+  return `[${link.program}:${link.ticket}](${link.url})`;
+}
+
+/** The link a line of markdown holds, or null when it is not a link line. */
+export function parseExternalLinkLine(line: string): ExternalLink | null {
+  const m = line.match(EXTERNAL_LINK_RE);
+  if (!m) return null;
+  const program = m[1]!.trim();
+  const ticket = m[2]!.trim();
+  if (!program || !ticket) return null;
+  return { program, ticket, url: m[3]! };
+}
+
+/**
+ * A well-formed external link: a program and a ticket that the line syntax
+ * can carry (no brackets, no colon in the program — it ends at the first
+ * one) and an http(s) url with nothing the link syntax would cut short.
+ */
+export function isExternalLink(link: ExternalLink): boolean {
+  const back = parseExternalLinkLine(formatExternalLink(link));
+  return (
+    back !== null &&
+    back.program === link.program &&
+    back.ticket === link.ticket &&
+    back.url === link.url
+  );
+}
+
+/**
+ * Lift an external link off the top of a markdown text: when its first
+ * non-blank line is a link line, that line is the link and the rest is the
+ * text. Anything else — a link further down, a line with more on it — is
+ * ordinary content.
+ */
+export function splitExternalLink(text: string): { text: string; link?: ExternalLink } {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.trim() !== "");
+  if (at === -1) return { text };
+  const link = parseExternalLinkLine(lines[at]!);
+  if (!link) return { text };
+  return { text: lines.slice(at + 1).join("\n").trim(), link };
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
@@ -215,8 +315,10 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(bodyLines.join("\n").trim());
-      current.body = split.body;
+      const { text, link } = splitExternalLink(split.body);
+      current.body = text;
       current.tests = split.tests;
+      if (link) current.link = link;
       scenarios.push(current);
       bodyLines.length = 0;
     }
@@ -249,18 +351,33 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  return { name, description: preamble.join("\n").trim(), scenarios: sortScenarios(scenarios) };
+  const { text: description, link } = splitExternalLink(preamble.join("\n").trim());
+  const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
+  if (link) feature.link = link;
+  return feature;
 }
 
 function header(name: string, version: number, status: ScenarioStatus): string {
   return `## ${name} @v${version} [${status}]`;
 }
 
-export function serializeFeature(feature: Feature): string {
+export interface SerializeOptions {
+  /**
+   * Whether the feature's and scenarios' external links are written
+   * (default true). The `.feature.md` projection passes the "Publish
+   * external links" setting here; everything else — the editor wire format,
+   * the conflict dialog — always carries the links.
+   */
+  links?: boolean;
+}
+
+export function serializeFeature(feature: Feature, { links = true }: SerializeOptions = {}): string {
   const parts = [`# ${feature.name}`];
+  if (links && feature.link) parts.push(formatExternalLink(feature.link));
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
     const chunks = [header(s.name, s.version, s.status)];
+    if (links && s.link) chunks.push(formatExternalLink(s.link));
     if (s.body) chunks.push(s.body);
     if (s.tests.length > 0) chunks.push(testsTable(s.tests));
     parts.push(chunks.join("\n\n"));

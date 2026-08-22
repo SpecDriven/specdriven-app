@@ -2,12 +2,13 @@ import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { isFeatureFile, walk } from "./walk";
 import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature } from "./automerge/merge";
-import { projectFeature } from "./automerge/project";
+import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
 import { importFeatureDoc, reconcile, removeDraftScenario } from "./automerge/reconcile";
 import {
   createFeatureDoc,
   docDirRel,
   hasFeatureDoc,
+  listFeatureDocs,
   loadFeatureDoc,
   saveFeatureDoc,
 } from "./automerge/store";
@@ -95,14 +96,16 @@ export async function readFeature(dataDir: string, fileName: string): Promise<st
 }
 
 /**
- * The feature as the editor should see it: the `.feature.md` content plus the
- * draft scenarios that live only in the Automerge document
+ * The feature as the editor should see it: the `.feature.md` content plus
+ * what lives only in the Automerge document — the draft scenarios
  * (specs/automerge-store.spec.md "draft scenarios live in the document
  * only"), serialized with explicit [draft] chips so a later save keeps them
- * drafts — and the same thing parsed, each scenario carrying the document's
- * id for it (`Scenario.id`), which the markdown never does. The file stays
- * the source for everything it holds — the document only contributes what
- * the file cannot see.
+ * drafts, and the external links the projection leaves out while "Publish
+ * external links" is off (specs/external-links/project-management-jira-
+ * linear-etc.feature.md) — and the same thing parsed, each scenario carrying
+ * the document's id for it (`Scenario.id`), which the markdown never does.
+ * The file stays the source for everything it holds — the document only
+ * contributes what the file cannot see.
  */
 export interface FeatureView {
   content: string;
@@ -126,7 +129,10 @@ export async function readFeatureForEditor(
   return (await readFeatureView(dataDir, fileName))?.content ?? null;
 }
 
-/** Fold the document's drafts, and its ids, into a feature text for the editor. */
+/**
+ * Fold the document's drafts, its ids, and the external links the file
+ * doesn't carry, into a feature text for the editor.
+ */
 async function featureView(
   dataDir: string,
   fileName: string,
@@ -135,30 +141,76 @@ async function featureView(
   const feature = parseFeature(content);
   const loaded = await loadFeatureDoc(dataDir, fileName);
   if (loaded === null) return { content, parsed: feature };
+  const inDoc = docToFeature(loaded.doc);
   const key = (s: { name: string; version: number }) => `${s.name}@v${s.version}`;
   const ids = new Map(loaded.doc.specs.map((s) => [key(s), s.id] as const));
+  // Plain copies of the document's links (docToFeature strips the proxies).
+  const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
   const have = new Set(feature.scenarios.map(key));
   const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
-    .map((s) => ({
-      id: s.id,
-      name: s.name,
-      version: s.version,
-      status: s.status,
-      body: s.body,
-      tests: [...s.tests],
-    }));
+    .map((s) => {
+      const link = docLinks.get(key(s));
+      return {
+        id: s.id,
+        name: s.name,
+        version: s.version,
+        status: s.status,
+        body: s.body,
+        tests: [...s.tests],
+        ...(link ? { link } : {}),
+      };
+    });
+  // Links: the file's own where it has one (it is the source for what it
+  // holds), else the document's. A file written with links off has none,
+  // and the editor must still show — and keep — them.
+  let linked = 0;
+  const scenarios = feature.scenarios.map((s) => {
+    const id = ids.get(key(s));
+    const link = s.link ?? docLinks.get(key(s));
+    if (link && !s.link) linked++;
+    return {
+      ...s,
+      ...(id === undefined ? {} : { id }),
+      ...(link ? { link } : {}),
+    };
+  });
+  const link = feature.link ?? inDoc.link;
+  if (link && !feature.link) linked++;
   const parsed: Feature = {
     ...feature,
-    scenarios: sortScenarios([
-      ...feature.scenarios.map((s) => {
-        const id = ids.get(key(s));
-        return id === undefined ? s : { ...s, id };
-      }),
-      ...drafts,
-    ]),
+    ...(link ? { link } : {}),
+    scenarios: sortScenarios([...scenarios, ...drafts]),
   };
-  return { content: drafts.length === 0 ? content : serializeFeature(parsed), parsed };
+  return {
+    content: drafts.length === 0 && linked === 0 ? content : serializeFeature(parsed),
+    parsed,
+  };
+}
+
+/**
+ * Rewrite every feature file to its document's current projection — what
+ * the "Publish external links" switch does on the spot, so toggling it puts
+ * the links into (or takes them out of) every `.feature.md` at once rather
+ * than one file at a time as they happen to be edited. Local writes; the
+ * reload cron commits and pushes them like any saved change. Returns how
+ * many files changed.
+ */
+export async function reprojectFeatures(dataDir: string): Promise<number> {
+  let changed = 0;
+  for (const fileName of await listFeatureDocs(dataDir)) {
+    const text = await readTextFile(`${dataDir}/${fileName}`);
+    if (text === null) continue;
+    const loaded = await loadFeatureDoc(dataDir, fileName);
+    if (loaded === null) continue;
+    const projection = projectFeature(loaded.doc);
+    // Only a file that already is a projection — in the other form — is
+    // rewritten; a drifted file is left for the sync tick to absorb first.
+    if (text === projection || !isProjectionOf(text, loaded.doc)) continue;
+    await writeTextFile(`${dataDir}/${fileName}`, projection);
+    changed++;
+  }
+  return changed;
 }
 
 /**

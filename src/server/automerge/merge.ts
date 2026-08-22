@@ -7,7 +7,7 @@
 // it is the fallback that keeps mixed-version teams and the PR workflow safe.
 
 import * as A from "@automerge/automerge";
-import type { Feature, Scenario } from "../parser";
+import type { ExternalLink, Feature, Scenario } from "../parser";
 
 export type ThreeWayResult =
   | { ok: true; feature: Feature }
@@ -37,6 +37,25 @@ function mergeText(base: string, ours: string, theirs: string): string {
 /** draft → proposed → published: the lifecycle only moves forward. */
 const STATUS_RANK = { draft: 0, proposed: 1, published: 2 } as const;
 
+function linkKey(link: ExternalLink | undefined): string {
+  return link ? `${link.program}\n${link.ticket}\n${link.url}` : "";
+}
+
+/**
+ * An external link is one value, not text: the side that changed it wins,
+ * ours when both did (specs/external-links/project-management-jira-linear-
+ * etc.feature.md).
+ */
+function mergeLink(
+  base: ExternalLink | undefined,
+  ours: ExternalLink | undefined,
+  theirs: ExternalLink | undefined,
+): ExternalLink | undefined {
+  const winner =
+    linkKey(theirs) !== linkKey(base) && linkKey(ours) === linkKey(base) ? theirs : ours;
+  return winner ? { ...winner } : undefined;
+}
+
 /** Merge one scenario present on both sides. */
 function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
@@ -44,6 +63,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     theirs.tests.join("\n") !== baseTests && ours.tests.join("\n") === baseTests
       ? theirs.tests
       : ours.tests;
+  const link = mergeLink(base?.link, ours.link, theirs.link);
   return {
     name: ours.name,
     version: ours.version,
@@ -52,6 +72,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
+    ...(link ? { link } : {}),
   };
 }
 
@@ -97,14 +118,18 @@ export function threeWayFeature(
       }
     }
   }
+  const link = mergeLink(base.link, ours.link, theirs.link);
   return {
     ok: true,
-    feature: { name, description, scenarios },
+    feature: { name, description, scenarios, ...(link ? { link } : {}) },
   };
 }
 
 function sameScenario(a: Scenario, b: Scenario): boolean {
   return (
-    a.body === b.body && a.status === b.status && a.tests.join("\n") === b.tests.join("\n")
+    a.body === b.body &&
+    a.status === b.status &&
+    a.tests.join("\n") === b.tests.join("\n") &&
+    linkKey(a.link) === linkKey(b.link)
   );
 }
