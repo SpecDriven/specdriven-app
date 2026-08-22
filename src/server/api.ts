@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
+  normalizeDeletePublished,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -46,6 +47,7 @@ import {
   deleteFolder,
   deleteDraftScenario,
   deleteFeature,
+  deletePublishedScenario,
   moveFeature,
   renameFeature,
   renameFeatureFile,
@@ -246,6 +248,7 @@ async function stateFields(state: SpecDrivenState) {
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
     codeGen: normalizeCodeGen(state.codeGen),
+    deletePublished: normalizeDeletePublished(state.deletePublished),
     syncServerUrl: state.syncServerUrl ?? null,
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
@@ -277,6 +280,7 @@ const putState: Handler = async (req) => {
     gitEngine?: string | null;
     showTestLinks?: boolean;
     codeGen?: boolean;
+    deletePublished?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -287,12 +291,13 @@ const putState: Handler = async (req) => {
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
     body.codeGen === undefined &&
+    body.deletePublished === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen, deletePublished or syncServerUrl is required",
       },
       400,
     );
@@ -378,6 +383,15 @@ const putState: Handler = async (req) => {
     }
     if (body.codeGen) delete state.codeGen;
     else state.codeGen = false;
+  }
+  // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
+  // Published Spec"): opt-in — the default OFF is an absent key.
+  if (body.deletePublished !== undefined) {
+    if (typeof body.deletePublished !== "boolean") {
+      return json({ error: "deletePublished must be a boolean" }, 400);
+    }
+    if (body.deletePublished) state.deletePublished = true;
+    else delete state.deletePublished;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -573,6 +587,27 @@ const postDeleteDraft = withDataDir(async (dir, req, params) => {
   const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
   try {
     return json(await deleteDraftScenario(dir, params.file!, target));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/editor/spec-editor.feature.md "Delete Published Spec": deleting a
+// published scenario is allowed only while the Settings switch is on —
+// enforced here and not only in the UI, so nothing can remove published
+// content while the switch is off. The client shows the Danger Zone
+// confirmation first; the removal is committed and pushed right away.
+const postDeletePublished = withDataDir(async (dir, req, params) => {
+  if (!normalizeDeletePublished((await readState(getAppRoot())).deletePublished)) {
+    return json({ error: "Deleting published scenarios is switched off in Settings" }, 403);
+  }
+  const body = (await req.json()) as { scenario?: { name?: string; version?: number } };
+  if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
+    return json({ error: "scenario needs a name and a version" }, 400);
+  }
+  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  try {
+    return json(await deletePublishedScenario(dir, params.file!, target));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -802,6 +837,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
+  ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/agent/session", postAgentSession],
 ];
 
