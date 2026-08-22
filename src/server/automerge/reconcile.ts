@@ -7,7 +7,7 @@
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
 import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../parser";
-import type { FeatureDoc, ScenarioEntry } from "./schema";
+import type { FeatureDoc, SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
 /** Create a document from a parsed feature file (first import). */
@@ -15,13 +15,14 @@ export function importFeatureDoc(feature: Feature): A.Doc<FeatureDoc> {
   return newFeatureDoc({
     name: feature.name,
     description: feature.description,
-    scenarios: feature.scenarios.map(newEntry),
+    specs: feature.scenarios.map(newEntry),
   });
 }
 
-function newEntry(s: Scenario): ScenarioEntry {
+function newEntry(s: Scenario): SpecEntry {
   return {
     id: randomUUID(),
+    type: "Scenario",
     name: s.name,
     version: s.version,
     status: s.status,
@@ -41,7 +42,7 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
  * file can never rewrite published history through the reconciliation door.
  */
 function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
-  for (const entry of doc.scenarios) {
+  for (const entry of doc.specs) {
     if (entry.status !== "published") continue;
     const match = target.scenarios.find((s) => sameScenario(entry, s));
     if (!match || match.body !== entry.body) {
@@ -87,7 +88,7 @@ export function reconcile(
 ): A.Doc<FeatureDoc> {
   if (!force) assertPublishedKept(doc, target);
 
-  const entries: Scenario[] = doc.scenarios.map((e) => ({
+  const entries: Scenario[] = doc.specs.map((e) => ({
     id: e.id,
     name: e.name,
     version: e.version,
@@ -132,19 +133,19 @@ export function reconcile(
     }
     for (const [i, match] of matchAt) {
       const entry = entries[i]!;
-      const live = d.scenarios[i]!;
-      if (entry.name !== match.name) A.updateText(d, ["scenarios", i, "name"], match.name);
+      const live = d.specs[i]!;
+      if (entry.name !== match.name) A.updateText(d, ["specs", i, "name"], match.name);
       if (entry.version !== match.version) live.version = match.version;
       if (entry.status !== match.status) live.status = match.status;
-      if (entry.body !== match.body) A.updateText(d, ["scenarios", i, "body"], match.body);
+      if (entry.body !== match.body) A.updateText(d, ["specs", i, "body"], match.body);
       if (entry.tests.join("\n") !== match.tests.join("\n")) {
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
     }
     for (let i = entries.length - 1; i >= 0; i--) {
-      if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.scenarios, i);
+      if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.specs, i);
     }
-    for (const s of additions) d.scenarios.push(newEntry(s));
+    for (const s of additions) d.specs.push(newEntry(s));
   });
 }
 
@@ -163,11 +164,11 @@ export function removeDraftScenario(
   doc: A.Doc<FeatureDoc>,
   target: { name: string; version: number },
 ): A.Doc<FeatureDoc> | null {
-  const at = doc.scenarios.findIndex(
+  const at = doc.specs.findIndex(
     (s) => s.status === "draft" && s.name === target.name && s.version === target.version,
   );
   if (at === -1) return null;
   return A.change(doc, (d) => {
-    A.deleteAt(d.scenarios, at);
+    A.deleteAt(d.specs, at);
   });
 }

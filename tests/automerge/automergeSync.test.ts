@@ -122,7 +122,7 @@ test("external drift is absorbed into the doc on a clean pull", async () => {
 
   await syncDataDir(a);
   const doc = (await loadFeatureDoc(a, "seed.feature.md"))!.doc;
-  expect(doc.scenarios[0]!.body).toContain("edited on GitHub");
+  expect(doc.specs[0]!.body).toContain("edited on GitHub");
   expect(projectFeature(doc)).toBe((await readFeature(a, "seed.feature.md"))!);
 });
 
@@ -139,7 +139,7 @@ test("a chipless hand-added scenario is absorbed as a doc-only draft", async () 
 
   await syncDataDir(a);
   const doc = (await loadFeatureDoc(a, "seed.feature.md"))!.doc;
-  expect(doc.scenarios.find((s) => s.name === "Sketch")?.status).toBe("draft");
+  expect(doc.specs.find((s) => s.name === "Sketch")?.status).toBe("draft");
   const md = await readFeature(a, "seed.feature.md");
   expect(md).not.toContain("Sketch");
   expect(projectFeature(doc)).toBe(md!);

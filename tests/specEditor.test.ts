@@ -39,7 +39,7 @@ test("a new draft is persisted in the Automerge document, out of the file", asyn
   expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
   expect(loaded).not.toBeNull();
-  expect(loaded!.doc.scenarios.map((s) => [s.name, s.status])).toEqual([["Idea", "draft"]]);
+  expect(loaded!.doc.specs.map((s) => [s.name, s.status])).toEqual([["Idea", "draft"]]);
 });
 
 // "The user can use Delete which removes the draft spec." — a draft is
@@ -106,7 +106,7 @@ test("the editor view carries each scenario's document id; the markdown carries 
   );
   const view = (await readFeatureView(root, "quote.feature.md"))!;
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
-  const ids = Object.fromEntries(loaded!.doc.scenarios.map((s) => [s.name, s.id]));
+  const ids = Object.fromEntries(loaded!.doc.specs.map((s) => [s.name, s.id]));
   expect(view.parsed.scenarios.map((s) => [s.name, s.id])).toEqual([
     ["Basic", ids["Basic"]],
     ["Idea", ids["Idea"]],
@@ -147,7 +147,7 @@ test("Publish of a renamed draft publishes that draft, not a second spec beside 
   expect(editor).not.toContain("Scenario goes under");
   expect(editor).not.toContain("[draft]");
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
-  expect(loaded!.doc.scenarios.map((s) => [s.name, s.status, s.id])).toEqual([
+  expect(loaded!.doc.specs.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Spec goes under the highlighted folder", "published", draft.id!],
   ]);
 });
@@ -171,7 +171,7 @@ test("an autosave after a retyped title rewrites the draft instead of filing a s
     ["Better Idea", "draft", id],
   ]);
   const loaded = await loadFeatureDoc(root, "quote.feature.md");
-  expect(loaded!.doc.scenarios.map((s) => [s.name, s.status, s.id])).toEqual([
+  expect(loaded!.doc.specs.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Better Idea", "draft", id],
   ]);
 });

@@ -16,6 +16,7 @@ import {
   removeFeatureDoc,
   saveFeatureDoc,
 } from "../../src/server/automerge/store";
+import type { FeatureDoc, SpecEntry } from "../../src/server/automerge/schema";
 
 let root: string;
 
@@ -33,9 +34,10 @@ function sampleDoc() {
   return newFeatureDoc({
     name: "Quote Policy",
     description: "Quotes for potential customers.",
-    scenarios: [
+    specs: [
       {
         id: crypto.randomUUID(),
+        type: "Scenario",
         name: "Basic Quote",
         version: 1,
         status: "proposed",
@@ -63,13 +65,13 @@ test("create/load round-trips the document and its identity", async () => {
 test("saveFeatureDoc appends an incremental chunk that loads back", async () => {
   const created = await createFeatureDoc(root, FILE, sampleDoc());
   const next = A.change(A.clone(created.doc), (d) => {
-    A.updateText(d, ["scenarios", 0, "body"], "- **Given** a premium account\n- **Then** a quote");
+    A.updateText(d, ["specs", 0, "body"], "- **Given** a premium account\n- **Then** a quote");
   });
   await saveFeatureDoc(root, FILE, next, created.heads);
   const files = await readdir(docDir(root, FILE));
   expect(files.filter((f) => f.startsWith("changes-")).length).toBe(1);
   const loaded = await loadFeatureDoc(root, FILE);
-  expect(loaded!.doc.scenarios[0]!.body).toContain("premium account");
+  expect(loaded!.doc.specs[0]!.body).toContain("premium account");
 });
 
 test("a no-op save writes nothing", async () => {
@@ -86,10 +88,10 @@ test("divergent copies union-merge deterministically", async () => {
   const created = await createFeatureDoc(root, FILE, sampleDoc());
 
   const peerA = A.change(A.clone(created.doc), (d) => {
-    A.splice(d, ["scenarios", 0, "body"], 0, 0, "A: ");
+    A.splice(d, ["specs", 0, "body"], 0, 0, "A: ");
   });
   const peerB = A.change(A.clone(created.doc), (d) => {
-    d.scenarios[0]!.tests.push("https://github.com/acme/repo/blob/main/t.test.ts");
+    d.specs[0]!.tests.push("https://github.com/acme/repo/blob/main/t.test.ts");
   });
 
   // Each peer appends its chunk to its own copy of the directory.
@@ -106,8 +108,8 @@ test("divergent copies union-merge deterministically", async () => {
 
   const mergedA = await loadFeatureDoc(dirA, FILE);
   const mergedB = await loadFeatureDoc(dirB, FILE);
-  expect(mergedA!.doc.scenarios[0]!.body.startsWith("A: ")).toBe(true);
-  expect(mergedA!.doc.scenarios[0]!.tests.length).toBe(1);
+  expect(mergedA!.doc.specs[0]!.body.startsWith("A: ")).toBe(true);
+  expect(mergedA!.doc.specs[0]!.tests.length).toBe(1);
   expect(A.toJS(mergedA!.doc)).toEqual(A.toJS(mergedB!.doc));
   expect(A.getHeads(mergedA!.doc)).toEqual(A.getHeads(mergedB!.doc));
 });
@@ -146,7 +148,7 @@ test("compaction folds change files into one snapshot that still loads", async (
   let { doc, heads } = await createFeatureDoc(root, FILE, sampleDoc());
   for (let i = 0; i < 13; i++) {
     const next = A.change(A.clone(doc), (d) => {
-      A.splice(d, ["scenarios", 0, "body"], 0, 0, `${i} `);
+      A.splice(d, ["specs", 0, "body"], 0, 0, `${i} `);
     });
     await saveFeatureDoc(root, FILE, next, heads);
     const loaded = (await loadFeatureDoc(root, FILE))!;
@@ -157,8 +159,8 @@ test("compaction folds change files into one snapshot that still loads", async (
   expect(files.filter((f) => f.startsWith("changes-")).length).toBeLessThan(12);
   expect(files.filter((f) => f.startsWith("snapshot-")).length).toBe(1);
   const loaded = await loadFeatureDoc(root, FILE);
-  expect(loaded!.doc.scenarios[0]!.body).toContain("12 ");
-  expect(loaded!.doc.scenarios[0]!.body).toContain("0 ");
+  expect(loaded!.doc.specs[0]!.body).toContain("12 ");
+  expect(loaded!.doc.specs[0]!.body).toContain("0 ");
 });
 
 test("removeFeatureDoc deletes the directory", async () => {
@@ -167,11 +169,12 @@ test("removeFeatureDoc deletes the directory", async () => {
   expect(await loadFeatureDoc(root, FILE)).toBeNull();
 });
 
-// A schema v1 document — statuses as `published`/`proposed` booleans —
-// migrates on load: `status` appears, the booleans go, the version bumps.
+// A schema v1 document — statuses as `published`/`proposed` booleans, the
+// list under `scenarios`, no `type` — migrates on load: `status` appears, the
+// booleans go, the entries move to `specs` as Scenarios, the version bumps.
 // loadFeatureDoc returns pre-migration heads, so the next save persists the
 // migration ops and a reload needs no second migration.
-test("a v1 document's booleans migrate to the status field on load", async () => {
+test("a v1 document migrates to status, specs, and type on load", async () => {
   type V1Entry = {
     id: string;
     name: string;
@@ -188,33 +191,71 @@ test("a v1 document's booleans migrate to the status field on load", async () =>
     description: string;
     scenarios: V1Entry[];
   };
+  const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
   const v1 = A.from<V1Doc>({
     schemaVersion: 1,
     id: crypto.randomUUID(),
     name: "Quote Policy",
     description: "",
     scenarios: [
-      { id: crypto.randomUUID(), name: "Done", version: 1, published: true, proposed: false, body: "done", tests: [] },
-      { id: crypto.randomUUID(), name: "Pending", version: 1, published: false, proposed: true, body: "pending", tests: [] },
-      { id: crypto.randomUUID(), name: "Idea", version: 1, published: false, proposed: false, body: "idea", tests: [] },
+      { id: ids[0]!, name: "Done", version: 1, published: true, proposed: false, body: "done", tests: [] },
+      { id: ids[1]!, name: "Pending", version: 1, published: false, proposed: true, body: "pending", tests: [] },
+      { id: ids[2]!, name: "Idea", version: 1, published: false, proposed: false, body: "idea", tests: [] },
     ],
   });
   await createFeatureDoc(root, FILE, v1 as unknown as Parameters<typeof createFeatureDoc>[2]);
 
   const loaded = (await loadFeatureDoc(root, FILE))!;
-  expect(loaded.doc.schemaVersion).toBe(2);
+  expect(loaded.doc.schemaVersion).toBe(3);
   const plain = A.toJS(loaded.doc);
+  expect(Object.keys(plain)).not.toContain("scenarios");
+  expect(plain.specs.map((s) => s.id)).toEqual(ids);
   expect(
-    Object.fromEntries(plain.scenarios.map((s) => [s.name, s.status])),
+    Object.fromEntries(plain.specs.map((s) => [s.name, s.status])),
   ).toEqual({ Done: "published", Pending: "proposed", Idea: "draft" });
-  for (const s of plain.scenarios) {
+  for (const s of plain.specs) {
+    expect(s.type).toBe("Scenario");
     expect(Object.keys(s)).not.toContain("published");
     expect(Object.keys(s)).not.toContain("proposed");
   }
 
   await saveFeatureDoc(root, FILE, loaded.doc, loaded.heads);
   const reloaded = (await loadFeatureDoc(root, FILE))!;
-  expect(reloaded.doc.schemaVersion).toBe(2);
+  expect(reloaded.doc.schemaVersion).toBe(3);
   expect(reloaded.heads).toEqual(A.getHeads(reloaded.doc));
   expect(A.getHeads(reloaded.doc)).toEqual(A.getHeads(loaded.doc));
+});
+
+// A schema v2 document — `status` already there, the list still under
+// `scenarios`, no `type` — moves to `specs` with every entry a Scenario.
+test("a v2 document's scenarios become typed specs on load", async () => {
+  type V2Entry = Omit<SpecEntry, "type">;
+  type V2Doc = Omit<FeatureDoc, "specs"> & { scenarios: V2Entry[] };
+  const id = crypto.randomUUID();
+  const v2 = A.from<V2Doc>({
+    schemaVersion: 2,
+    id: crypto.randomUUID(),
+    name: "Quote Policy",
+    description: "",
+    scenarios: [{ id, name: "Basic Quote", version: 1, status: "proposed", body: "quote", tests: [] }],
+  });
+  await createFeatureDoc(root, FILE, v2 as unknown as Parameters<typeof createFeatureDoc>[2]);
+
+  const loaded = (await loadFeatureDoc(root, FILE))!;
+  expect(loaded.doc.schemaVersion).toBe(3);
+  const plain = A.toJS(loaded.doc);
+  expect(Object.keys(plain)).not.toContain("scenarios");
+  expect(plain.specs).toEqual([
+    { id, type: "Scenario", name: "Basic Quote", version: 1, status: "proposed", body: "quote", tests: [] },
+  ]);
+
+  // The migrated body is still collaborative text.
+  const edited = A.change(loaded.doc, (d) => {
+    A.updateText(d, ["specs", 0, "body"], "a quote");
+  });
+  await saveFeatureDoc(root, FILE, edited, loaded.heads);
+  const reloaded = (await loadFeatureDoc(root, FILE))!;
+  expect(reloaded.doc.schemaVersion).toBe(3);
+  expect(reloaded.doc.specs[0]!.body).toBe("a quote");
+  expect(reloaded.heads).toEqual(A.getHeads(reloaded.doc));
 });
