@@ -2623,7 +2623,7 @@ export function App() {
                   })
                 }
               >
-                + Add Spec
+                + Add Scenario
               </button>
             </div>
             {status && <p className="status">{status}</p>}
