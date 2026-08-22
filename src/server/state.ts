@@ -35,6 +35,10 @@ export interface SpecDrivenState {
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to the Claude CLI. */
   codeGen?: boolean;
+  /** Allow deleting published scenarios (specs/editor/spec-editor.feature.md
+      "Delete Published Spec"); absent means OFF — published scenarios are
+      immutable unless this is explicitly turned on. */
+  deletePublished?: boolean;
   /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
@@ -132,6 +136,12 @@ export function normalizeShowTestLinks(value: unknown): boolean {
     (specs/agents/claude.spec.md). */
 export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
+}
+
+/** Effective published-deletion setting: OFF unless explicitly turned on
+    (specs/editor/spec-editor.feature.md "Delete Published Spec"). */
+export function normalizeDeletePublished(value: unknown): boolean {
+  return value === true;
 }
 
 /**

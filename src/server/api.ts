@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
+  normalizeDeletePublished,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -41,11 +42,13 @@ import {
   listFeatures,
   listFolders,
   readFeatureForEditor,
+  readFeatureView,
   createFeature,
   createFolder,
   deleteFolder,
   deleteDraftScenario,
   deleteFeature,
+  deletePublishedScenario,
   moveFeature,
   renameFeature,
   renameFeatureFile,
@@ -53,11 +56,11 @@ import {
   publishFeature,
   resolveFeatureConflict,
 } from "./features";
-import type { ScenarioTarget } from "./features";
+import type { FeatureView, ScenarioTarget } from "./features";
 import { claudeAvailable, runCodeGenSession } from "./agent";
 import type { SpecInput } from "./agent";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
-import { extractScenarios, parseFeature } from "./parser";
+import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
 import {
@@ -246,6 +249,7 @@ async function stateFields(state: SpecDrivenState) {
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
     codeGen: normalizeCodeGen(state.codeGen),
+    deletePublished: normalizeDeletePublished(state.deletePublished),
     syncServerUrl: state.syncServerUrl ?? null,
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
@@ -277,6 +281,7 @@ const putState: Handler = async (req) => {
     gitEngine?: string | null;
     showTestLinks?: boolean;
     codeGen?: boolean;
+    deletePublished?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -287,12 +292,13 @@ const putState: Handler = async (req) => {
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
     body.codeGen === undefined &&
+    body.deletePublished === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, codeGen, deletePublished or syncServerUrl is required",
       },
       400,
     );
@@ -378,6 +384,15 @@ const putState: Handler = async (req) => {
     }
     if (body.codeGen) delete state.codeGen;
     else state.codeGen = false;
+  }
+  // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
+  // Published Spec"): opt-in — the default OFF is an absent key.
+  if (body.deletePublished !== undefined) {
+    if (typeof body.deletePublished !== "boolean") {
+      return json({ error: "deletePublished must be a boolean" }, 400);
+    }
+    if (body.deletePublished) state.deletePublished = true;
+    else delete state.deletePublished;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -518,38 +533,56 @@ const getFeature = withDataDir(async (dir, _req, params) => {
   // A name readFeature refuses — a legacy `<slug>.feature` still held by
   // an open tab, or a traversal attempt — is "not found", not a 500.
   // The editor view: file content plus the document's draft scenarios,
-  // which are never in the file (specs/automerge-store.spec.md).
-  let content: string | null;
+  // which are never in the file (specs/automerge-store.spec.md), and the
+  // parsed form carrying each scenario's document id — the identity the
+  // editor hands back when it saves.
+  let view: FeatureView | null;
   try {
-    content = await readFeatureForEditor(dir, params.file!);
+    view = await readFeatureView(dir, params.file!);
   } catch {
     return json({ error: "not found" }, 404);
   }
-  if (content === null) return json({ error: "not found" }, 404);
-  return json({ fileName: params.file!, content, parsed: parseFeature(content) });
+  if (view === null) return json({ error: "not found" }, 404);
+  return json({ fileName: params.file!, ...view });
 });
+
+/** A scenario as a request body names it: name + version, and the document
+    id the editor read it under when it has one (Scenario.id). */
+type ScenarioBody = { name?: unknown; version?: unknown; id?: unknown } | null | undefined;
+
+/** The scenario a body names, or null when the name or version is missing. */
+function scenarioTarget(body: ScenarioBody): ScenarioTarget | null {
+  if (typeof body?.name !== "string" || typeof body.version !== "number") return null;
+  const target: ScenarioTarget = { name: body.name, version: body.version };
+  if (typeof body.id === "string") target.id = body.id;
+  return target;
+}
 
 const putFeature = withDataDir(async (dir, req, params) => {
   const body = (await req.json()) as {
     content?: string;
     resolveConflict?: boolean;
     save?: boolean;
-    // Individual scenario publish (specs/crud-feature.spec.md "publish
-    // each scenario individually"); absent = publish all scenarios.
-    scenario?: { name?: string; version?: number };
+    // The scenario this request is about. On a publish: the one scenario to
+    // publish (specs/crud-feature.spec.md "publish each scenario
+    // individually"), absent = publish all. On a save: the dialog's scenario.
+    // Its document id, when the editor holds one, keeps a scenario saved
+    // under a new name or version one scenario rather than two
+    // (specs/editor-autosave.feature.md "Autosave Never Adds the Same
+    // Scenario Twice").
+    scenario?: ScenarioBody;
   };
   if (typeof body.content !== "string") return json({ error: "content is required" }, 400);
   let scenario: ScenarioTarget | undefined;
   if (body.scenario !== undefined) {
-    if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
-      return json({ error: "scenario needs a name and a version" }, 400);
-    }
-    scenario = { name: body.scenario.name, version: body.scenario.version };
+    const target = scenarioTarget(body.scenario);
+    if (!target) return json({ error: "scenario needs a name and a version" }, 400);
+    scenario = target;
   }
   try {
     // save: auto-save locally with [proposed] markers; the reload cron
     // commits and pushes (specs/crud-feature.spec.md).
-    if (body.save) return json(await saveFeature(dir, params.file!, body.content));
+    if (body.save) return json(await saveFeature(dir, params.file!, body.content, scenario));
     const result = body.resolveConflict
       ? await resolveFeatureConflict(dir, params.file!, body.content, scenario)
       : await publishFeature(dir, params.file!, body.content, scenario);
@@ -573,6 +606,27 @@ const postDeleteDraft = withDataDir(async (dir, req, params) => {
   const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
   try {
     return json(await deleteDraftScenario(dir, params.file!, target));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/editor/spec-editor.feature.md "Delete Published Spec": deleting a
+// published scenario is allowed only while the Settings switch is on —
+// enforced here and not only in the UI, so nothing can remove published
+// content while the switch is off. The client shows the Danger Zone
+// confirmation first; the removal is committed and pushed right away.
+const postDeletePublished = withDataDir(async (dir, req, params) => {
+  if (!normalizeDeletePublished((await readState(getAppRoot())).deletePublished)) {
+    return json({ error: "Deleting published scenarios is switched off in Settings" }, 403);
+  }
+  const body = (await req.json()) as { scenario?: { name?: string; version?: number } };
+  if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
+    return json({ error: "scenario needs a name and a version" }, 400);
+  }
+  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  try {
+    return json(await deletePublishedScenario(dir, params.file!, target));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -802,6 +856,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
+  ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/agent/session", postAgentSession],
 ];
 

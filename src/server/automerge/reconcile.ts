@@ -6,7 +6,7 @@
 
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
-import type { Feature, Scenario } from "../parser";
+import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../parser";
 import type { FeatureDoc, SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
@@ -31,8 +31,8 @@ function newEntry(s: Scenario): SpecEntry {
   };
 }
 
-const sameScenario = (e: { name: string; version: number }, s: Scenario) =>
-  e.name === s.name && e.version === s.version;
+const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
+  a.name === b.name && a.version === b.version;
 
 /**
  * The published-immutability invariant (specs/ui.spec.md), stated on the doc:
@@ -64,17 +64,32 @@ function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
  * cannot see it must not delete. A target scenario that does claim one (same
  * name and version, or same body) promotes or renames it in place.
  *
+ * `scenario` is the editor's word on which entry one target scenario is: the
+ * entry carrying `scenario.id` — the document id the editor read it under
+ * (Scenario.id) — is the target scenario with that name and version, whatever
+ * its name, version or body were when it was last saved
+ * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
+ * Twice"). The passes below can only see a rename by an unchanged body, which
+ * a title retyped while the body is still being written never has — and a
+ * draft left unclaimed that way would linger under its old name while its new
+ * self was filed as a second scenario. The claim is skipped when it no longer
+ * fits: the id is gone from the doc, the target has no scenario of that name
+ * and version, another entry already carries that identity (the identity
+ * pass's to claim), or the entry is published — whose identity no editor may
+ * move (specs/ui.spec.md: published scenarios are immutable).
+ *
  * `force` skips the published-immutability gate — only for an explicit human
  * decision (the conflict-resolution dialog), never for an automated write.
  */
 export function reconcile(
   doc: A.Doc<FeatureDoc>,
   target: Feature,
-  { force = false } = {},
+  { force = false, scenario }: { force?: boolean; scenario?: ScenarioTarget } = {},
 ): A.Doc<FeatureDoc> {
   if (!force) assertPublishedKept(doc, target);
 
   const entries: Scenario[] = doc.specs.map((e) => ({
+    id: e.id,
     name: e.name,
     version: e.version,
     status: e.status,
@@ -93,6 +108,19 @@ export function reconcile(
       }
     });
   };
+  if (scenario?.id) {
+    const { id, name, version } = scenario;
+    const at = entries.findIndex((e) => e.id === id);
+    const entry = at === -1 ? undefined : entries[at];
+    const claimed = target.scenarios.find((s) => sameScenario(s, { name, version }));
+    const blocked =
+      entries.some((e, i) => i !== at && sameScenario(e, { name, version })) ||
+      (entry?.status === "published" && !sameScenario(entry, { name, version }));
+    if (entry && claimed && !blocked) {
+      matchAt.set(at, claimed);
+      matched.add(claimed);
+    }
+  }
   claim((s, i) => sameScenario(entries[i]!, s));
   claim((s, i) => s.body === entries[i]!.body); // rename / version bump
 
@@ -128,8 +156,9 @@ export function reconcile(
  * what markdown always looks like, and reconcile keeps the entry. Deleting a
  * draft is therefore a direct document operation, asked for explicitly.
  *
- * Drafts only — a proposed or published scenario is removed by saving the
- * feature without it. Null when no draft carries that name and version.
+ * Drafts only — a proposed scenario is removed by saving the feature without
+ * it, and a published one through deletePublishedScenario in features.ts.
+ * Null when no draft carries that name and version.
  */
 export function removeDraftScenario(
   doc: A.Doc<FeatureDoc>,
