@@ -6,7 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { scenarioSignature } from "../src/frontend/App";
+import { namingInProgress, scenarioSignature } from "../src/frontend/App";
 import type { Scenario } from "../src/server/parser";
 import {
   DEFAULT_AUTOSAVE_SECONDS,
@@ -127,4 +127,17 @@ test("the autosave interval is independent of the autosync frequency", async () 
   const state = await readState(root);
   expect(state.reloadFrequencySeconds).toBe(0);
   expect(normalizeAutosaveSeconds(state.autosaveIntervalSeconds)).toBe(5);
+});
+
+// While the caret is in the dialog's title field the name is only half typed,
+// so no tick saves it — the tick after focus moves on saves it whole.
+test("no autosave tick runs while the scenario name is being typed", () => {
+  const nameField = { id: "name" } as unknown as Element;
+  const body = { id: "body" } as unknown as Element;
+  expect(namingInProgress(nameField, nameField)).toBe(true);
+  expect(namingInProgress(nameField, body)).toBe(false);
+  expect(namingInProgress(nameField, null)).toBe(false);
+  // A published scenario has no editable title: nothing holds its ticks back.
+  expect(namingInProgress(null, body)).toBe(false);
+  expect(namingInProgress(null, null)).toBe(false);
 });
