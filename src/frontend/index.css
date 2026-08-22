@@ -2232,3 +2232,102 @@ button.table-add:hover {
   background: var(--surface-2);
   box-shadow: var(--shadow-sm);
 }
+
+/* External links (specs/external-links/project-management-jira-linear-etc.
+   feature.md): the ticket chip on a scenario card and beside the feature
+   name — `Jira:ABC-123`, opening the ticket in a new tab. */
+.ext-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.5rem;
+  padding: 0.12rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ext-link::after {
+  content: "↗";
+  font-family: var(--font-sans);
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+.ext-link:hover {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.feature-title .ext-link {
+  margin-left: 0;
+  font-size: 0.78rem;
+}
+
+/* The dialogs' ticket-link fields: url first (pasting it fills the other
+   two), then the tool's short name and the ticket id. */
+.dialog .link-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.link-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.link-inputs input,
+.link-inputs select {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.88rem;
+}
+
+.link-inputs .link-url {
+  flex: 1 1 16rem;
+  min-width: 12rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.link-inputs .link-type {
+  width: 7rem;
+}
+
+.link-inputs .link-program {
+  width: 8rem;
+}
+
+.link-inputs .link-ticket {
+  width: 8rem;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.link-preview {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.link-preview code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--text-2);
+}
+
+.dialog.link-dialog {
+  width: min(44rem, 92vw);
+}
