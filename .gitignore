@@ -2,7 +2,7 @@
 .DS_Store
 .certs
 node_modules
-.specdriven
+/.specdriven
 .claude/settings.local.json
 data-sample
 dist

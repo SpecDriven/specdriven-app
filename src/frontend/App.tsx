@@ -303,6 +303,9 @@ export function App() {
   const [settingRepo, setSettingRepo] = useState(false);
   // Whether the runtime offers a native folder chooser (specs/app-start.spec.md).
   const [canChooseFolder, setCanChooseFolder] = useState(false);
+  // Demo mode: the data directory is a fixed ephemeral copy — everything that
+  // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
+  const [demo, setDemo] = useState(false);
   const repoInputRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -521,7 +524,9 @@ export function App() {
 
   useEffect(() => {
     (async () => {
-      const state = await (await fetch("/api/state")).json();
+      // boot=1 marks the page-load fetch: in demo mode the server reseeds the
+      // pristine dataset on it, so a refresh reopens on the default data.
+      const state = await (await fetch("/api/state?boot=1")).json();
       setDataRepo(state.dataRepo);
       setRecentRepos(Array.isArray(state.recentDataRepos) ? state.recentDataRepos : []);
       setNeedsRepo(state.needsDataRepo);
@@ -548,6 +553,7 @@ export function App() {
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
+      setDemo(Boolean(state.demo));
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(state.cliGitAvailable));
@@ -2816,7 +2822,9 @@ export function App() {
                 aria-label="Open the data folder's README"
                 onClick={(e) => spaClick(e, goHome)}
               >
-                {repoDisplayName(dataRepo)}
+                {/* The demo's working copy is a numbered throwaway folder —
+                    show the dataset's name, not the generation counter. */}
+                {demo ? "demo-data" : repoDisplayName(dataRepo)}
               </a>
             )}
             {/* Recent folder list (specs/ui/ui.feature.md "Recent folder
@@ -2825,7 +2833,7 @@ export function App() {
                 only — the full path is the tooltip. Picking one switches
                 to it and opens its README; the current folder is ticked,
                 and picking it just goes home to the README. */}
-            {dataRepo && (
+            {dataRepo && !demo && (
               <div className="repo-recent">
                 <button
                   type="button"
@@ -2880,33 +2888,39 @@ export function App() {
                 )}
               </div>
             )}
-            <button
-              type="button"
-              className="repo-edit"
-              title="Change data directory"
-              aria-label="Change data directory"
-              disabled={settingRepo}
-              onClick={() => void changeRepo()}
-            >
-              ✎
-            </button>
+            {!demo && (
+              <button
+                type="button"
+                className="repo-edit"
+                title="Change data directory"
+                aria-label="Change data directory"
+                disabled={settingRepo}
+                onClick={() => void changeRepo()}
+              >
+                ✎
+              </button>
+            )}
             {/* Sync (specs/ui.spec.md "Main page"): immediate data reload,
                 next to the folder it reloads. Disabled with a progress label
                 while running, the icon turning; no status line at the bottom
                 of the page. Up here it works from the home view too, not
                 only with a feature open. */}
-            <button
-              type="button"
-              className="repo-sync"
-              title="Sync — pull the data folder and push saved changes"
-              disabled={syncing}
-              onClick={() => void syncNow()}
-            >
-              <SyncIcon spinning={syncing} />
-              {syncing ? "Syncing…" : "Sync"}
-            </button>
+            {!demo && (
+              <button
+                type="button"
+                className="repo-sync"
+                title="Sync — pull the data folder and push saved changes"
+                disabled={syncing}
+                onClick={() => void syncNow()}
+              >
+                <SyncIcon spinning={syncing} />
+                {syncing ? "Syncing…" : "Sync"}
+              </button>
+            )}
           </div>
         </header>
+        {/* Demo mode: say what the sandbox does — edits are ephemeral. */}
+        {demo && <div className="demo-banner">Demo — edits reset on refresh</div>}
         {/* Search field (specs/search.spec.md): top-left, under the header
             so the macOS drag region above it stays draggable. */}
         <div className="sidebar-search">
@@ -3811,6 +3825,9 @@ export function App() {
                 </select>
               </label>
             </section>
+            {/* Demo mode has nothing to sync with: the whole autosync/live
+                sync group hides — the server refuses the changes anyway. */}
+            {!demo && (
             <section className="settings-group">
               {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
                   default; off stores a frequency of 0, which stops the reload. */}
@@ -3886,6 +3903,7 @@ export function App() {
                 </div>
               )}
             </section>
+            )}
             <section className="settings-group">
               {/* Editor autosave (specs/editor-autosave.feature.md): the open
                   editor saves itself at this interval. There is no off switch —
@@ -3976,7 +3994,9 @@ export function App() {
             <section className="settings-group">
               {/* Code gen (specs/agents/claude.spec.md): off takes the selection
                   checkboxes and Start session away, and the server refuses a
-                  session, so no spec can reach the Claude CLI. */}
+                  session, so no spec can reach the Claude CLI. Hidden in demo
+                  mode, where it is pinned off (no Claude CLI to hand specs to). */}
+              {!demo && (
               <label className="settings-row">
                 <span className="settings-row-label">
                   Code generation
@@ -3996,6 +4016,7 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              )}
               {/* Deleting published scenarios
                   (specs/editor/spec-editor.feature.md "Delete Published
                   Spec"): opt-in — with the switch off published scenarios
@@ -4020,7 +4041,11 @@ export function App() {
                 </span>
               </label>
               {/* Git engine (specs/git-operations.spec.md): which one carries
-                  the operations out and who supplies GitHub credentials. */}
+                  the operations out and who supplies GitHub credentials.
+                  Hidden in demo mode along with the sign-in — the demo
+                  dataset never syncs with GitHub. */}
+              {!demo && (
+                <>
               <label className="settings-row">
                 <span className="settings-row-label">
                   Git engine
@@ -4122,6 +4147,8 @@ export function App() {
                   either.
                 </p>
               </div>
+                </>
+              )}
             </section>
             <p className="hint settings-footnote">
               Changes are saved to .specdriven/settings.json as you make them.

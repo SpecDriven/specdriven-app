@@ -1,10 +1,15 @@
 import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
+import { isDemoMode, setupDemo } from "./server/demo";
 import { initTelemetry } from "./server/telemetry";
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
 // be up before the first sync or API call so nothing escapes the pipeline.
 initTelemetry();
+
+// Demo mode (DEMO_MODE=1): seed the ephemeral demo dataset and sandbox all
+// state under the demo root before startup reads any settings.
+if (isDemoMode()) await setupDemo();
 
 // The API itself lives in server/api.ts so the desktop app can serve the
 // same routes over its app:// protocol (specs/desktop-app.spec.md).
