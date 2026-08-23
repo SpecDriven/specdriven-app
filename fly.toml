@@ -1,0 +1,23 @@
+# Fly.io config for the public demo (see Dockerfile). Everything is
+# ephemeral by design — no volume; each machine seeds its own demo copy.
+# Keep it at one machine (fly scale count 1): multiple machines each hold an
+# independent demo dataset, and requests are not sticky between them.
+app = "specdriven-demo"
+primary_region = "iad"
+
+[build]
+
+[env]
+  DEMO_MODE = "1"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
