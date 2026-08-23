@@ -1,7 +1,7 @@
 // Automates specs/editor/spec-editor.feature.md "Create New Spec": a new
 // spec starts as a draft persisted in Automerge, Delete removes the draft,
-// and the dialog's two ways forward are Propose and Publish — closing (ESC or
-// the close widget) leaves the scenario in its autosaved state, which is the
+// and the editor's two ways forward are Propose and Publish — leaving (ESC or
+// the `<` back button) leaves the scenario in its autosaved state, which is the
 // frontend simply not discarding anything on the way out.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";

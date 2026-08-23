@@ -5,6 +5,7 @@
 // in the feature file. Pasting the url first fills the other two where the
 // url gives them away (./externallinks).
 
+import { useRef } from "react";
 import { EXTERNAL_LINK_TYPES, externalLinkTypeOf, formatExternalLink } from "../server/parser";
 import type { ExternalLinkType } from "../server/parser";
 import { EMPTY_LINK_DRAFT, isBlankLinkDraft, resolveLinkDraft, withLinkUrl } from "./externallinks";
@@ -31,8 +32,14 @@ export function ExternalLinkField({ draft, onChange, error, autoFocus }: Props) 
   // No tool named yet is "Other" with an empty name — the name field is where
   // a tool the dropdown doesn't offer gets typed.
   const type = externalLinkTypeOf(draft.program);
-  const chooseType = (next: ExternalLinkType) =>
+  // The name field takes the caret when "Other" is picked from the dropdown —
+  // not when the fields first appear with no tool named, or it would steal
+  // the focus from whatever the editor put it on (its title field).
+  const nameFieldWanted = useRef(false);
+  const chooseType = (next: ExternalLinkType) => {
+    nameFieldWanted.current = next === "Other";
     onChange({ ...draft, program: next === "Other" ? "" : next });
+  };
   return (
     <>
       <div className="link-inputs">
@@ -64,7 +71,7 @@ export function ExternalLinkField({ draft, onChange, error, autoFocus }: Props) 
             placeholder="Tool name"
             aria-label="Tool name"
             spellCheck={false}
-            autoFocus={!draft.program}
+            autoFocus={nameFieldWanted.current && !draft.program}
             onChange={(e) => onChange({ ...draft, program: e.target.value })}
           />
         )}
