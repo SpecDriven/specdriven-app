@@ -11,6 +11,12 @@ import type { GitEngine } from "./git";
 
 export interface SpecDrivenState {
   dataRepo?: string;
+  /**
+   * Data folders used before, most recent first (specs/ui/ui.feature.md
+   * "Recent folder list"): what the ▾ beside the folder name offers. Holds
+   * the current folder too; at most MAX_RECENT_DATA_REPOS entries.
+   */
+  recentDataRepos?: string[];
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
   /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
@@ -199,4 +205,43 @@ export async function writeState(
 
 export function needsDataRepo(state: SpecDrivenState): boolean {
   return !state.dataRepo || state.dataRepo.trim() === "";
+}
+
+// Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
+// data folders picked before, most recent first, up to 10.
+export const MAX_RECENT_DATA_REPOS = 10;
+
+/** Cleaned, deduplicated, capped list for a stored value. */
+export function normalizeRecentDataRepos(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const repo = entry.trim();
+    if (!repo || seen.has(repo)) continue;
+    seen.add(repo);
+    out.push(repo);
+    if (out.length === MAX_RECENT_DATA_REPOS) break;
+  }
+  return out;
+}
+
+/**
+ * The recent list as shown: the current folder first, then the stored
+ * entries. A settings file from before the list still offers the one
+ * folder it names.
+ */
+export function recentDataRepos(state: SpecDrivenState): string[] {
+  const current = state.dataRepo?.trim();
+  const stored = normalizeRecentDataRepos(state.recentDataRepos);
+  return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
+}
+
+/** Moves (or adds) repo to the front of the list, dropping the oldest past 10. */
+export function rememberDataRepo(state: SpecDrivenState, repo: string): void {
+  state.recentDataRepos = normalizeRecentDataRepos([
+    repo,
+    ...normalizeRecentDataRepos(state.recentDataRepos),
+  ]);
 }
