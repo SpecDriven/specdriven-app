@@ -181,3 +181,13 @@ test("no native folder chooser: /api/choose-folder is 501", async () => {
   const res = await api("/api/choose-folder", { method: "POST" });
   expect(res.status).toBe(501);
 });
+
+test("the demo user is Test User, not the OS account", async () => {
+  const state = await bootState();
+  expect(state.user).toEqual({
+    username: "Test User",
+    login: null,
+    name: "Test User",
+    email: "test-user@specdriven.demo",
+  });
+});
