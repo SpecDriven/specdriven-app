@@ -991,21 +991,32 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // With a folder selected, the new feature is created inside it — the same
+  // insertion point "+ New folder" uses; `folder/name` nests further below
+  // it (specs/ui/folders.feature.md).
   const createFeature = async () => {
-    const name = await prompt({
-      title: "New feature",
-      hint: "Use folder/name to create inside a folder.",
-      placeholder: "billing/Basic Quote",
+    const parent = selectedFolder;
+    const input = await prompt({
+      title: parent ? `New feature in "${parent}"` : "New feature",
+      hint: parent ? undefined : "Use folder/name to create inside a folder.",
+      placeholder: parent ? "Basic Quote" : "billing/Basic Quote",
       confirmLabel: "Create feature",
     });
-    if (!name) return;
+    if (!input) return;
     const res = await fetch("/api/features", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name: parent ? `${parent}/${input}` : input }),
     });
     const data = await res.json();
     if (res.ok) {
+      // Reveal the new feature: a selected folder may be collapsed, since
+      // clicking one both selects it and toggles its subtree.
+      if (parent) setCollapsed((prev) => {
+        const next = new Set(prev);
+        next.delete(parent);
+        return next;
+      });
       await loadFeatures();
       await openFeature(data.fileName, { push: true });
     } else {
