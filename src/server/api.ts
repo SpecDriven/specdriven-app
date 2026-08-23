@@ -65,6 +65,7 @@ import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
+import { readReadme, writeReadme } from "./readme";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -551,6 +552,23 @@ const getFeatures = withDataDir(async (dir) =>
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
+// The data repo's README (specs/app-startup.feature.md "App Starts with
+// existing specs folder selected"): the home view opens it in an editor.
+const getReadme = withDataDir(async (dir) => json(await readReadme(dir)));
+
+// The README editor's autosave: a plain local write — the reload cron commits
+// and pushes it, like a saved scenario (specs/editor-autosave.feature.md
+// "Autosave Saves Locally").
+const putReadme = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
+  if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
+  try {
+    return json(await writeReadme(dir, body.content));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 500);
+  }
+});
+
 const getSearch = withDataDir(async (dir, req) => {
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
@@ -888,6 +906,8 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/images", postImage],
   ["GET", "/api/images/:name", getImage],
   ["GET", "/api/search", getSearch],
+  ["GET", "/api/readme", getReadme],
+  ["PUT", "/api/readme", putReadme],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

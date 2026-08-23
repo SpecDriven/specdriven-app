@@ -14,7 +14,7 @@ import {
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
-import { buildTree, firstFeature } from "../src/frontend/tree";
+import { buildTree } from "../src/frontend/tree";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
@@ -143,33 +143,6 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.folders.map((f) => f.path)).toEqual(["billing/sub"]);
   expect(billing.features.map((f) => f.name)).toEqual(["Quotes"]);
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
-});
-
-// specs/app-start.spec.md: a newly picked folder opens on its topmost
-// feature, which is the first one the sidebar renders — folders before
-// features, depth first.
-test("firstFeature returns the topmost feature in sidebar order", () => {
-  const nested = buildTree(
-    ["billing", "billing/sub"],
-    [
-      { fileName: "alpha.feature.md", name: "Alpha", scenarios: [] },
-      { fileName: "billing/quotes.feature.md", name: "Quotes", scenarios: [] },
-      { fileName: "billing/sub/deep.feature.md", name: "Deep", scenarios: [] },
-    ],
-  );
-  expect(firstFeature(nested)?.fileName).toBe("billing/sub/deep.feature.md");
-
-  // Empty folders are skipped; a root-level feature wins when no folder holds one.
-  const flat = buildTree(
-    ["empty"],
-    [
-      { fileName: "zeta.feature.md", name: "Zeta", scenarios: [] },
-      { fileName: "alpha.feature.md", name: "Alpha", scenarios: [] },
-    ],
-  );
-  expect(firstFeature(flat)?.fileName).toBe("alpha.feature.md");
-
-  expect(firstFeature(buildTree(["empty"], []))).toBeUndefined();
 });
 
 // The move flow runs on all three git engines (specs/git-operations.spec.md).
