@@ -231,6 +231,12 @@ interface OpenOptions {
    * preservation used by sync/cron refreshes.
    */
   scenario?: ScenarioRef | null;
+  /**
+   * Open with the feature description editor on (specs/editor/feature-editor
+   * .feature.md "Edit feature descrition"): a just-created feature is empty,
+   * and describing it is the first thing to do.
+   */
+  editDescription?: boolean;
 }
 
 /** What /api/features returns: the flat feature list plus the folder list. */
@@ -386,6 +392,21 @@ export function App() {
   const [featureLinkDraft, setFeatureLinkDraft] = useState<LinkDraft | null>(null);
   const [featureLinkError, setFeatureLinkError] = useState<string | null>(null);
   const [featureLinkSaving, setFeatureLinkSaving] = useState(false);
+  // The feature description editor (specs/editor/feature-editor.feature.md):
+  // the free markdown above the first scenario, edited in place and autosaved
+  // at the scenario editor's interval like the home README. Keyed by file so
+  // the editor belongs to the feature it was opened on — it shows only while
+  // that feature is selected, and a save that lands after the user moved on
+  // stamps nothing onto the feature opened since. `descSaved` is the text
+  // last landed on the server; refs, because a tick reads them between
+  // renders and must not cause one.
+  const [descEdit, setDescEdit] = useState<{ file: string; text: string } | null>(null);
+  const descEditRef = useRef(descEdit);
+  descEditRef.current = descEdit;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const descSaved = useRef<string | null>(null);
+  const descInFlight = useRef(false);
   // Git engine (specs/git-operations.spec.md): the GitHub CLI (the default
   // wherever gh is installed), plain system git, or the bundled JavaScript
   // one — which is always available, so it needs no availability flag.
@@ -492,7 +513,11 @@ export function App() {
     if (loading || needsRepo || reloadSeconds <= 0) return;
     const id = setInterval(() => {
       void loadFeatures();
-      if (selected && !dirty && !editing && !conflict) void openFeature(selected);
+      // The description editor holding an edit that hasn't landed yet keeps
+      // its feature as is, like the README below.
+      const descPending =
+        descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
+      if (selected && !dirty && !editing && !conflict && !descPending) void openFeature(selected);
       // A pulled README shows up too — unless the home editor holds an edit
       // that hasn't landed yet.
       if (!selected && readmeText.current === readmeSaved.current) void loadReadme();
@@ -929,6 +954,7 @@ export function App() {
       setEditing(null);
       setRenameDraft(null);
       setConflict(null);
+      if (opts.editDescription) openDescriptionEditor(file, parsed.description);
       setStatus(
         missingScenario
           ? `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`
@@ -1018,7 +1044,9 @@ export function App() {
         return next;
       });
       await loadFeatures();
-      await openFeature(data.fileName, { push: true });
+      // A new feature opens on its description editor (specs/editor/feature-
+      // editor.feature.md "Edit feature descrition").
+      await openFeature(data.fileName, { push: true, editDescription: true });
     } else {
       setStatus(data.error);
     }
@@ -1737,6 +1765,83 @@ export function App() {
       void readmeTick.current();
     };
   }, [readmeOpen, autosaveSeconds]);
+
+  /**
+   * Feature description editor (specs/editor/feature-editor.feature.md "Edit
+   * feature descrition"). Opening seeds it with the description on the
+   * feature, which counts as saved; nothing is written until it changes.
+   */
+  const openDescriptionEditor = (file: string, text: string) => {
+    descSaved.current = text;
+    setDescEdit({ file, text });
+  };
+
+  /**
+   * One autosave tick of the description editor: save the feature with the
+   * description it holds, unless that is what the server already has. Same
+   * rules as the README editor — ticks never overlap, only a landed save
+   * counts, a failed one is reported and retried by the next tick. The save
+   * goes through the ordinary feature save, so the scenarios ride along
+   * unchanged and the reload cron commits and pushes it.
+   */
+  const autosaveDescription = async () => {
+    const edit = descEditRef.current;
+    if (!edit || !feature || edit.file !== selected) return;
+    if (edit.text === descSaved.current) return;
+    if (descInFlight.current) return; // the previous tick is still saving
+    descInFlight.current = true;
+    const next: Feature = { ...feature, description: edit.text.trim() };
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        content?: string;
+        parsed?: Feature;
+        error?: string;
+      };
+      if (res.ok && typeof data.content === "string") {
+        // The editor may have closed, or moved to another feature, while the
+        // save was away: then its result belongs to nothing on screen.
+        if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
+        if (selectedRef.current === edit.file) {
+          setFeature(featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file));
+          flashSaved();
+        }
+      } else {
+        setStatus(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
+      }
+    } catch (e) {
+      setStatus(`Description not saved: ${(e as Error).message} — will retry.`);
+    } finally {
+      descInFlight.current = false;
+    }
+  };
+  const descTick = useRef(autosaveDescription);
+  useEffect(() => {
+    descTick.current = autosaveDescription;
+  });
+  // Ticks run while the selected feature's description editor is on. Leaving
+  // it — Done, or navigating to another feature or home — saves what was typed
+  // since the last tick, then drops an editor left behind by navigation.
+  const descOpen = descEdit !== null && descEdit.file === selected;
+  useEffect(() => {
+    if (!descOpen) return;
+    const id = setInterval(() => void descTick.current(), autosaveSeconds * 1000);
+    return () => {
+      clearInterval(id);
+      void descTick.current();
+      if (descEditRef.current && descEditRef.current.file !== selectedRef.current) setDescEdit(null);
+    };
+  }, [descOpen, autosaveSeconds]);
+
+  /** Done: land what the editor holds and show the description rendered. */
+  const closeDescriptionEditor = async () => {
+    await descTick.current();
+    setDescEdit(null);
+  };
 
   // Avatar initials: from the git name when set, else the OS user name
   // (specs/user-info-settings.spec.md).
@@ -2847,6 +2952,21 @@ export function App() {
                     >
                       {feature.link ? "Edit ticket" : "Link ticket"}
                     </button>
+                    {/* The description editor (specs/editor/feature-editor
+                        .feature.md): switches the description pane below
+                        between rendered and editable. */}
+                    {descOpen ? (
+                      <button className="link" onClick={() => void closeDescriptionEditor()}>
+                        Done
+                      </button>
+                    ) : (
+                      <button
+                        className="link"
+                        onClick={() => openDescriptionEditor(selected, feature.description)}
+                      >
+                        {feature.description ? "Edit description" : "Add description"}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <form
@@ -2898,10 +3018,36 @@ export function App() {
                 </button>
               </div>
             </div>
-            {feature.description && (
-              <div className="feature-desc md-preview">
-                {renderMarkdown(feature.description)}
+            {descOpen && descEdit ? (
+              /* specs/editor/feature-editor.feature.md "Edit feature
+                 descrition": the description pane becomes the editor, sized
+                 like the rendered pane so the scenario list stays in view. */
+              <div className="feature-desc-editor">
+                <MarkdownEditor
+                  value={descEdit.text}
+                  onChange={(text) => setDescEdit({ file: descEdit.file, text })}
+                  placeholder="Describe this feature — any markdown. Saved automatically."
+                />
+                <span className="readme-hint">
+                  Saved automatically every {autosaveSeconds} seconds; the next sync pushes it.
+                  Done shows it rendered.
+                </span>
               </div>
+            ) : (
+              feature.description && (
+                /* Clicking the rendered description opens the editor too —
+                   links inside it still open as links. */
+                <div
+                  className="feature-desc md-preview editable"
+                  title="Click to edit the description"
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("a")) return;
+                    openDescriptionEditor(selected, feature.description);
+                  }}
+                >
+                  {renderMarkdown(feature.description)}
+                </div>
+              )
             )}
             {/* specs/ui.spec.md "Scenario List": each card renders its body as
                 a Markdown preview, clamped to n lines (n set in Settings). */}

@@ -871,6 +871,33 @@ button {
   color: var(--text-2);
 }
 
+/* A rendered description opens its editor on click (specs/editor/feature-
+   editor.feature.md), alongside the "Edit description" link in the title row. */
+.feature-desc.editable {
+  cursor: text;
+}
+
+.feature-desc.editable:hover {
+  border-color: var(--border-strong);
+}
+
+/* The description pane while it is being edited (specs/editor/feature-
+   editor.feature.md): the editor takes the pane's third of the screen and
+   scrolls inside it, so the scenario list below keeps its room. */
+.feature-desc-editor {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 33vh;
+  min-height: 0;
+}
+
+.feature-desc-editor .readme-hint {
+  color: var(--text-3);
+  font-size: 0.8rem;
+}
+
 .scenarios {
   flex: 1;
   display: flex;
