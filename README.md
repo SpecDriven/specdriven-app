@@ -79,6 +79,27 @@ and fall back to `~/.specdriven/settings.json`, so one settings file can serve
 every checkout; `SPECDRIVEN_HOME` overrides that home directory. Settings are saved
 back to whichever file was read.
 
+## Demo mode
+
+`DEMO_MODE=1` (`bun run demo`) runs the app as a public, self-resetting demo of
+the checked-in `demo-data/` dataset (a snapshot of the specs-insurance repo,
+refreshed with `cp -R ../specs-insurance demo-data && rm -rf demo-data/.git`):
+
+- Every page load copies `demo-data/` to a fresh working directory under
+  `SPECDRIVEN_ROOT` (default `/tmp/specdriven-demo`) — editing works in full,
+  and a browser refresh returns the demo to the default dataset. The snapshot
+  itself is never written.
+- The copy has no `.git`, so every git operation takes the existing
+  plain-directory path: saves land locally, pull/push are skipped, and nothing
+  talks to GitHub. Sign-in, the folder picker, and data-directory changes are
+  refused server-side (403/501) and hidden in the UI.
+- All state — settings, token file, logs — is confined under the demo root
+  (`SPECDRIVEN_HOME` is pointed inside it), away from `~/.specdriven`.
+
+`Dockerfile` + `fly.toml` deploy it as a container (`fly deploy`); everything is
+ephemeral, so no volume is needed. Keep it to one machine — each machine holds
+an independent demo copy.
+
 ## Observability
 
 The server (web and desktop) is instrumented with OpenTelemetry around the

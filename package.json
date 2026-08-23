@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "bun --hot src/index.ts",
     "start": "bun src/index.ts",
+    "demo": "DEMO_MODE=1 bun src/index.ts",
     "build": "bun scripts/build.ts",
     "build:all": "bun scripts/build.ts --all",
     "dev:electron": "bun scripts/dev-electron.ts",

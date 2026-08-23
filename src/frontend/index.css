@@ -487,6 +487,18 @@ aside header h1 {
   animation: sync-spin 1s linear infinite;
 }
 
+/* Demo mode: a quiet one-line note under the header, telling visitors the
+   dataset is a sandbox that resets on refresh. */
+.demo-banner {
+  font-size: 0.72rem;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.5rem;
+  margin: 0 0.9rem 0.4rem;
+  text-align: center;
+}
+
 @keyframes sync-spin {
   to {
     transform: rotate(360deg);
