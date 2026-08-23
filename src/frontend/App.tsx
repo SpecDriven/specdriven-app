@@ -247,6 +247,11 @@ interface Listing {
 
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
+  // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
+  // data folders used before, most recent first, up to 10 — what the ▾
+  // beside the folder name drops down.
+  const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [settingRepo, setSettingRepo] = useState(false);
@@ -465,6 +470,7 @@ export function App() {
     (async () => {
       const state = await (await fetch("/api/state")).json();
       setDataRepo(state.dataRepo);
+      setRecentRepos(Array.isArray(state.recentDataRepos) ? state.recentDataRepos : []);
       setNeedsRepo(state.needsDataRepo);
       if (typeof state.reloadFrequencySeconds === "number") {
         setReloadSeconds(state.reloadFrequencySeconds);
@@ -683,6 +689,28 @@ export function App() {
     };
   }, [userMenuOpen]);
 
+  // specs/ui/ui.feature.md "Recent folder list": ESC or a click anywhere
+  // else closes the folder drop down (same behavior as the user menu).
+  useEffect(() => {
+    if (!recentMenuOpen) return;
+    const onDown = (e: Event) => {
+      if (!(e.target instanceof Element) || !e.target.closest(".repo-recent"))
+        setRecentMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setRecentMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [recentMenuOpen]);
+
   // specs/ui.spec.md "Feature entry menu": ESC or a click anywhere else
   // closes the entry's drop down menu (same behavior as the user menu).
   useEffect(() => {
@@ -717,6 +745,7 @@ export function App() {
       editing ||
       settingsOpen ||
       userMenuOpen ||
+      recentMenuOpen ||
       userInfoOpen ||
       treeMenu !== null
     )
@@ -735,7 +764,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFolder, editing, settingsOpen, userMenuOpen, userInfoOpen, treeMenu]);
+  }, [selectedFolder, editing, settingsOpen, userMenuOpen, recentMenuOpen, userInfoOpen, treeMenu]);
 
   // Search as the user types, debounced (specs/search.spec.md); the
   // AbortController keeps a stale response from overwriting a newer query.
@@ -854,6 +883,7 @@ export function App() {
       const state = await res.json();
       if (res.ok) {
         setDataRepo(state.dataRepo);
+        setRecentRepos(state.recentDataRepos ?? []);
         setNeedsRepo(false);
         // A freshly picked folder opens on its README, like a start does
         // (specs/app-startup.feature.md "A newly picked data folder opens on
@@ -895,7 +925,12 @@ export function App() {
       confirmLabel: "Use this directory",
       browse: canChooseFolder ? chooseFolderNative : undefined,
     });
-    const next = input?.trim();
+    await switchRepo(input?.trim() ?? "");
+  };
+
+  // Switch to another data dir — typed into the prompt above or picked from
+  // the recent folder list (specs/ui/ui.feature.md "Recent folder list").
+  const switchRepo = async (next: string) => {
     if (!next || next === dataRepo) return;
     setSettingRepo(true);
     // A README edit belongs to the repo it was typed in: land it there before
@@ -912,6 +947,7 @@ export function App() {
       const state = await res.json();
       if (res.ok) {
         setDataRepo(state.dataRepo);
+        setRecentRepos(state.recentDataRepos ?? []);
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
@@ -2661,6 +2697,67 @@ export function App() {
               >
                 {repoDisplayName(dataRepo)}
               </a>
+            )}
+            {/* Recent folder list (specs/ui/ui.feature.md "Recent folder
+                list"): a small ▾ next to the folder name drops down the
+                folders used before (up to 10, most recent first), by name
+                only — the full path is the tooltip. Picking one switches
+                to it and opens its README; the current folder is ticked,
+                and picking it just goes home to the README. */}
+            {dataRepo && (
+              <div className="repo-recent">
+                <button
+                  type="button"
+                  className="repo-recent-toggle"
+                  title="Recent data folders"
+                  aria-label="Recent data folders"
+                  aria-haspopup="menu"
+                  aria-expanded={recentMenuOpen}
+                  disabled={settingRepo}
+                  onClick={() => setRecentMenuOpen((o) => !o)}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path
+                      d="M1.5 3.5 5 7l3.5-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {recentMenuOpen && (
+                  <div className="repo-recent-menu" role="menu" aria-label="Recent data folders">
+                    {recentRepos.map((repo) => {
+                      const current = repo === dataRepo;
+                      return (
+                        <button
+                          key={repo}
+                          role="menuitemradio"
+                          aria-checked={current}
+                          className={current ? "current" : undefined}
+                          title={repo}
+                          onClick={() => {
+                            setRecentMenuOpen(false);
+                            if (current) {
+                              goHome();
+                              void loadReadme();
+                            } else {
+                              void switchRepo(repo);
+                            }
+                          }}
+                        >
+                          <span className="check" aria-hidden="true">
+                            {current ? "✓" : ""}
+                          </span>
+                          <span className="repo-recent-name">{repoDisplayName(repo)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
             <button
               type="button"

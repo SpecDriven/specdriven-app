@@ -13,6 +13,8 @@ import {
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
+  recentDataRepos,
+  rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
@@ -262,6 +264,9 @@ async function stateFields(state: SpecDrivenState) {
     codeGen: normalizeCodeGen(state.codeGen),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     syncServerUrl: state.syncServerUrl ?? null,
+    // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
+    // most recent first, the current folder included, at most 10.
+    recentDataRepos: recentDataRepos(state),
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
     canChooseFolder: canChooseFolder(),
@@ -351,6 +356,9 @@ const putState: Handler = async (req) => {
       return json({ error: (e as Error).message }, 400);
     }
     state.dataRepo = dataRepo;
+    // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
+    // to the front, the oldest past ten falls off.
+    rememberDataRepo(state, dataRepo);
   }
   if (body.reloadFrequencySeconds !== undefined) {
     const n = body.reloadFrequencySeconds;

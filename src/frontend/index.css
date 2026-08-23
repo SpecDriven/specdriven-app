@@ -302,6 +302,8 @@ aside header {
   align-items: center;
   gap: 0.55rem;
   padding: 0.1rem 0.35rem 0;
+  /* Anchors the recent folder menu, which spans the sidebar's width. */
+  position: relative;
 }
 
 /* Desktop app (specs/desktop-app.spec.md "Window"): the sidebar header makes
@@ -355,6 +357,84 @@ aside header h1 {
 .repo-name:focus-visible {
   color: var(--text-1);
   background: var(--hover);
+}
+
+/* Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
+   small ▾ beside the folder name, and the menu it drops down — the header's
+   quiet icon-button styling, the menu in the user menu's surface. */
+.repo-recent {
+  flex-shrink: 0;
+  display: flex;
+  /* Stays clickable inside the macOS drag-region header (desktop app). */
+  -webkit-app-region: no-drag;
+}
+
+.repo-recent-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  padding: 0.25rem 0.2rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.repo-recent-toggle:hover:not(:disabled),
+.repo-recent-toggle[aria-expanded="true"] {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.repo-recent-toggle:disabled {
+  opacity: 0.6;
+}
+
+/* The sidebar clips its overflow, so the menu hangs from the header and
+   spans the sidebar's width rather than floating beside the toggle. */
+.repo-recent-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+}
+
+.repo-recent-menu button {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  column-gap: 0.2rem;
+  align-items: center;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.5rem 0.35rem 0.3rem;
+  color: var(--text-1);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.repo-recent-menu button:hover {
+  background: var(--hover);
+}
+
+.repo-recent-menu .check {
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.repo-recent-menu .repo-recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .repo-edit {
