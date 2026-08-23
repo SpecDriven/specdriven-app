@@ -19,6 +19,7 @@ import {
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { resolveDataRepo } from "./repo";
+import { isDemoMode, reseedDemo } from "./demo";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   cliGitAvailable,
@@ -270,6 +271,9 @@ async function stateFields(state: SpecDrivenState) {
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
     canChooseFolder: canChooseFolder(),
+    // Demo mode: the client hides everything that changes or syncs the data
+    // directory — the dataset is ephemeral and resets on every page load.
+    demo: isDemoMode(),
     ...gitEngineFields(state),
     ...(await authFields()),
   };
@@ -278,7 +282,13 @@ async function stateFields(state: SpecDrivenState) {
 // App start (specs/app-start.spec.md): the client asks for state; if no
 // data repo is recorded, it prompts the user for one. The repo may be a
 // regular GitHub url (https://github.com/SpecDriven/data-insurance).
-const getState: Handler = async () => {
+const getState: Handler = async (req) => {
+  // Demo mode: the client's one boot-time state fetch carries ?boot=1, and a
+  // page load is the demo's reset point — reseed the pristine dataset before
+  // answering, so a browser refresh always opens on the default data.
+  if (isDemoMode() && new URL(req.url).searchParams.has("boot")) {
+    await reseedDemo();
+  }
   const state = await readState(getAppRoot());
   return json({
     ...(await stateFields(state)),
@@ -320,6 +330,17 @@ const putState: Handler = async (req) => {
       },
       400,
     );
+  }
+  // Demo mode: the ephemeral dataset is the only one on offer — the data
+  // directory, git engine and sync server are pinned (same server-side 403
+  // pattern as postDeletePublished / postAgentSession).
+  if (
+    isDemoMode() &&
+    (body.dataRepo !== undefined ||
+      body.gitEngine !== undefined ||
+      body.syncServerUrl !== undefined)
+  ) {
+    return json({ error: "changing the data directory is disabled in demo mode" }, 403);
   }
   const state = await readState(getAppRoot());
   // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"
@@ -897,18 +918,26 @@ const postChooseFolder: Handler = async () => {
   return json({ path: await chooseFolder() });
 };
 
+/** 403 in demo mode — routes whose whole point is talking to GitHub. */
+const unlessDemo =
+  (handler: Handler): Handler =>
+  (req, params) =>
+    isDemoMode()
+      ? json({ error: "GitHub sign-in is disabled in demo mode" }, 403)
+      : handler(req, params);
+
 /** Pattern segments starting with `:` bind the (decoded) path segment. */
 const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
   ["POST", "/api/choose-folder", postChooseFolder],
   ["POST", "/api/reload", postReload],
-  ["POST", "/api/auth/github/start", postAuthStart],
-  ["POST", "/api/auth/github/poll", postAuthPoll],
-  ["POST", "/api/auth/github/web/start", postAuthWebStart],
-  ["POST", "/api/auth/github/web/poll", postAuthWebPoll],
-  ["GET", "/api/auth/github/callback", getAuthWebCallback],
-  ["DELETE", "/api/auth/github", deleteAuth],
+  ["POST", "/api/auth/github/start", unlessDemo(postAuthStart)],
+  ["POST", "/api/auth/github/poll", unlessDemo(postAuthPoll)],
+  ["POST", "/api/auth/github/web/start", unlessDemo(postAuthWebStart)],
+  ["POST", "/api/auth/github/web/poll", unlessDemo(postAuthWebPoll)],
+  ["GET", "/api/auth/github/callback", unlessDemo(getAuthWebCallback)],
+  ["DELETE", "/api/auth/github", unlessDemo(deleteAuth)],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
   ["POST", "/api/images", postImage],
