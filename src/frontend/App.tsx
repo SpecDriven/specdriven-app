@@ -13,6 +13,7 @@ import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
 import { SearchIcon } from "./SearchIcon";
+import { SyncIcon } from "./SyncIcon";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -2555,6 +2556,21 @@ export function App() {
             >
               ✎
             </button>
+            {/* Sync (specs/ui.spec.md "Main page"): immediate data reload,
+                next to the folder it reloads. Disabled with a progress label
+                while running, the icon turning; no status line at the bottom
+                of the page. Up here it works from the home view too, not
+                only with a feature open. */}
+            <button
+              type="button"
+              className="repo-sync"
+              title="Sync — pull the data folder and push saved changes"
+              disabled={syncing}
+              onClick={() => void syncNow()}
+            >
+              <SyncIcon spinning={syncing} />
+              {syncing ? "Syncing…" : "Sync"}
+            </button>
           </div>
         </header>
         {/* Search field (specs/search.spec.md): top-left, under the header
@@ -2854,12 +2870,10 @@ export function App() {
                 )}
               </div>
               <div className="editor-actions">
-                <button className="secondary" onClick={syncNow} disabled={syncing}>
-                  {syncing ? "Syncing…" : "Sync"}
-                </button>
-                {/* Publish All, right of Sync (specs/crud-feature.spec.md
-                    "publish each scenario individually"): marks every scenario
-                    published; individual scenarios publish from their cards. */}
+                {/* Publish All (specs/crud-feature.spec.md "publish each
+                    scenario individually"): marks every scenario published;
+                    individual scenarios publish from their cards. Sync lives
+                    in the sidebar header, beside the data folder. */}
                 <button
                   className="secondary"
                   onClick={() => void publish()}
