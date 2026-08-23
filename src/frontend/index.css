@@ -1049,8 +1049,7 @@ button {
   text-decoration: underline;
 }
 
-.scenario-title .version,
-.dialog-title .version {
+.scenario-title .version {
   color: var(--text-3);
   font-family: var(--font-mono);
   font-size: 0.8rem;
@@ -1186,7 +1185,10 @@ button.link:disabled {
 
 .dialog input,
 .dialog select,
-.dialog textarea {
+.dialog textarea,
+.scenario-pane input,
+.scenario-pane select,
+.scenario-pane textarea {
   padding: 0.5rem 0.7rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -1199,6 +1201,9 @@ button.link:disabled {
 .dialog input:focus,
 .dialog select:focus,
 .dialog textarea:focus,
+.scenario-pane input:focus,
+.scenario-pane select:focus,
+.scenario-pane textarea:focus,
 .repo-prompt input:focus,
 .rename-input:focus,
 .conflict-draft:focus {
@@ -1216,7 +1221,9 @@ button.link:disabled {
 }
 
 .dialog input:disabled,
-.dialog textarea:disabled {
+.dialog textarea:disabled,
+.scenario-pane input:disabled,
+.scenario-pane textarea:disabled {
   background: var(--surface-1);
   color: var(--text-2);
 }
@@ -1303,59 +1310,70 @@ button.link:disabled {
   word-break: break-word;
 }
 
-/* Scenario edit dialog (specs/ui.spec.md): resizable via the corner handle;
-   the markdown editor absorbs the resized space. */
-.dialog.scenario-dialog {
-  /* Anchors the close-editor widget to the dialog's corner. */
-  position: relative;
-  resize: both;
-  overflow: hidden;
-  width: min(46rem, 92vw);
-  height: min(38rem, 88vh);
-  min-width: 24rem;
-  min-height: 20rem;
-  max-width: 96vw;
-  max-height: 92vh;
-}
-
-/* The close-editor widget (specs/editor/spec-editor.feature.md): closing —
-   there or with ESC — leaves the scenario in its autosaved state. */
-.dialog .dialog-close {
-  position: absolute;
-  top: 0.55rem;
-  right: 0.6rem;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0.3rem 0.4rem;
-  border-radius: 0.35rem;
-  cursor: pointer;
-}
-
-.dialog .dialog-close:hover {
-  color: var(--text-1);
-  background: var(--surface-1);
-}
-
-.dialog-title {
+/* Scenario editor pane (specs/editor/spec-editor.feature.md "Spec editor
+   pane"): takes the feature pane's slot — a bar on top, one scrolling column
+   below. Part of the page, not a dialog: nothing is dimmed and nothing is
+   resizable; the body editor grows with the window instead. */
+.scenario-pane {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-family: var(--font-serif);
+  flex-direction: column;
+  gap: 0.8rem;
 }
 
-.dialog-title .badge {
-  margin-left: 0;
+.scenario-pane-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-/* The dialog title IS the scenario name (specs/ui.spec.md) */
-.dialog input.dialog-title-input {
+/* The way back: a quiet icon button like the ▾ beside the data folder name,
+   not the bar's filled primary (which `.editor-bar button` would make it). */
+.editor-bar button.back-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.editor-bar button.back-button:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.editor-bar button.back-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* The title IS the scenario name (specs/ui.spec.md "Scenario edit dialog"):
+   a heading once published, an underlined field until then. */
+.scenario-pane-heading {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenario-pane input.scenario-pane-name {
+  flex: 1 1 12rem;
+  min-width: 8rem;
+  max-width: 36rem;
   font-family: var(--font-serif);
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.012em;
   padding: 0.15rem 0;
   border: none;
   border-bottom: 1px dashed var(--border-strong);
@@ -1363,16 +1381,59 @@ button.link:disabled {
   background: transparent;
 }
 
-.dialog input.dialog-title-input:focus {
+.scenario-pane input.scenario-pane-name:focus {
   outline: none;
   box-shadow: none;
   border-bottom: 1px solid var(--accent);
 }
 
+.scenario-pane .version-field {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Delete, set apart from Propose/Publish: the dialogs' destructive look. */
+.editor-bar button.danger {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  margin-right: 0.75rem;
+}
+
+.editor-bar button.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger-fg);
+}
+
+/* The column: the body first and growing, then the scenario table, the ticket
+   link and the tests. Same 3px trick as .scenarios, so focus rings aren't
+   clipped by the scroll box. */
+.scenario-pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  overflow-y: auto;
+  padding: 3px;
+  margin: -3px;
+}
+
+.scenario-pane-body > :not(.body-field) {
+  flex-shrink: 0;
+}
+
+/* At least 40% of the window, growing with the pane; the markdown textarea
+   absorbs it, as it does the description editor's third. */
+.scenario-pane .body-field {
+  min-height: 40vh;
+}
+
 /* The version is assigned by the app, so it reads as a label, not a field.
    The badge beside it is the scenario's status — draft until Propose or
    Publish advances it (specs/editor/spec-editor.feature.md). */
-.dialog .version-field {
+.dialog .version-field,
+.scenario-pane .version-field {
   margin: 0;
   color: var(--text-2);
   font-size: 0.83rem;
@@ -1381,7 +1442,8 @@ button.link:disabled {
   gap: 0.5rem;
 }
 
-.dialog .body-field {
+.dialog .body-field,
+.scenario-pane .body-field {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -1974,7 +2036,8 @@ aside > .user-corner {
 
 /* Scenario table widget (specs/scenario-table.spec.md): a grid over the
    markdown table in the body. Sits below the flexing body editor. */
-.dialog .table-field {
+.dialog .table-field,
+.scenario-pane .table-field {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -2010,7 +2073,8 @@ aside > .user-corner {
   align-items: center;
 }
 
-.dialog .scenario-table input {
+.dialog .scenario-table input,
+.scenario-pane .scenario-table input {
   width: 100%;
   min-width: 4rem;
   border: none;
@@ -2031,7 +2095,8 @@ aside > .user-corner {
   font-weight: 500;
 }
 
-.dialog .scenario-table input:focus {
+.dialog .scenario-table input:focus,
+.scenario-pane .scenario-table input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   box-shadow: none;
@@ -2138,7 +2203,8 @@ button.table-add:hover {
 
 /* Edit-dialog widget for the links: current links with an ✎ and a remove ✕
    each, plus an add field. Both fields only accept GitHub urls. */
-.dialog .tests-field {
+.dialog .tests-field,
+.scenario-pane .tests-field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -2368,16 +2434,13 @@ button.table-add:hover {
   gap: 0.4rem;
 }
 
-/* The "esc to exit" note pinned to the bottom of the Settings and scenario
-   edit dialogs (specs/editor/spec-editor.feature.md). */
-.settings-footnote,
-.dialog-footnote {
+/* The "esc to exit" note pinned to the bottom of the Settings dialog. */
+.settings-footnote {
   text-align: center;
   color: var(--text-3);
 }
 
-.settings-footnote kbd,
-.dialog-footnote kbd {
+.settings-footnote kbd {
   padding: 0.05rem 0.35rem;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
@@ -2440,7 +2503,8 @@ button.table-add:hover {
 
 /* The dialogs' ticket-link fields: url first (pasting it fills the other
    two), then the tool's short name and the ticket id. */
-.dialog .link-field {
+.dialog .link-field,
+.scenario-pane .link-field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;

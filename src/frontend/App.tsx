@@ -13,6 +13,7 @@ import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
 import { SearchIcon } from "./SearchIcon";
+import { BackIcon } from "./BackIcon";
 import { SyncIcon } from "./SyncIcon";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
@@ -167,9 +168,9 @@ export interface EditState {
   index: number | null;
   scenario: Scenario;
   /**
-   * True while this dialog is creating a scenario, which it stays even after
-   * autosave (specs/editor-autosave.feature.md) has put the scenario in the
-   * feature and given `index` a value. The dialog keeps its new-scenario
+   * True while the editor pane is creating a scenario, which it stays even
+   * after autosave (specs/editor-autosave.feature.md) has put the scenario in
+   * the feature and given `index` a value. The pane keeps its new-scenario
    * behavior for as long as it is open: retyping the name re-derives the
    * version, and the Draft checkbox stays unlocked.
    */
@@ -220,6 +221,51 @@ export function scenarioSignature(s: Scenario, version: number): string {
  */
 export function namingInProgress(nameField: Element | null, active: Element | null): boolean {
   return nameField !== null && nameField === active;
+}
+
+/**
+ * The feature with the editor's scenario written in — over the entry the
+ * editor opened on (or the one a previous save placed), or appended when it
+ * has none — in canonical order, which is where its card will be. Every save
+ * places the scenario this way, so the way back (specs/editor/spec-editor
+ * .feature.md "Spec editor pane") can predict where to land.
+ */
+export function withScenario(feature: Feature, at: number | null, s: Scenario): Feature {
+  return {
+    ...feature,
+    scenarios: sortScenarios(
+      at === null ? [...feature.scenarios, s] : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
+    ),
+  };
+}
+
+/**
+ * Whether a click on a scenario card landed on one of its controls — a
+ * button, a checkbox, the ticket link, a test link — rather than on the card
+ * itself. The title link counts as the card: clicking it highlights, and
+ * double-clicking it edits, like anywhere else on the card.
+ */
+export function isCardControl(
+  target: { closest?: (selector: string) => unknown } | EventTarget | null,
+): boolean {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  if (!el || typeof el.closest !== "function") return false;
+  if (el.closest(".scenario-title > a")) return false;
+  return el.closest("button, input, a") != null;
+}
+
+/**
+ * The card to highlight on the way back from the editor pane
+ * (specs/editor/spec-editor.feature.md "Spec editor pane"): the scenario's
+ * entry found by identity, since a save may have moved it; null for a
+ * scenario the feature never received.
+ */
+export function cardOfScenario(
+  scenarios: readonly Scenario[],
+  s: { name: string; version: number },
+): number | null {
+  const i = scenarios.findIndex((sc) => sc.name === s.name && sc.version === s.version);
+  return i === -1 ? null : i;
 }
 
 interface OpenOptions {
@@ -311,13 +357,20 @@ export function App() {
   // because a tick reads them between renders and must not cause one.
   const autosaved = useRef<string | null>(null);
   const autosaveInFlight = useRef(false);
-  /** The dialog's title field, so a tick can see whether the name is still
-      being typed (specs/editor-autosave.feature.md). Null once the scenario
-      is published, when the name is no longer editable. */
+  /** The editor pane's title field, so a tick can see whether the name is
+      still being typed (specs/editor-autosave.feature.md). Null once the
+      scenario is published, when the name is no longer editable. */
   const nameFieldRef = useRef<HTMLInputElement | null>(null);
-  /** Close, for the handlers that close the dialog from outside the render
-      that defines it (ESC). Kept in a ref so they always run the current one. */
-  const closeEditorRef = useRef<() => void>(() => {});
+  /** The ways out of the editor pane, for the handlers that leave it from
+      outside the render that defines them — ESC, and every navigation away
+      from the feature (specs/editor/spec-editor.feature.md "Spec editor
+      pane"). Kept in a ref so they always run the current ones. `close`
+      returns the last save when one went out, for a caller that must order
+      itself after it. */
+  const editorRef = useRef<{ close: () => Promise<boolean> | null; back: () => void }>({
+    close: () => null,
+    back: () => {},
+  });
   /** True from the moment Delete is pressed until the removal is away, so no
       tick saves the scenario back while the confirmation is on screen — and
       so nothing re-sorts the feature under the entry being deleted. */
@@ -565,8 +618,15 @@ export function App() {
           return i === null ? count - 1 : Math.max(i - 1, 0);
         });
       } else if (e.key === "Enter" && selectedScenario !== null) {
-        // A focused button keeps its native Enter activation.
-        if (t instanceof HTMLButtonElement || t instanceof HTMLAnchorElement) return;
+        // A focused button or link keeps its native Enter activation — except
+        // the highlighted card's own title link, which a click left focused:
+        // Enter there edits the scenario rather than re-selecting it.
+        const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
+          ".scenario-title > a",
+        );
+        if (t instanceof HTMLButtonElement) return;
+        if (t instanceof HTMLAnchorElement && t !== titleLink) return;
+        e.preventDefault();
         const s = feature.scenarios[selectedScenario];
         if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
       }
@@ -624,20 +684,33 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [featureLinkOpen]);
 
-  // specs/editor/spec-editor.feature.md: ESC returns to the scenario screen,
-  // leaving the scenario in its autosaved state — same as the close widget —
-  // and it works while a dialog field has focus.
+  // specs/editor/spec-editor.feature.md "Spec editor pane": ESC is the way
+  // back, like `<` — leaving the scenario in its autosaved state — and it
+  // works while a pane field has focus. Unless something open above the pane
+  // owns the key: the sidebar stays reachable beside the pane, and its menus,
+  // Settings and the other dialogs each take their ESC on the same window
+  // listener, so one press must not also leave the editor. The search field
+  // clears itself on ESC — an ESC from inside the sidebar is its own.
+  const escapeOwnedElsewhere =
+    settingsOpen ||
+    userInfoOpen ||
+    modalOpen ||
+    conflict !== null ||
+    featureLinkOpen ||
+    userMenuOpen ||
+    recentMenuOpen ||
+    treeMenu !== null;
   useEffect(() => {
-    if (!editing) return;
+    if (!editing || escapeOwnedElsewhere) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        closeEditorRef.current();
-      }
+      if (e.key !== "Escape") return;
+      if (e.target instanceof Element && e.target.closest("aside")) return;
+      e.preventDefault();
+      editorRef.current.back();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing]);
+  }, [editing, escapeOwnedElsewhere]);
 
   // specs/ui.spec.md "Settings": ESC closes the settings dialog — every
   // change is already saved — and it works while a dialog field has focus.
@@ -802,9 +875,10 @@ export function App() {
   }, [query]);
 
   // specs/search.spec.md: "/" and Cmd/Ctrl+F focus the search field from
-  // anywhere — except while a dialog is open or typing in another field.
+  // anywhere — except while a dialog is open or typing in another field. The
+  // editor pane is no dialog: the search field is right beside it.
   useEffect(() => {
-    if (editing || settingsOpen || userInfoOpen || modalOpen) return;
+    if (settingsOpen || userInfoOpen || modalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey;
       const find =
@@ -824,24 +898,29 @@ export function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, settingsOpen, userInfoOpen, modalOpen]);
+  }, [settingsOpen, userInfoOpen, modalOpen]);
 
   // Keep the ↑/↓ highlight visible while it walks the result list.
   useEffect(() => {
     document.querySelector(".search-result.active")?.scrollIntoView({ block: "nearest" });
   }, [activeResult]);
 
-  // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog.
+  // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog. The
+  // editor pane is part of the page, not a dialog — Tab reaches the sidebar
+  // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const settingsTrapRef = useFocusTrap(settingsOpen);
-  const editingTrapRef = useFocusTrap(editing !== null);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const featureLinkTrapRef = useFocusTrap(featureLinkOpen);
   const conflictTrapRef = useFocusTrap(conflict !== null);
 
+  // Also re-run when the editor pane gives the feature page back: the cards
+  // mount afresh, so the highlighted one is scrolled to even if the highlight
+  // itself did not move (specs/editor/spec-editor.feature.md "Spec editor
+  // pane").
   useEffect(() => {
     if (selectedScenario !== null)
       scenarioRefs.current[selectedScenario]?.scrollIntoView({ block: "nearest" });
-  }, [selectedScenario]);
+  }, [selectedScenario, editingOpen]);
 
   // Canonical url (specs/navigation.spec.md "Resolution rules"): the address
   // bar always shows what is actually selected. replaceState so selection
@@ -935,9 +1014,12 @@ export function App() {
     setSettingRepo(true);
     // A README edit belongs to the repo it was typed in: land it there before
     // the switch, and empty the editor so no tick writes it into the new one.
+    // The same for an open scenario editor: its last save lands in this repo
+    // (specs/editor/spec-editor.feature.md "Spec editor pane").
     await readmeTick.current();
     readmeText.current = null;
     setReadme(null);
+    await editorRef.current.close();
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -967,6 +1049,13 @@ export function App() {
     if (res.ok) {
       const data = await res.json();
       const parsed = featureFromResponse(data, file);
+      // An open editor pane leaves the way `<` does — its last save goes out
+      // now (specs/editor/spec-editor.feature.md "Spec editor pane"). Before
+      // the selection moves on: the save places its scenario in the feature
+      // it belongs to with a synchronous setFeature, which the feature opened
+      // here must land on top of, not under. And not before the fetch, or
+      // the old feature page would show for the duration of the request.
+      editorRef.current.close();
       setSelected(file);
       setFeature(parsed);
       let missingScenario: string | null = null;
@@ -987,7 +1076,6 @@ export function App() {
         history.pushState(null, "", featurePath(file));
       }
       setDirty(false);
-      setEditing(null);
       setRenameDraft(null);
       setConflict(null);
       if (opts.editDescription) openDescriptionEditor(file, parsed.description);
@@ -1001,6 +1089,8 @@ export function App() {
       // a stale deep link. Drop a stale selection rather than re-fetching it
       // on every reload tick; a link or click that misses leaves a note.
       if (file === selected) {
+        // The file is gone, so an editor open on it has nothing to save into.
+        setEditing(null);
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
@@ -1017,10 +1107,13 @@ export function App() {
    * Home — the data folder's README editor (specs/app-startup.feature.md
    * "The data folder name links to the README"). Drops the feature selection
    * and pushes `/`, so Back returns to the feature that was open. The README
-   * editor's own unmount tick saves anything typed there, and a feature's
-   * scenario editor is a dialog that can't be open while its link is clicked.
+   * editor's own unmount tick saves anything typed there, and an open
+   * scenario editor leaves the way `<` does — its last save goes out before
+   * the selection drops (specs/editor/spec-editor.feature.md "Spec editor
+   * pane").
    */
   const goHome = () => {
+    editorRef.current.close();
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1035,6 +1128,9 @@ export function App() {
     if (route.feature) {
       await openFeature(route.feature, { scenario: route.scenario ?? null });
     } else {
+      // Back to home while the editor pane is open: it leaves the way `<`
+      // does (specs/editor/spec-editor.feature.md "Spec editor pane").
+      editorRef.current.close();
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -1370,6 +1466,8 @@ export function App() {
     const data = await res.json();
     if (res.ok) {
       if (selected === f.fileName) {
+        // An editor open on the deleted feature has nothing left to save into.
+        setEditing(null);
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
@@ -1543,32 +1641,24 @@ export function App() {
       : editing.scenario.version;
 
   /**
-   * Write the dialog's scenario into the feature and save the feature locally
+   * Write the editor's scenario into the feature and save the feature locally
    * (marked [proposed], so no data is lost); the server's reload cron commits
    * and pushes it. `close` false is the autosave path
-   * (specs/editor-autosave.feature.md): the dialog stays open and follows its
+   * (specs/editor-autosave.feature.md): the pane stays open and follows its
    * scenario into the saved feature. Reports whether the save landed.
    */
   const commitScenario = async (
     tests: string[],
     close: boolean,
     // Propose (specs/editor/spec-editor.feature.md) is the explicit action
-    // that advances the dialog's draft; every other save keeps the status.
+    // that advances the editor's draft; every other save keeps the status.
     status?: Scenario["status"],
   ): Promise<boolean> => {
     if (!editing || !feature || !selected) return false;
     const s = { ...editing.scenario, status: status ?? editing.scenario.status, version: draftVersion, tests };
-    // Where this scenario sits in the feature: the entry the dialog opened
+    // Where this scenario sits in the feature: the entry the editor opened
     // on, or the one a previous autosave placed — never appended twice.
-    const at = editing.index;
-    const next: Feature = {
-      ...feature,
-      scenarios: sortScenarios(
-        at === null
-          ? [...feature.scenarios, s]
-          : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
-      ),
-    };
+    const next = withScenario(feature, editing.index, s);
     setFeature(next);
     if (close) setEditing(null);
     const session = editorSession.current;
@@ -1585,46 +1675,57 @@ export function App() {
       }),
     });
     const data = await res.json();
+    // The user may have moved on while the save was away — navigating from
+    // the sidebar leaves the editor pane with this last save
+    // (specs/editor/spec-editor.feature.md "Spec editor pane") — and then
+    // its result belongs to nothing on screen.
+    const stillHere = selectedRef.current === selected;
     if (res.ok) {
       const saved = featureFromResponse(data, selected);
-      setFeature(saved);
-      setDirty(false);
-      // A still-open dialog has to find its scenario again: the feature comes
-      // back in canonical order, so a renamed scenario has moved. Not finding
-      // it (the entry was dropped underneath us) leaves the dialog new, so
+      if (stillHere) {
+        setFeature(saved);
+        setDirty(false);
+      }
+      // The feature comes back in canonical order, so a renamed scenario has
+      // moved: a still-open editor has to find its scenario again, and an
+      // explicit save that closed the editor lands on its card. Not finding
+      // it (the entry was dropped underneath us) leaves the editor new, so
       // the next save re-adds the work rather than overwriting a neighbour.
       // The entry's document id comes back with it: a new scenario adopts it
       // here, and every later save names the entry by it.
+      const moved = cardOfScenario(saved.scenarios, s);
       if (!close && session === editorSession.current) {
-        const moved = saved.scenarios.findIndex(
-          (sc) => sc.name === s.name && sc.version === s.version,
-        );
-        const id = moved === -1 ? undefined : saved.scenarios[moved]!.id;
+        const id = moved === null ? undefined : saved.scenarios[moved]!.id;
         setEditing((prev) =>
           prev === null
             ? null
             : {
                 ...prev,
-                index: moved === -1 ? null : moved,
+                index: moved,
                 scenario: id === undefined ? prev.scenario : { ...prev.scenario, id },
               },
         );
       }
-      // A published scenario's dialog can only have changed its links — test
+      if (close && stillHere) setSelectedScenario(moved);
+      // A published scenario's editor can only have changed its links — test
       // links (specs/traceability.spec.md) and its ticket link — so there is
       // nothing left to publish.
-      setStatus(
-        s.status === "published"
-          ? `Saved the links of "${s.name}" v${s.version}.`
-          : s.status === "draft"
-            ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
-            : "Saved — publish scenarios from their cards, or press Publish All.",
-      );
-      flashSaved();
+      if (stillHere) {
+        setStatus(
+          s.status === "published"
+            ? `Saved the links of "${s.name}" v${s.version}.`
+            : s.status === "draft"
+              ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
+              : "Saved — publish scenarios from their cards, or press Publish All.",
+        );
+        flashSaved();
+      }
       return true;
     }
-    setDirty(true);
-    setStatus(data.error ?? "Save failed");
+    if (stillHere) {
+      setDirty(true);
+      setStatus(data.error ?? "Save failed");
+    }
     return false;
   };
 
@@ -1695,17 +1796,12 @@ export function App() {
     const tests = pendingTests();
     if (tests === null) return;
     const s = { ...editing.scenario, version: draftVersion, tests };
-    const at = editing.index;
-    const next: Feature = {
-      ...feature,
-      scenarios: sortScenarios(
-        at === null
-          ? [...feature.scenarios, s]
-          : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
-      ),
-    };
+    const next = withScenario(feature, editing.index, s);
     setFeature(next);
     setEditing(null);
+    // Back on the feature page, the published scenario's card is the one to
+    // land on (specs/editor/spec-editor.feature.md "Spec editor pane").
+    setSelectedScenario(cardOfScenario(next.scenarios, s));
     await publish(scenarioTarget(s), next);
   };
 
@@ -2132,7 +2228,9 @@ export function App() {
 
   // Publish external links (specs/external-links/project-management-jira-
   // linear-etc.feature.md): the server rewrites every feature file to the
-  // new form at once; the open feature is re-read so the page follows.
+  // new form at once; the open feature is re-read so the page follows — an
+  // editor pane open on it (Settings is reachable beside the pane) leaves
+  // with its last save, like any other re-open.
   const toggleExternalLinks = async (on: boolean) => {
     setSettingsPublishLinksDraft(on);
     if (!(await patchSettings({ publishExternalLinks: on }))) {
@@ -2374,15 +2472,17 @@ export function App() {
   };
 
   /**
-   * Close the scenario edit dialog (specs/editor/spec-editor.feature.md): ESC
-   * and the close widget leave the scenario in its autosaved state — closing
-   * discards nothing and reverts nothing; Delete is the way to take a draft
-   * back out. One last save catches what was typed since the previous tick,
-   * so the state left behind is the dialog's latest. Started before the dialog
-   * state clears so it saves under this editor session; while a tick is still
-   * in flight that tick's save is the autosaved state to leave.
+   * Leave the editor pane (specs/editor/spec-editor.feature.md "Spec editor
+   * pane"): `<`, ESC and every navigation away from the feature leave the
+   * scenario in its autosaved state — leaving discards nothing and reverts
+   * nothing; Delete is the way to take a draft back out. One last save
+   * catches what was typed since the previous tick, so the state left behind
+   * is the pane's latest. Started before the editor state clears so it saves
+   * under this editor session; while a tick is still in flight that tick's
+   * save is the autosaved state to leave. Returns the save when one went out.
    */
-  const closeEditor = () => {
+  const closeEditor = (): Promise<boolean> | null => {
+    let saving: Promise<boolean> | null = null;
     if (
       editing &&
       editing.scenario.name.trim() && // no name, nothing to be saved under
@@ -2390,15 +2490,36 @@ export function App() {
       !deletingScenario.current &&
       scenarioSignature(editing.scenario, draftVersion) !== autosaved.current
     ) {
-      void commitScenario(editing.scenario.tests, false);
+      saving = commitScenario(editing.scenario.tests, false);
     }
     setEditing(null);
+    return saving;
   };
 
-  // ESC closes the dialog the same way the close widget does, from a listener
-  // bound while the dialog opened — it runs whichever close is current.
+  /**
+   * `<` and ESC (specs/editor/spec-editor.feature.md "Spec editor pane"):
+   * back to the feature, landing on the scenario's card — highlighted and
+   * scrolled into view. The card is found by identity in the feature as the
+   * last save is writing it (the same placement commitScenario makes), or as
+   * it stands when nothing needed saving; a new scenario that was never
+   * saved has no card, so nothing is highlighted.
+   */
+  const backToFeature = () => {
+    if (!editing || !feature) {
+      closeEditor();
+      return;
+    }
+    const s = { ...editing.scenario, version: draftVersion };
+    const at = editing.index;
+    const saved = closeEditor() !== null;
+    const landed = saved ? withScenario(feature, at, s) : feature;
+    setSelectedScenario(cardOfScenario(landed.scenarios, s));
+  };
+
+  // ESC and the navigation paths run whichever close/back is current, from
+  // listeners and callbacks bound in earlier renders.
   useEffect(() => {
-    closeEditorRef.current = closeEditor;
+    editorRef.current = { close: closeEditor, back: backToFeature };
   });
 
   /** Draft the next version of a published scenario as a new, editable scenario. */
@@ -3003,7 +3124,241 @@ export function App() {
         }}
       />
       <section className="editor">
-        {selected && feature ? (
+        {editing && selected && feature ? (
+          /* specs/editor/spec-editor.feature.md "Spec editor pane": the
+             scenario editor takes the feature pane's slot — the sidebar stays
+             beside it — with a bar on top and one scrolling column below. */
+          <div className="scenario-pane">
+            <div className="editor-bar scenario-pane-bar">
+              <div className="scenario-pane-title">
+                {/* The way back: like ESC, it leaves the scenario in its
+                    autosaved state and lands on the scenario's card. */}
+                <button
+                  type="button"
+                  className="back-button"
+                  aria-label={`Back to ${feature.name || titleFromFileName(selected)}`}
+                  title={`Back to ${feature.name || titleFromFileName(selected)}`}
+                  autoFocus={editingPublished}
+                  onClick={backToFeature}
+                >
+                  <BackIcon />
+                </button>
+                {/* specs/ui.spec.md "Scenario edit dialog": the scenario name
+                    is the title — editable unless published. */}
+                {editingPublished ? (
+                  <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
+                ) : (
+                  <input
+                    className="scenario-pane-name"
+                    // While this field has the caret autosave stands down, so
+                    // the name is saved once, whole
+                    // (specs/editor-autosave.feature.md).
+                    ref={nameFieldRef}
+                    value={editing.scenario.name}
+                    placeholder="Scenario name"
+                    aria-label="Scenario name"
+                    autoFocus
+                    spellCheck={false}
+                    onChange={(e) =>
+                      setEditing({ ...editing, scenario: { ...editing.scenario, name: e.target.value } })
+                    }
+                  />
+                )}
+                {/* The version is assigned by the app, never typed: a new
+                    scenario takes the next version for its name
+                    (specs/ui.spec.md). The status rides along as a badge: a
+                    scenario starts as a draft — persisted by autosave, kept
+                    out of the .feature.md — until Propose or Publish advances
+                    it (specs/editor/spec-editor.feature.md). */}
+                <p className="version-field">
+                  Version <span className="version">v{draftVersion}</span>
+                  <span className={`badge ${editing.scenario.status}`}>
+                    {editing.scenario.status}
+                  </span>
+                </p>
+              </div>
+              <div className="editor-actions scenario-pane-actions">
+                {/* Proposed scenarios and drafts can be deleted
+                    (specs/editor/spec-editor.feature.md) — published ones too
+                    while Settings allows it ("Delete Published Spec") —
+                    confirmed first, then saved out of the feature or removed
+                    from the document. Kept apart from Propose/Publish, at the
+                    head of the actions. */}
+                {editingDeletable && (
+                  <button className="danger" onClick={() => void deleteScenario()}>
+                    Delete
+                  </button>
+                )}
+                {/* The two ways forward (specs/editor/spec-editor.feature.md):
+                    Propose moves the draft into the .feature.md as [proposed];
+                    Publish takes it straight to [published], committed and
+                    pushed. Closing without either keeps the autosaved draft.
+                    Propose is only offered on a draft — an already proposed
+                    scenario has nowhere left to go but Publish. */}
+                {!editingPublished && (
+                  <>
+                    {editing.scenario.status === "draft" && (
+                      <button
+                        className="secondary"
+                        onClick={() => void proposeScenario()}
+                        disabled={!editing.scenario.name.trim()}
+                      >
+                        Propose
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void publishScenario()}
+                      disabled={!editing.scenario.name.trim() || publishing !== null}
+                    >
+                      Publish
+                    </button>
+                  </>
+                )}
+                {/* A published scenario is read-only apart from its links —
+                    test links and its ticket — so that is what its Save saves. */}
+                {editingPublished && <button onClick={saveScenario}>Save links</button>}
+              </div>
+            </div>
+            <div className="scenario-pane-body">
+              <div className="body-field">
+                <span className="field-label">Body</span>
+                <MarkdownEditor
+                  value={editing.scenario.body}
+                  readOnly={editingPublished}
+                  placeholder="Describe the scenario in Markdown…"
+                  onChange={(body) =>
+                    setEditing({ ...editing, scenario: { ...editing.scenario, body } })
+                  }
+                />
+              </div>
+              {!editingPublished && (
+                // specs/scenario-table.spec.md: structured view over the
+                // markdown table stored in the body.
+                <div className="table-field">
+                  <span className="field-label">Scenario table</span>
+                  <ScenarioTable
+                    body={editing.scenario.body}
+                    onChange={(body) =>
+                      setEditing({ ...editing, scenario: { ...editing.scenario, body } })
+                    }
+                  />
+                </div>
+              )}
+              {/* specs/traceability.spec.md: GitHub links to the automated
+                  tests covering this scenario — added, corrected in place (✎)
+                  and removed (✕). Editable even for a published scenario: the
+                  links track the tests, not the immutable spec. Hidden
+                  entirely when the Settings toggle is off. */}
+              {/* specs/external-links/project-management-jira-linear-etc.
+                  feature.md "Add link at spec level": the ticket tracking this
+                  scenario. Editable on a published scenario too — like the test
+                  links, it is bookkeeping around the spec, not the spec. */}
+              <div className="link-field">
+                <span className="field-label">Ticket link</span>
+                <ExternalLinkField draft={linkDraft} onChange={changeLinkDraft} error={linkError} />
+              </div>
+              {showTestLinks && (
+                <div className="tests-field">
+                  <span className="field-label">Automated tests</span>
+                  {editing.scenario.tests.length > 0 && (
+                    <ul className="test-list">
+                      {editing.scenario.tests.map((t, i) => (
+                        <li key={t}>
+                          {testEdit === i ? (
+                            <form
+                              className="test-edit"
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                commitTestEdit();
+                              }}
+                            >
+                              <input
+                                value={testEditDraft}
+                                aria-label="Test link (GitHub url)"
+                                spellCheck={false}
+                                autoFocus
+                                onChange={(e) => setTestEditDraft(e.target.value)}
+                                // ESC backs out of the row, not out of the
+                                // whole editor pane (specs/ui.spec.md).
+                                onKeyDown={(e) => {
+                                  if (e.key !== "Escape") return;
+                                  e.stopPropagation();
+                                  setTestEdit(null);
+                                }}
+                              />
+                              <button
+                                type="submit"
+                                className="link"
+                                disabled={
+                                  !canSetTestLink(editing.scenario.tests, i, testEditDraft)
+                                }
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                className="link"
+                                onClick={() => setTestEdit(null)}
+                              >
+                                Cancel
+                              </button>
+                            </form>
+                          ) : (
+                            <>
+                              <a href={t} target="_blank" rel="noreferrer" title={t}>
+                                {testLinkLabel(t)}
+                              </a>
+                              <button
+                                type="button"
+                                className="link"
+                                title={`Edit ${t}`}
+                                onClick={() => startTestEdit(i)}
+                              >
+                                ✎
+                              </button>
+                              <button
+                                type="button"
+                                className="link"
+                                title={`Remove ${t}`}
+                                onClick={() => removeTest(i)}
+                              >
+                                ✕
+                              </button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <form
+                    className="test-add"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      addTest();
+                    }}
+                  >
+                    <input
+                      value={testDraft}
+                      placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java"
+                      aria-label="Test link (GitHub url)"
+                      spellCheck={false}
+                      onChange={(e) => setTestDraft(e.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      className="link"
+                      disabled={!canSetTestLink(editing.scenario.tests, null, testDraft)}
+                    >
+                      Add
+                    </button>
+                  </form>
+                  {testsError && <p className="error">{testsError}</p>}
+                </div>
+              )}
+            </div>
+            {status && <p className="status">{status}</p>}
+          </div>
+        ) : selected && feature ? (
           <>
             <div className="editor-bar">
               {/* specs/ui.spec.md "Main page": the top of the page shows
@@ -3161,6 +3516,18 @@ export function App() {
                   className={`scenario-card${s.status === "published" ? " published" : ""}${
                     i === selectedScenario ? " selected" : ""
                   }`}
+                  // A click anywhere on the card highlights it (the title link
+                  // does so itself); a double-click opens it in the editor
+                  // pane, like Enter. The card's controls keep their own
+                  // clicks.
+                  onClick={(e) => {
+                    if (isCardControl(e.target)) return;
+                    setSelectedScenario(i);
+                  }}
+                  onDoubleClick={(e) => {
+                    if (isCardControl(e.target)) return;
+                    setEditing({ index: i, scenario: { ...s } });
+                  }}
                 >
                   <header>
                     <span className="scenario-title">
@@ -3266,10 +3633,10 @@ export function App() {
                       name: "",
                       version: 1,
                       // A new scenario starts as a draft: autosave
-                      // (specs/editor-autosave.feature.md) writes the dialog
+                      // (specs/editor-autosave.feature.md) writes the editor
                       // out every few seconds, and a draft stays in the
                       // document. Proposing it — into the .feature.md — takes
-                      // clearing the dialog's Draft checkbox, an explicit act.
+                      // the editor's Propose button, an explicit act.
                       status: "draft",
                       body: "",
                       tests: [],
@@ -3836,242 +4203,6 @@ export function App() {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-      {editing && (
-        <div className="dialog-backdrop" onClick={() => closeEditor()}>
-          {/* specs/ui.spec.md "Scenario edit dialog": the scenario name is the
-              dialog title (an editable title unless published), the dialog is
-              resizable, and the body is an embedded markdown editor. */}
-          <div className="dialog scenario-dialog" ref={editingTrapRef} onClick={(e) => e.stopPropagation()}>
-            {/* The close-editor widget (specs/editor/spec-editor.feature.md):
-                like ESC, it leaves the scenario in its autosaved state. */}
-            <button
-              type="button"
-              className="dialog-close"
-              aria-label="Close editor"
-              title="Close — the scenario keeps its autosaved state"
-              onClick={() => closeEditor()}
-            >
-              ✕
-            </button>
-            {editingPublished ? (
-              <h3 className="dialog-title">
-                {editing.scenario.name} <span className="version">v{editing.scenario.version}</span>
-                <span className="badge">published</span>
-              </h3>
-            ) : (
-              <input
-                className="dialog-title-input"
-                // While this field has the caret autosave stands down, so the
-                // name is saved once, whole (specs/editor-autosave.feature.md).
-                ref={nameFieldRef}
-                value={editing.scenario.name}
-                placeholder="Scenario name"
-                aria-label="Scenario name"
-                autoFocus
-                onChange={(e) =>
-                  setEditing({ ...editing, scenario: { ...editing.scenario, name: e.target.value } })
-                }
-              />
-            )}
-            {!editingPublished && (
-              // The version is assigned by the app, never typed: a new scenario
-              // takes the next version for its name (specs/ui.spec.md). The
-              // status rides along as a badge: a scenario starts as a draft —
-              // persisted by autosave, kept out of the .feature.md — until
-              // Propose or Publish advances it
-              // (specs/editor/spec-editor.feature.md).
-              <p className="version-field">
-                Version <span className="version">v{draftVersion}</span>
-                <span className={`badge ${editing.scenario.status}`}>
-                  {editing.scenario.status}
-                </span>
-              </p>
-            )}
-            <div className="body-field">
-              <span className="field-label">Body</span>
-              <MarkdownEditor
-                value={editing.scenario.body}
-                readOnly={editingPublished}
-                placeholder="Describe the scenario in Markdown…"
-                onChange={(body) =>
-                  setEditing({ ...editing, scenario: { ...editing.scenario, body } })
-                }
-              />
-            </div>
-            {!editingPublished && (
-              // specs/scenario-table.spec.md: structured view over the
-              // markdown table stored in the body.
-              <div className="table-field">
-                <span className="field-label">Scenario table</span>
-                <ScenarioTable
-                  body={editing.scenario.body}
-                  onChange={(body) =>
-                    setEditing({ ...editing, scenario: { ...editing.scenario, body } })
-                  }
-                />
-              </div>
-            )}
-            {/* specs/traceability.spec.md: GitHub links to the automated
-                tests covering this scenario — added, corrected in place (✎)
-                and removed (✕). Editable even for a published scenario: the
-                links track the tests, not the immutable spec. Hidden
-                entirely when the Settings toggle is off. */}
-            {/* specs/external-links/project-management-jira-linear-etc.
-                feature.md "Add link at spec level": the ticket tracking this
-                scenario. Editable on a published scenario too — like the test
-                links, it is bookkeeping around the spec, not the spec. */}
-            <div className="link-field">
-              <span className="field-label">Ticket link</span>
-              <ExternalLinkField draft={linkDraft} onChange={changeLinkDraft} error={linkError} />
-            </div>
-            {showTestLinks && (
-              <div className="tests-field">
-                <span className="field-label">Automated tests</span>
-                {editing.scenario.tests.length > 0 && (
-                  <ul className="test-list">
-                    {editing.scenario.tests.map((t, i) => (
-                      <li key={t}>
-                        {testEdit === i ? (
-                          <form
-                            className="test-edit"
-                            onSubmit={(e) => {
-                              e.preventDefault();
-                              commitTestEdit();
-                            }}
-                          >
-                            <input
-                              value={testEditDraft}
-                              aria-label="Test link (GitHub url)"
-                              spellCheck={false}
-                              autoFocus
-                              onChange={(e) => setTestEditDraft(e.target.value)}
-                              // ESC backs out of the row, not out of the
-                              // whole dialog (specs/ui.spec.md).
-                              onKeyDown={(e) => {
-                                if (e.key !== "Escape") return;
-                                e.stopPropagation();
-                                setTestEdit(null);
-                              }}
-                            />
-                            <button
-                              type="submit"
-                              className="link"
-                              disabled={
-                                !canSetTestLink(editing.scenario.tests, i, testEditDraft)
-                              }
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              className="link"
-                              onClick={() => setTestEdit(null)}
-                            >
-                              Cancel
-                            </button>
-                          </form>
-                        ) : (
-                          <>
-                            <a href={t} target="_blank" rel="noreferrer" title={t}>
-                              {testLinkLabel(t)}
-                            </a>
-                            <button
-                              type="button"
-                              className="link"
-                              title={`Edit ${t}`}
-                              onClick={() => startTestEdit(i)}
-                            >
-                              ✎
-                            </button>
-                            <button
-                              type="button"
-                              className="link"
-                              title={`Remove ${t}`}
-                              onClick={() => removeTest(i)}
-                            >
-                              ✕
-                            </button>
-                          </>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <form
-                  className="test-add"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    addTest();
-                  }}
-                >
-                  <input
-                    value={testDraft}
-                    placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java"
-                    aria-label="Test link (GitHub url)"
-                    spellCheck={false}
-                    onChange={(e) => setTestDraft(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="link"
-                    disabled={!canSetTestLink(editing.scenario.tests, null, testDraft)}
-                  >
-                    Add
-                  </button>
-                </form>
-                {testsError && <p className="error">{testsError}</p>}
-              </div>
-            )}
-            <div className="dialog-actions">
-              {/* Proposed scenarios and drafts can be deleted
-                  (specs/editor/spec-editor.feature.md) — published ones too
-                  while Settings allows it ("Delete Published Spec") —
-                  confirmed first, then saved out of the feature or removed
-                  from the document. Kept apart from Propose/Publish on the
-                  far left. */}
-              {editingDeletable && (
-                <button className="danger" onClick={() => void deleteScenario()}>
-                  Delete
-                </button>
-              )}
-              {/* The two ways forward (specs/editor/spec-editor.feature.md):
-                  Propose moves the draft into the .feature.md as [proposed];
-                  Publish takes it straight to [published], committed and
-                  pushed. Closing without either keeps the autosaved draft.
-                  Propose is only offered on a draft — an already proposed
-                  scenario has nowhere left to go but Publish. */}
-              {!editingPublished && (
-                <>
-                  {editing.scenario.status === "draft" && (
-                    <button
-                      className="secondary"
-                      onClick={() => void proposeScenario()}
-                      disabled={!editing.scenario.name.trim()}
-                    >
-                      Propose
-                    </button>
-                  )}
-                  <button
-                    onClick={() => void publishScenario()}
-                    disabled={!editing.scenario.name.trim() || publishing !== null}
-                  >
-                    Publish
-                  </button>
-                </>
-              )}
-              {/* A published scenario is read-only apart from its links —
-                  test links and its ticket — so that is what its Save saves. */}
-              {editingPublished && <button onClick={saveScenario}>Save links</button>}
-            </div>
-            {/* Like the Settings dialog, the way out is ESC (or the ✕): the
-                scenario stays in its autosaved state
-                (specs/editor/spec-editor.feature.md). */}
-            <p className="hint dialog-footnote">
-              <kbd>esc</kbd> to exit
-            </p>
           </div>
         </div>
       )}
