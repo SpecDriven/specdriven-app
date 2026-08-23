@@ -223,6 +223,51 @@ export function namingInProgress(nameField: Element | null, active: Element | nu
   return nameField !== null && nameField === active;
 }
 
+/**
+ * The feature with the editor's scenario written in — over the entry the
+ * editor opened on (or the one a previous save placed), or appended when it
+ * has none — in canonical order, which is where its card will be. Every save
+ * places the scenario this way, so the way back (specs/editor/spec-editor
+ * .feature.md "Spec editor pane") can predict where to land.
+ */
+export function withScenario(feature: Feature, at: number | null, s: Scenario): Feature {
+  return {
+    ...feature,
+    scenarios: sortScenarios(
+      at === null ? [...feature.scenarios, s] : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
+    ),
+  };
+}
+
+/**
+ * Whether a click on a scenario card landed on one of its controls — a
+ * button, a checkbox, the ticket link, a test link — rather than on the card
+ * itself. The title link counts as the card: clicking it highlights, and
+ * double-clicking it edits, like anywhere else on the card.
+ */
+export function isCardControl(
+  target: { closest?: (selector: string) => unknown } | EventTarget | null,
+): boolean {
+  const el = target as { closest?: (selector: string) => unknown } | null;
+  if (!el || typeof el.closest !== "function") return false;
+  if (el.closest(".scenario-title > a")) return false;
+  return el.closest("button, input, a") != null;
+}
+
+/**
+ * The card to highlight on the way back from the editor pane
+ * (specs/editor/spec-editor.feature.md "Spec editor pane"): the scenario's
+ * entry found by identity, since a save may have moved it; null for a
+ * scenario the feature never received.
+ */
+export function cardOfScenario(
+  scenarios: readonly Scenario[],
+  s: { name: string; version: number },
+): number | null {
+  const i = scenarios.findIndex((sc) => sc.name === s.name && sc.version === s.version);
+  return i === -1 ? null : i;
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -573,8 +618,15 @@ export function App() {
           return i === null ? count - 1 : Math.max(i - 1, 0);
         });
       } else if (e.key === "Enter" && selectedScenario !== null) {
-        // A focused button keeps its native Enter activation.
-        if (t instanceof HTMLButtonElement || t instanceof HTMLAnchorElement) return;
+        // A focused button or link keeps its native Enter activation — except
+        // the highlighted card's own title link, which a click left focused:
+        // Enter there edits the scenario rather than re-selecting it.
+        const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
+          ".scenario-title > a",
+        );
+        if (t instanceof HTMLButtonElement) return;
+        if (t instanceof HTMLAnchorElement && t !== titleLink) return;
+        e.preventDefault();
         const s = feature.scenarios[selectedScenario];
         if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
       }
@@ -3464,6 +3516,18 @@ export function App() {
                   className={`scenario-card${s.status === "published" ? " published" : ""}${
                     i === selectedScenario ? " selected" : ""
                   }`}
+                  // A click anywhere on the card highlights it (the title link
+                  // does so itself); a double-click opens it in the editor
+                  // pane, like Enter. The card's controls keep their own
+                  // clicks.
+                  onClick={(e) => {
+                    if (isCardControl(e.target)) return;
+                    setSelectedScenario(i);
+                  }}
+                  onDoubleClick={(e) => {
+                    if (isCardControl(e.target)) return;
+                    setEditing({ index: i, scenario: { ...s } });
+                  }}
                 >
                   <header>
                     <span className="scenario-title">
