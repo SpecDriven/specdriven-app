@@ -18,6 +18,19 @@ export function isDemoMode(): boolean {
   return v === "1" || v === "true";
 }
 
+/**
+ * The demo's stand-in identity. A public demo has no OS account worth
+ * showing — in a container `os.userInfo()` reports whatever uid the process
+ * happens to run as — so the User info dialog and the commits the demo
+ * writes both name this fixed user instead.
+ */
+export const DEMO_USER = {
+  username: "Test User",
+  login: null,
+  name: "Test User",
+  email: "test-user@specdriven.demo",
+} as const;
+
 /** The pristine snapshot shipped with the app; never written at runtime. */
 function demoSource(): string {
   return process.env.DEMO_DATA_DIR || resolve(process.cwd(), "demo-data");

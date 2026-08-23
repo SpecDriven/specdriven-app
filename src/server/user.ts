@@ -1,5 +1,6 @@
 import { userInfo } from "node:os";
 import { getAuth } from "./auth";
+import { DEMO_USER, isDemoMode } from "./demo";
 import { cliGitAvailable, currentEngine, ghAccount } from "./git";
 import { run } from "./run";
 
@@ -28,6 +29,8 @@ async function gitConfig(key: string): Promise<string | null> {
 }
 
 export async function getCurrentUser(): Promise<CurrentUser> {
+  // The demo has no real user behind it: everyone who opens it is Test User.
+  if (isDemoMode()) return { ...DEMO_USER };
   const username = userInfo().username;
   const auth = await getAuth();
   if (auth) {

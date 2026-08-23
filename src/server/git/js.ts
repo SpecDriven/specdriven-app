@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { createGit } from "just-git";
 import type { CredentialProvider, IdentityOverride } from "just-git";
 import { getAuth } from "../auth";
+import { DEMO_USER, isDemoMode } from "../demo";
 import { readTextFile } from "../fsx";
 import type { RunResult } from "../run";
 import type { GitBackend } from "./backend";
@@ -113,6 +114,8 @@ async function identity(): Promise<IdentityOverride> {
       locked: true,
     };
   }
+  // In the demo the identity is fixed, so commits match the User info dialog.
+  if (isDemoMode()) return { name: DEMO_USER.name, email: DEMO_USER.email, locked: true };
   const user = userInfo().username;
   const global = await globalGitIdentity();
   return {
