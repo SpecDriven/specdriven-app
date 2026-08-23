@@ -334,6 +334,9 @@ aside header h1 {
   min-width: 0;
 }
 
+/* The data folder name is the home link (specs/app-startup.feature.md "The
+   data folder name links to the README"): styled as the label it was, with a
+   hover to say it's clickable. */
 .repo-name {
   color: var(--text-2);
   font-family: var(--font-mono);
@@ -341,6 +344,17 @@ aside header h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.3rem;
+  /* Stays clickable inside the macOS drag-region header (desktop app). */
+  -webkit-app-region: no-drag;
+}
+
+.repo-name:hover,
+.repo-name:focus-visible {
+  color: var(--text-1);
+  background: var(--hover);
 }
 
 .repo-edit {
@@ -2330,4 +2344,12 @@ button.table-add:hover {
 
 .dialog.link-dialog {
   width: min(44rem, 92vw);
+}
+
+/* Home README editor (specs/app-startup.feature.md "App Starts with existing
+   specs folder selected"): the heading row matches a feature's, and the
+   editor takes the rest of the pane. */
+.feature-title .readme-hint {
+  color: var(--text-3);
+  font-size: 0.8rem;
 }

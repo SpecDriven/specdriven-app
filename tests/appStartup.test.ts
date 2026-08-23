@@ -1,0 +1,140 @@
+// Automates specs/app-startup.feature.md "App Starts with existing specs
+// folder selected": with a data folder already configured, the app opens on
+// the folder's README.md in an editor, and the editor's autosaves are plain
+// local writes that the reload cron's sync commits and pushes.
+
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { handleApi, matchApi, reloader } from "../src/server/api";
+import { setGitEngine } from "../src/server/git";
+import { readReadme, readmeFileName, writeReadme } from "../src/server/readme";
+import { syncDataDir } from "../src/server/reload";
+import { writeState } from "../src/server/state";
+import { git, stopServers, twoClones } from "./helpers/fixtures";
+
+let root: string;
+let home: string;
+const realRoot = process.env.SPECDRIVEN_ROOT;
+const realHome = process.env.SPECDRIVEN_HOME;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "specdriven-startup-"));
+  // An empty home keeps the developer's own settings file out of the test.
+  home = await mkdtemp(join(tmpdir(), "specdriven-startup-home-"));
+  process.env.SPECDRIVEN_ROOT = root;
+  process.env.SPECDRIVEN_HOME = home;
+});
+
+afterEach(async () => {
+  reloader.stop();
+  stopServers();
+  setGitEngine(null);
+  await rm(root, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
+  for (const [name, value] of [
+    ["SPECDRIVEN_ROOT", realRoot],
+    ["SPECDRIVEN_HOME", realHome],
+  ] as const) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
+
+async function getReadme(): Promise<Response> {
+  return (await handleApi(new Request("http://localhost/api/readme")))!;
+}
+
+async function putReadme(body: unknown): Promise<Response> {
+  return (await handleApi(
+    new Request("http://localhost/api/readme", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  ))!;
+}
+
+test("the README routes match GET and PUT only", () => {
+  expect(matchApi("GET", "/api/readme")).not.toBeNull();
+  expect(matchApi("PUT", "/api/readme")).not.toBeNull();
+  expect(matchApi("POST", "/api/readme")).toBeNull();
+  expect(matchApi("DELETE", "/api/readme")).toBeNull();
+});
+
+test("the configured data folder's README.md is served to the home editor", async () => {
+  const data = join(root, "data");
+  await Bun.write(join(data, "README.md"), "# My specs\n\nRead me.\n");
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+
+  const res = await getReadme();
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ content: "# My specs\n\nRead me.\n", exists: true });
+});
+
+test("a data folder without a README opens on an empty editor", async () => {
+  const data = join(root, "data");
+  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+
+  const res = await getReadme();
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ content: "", exists: false });
+});
+
+test("without a data folder there is no README to open", async () => {
+  await writeState({ reloadFrequencySeconds: 0 }, root);
+  expect((await getReadme()).status).toBe(409);
+  expect((await putReadme({ content: "x" })).status).toBe(409);
+});
+
+test("an autosave writes the README locally, creating it when missing", async () => {
+  const data = join(root, "data");
+  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+
+  const created = await putReadme({ content: "# Fresh\n" });
+  expect(created.status).toBe(200);
+  expect(await created.json()).toEqual({ content: "# Fresh\n", exists: true });
+  expect(await Bun.file(join(data, "README.md")).text()).toBe("# Fresh\n");
+
+  // The next tick rewrites the same file — never a second one.
+  expect((await putReadme({ content: "# Fresh\n\nMore.\n" })).status).toBe(200);
+  expect(await Bun.file(join(data, "README.md")).text()).toBe("# Fresh\n\nMore.\n");
+  expect((await readdir(data)).filter((f) => /readme/i.test(f))).toEqual(["README.md"]);
+  expect(await (await getReadme()).json()).toEqual({ content: "# Fresh\n\nMore.\n", exists: true });
+});
+
+test("a save without content is refused", async () => {
+  const data = join(root, "data");
+  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+
+  expect((await putReadme({})).status).toBe(400);
+  expect((await putReadme({ content: 42 })).status).toBe(400);
+  expect(await Bun.file(join(data, "README.md")).exists()).toBe(false);
+});
+
+test("a repo's own spelling of the README is read and saved in place", async () => {
+  const data = join(root, "data");
+  await Bun.write(join(data, "readme.md"), "lower\n");
+
+  expect(await readmeFileName(data)).toBe("readme.md");
+  expect(await readReadme(data)).toEqual({ content: "lower\n", exists: true });
+  await writeReadme(data, "still lower\n");
+  expect(await Bun.file(join(data, "readme.md")).text()).toBe("still lower\n");
+  expect((await readdir(data)).filter((f) => /readme/i.test(f))).toEqual(["readme.md"]);
+});
+
+test("README autosaves are committed and pushed by the sync tick", async () => {
+  setGitEngine("cli");
+  const { a, b } = await twoClones(root);
+  await writeState({ dataRepo: b, reloadFrequencySeconds: 0 }, root);
+
+  expect((await putReadme({ content: "# Shared specs\n" })).status).toBe(200);
+  await syncDataDir(b);
+
+  await git(a, "pull", "origin", "main");
+  expect(await Bun.file(join(a, "README.md")).text()).toBe("# Shared specs\n");
+});
