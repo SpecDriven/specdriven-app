@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BackIcon } from "../src/frontend/BackIcon";
-import { cardOfScenario, withScenario } from "../src/frontend/App";
+import { cardOfScenario, isCardControl, withScenario } from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number, status: Scenario["status"] = "proposed"): Scenario => ({
@@ -62,3 +62,27 @@ describe("the back button", () => {
   });
 });
 
+// A click on a scenario card highlights it and a double-click opens the editor
+// pane — unless it landed on one of the card's controls. Modelled on the
+// element's ancestry: `closest` answers for the selectors the card asks about.
+describe("what counts as a card control", () => {
+  const within = (...matches: string[]) => ({
+    closest: (selector: string) =>
+      selector.split(",").some((s) => matches.includes(s.trim())) ? {} : null,
+  });
+
+  test("the card body and its title link are the card", () => {
+    expect(isCardControl(within())).toBe(false);
+    expect(isCardControl(within("a", ".scenario-title > a"))).toBe(false);
+  });
+
+  test("buttons, checkboxes and other links are controls", () => {
+    expect(isCardControl(within("button"))).toBe(true);
+    expect(isCardControl(within("input"))).toBe(true);
+    expect(isCardControl(within("a"))).toBe(true);
+  });
+
+  test("no element, no control", () => {
+    expect(isCardControl(null)).toBe(false);
+  });
+});
