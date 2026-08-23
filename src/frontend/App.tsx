@@ -42,7 +42,7 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree, firstFeature } from "./tree";
+import { buildTree } from "./tree";
 import type { FolderNode } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import type { ScenarioRef } from "./route";
@@ -326,6 +326,19 @@ export function App() {
   const [previewLines, setPreviewLines] = useState(8);
   /** How often the open editor saves itself (specs/editor-autosave.feature.md). */
   const [autosaveSeconds, setAutosaveSeconds] = useState(DEFAULT_AUTOSAVE_SECONDS);
+  // The data repo's README.md (specs/app-startup.feature.md "App Starts with
+  // existing specs folder selected"): the home view is an editor on it, saved
+  // on the same interval as the scenario editor. `readme` is what the editor
+  // holds (null until loaded); the refs are what the last landed save or load
+  // put on disk, and whether a save is still on its way — a tick reads them
+  // between renders.
+  const [readme, setReadme] = useState<string | null>(null);
+  const readmeText = useRef<string | null>(null);
+  readmeText.current = readme;
+  const readmeSaved = useRef<string | null>(null);
+  const readmeInFlight = useRef(false);
+  /** Bumped per README load, so a save landing after a repo switch stamps nothing. */
+  const readmeSession = useRef(0);
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
@@ -416,6 +429,16 @@ export function App() {
     return null;
   }, []);
 
+  /** Read the data repo's README into the home editor, dropping any unsaved edit. */
+  const loadReadme = useCallback(async (): Promise<void> => {
+    const res = await fetch("/api/readme");
+    if (!res.ok) return;
+    const data = (await res.json()) as { content: string };
+    readmeSession.current += 1;
+    readmeSaved.current = data.content;
+    setReadme(data.content);
+  }, []);
+
   useEffect(() => {
     (async () => {
       const state = await (await fetch("/api/state")).json();
@@ -451,13 +474,15 @@ export function App() {
       setAuth(state.auth ?? null);
       if (state.user) setUser(state.user);
       if (!state.needsDataRepo) {
-        await loadFeatures();
+        // The README rides along: a start on the bare url opens on it
+        // (specs/app-startup.feature.md).
+        await Promise.all([loadFeatures(), loadReadme()]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
       }
       setLoading(false);
     })();
-  }, [loadFeatures]);
+  }, [loadFeatures, loadReadme]);
 
   // Mirror the server's cron reload (specs/crud-feature.spec.md): refresh the
   // feature list on the same cadence so pulled changes show up, without
@@ -467,9 +492,12 @@ export function App() {
     const id = setInterval(() => {
       void loadFeatures();
       if (selected && !dirty && !editing && !conflict) void openFeature(selected);
+      // A pulled README shows up too — unless the home editor holds an edit
+      // that hasn't landed yet.
+      if (!selected && readmeText.current === readmeSaved.current) void loadReadme();
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
-  }, [loading, needsRepo, reloadSeconds, selected, dirty, editing, conflict, loadFeatures]);
+  }, [loading, needsRepo, reloadSeconds, selected, dirty, editing, conflict, loadFeatures, loadReadme]);
 
   // specs/ui.spec.md "Select scenarios via up and down keys": arrow keys move a
   // highlight through the scenario cards, Enter opens the highlighted one in
@@ -784,15 +812,6 @@ export function App() {
           : `SpecDriven — ${name}`;
   }, [selected, feature, selectedScenario]);
 
-  // A freshly picked data folder has no selection of its own, and an empty
-  // spec pane says nothing about the folder. Open its topmost feature — the
-  // first one the sidebar lists — so the specs list has content.
-  const openFirstFeature = async (listing: Listing | null) => {
-    if (!listing) return;
-    const first = firstFeature(buildTree(listing.folders, listing.features));
-    if (first) await openFeature(first.fileName);
-  };
-
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
     // effect would rewrite a deep link before we get to honor it
@@ -810,11 +829,11 @@ export function App() {
       if (res.ok) {
         setDataRepo(state.dataRepo);
         setNeedsRepo(false);
-        const listing = await loadFeatures();
+        // A freshly picked folder opens on its README, like a start does
+        // (specs/app-startup.feature.md "A newly picked data folder opens on
+        // its README") — unless there is a deep link to honor.
+        await Promise.all([loadFeatures(), loadReadme()]);
         await openFromLocation(entryPath);
-        // No deep link to honor: open the first feature rather than the empty
-        // pane a bare "/" would leave (specs/app-start.spec.md).
-        if (!parseRoute(entryPath).feature) await openFirstFeature(listing);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
       }
@@ -853,6 +872,11 @@ export function App() {
     const next = input?.trim();
     if (!next || next === dataRepo) return;
     setSettingRepo(true);
+    // A README edit belongs to the repo it was typed in: land it there before
+    // the switch, and empty the editor so no tick writes it into the new one.
+    await readmeTick.current();
+    readmeText.current = null;
+    setReadme(null);
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -866,7 +890,8 @@ export function App() {
         setFeature(null);
         setSelectedScenario(null);
         setStatus("");
-        await openFirstFeature(await loadFeatures());
+        // Home is the new folder's README (specs/app-startup.feature.md).
+        await Promise.all([loadFeatures(), loadReadme()]);
       } else {
         setStatus(state.error ?? "Could not use this directory");
       }
@@ -923,6 +948,22 @@ export function App() {
       }
       await loadFeatures();
     }
+  };
+
+  /**
+   * Home — the data folder's README editor (specs/app-startup.feature.md
+   * "The data folder name links to the README"). Drops the feature selection
+   * and pushes `/`, so Back returns to the feature that was open. The README
+   * editor's own unmount tick saves anything typed there, and a feature's
+   * scenario editor is a dialog that can't be open while its link is clicked.
+   */
+  const goHome = () => {
+    setSelectedFolder(null);
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+    setStatus("");
+    if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
   /** Derive the view from a url (initial load, popstate, after repo setup). */
@@ -1636,6 +1677,54 @@ export function App() {
     const id = setInterval(() => void autosaveTick.current(), autosaveSeconds * 1000);
     return () => clearInterval(id);
   }, [editingOpen, autosaveSeconds]);
+
+  /**
+   * One autosave tick of the home README editor (specs/app-startup.feature.md
+   * "App Starts with existing specs folder selected"): write what it holds,
+   * unless that is already on disk. Same rules as the scenario editor — ticks
+   * never overlap, only a landed save counts, a failed one is reported and
+   * retried by the next tick.
+   */
+  const autosaveReadme = async () => {
+    const content = readmeText.current;
+    if (content === null || content === readmeSaved.current) return;
+    if (readmeInFlight.current) return; // the previous tick is still saving
+    readmeInFlight.current = true;
+    const session = readmeSession.current;
+    try {
+      const res = await fetch("/api/readme", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        if (session === readmeSession.current) readmeSaved.current = content;
+      } else {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setStatus(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
+      }
+    } catch (e) {
+      setStatus(`README.md not saved: ${(e as Error).message} — will retry.`);
+    } finally {
+      readmeInFlight.current = false;
+    }
+  };
+  const readmeTick = useRef(autosaveReadme);
+  useEffect(() => {
+    readmeTick.current = autosaveReadme;
+  });
+  // Ticks run while the home view shows the README editor. Leaving it (a
+  // feature opens) saves what was typed since the last tick, so nothing
+  // written on the home view is lost to the navigation.
+  const readmeOpen = !loading && !needsRepo && selected === null && readme !== null;
+  useEffect(() => {
+    if (!readmeOpen) return;
+    const id = setInterval(() => void readmeTick.current(), autosaveSeconds * 1000);
+    return () => {
+      clearInterval(id);
+      void readmeTick.current();
+    };
+  }, [readmeOpen, autosaveSeconds]);
 
   // Avatar initials: from the git name when set, else the OS user name
   // (specs/user-info-settings.spec.md).
@@ -2440,11 +2529,22 @@ export function App() {
             <Logo size={28} />
           </h1>
           {/* The data repo name sits beside the mark rather than under it, so
-              the header costs a single row of vertical space. */}
+              the header costs a single row of vertical space. It is the home
+              link (specs/app-startup.feature.md "The data folder name links
+              to the README"): a real `/` anchor, so a plain click opens the
+              README editor and right-click → Copy Link works. */}
           <div className="repo-row">
-            <span className="repo-name" title={dataRepo ?? undefined}>
-              {dataRepo && repoDisplayName(dataRepo)}
-            </span>
+            {dataRepo && (
+              <a
+                href="/"
+                className="repo-name"
+                title={`${dataRepo} — open its README`}
+                aria-label="Open the data folder's README"
+                onClick={(e) => spaClick(e, goHome)}
+              >
+                {repoDisplayName(dataRepo)}
+              </a>
+            )}
             <button
               type="button"
               className="repo-edit"
@@ -2916,7 +3016,26 @@ export function App() {
           </>
         ) : (
           <>
-            <p className="empty">Select a feature file or create a new one.</p>
+            {/* Home (specs/app-startup.feature.md "App Starts with existing
+                specs folder selected"): the data repo's README.md, open for
+                editing and autosaved at the scenario editor's interval. */}
+            <div className="editor-bar">
+              <div className="feature-title">
+                <h2>README.md</h2>
+                <span className="readme-hint">
+                  {readme === null
+                    ? "Loading…"
+                    : `Saved automatically every ${autosaveSeconds} seconds; the next sync pushes it.`}
+                </span>
+              </div>
+            </div>
+            {readme !== null && (
+              <MarkdownEditor
+                value={readme}
+                onChange={setReadme}
+                placeholder="This data folder has no README.md yet — write one here and it is created on the next autosave."
+              />
+            )}
             {/* A stale deep link lands here with a note (specs/navigation.spec.md). */}
             {status && <p className="status">{status}</p>}
           </>
