@@ -13,6 +13,7 @@ import { setupDemo } from "../src/server/demo";
 import { setFolderChooser } from "../src/server/folderChooser";
 import { setGitEngine } from "../src/server/git";
 import { readState } from "../src/server/state";
+import { version as pkgVersion } from "../package.json";
 
 let root: string;
 let source: string;
@@ -180,6 +181,11 @@ test("GitHub sign-in routes refuse in demo mode", async () => {
 test("no native folder chooser: /api/choose-folder is 501", async () => {
   const res = await api("/api/choose-folder", { method: "POST" });
   expect(res.status).toBe(501);
+});
+
+test("state carries the app version — the demo shows it beside the user", async () => {
+  const state = await bootState();
+  expect(state.version).toBe(pkgVersion);
 });
 
 test("the demo user is Test User, not the OS account", async () => {
