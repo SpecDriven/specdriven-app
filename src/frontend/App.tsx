@@ -31,6 +31,7 @@ import { ScenarioTable } from "./ScenarioTable";
 import {
   desktopLink,
   featurePath,
+  pagePath,
   parseRoute,
   repoDisplayName,
   resolveScenario,
@@ -268,6 +269,21 @@ export function cardOfScenario(
   return i === -1 ? null : i;
 }
 
+/**
+ * The scenario whose page is open (specs/navigation.spec.md "URL scheme") —
+ * what the address bar and the window title name. Read through the pane's
+ * index into the feature, so a rename follows the scenario the moment its
+ * save lands; a highlighted card is not a page, and a new scenario no save
+ * has placed in the feature yet has no url of its own.
+ */
+export function pageScenario(
+  editing: { index: number | null } | null,
+  scenarios: readonly Scenario[] | undefined,
+): Scenario | null {
+  if (!editing || editing.index === null) return null;
+  return scenarios?.[editing.index] ?? null;
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -277,6 +293,12 @@ interface OpenOptions {
    * preservation used by sync/cron refreshes.
    */
   scenario?: ScenarioRef | null;
+  /**
+   * Open the scenario's own page — the editor pane — on top of selecting its
+   * card (specs/navigation.spec.md "open a scenario link"). Deep links do;
+   * in-app navigation that merely lands on a card does not.
+   */
+  pane?: boolean;
   /**
    * Open with the feature description editor on (specs/editor/feature-editor
    * .feature.md "Edit feature descrition"): a just-created feature is empty,
@@ -355,6 +377,14 @@ export function App() {
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
+  /**
+   * A scenario deep link asks for that scenario's page (specs/navigation.spec
+   * .md "open a scenario link"). The pane opens from an effect rather than
+   * straight from the navigation: any pane the link replaced closes first, so
+   * the new one starts a fresh editor session — its own autosave baseline,
+   * with the outgoing one's last save unable to reach back into it.
+   */
+  const [paneRequest, setPaneRequest] = useState<Scenario | null>(null);
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
@@ -644,6 +674,10 @@ export function App() {
   // The dialog's "Add test link" field starts empty each time it opens, with
   // no row left open for ✎ editing (specs/traceability.spec.md).
   const editingOpen = editing !== null;
+  /** The scenario whose page is open — what the url and the title name. */
+  const paneScenario = pageScenario(editing, feature?.scenarios);
+  /** Whether the url already stands for an open scenario page. */
+  const panePushed = useRef(false);
   useEffect(() => {
     setTestDraft("");
     setTestEdit(null);
@@ -664,6 +698,18 @@ export function App() {
     // dialog open there is no tick for the flag to hold back.
     deletingScenario.current = false;
   }, [editingOpen]);
+
+  // A scenario deep link honored above left its scenario here: open its page
+  // now that the feature it belongs to is on screen (specs/navigation.spec.md
+  // "open a scenario link"). By identity, like every other card lookup — the
+  // link resolved against the same feature, so it is still there.
+  useEffect(() => {
+    if (!paneRequest) return;
+    setPaneRequest(null);
+    if (!feature) return;
+    const idx = cardOfScenario(feature.scenarios, paneRequest);
+    if (idx !== null) setEditing({ index: idx, scenario: { ...feature.scenarios[idx]! } });
+  }, [paneRequest, feature]);
 
   // A "Save was blocked" message stops applying the moment the tests widgets
   // change — typing, adding, or opening/closing an ✎ row.
@@ -929,20 +975,29 @@ export function App() {
   }, [selectedScenario, editingOpen]);
 
   // Canonical url (specs/navigation.spec.md "Resolution rules"): the address
-  // bar always shows what is actually selected. replaceState so selection
-  // moves don't spam history — deliberate feature switches push in openFeature.
+  // bar shows the page that is open — the scenario page's own url while it is
+  // open, the feature's otherwise. Opening a scenario page pushes, like a
+  // feature switch does in openFeature, so Back leaves it the way `<` does.
+  // Everything else rewrites in place: a rename moving an open page's url
+  // must not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
-    const s = selectedScenario !== null ? feature?.scenarios[selectedScenario] : undefined;
-    const url = selected ? (s ? scenarioPath(selected, s) : featurePath(selected)) : "/";
-    if (location.pathname !== url) history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, feature, selectedScenario]);
+    const url = pagePath(selected, paneScenario);
+    const opening = paneScenario !== null && !panePushed.current;
+    panePushed.current = paneScenario !== null;
+    if (location.pathname === url) return;
+    // A page opened by a deep link is already standing on a scenario url:
+    // canonicalizing it (a versionless link resolving to `/v<N>`) rewrites in
+    // place, or Back would land on the link again and re-open the page.
+    const fromLink = parseRoute(location.pathname).scenario !== undefined;
+    if (opening && !fromLink) history.pushState(null, "", url);
+    else history.replaceState(null, "", url);
+  }, [loading, needsRepo, selected, paneScenario]);
 
-  // Window title follows the selection (specs/navigation.spec.md) — chat and
+  // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
   useEffect(() => {
-    const s =
-      feature && selectedScenario !== null ? feature.scenarios[selectedScenario] : undefined;
+    const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
     document.title =
       !selected || !feature
@@ -950,7 +1005,7 @@ export function App() {
         : s
           ? `SpecDriven — ${name} · ${s.name} v${s.version}`
           : `SpecDriven — ${name}`;
-  }, [selected, feature, selectedScenario]);
+  }, [selected, feature, paneScenario]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1071,6 +1126,9 @@ export function App() {
         const idx = opts.scenario === null ? null : resolveScenario(parsed.scenarios, opts.scenario);
         if (opts.scenario !== null && idx === null) missingScenario = opts.scenario.slug;
         setSelectedScenario(idx);
+        // A scenario link opens that scenario's page (specs/navigation.spec.md
+        // "open a scenario link") — the whole point of the card's "Copy link".
+        setPaneRequest(opts.pane && idx !== null ? parsed.scenarios[idx]! : null);
       } else {
         // Keep the keyboard highlight across a same-file refresh (sync, cron);
         // drop it when switching files or when the list shrank past it.
@@ -1132,7 +1190,10 @@ export function App() {
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
     if (route.feature) {
-      await openFeature(route.feature, { scenario: route.scenario ?? null });
+      // A scenario url is a link to that scenario's page — the card's "Copy
+      // link" makes one — so it opens the pane, not just the card
+      // (specs/navigation.spec.md "open a scenario link").
+      await openFeature(route.feature, { scenario: route.scenario ?? null, pane: true });
     } else {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
@@ -2559,6 +2620,8 @@ export function App() {
       scenario: r.scenario
         ? { slug: slugify(r.scenario.name), version: r.scenario.version }
         : null,
+      // Like the deep link: a scenario hit opens that scenario's page.
+      pane: true,
     });
   };
 
