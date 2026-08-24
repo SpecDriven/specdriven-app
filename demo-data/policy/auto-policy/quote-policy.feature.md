@@ -38,5 +38,3 @@ Adds the good-driver discount to v1.
 - **Given** a quote was issued 31 days ago
 - **When** the prospect tries to bind it
 - **Then** binding is refused and the prospect is offered a re-quote at current rates
-
-## S7 @v1 [proposed]
