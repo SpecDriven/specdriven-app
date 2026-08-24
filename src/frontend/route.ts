@@ -99,6 +99,19 @@ export function scenarioPath(
 }
 
 /**
+ * The url of what is on screen (specs/navigation.spec.md "URL scheme"): the
+ * scenario's own url while its page is open, otherwise the feature's, and `/`
+ * with no feature open.
+ */
+export function pagePath(
+  fileName: string | null,
+  scenario: Pick<Scenario, "name" | "version"> | null,
+): string {
+  if (!fileName) return "/";
+  return scenario ? scenarioPath(fileName, scenario) : featurePath(fileName);
+}
+
+/**
  * Resolve a scenario ref against a parsed feature: exact version when the ref
  * has one, otherwise the highest version of that name. On slug collisions the
  * first match in file order wins (specs/navigation.spec.md). Returns the

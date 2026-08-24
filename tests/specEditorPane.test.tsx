@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BackIcon } from "../src/frontend/BackIcon";
-import { cardOfScenario, isCardControl, withScenario } from "../src/frontend/App";
+import { cardOfScenario, isCardControl, pageScenario, withScenario } from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number, status: Scenario["status"] = "proposed"): Scenario => ({
@@ -50,6 +50,32 @@ describe("the way back lands on the scenario's card", () => {
   test("a scenario the feature never received highlights nothing", () => {
     expect(cardOfScenario(feature.scenarios, { name: "", version: 1 })).toBeNull();
     expect(cardOfScenario(feature.scenarios, { name: "Gamma", version: 3 })).toBeNull();
+  });
+});
+
+// specs/navigation.feature.md "a scenario page carries its own url": the pane
+// is a page, so the url and the window title name the scenario it holds — read
+// through its position in the feature, so a rename follows it.
+describe("the scenario the open page names", () => {
+  test("a closed pane names nothing — a highlighted card is not a page", () => {
+    expect(pageScenario(null, feature.scenarios)).toBeNull();
+  });
+
+  test("an open pane names the scenario it sits on", () => {
+    expect(pageScenario({ index: 2 }, feature.scenarios)).toEqual(feature.scenarios[2]!);
+  });
+
+  test("a rename moves the page's url as soon as the save lands", () => {
+    const landed = withScenario(feature, 0, sc("Zulu", 1));
+    const at = cardOfScenario(landed.scenarios, { name: "Zulu", version: 1 })!;
+    expect(pageScenario({ index: at }, landed.scenarios)!.name).toBe("Zulu");
+  });
+
+  test("a new scenario no save has placed yet has no url of its own", () => {
+    expect(pageScenario({ index: null }, feature.scenarios)).toBeNull();
+    // Nor does one whose entry went away underneath the pane.
+    expect(pageScenario({ index: 9 }, feature.scenarios)).toBeNull();
+    expect(pageScenario({ index: 0 }, undefined)).toBeNull();
   });
 });
 
