@@ -328,6 +328,8 @@ export function App() {
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
+  // The running app's version, shown beside the user name in demo mode.
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const repoInputRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -584,6 +586,7 @@ export function App() {
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setDemo(Boolean(state.demo));
+      setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
       setCliGitAvailable(Boolean(state.cliGitAvailable));
@@ -3160,6 +3163,8 @@ export function App() {
               {initials}
             </span>
             <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
+            {/* Demo mode: the build on screen, right of the user name. */}
+            {demo && appVersion && <span className="app-version">v{appVersion}</span>}
           </button>
         </div>
       </aside>
