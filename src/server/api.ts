@@ -79,6 +79,7 @@ import { startNetSyncClient } from "./automerge/netsync";
 import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
+import { version as appVersion } from "../../package.json";
 
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
@@ -274,6 +275,9 @@ async function stateFields(state: SpecDrivenState) {
     // Demo mode: the client hides everything that changes or syncs the data
     // directory — the dataset is ephemeral and resets on every page load.
     demo: isDemoMode(),
+    // The running app's version (package.json). The demo shows it beside the
+    // user name, so a public demo says which build is on screen.
+    version: appVersion,
     ...gitEngineFields(state),
     ...(await authFields()),
   };
