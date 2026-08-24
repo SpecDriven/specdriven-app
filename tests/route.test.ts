@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   featurePath,
+  pagePath,
   parseRoute,
   repoDisplayName,
   resolveScenario,
@@ -109,6 +110,38 @@ describe("paths", () => {
       feature: "quote-policy.feature.md",
       scenario: { slug: "basic-quote", version: 3 },
     });
+  });
+});
+
+// specs/navigation.feature.md "a scenario page carries its own url": the url
+// names the page that is open — a scenario's own while its page is open, the
+// feature's otherwise. A highlighted card is not a page.
+describe("pagePath", () => {
+  test("no feature open is home", () => {
+    expect(pagePath(null, null)).toBe("/");
+    expect(pagePath(null, sc("Basic Quote", 2))).toBe("/");
+  });
+
+  test("a feature page with no scenario page open is the feature url", () => {
+    expect(pagePath("billing/quotes.feature.md", null)).toBe("/features/billing/quotes");
+  });
+
+  test("an open scenario page is that scenario's permalink", () => {
+    expect(pagePath("billing/quotes.feature.md", sc("Basic Quote", 2))).toBe(
+      "/features/billing/quotes/scenarios/basic-quote/v2",
+    );
+  });
+
+  test("the shared link resolves back to the page it was copied from", () => {
+    const file = "billing/quotes.feature.md";
+    const scenarios = [sc("Basic Quote", 1), sc("Basic Quote", 2)];
+    // "Copy link" on the card shares exactly the page url ...
+    const copied = pagePath(file, scenarios[1]!);
+    expect(copied).toBe(scenarioPath(file, scenarios[1]!));
+    // ... and opening it lands on that same scenario.
+    const route = parseRoute(copied);
+    expect(route.feature).toBe(file);
+    expect(resolveScenario(scenarios, route.scenario!)).toBe(1);
   });
 });
 
