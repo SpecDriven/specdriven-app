@@ -27,28 +27,6 @@ zzzzz
 | Two-pay         | 2        | $3                      |
 | Monthly autopay | 6        | $5                      |
 
-## S6 @v1 [published]
-
-[Jira:ABC-123](https://jira.com/ABC-123)
-
-fvfgfgf
-
-## T5 @v1 [proposed]
-
-[Jira:BMX-111](https://jira.com/BMX-111)
-
-sfsdfsd
-
-## T6 @v1 [proposed]
-
-[Jira:DDD-222](https://jira.com/DDD-222)
-
-fdfdfd
-
-## U2-s4 @v1 [published]
-
-eee
-
 ## Unpaid balance triggers a cancellation notice @v1 [published]
 
 - **Given** an installment still unpaid at the end of the grace period
