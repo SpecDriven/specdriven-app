@@ -43,6 +43,18 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/images/shot-1a2b3c4d.png")).toBeNull();
   });
 
+  // Roadmap pages (specs/app/roadmap.feature.md): the folder's listing, a
+  // page by name, and creating one.
+  test("roadmap routes match by method", () => {
+    expect(matchApi("GET", "/api/roadmap")).not.toBeNull();
+    expect(matchApi("POST", "/api/roadmap")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/roadmap")).toBeNull();
+    const page = matchApi("GET", "/api/roadmap/roadmap%2Fpricing.md");
+    expect(page).not.toBeNull();
+    expect(page!.params).toEqual({ file: "roadmap/pricing.md" });
+    expect(matchApi("PUT", "/api/roadmap/roadmap%2Fpricing.md")).not.toBeNull();
+  });
+
   // Code gen session (specs/agents/claude.spec.md): the client posts the
   // session name and the selected specs.
   test("agent session route matches POST only", () => {

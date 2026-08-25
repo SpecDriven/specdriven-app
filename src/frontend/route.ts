@@ -1,6 +1,7 @@
 // Deep-link urls (specs/navigation.spec.md):
 //
 //   /                                               home
+//   /roadmap/<page>                                 roadmap page
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
@@ -26,6 +27,11 @@ export interface Route {
   /** Feature file name, with the `.feature.md` suffix restored. */
   feature?: string;
   scenario?: ScenarioRef;
+  /**
+   * Roadmap page file name, repo-relative and with the `.md` suffix restored
+   * (specs/app/roadmap.feature.md) — `roadmap/pricing.md`.
+   */
+  roadmap?: string;
 }
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
@@ -41,6 +47,12 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
+  // A roadmap page is a plain path under the folder it lives in; a hand-typed
+  // link may carry the `.md` suffix already.
+  if (segs[0] === ROADMAP_FOLDER && segs[1]) {
+    const path = segs.slice(1).join("/").replace(/\.md$/, "");
+    return { roadmap: `${ROADMAP_FOLDER}/${path}.md` };
+  }
   if (segs[0] !== "features" || !segs[1]) return {};
   // The feature path runs up to the first `scenarios` segment that has a slug
   // after it (folders make feature paths multi-segment).
@@ -83,6 +95,15 @@ export function desktopLink(path: string): string {
  */
 export function repoDisplayName(repo: string): string {
   return repo.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/, "") || repo;
+}
+
+/** The roadmap folder's name, shared with the server (src/server/roadmap.ts). */
+const ROADMAP_FOLDER = "roadmap";
+
+/** `roadmap/q3/pricing.md` -> `/roadmap/q3/pricing`. */
+export function roadmapPath(fileName: string): string {
+  const stem = fileName.replace(/^roadmap\//, "").replace(/\.md$/, "");
+  return `/${ROADMAP_FOLDER}/${stem.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function featurePath(fileName: string): string {

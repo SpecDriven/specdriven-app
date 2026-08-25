@@ -685,6 +685,88 @@ aside header h1 {
   font-weight: 500;
 }
 
+/* The roadmap folder (specs/app/roadmap.feature.md): its pages sit above the
+   feature tree, under a quiet header with the "new page" button — a section,
+   not a folder row, since the folder itself is never a drop target. */
+.roadmap-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.roadmap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.2rem 0.3rem;
+}
+
+/* The section header doubles as its twist: click to fold the pages away. */
+.roadmap-title {
+  flex: 1;
+  display: block;
+  text-align: left;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.roadmap-title:hover {
+  color: var(--text-1);
+}
+
+.roadmap-title .twist {
+  letter-spacing: normal;
+}
+
+.roadmap-add {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--radius-sm);
+}
+
+.roadmap-add:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+a.roadmap-entry {
+  display: block;
+  text-align: left;
+  text-decoration: none;
+  padding: 0.38rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+a.roadmap-entry:hover {
+  background: var(--hover);
+}
+
+a.roadmap-entry.active {
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+.roadmap-list .empty {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
 .folder-row {
   display: flex;
   align-items: center;
