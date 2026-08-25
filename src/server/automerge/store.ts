@@ -1,6 +1,8 @@
 // Chunked Automerge storage inside the data repo, synced by git alongside the
-// markdown projections. One directory per feature under
-// `.specdriven/automerge/features/<fileName>/`:
+// markdown projections. One directory per document under
+// `.specdriven/automerge/<kind>/<fileName>/` — `features` for the
+// `.feature.md` documents, `docs` for the roadmap folder's plain markdown
+// pages (specs/app/roadmap.feature.md):
 //
 //   docid                  stable document identity, shared via git
 //   snapshot-<hash>.bin    full document (Automerge.save)
@@ -22,7 +24,14 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
-import { SCHEMA_VERSION, type FeatureDoc, type SpecEntry, type SpecType } from "./schema";
+import {
+  ROADMAP_SCHEMA_VERSION,
+  SCHEMA_VERSION,
+  type FeatureDoc,
+  type RoadmapDoc,
+  type SpecEntry,
+  type SpecType,
+} from "./schema";
 
 const log = getLogger("automerge");
 
@@ -47,9 +56,9 @@ function emitDocSaved(dataDir: string, fileName: string): void {
   for (const listener of docSavedListeners) listener(dataDir, fileName);
 }
 
-export interface LoadedDoc {
-  doc: A.Doc<FeatureDoc>;
-  /** Heads as loaded — pass to saveFeatureDoc so it writes only the delta. */
+export interface LoadedDoc<T = FeatureDoc> {
+  doc: A.Doc<T>;
+  /** Heads as loaded — pass back on save so it writes only the delta. */
   heads: A.Heads;
   docId: string;
   /** Chunk files that could not be applied (foreign lineage or corrupt). */
@@ -129,19 +138,49 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
   });
 }
 
+/**
+ * The kinds of document the store holds, each under its own directory:
+ * `features` for the `.feature.md` documents, `docs` for the plain markdown
+ * pages — today the roadmap folder's (specs/app/roadmap.feature.md). Inside
+ * either, the path is the file's repo-relative name.
+ */
+export type DocKind = "features" | "docs";
+
+function dirRel(kind: DocKind, fileName: string): string {
+  return `.specdriven/automerge/${kind}/${fileName}`;
+}
+
 /** Repo-relative path of a feature's doc directory, for git pathspecs. */
 export function docDirRel(fileName: string): string {
-  return `.specdriven/automerge/features/${fileName}`;
+  return dirRel("features", fileName);
+}
+
+/** Repo-relative path of a roadmap page's doc directory, for git pathspecs. */
+export function roadmapDocDirRel(fileName: string): string {
+  return dirRel("docs", fileName);
 }
 
 export function docDir(dataDir: string, fileName: string): string {
   return join(dataDir, docDirRel(fileName));
 }
 
+function kindDir(dataDir: string, kind: DocKind, fileName: string): string {
+  return join(dataDir, dirRel(kind, fileName));
+}
+
+async function hasDoc(dataDir: string, kind: DocKind, fileName: string): Promise<boolean> {
+  const { snapshots, changes } = await chunkFiles(kindDir(dataDir, kind, fileName));
+  return snapshots.length > 0 || changes.length > 0;
+}
+
 /** True when the feature has a doc directory with at least one chunk. */
 export async function hasFeatureDoc(dataDir: string, fileName: string): Promise<boolean> {
-  const { snapshots, changes } = await chunkFiles(docDir(dataDir, fileName));
-  return snapshots.length > 0 || changes.length > 0;
+  return hasDoc(dataDir, "features", fileName);
+}
+
+/** True when the roadmap page has a doc directory with at least one chunk. */
+export async function hasRoadmapDoc(dataDir: string, fileName: string): Promise<boolean> {
+  return hasDoc(dataDir, "docs", fileName);
 }
 
 function contentHash(bytes: Uint8Array): string {
@@ -164,19 +203,22 @@ async function chunkFiles(dir: string): Promise<{ snapshots: string[]; changes: 
 }
 
 /**
- * Load a feature's document by merging every chunk in its directory, or null
- * when the feature has no document yet (pre-migration repo, or a plain-md
- * write from an older app version).
+ * Load a document by merging every chunk in its directory, or null when there
+ * is none yet. `migrate` brings what disk holds up to the current schema (the
+ * feature documents' only); the heads returned are the pre-migration ones, so
+ * the migration ops ride whatever delta the caller saves next.
  */
-export async function loadFeatureDoc(
+async function loadDoc<T>(
   dataDir: string,
+  kind: DocKind,
   fileName: string,
-): Promise<LoadedDoc | null> {
-  const dir = docDir(dataDir, fileName);
+  migrate: (doc: A.Doc<T>) => A.Doc<T> = (doc) => doc,
+): Promise<LoadedDoc<T> | null> {
+  const dir = kindDir(dataDir, kind, fileName);
   const { snapshots, changes } = await chunkFiles(dir);
   if (snapshots.length === 0 && changes.length === 0) return null;
 
-  let doc: A.Doc<FeatureDoc> | null = null;
+  let doc: A.Doc<T> | null = null;
   const skippedChunks: string[] = [];
   for (const file of [...snapshots, ...changes]) {
     let bytes: Uint8Array;
@@ -187,7 +229,7 @@ export async function loadFeatureDoc(
       continue;
     }
     try {
-      doc = doc === null ? A.load<FeatureDoc>(bytes) : A.loadIncremental(doc, bytes);
+      doc = doc === null ? A.load<T>(bytes) : A.loadIncremental(doc, bytes);
     } catch {
       skippedChunks.push(file);
     }
@@ -203,23 +245,43 @@ export async function loadFeatureDoc(
       "automerge.skipped_chunks": skippedChunks.join(","),
     });
   }
-  const docId = (await readTextFile(join(dir, "docid")))?.trim() ?? doc.id;
+  const docId = (await readTextFile(join(dir, "docid")))?.trim() ?? (doc as { id?: string }).id ?? "";
   // Heads are captured before the schema migration on purpose — see migrated.
   const heads = A.getHeads(doc);
-  return { doc: migrated(doc), heads, docId, skippedChunks };
+  return { doc: migrate(doc), heads, docId, skippedChunks };
 }
 
 /**
- * Create a feature's document directory from a fresh doc: full snapshot plus
- * the docid file that gives every peer the same identity for network sync.
+ * Load a feature's document, or null when the feature has none yet (a
+ * pre-migration repo, or a plain-md write from an older app version).
  */
-export async function createFeatureDoc(
+export async function loadFeatureDoc(
   dataDir: string,
   fileName: string,
-  doc: A.Doc<FeatureDoc>,
-): Promise<LoadedDoc> {
+): Promise<LoadedDoc | null> {
+  return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated);
+}
+
+/** Load a roadmap page's document (specs/app/roadmap.feature.md). */
+export async function loadRoadmapDoc(
+  dataDir: string,
+  fileName: string,
+): Promise<LoadedDoc<RoadmapDoc> | null> {
+  return loadDoc<RoadmapDoc>(dataDir, "docs", fileName);
+}
+
+/**
+ * Create a document directory from a fresh doc: full snapshot plus the docid
+ * file that gives every peer the same identity for network sync.
+ */
+async function createDoc<T extends { id: string }>(
+  dataDir: string,
+  kind: DocKind,
+  fileName: string,
+  doc: A.Doc<T>,
+): Promise<LoadedDoc<T>> {
   return withSpan("automerge.create_doc", { "specdriven.file": fileName }, async (span) => {
-    const dir = docDir(dataDir, fileName);
+    const dir = kindDir(dataDir, kind, fileName);
     await mkdir(dir, { recursive: true });
     const bytes = A.save(doc);
     await writeFile(join(dir, `snapshot-${contentHash(bytes)}.bin`), bytes);
@@ -227,23 +289,40 @@ export async function createFeatureDoc(
     await writeFile(join(dir, "docid"), `${docId}\n`);
     span.setAttributes({ "automerge.doc_id": docId, "automerge.snapshot_bytes": bytes.length });
     log.debug(`created document for ${fileName}`, { "automerge.doc_id": docId });
-    emitDocSaved(dataDir, fileName);
+    if (kind === "features") emitDocSaved(dataDir, fileName);
     return { doc, heads: A.getHeads(doc), docId, skippedChunks: [] };
   });
 }
 
-/**
- * Persist changes made since `sinceHeads` (the heads returned by
- * loadFeatureDoc) as one incremental chunk, folding everything into a fresh
- * snapshot once enough change files pile up. A no-op delta writes nothing.
- */
-export async function saveFeatureDoc(
+export async function createFeatureDoc(
   dataDir: string,
   fileName: string,
   doc: A.Doc<FeatureDoc>,
+): Promise<LoadedDoc> {
+  return createDoc(dataDir, "features", fileName, doc);
+}
+
+export async function createRoadmapDoc(
+  dataDir: string,
+  fileName: string,
+  doc: A.Doc<RoadmapDoc>,
+): Promise<LoadedDoc<RoadmapDoc>> {
+  return createDoc(dataDir, "docs", fileName, doc);
+}
+
+/**
+ * Persist changes made since `sinceHeads` (the heads a load returned) as one
+ * incremental chunk, folding everything into a fresh snapshot once enough
+ * change files pile up. A no-op delta writes nothing.
+ */
+async function saveDoc<T>(
+  dataDir: string,
+  kind: DocKind,
+  fileName: string,
+  doc: A.Doc<T>,
   sinceHeads: A.Heads,
 ): Promise<void> {
-  const dir = docDir(dataDir, fileName);
+  const dir = kindDir(dataDir, kind, fileName);
   const delta = A.saveSince(doc, sinceHeads);
   if (delta.length === 0) return;
   await withSpan(
@@ -255,10 +334,28 @@ export async function saveFeatureDoc(
       log.debug(`saved incremental chunk for ${fileName}`, {
         "automerge.delta_bytes": delta.length,
       });
-      await compactFeatureDoc(dataDir, fileName);
-      emitDocSaved(dataDir, fileName);
+      await compactDoc(dataDir, kind, fileName);
+      if (kind === "features") emitDocSaved(dataDir, fileName);
     },
   );
+}
+
+export async function saveFeatureDoc(
+  dataDir: string,
+  fileName: string,
+  doc: A.Doc<FeatureDoc>,
+  sinceHeads: A.Heads,
+): Promise<void> {
+  return saveDoc(dataDir, "features", fileName, doc, sinceHeads);
+}
+
+export async function saveRoadmapDoc(
+  dataDir: string,
+  fileName: string,
+  doc: A.Doc<RoadmapDoc>,
+  sinceHeads: A.Heads,
+): Promise<void> {
+  return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
 }
 
 /**
@@ -267,15 +364,15 @@ export async function saveFeatureDoc(
  * from the working tree; two peers compacting concurrently just leave two
  * snapshots for the next load to merge.
  */
-export async function compactFeatureDoc(dataDir: string, fileName: string): Promise<void> {
-  const dir = docDir(dataDir, fileName);
+async function compactDoc(dataDir: string, kind: DocKind, fileName: string): Promise<void> {
+  const dir = kindDir(dataDir, kind, fileName);
   const { snapshots, changes } = await chunkFiles(dir);
   if (changes.length < COMPACT_AT) return;
   await withSpan(
     "automerge.compact_doc",
     { "specdriven.file": fileName, "automerge.change_chunks": changes.length },
     async () => {
-      const loaded = await loadFeatureDoc(dataDir, fileName);
+      const loaded = await loadDoc<unknown>(dataDir, kind, fileName);
       if (loaded === null) return;
       const bytes = A.save(loaded.doc);
       const name = `snapshot-${contentHash(bytes)}.bin`;
@@ -292,18 +389,28 @@ export async function compactFeatureDoc(dataDir: string, fileName: string): Prom
   );
 }
 
+export async function compactFeatureDoc(dataDir: string, fileName: string): Promise<void> {
+  return compactDoc(dataDir, "features", fileName);
+}
+
 /** Remove a feature's document directory (feature deleted). */
 export async function removeFeatureDoc(dataDir: string, fileName: string): Promise<void> {
   await rm(docDir(dataDir, fileName), { recursive: true, force: true });
   log.debug(`removed document for ${fileName}`);
 }
 
+/** Remove a roadmap page's document directory (page deleted). */
+export async function removeRoadmapDoc(dataDir: string, fileName: string): Promise<void> {
+  await rm(kindDir(dataDir, "docs", fileName), { recursive: true, force: true });
+  log.debug(`removed document for ${fileName}`);
+}
+
 /**
- * Every feature (by repo-relative file name) that has a document directory
- * with at least one chunk — the doc-side counterpart of features.ts walk().
+ * Every file (by repo-relative name) of this kind that has a document
+ * directory with at least one chunk — the doc-side counterpart of walk().
  */
-export async function listFeatureDocs(dataDir: string): Promise<string[]> {
-  const rootDir = join(dataDir, ".specdriven", "automerge", "features");
+async function listDocs(dataDir: string, kind: DocKind, suffix: string): Promise<string[]> {
+  const rootDir = join(dataDir, ".specdriven", "automerge", kind);
   const found: string[] = [];
   const visit = async (rel: string): Promise<void> => {
     let entries: import("node:fs").Dirent[];
@@ -315,8 +422,8 @@ export async function listFeatureDocs(dataDir: string): Promise<string[]> {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const path = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.name.endsWith(".feature.md")) {
-        if (await hasFeatureDoc(dataDir, path)) found.push(path);
+      if (entry.name.endsWith(suffix)) {
+        if (await hasDoc(dataDir, kind, path)) found.push(path);
       } else {
         await visit(path);
       }
@@ -326,10 +433,29 @@ export async function listFeatureDocs(dataDir: string): Promise<string[]> {
   return found.sort();
 }
 
+/** Every feature that has a document — the doc side of features.ts walk(). */
+export async function listFeatureDocs(dataDir: string): Promise<string[]> {
+  return listDocs(dataDir, "features", ".feature.md");
+}
+
+/** Every roadmap page that has a document (specs/app/roadmap.feature.md). */
+export async function listRoadmapDocs(dataDir: string): Promise<string[]> {
+  return listDocs(dataDir, "docs", ".md");
+}
+
 /** Mint an empty feature document with a fresh identity. */
 export function newFeatureDoc(init: Omit<FeatureDoc, "schemaVersion" | "id">): A.Doc<FeatureDoc> {
   return A.from<FeatureDoc>({
     schemaVersion: SCHEMA_VERSION,
+    id: randomUUID(),
+    ...init,
+  });
+}
+
+/** Mint an empty roadmap document with a fresh identity. */
+export function newRoadmapDoc(init: Omit<RoadmapDoc, "schemaVersion" | "id">): A.Doc<RoadmapDoc> {
+  return A.from<RoadmapDoc>({
+    schemaVersion: ROADMAP_SCHEMA_VERSION,
     id: randomUUID(),
     ...init,
   });

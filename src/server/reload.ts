@@ -12,7 +12,8 @@
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
-import { readState, needsDataRepo } from "./state";
+import { ensureRoadmapFolder, importRoadmapDrift } from "./roadmap";
+import { readState, needsDataRepo, normalizeRoadmap } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
@@ -37,11 +38,24 @@ export async function reloadData(rootDir: string): Promise<string> {
     return "data repo not configured; skipped reload";
   }
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
-  return syncDataDir(dir);
+  return syncDataDir(dir, { roadmap: normalizeRoadmap(state.roadmap) });
+}
+
+/** What a tick does beyond pulling and pushing. */
+export interface SyncOptions {
+  /**
+   * The Roadmap setting (specs/app/roadmap.feature.md): on, the tick makes
+   * sure the `roadmap` folder exists and keeps its pages' documents in step
+   * with their markdown. Off, the folder is none of the app's business.
+   */
+  roadmap?: boolean;
 }
 
 /** The tick itself, on an already-resolved data dir (shared with tests). */
-export async function syncDataDir(dir: string): Promise<string> {
+export async function syncDataDir(
+  dir: string,
+  { roadmap = false }: SyncOptions = {},
+): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
     const pulled = await pull(dir);
     if (!pulled.ok) {
@@ -58,6 +72,14 @@ export async function syncDataDir(dir: string): Promise<string> {
     if (!merging) {
       const drifted = await importDrift(dir);
       if (drifted) parts.push(drifted);
+      // Scenario "Create roadmap folder if necessary": the folder is made
+      // here when the setting asks for one and the repo has none — and the
+      // push below commits everything in it, like any other saved change.
+      if (roadmap) {
+        await ensureRoadmapFolder(dir);
+        const roadmapDrift = await importRoadmapDrift(dir);
+        if (roadmapDrift) parts.push(roadmapDrift);
+      }
     }
     const synced = await syncSavedChanges(dir);
     parts.push(synced.message);
