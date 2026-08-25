@@ -124,6 +124,13 @@ const DEFAULT_AUTOSYNC_SECONDS = 60;
 const DEFAULT_AUTOSAVE_SECONDS = 6;
 const MIN_AUTOSAVE_SECONDS = 3;
 
+// Project management (specs/external-links/project-management-jira-linear-
+// etc.feature.md): the tool tickets live in until Settings names another, and
+// the tools the Settings dropdown offers by name — anything else is typed in
+// beside it. Mirrors the server's default in src/server/state.ts.
+const DEFAULT_PROJECT_MANAGEMENT_TOOL = "Jira";
+const PROJECT_MANAGEMENT_TOOLS = ["Jira", "Linear", "GitHub", "GitLab", "Asana", "Azure DevOps"];
+
 // Sidebar width (specs/ui.spec.md "Sidebar resize"): dragged via the divider
 // so a deep folder tree gets room. Device-local, like the theme.
 const SIDEBAR_MIN = 180;
@@ -454,6 +461,14 @@ export function App() {
   // External links (specs/external-links/project-management-jira-linear-etc.
   // feature.md): whether ticket links are written into the .feature.md files.
   const [publishExternalLinks, setPublishExternalLinks] = useState(true);
+  // Project management (specs/external-links/project-management-jira-linear-
+  // etc.feature.md): whether tickets are tracked at all, and the tool they
+  // live in. Off, nothing in the app shows or asks for a ticket; on, the
+  // editors ask for the ticket's url alone — the tool is this one.
+  const [projectManagement, setProjectManagement] = useState(true);
+  const [projectManagementTool, setProjectManagementTool] = useState(
+    DEFAULT_PROJECT_MANAGEMENT_TOOL,
+  );
   /** Code gen sessions offered at all (specs/agents/claude.spec.md). */
   const [codeGen, setCodeGen] = useState(true);
   // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
@@ -475,6 +490,9 @@ export function App() {
     String(DEFAULT_AUTOSAVE_SECONDS),
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  const [settingsProjectManagementDraft, setSettingsProjectManagementDraft] = useState(true);
+  /** The tool name being typed/picked in Settings; saved when it is usable. */
+  const [settingsToolDraft, setSettingsToolDraft] = useState(DEFAULT_PROJECT_MANAGEMENT_TOOL);
   const [settingsPublishLinksDraft, setSettingsPublishLinksDraft] = useState(true);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
@@ -594,6 +612,12 @@ export function App() {
       }
       if (typeof state.publishExternalLinks === "boolean") {
         setPublishExternalLinks(state.publishExternalLinks);
+      }
+      if (typeof state.projectManagement === "boolean") {
+        setProjectManagement(state.projectManagement);
+      }
+      if (typeof state.projectManagementTool === "string") {
+        setProjectManagementTool(state.projectManagementTool);
       }
       if (typeof state.codeGen === "boolean") {
         setCodeGen(state.codeGen);
@@ -2088,6 +2112,8 @@ export function App() {
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
+    setSettingsProjectManagementDraft(projectManagement);
+    setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
@@ -2238,6 +2264,10 @@ export function App() {
     setAutosaveSeconds(data.autosaveIntervalSeconds);
     setShowTestLinks(data.showTestLinks !== false);
     setPublishExternalLinks(data.publishExternalLinks !== false);
+    setProjectManagement(data.projectManagement !== false);
+    if (typeof data.projectManagementTool === "string") {
+      setProjectManagementTool(data.projectManagementTool);
+    }
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -2317,6 +2347,26 @@ export function App() {
   const toggleTestLinks = async (on: boolean) => {
     setSettingsTestLinksDraft(on);
     if (!(await patchSettings({ showTestLinks: on }))) setSettingsTestLinksDraft(!on);
+  };
+
+  // Project management (specs/external-links/project-management-jira-linear-
+  // etc.feature.md): the switch decides whether the app tracks tickets at
+  // all. Off, the ticket chips and fields go — the links already recorded
+  // stay in the documents, and come back when it is switched on again.
+  const toggleProjectManagement = async (on: boolean) => {
+    setSettingsProjectManagementDraft(on);
+    if (!(await patchSettings({ projectManagement: on }))) {
+      setSettingsProjectManagementDraft(!on);
+    }
+  };
+
+  // The tool the tickets live in: picked from the list, or typed when it is
+  // one the list doesn't offer. A blank name is not saved — the field is
+  // being typed into; the stored tool stands until it holds a usable name.
+  const changeTool = async (name: string) => {
+    setSettingsToolDraft(name);
+    if (!name.trim()) return;
+    await patchSettings({ projectManagementTool: name });
   };
 
   // Publish external links (specs/external-links/project-management-jira-
@@ -3412,10 +3462,17 @@ export function App() {
                   feature.md "Add link at spec level": the ticket tracking this
                   scenario. Editable on a published scenario too — like the test
                   links, it is bookkeeping around the spec, not the spec. */}
-              <div className="link-field">
-                <span className="field-label">Ticket link</span>
-                <ExternalLinkField draft={linkDraft} onChange={changeLinkDraft} error={linkError} />
-              </div>
+              {projectManagement && (
+                <div className="link-field">
+                  <span className="field-label">Ticket link</span>
+                  <ExternalLinkField
+                    draft={linkDraft}
+                    onChange={changeLinkDraft}
+                    error={linkError}
+                    tool={projectManagementTool}
+                  />
+                </div>
+              )}
               {showTestLinks && (
                 <div className="tests-field">
                   <span className="field-label">Automated tests</span>
@@ -3543,7 +3600,7 @@ export function App() {
                         management-jira-linear-etc.feature.md "Add link to
                         feature"): a chip opening the ticket, and the dialog
                         that sets or clears it. */}
-                    {feature.link && (
+                    {projectManagement && feature.link && (
                       <a
                         className="ext-link"
                         href={feature.link.url}
@@ -3554,38 +3611,40 @@ export function App() {
                         {externalLinkLabel(feature.link)}
                       </a>
                     )}
-                    <button
-                      className="link"
-                      onClick={() => {
-                        setFeatureLinkError(null);
-                        setFeatureLinkDraft(linkDraftOf(feature.link));
-                      }}
-                    >
-                      {feature.link ? "Edit ticket" : "Link ticket"}
-                    </button>
+                    {projectManagement && (
+                      <button
+                        className="link"
+                        onClick={() => {
+                          setFeatureLinkError(null);
+                          setFeatureLinkDraft(linkDraftOf(feature.link));
+                        }}
+                      >
+                        {feature.link ? "Edit ticket" : "Link ticket"}
+                      </button>
+                    )}
                     {/* Assignment (src/server/members.ts): the project member
                         this feature is assigned to, chosen from the data
                         repo's project-settings.json. Saved on the spot, like
                         the ticket link. Off by default — the Settings switch
                         decides whether this project assigns features at all. */}
                     {assignments && (
-                    <label className="assigned-field">
-                      <span>Assigned</span>
-                      <select
-                        className="assigned-select"
-                        aria-label="Assigned member"
-                        value={feature.assigned ?? ""}
-                        disabled={assignedSaving}
-                        onChange={(e) => void saveAssigned(e.target.value)}
-                      >
-                        <option value="">Unassigned</option>
-                        {assignableMembers().map((m) => (
-                          <option key={m.name} value={m.name}>
-                            {m.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="assigned-field">
+                        <span>Assigned</span>
+                        <select
+                          className="assigned-select"
+                          aria-label="Assigned member"
+                          value={feature.assigned ?? ""}
+                          disabled={assignedSaving}
+                          onChange={(e) => void saveAssigned(e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {assignableMembers().map((m) => (
+                            <option key={m.name} value={m.name}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     )}
                     {/* The description editor (specs/editor/feature-editor
                         .feature.md): switches the description pane below
@@ -3747,7 +3806,7 @@ export function App() {
                       {/* The scenario's ticket (specs/external-links/project-
                           management-jira-linear-etc.feature.md "Add link at
                           spec level"), opening in a new tab. */}
-                      {s.link && (
+                      {projectManagement && s.link && (
                         <a
                           className="ext-link"
                           href={s.link.url}
@@ -4136,29 +4195,95 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
-              {/* specs/external-links/project-management-jira-linear-etc.
-                  feature.md "Publishing links into projected feature (.md)
-                  files": the ticket links go into the markdown only while
-                  this is on; default ON. */}
+              {/* Project management (specs/external-links/project-management-
+                  jira-linear-etc.feature.md): the master switch for tickets;
+                  default ON. Off, no feature or scenario shows or asks for
+                  one. */}
               <label className="settings-row">
                 <span className="settings-row-label">
-                  Publish external links
+                  Project management
                   <span className="settings-row-hint">
-                    Write each feature's and scenario's ticket link (Jira, Linear…) into the
-                    .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
-                    keeps the links in the app only.
+                    {settingsProjectManagementDraft
+                      ? "Features and scenarios carry a link to the ticket tracking them; the editors ask for the ticket's url."
+                      : "Ticket links are off: nothing in the app shows or asks for one. Links already recorded are kept."}
                   </span>
                 </span>
                 <span className="switch">
                   <input
                     type="checkbox"
                     role="switch"
-                    checked={settingsPublishLinksDraft}
-                    onChange={(e) => void toggleExternalLinks(e.target.checked)}
+                    checked={settingsProjectManagementDraft}
+                    onChange={(e) => void toggleProjectManagement(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              {settingsProjectManagementDraft && (
+                <>
+                  {/* The tool chosen here is the `<program>` of every new
+                      link, which is why the editors need only the url. */}
+                  <label className="settings-row">
+                    <span className="settings-row-label">
+                      Project management tool
+                      <span className="settings-row-hint">
+                        Where the tickets live. Its name is what a link shows —{" "}
+                        <code>{settingsToolDraft.trim() || DEFAULT_PROJECT_MANAGEMENT_TOOL}:ABC-123</code>.
+                      </span>
+                    </span>
+                    <span className="settings-tool">
+                      <select
+                        aria-label="Project management tool"
+                        value={
+                          PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim())
+                            ? settingsToolDraft.trim()
+                            : "Other"
+                        }
+                        onChange={(e) => void changeTool(e.target.value === "Other" ? "" : e.target.value)}
+                      >
+                        {PROJECT_MANAGEMENT_TOOLS.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                        <option value="Other">Other</option>
+                      </select>
+                      {!PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim()) && (
+                        <input
+                          className="settings-tool-name"
+                          value={settingsToolDraft}
+                          placeholder="Tool name"
+                          aria-label="Project management tool name"
+                          spellCheck={false}
+                          onChange={(e) => void changeTool(e.target.value)}
+                        />
+                      )}
+                    </span>
+                  </label>
+                  {/* specs/external-links/project-management-jira-linear-etc.
+                      feature.md "Publishing links into projected feature (.md)
+                      files": the ticket links go into the markdown only while
+                      this is on; default ON. */}
+                  <label className="settings-row">
+                    <span className="settings-row-label">
+                      Publish external links
+                      <span className="settings-row-hint">
+                        Write each feature's and scenario's ticket link (Jira, Linear…) into the
+                        .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
+                        keeps the links in the app only.
+                      </span>
+                    </span>
+                    <span className="switch">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={settingsPublishLinksDraft}
+                        onChange={(e) => void toggleExternalLinks(e.target.checked)}
+                      />
+                      <span className="switch-track" aria-hidden="true" />
+                    </span>
+                  </label>
+                </>
+              )}
             </section>
             <section className="settings-group">
               {/* Code gen (specs/agents/claude.spec.md): off takes the selection
@@ -4394,8 +4519,9 @@ export function App() {
             >
               <h3>Ticket for this feature</h3>
               <p className="hint">
-                The Jira, Linear… ticket that tracks “{feature.name || titleFromFileName(selected!)}
-                ”. Leave every field empty to remove the link.
+                The {projectManagementTool} ticket that tracks “
+                {feature.name || titleFromFileName(selected!)}”. Clear the url to remove the
+                link.
               </p>
               <div className="link-field">
                 <ExternalLinkField
@@ -4406,6 +4532,7 @@ export function App() {
                   }}
                   error={featureLinkError}
                   autoFocus
+                  tool={projectManagementTool}
                 />
               </div>
               <div className="dialog-actions">

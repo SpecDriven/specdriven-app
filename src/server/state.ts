@@ -38,6 +38,20 @@ export interface SpecDrivenState {
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;
   /**
+   * Track tickets at all
+   * (specs/external-links/project-management-jira-linear-etc.feature.md);
+   * absent means ON. Off takes the ticket fields out of the feature and spec
+   * editors — nothing in the app asks for a ticket, and the links already
+   * recorded stay untouched.
+   */
+  projectManagement?: boolean;
+  /**
+   * The project management tool the tickets live in — the `<program>` half
+   * of `[Jira:ABC-123](url)`. Chosen once here rather than per link, so the
+   * editors need only the ticket's url. Absent means the default, Jira.
+   */
+  projectManagementTool?: string;
+  /**
    * Write external links — the Jira/Linear ticket of a feature or scenario
    * — into the `.feature.md` files
    * (specs/external-links/project-management-jira-linear-etc.feature.md);
@@ -175,6 +189,25 @@ export function normalizeAssignments(value: unknown): boolean {
     off (specs/external-links/project-management-jira-linear-etc.feature.md). */
 export function normalizePublishExternalLinks(value: unknown): boolean {
   return value !== false;
+}
+
+// Project management (specs/external-links/project-management-jira-linear-
+// etc.feature.md): which tool the tickets live in, chosen in Settings once
+// instead of on every link. Jira is the default so a fresh install can link
+// a ticket without visiting Settings first.
+export const DEFAULT_PROJECT_MANAGEMENT_TOOL = "Jira";
+
+/** Effective project-management setting: ON unless explicitly turned off. */
+export function normalizeProjectManagement(value: unknown): boolean {
+  return value !== false;
+}
+
+/** Effective tool name for a stored value; anything absent or unusable as a
+    `<program>` — empty, or carrying ':' or brackets — falls back to Jira. */
+export function normalizeProjectManagementTool(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_PROJECT_MANAGEMENT_TOOL;
+  const name = value.trim();
+  return name && !/[:[\]]/.test(name) ? name : DEFAULT_PROJECT_MANAGEMENT_TOOL;
 }
 
 /**

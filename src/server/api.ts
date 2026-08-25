@@ -9,7 +9,10 @@ import {
   normalizeAssignments,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
+  DEFAULT_PROJECT_MANAGEMENT_TOOL,
   normalizeDeletePublished,
+  normalizeProjectManagement,
+  normalizeProjectManagementTool,
   normalizePublishExternalLinks,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
@@ -264,6 +267,8 @@ async function stateFields(state: SpecDrivenState) {
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    projectManagement: normalizeProjectManagement(state.projectManagement),
+    projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     deletePublished: normalizeDeletePublished(state.deletePublished),
@@ -313,6 +318,8 @@ const putState: Handler = async (req) => {
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
+    projectManagement?: boolean;
+    projectManagementTool?: string;
     publishExternalLinks?: boolean;
     codeGen?: boolean;
     deletePublished?: boolean;
@@ -326,6 +333,8 @@ const putState: Handler = async (req) => {
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
+    body.projectManagement === undefined &&
+    body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
     body.codeGen === undefined &&
     body.deletePublished === undefined &&
@@ -335,7 +344,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, publishExternalLinks, codeGen, deletePublished, assignments or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished, assignments or syncServerUrl is required",
       },
       400,
     );
@@ -426,6 +435,32 @@ const putState: Handler = async (req) => {
     }
     if (body.showTestLinks) delete state.showTestLinks;
     else state.showTestLinks = false;
+  }
+  // Project management (specs/external-links/project-management-jira-linear-
+  // etc.feature.md): whether tickets are tracked at all, and which tool they
+  // live in. Both defaults — ON, and Jira — are stored as an absent key.
+  if (body.projectManagement !== undefined) {
+    if (typeof body.projectManagement !== "boolean") {
+      return json({ error: "projectManagement must be a boolean" }, 400);
+    }
+    if (body.projectManagement) delete state.projectManagement;
+    else state.projectManagement = false;
+  }
+  if (body.projectManagementTool !== undefined) {
+    if (typeof body.projectManagementTool !== "string") {
+      return json({ error: "projectManagementTool must be a string" }, 400);
+    }
+    const tool = body.projectManagementTool.trim();
+    // The name becomes the `<program>` of `[Jira:ABC-123](url)`, so it must
+    // survive that form — the same rule the link fields enforce.
+    if (!tool || /[:[\]]/.test(tool)) {
+      return json(
+        { error: "projectManagementTool must be a name without ':' or brackets" },
+        400,
+      );
+    }
+    if (tool === DEFAULT_PROJECT_MANAGEMENT_TOOL) delete state.projectManagementTool;
+    else state.projectManagementTool = tool;
   }
   // External links in the markdown (specs/external-links/project-management-
   // jira-linear-etc.feature.md): optional, default ON — stored as an absent

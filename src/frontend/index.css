@@ -2448,6 +2448,24 @@ button.table-add:hover {
   min-width: 0;
 }
 
+/* The project management tool: the list of the usual ones, plus the name
+   field that appears for a tool the list doesn't offer. */
+.settings-tool {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.settings-tool .settings-tool-name {
+  width: 9rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.88rem;
+}
+
 /* The GitHub account block stacks its own rows but still reads as one row
    of the group it sits in. */
 .dialog .settings-row.auth-section {

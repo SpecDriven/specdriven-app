@@ -32,7 +32,12 @@ import {
   reprojectFeatures,
   saveFeature,
 } from "../src/server/features";
-import { normalizePublishExternalLinks } from "../src/server/state";
+import {
+  DEFAULT_PROJECT_MANAGEMENT_TOOL,
+  normalizeProjectManagement,
+  normalizeProjectManagementTool,
+  normalizePublishExternalLinks,
+} from "../src/server/state";
 import {
   EMPTY_LINK_DRAFT,
   externalLinkLabel,
@@ -40,7 +45,9 @@ import {
   linkDraftOf,
   resolveLinkDraft,
   suggestLink,
+  ticketFromUrl,
   withLinkUrl,
+  withLinkUrlForTool,
 } from "../src/frontend/externallinks";
 import { scenarioSignature } from "../src/frontend/App";
 
@@ -462,4 +469,71 @@ test("the autosave signature follows the link", () => {
   const sig = scenarioSignature(s, 2);
   expect(scenarioSignature({ ...s }, 2)).toBe(sig);
   expect(scenarioSignature({ ...s, link: JIRA }, 2)).not.toBe(sig);
+});
+
+// Project management chosen in Settings (specs/external-links/project-
+// management-jira-linear-etc.feature.md): the switch decides whether tickets
+// are tracked at all, and the tool named there is the one every new link
+// carries — which is why the editors ask for the url alone.
+test("project management is on by default and only an explicit false turns it off", () => {
+  expect(normalizeProjectManagement(undefined)).toBe(true);
+  expect(normalizeProjectManagement(true)).toBe(true);
+  expect(normalizeProjectManagement(null)).toBe(true);
+  expect(normalizeProjectManagement(false)).toBe(false);
+});
+
+test("the tool falls back to Jira unless a usable name is stored", () => {
+  expect(DEFAULT_PROJECT_MANAGEMENT_TOOL).toBe("Jira");
+  expect(normalizeProjectManagementTool(undefined)).toBe("Jira");
+  expect(normalizeProjectManagementTool("")).toBe("Jira");
+  expect(normalizeProjectManagementTool("   ")).toBe("Jira");
+  expect(normalizeProjectManagementTool(7)).toBe("Jira");
+  expect(normalizeProjectManagementTool(" Linear ")).toBe("Linear");
+  expect(normalizeProjectManagementTool("YouTrack")).toBe("YouTrack");
+  // The name becomes the `<program>` of `[Jira:ABC-123](url)`, so a name
+  // that would break that form is not one.
+  expect(normalizeProjectManagementTool("Ji:ra")).toBe("Jira");
+  expect(normalizeProjectManagementTool("Ji[ra]")).toBe("Jira");
+});
+
+test("the url alone yields the ticket id", () => {
+  expect(ticketFromUrl(JIRA.url)).toBe("ABC-123");
+  expect(ticketFromUrl(LINEAR.url)).toBe("ENG-42");
+  expect(ticketFromUrl("https://github.com/acme/repo/issues/17")).toBe("#17");
+  // No key anywhere: the last path segment is what the tool put there.
+  expect(ticketFromUrl("https://tracker.example.com/tickets/quote%20policy")).toBe("quote policy");
+  expect(ticketFromUrl("https://example.com/")).toBe("");
+  expect(ticketFromUrl("not a url")).toBe("");
+});
+
+test("with the tool chosen in Settings, only the url is needed", () => {
+  const typed = withLinkUrlForTool(EMPTY_LINK_DRAFT, JIRA.url, "Jira");
+  expect(typed).toEqual(linkDraftOf(JIRA));
+  expect(resolveLinkDraft(typed)).toEqual({ link: JIRA });
+  // The Settings tool wins over the one the url would suggest.
+  expect(withLinkUrlForTool(EMPTY_LINK_DRAFT, LINEAR.url, "Jira")).toEqual({
+    program: "Jira",
+    ticket: "ENG-42",
+    url: LINEAR.url,
+  });
+  // A link recorded under another tool keeps it — editing the url of a
+  // Linear ticket must not rename it to the Settings tool.
+  expect(withLinkUrlForTool(linkDraftOf(LINEAR), "https://linear.app/acme/issue/ENG-43", "Jira")).toEqual(
+    { program: "Linear", ticket: "ENG-43", url: "https://linear.app/acme/issue/ENG-43" },
+  );
+  // A ticket derived from the old url follows the new one, even when it came
+  // from the last path segment rather than an ABC-123 key.
+  const slug = withLinkUrlForTool(EMPTY_LINK_DRAFT, "https://tracker.example.com/t/one", "Tracker");
+  expect(slug).toEqual({ program: "Tracker", ticket: "one", url: "https://tracker.example.com/t/one" });
+  expect(withLinkUrlForTool(slug, "https://tracker.example.com/t/two", "Tracker").ticket).toBe("two");
+  // A ticket id typed by hand stays put.
+  const mine = { program: "Jira", ticket: "ABC-9", url: "https://tracker.example.com/t/one" };
+  expect(withLinkUrlForTool(mine, "https://tracker.example.com/t/two", "Jira").ticket).toBe("ABC-9");
+});
+
+test("a url typed a character at a time ends with the whole ticket id, tool and all", () => {
+  const full = "https://acme.atlassian.net/browse/ABC-124";
+  let draft = EMPTY_LINK_DRAFT;
+  for (let n = 1; n <= full.length; n++) draft = withLinkUrlForTool(draft, full.slice(0, n), "Jira");
+  expect(draft).toEqual({ program: "Jira", ticket: "ABC-124", url: full });
 });
