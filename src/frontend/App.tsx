@@ -3622,6 +3622,21 @@ export function App() {
                         {feature.link ? "Edit ticket" : "Link ticket"}
                       </button>
                     )}
+                    {/* The description editor (specs/editor/feature-editor
+                        .feature.md): switches the description pane below
+                        between rendered and editable. */}
+                    {descOpen ? (
+                      <button className="link" onClick={() => void closeDescriptionEditor()}>
+                        Done
+                      </button>
+                    ) : (
+                      <button
+                        className="link"
+                        onClick={() => openDescriptionEditor(selected, feature.description)}
+                      >
+                        {feature.description ? "Edit description" : "Add description"}
+                      </button>
+                    )}
                     {/* Assignment (src/server/members.ts): the project member
                         this feature is assigned to, chosen from the data
                         repo's project-settings.json. Saved on the spot, like
@@ -3645,21 +3660,6 @@ export function App() {
                           ))}
                         </select>
                       </label>
-                    )}
-                    {/* The description editor (specs/editor/feature-editor
-                        .feature.md): switches the description pane below
-                        between rendered and editable. */}
-                    {descOpen ? (
-                      <button className="link" onClick={() => void closeDescriptionEditor()}>
-                        Done
-                      </button>
-                    ) : (
-                      <button
-                        className="link"
-                        onClick={() => openDescriptionEditor(selected, feature.description)}
-                      >
-                        {feature.description ? "Edit description" : "Add description"}
-                      </button>
                     )}
                   </>
                 ) : (
