@@ -48,6 +48,13 @@ export interface SpecDrivenState {
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to the Claude CLI. */
   codeGen?: boolean;
+  /**
+   * Offer feature assignment — the "Assigned" dropdown of project members
+   * (src/server/members.ts); absent means OFF. Off hides the dropdown; an
+   * assignment already written into a `.feature.md` is left alone, so
+   * turning the switch back on finds it again.
+   */
+  assignments?: boolean;
   /** Allow deleting published scenarios (specs/editor/spec-editor.feature.md
       "Delete Published Spec"); absent means OFF — published scenarios are
       immutable unless this is explicitly turned on. */
@@ -154,6 +161,13 @@ export function normalizeCodeGen(value: unknown): boolean {
 /** Effective published-deletion setting: OFF unless explicitly turned on
     (specs/editor/spec-editor.feature.md "Delete Published Spec"). */
 export function normalizeDeletePublished(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective assignment setting: OFF unless explicitly turned on — a project
+    that doesn't assign features never sees the dropdown
+    (src/server/members.ts). */
+export function normalizeAssignments(value: unknown): boolean {
   return value === true;
 }
 

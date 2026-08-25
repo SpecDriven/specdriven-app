@@ -2523,6 +2523,31 @@ button.table-add:hover {
   font-size: 0.78rem;
 }
 
+/* Assignment (src/server/members.ts): the "Assigned" dropdown beside the
+   feature name, offering the data repo's project members. */
+.assigned-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.assigned-select {
+  max-width: 12rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.8rem;
+}
+
+.assigned-select:disabled {
+  opacity: 0.6;
+}
+
 /* The dialogs' ticket-link fields: url first (pasting it fills the other
    two), then the tool's short name and the ticket id. */
 .dialog .link-field,
