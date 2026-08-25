@@ -17,9 +17,21 @@ First notice of loss (FNOL) for collision and comprehensive claims.
 - **And** the claim status is "Open — awaiting adjuster" (assign-adjuster.feature.md)
 - **And** a confirmation email with the claim number is sent
 
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/RecordCarAccidentTest.java#L34 |
+
 ## Report accident through the claims hotline @v1 [published]
 
 - **Given** a caller reaches the 24/7 claims hotline
 - **When** a live agent records the accident details on the insured's behalf
 - **Then** a claim is opened exactly as if it had been reported online
 - **And** the agent reads the claim number back to the caller
+
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/RecordCarAccidentTest.java#L79 |

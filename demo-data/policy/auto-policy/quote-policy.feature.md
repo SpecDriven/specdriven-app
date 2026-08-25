@@ -16,6 +16,12 @@ questionnaire and receives a premium they can later bind
 | Standard       | 100/300             | $1,000               | $517    |
 | Full           | 250/500             | $500                 | $689    |
 
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/QuoteAutoPolicyTest.java#L33 |
+
 ## Basic auto quote @v2 [proposed]
 
 Adds the good-driver discount to v1.
@@ -32,6 +38,12 @@ Adds the good-driver discount to v1.
 - **When** the prospect requests a quote
 - **Then** no quote is offered
 - **And** the decline reason "does not meet underwriting guidelines" is recorded
+
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/QuoteAutoPolicyTest.java#L78 |
 
 ## Quote expires after 30 days @v1 [proposed]
 

@@ -14,6 +14,12 @@ HO-3 quotes for owner-occupied homes — the property side of the book.
 | $300,000          | $2,500     | $1,180         |
 | $500,000          | $1,000     | $2,050         |
 
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/QuoteHomeownersPolicyTest.java#L32 |
+
 ## Flood damage is excluded @v1 [published]
 
 - **Given** the home sits in a FEMA special flood hazard area
