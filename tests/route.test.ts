@@ -5,6 +5,7 @@ import {
   parseRoute,
   repoDisplayName,
   resolveScenario,
+  roadmapPath,
   scenarioPath,
 } from "../src/frontend/route";
 import type { Scenario } from "../src/server/parser";
@@ -22,6 +23,18 @@ describe("parseRoute", () => {
     expect(parseRoute("/")).toEqual({});
     expect(parseRoute("/features")).toEqual({});
     expect(parseRoute("/settings")).toEqual({});
+  });
+
+  // Roadmap pages (specs/app/roadmap.feature.md) address the markdown files
+  // in the data repo's roadmap folder.
+  test("roadmap pages", () => {
+    expect(parseRoute("/roadmap/pricing")).toEqual({ roadmap: "roadmap/pricing.md" });
+    expect(parseRoute("/roadmap/q3/pricing")).toEqual({ roadmap: "roadmap/q3/pricing.md" });
+    // A hand-typed link carrying the suffix doesn't double it up.
+    expect(parseRoute("/roadmap/pricing.md")).toEqual({ roadmap: "roadmap/pricing.md" });
+    expect(parseRoute("/roadmap")).toEqual({});
+    expect(roadmapPath("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
+    expect(parseRoute(roadmapPath("roadmap/a b.md"))).toEqual({ roadmap: "roadmap/a b.md" });
   });
 
   test("feature url restores the file suffix", () => {
