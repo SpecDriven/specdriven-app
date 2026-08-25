@@ -28,6 +28,11 @@
 // lifts it into `link`; whether the projection writes it is the "Publish
 // external links" setting.
 //
+// A feature may also carry the project member it is assigned to
+// (project-settings.json in the data repo): one `**Assigned:** <name>` line
+// under the `#` heading, beside the link line. The parser lifts it into
+// `assigned`; the projection always writes it.
+//
 // The first `#` heading is the feature name; a `##` heading that ends with a
 // version starts a scenario. The `@` marks where the name ends and the version
 // begins, so a name that itself contains a version ("Migrate to v2 API @v1")
@@ -100,6 +105,12 @@ export interface Feature {
   scenarios: Scenario[];
   /** The ticket tracking the feature as a whole, if it has one. */
   link?: ExternalLink;
+  /**
+   * Name of the project member the feature is assigned to, if any — one of
+   * the members listed in the data repo's `project-settings.json`
+   * (src/server/members.ts). Absent when nobody is assigned.
+   */
+  assigned?: string;
 }
 
 /**
@@ -229,6 +240,64 @@ export function splitExternalLink(text: string): { text: string; link?: External
   return { text: lines.slice(at + 1).join("\n").trim(), link };
 }
 
+/**
+ * The project member a feature is assigned to (src/server/members.ts) is
+ * written as one line under the feature's `# <name>` heading —
+ * `**Assigned:** Ada Lovelace` — beside the external-link line, in either
+ * order. Plain markdown, so GitHub renders it as bold text rather than
+ * front-matter noise. The name is a member's name as `project-settings.json`
+ * spells it; a name that is not in that file still parses and is kept, so a
+ * hand edit or a member removed from the project loses nothing.
+ */
+const ASSIGNED_RE = /^\s{0,3}\*\*Assigned:\*\*\s*(.+?)\s*$/i;
+
+/** The markdown line an assignment is written as. */
+export function formatAssigned(assigned: string): string {
+  return `**Assigned:** ${assigned}`;
+}
+
+/** The member name a line of markdown assigns, or null when it is not one. */
+export function parseAssignedLine(line: string): string | null {
+  const m = line.match(ASSIGNED_RE);
+  if (!m) return null;
+  return m[1]!.trim() || null;
+}
+
+/**
+ * Lift a feature's metadata lines — its ticket link and its assignment — off
+ * the top of the text under the `#` heading. Either may come first, and
+ * anything else ends the metadata: a line further down, or one with more on
+ * it, is ordinary description.
+ */
+export function splitFeatureMeta(text: string): {
+  text: string;
+  link?: ExternalLink;
+  assigned?: string;
+} {
+  let rest = text;
+  let link: ExternalLink | undefined;
+  let assigned: string | undefined;
+  // At most one line of each kind, so two passes settle it whichever order
+  // they were written in.
+  for (let pass = 0; pass < 2; pass++) {
+    const lines = rest.split("\n");
+    const at = lines.findIndex((line) => line.trim() !== "");
+    if (at === -1) break;
+    const line = lines[at]!;
+    const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
+    const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
+    if (nextLink) link = nextLink;
+    else if (nextAssigned) assigned = nextAssigned;
+    else break;
+    rest = lines.slice(at + 1).join("\n").trim();
+  }
+  return {
+    text: rest,
+    ...(link ? { link } : {}),
+    ...(assigned ? { assigned } : {}),
+  };
+}
+
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
 const SCENARIO_RE = /^##\s+(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved|draft)\])?\s*$/;
 /** Feature files written before the `@` version prefix: ``## <name> v1 [published]``. */
@@ -351,9 +420,10 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link } = splitExternalLink(preamble.join("\n").trim());
+  const { text: description, link, assigned } = splitFeatureMeta(preamble.join("\n").trim());
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
   if (link) feature.link = link;
+  if (assigned) feature.assigned = assigned;
   return feature;
 }
 
@@ -374,6 +444,7 @@ export interface SerializeOptions {
 export function serializeFeature(feature: Feature, { links = true }: SerializeOptions = {}): string {
   const parts = [`# ${feature.name}`];
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
+  if (feature.assigned) parts.push(formatAssigned(feature.assigned));
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
     const chunks = [header(s.name, s.version, s.status)];

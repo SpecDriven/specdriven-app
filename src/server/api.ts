@@ -6,6 +6,7 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeAssignments,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
@@ -68,6 +69,7 @@ import type { FeatureView, ScenarioTarget } from "./features";
 import { claudeAvailable, runCodeGenSession } from "./agent";
 import type { SpecInput } from "./agent";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
+import { readProjectMembers } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
@@ -270,6 +272,7 @@ async function stateFields(state: SpecDrivenState) {
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     deletePublished: normalizeDeletePublished(state.deletePublished),
+    assignments: normalizeAssignments(state.assignments),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -320,6 +323,7 @@ const putState: Handler = async (req) => {
     publishExternalLinks?: boolean;
     codeGen?: boolean;
     deletePublished?: boolean;
+    assignments?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -334,12 +338,13 @@ const putState: Handler = async (req) => {
     body.publishExternalLinks === undefined &&
     body.codeGen === undefined &&
     body.deletePublished === undefined &&
+    body.assignments === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished, assignments or syncServerUrl is required",
       },
       400,
     );
@@ -488,6 +493,16 @@ const putState: Handler = async (req) => {
     if (body.deletePublished) state.deletePublished = true;
     else delete state.deletePublished;
   }
+  // Feature assignment (src/server/members.ts): opt-in — the default OFF is
+  // an absent key. Off only takes the dropdown away; nothing already
+  // assigned is rewritten.
+  if (body.assignments !== undefined) {
+    if (typeof body.assignments !== "boolean") {
+      return json({ error: "assignments must be a boolean" }, 400);
+    }
+    if (body.assignments) state.assignments = true;
+    else delete state.assignments;
+  }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
   if (body.syncServerUrl !== undefined) {
@@ -613,8 +628,16 @@ const getAuthWebCallback: Handler = async (req) => {
   return callbackPage(result.ok, result.message);
 };
 
+// The listing carries the project's members along with it (src/server/
+// members.ts): the "Assigned" dropdown offers them, and they come from the
+// data repo, so they change when the folder does and refresh on every
+// reload tick — the same rhythm as the feature list itself.
 const getFeatures = withDataDir(async (dir) =>
-  json({ features: await listFeatures(dir), folders: await listFolders(dir) }),
+  json({
+    features: await listFeatures(dir),
+    folders: await listFolders(dir),
+    members: await readProjectMembers(dir),
+  }),
 );
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
