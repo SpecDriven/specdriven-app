@@ -62,6 +62,7 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   };
   const link = plainLink(doc.link);
   if (link) feature.link = link;
+  if (doc.assigned) feature.assigned = doc.assigned;
   return feature;
 }
 

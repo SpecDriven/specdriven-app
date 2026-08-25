@@ -9,6 +9,7 @@ import {
 } from "../server/parser";
 import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../server/parser";
 import type { FeatureListing } from "../server/features";
+import type { ProjectMember } from "../server/members";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
@@ -314,10 +315,13 @@ interface OpenOptions {
   editDescription?: boolean;
 }
 
-/** What /api/features returns: the flat feature list plus the folder list. */
+/** What /api/features returns: the flat feature list, the folder list, and
+    the project's members (src/server/members.ts) — who a feature can be
+    assigned to. */
 interface Listing {
   features: FeatureListing[];
   folders: string[];
+  members: ProjectMember[];
 }
 
 export function App() {
@@ -341,6 +345,11 @@ export function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [features, setFeatures] = useState<FeatureListing[]>([]);
+  // Project members (src/server/members.ts): the data repo's
+  // project-settings.json, as the feature's "Assigned" dropdown offers them.
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  /** Whether an assignment change is in flight — the dropdown waits for it. */
+  const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -466,6 +475,9 @@ export function App() {
   // Published Spec"): opt-in — published scenarios stay immutable until the
   // Settings switch turns deletion on.
   const [deletePublished, setDeletePublished] = useState(false);
+  // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
+  // dropdown shows only once the Settings switch turns assignments on.
+  const [assignments, setAssignments] = useState(false);
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -484,6 +496,7 @@ export function App() {
   const [settingsPublishLinksDraft, setSettingsPublishLinksDraft] = useState(true);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
+  const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -552,9 +565,14 @@ export function App() {
     const res = await fetch("/api/features");
     const data = await res.json();
     if (res.ok) {
-      const listing: Listing = { features: data.features, folders: data.folders ?? [] };
+      const listing: Listing = {
+        features: data.features,
+        folders: data.folders ?? [],
+        members: Array.isArray(data.members) ? data.members : [],
+      };
       setFeatures(listing.features);
       setFolders(listing.folders);
+      setMembers(listing.members);
       setLoadError(null);
       return listing;
     }
@@ -606,6 +624,9 @@ export function App() {
       }
       if (typeof state.deletePublished === "boolean") {
         setDeletePublished(state.deletePublished);
+      }
+      if (typeof state.assignments === "boolean") {
+        setAssignments(state.assignments);
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
@@ -2096,6 +2117,7 @@ export function App() {
     setSettingsPublishLinksDraft(publishExternalLinks);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
+    setSettingsAssignmentsDraft(assignments);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -2251,6 +2273,7 @@ export function App() {
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
     setDeletePublished(data.deletePublished === true);
+    setAssignments(data.assignments === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -2370,6 +2393,11 @@ export function App() {
     if (!(await patchSettings({ deletePublished: on }))) setSettingsDeletePublishedDraft(!on);
   };
 
+  const toggleAssignments = async (on: boolean) => {
+    setSettingsAssignmentsDraft(on);
+    if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
+  };
+
   const pickGitEngine = async (engine: string) => {
     const prev = settingsEngineDraft;
     setSettingsEngineDraft(engine);
@@ -2437,6 +2465,55 @@ export function App() {
       setFeatureLinkError("Could not save the ticket link — is the server running?");
     } finally {
       setFeatureLinkSaving(false);
+    }
+  };
+
+  /**
+   * The project members the "Assigned" dropdown offers: the data repo's
+   * project-settings.json (src/server/members.ts), plus whoever the feature
+   * is assigned to when that name is no longer on the list — a member who
+   * left the project must still show, or opening the feature would silently
+   * look unassigned.
+   */
+  const assignableMembers = (): ProjectMember[] => {
+    const assigned = feature?.assigned;
+    if (!assigned || members.some((m) => m.name === assigned)) return members;
+    return [...members, { name: assigned }];
+  };
+
+  /**
+   * Assign the feature to a project member, or to nobody (the empty choice).
+   * Saved like the feature's ticket link: locally, right away, pushed by the
+   * reload cron — the name lands in the file's `**Assigned:**` line.
+   */
+  const saveAssigned = async (name: string) => {
+    if (!feature || !selected) return;
+    const assigned = name.trim();
+    if ((feature.assigned ?? "") === assigned) return;
+    const { assigned: _previous, ...rest } = feature;
+    const next: Feature = assigned ? { ...rest, assigned } : rest;
+    setAssignedSaving(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        setStatus(
+          assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
+        );
+        flashSaved();
+      } else {
+        setStatus(data.error ?? "Could not save the assignment");
+      }
+    } catch {
+      setStatus("Could not save the assignment — is the server running?");
+    } finally {
+      setAssignedSaving(false);
     }
   };
 
@@ -3545,6 +3622,30 @@ export function App() {
                         {feature.link ? "Edit ticket" : "Link ticket"}
                       </button>
                     )}
+                    {/* Assignment (src/server/members.ts): the project member
+                        this feature is assigned to, chosen from the data
+                        repo's project-settings.json. Saved on the spot, like
+                        the ticket link. Off by default — the Settings switch
+                        decides whether this project assigns features at all. */}
+                    {assignments && (
+                      <label className="assigned-field">
+                        <span>Assigned</span>
+                        <select
+                          className="assigned-select"
+                          aria-label="Assigned member"
+                          value={feature.assigned ?? ""}
+                          disabled={assignedSaving}
+                          onChange={(e) => void saveAssigned(e.target.value)}
+                        >
+                          <option value="">Unassigned</option>
+                          {assignableMembers().map((m) => (
+                            <option key={m.name} value={m.name}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     {/* The description editor (specs/editor/feature-editor
                         .feature.md): switches the description pane below
                         between rendered and editable. */}
@@ -4210,6 +4311,28 @@ export function App() {
                 </span>
               </label>
               )}
+              {/* Feature assignment (src/server/members.ts): opt-in — with
+                  the switch off the feature page offers no "Assigned"
+                  dropdown, and nothing already assigned is rewritten. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Assign features to project members
+                  <span className="settings-row-hint">
+                    {settingsAssignmentsDraft
+                      ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
+                      : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsAssignmentsDraft}
+                    onChange={(e) => void toggleAssignments(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
               {/* Deleting published scenarios
                   (specs/editor/spec-editor.feature.md "Delete Published
                   Spec"): opt-in — with the switch off published scenarios
