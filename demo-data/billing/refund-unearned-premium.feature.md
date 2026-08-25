@@ -6,6 +6,12 @@
 - **When** the cancellation is processed
 - **Then** $400 of unearned premium is refunded to the original payment method
 
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/billing/RefundUnearnedPremiumTest.java#L32 |
+
 ## Refund clears within 10 business days @v1 [proposed]
 
 - **Given** a processed refund
