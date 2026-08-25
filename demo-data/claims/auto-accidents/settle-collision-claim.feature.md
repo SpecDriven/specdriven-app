@@ -8,6 +8,12 @@
 - **Then** $3,700 is paid directly to the repair shop
 - **And** the insured is notified that the $500 deductible is due to the shop
 
+### Tests
+
+| Test |
+| --- |
+| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/SettleCollisionClaimTest.java#L36 |
+
 ## Declare a total loss @v1 [proposed]
 
 - **Given** a repair estimate of $9,000 on a vehicle with an actual cash value of $11,000
