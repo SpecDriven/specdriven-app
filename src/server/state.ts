@@ -74,6 +74,13 @@ export interface SpecDrivenState {
       immutable unless this is explicitly turned on. */
   deletePublished?: boolean;
   /**
+   * Show the data repo's `roadmap` folder — the markdown pages above the
+   * feature folders (specs/app/roadmap.feature.md); absent means OFF. On, the
+   * folder is created if the repo has none, and the sidebar lists its pages;
+   * off, the folder and its pages are simply not shown.
+   */
+  roadmap?: boolean;
+  /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
    * or empty means OFF — git stays the only transport. On a public server,
@@ -182,6 +189,12 @@ export function normalizeDeletePublished(value: unknown): boolean {
     that doesn't assign features never sees the dropdown
     (src/server/members.ts). */
 export function normalizeAssignments(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective roadmap setting: OFF unless explicitly turned on — the roadmap
+    folder is opt-in (specs/app/roadmap.feature.md). */
+export function normalizeRoadmap(value: unknown): boolean {
   return value === true;
 }
 

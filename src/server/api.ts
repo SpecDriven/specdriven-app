@@ -14,6 +14,7 @@ import {
   normalizeProjectManagement,
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
+  normalizeRoadmap,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -74,6 +75,14 @@ import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
+import {
+  createRoadmapPage,
+  ensureRoadmapFolder,
+  isRoadmapPath,
+  listRoadmap,
+  readRoadmapPage,
+  saveRoadmapPage,
+} from "./roadmap";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -273,6 +282,7 @@ async function stateFields(state: SpecDrivenState) {
     codeGen: normalizeCodeGen(state.codeGen),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
+    roadmap: normalizeRoadmap(state.roadmap),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -324,6 +334,7 @@ const putState: Handler = async (req) => {
     codeGen?: boolean;
     deletePublished?: boolean;
     assignments?: boolean;
+    roadmap?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -339,12 +350,13 @@ const putState: Handler = async (req) => {
     body.codeGen === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
+    body.roadmap === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished, assignments or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished, assignments, roadmap or syncServerUrl is required",
       },
       400,
     );
@@ -503,6 +515,18 @@ const putState: Handler = async (req) => {
     if (body.assignments) state.assignments = true;
     else delete state.assignments;
   }
+  // The roadmap folder (specs/app/roadmap.feature.md): opt-in — the default
+  // OFF is an absent key. Turning it on creates the folder below, once the
+  // settings are written.
+  let roadmapTurnedOn = false;
+  if (body.roadmap !== undefined) {
+    if (typeof body.roadmap !== "boolean") {
+      return json({ error: "roadmap must be a boolean" }, 400);
+    }
+    roadmapTurnedOn = body.roadmap && !normalizeRoadmap(state.roadmap);
+    if (body.roadmap) state.roadmap = true;
+    else delete state.roadmap;
+  }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
   if (body.syncServerUrl !== undefined) {
@@ -521,6 +545,17 @@ const putState: Handler = async (req) => {
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
+  // Scenario "Create roadmap folder if necessary": the switch is what asks
+  // for the folder, so it is made on the spot rather than on the next tick.
+  // A repo we cannot reach is left to that tick; the switch still stands.
+  if (roadmapTurnedOn && !needsDataRepo(state)) {
+    try {
+      const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
+      if (await ensureRoadmapFolder(dir)) reloadLog.info("created the roadmap folder");
+    } catch (e) {
+      reloadLog.error((e as Error).message, errorAttributes(e));
+    }
+  }
   if (linksChanged && !needsDataRepo(state)) {
     // The switch takes effect on every `.feature.md` at once; the reload
     // cron commits and pushes the rewritten files like any saved change.
@@ -540,7 +575,7 @@ const putState: Handler = async (req) => {
   // is logged and the switch still stands; the folder is configured either way.
   if (pickedDir) {
     const dir = pickedDir;
-    await syncTick(() => syncDataDir(dir));
+    await syncTick(() => syncDataDir(dir, { roadmap: normalizeRoadmap(state.roadmap) }));
   }
   await applyNetSync(state);
   return json(await stateFields(state));
@@ -635,10 +670,48 @@ const getAuthWebCallback: Handler = async (req) => {
 const getFeatures = withDataDir(async (dir) =>
   json({
     features: await listFeatures(dir),
-    folders: await listFolders(dir),
+    // The roadmap folder is not a feature folder (specs/app/roadmap.feature
+    // .md): it holds markdown pages, listed on their own above the tree, so
+    // it never shows as an empty folder among the feature ones.
+    folders: (await listFolders(dir)).filter((folder) => !isRoadmapPath(folder)),
     members: await readProjectMembers(dir),
   }),
 );
+
+// Roadmap pages (specs/app/roadmap.feature.md): the markdown files in the
+// data repo's `roadmap` folder, listed with the member each is assigned to.
+const getRoadmap = withDataDir(async (dir) => json({ pages: await listRoadmap(dir) }));
+
+const postRoadmap = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+  if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
+  try {
+    return json({ fileName: await createRoadmapPage(dir, body.name) }, 201);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+const getRoadmapPage = withDataDir(async (dir, _req, params) => {
+  try {
+    const page = await readRoadmapPage(dir, params.file ?? "");
+    return page === null ? json({ error: "Roadmap page not found" }, 404) : json(page);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// The roadmap editor's autosave: a local write through the page's document —
+// the reload cron commits and pushes it, like a saved scenario.
+const putRoadmapPage = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
+  if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
+  try {
+    return json(await saveRoadmapPage(dir, params.file ?? "", body.content));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
@@ -1007,6 +1080,10 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/search", getSearch],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
+  ["GET", "/api/roadmap", getRoadmap],
+  ["POST", "/api/roadmap", postRoadmap],
+  ["GET", "/api/roadmap/:file", getRoadmapPage],
+  ["PUT", "/api/roadmap/:file", putRoadmapPage],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

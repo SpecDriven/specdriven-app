@@ -264,6 +264,20 @@ export function parseAssignedLine(line: string): string | null {
 }
 
 /**
+ * Lift a leading `**Assigned:**` line off a text — the assignment on its own,
+ * without the ticket link splitFeatureMeta also looks for. What a roadmap
+ * document carries (parseRoadmap): it has an assignment but no ticket.
+ */
+export function splitAssigned(text: string): { text: string; assigned?: string } {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.trim() !== "");
+  if (at === -1) return { text };
+  const assigned = parseAssignedLine(lines[at]!);
+  if (!assigned) return { text };
+  return { text: lines.slice(at + 1).join("\n").trim(), assigned };
+}
+
+/**
  * Lift a feature's metadata lines — its ticket link and its assignment — off
  * the top of the text under the `#` heading. Either may come first, and
  * anything else ends the metadata: a line further down, or one with more on
@@ -585,4 +599,50 @@ export function markProposed(text: string): string {
   return rewriteHeaders(text, (m) =>
     m.status === "draft" && !m.explicit ? "proposed" : m.status,
   );
+}
+
+// Roadmap documents (specs/app/roadmap.feature.md) are the data repo's other
+// kind of markdown: regular files in the `roadmap/` folder, with no scenarios
+// in them. Like a feature, a roadmap document may carry the project member it
+// is assigned to on an `**Assigned:**` line under its heading; everything
+// else is free markdown, kept as written.
+
+/** A roadmap document: its heading, who it is assigned to, and its markdown. */
+export interface Roadmap {
+  /** The `# <name>` heading, or "" for a file that opens without one. */
+  name: string;
+  /** Everything below the heading and the assignment line. */
+  body: string;
+  /** Name of the project member the document is assigned to, if any. */
+  assigned?: string;
+}
+
+const ROADMAP_HEADING_RE = /^#\s+(.+?)\s*$/;
+
+/**
+ * Read a roadmap document. A leading `# <name>` heading is the name; a
+ * `**Assigned:** <name>` line right under it is the assignment. A file that
+ * starts with neither is all body — a plain markdown file must survive the
+ * round trip unchanged apart from its surrounding blank lines.
+ */
+export function parseRoadmap(text: string): Roadmap {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.trim() !== "");
+  const heading = at === -1 ? null : lines[at]!.match(ROADMAP_HEADING_RE);
+  const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
+  const { text: body, assigned } = splitAssigned(rest);
+  return {
+    name: heading ? heading[1]! : "",
+    body,
+    ...(assigned ? { assigned } : {}),
+  };
+}
+
+/** The markdown a roadmap document is written as — the shape parseRoadmap reads. */
+export function serializeRoadmap(doc: Roadmap): string {
+  const parts: string[] = [];
+  if (doc.name) parts.push(`# ${doc.name}`);
+  if (doc.assigned) parts.push(formatAssigned(doc.assigned));
+  if (doc.body) parts.push(doc.body);
+  return parts.length === 0 ? "" : parts.join("\n\n") + "\n";
 }
