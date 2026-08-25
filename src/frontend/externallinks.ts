@@ -129,6 +129,52 @@ export function suggestLink(url: string): Partial<Pick<ExternalLink, "program" |
 }
 
 /**
+ * The ticket id a url yields on its own — what the url-only fields use, since
+ * there is no ticket field to type one into. The tools' own key (ABC-123)
+ * first; failing that the url's last path segment, which is what a tool with
+ * numeric or slug ids leaves there.
+ */
+export function ticketFromUrl(url: string): string {
+  const guess = suggestLink(url).ticket;
+  if (guess) return guess;
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return "";
+  }
+  const last = parsed.pathname.split("/").filter(Boolean).pop();
+  if (!last) return "";
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(last);
+  } catch {
+    decoded = last;
+  }
+  return /[[\]]/.test(decoded) ? "" : decoded;
+}
+
+/**
+ * The draft with a new url when the tool comes from Settings, not from a
+ * dropdown beside the field: only the url is shown, so the tool is the one
+ * Settings names and the ticket is whatever the url gives away. A link
+ * recorded under another tool keeps it — editing its url must not rename the
+ * ticket it already points at.
+ */
+export function withLinkUrlForTool(draft: LinkDraft, url: string, tool: string): LinkDraft {
+  const guessed = withLinkUrl(draft, url);
+  // A ticket that is still the one derived from the old url follows the new
+  // one; one the user typed themselves stays.
+  const derived = ticketFromUrl(url);
+  const followed = !guessed.ticket.trim() || guessed.ticket === ticketFromUrl(draft.url);
+  return {
+    url,
+    program: draft.program.trim() || tool,
+    ticket: followed ? derived : guessed.ticket,
+  };
+}
+
+/**
  * The draft with a new url — and, for the fields the url gives away, the tool
  * and ticket it suggests. A field the user filled in themselves is never
  * overwritten by a guess; a field still holding what the previous url
