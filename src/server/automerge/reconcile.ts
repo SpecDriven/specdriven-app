@@ -17,6 +17,7 @@ export function importFeatureDoc(feature: Feature): A.Doc<FeatureDoc> {
     description: feature.description,
     specs: feature.scenarios.map(newEntry),
     ...(feature.link ? { link: { ...feature.link } } : {}),
+    ...(feature.assigned ? { assigned: feature.assigned } : {}),
   });
 }
 
@@ -122,6 +123,7 @@ export function reconcile(
   const docLink = doc.link
     ? { program: doc.link.program, ticket: doc.link.ticket, url: doc.link.url }
     : undefined;
+  const docAssigned = doc.assigned;
   const matchAt = new Map<number, Scenario>();
   const matched = new Set<Scenario>();
   const claim = (candidate: (s: Scenario, i: number) => boolean) => {
@@ -158,6 +160,12 @@ export function reconcile(
       A.updateText(d, ["description"], target.description);
     }
     assignLink(d, docLink, target.link);
+    // The assignment is one member, not text to merge — replaced whole, the
+    // same way on every peer (src/server/members.ts).
+    if ((docAssigned ?? "") !== (target.assigned ?? "")) {
+      if (target.assigned) d.assigned = target.assigned;
+      else delete d.assigned;
+    }
     for (const [i, match] of matchAt) {
       const entry = entries[i]!;
       const live = d.specs[i]!;

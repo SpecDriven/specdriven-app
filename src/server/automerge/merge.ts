@@ -119,9 +119,21 @@ export function threeWayFeature(
     }
   }
   const link = mergeLink(base.link, ours.link, theirs.link);
+  // The assignment merges like a link: one value, the side that changed it
+  // wins, ours when both did (src/server/members.ts).
+  const assigned =
+    (theirs.assigned ?? "") !== (base.assigned ?? "") && (ours.assigned ?? "") === (base.assigned ?? "")
+      ? theirs.assigned
+      : ours.assigned;
   return {
     ok: true,
-    feature: { name, description, scenarios, ...(link ? { link } : {}) },
+    feature: {
+      name,
+      description,
+      scenarios,
+      ...(link ? { link } : {}),
+      ...(assigned ? { assigned } : {}),
+    },
   };
 }
 

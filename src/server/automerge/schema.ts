@@ -56,4 +56,12 @@ export type FeatureDoc = {
   specs: SpecEntry[];
   /** The ticket tracking the feature as a whole, if any (see SpecEntry.link). */
   link?: ExternalLink;
+  /**
+   * Name of the project member the feature is assigned to
+   * (src/server/members.ts). Absent when nobody is assigned; set whole, like
+   * `link`, so concurrent assignments resolve to one member rather than a mix
+   * of two names. Added after schema v3 as an optional key — older documents
+   * simply lack it, no migration needed.
+   */
+  assigned?: string;
 };
