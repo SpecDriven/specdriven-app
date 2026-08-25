@@ -40,11 +40,15 @@ function demoSource(): string {
  * Settings the demo cannot run without, re-stamped on every reseed so a
  * settings write racing a reseed can never unset them: the bundled git
  * engine (no gh/git binaries probed), no sync cron, no code gen sessions.
+ * The roadmap folder is opt-in everywhere else (specs/app/roadmap.feature.md)
+ * but on here, so the demo dataset's roadmap pages are visible without a trip
+ * through Settings; a visitor is still free to toggle it off.
  */
 const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   gitEngine: "js",
   reloadFrequencySeconds: 0,
   codeGen: false,
+  roadmap: true,
 };
 
 /** How long in-flight requests may keep using a replaced generation dir. */
