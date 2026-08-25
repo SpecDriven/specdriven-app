@@ -25,12 +25,15 @@ const realDemoData = process.env.DEMO_DATA_DIR;
 
 const PRISTINE_README = "# Demo specs\n";
 const PRISTINE_FEATURE = "# Quote\n\n## Get a quote [published]\n\nsome text\n";
+const PRISTINE_PAGE =
+  "# Usage-Based Auto\n\n**Assigned:** Dana Whitfield\n\nPrice on how they drive.\n";
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-demo-"));
   source = await mkdtemp(join(tmpdir(), "specdriven-demo-src-"));
   await Bun.write(join(source, "README.md"), PRISTINE_README);
   await Bun.write(join(source, "billing", "quote.feature.md"), PRISTINE_FEATURE);
+  await Bun.write(join(source, "roadmap", "usage-based-auto.md"), PRISTINE_PAGE);
   process.env.SPECDRIVEN_ROOT = root;
   process.env.DEMO_MODE = "1";
   process.env.DEMO_DATA_DIR = source;
@@ -85,6 +88,38 @@ test("boot state names the demo: ephemeral folder, no chooser, js git, no cron",
   expect(state.gitEngine).toBe("js");
   expect(state.reloadFrequencySeconds).toBe(0);
   expect(basename(state.dataRepo)).toMatch(/^data-\d+$/);
+});
+
+// The roadmap folder is opt-in (specs/app/roadmap.feature.md), so the demo has
+// to turn it on itself or the dataset's pages have nowhere to show.
+test("the roadmap folder is on, and the dataset's pages are listed", async () => {
+  const state = await bootState();
+  expect(state.roadmap).toBe(true);
+
+  const { pages } = await (await api("/api/roadmap")).json();
+  expect(pages).toEqual([
+    {
+      fileName: "roadmap/usage-based-auto.md",
+      name: "Usage-Based Auto",
+      assigned: "Dana Whitfield",
+    },
+  ]);
+});
+
+test("a roadmap edit lands in the working copy; the snapshot is untouched", async () => {
+  const state = await bootState();
+  const res = await api(`/api/roadmap/${encodeURIComponent("roadmap/usage-based-auto.md")}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: PRISTINE_PAGE + "\nAnd measure it.\n" }),
+  });
+  expect(res.status).toBe(200);
+  expect(
+    await readFile(join(state.dataRepo, "roadmap", "usage-based-auto.md"), "utf8"),
+  ).toContain("And measure it.");
+  expect(await readFile(join(source, "roadmap", "usage-based-auto.md"), "utf8")).toBe(
+    PRISTINE_PAGE,
+  );
 });
 
 test("edits land in the working copy; the pristine snapshot is untouched", async () => {
