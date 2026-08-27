@@ -1359,7 +1359,7 @@ button.link:disabled {
   cursor: not-allowed;
 }
 
-/* Delete in the scenario dialog (specs/ui.spec.md "Scenario edit dialog"):
+/* Delete in the scenario dialog (specs/ui.spec.md "Scenario editor"):
    destructive styling, pushed to the far left away from Cancel/Save. */
 .dialog-actions button.danger {
   margin-right: auto;
@@ -1450,7 +1450,7 @@ button.link:disabled {
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* The title IS the scenario name (specs/ui.spec.md "Scenario edit dialog"):
+/* The title IS the scenario name (specs/ui.spec.md "Scenario editor"):
    a heading once published, an underlined field until then. */
 .scenario-pane-heading {
   margin: 0;
@@ -1551,7 +1551,7 @@ button.link:disabled {
   color: var(--text-2);
 }
 
-/* Embedded markdown editor (specs/ui.spec.md "Scenario edit dialog") */
+/* Embedded markdown editor (specs/ui.spec.md "Scenario editor") */
 .md-editor {
   flex: 1;
   /* never collapses entirely, however small the resizable dialog gets */
