@@ -259,7 +259,7 @@ test("saving a feature without its draft leaves the draft in place", async () =>
   expect(result.content).toContain("## Idea @v1 [draft]");
 });
 
-// specs/ui.spec.md "Scenario edit dialog": Delete on a draft removes it from
+// specs/ui.spec.md "Scenario editor": Delete on a draft removes it from
 // the document — the file never held it, and the editor stops showing it.
 test("deleteDraftScenario removes the draft from the document", async () => {
   await createFeature(root, "Quote");

@@ -1941,7 +1941,7 @@ export function App() {
 
   /**
    * A url still sitting in the add field or an open ✎ row rides along with
-   * any explicit save — it must never be silently dropped — and one that
+   * Propose and Publish — it must never be silently dropped — and one that
    * can't join the list blocks the save instead (specs/traceability.spec.md).
    * The ticket-link fields gate the save the same way: a half-filled link is
    * not written half-done, it blocks with a message
@@ -1965,15 +1965,6 @@ export function App() {
       return null;
     }
     return pending.tests;
-  };
-
-  /** Save a published scenario's links — test links and its ticket link are
-      all its dialog can change (specs/traceability.spec.md,
-      specs/external-links/project-management-jira-linear-etc.feature.md). */
-  const saveScenario = async () => {
-    const tests = pendingTests();
-    if (tests === null) return;
-    await commitScenario(tests, true);
   };
 
   /**
@@ -2019,7 +2010,7 @@ export function App() {
    * One autosave tick (specs/editor-autosave.feature.md "Autosave Triggered at
    * Defined Interval"): save what the editor holds, unless it holds nothing
    * new. A url still being typed into the test-link fields stays out — those
-   * join the scenario when the user adds them, or on an explicit Save.
+   * join the scenario when the user adds them, or when the pane closes.
    */
   const autosaveScenario = async () => {
     if (!editing || !feature || !selected) return;
@@ -2881,7 +2872,7 @@ export function App() {
     );
 
   /**
-   * Delete the dialog's scenario (specs/ui.spec.md "Scenario edit dialog"),
+   * Delete the dialog's scenario (specs/ui.spec.md "Scenario editor"),
    * after a confirmation. Three removals, by what the scenario is: a
    * [proposed] one is saved out of the feature like any other edit; a draft —
    * which the `.feature.md` never held, so leaving it out of a save would
@@ -2985,8 +2976,8 @@ export function App() {
    * pane"): `<`, ESC and every navigation away from the feature leave the
    * scenario in its autosaved state — leaving discards nothing and reverts
    * nothing; Delete is the way to take a draft back out. One last save
-   * catches what was typed since the previous tick, so the state left behind
-   * is the pane's latest. Started before the editor state clears so it saves
+   * catches what was typed since the previous tick — the test-link fields
+   * included — so the state left behind is the pane's latest. Started before the editor state clears so it saves
    * under this editor session; while a tick is still in flight that tick's
    * save is the autosaved state to leave. Returns the save when one went out.
    */
@@ -2996,10 +2987,23 @@ export function App() {
       editing &&
       editing.scenario.name.trim() && // no name, nothing to be saved under
       !autosaveInFlight.current &&
-      !deletingScenario.current &&
-      scenarioSignature(editing.scenario, draftVersion) !== autosaved.current
+      !deletingScenario.current
     ) {
-      saving = commitScenario(editing.scenario.tests, false);
+      // A url still sitting in the add field or in an open ✎ row joins the
+      // scenario on the way out, as if Add (or the row's Save) had been
+      // pressed — it is never silently dropped (specs/traceability.spec.md).
+      // A published scenario has no explicit save left to fold it in, so
+      // leaving is the last chance. One that can't join the list has nowhere
+      // to be reported once the pane is gone, so it is left behind rather
+      // than holding the pane open.
+      const tests = resolvePendingTests(
+        editing.scenario.tests,
+        testEdit === null ? null : { index: testEdit, url: testEditDraft },
+        testDraft,
+      ).tests;
+      if (scenarioSignature({ ...editing.scenario, tests }, draftVersion) !== autosaved.current) {
+        saving = commitScenario(tests, false);
+      }
     }
     setEditing(null);
     return saving;
@@ -3293,7 +3297,7 @@ export function App() {
   const savedEntry =
     editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
   // Delete applies to [proposed] scenarios and to drafts (specs/ui.spec.md
-  // "Scenario edit dialog") — not to a scenario that isn't part of the
+  // "Scenario editor") — not to a scenario that isn't part of the
   // feature yet (index === null; a new one autosave has already placed does
   // have an index, and can be deleted). Published ones are immutable, unless
   // deletion is turned on in Settings (specs/editor/spec-editor.feature.md
@@ -3709,7 +3713,7 @@ export function App() {
                 >
                   <BackIcon />
                 </button>
-                {/* specs/ui.spec.md "Scenario edit dialog": the scenario name
+                {/* specs/ui.spec.md "Scenario editor": the scenario name
                     is the title — editable unless published. */}
                 {editingPublished ? (
                   <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
@@ -3781,8 +3785,9 @@ export function App() {
                   </>
                 )}
                 {/* A published scenario is read-only apart from its links —
-                    test links and its ticket — so that is what its Save saves. */}
-                {editingPublished && <button onClick={saveScenario}>Save links</button>}
+                    test links and its ticket — and those save themselves:
+                    autosave writes them locally like any other edit, and Sync
+                    pushes them. So its bar carries no save action at all. */}
               </div>
             </div>
             <div className="scenario-pane-body">

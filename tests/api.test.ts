@@ -96,7 +96,7 @@ describe("matchApi", () => {
     expect(move!.params).toEqual({ file: "quote.feature.md" });
   });
 
-  // Draft deletion (specs/ui.spec.md "Scenario edit dialog"): POST, so the
+  // Draft deletion (specs/ui.spec.md "Scenario editor"): POST, so the
   // scenario's name and version can ride in the body.
   test("the draft delete route matches POST only", () => {
     expect(matchApi("POST", "/api/features/quote.feature.md/delete-draft")).not.toBeNull();

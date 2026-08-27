@@ -436,7 +436,7 @@ export async function saveFeature(
 }
 
 /**
- * Delete a draft scenario (specs/ui.spec.md "Scenario edit dialog"): drafts
+ * Delete a draft scenario (specs/ui.spec.md "Scenario editor"): drafts
  * live in the Automerge document only, so this is a document operation rather
  * than a save of the feature without them — markdown cannot express a draft's
  * absence, and the next read would fold the draft straight back in. Local like
