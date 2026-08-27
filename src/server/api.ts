@@ -815,7 +815,7 @@ const putFeature = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui.spec.md "Scenario edit dialog" (Delete on a draft): a draft lives
+// specs/ui.spec.md "Scenario editor" (Delete on a draft): a draft lives
 // in the Automerge document only, so it is deleted from the document rather
 // than by saving the feature without it — a save cannot express the absence
 // of something the markdown never held. Proposed scenarios keep going through
