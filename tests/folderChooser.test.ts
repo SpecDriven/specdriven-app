@@ -1,12 +1,14 @@
 // Automates specs/app-start.spec.md "picking the data directory with the
 // native folder chooser": the chooser is pluggable (osascript on a macOS
-// web server, Electron's dialog in the desktop app), one dialog is open at
-// a time, and the endpoint reports 501 where no native chooser exists.
+// web server, PowerShell on a Windows one, Electron's dialog in the desktop
+// app), one dialog is open at a time, and the endpoint reports 501 where no
+// native chooser exists.
 
 import { test, expect, afterEach, afterAll } from "bun:test";
 import {
   canChooseFolder,
   chooseFolder,
+  platformChooser,
   setFolderChooser,
 } from "../src/server/folderChooser";
 import { matchApi } from "../src/server/api";
@@ -23,6 +25,14 @@ afterAll(() => {
 
 const post = () =>
   new Request("http://localhost/api/choose-folder", { method: "POST" });
+
+// The desktop shells that run a local web server both ship a chooser; the
+// Browse… button is hidden only where no dialog exists to open.
+test("macOS and Windows get a chooser out of the box, others none", () => {
+  expect(platformChooser("darwin")).not.toBeNull();
+  expect(platformChooser("win32")).not.toBeNull();
+  expect(platformChooser("linux")).toBeNull();
+});
 
 test("canChooseFolder reflects whether a chooser is installed", () => {
   expect(canChooseFolder()).toBe(false);
