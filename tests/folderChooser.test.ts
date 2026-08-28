@@ -1,10 +1,13 @@
 // Automates specs/app-start.spec.md "picking the data directory with the
 // native folder chooser": the chooser is pluggable (osascript on a macOS
-// web server, PowerShell on a Windows one, Electron's dialog in the desktop
-// app), one dialog is open at a time, and the endpoint reports 501 where no
-// native chooser exists.
+// web server, PowerShell on a Windows one, zenity or kdialog on a Linux
+// one, Electron's dialog in the desktop app), one dialog is open at a
+// time, and the endpoint reports 501 where no native chooser exists.
 
 import { test, expect, afterEach, afterAll } from "bun:test";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   canChooseFolder,
   chooseFolder,
@@ -26,12 +29,72 @@ afterAll(() => {
 const post = () =>
   new Request("http://localhost/api/choose-folder", { method: "POST" });
 
-// The desktop shells that run a local web server both ship a chooser; the
-// Browse… button is hidden only where no dialog exists to open.
-test("macOS and Windows get a chooser out of the box, others none", () => {
+// A PATH holding just the named executables, so the Linux lookup can be
+// exercised without caring what this machine has installed.
+function pathWith(...commands: string[]): string {
+  const dir = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  for (const command of commands) {
+    const file = join(dir, command);
+    writeFileSync(file, "#!/bin/sh\n");
+    chmodSync(file, 0o755);
+  }
+  return dir;
+}
+
+// macOS and Windows always have a dialog to open; the Browse… button is
+// hidden only where none exists.
+test("macOS and Windows get a chooser out of the box, unknown platforms none", () => {
   expect(platformChooser("darwin")).not.toBeNull();
   expect(platformChooser("win32")).not.toBeNull();
-  expect(platformChooser("linux")).toBeNull();
+  expect(platformChooser("freebsd", {})).toBeNull();
+});
+
+// Linux ships no dialog of its own, so the chooser is whichever of the
+// desktop ones is actually installed.
+test("Linux takes zenity or kdialog, whichever is on PATH", () => {
+  const display = { DISPLAY: ":0" };
+  expect(platformChooser("linux", { ...display, PATH: pathWith("zenity") })).not.toBeNull();
+  expect(platformChooser("linux", { ...display, PATH: pathWith("kdialog") })).not.toBeNull();
+  expect(platformChooser("linux", { ...display, PATH: pathWith("ls") })).toBeNull();
+  expect(platformChooser("linux", display)).toBeNull();
+});
+
+// A directory on PATH named zenity is not a dialog; neither is one without
+// the execute bit.
+test("Linux ignores a PATH entry that is not executable", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  mkdirSync(join(dir, "zenity"));
+  const notExecutable = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  writeFileSync(join(notExecutable, "kdialog"), "#!/bin/sh\n");
+  chmodSync(join(notExecutable, "kdialog"), 0o644);
+  expect(platformChooser("linux", { DISPLAY: ":0", PATH: dir })).toBeNull();
+  expect(platformChooser("linux", { DISPLAY: ":0", PATH: notExecutable })).toBeNull();
+});
+
+// Headless Linux — the Docker image, an SSH session — has nowhere to put a
+// dialog even with zenity installed, so Browse… stays hidden.
+test("Linux with no display gets no chooser", () => {
+  const PATH = pathWith("zenity");
+  expect(platformChooser("linux", { PATH })).toBeNull();
+  expect(platformChooser("linux", { PATH, WAYLAND_DISPLAY: "wayland-0" })).not.toBeNull();
+});
+
+// Cancel exits non-zero and prints nothing, which has to read back as null
+// rather than an empty path — same contract as osascript and PowerShell.
+test("Linux chooser resolves the printed path, null when canceled", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  const picks = join(dir, "zenity");
+  writeFileSync(picks, "#!/bin/sh\necho /tmp/linux-picked\n");
+  chmodSync(picks, 0o755);
+  const picked = platformChooser("linux", { DISPLAY: ":0", PATH: dir })!;
+  expect(await picked()).toBe("/tmp/linux-picked");
+
+  const cancelDir = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  const cancels = join(cancelDir, "zenity");
+  writeFileSync(cancels, "#!/bin/sh\nexit 1\n");
+  chmodSync(cancels, 0o755);
+  const canceled = platformChooser("linux", { DISPLAY: ":0", PATH: cancelDir })!;
+  expect(await canceled()).toBeNull();
 });
 
 test("canChooseFolder reflects whether a chooser is installed", () => {
