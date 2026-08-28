@@ -39,8 +39,3 @@ We will use the MCP protocol
 We want to make this application very easy to adopt.
 Provisioning an RDBMS server maybe a source of friction in some
 environments.
-
-## Why MCP server
-
-We want coding agents to use an MCP server to get ready for growth.
-MCP will provide tools for the agent to work with specs efficiently.
