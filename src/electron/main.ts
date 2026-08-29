@@ -3,7 +3,7 @@
 // app:// protocol — no localhost port is opened. In development
 // (ELECTRON_DEV=1) it loads the running Bun dev server instead, for HMR.
 
-import { app, BrowserWindow, dialog, nativeTheme, protocol, session, shell } from "electron";
+import { app, BrowserWindow, dialog, nativeTheme, protocol, screen, session, shell } from "electron";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { applyStartupState, handleApi } from "../server/api";
@@ -14,6 +14,16 @@ import { DESKTOP_SCHEME } from "../frontend/route";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
 import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
+import {
+  DEFAULT_HEIGHT,
+  DEFAULT_WIDTH,
+  fitToDisplays,
+  loadWindowState,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  saveWindowState,
+  type WindowState,
+} from "./windowState";
 
 const APP_ORIGIN = "app://specdriven";
 const DEV_URL = process.env.ELECTRON_DEV
@@ -161,11 +171,19 @@ app.on("open-url", (event, url) => {
 });
 
 function createWindow(): void {
+  // Geometry from the last run, fitted to the displays present now; null
+  // (first run, corrupt file, monitor gone) means the centered default.
+  const stateFile = join(userData, "window-state.json");
+  const saved = fitToDisplays(
+    loadWindowState(stateFile),
+    screen.getAllDisplays().map((d) => d.workArea),
+  );
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 760,
-    minHeight: 500,
+    width: saved?.width ?? DEFAULT_WIDTH,
+    height: saved?.height ?? DEFAULT_HEIGHT,
+    ...(saved ? { x: saved.x, y: saved.y } : {}),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     // Matches the design system's --surface-1 so the window never flashes
     // white while the renderer loads.
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1F1E1D" : "#F0EEE6",
@@ -181,8 +199,37 @@ function createWindow(): void {
     },
   });
 
+  if (saved?.maximized) win.maximize();
+
   win.on("closed", () => {
     win = null;
+  });
+
+  // Remember the geometry: debounced while a drag streams resize/move
+  // events, then a final authoritative save on close (the window is still
+  // alive there, unlike closed). getNormalBounds keeps the un-maximized
+  // rect, so leaving a maximized session restores both the flag and the
+  // size to return to. Fullscreen is deliberately not persisted.
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const currentState = (w: BrowserWindow): WindowState => ({
+    ...w.getNormalBounds(),
+    maximized: w.isMaximized(),
+  });
+  const scheduleSave = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      if (win && !win.isDestroyed()) saveWindowState(stateFile, currentState(win));
+    }, 400);
+  };
+  win.on("resize", scheduleSave);
+  win.on("move", scheduleSave);
+  win.on("close", () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (win && !win.isDestroyed()) saveWindowState(stateFile, currentState(win));
   });
 
   // specs/desktop-app.spec.md "External links": target=_blank and plain
