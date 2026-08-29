@@ -314,6 +314,45 @@ aside header {
   user-select: none;
 }
 
+/* Window edge drag strips (specs/desktop-app.spec.md "Window"): with the
+   title bar hidden, thin strips along the four borders let the window be
+   moved by grabbing any edge, not just the sidebar header. They cover only
+   the panes' padding; the outermost pixels still act as native resize
+   handles, which take priority over the drag region. */
+:root[data-desktop="darwin"] .window-edge {
+  position: fixed;
+  z-index: 99;
+  -webkit-app-region: drag;
+}
+
+:root[data-desktop="darwin"] .window-edge[data-edge="top"] {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+
+:root[data-desktop="darwin"] .window-edge[data-edge="bottom"] {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+
+:root[data-desktop="darwin"] .window-edge[data-edge="left"] {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 10px;
+}
+
+:root[data-desktop="darwin"] .window-edge[data-edge="right"] {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+}
+
 aside header h1 {
   margin: 0;
   display: flex;
