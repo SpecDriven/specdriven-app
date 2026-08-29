@@ -17,4 +17,17 @@ if (navigator.userAgent.includes("Electron")) {
     : "other";
 }
 
+// On macOS the title bar is hidden, so besides the sidebar header the window
+// edges double as drag regions: thin strips along all four borders let the
+// window be moved by grabbing any edge (specs/desktop-app.spec.md "Window").
+// They sit over the panes' padding, so no interactive element loses clicks.
+if (document.documentElement.dataset.desktop === "darwin") {
+  for (const edge of ["top", "right", "bottom", "left"]) {
+    const strip = document.createElement("div");
+    strip.className = "window-edge";
+    strip.dataset.edge = edge;
+    document.body.append(strip);
+  }
+}
+
 createRoot(document.getElementById("root")!).render(<App />);
