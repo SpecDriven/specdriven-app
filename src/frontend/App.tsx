@@ -1163,8 +1163,14 @@ export function App() {
         setNeedsRepo(false);
         // A freshly picked folder opens on its README, like a start does
         // (specs/app-startup.feature.md "A newly picked data folder opens on
-        // its README") — unless there is a deep link to honor.
-        await Promise.all([loadFeatures(), loadReadme()]);
+        // its README") — unless there is a deep link to honor. The roadmap
+        // pages ride along, as they do on a start with a folder already
+        // configured (specs/app/roadmap.feature.md).
+        await Promise.all([
+          loadFeatures(),
+          loadReadme(),
+          state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
+        ]);
         await openFromLocation(entryPath);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
@@ -1217,6 +1223,11 @@ export function App() {
     readmeText.current = null;
     setReadme(null);
     await editorRef.current.close();
+    // An open roadmap page belongs to the old folder too (specs/app/roadmap
+    // .feature.md): its last save goes out there, then the pane empties so no
+    // later tick writes what it held into the new folder.
+    await roadmapTick.current();
+    closeRoadmapPage({ save: false });
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -1231,8 +1242,20 @@ export function App() {
         setFeature(null);
         setSelectedScenario(null);
         setStatus("");
+        // The old folder's pages are not this folder's: the sidebar section
+        // empties, and refills below when the Roadmap setting shows it at all.
+        setRoadmapPages([]);
+        // A page url from the old folder would only miss in the new one, and
+        // nothing else resets it — the selection was already empty while a
+        // roadmap page was open, so the canonical-url effect has no change to
+        // react to.
+        if (location.pathname !== "/") history.replaceState(null, "", "/");
         // Home is the new folder's README (specs/app-startup.feature.md).
-        await Promise.all([loadFeatures(), loadReadme()]);
+        await Promise.all([
+          loadFeatures(),
+          loadReadme(),
+          state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
+        ]);
       } else {
         setStatus(state.error ?? "Could not use this directory");
       }
