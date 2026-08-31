@@ -1,33 +1,33 @@
-# SpecdrivenApp
+# Specdriven App
 
-Desktop application in support of Enterprise Spec-driven Development — see [PRD.md](PRD.md)
-for the problem it solves and [ARCHITECTURE.md](ARCHITECTURE.md) for the shape of
-the solution.
+Desktop application designed to enable the practice of evolutionary spec-driven development.
+All data --inclusing the database -- is stored in git. No other dependencies are required.
 
-A local Electron / React app built by [Bun](https://bun.sh); specs live as
-markdown feature files in a separate **data repo** on GitHub, which the app
-clones and git-pulls on a timer. One backend serves it two ways: a web app via
-`Bun.serve()` for development testing, and a packaged Electron desktop app that serves the same routes
-over its `app://` protocol and registers `specdriven://` deep links with the
-OS.
+## Building from zip file
+
+We are distributing the app as a zip file to allow our customers to apply their security protocols 
+to the source code and build their own binaries. Any AI coding agent should be able
+to easily let you build and run the application.
+
+Build tool:  [Bun](https://bun.sh)
+
+### Install dependencies
+
+```sh
+bun install
+```
+
+### Run the desktop app
+
+```sh
+bun run dev:electron
+```
+
+# Testing
+
+Fork https://github.com/SpecDriven/specs-insurance and 'git clone' locally in order to have write permissions.
 
 # Development
-
-## Prerequisites
-
-- [Bun](https://bun.sh) — currently developed against 1.3.14. It is the runtime,
-  the bundler, and the test runner; there is no npm, vite, or jest here, and no
-  Node.js to install. (The server code does stick to Node APIs so it can also
-  run inside Electron's main process — on the Node that Electron bundles.)
-- Optionally a `git` binary. Git operations shell out to it when it is there;
-  when it is not, the built-in engine ([just-git](https://github.com/blindmansion/just-git),
-  git implemented in JavaScript and bundled with the app) does the same work
-  in-process, against the same on-disk repositories.
-- Optionally the [GitHub CLI](https://cli.github.com) (`gh`). When it is
-  installed the app uses it by default for GitHub credentials and clones, so
-  `gh auth login` is all the authentication setup there is; without it, sign in
-  from the Settings dialog instead. All three are switchable in Settings.
-- Access to the data repo you intend to open.
 
 ## Clone the spec repo
 
