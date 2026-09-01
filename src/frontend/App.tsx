@@ -16,9 +16,22 @@ import type { RoadmapListing } from "../server/roadmap";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
-import { SearchIcon } from "./SearchIcon";
-import { BackIcon } from "./BackIcon";
-import { SyncIcon } from "./SyncIcon";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Ellipsis,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  X,
+} from "lucide-react";
+import { PublishRing, StatusIcon } from "./StatusIcon";
+import { Tooltip } from "./Tooltip";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -885,6 +898,7 @@ export function App() {
     modalOpen ||
     conflict !== null ||
     featureLinkOpen ||
+    sessionError !== null ||
     userMenuOpen ||
     recentMenuOpen ||
     treeMenu !== null;
@@ -913,6 +927,20 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settingsOpen]);
+
+  // specs/ui.spec.md "Dialogs": the code gen session error closes on ESC
+  // like every other dialog; nothing to save, so nothing is lost.
+  useEffect(() => {
+    if (sessionError === null) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSessionError(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sessionError]);
 
   // specs/ui.spec.md "Dialogs": ESC closes the merge conflict dialog. The
   // merge itself lives in the repo (specs/git-operations.spec.md), so nothing
@@ -1100,6 +1128,7 @@ export function App() {
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const featureLinkTrapRef = useFocusTrap(featureLinkOpen);
   const conflictTrapRef = useFocusTrap(conflict !== null);
+  const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
 
   // Also re-run when the editor pane gives the feature page back: the cards
   // mount afresh, so the highlighted one is scrolled to even if the highlight
@@ -3162,22 +3191,30 @@ export function App() {
       >
         {f.name}
       </a>
+      {/* The feature's rollup (specs/ui/ui.feature.md "Design system"): how
+          many of its scenarios are published, as a small ring. */}
+      <PublishRing
+        published={f.scenarios.filter((s) => s.status === "published").length}
+        total={f.scenarios.length}
+      />
       {/* Drop down menu (specs/ui.spec.md "Feature entry menu"): File →
           Rename edits the underlying file name; Delete removes the file. */}
       <span className="tree-row-menu">
-        <button
-          type="button"
-          className="tree-menu-btn"
-          title={`Menu for ${f.fileName}`}
-          aria-haspopup="menu"
-          aria-expanded={treeMenu === f.fileName}
-          onClick={() => {
-            setTreeMenuFile(false);
-            setTreeMenu((m) => (m === f.fileName ? null : f.fileName));
-          }}
-        >
-          ⋯
-        </button>
+        <Tooltip label="More actions">
+          <button
+            type="button"
+            className="tree-menu-btn"
+            aria-label={`Menu for ${f.fileName}`}
+            aria-haspopup="menu"
+            aria-expanded={treeMenu === f.fileName}
+            onClick={() => {
+              setTreeMenuFile(false);
+              setTreeMenu((m) => (m === f.fileName ? null : f.fileName));
+            }}
+          >
+            <Ellipsis size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
         {treeMenu === f.fileName && (
           <div className="tree-menu" role="menu" aria-label={`Menu for ${f.fileName}`}>
             <button
@@ -3186,7 +3223,12 @@ export function App() {
               aria-expanded={treeMenuFile}
               onClick={() => setTreeMenuFile((o) => !o)}
             >
-              File {treeMenuFile ? "▾" : "▸"}
+              File{" "}
+              {treeMenuFile ? (
+                <ChevronDown size={12} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={12} aria-hidden="true" />
+              )}
             </button>
             {treeMenuFile && (
               <div className="tree-submenu" role="menu" aria-label="File">
@@ -3263,16 +3305,25 @@ export function App() {
                 toggleFolder(child.path);
               }}
             >
-              <span className="twist">{collapsed.has(child.path) ? "▸" : "▾"}</span> {child.name}
+              <span className="twist">
+                {collapsed.has(child.path) ? (
+                  <ChevronRight size={12} aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={12} aria-hidden="true" />
+                )}
+              </span>{" "}
+              {child.name}
             </button>
-            <button
-              type="button"
-              className="folder-delete"
-              title={`Delete folder ${child.path}`}
-              onClick={() => void removeFolder(child.path)}
-            >
-              ✕
-            </button>
+            <Tooltip label="Delete folder">
+              <button
+                type="button"
+                className="folder-delete"
+                aria-label={`Delete folder ${child.path}`}
+                onClick={() => void removeFolder(child.path)}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
           {!collapsed.has(child.path) && renderTree(child, depth + 1)}
         </div>
@@ -3410,7 +3461,7 @@ export function App() {
                           }}
                         >
                           <span className="check" aria-hidden="true">
-                            {current ? "✓" : ""}
+                            {current ? <Check size={12} aria-hidden="true" /> : ""}
                           </span>
                           <span className="repo-recent-name">{repoDisplayName(repo)}</span>
                         </button>
@@ -3421,16 +3472,17 @@ export function App() {
               </div>
             )}
             {!demo && (
-              <button
-                type="button"
-                className="repo-edit"
-                title="Change data directory"
-                aria-label="Change data directory"
-                disabled={settingRepo}
-                onClick={() => void changeRepo()}
-              >
-                ✎
-              </button>
+              <Tooltip label="Change data directory">
+                <button
+                  type="button"
+                  className="repo-edit"
+                  aria-label="Change data directory"
+                  disabled={settingRepo}
+                  onClick={() => void changeRepo()}
+                >
+                  <Pencil size={13} aria-hidden="true" />
+                </button>
+              </Tooltip>
             )}
             {/* Sync (specs/ui.spec.md "Main page"): immediate data reload,
                 next to the folder it reloads. Disabled with a progress label
@@ -3445,7 +3497,11 @@ export function App() {
                 disabled={syncing}
                 onClick={() => void syncNow()}
               >
-                <SyncIcon spinning={syncing} />
+                <RefreshCw
+                  size={14}
+                  className={syncing ? "sync-icon spinning" : "sync-icon"}
+                  aria-hidden="true"
+                />
                 {syncing ? "Syncing…" : "Sync"}
               </button>
             )}
@@ -3456,7 +3512,7 @@ export function App() {
         {/* Search field (specs/search.spec.md): top-left, under the header
             so the macOS drag region above it stays draggable. */}
         <div className="sidebar-search">
-          <SearchIcon />
+          <Search size={14} className="search-icon" aria-hidden="true" />
           <input
             ref={searchRef}
             type="text"
@@ -3493,7 +3549,7 @@ export function App() {
                 searchRef.current?.focus();
               }}
             >
-              ✕
+              <X size={13} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -3516,9 +3572,14 @@ export function App() {
                     : `Start a code gen session with ${selectionLabel}`
                 }
               >
-                {sessionRunning
-                  ? "Session running…"
-                  : `▶ Start session${specSelection.size > 0 ? ` (${specSelection.size})` : ""}`}
+                {sessionRunning ? (
+                  "Session running…"
+                ) : (
+                  <>
+                    <Play size={12} aria-hidden="true" /> Start session
+                    {specSelection.size > 0 ? ` (${specSelection.size})` : ""}
+                  </>
+                )}
               </button>
             </div>
             {/* What a session would run over, so a scenario checked on a card
@@ -3547,16 +3608,25 @@ export function App() {
                 title={roadmapCollapsed ? "Show the roadmap pages" : "Hide the roadmap pages"}
                 onClick={() => toggleRoadmapSection(!roadmapCollapsed)}
               >
-                <span className="twist">{roadmapCollapsed ? "▸" : "▾"}</span> Roadmap
+                <span className="twist">
+                  {roadmapCollapsed ? (
+                    <ChevronRight size={12} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={12} aria-hidden="true" />
+                  )}
+                </span>{" "}
+                Roadmap
               </button>
-              <button
-                type="button"
-                className="roadmap-add"
-                title="New roadmap page"
-                onClick={() => void newRoadmapPage()}
-              >
-                +
-              </button>
+              <Tooltip label="New roadmap page">
+                <button
+                  type="button"
+                  className="roadmap-add"
+                  aria-label="New roadmap page"
+                  onClick={() => void newRoadmapPage()}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+              </Tooltip>
             </div>
             {!roadmapCollapsed &&
               roadmapPages.map((page) => (
@@ -3595,7 +3665,8 @@ export function App() {
                   {r.scenario && (
                     <span className="crumb">
                       {" "}
-                      › {r.scenario.name} v{r.scenario.version}
+                      <ChevronRight size={11} aria-hidden="true" /> {r.scenario.name} v
+                      {r.scenario.version}
                     </span>
                   )}
                 </span>
@@ -3660,7 +3731,7 @@ export function App() {
                   openSettings();
                 }}
               >
-                ⚙ Settings
+                <Settings size={13} aria-hidden="true" /> Settings
               </button>
             </div>
           )}
@@ -3734,7 +3805,7 @@ export function App() {
                   autoFocus={editingPublished}
                   onClick={backToFeature}
                 >
-                  <BackIcon />
+                  <ChevronLeft size={16} aria-hidden="true" />
                 </button>
                 {/* specs/ui.spec.md "Scenario editor": the scenario name
                     is the title — editable unless published. */}
@@ -3765,7 +3836,8 @@ export function App() {
                     it (specs/editor/spec-editor.feature.md). */}
                 <p className="version-field">
                   Version <span className="version">v{draftVersion}</span>
-                  <span className={`badge ${editing.scenario.status}`}>
+                  <span className="status-field">
+                    <StatusIcon status={editing.scenario.status} size={14} />
                     {editing.scenario.status}
                   </span>
                 </p>
@@ -3913,17 +3985,19 @@ export function App() {
                                 type="button"
                                 className="link"
                                 title={`Edit ${t}`}
+                                aria-label={`Edit ${t}`}
                                 onClick={() => startTestEdit(i)}
                               >
-                                ✎
+                                <Pencil size={12} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
                                 className="link"
                                 title={`Remove ${t}`}
+                                aria-label={`Remove ${t}`}
                                 onClick={() => removeTest(i)}
                               >
-                                ✕
+                                <X size={12} aria-hidden="true" />
                               </button>
                             </>
                           )}
@@ -4140,9 +4214,7 @@ export function App() {
                   ref={(el) => {
                     scenarioRefs.current[i] = el;
                   }}
-                  className={`scenario-card${s.status === "published" ? " published" : ""}${
-                    i === selectedScenario ? " selected" : ""
-                  }`}
+                  className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}`}
                   // A click anywhere on the card highlights it (the title link
                   // does so itself); a double-click opens it in the editor
                   // pane, like Enter. The card's controls keep their own
@@ -4176,6 +4248,9 @@ export function App() {
                       )}
                       {/* The title is the scenario's permalink
                           (specs/navigation.spec.md "share a link"). */}
+                      {/* Status as a glyph, not a word (specs/ui/ui.feature.md
+                          "Design system"): draft, proposed or published. */}
+                      <StatusIcon status={s.status} />
                       <a
                         href={scenarioPath(selected, s)}
                         onClick={(e) => spaClick(e, () => setSelectedScenario(i))}
@@ -4183,11 +4258,6 @@ export function App() {
                         {s.name}
                       </a>{" "}
                       <span className="version">v{s.version}</span>
-                      {s.status === "published" && <span className="badge">published</span>}
-                      {s.status === "proposed" && (
-                        <span className="badge proposed">proposed</span>
-                      )}
-                      {s.status === "draft" && <span className="badge draft">draft</span>}
                       {/* The scenario's ticket (specs/external-links/project-
                           management-jira-linear-etc.feature.md "Add link at
                           spec level"), opening in a new tab. */}
@@ -4352,6 +4422,9 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => resolving === null && dismissConflict()}>
           <div
             className="dialog conflict-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Merge conflict"
             ref={conflictTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4435,6 +4508,9 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
           <div
             className="dialog settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Settings"
             ref={settingsTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4449,7 +4525,7 @@ export function App() {
                 aria-label="Close settings"
                 onClick={() => setSettingsOpen(false)}
               >
-                ✕
+                <X size={14} aria-hidden="true" />
               </button>
             </div>
             <section className="settings-group">
@@ -4925,7 +5001,14 @@ export function App() {
       )}
       {userInfoOpen && (
         <div className="dialog-backdrop" onClick={() => setUserInfoOpen(false)}>
-          <div className="dialog" ref={userInfoTrapRef} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="User info"
+            ref={userInfoTrapRef}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>User info</h3>
             <dl className="user-info">
               <dt>OS user</dt>
@@ -4955,6 +5038,9 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => setFeatureLinkDraft(null)}>
           <div
             className="dialog link-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Feature ticket link"
             ref={featureLinkTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
@@ -5005,7 +5091,9 @@ export function App() {
           <div
             className="dialog"
             role="alertdialog"
+            aria-modal="true"
             aria-label="Code gen session failed"
+            ref={sessionErrorTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Code gen session failed</h3>

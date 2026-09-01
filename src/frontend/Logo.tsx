@@ -1,6 +1,8 @@
-import React from "react";
-
-/** "SD" logo mark shown in the sidebar's upper-left corner. */
+/**
+ * "SD" logo mark shown in the sidebar's upper-left corner. Filled with the
+ * accent token (specs/ui/ui.feature.md "Design system"), so it follows the
+ * theme like every other coloured element.
+ */
 export function Logo({ size = 36 }: { size?: number }) {
   return (
     <svg
@@ -12,17 +14,12 @@ export function Logo({ size = 36 }: { size?: number }) {
       aria-label="Spec-driven"
     >
       <defs>
-        {/* Terracotta, matching the design system's accent tokens. */}
-        <linearGradient id="sd-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#d97757" />
-          <stop offset="100%" stopColor="#b8552f" />
-        </linearGradient>
         <linearGradient id="sd-sheen" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.22" />
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.18" />
           <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <rect x="1" y="1" width="38" height="38" rx="9" fill="url(#sd-bg)" />
+      <rect x="1" y="1" width="38" height="38" rx="9" style={{ fill: "var(--accent)" }} />
       <rect x="1" y="1" width="38" height="19" rx="9" fill="url(#sd-sheen)" />
       {/* Faint "spec lines", nodding to a written spec document. */}
       <g stroke="#ffffff" strokeOpacity="0.35" strokeWidth="1.6" strokeLinecap="round">
@@ -34,10 +31,10 @@ export function Logo({ size = 36 }: { size?: number }) {
         y="24.5"
         textAnchor="middle"
         dominantBaseline="middle"
-        fontFamily="'Source Serif 4 Variable', 'Iowan Old Style', Georgia, serif"
-        fontSize="17"
-        fontWeight="600"
-        letterSpacing="0.5"
+        fontFamily="'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        fontSize="16"
+        fontWeight="700"
+        letterSpacing="-0.3"
         fill="#ffffff"
       >
         SD

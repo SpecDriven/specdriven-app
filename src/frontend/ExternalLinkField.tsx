@@ -11,6 +11,7 @@
 // only for a url that gives no id away, since a link needs one either way.
 
 import { useRef } from "react";
+import { X } from "lucide-react";
 import { EXTERNAL_LINK_TYPES, externalLinkTypeOf, formatExternalLink } from "../server/parser";
 import type { ExternalLinkType } from "../server/parser";
 import {
@@ -116,7 +117,7 @@ export function ExternalLinkField({ draft, onChange, error, autoFocus, tool }: P
             aria-label="Remove the ticket link"
             onClick={() => onChange(EMPTY_LINK_DRAFT)}
           >
-            ✕
+            <X size={12} aria-hidden="true" />
           </button>
         )}
       </div>
