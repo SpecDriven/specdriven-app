@@ -28,10 +28,15 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Trash2,
+  UserRound,
   X,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
+import { Menu } from "./Menu";
+import { SaveIndicator, Toaster, toast } from "./Toasts";
+import { ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -411,7 +416,6 @@ export function App() {
   /** Sidebar entry whose "⋯" menu is open (file name), if any. */
   const [treeMenu, setTreeMenu] = useState<string | null>(null);
   /** True while the File submenu of the open tree menu is expanded. */
-  const [treeMenuFile, setTreeMenuFile] = useState(false);
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   // Full-text search (specs/search.spec.md): while the query is non-empty
@@ -470,8 +474,11 @@ export function App() {
   const [conflictDraft, setConflictDraft] = useState("");
   /** Which resolution is being published, if any — the buttons disable while it runs. */
   const [resolving, setResolving] = useState<"ours" | "theirs" | "draft" | null>(null);
-  const [status, setStatus] = useState("");
-  const [savedFlash, setSavedFlash] = useState(false);
+  /** Autosave state behind the header's Saved indicator. */
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** The `?` keyboard cheat sheet. */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   /** "all", a scenario key (`name@vN`), or null while no publish is running. */
   const [publishing, setPublishing] = useState<string | null>(null);
@@ -769,56 +776,9 @@ export function App() {
     loadRoadmapPages,
   ]);
 
-  // specs/ui.spec.md "Select scenarios via up and down keys": arrow keys move a
-  // highlight through the scenario cards, Enter opens the highlighted one in
-  // the dialog. Inert while a dialog is open or while typing in a field.
-  useEffect(() => {
-    if (
-      !feature ||
-      feature.scenarios.length === 0 ||
-      editing ||
-      settingsOpen ||
-      userInfoOpen ||
-      modalOpen
-    )
-      return;
-    const count = feature.scenarios.length;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLSelectElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        // Steal focus from a clicked button (e.g. the feature just opened in
-        // the sidebar) so a following Enter edits the highlighted scenario
-        // instead of re-activating that button.
-        if (t instanceof HTMLElement) t.blur();
-        setSelectedScenario((i) => {
-          if (e.key === "ArrowDown") return i === null ? 0 : Math.min(i + 1, count - 1);
-          return i === null ? count - 1 : Math.max(i - 1, 0);
-        });
-      } else if (e.key === "Enter" && selectedScenario !== null) {
-        // A focused button or link keeps its native Enter activation — except
-        // the highlighted card's own title link, which a click left focused:
-        // Enter there edits the scenario rather than re-selecting it.
-        const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
-          ".scenario-title > a",
-        );
-        if (t instanceof HTMLButtonElement) return;
-        if (t instanceof HTMLAnchorElement && t !== titleLink) return;
-        e.preventDefault();
-        const s = feature.scenarios[selectedScenario];
-        if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [feature, editing, settingsOpen, userInfoOpen, modalOpen, selectedScenario]);
+  // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
+  // meanings, "/" for search and the rest — is declared in one registry
+  // further down (`shortcuts`) and dispatched by one listener.
 
   // The dialog's "Add test link" field starts empty each time it opens, with
   // no row left open for ✎ editing (specs/traceability.spec.md).
@@ -870,190 +830,11 @@ export function App() {
     setLinkError(null);
   }, [editingOpen, linkDraft]);
 
-  // ESC closes the feature's ticket-link dialog without saving, like Cancel
-  // (specs/ui.spec.md "Dialogs").
   const featureLinkOpen = featureLinkDraft !== null;
-  useEffect(() => {
-    if (!featureLinkOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setFeatureLinkDraft(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [featureLinkOpen]);
-
-  // specs/editor/spec-editor.feature.md "Spec editor pane": ESC is the way
-  // back, like `<` — leaving the scenario in its autosaved state — and it
-  // works while a pane field has focus. Unless something open above the pane
-  // owns the key: the sidebar stays reachable beside the pane, and its menus,
-  // Settings and the other dialogs each take their ESC on the same window
-  // listener, so one press must not also leave the editor. The search field
-  // clears itself on ESC — an ESC from inside the sidebar is its own.
-  const escapeOwnedElsewhere =
-    settingsOpen ||
-    userInfoOpen ||
-    modalOpen ||
-    conflict !== null ||
-    featureLinkOpen ||
-    sessionError !== null ||
-    userMenuOpen ||
-    recentMenuOpen ||
-    treeMenu !== null;
-  useEffect(() => {
-    if (!editing || escapeOwnedElsewhere) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (e.target instanceof Element && e.target.closest("aside")) return;
-      e.preventDefault();
-      editorRef.current.back();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, escapeOwnedElsewhere]);
-
-  // specs/ui.spec.md "Settings": ESC closes the settings dialog — every
-  // change is already saved — and it works while a dialog field has focus.
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSettingsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen]);
-
-  // specs/ui.spec.md "Dialogs": the code gen session error closes on ESC
-  // like every other dialog; nothing to save, so nothing is lost.
-  useEffect(() => {
-    if (sessionError === null) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSessionError(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [sessionError]);
-
-  // specs/ui.spec.md "Dialogs": ESC closes the merge conflict dialog. The
-  // merge itself lives in the repo (specs/git-operations.spec.md), so nothing
-  // is lost — the note below says Publish brings the choices back.
-  useEffect(() => {
-    if (!conflict) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || resolving) return;
-      e.preventDefault();
-      dismissConflict();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [conflict, resolving]);
-
-  // specs/user-info-settings.spec.md: ESC or a click anywhere else closes
-  // the user menu.
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".user-corner"))
-        setUserMenuOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setUserMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [userMenuOpen]);
-
-  // specs/ui/ui.feature.md "Recent folder list": ESC or a click anywhere
-  // else closes the folder drop down (same behavior as the user menu).
-  useEffect(() => {
-    if (!recentMenuOpen) return;
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".repo-recent"))
-        setRecentMenuOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setRecentMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [recentMenuOpen]);
-
-  // specs/ui.spec.md "Feature entry menu": ESC or a click anywhere else
-  // closes the entry's drop down menu (same behavior as the user menu).
-  useEffect(() => {
-    if (treeMenu === null) return;
-    const close = () => {
-      setTreeMenu(null);
-      setTreeMenuFile(false);
-    };
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".tree-row-menu")) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [treeMenu]);
-
-  // specs/folders.spec.md: ESC deselects the folder, moving the insertion
-  // point back to the tree root so "+ New folder" adds a top-level folder.
-  // Inert while a dialog is open or while typing (ESC cancels those instead).
-  useEffect(() => {
-    if (
-      selectedFolder === null ||
-      editing ||
-      settingsOpen ||
-      userMenuOpen ||
-      recentMenuOpen ||
-      userInfoOpen ||
-      treeMenu !== null
-    )
-      return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      e.preventDefault();
-      setSelectedFolder(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFolder, editing, settingsOpen, userMenuOpen, recentMenuOpen, userInfoOpen, treeMenu]);
+  // ESC (specs/ui.spec.md "Dialogs", specs/editor/spec-editor.feature.md
+  // "Spec editor pane", specs/folders.spec.md): one key, closing whatever is
+  // on top — see `closeTopmost` in the shortcut registry below. The menus
+  // (src/frontend/Menu.tsx) take their own ESC and outside clicks.
 
   // Search as the user types, debounced (specs/search.spec.md); the
   // AbortController keeps a stale response from overwriting a newer query.
@@ -1089,32 +870,6 @@ export function App() {
       controller.abort();
     };
   }, [query]);
-
-  // specs/search.spec.md: "/" and Cmd/Ctrl+F focus the search field from
-  // anywhere — except while a dialog is open or typing in another field. The
-  // editor pane is no dialog: the search field is right beside it.
-  useEffect(() => {
-    if (settingsOpen || userInfoOpen || modalOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey;
-      const find =
-        e.key.toLowerCase() === "f" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
-      if (!slash && !find) return;
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLSelectElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      e.preventDefault();
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen, userInfoOpen, modalOpen]);
 
   // Keep the ↑/↓ highlight visible while it walks the result list.
   useEffect(() => {
@@ -1270,7 +1025,6 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        setStatus("");
         // The old folder's pages are not this folder's: the sidebar section
         // empties, and refills below when the Roadmap setting shows it at all.
         setRoadmapPages([]);
@@ -1286,7 +1040,7 @@ export function App() {
           state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
         ]);
       } else {
-        setStatus(state.error ?? "Could not use this directory");
+        toast.error(state.error ?? "Could not use this directory");
       }
     } finally {
       setSettingRepo(false);
@@ -1334,11 +1088,11 @@ export function App() {
       setRenameDraft(null);
       setConflict(null);
       if (opts.editDescription) openDescriptionEditor(file, parsed.description);
-      setStatus(
-        missingScenario
-          ? `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`
-          : "",
-      );
+      if (missingScenario) {
+        toast.error(
+          `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`,
+        );
+      }
     } else {
       // The file is gone — deleted, renamed by the `.feature.md` migration, or
       // a stale deep link. Drop a stale selection rather than re-fetching it
@@ -1349,10 +1103,9 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        setStatus("");
       }
       if (opts.push || opts.scenario !== undefined) {
-        setStatus(`Feature "${file}" not found — the link may be stale.`);
+        toast.error(`Feature "${file}" not found — the link may be stale.`);
       }
       await loadFeatures();
     }
@@ -1374,7 +1127,6 @@ export function App() {
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
-    setStatus("");
     if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
@@ -1396,7 +1148,6 @@ export function App() {
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
-      setStatus("");
     }
   };
 
@@ -1442,7 +1193,7 @@ export function App() {
       // editor.feature.md "Edit feature descrition").
       await openFeature(data.fileName, { push: true, editDescription: true });
     } else {
-      setStatus(data.error);
+      toast.error(data.error ?? "Could not create the feature");
     }
   };
 
@@ -1598,7 +1349,7 @@ export function App() {
       setSelectedFolder(data.path);
       await loadFeatures();
     } else {
-      setStatus(data.error ?? "Could not create the folder");
+      toast.error(data.error ?? "Could not create the folder");
     }
   };
 
@@ -1617,9 +1368,23 @@ export function App() {
       // A selection under the deleted folder points nowhere — drop it.
       setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
       await loadFeatures();
+      toast.success(`Deleted folder "${path}".`, {
+        action: { label: "Undo", run: () => void restoreFolder(path) },
+      });
     } else {
-      setStatus(data.error ?? "Could not delete the folder");
+      toast.error(data.error ?? "Could not delete the folder");
     }
+  };
+
+  /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
+  const restoreFolder = async (path: string) => {
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (res.ok) await loadFeatures();
+    else toast.error(`Could not restore "${path}".`);
   };
 
   // Drag-move (specs/folders.spec.md): the server does a `git mv` into
@@ -1638,10 +1403,14 @@ export function App() {
       await loadFeatures();
       if (data.fileName !== fileName) {
         if (selected === fileName) await openFeature(data.fileName);
-        setStatus(`Moved to ${folder || "the top level"} — ${data.message}.`);
+        // Undo moves it straight back to where it came from.
+        const from = fileName.includes("/") ? fileName.slice(0, fileName.lastIndexOf("/")) : "";
+        toast.success(`Moved to ${folder || "the top level"} — ${data.message}.`, {
+          action: { label: "Undo", run: () => void moveTo(data.fileName, from) },
+        });
       }
     } else {
-      setStatus(data.error ?? "Move failed");
+      toast.error(data.error ?? "Move failed");
     }
   };
 
@@ -1669,12 +1438,12 @@ export function App() {
         setRenameDraft(null);
         await loadFeatures();
         await openFeature(selected);
-        setStatus(`Renamed to "${data.name}" — ${data.message}.`);
+        toast.success(`Renamed to "${data.name}" — ${data.message}.`);
       } else {
-        setStatus(data.error ?? "Rename failed");
+        toast.error(data.error ?? "Rename failed");
       }
     } catch {
-      setStatus("Rename failed — is the server running?");
+      toast.error("Rename failed — is the server running?");
     } finally {
       setRenaming(false);
     }
@@ -1706,10 +1475,10 @@ export function App() {
       await loadFeatures();
       if (data.fileName !== fileName) {
         if (selected === fileName) await openFeature(data.fileName);
-        setStatus(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
+        toast.success(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
       }
     } else {
-      setStatus(data.error ?? "Rename failed");
+      toast.error(data.error ?? "Rename failed");
     }
   };
 
@@ -1735,9 +1504,9 @@ export function App() {
         setSelectedScenario(null);
       }
       await loadFeatures();
-      setStatus(`Deleted "${f.name}" — ${data.message}.`);
+      toast.success(`Deleted "${f.name}" — ${data.message}.`);
     } else {
-      setStatus(data.error ?? "Delete failed");
+      toast.error(data.error ?? "Delete failed");
     }
   };
 
@@ -1764,14 +1533,14 @@ export function App() {
       if (res.status === 409 && data.status === "conflict") {
         setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
         setConflictDraft(data.ours);
-        setStatus("Merge conflict — choose a resolution below.");
+        toast.info("Merge conflict — choose a resolution below.");
       } else if (res.ok) {
         await openFeature(selected);
       } else {
-        setStatus(data.error ?? "Publish failed");
+        toast.error(data.error ?? "Publish failed");
       }
     } catch {
-      setStatus("Publish failed — is the server running?");
+      toast.error("Publish failed — is the server running?");
     } finally {
       setPublishing(null);
     }
@@ -1787,13 +1556,13 @@ export function App() {
       const res = await fetch("/api/reload", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        setStatus(data.error ?? "Sync failed");
+        toast.error(data.error ?? "Sync failed");
         return;
       }
       await loadFeatures();
       if (selected && !dirty && !editing && !conflict) await openFeature(selected);
     } catch {
-      setStatus("Sync failed — is the server running?");
+      toast.error("Sync failed — is the server running?");
     } finally {
       setSyncing(false);
     }
@@ -1802,7 +1571,6 @@ export function App() {
   const resolveWith = async (which: "ours" | "theirs" | "draft", resolved: string) => {
     if (!selected || resolving) return;
     setResolving(which);
-    setStatus("Publishing resolution…");
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
         method: "PUT",
@@ -1821,10 +1589,10 @@ export function App() {
         // openFeature closes the dialog by clearing the conflict.
         await openFeature(selected);
       } else {
-        setStatus(data.error ?? "Publish failed");
+        toast.error(data.error ?? "Publish failed");
       }
     } catch {
-      setStatus("Publish failed — is the server running?");
+      toast.error("Publish failed — is the server running?");
     } finally {
       setResolving(null);
     }
@@ -1834,7 +1602,7 @@ export function App() {
       in the repo, so Publish brings the same choices back. */
   const dismissConflict = () => {
     setConflict(null);
-    setStatus("Merge conflict left unresolved — Publish again to pick a resolution.");
+    toast.info("Merge conflict left unresolved — Publish again to pick a resolution.");
   };
 
   /** Handle a link in-app on a plain click; cmd/ctrl/shift-clicks keep their
@@ -1865,7 +1633,7 @@ export function App() {
       const ok = document.execCommand("copy");
       ta.remove();
       if (!ok) {
-        setStatus("Could not copy the link to the clipboard.");
+        toast.error("Could not copy the link to the clipboard.");
         return;
       }
     }
@@ -1874,10 +1642,10 @@ export function App() {
   };
 
   // specs/crud-feature.spec.md ("Scenario is automatically saved locally and
-  // pushed to GitHub"): show 'Saved' on the top banner for 2 sec.
-  const flashSaved = () => {
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2000);
+  // pushed to GitHub"): a landed save updates the header's Saved indicator.
+  const markSaved = () => {
+    setSaving(false);
+    setSavedAt(Date.now());
   };
 
   /**
@@ -1924,6 +1692,7 @@ export function App() {
     setFeature(next);
     if (close) setEditing(null);
     const session = editorSession.current;
+    setSaving(true);
     const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1972,21 +1741,14 @@ export function App() {
       // A published scenario's editor can only have changed its links — test
       // links (specs/traceability.spec.md) and its ticket link — so there is
       // nothing left to publish.
-      if (stillHere) {
-        setStatus(
-          s.status === "published"
-            ? `Saved the links of "${s.name}" v${s.version}.`
-            : s.status === "draft"
-              ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
-              : "Saved — publish scenarios from their cards, or press Publish All.",
-        );
-        flashSaved();
-      }
+      if (stillHere) markSaved();
+      else setSaving(false);
       return true;
     }
+    setSaving(false);
     if (stillHere) {
       setDirty(true);
-      setStatus(data.error ?? "Save failed");
+      toast.error(data.error ?? "Save failed");
     }
     return false;
   };
@@ -2031,7 +1793,7 @@ export function App() {
     const name = editing.scenario.name.trim();
     const version = draftVersion;
     if (await commitScenario(tests, true, "proposed")) {
-      setStatus(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
+      toast.success(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
     }
   };
 
@@ -2115,6 +1877,7 @@ export function App() {
     if (content === null || content === readmeSaved.current) return;
     if (readmeInFlight.current) return; // the previous tick is still saving
     readmeInFlight.current = true;
+    setSaving(true);
     const session = readmeSession.current;
     try {
       const res = await fetch("/api/readme", {
@@ -2123,15 +1886,19 @@ export function App() {
         body: JSON.stringify({ content }),
       });
       if (res.ok) {
-        if (session === readmeSession.current) readmeSaved.current = content;
+        if (session === readmeSession.current) {
+          readmeSaved.current = content;
+          markSaved();
+        }
       } else {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setStatus(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`README.md not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`README.md not saved: ${(e as Error).message} — will retry.`);
     } finally {
       readmeInFlight.current = false;
+      setSaving(false);
     }
   };
   const readmeTick = useRef(autosaveReadme);
@@ -2167,7 +1934,7 @@ export function App() {
     if (!res.ok || typeof data.content !== "string") {
       // Gone — deleted, renamed, or a stale deep link.
       if (roadmapPageRef.current?.fileName === fileName) closeRoadmapPage({ save: false });
-      setStatus(data.error ?? `Roadmap page "${fileName}" not found — the link may be stale.`);
+      toast.error(data.error ?? `Roadmap page "${fileName}" not found — the link may be stale.`);
       await loadRoadmapPages();
       return;
     }
@@ -2184,7 +1951,6 @@ export function App() {
     if (opts.push && location.pathname !== roadmapPath(fileName)) {
       history.pushState(null, "", roadmapPath(fileName));
     }
-    setStatus("");
   };
 
   /** The listing fields of a page response, without its content. */
@@ -2216,6 +1982,7 @@ export function App() {
     if (roadmapInFlight.current) return; // the previous tick is still saving
     roadmapInFlight.current = true;
     const session = roadmapSession.current;
+    setSaving(true);
     try {
       const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
         method: "PUT",
@@ -2229,6 +1996,7 @@ export function App() {
           // document's projection, which can be tidier than the buffer, and
           // taking that back would have every tick save the same text again.
           roadmapSaved.current = content;
+          markSaved();
           // Only when the heading or the assignment actually moved: a new
           // listing object on every tick would restart the timers watching it.
           setRoadmapPage((open) =>
@@ -2238,12 +2006,13 @@ export function App() {
           );
         }
       } else {
-        setStatus(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
     } finally {
       roadmapInFlight.current = false;
+      setSaving(false);
     }
   };
   const roadmapTick = useRef(autosaveRoadmap);
@@ -2301,16 +2070,17 @@ export function App() {
         roadmapTextRef.current = data.content;
         setRoadmapText(data.content);
         setRoadmapPage(roadmapListing(data));
-        setStatus(
+        toast.success(
           assigned ? `Assigned to ${assigned} — saved locally.` : "Assignment cleared — saved locally.",
+          { action: { label: "Undo", run: () => void saveRoadmapAssigned(_previous ?? "") } },
         );
-        flashSaved();
+        markSaved();
         void loadRoadmapPages();
       } else {
-        setStatus(data.error ?? "Could not save the assignment");
+        toast.error(data.error ?? "Could not save the assignment");
       }
     } catch {
-      setStatus("Could not save the assignment — is the server running?");
+      toast.error("Could not save the assignment — is the server running?");
     } finally {
       setRoadmapAssignedSaving(false);
     }
@@ -2332,7 +2102,7 @@ export function App() {
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {
-      setStatus(data.error ?? "Could not create the roadmap page");
+      toast.error(data.error ?? "Could not create the roadmap page");
       return;
     }
     // Reveal the new page: the section may be folded shut, and a page that
@@ -2372,6 +2142,7 @@ export function App() {
     if (edit.text === descSaved.current) return;
     if (descInFlight.current) return; // the previous tick is still saving
     descInFlight.current = true;
+    setSaving(true);
     const next: Feature = { ...feature, description: edit.text.trim() };
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
@@ -2390,15 +2161,16 @@ export function App() {
         if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
         if (selectedRef.current === edit.file) {
           setFeature(featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file));
-          flashSaved();
+          markSaved();
         }
       } else {
-        setStatus(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`Description not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
     } finally {
       descInFlight.current = false;
+      setSaving(false);
     }
   };
   const descTick = useRef(autosaveDescription);
@@ -2807,12 +2579,12 @@ export function App() {
         setFeature(featureFromResponse(data, selected));
         setDirty(false);
         setFeatureLinkDraft(null);
-        setStatus(
+        toast.success(
           resolved.link
             ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
             : `Ticket link removed — ${data.message}.`,
         );
-        flashSaved();
+        markSaved();
       } else {
         setFeatureLinkError(data.error ?? "Could not save the ticket link");
       }
@@ -2858,15 +2630,16 @@ export function App() {
       if (res.ok) {
         setFeature(featureFromResponse(data, selected));
         setDirty(false);
-        setStatus(
+        toast.success(
           assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
+          { action: { label: "Undo", run: () => void saveAssigned(_previous ?? "") } },
         );
-        flashSaved();
+        markSaved();
       } else {
-        setStatus(data.error ?? "Could not save the assignment");
+        toast.error(data.error ?? "Could not save the assignment");
       }
     } catch {
-      setStatus("Could not save the assignment — is the server running?");
+      toast.error("Could not save the assignment — is the server running?");
     } finally {
       setAssignedSaving(false);
     }
@@ -3015,11 +2788,11 @@ export function App() {
       // content with the remaining drafts folded back in.
       setFeature(featureFromResponse(data, selected));
       setDirty(false);
-      setStatus(done);
-      flashSaved();
+      toast.success(done);
+      markSaved();
     } else {
       setDirty(true);
-      setStatus(data.error ?? "Delete failed");
+      toast.error(data.error ?? "Delete failed");
     }
   };
 
@@ -3207,56 +2980,39 @@ export function App() {
             aria-label={`Menu for ${f.fileName}`}
             aria-haspopup="menu"
             aria-expanded={treeMenu === f.fileName}
-            onClick={() => {
-              setTreeMenuFile(false);
-              setTreeMenu((m) => (m === f.fileName ? null : f.fileName));
-            }}
+            onClick={() => setTreeMenu((m) => (m === f.fileName ? null : f.fileName))}
           >
             <Ellipsis size={14} aria-hidden="true" />
           </button>
         </Tooltip>
-        {treeMenu === f.fileName && (
-          <div className="tree-menu" role="menu" aria-label={`Menu for ${f.fileName}`}>
-            <button
-              role="menuitem"
-              aria-haspopup="menu"
-              aria-expanded={treeMenuFile}
-              onClick={() => setTreeMenuFile((o) => !o)}
-            >
-              File{" "}
-              {treeMenuFile ? (
-                <ChevronDown size={12} aria-hidden="true" />
-              ) : (
-                <ChevronRight size={12} aria-hidden="true" />
-              )}
-            </button>
-            {treeMenuFile && (
-              <div className="tree-submenu" role="menu" aria-label="File">
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setTreeMenu(null);
-                    setTreeMenuFile(false);
-                    void renameFile(f.fileName);
-                  }}
-                >
-                  Rename “{fileStem(f.fileName)}”
-                </button>
-              </div>
-            )}
-            <button
-              role="menuitem"
-              className="danger"
-              onClick={() => {
-                setTreeMenu(null);
-                setTreeMenuFile(false);
-                void removeFeature(f);
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
+        <Menu
+          open={treeMenu === f.fileName}
+          onClose={() => setTreeMenu(null)}
+          label={`Menu for ${f.fileName}`}
+          className="tree-menu"
+          containerSelector=".tree-row-menu"
+          items={[
+            {
+              id: "file",
+              label: "File",
+              items: [
+                {
+                  id: "rename",
+                  label: `Rename “${fileStem(f.fileName)}”`,
+                  icon: <Pencil size={13} />,
+                  onSelect: () => void renameFile(f.fileName),
+                },
+              ],
+            },
+            {
+              id: "delete",
+              label: "Delete",
+              icon: <Trash2 size={13} />,
+              danger: true,
+              onSelect: () => void removeFeature(f),
+            },
+          ]}
+        />
       </span>
         </div>
       </div>
@@ -3332,6 +3088,269 @@ export function App() {
     </>
   );
 
+  // One keyboard model (specs/ui/ui.feature.md "Design system"): every
+  // shortcut is declared once here, dispatched by one listener
+  // (src/frontend/shortcuts.tsx) and listed by the `?` cheat sheet from the
+  // same list. Single keys stay quiet while a dialog or menu is open and
+  // while typing in a field; ESC works everywhere.
+  const dialogOpen =
+    settingsOpen ||
+    userInfoOpen ||
+    modalOpen ||
+    conflict !== null ||
+    featureLinkOpen ||
+    sessionError !== null ||
+    sheetOpen;
+  const menuOpen = treeMenu !== null || recentMenuOpen || userMenuOpen;
+  const quiet = dialogOpen || menuOpen;
+  const onFeaturePage = selected !== null && feature !== null && editing === null;
+  const newScenario = () =>
+    setEditing({
+      index: null,
+      isNew: true,
+      scenario: { name: "", version: 1, status: "draft", body: "", tests: [] },
+    });
+  // specs/ui.spec.md "Select scenarios via up and down keys": the highlight
+  // walks the cards; Enter opens the highlighted one in the editor pane.
+  const moveScenarioSelection = (e: KeyboardEvent, delta: 1 | -1) => {
+    if (!feature) return;
+    const count = feature.scenarios.length;
+    // Steal focus from a clicked button (e.g. the feature just opened in the
+    // sidebar) so a following Enter edits the highlighted scenario instead
+    // of re-activating that button.
+    if (e.target instanceof HTMLElement) e.target.blur();
+    setSelectedScenario((i) =>
+      delta > 0
+        ? i === null
+          ? 0
+          : Math.min(i + 1, count - 1)
+        : i === null
+          ? count - 1
+          : Math.max(i - 1, 0),
+    );
+  };
+  const openSelectedScenario = (e: KeyboardEvent): void | false => {
+    if (!feature || selectedScenario === null) return false;
+    const t = e.target;
+    if (e.key === "Enter") {
+      // A focused button or link keeps its native Enter activation — except
+      // the highlighted card's own title link, which a click left focused:
+      // Enter there edits the scenario rather than re-selecting it.
+      const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
+        ".scenario-title > a",
+      );
+      if (t instanceof HTMLButtonElement) return false;
+      if (t instanceof HTMLAnchorElement && t !== titleLink) return false;
+    }
+    const s = feature.scenarios[selectedScenario];
+    if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
+  };
+  // ESC closes whatever is on top (specs/ui.spec.md "Dialogs"): a dialog;
+  // then the editor pane — its way back, leaving the scenario autosaved
+  // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
+  // key came from the sidebar, which stays reachable beside the pane; then
+  // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
+  const closeTopmost = (e: KeyboardEvent): void | false => {
+    if (sessionError !== null) return setSessionError(null);
+    if (conflict) {
+      if (resolving) return false;
+      dismissConflict();
+      return;
+    }
+    if (settingsOpen) return setSettingsOpen(false);
+    if (userInfoOpen) return setUserInfoOpen(false);
+    if (featureLinkOpen) return setFeatureLinkDraft(null);
+    if (modalOpen || sheetOpen || menuOpen) return false;
+    const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
+    if (editing && !fromSidebar) {
+      editorRef.current.back();
+      return;
+    }
+    if (isTypingTarget(e.target)) return false;
+    if (selectedFolder !== null) return setSelectedFolder(null);
+    return false;
+  };
+  const shortcuts: Shortcut[] = [
+    {
+      id: "search",
+      keys: ["/", "mod+k", "mod+f"],
+      label: "Search specs",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => {
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      },
+    },
+    {
+      id: "sheet",
+      keys: "?",
+      label: "Keyboard shortcuts",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => setSheetOpen(true),
+    },
+    {
+      id: "go-home",
+      keys: "g h",
+      label: "Go to Home (README)",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => {
+        goHome();
+        void loadReadme();
+      },
+    },
+    {
+      id: "go-roadmap",
+      keys: "g r",
+      label: "Go to the roadmap",
+      group: "Navigate",
+      when: () => !quiet && roadmapPages.length > 0,
+      run: () => {
+        const page = roadmapPages[0];
+        if (page) void openRoadmapPage(page.fileName, { push: true });
+      },
+    },
+    {
+      id: "settings",
+      keys: ["mod+,", "g s"],
+      label: "Settings",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => openSettings(),
+    },
+    {
+      id: "theme",
+      keys: "mod+shift+l",
+      label: "Cycle the theme",
+      group: "Navigate",
+      inFields: true,
+      when: () => !quiet,
+      run: () => {
+        const order: ThemePref[] = ["system", "light", "dark"];
+        const next = order[(order.indexOf(theme) + 1) % order.length]!;
+        setTheme(next);
+        applyThemePref(next);
+        toast.info(`Theme: ${next}`);
+      },
+    },
+    {
+      id: "escape",
+      keys: "escape",
+      label: "Close, go back, or clear the selection",
+      group: "Navigate",
+      inFields: true,
+      run: closeTopmost,
+    },
+    {
+      id: "create",
+      keys: "c",
+      label: onFeaturePage ? "New scenario" : "New feature",
+      group: "Create",
+      when: () => !quiet && editing === null,
+      run: () => {
+        if (onFeaturePage) newScenario();
+        else void createFeature();
+      },
+    },
+    {
+      id: "next",
+      keys: ["j", "arrowdown"],
+      label: "Next scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
+      run: (e) => moveScenarioSelection(e, 1),
+    },
+    {
+      id: "prev",
+      keys: ["k", "arrowup"],
+      label: "Previous scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
+      run: (e) => moveScenarioSelection(e, -1),
+    },
+    {
+      id: "open",
+      keys: ["enter", "e", "o"],
+      label: "Open the selected scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && selectedScenario !== null,
+      run: openSelectedScenario,
+    },
+    {
+      id: "publish",
+      keys: "mod+enter",
+      label: editing
+        ? editing.scenario.status === "draft"
+          ? "Propose the scenario"
+          : "Publish the scenario"
+        : "Publish all",
+      group: "Publish",
+      inFields: true,
+      when: () => !quiet && (editing !== null || onFeaturePage),
+      run: () => {
+        if (publishing !== null) return false;
+        if (editing) {
+          if (editing.scenario.status === "published" || !editing.scenario.name.trim())
+            return false;
+          if (editing.scenario.status === "draft") void proposeScenario();
+          else void publishScenario();
+          return;
+        }
+        void publish();
+      },
+    },
+    {
+      id: "copy-link",
+      keys: "mod+shift+c",
+      label: "Copy link to this page",
+      group: "Share",
+      inFields: true,
+      when: () => !quiet && (selected !== null || roadmapPage !== null),
+      run: () => {
+        if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
+        else if (selected) void copyLink(featurePath(selected));
+        else if (roadmapPage) void copyLink(roadmapPath(roadmapPage.fileName));
+      },
+    },
+    // Handled by the fields themselves (src/frontend/MarkdownEditor.tsx and
+    // the sidebar divider); listed so the cheat sheet is complete.
+    {
+      id: "md-bold",
+      keys: "mod+b",
+      label: "Bold (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "md-italic",
+      keys: "mod+i",
+      label: "Italic (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "md-link",
+      keys: "mod+k",
+      label: "Insert a link (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "divider",
+      keys: ["arrowleft", "arrowright"],
+      label: "Resize the sidebar (divider focused)",
+      group: "Navigate",
+      displayOnly: true,
+      run: () => false,
+    },
+  ];
+  useShortcuts(shortcuts);
+
   if (loading) return <main className="centered">Loading…</main>;
 
   if (needsRepo) {
@@ -3385,7 +3404,6 @@ export function App() {
       className={resizingSidebar ? "layout resizing" : "layout"}
       style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
     >
-      {savedFlash && <div className="saved-banner">Saved</div>}
       <aside>
         <header>
           <h1>
@@ -3439,36 +3457,30 @@ export function App() {
                     />
                   </svg>
                 </button>
-                {recentMenuOpen && (
-                  <div className="repo-recent-menu" role="menu" aria-label="Recent data folders">
-                    {recentRepos.map((repo) => {
-                      const current = repo === dataRepo;
-                      return (
-                        <button
-                          key={repo}
-                          role="menuitemradio"
-                          aria-checked={current}
-                          className={current ? "current" : undefined}
-                          title={repo}
-                          onClick={() => {
-                            setRecentMenuOpen(false);
-                            if (current) {
-                              goHome();
-                              void loadReadme();
-                            } else {
-                              void switchRepo(repo);
-                            }
-                          }}
-                        >
-                          <span className="check" aria-hidden="true">
-                            {current ? <Check size={12} aria-hidden="true" /> : ""}
-                          </span>
-                          <span className="repo-recent-name">{repoDisplayName(repo)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <Menu
+                  open={recentMenuOpen}
+                  onClose={() => setRecentMenuOpen(false)}
+                  label="Recent data folders"
+                  className="repo-recent-menu"
+                  containerSelector=".repo-recent"
+                  items={recentRepos.map((repo) => {
+                    const current = repo === dataRepo;
+                    return {
+                      id: repo,
+                      label: repoDisplayName(repo),
+                      title: repo,
+                      checked: current,
+                      onSelect: () => {
+                        if (current) {
+                          goHome();
+                          void loadReadme();
+                        } else {
+                          void switchRepo(repo);
+                        }
+                      },
+                    };
+                  })}
+                />
               </div>
             )}
             {!demo && (
@@ -3713,28 +3725,28 @@ export function App() {
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
-          {userMenuOpen && (
-            <div className="user-menu" role="menu" aria-label="User menu">
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  setUserInfoOpen(true);
-                }}
-              >
-                User info
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  openSettings();
-                }}
-              >
-                <Settings size={13} aria-hidden="true" /> Settings
-              </button>
-            </div>
-          )}
+          <Menu
+            open={userMenuOpen}
+            onClose={() => setUserMenuOpen(false)}
+            label="User menu"
+            className="user-menu"
+            containerSelector=".user-corner"
+            items={[
+              {
+                id: "user-info",
+                label: "User info",
+                icon: <UserRound size={13} />,
+                onSelect: () => setUserInfoOpen(true),
+              },
+              {
+                id: "settings",
+                label: "Settings",
+                icon: <Settings size={13} />,
+                keys: "mod+,",
+                onSelect: openSettings,
+              },
+            ]}
+          />
           <button
             className="user-chip"
             aria-haspopup="menu"
@@ -3843,6 +3855,7 @@ export function App() {
                 </p>
               </div>
               <div className="editor-actions scenario-pane-actions">
+                <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
                 {/* Proposed scenarios and drafts can be deleted
                     (specs/editor/spec-editor.feature.md) — published ones too
                     while Settings allows it ("Delete Published Spec") —
@@ -4031,7 +4044,6 @@ export function App() {
                 </div>
               )}
             </div>
-            {status && <p className="status">{status}</p>}
           </div>
         ) : selected && feature ? (
           <>
@@ -4154,6 +4166,11 @@ export function App() {
                 )}
               </div>
               <div className="editor-actions">
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
+                />
                 {/* Publish All (specs/crud-feature.spec.md "publish each
                     scenario individually"): marks every scenario published;
                     individual scenarios publish from their cards. Sync lives
@@ -4344,7 +4361,6 @@ export function App() {
                 + Add Scenario
               </button>
             </div>
-            {status && <p className="status">{status}</p>}
           </>
         ) : roadmapPage && roadmapText !== null ? (
           /* A roadmap page (specs/app/roadmap.feature.md): a regular markdown
@@ -4354,6 +4370,11 @@ export function App() {
             <div className="editor-bar">
               <div className="feature-title">
                 <h2>{roadmapPage.name || roadmapPage.fileName}</h2>
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={roadmapText !== roadmapSaved.current}
+                />
                 <span className="readme-hint">
                   {`Saved automatically every ${autosaveSeconds} seconds; the next sync pushes it.`}
                 </span>
@@ -4383,7 +4404,6 @@ export function App() {
               onChange={setRoadmapText}
               placeholder="Write this roadmap page in Markdown…"
             />
-            {status && <p className="status">{status}</p>}
           </>
         ) : (
           <>
@@ -4393,6 +4413,11 @@ export function App() {
             <div className="editor-bar">
               <div className="feature-title">
                 <h2>README.md</h2>
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={readme !== null && readme !== readmeSaved.current}
+                />
                 <span className="readme-hint">
                   {readme === null
                     ? "Loading…"
@@ -4408,7 +4433,6 @@ export function App() {
               />
             )}
             {/* A stale deep link lands here with a note (specs/navigation.spec.md). */}
-            {status && <p className="status">{status}</p>}
           </>
         )}
       </section>
@@ -5104,8 +5128,10 @@ export function App() {
           </div>
         </div>
       )}
+      {sheetOpen && <ShortcutSheet shortcuts={shortcuts} onClose={() => setSheetOpen(false)} />}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
       {modal}
+      <Toaster />
     </main>
   );
 }

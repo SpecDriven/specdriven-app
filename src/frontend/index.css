@@ -386,48 +386,9 @@ aside header h1 {
 /* The sidebar clips its overflow, so the menu hangs from the header and
    spans the sidebar's width rather than floating beside the toggle. */
 .repo-recent-menu {
-  position: absolute;
   top: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.repo-recent-menu button {
-  display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr);
-  column-gap: 0.2rem;
-  align-items: center;
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.5rem 0.35rem 0.3rem;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.repo-recent-menu button:hover {
-  background: var(--hover);
-}
-
-.repo-recent-menu .check {
-  color: var(--accent);
-  font-size: 0.75rem;
-}
-
-.repo-recent-menu .repo-recent-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .repo-edit {
@@ -867,45 +828,9 @@ a.roadmap-entry.active {
 
 /* The drop down: File (submenu with Rename) and Delete. */
 .tree-menu {
-  position: absolute;
   top: calc(100% + 0.2rem);
   right: 0.25rem;
-  min-width: 10rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.tree-menu button {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.42rem 0.6rem;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.tree-menu button:hover {
-  background: var(--hover);
-}
-
-.tree-submenu {
-  display: flex;
-  flex-direction: column;
-  border-left: 2px solid var(--border);
-  margin-left: 0.6rem;
-}
-
-.tree-menu button.danger:hover {
-  color: var(--danger-fg);
-  background: var(--danger-bg);
+  min-width: 11rem;
 }
 
 /* Where the dragged feature would land (specs/folders.spec.md). */
@@ -1155,21 +1080,6 @@ button {
 }
 
 
-/* Transient 'Saved' toast, shown for 2 sec after an auto-save */
-.saved-banner {
-  position: fixed;
-  top: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  padding: 0.4rem 1rem;
-  border-radius: 999px;
-  background: var(--text-1);
-  color: var(--surface-0);
-  font-size: 0.75rem;
-  font-weight: 550;
-  box-shadow: var(--shadow-lg);
-}
 
 .card-actions {
   display: flex;
@@ -1840,33 +1750,9 @@ aside > .user-corner {
 }
 
 .user-menu {
-  position: absolute;
   bottom: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.user-menu button {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.42rem 0.6rem;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-
-.user-menu button:hover {
-  background: var(--hover);
 }
 
 /* User info dialog */
@@ -1953,11 +1839,6 @@ aside > .user-corner {
   user-select: all;
 }
 
-.status {
-  color: var(--text-2);
-  font-size: 0.75rem;
-  margin: 0;
-}
 
 .error {
   color: var(--danger-fg);
@@ -2768,4 +2649,288 @@ button.table-add:hover {
   color: inherit;
   font-family: var(--font-mono);
   font-size: 0.6875rem;
+}
+
+/* ---- Keycaps (shortcut hints in menus, tooltips, the cheat sheet) ---- */
+kbd {
+  display: inline-block;
+  min-width: 1.3em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.keys-then,
+.keys-or {
+  margin: 0 0.25rem;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+/* ---- Menu (src/frontend/Menu.tsx) ---- */
+.menu {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: 0.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.menu-entry {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.menu-item:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.menu-item.danger {
+  color: var(--danger-fg);
+}
+
+.menu-item.danger:hover,
+.menu-item.danger:focus-visible {
+  background: var(--danger-bg);
+}
+
+.menu-check {
+  display: inline-flex;
+  width: 0.9rem;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.menu-icon {
+  display: inline-flex;
+  color: var(--text-2);
+}
+
+.menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item .keys {
+  margin-left: auto;
+}
+
+.menu-submenu {
+  display: flex;
+  flex-direction: column;
+  margin-left: 0.75rem;
+  padding-left: 0.25rem;
+  border-left: 2px solid var(--border);
+}
+
+/* ---- Toasts (src/frontend/Toasts.tsx) ---- */
+.toaster {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: min(28rem, calc(100vw - 1.5rem));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  box-shadow: var(--shadow-md);
+}
+
+.toast > svg {
+  flex: none;
+}
+
+.toast.success > svg {
+  color: var(--status-published);
+}
+
+.toast.info > svg {
+  color: var(--text-2);
+}
+
+.toast.error {
+  border-color: var(--danger-border);
+}
+
+.toast.error > svg {
+  color: var(--danger-fg);
+}
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent-strong);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent-soft);
+}
+
+.toast-close {
+  flex: none;
+  display: inline-flex;
+  padding: 0.25rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 160ms ease-out;
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.4rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ---- Save indicator (page headers) ---- */
+.save-indicator {
+  flex: none;
+  align-self: center;
+  margin: 0 0.5rem;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.save-indicator.unsaved {
+  color: var(--status-proposed);
+}
+
+/* ---- Cheat sheet (src/frontend/shortcuts.tsx) ---- */
+.shortcut-sheet {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+}
+
+.shortcut-groups {
+  columns: 2;
+  column-gap: 2rem;
+}
+
+@media (max-width: 40rem) {
+  .shortcut-groups {
+    columns: 1;
+  }
+}
+
+.shortcut-group {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+.shortcut-group h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: none;
+}
+
+.shortcut-alt {
+  display: inline-flex;
+  align-items: center;
 }
