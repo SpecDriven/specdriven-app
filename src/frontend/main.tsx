@@ -2,7 +2,6 @@
 // render identically offline, so no font CDN — the woff2 files ship with
 // the bundle.
 import "@fontsource-variable/inter";
-import "@fontsource-variable/source-serif-4";
 import "@fontsource-variable/jetbrains-mono";
 
 import { createRoot } from "react-dom/client";

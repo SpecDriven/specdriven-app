@@ -81,8 +81,8 @@ test("listFeatures carries each file's scenario names and versions", async () =>
       fileName: "quotes.feature.md",
       name: "Quotes",
       scenarios: [
-        { name: "Basic", version: 1 },
-        { name: "Renewal", version: 2 },
+        { name: "Basic", version: 1, status: "published" },
+        { name: "Renewal", version: 2, status: "draft" },
       ],
     },
   ]);

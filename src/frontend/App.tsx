@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+  ReactNode,
+} from "react";
 import {
   parseFeature,
   parseRoadmap,
@@ -16,9 +21,43 @@ import type { RoadmapListing } from "../server/roadmap";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import { Logo } from "./Logo";
-import { SearchIcon } from "./SearchIcon";
-import { BackIcon } from "./BackIcon";
-import { SyncIcon } from "./SyncIcon";
+import {
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Ellipsis,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  ExternalLink,
+  FileText,
+  FolderInput,
+  Home,
+  Keyboard,
+  Link,
+  ListFilter,
+  Map as MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  Sun,
+  Ticket,
+  Trash2,
+  UserRound,
+  X,
+} from "lucide-react";
+import { PublishRing, StatusIcon } from "./StatusIcon";
+import { Tooltip } from "./Tooltip";
+import { Menu } from "./Menu";
+import { Popover } from "./Popover";
+import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
+import { CommandPalette, type PaletteItem } from "./CommandPalette";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { SaveIndicator, Toaster, toast } from "./Toasts";
+import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -316,6 +355,106 @@ export function pageScenario(
   return scenarios?.[editing.index] ?? null;
 }
 
+/** What the command palette offers before typing: the last pages opened. */
+interface RecentEntry {
+  kind: "feature" | "scenario" | "roadmap";
+  fileName: string;
+  name: string;
+  scenario?: { name: string; version: number };
+}
+
+const RECENT_KEY = "sd-recent";
+
+function readRecent(): RecentEntry[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const list = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
+    return Array.isArray(list) ? list.slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(list: RecentEntry[]) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {
+    // Storage unavailable: the list just does not survive a reload.
+  }
+}
+
+/** The sidebar collapsed to a rail ("["), remembered on this device. */
+const COLLAPSED_KEY = "sd-sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeSidebarCollapsed(collapsed: boolean) {
+  try {
+    if (collapsed) localStorage.setItem(COLLAPSED_KEY, "1");
+    else localStorage.removeItem(COLLAPSED_KEY);
+  } catch {
+    // Storage unavailable: the choice just does not survive a reload.
+  }
+}
+
+/** The sidebar's filter: features by scenario status and by assignee. */
+interface TreeFilter {
+  status: Scenario["status"] | null;
+  assignee: string | null;
+}
+
+/** Roadmap pages grouped by the subfolder under `roadmap/`, top level first. */
+function roadmapGroups(pages: RoadmapListing[]): { dir: string; pages: RoadmapListing[] }[] {
+  const groups = new Map<string, RoadmapListing[]>();
+  for (const page of pages) {
+    const dir = page.fileName.split("/").slice(1, -1).join("/");
+    const list = groups.get(dir) ?? [];
+    list.push(page);
+    groups.set(dir, list);
+  }
+  return [...groups]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+    .map(([dir, list]) => ({ dir, pages: list }));
+}
+
+/** Placeholder for a page while its content is on the way. */
+function PageSkeleton({ cards }: { cards: number }) {
+  return (
+    <div className="skeleton-page" aria-busy="true" aria-label="Loading">
+      <div className="skeleton-bar">
+        <span className="skeleton" style={{ height: "1.1rem", width: "18rem" }} />
+        <span className="skeleton" style={{ height: "1.75rem", width: "6rem", marginLeft: "auto" }} />
+      </div>
+      {Array.from({ length: cards }, (_, i) => (
+        <div key={i} className="skeleton-card">
+          <span className="skeleton" style={{ height: "0.9rem", width: `${40 + (i % 3) * 10}%` }} />
+          <span className="skeleton" style={{ height: "0.7rem", width: "90%" }} />
+          <span className="skeleton" style={{ height: "0.7rem", width: "72%" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Two-letter initials for an assignee chip. */
+function initialsOf(name: string): string {
+  return (
+    name
+      .split(/[\s._-]+/)
+      .filter(Boolean)
+      .map((w) => w[0]!)
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?"
+  );
+}
+
 interface OpenOptions {
   /** Push a history entry for the opened feature (deliberate navigation). */
   push?: boolean;
@@ -398,18 +537,27 @@ export function App() {
   /** Sidebar entry whose "⋯" menu is open (file name), if any. */
   const [treeMenu, setTreeMenu] = useState<string | null>(null);
   /** True while the File submenu of the open tree menu is expanded. */
-  const [treeMenuFile, setTreeMenuFile] = useState(false);
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  // Full-text search (specs/search.spec.md): while the query is non-empty
-  // the sidebar tree is replaced by ranked results.
-  const [query, setQuery] = useState("");
-  /** null until a search for the current session has completed. */
-  const [searchResults, setSearchResults] = useState<SearchResultItem[] | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  /** Result row the ↑/↓ highlight is on. */
-  const [activeResult, setActiveResult] = useState(0);
-  const searchRef = useRef<HTMLInputElement | null>(null);
+  // Full-text search (specs/search.spec.md) lives in the command palette
+  // (⌘K, src/frontend/CommandPalette.tsx): open, with the text it starts on.
+  const [palette, setPalette] = useState<{ query: string } | null>(null);
+  /** The pages opened most recently — the palette's empty state. */
+  const [recent, setRecent] = useState<RecentEntry[]>(readRecent);
+  /** The header's ⋯ menu, a card's ⋯ menu (by index), the assignee chips. */
+  const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
+  const [cardMenu, setCardMenu] = useState<number | null>(null);
+  const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
+  const [roadmapAssigneeMenuOpen, setRoadmapAssigneeMenuOpen] = useState(false);
+  /** Sidebar collapsed to a rail ("["), remembered on this device. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  /** The sidebar's filter, and its menu. */
+  const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  /** A roadmap entry's ⋯ menu (file name), if open. */
+  const [roadmapMenu, setRoadmapMenu] = useState<string | null>(null);
+  /** A feature is being fetched — the skeleton shows until it lands. */
+  const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
   /** Draft for the inline file-name editor; null while not editing. */
@@ -457,8 +605,11 @@ export function App() {
   const [conflictDraft, setConflictDraft] = useState("");
   /** Which resolution is being published, if any — the buttons disable while it runs. */
   const [resolving, setResolving] = useState<"ours" | "theirs" | "draft" | null>(null);
-  const [status, setStatus] = useState("");
-  const [savedFlash, setSavedFlash] = useState(false);
+  /** Autosave state behind the header's Saved indicator. */
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  /** The `?` keyboard cheat sheet. */
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   /** "all", a scenario key (`name@vN`), or null while no publish is running. */
   const [publishing, setPublishing] = useState<string | null>(null);
@@ -756,56 +907,9 @@ export function App() {
     loadRoadmapPages,
   ]);
 
-  // specs/ui.spec.md "Select scenarios via up and down keys": arrow keys move a
-  // highlight through the scenario cards, Enter opens the highlighted one in
-  // the dialog. Inert while a dialog is open or while typing in a field.
-  useEffect(() => {
-    if (
-      !feature ||
-      feature.scenarios.length === 0 ||
-      editing ||
-      settingsOpen ||
-      userInfoOpen ||
-      modalOpen
-    )
-      return;
-    const count = feature.scenarios.length;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLSelectElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        // Steal focus from a clicked button (e.g. the feature just opened in
-        // the sidebar) so a following Enter edits the highlighted scenario
-        // instead of re-activating that button.
-        if (t instanceof HTMLElement) t.blur();
-        setSelectedScenario((i) => {
-          if (e.key === "ArrowDown") return i === null ? 0 : Math.min(i + 1, count - 1);
-          return i === null ? count - 1 : Math.max(i - 1, 0);
-        });
-      } else if (e.key === "Enter" && selectedScenario !== null) {
-        // A focused button or link keeps its native Enter activation — except
-        // the highlighted card's own title link, which a click left focused:
-        // Enter there edits the scenario rather than re-selecting it.
-        const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
-          ".scenario-title > a",
-        );
-        if (t instanceof HTMLButtonElement) return;
-        if (t instanceof HTMLAnchorElement && t !== titleLink) return;
-        e.preventDefault();
-        const s = feature.scenarios[selectedScenario];
-        if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [feature, editing, settingsOpen, userInfoOpen, modalOpen, selectedScenario]);
+  // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
+  // meanings, "/" for search and the rest — is declared in one registry
+  // further down (`shortcuts`) and dispatched by one listener.
 
   // The dialog's "Add test link" field starts empty each time it opens, with
   // no row left open for ✎ editing (specs/traceability.spec.md).
@@ -857,249 +961,19 @@ export function App() {
     setLinkError(null);
   }, [editingOpen, linkDraft]);
 
-  // ESC closes the feature's ticket-link dialog without saving, like Cancel
-  // (specs/ui.spec.md "Dialogs").
   const featureLinkOpen = featureLinkDraft !== null;
-  useEffect(() => {
-    if (!featureLinkOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setFeatureLinkDraft(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [featureLinkOpen]);
-
-  // specs/editor/spec-editor.feature.md "Spec editor pane": ESC is the way
-  // back, like `<` — leaving the scenario in its autosaved state — and it
-  // works while a pane field has focus. Unless something open above the pane
-  // owns the key: the sidebar stays reachable beside the pane, and its menus,
-  // Settings and the other dialogs each take their ESC on the same window
-  // listener, so one press must not also leave the editor. The search field
-  // clears itself on ESC — an ESC from inside the sidebar is its own.
-  const escapeOwnedElsewhere =
-    settingsOpen ||
-    userInfoOpen ||
-    modalOpen ||
-    conflict !== null ||
-    featureLinkOpen ||
-    userMenuOpen ||
-    recentMenuOpen ||
-    treeMenu !== null;
-  useEffect(() => {
-    if (!editing || escapeOwnedElsewhere) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (e.target instanceof Element && e.target.closest("aside")) return;
-      e.preventDefault();
-      editorRef.current.back();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [editing, escapeOwnedElsewhere]);
-
-  // specs/ui.spec.md "Settings": ESC closes the settings dialog — every
-  // change is already saved — and it works while a dialog field has focus.
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSettingsOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen]);
-
-  // specs/ui.spec.md "Dialogs": ESC closes the merge conflict dialog. The
-  // merge itself lives in the repo (specs/git-operations.spec.md), so nothing
-  // is lost — the note below says Publish brings the choices back.
-  useEffect(() => {
-    if (!conflict) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || resolving) return;
-      e.preventDefault();
-      dismissConflict();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [conflict, resolving]);
-
-  // specs/user-info-settings.spec.md: ESC or a click anywhere else closes
-  // the user menu.
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".user-corner"))
-        setUserMenuOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setUserMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [userMenuOpen]);
-
-  // specs/ui/ui.feature.md "Recent folder list": ESC or a click anywhere
-  // else closes the folder drop down (same behavior as the user menu).
-  useEffect(() => {
-    if (!recentMenuOpen) return;
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".repo-recent"))
-        setRecentMenuOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setRecentMenuOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [recentMenuOpen]);
-
-  // specs/ui.spec.md "Feature entry menu": ESC or a click anywhere else
-  // closes the entry's drop down menu (same behavior as the user menu).
-  useEffect(() => {
-    if (treeMenu === null) return;
-    const close = () => {
-      setTreeMenu(null);
-      setTreeMenuFile(false);
-    };
-    const onDown = (e: Event) => {
-      if (!(e.target instanceof Element) || !e.target.closest(".tree-row-menu")) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        close();
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [treeMenu]);
-
-  // specs/folders.spec.md: ESC deselects the folder, moving the insertion
-  // point back to the tree root so "+ New folder" adds a top-level folder.
-  // Inert while a dialog is open or while typing (ESC cancels those instead).
-  useEffect(() => {
-    if (
-      selectedFolder === null ||
-      editing ||
-      settingsOpen ||
-      userMenuOpen ||
-      recentMenuOpen ||
-      userInfoOpen ||
-      treeMenu !== null
-    )
-      return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      e.preventDefault();
-      setSelectedFolder(null);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedFolder, editing, settingsOpen, userMenuOpen, recentMenuOpen, userInfoOpen, treeMenu]);
-
-  // Search as the user types, debounced (specs/search.spec.md); the
-  // AbortController keeps a stale response from overwriting a newer query.
-  useEffect(() => {
-    const q = query.trim();
-    setActiveResult(0);
-    if (!q) {
-      setSearchResults(null);
-      setSearchError(null);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (res.ok) {
-          setSearchResults(data.results);
-          setSearchError(null);
-        } else {
-          setSearchResults([]);
-          setSearchError(data.error ?? "Search failed");
-        }
-      } catch {
-        // Aborted by a newer keystroke or unmount; anything else (server
-        // gone mid-typing) leaves the previous results standing.
-      }
-    }, 200);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [query]);
-
-  // specs/search.spec.md: "/" and Cmd/Ctrl+F focus the search field from
-  // anywhere — except while a dialog is open or typing in another field. The
-  // editor pane is no dialog: the search field is right beside it.
-  useEffect(() => {
-    if (settingsOpen || userInfoOpen || modalOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const slash = e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey;
-      const find =
-        e.key.toLowerCase() === "f" && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey;
-      if (!slash && !find) return;
-      const t = e.target;
-      if (
-        t instanceof HTMLInputElement ||
-        t instanceof HTMLTextAreaElement ||
-        t instanceof HTMLSelectElement ||
-        (t instanceof HTMLElement && t.isContentEditable)
-      )
-        return;
-      e.preventDefault();
-      searchRef.current?.focus();
-      searchRef.current?.select();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [settingsOpen, userInfoOpen, modalOpen]);
-
-  // Keep the ↑/↓ highlight visible while it walks the result list.
-  useEffect(() => {
-    document.querySelector(".search-result.active")?.scrollIntoView({ block: "nearest" });
-  }, [activeResult]);
+  // ESC (specs/ui.spec.md "Dialogs", specs/editor/spec-editor.feature.md
+  // "Spec editor pane", specs/folders.spec.md): one key, closing whatever is
+  // on top — see `closeTopmost` in the shortcut registry below. The menus
+  // (src/frontend/Menu.tsx) take their own ESC and outside clicks.
 
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog. The
   // editor pane is part of the page, not a dialog — Tab reaches the sidebar
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
-  const featureLinkTrapRef = useFocusTrap(featureLinkOpen);
   const conflictTrapRef = useFocusTrap(conflict !== null);
+  const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
 
   // Also re-run when the editor pane gives the feature page back: the cards
   // mount afresh, so the highlighted one is scrolled to even if the highlight
@@ -1241,7 +1115,6 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        setStatus("");
         // The old folder's pages are not this folder's: the sidebar section
         // empties, and refills below when the Roadmap setting shows it at all.
         setRoadmapPages([]);
@@ -1257,7 +1130,7 @@ export function App() {
           state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
         ]);
       } else {
-        setStatus(state.error ?? "Could not use this directory");
+        toast.error(state.error ?? "Could not use this directory");
       }
     } finally {
       setSettingRepo(false);
@@ -1265,7 +1138,10 @@ export function App() {
   };
 
   const openFeature = async (file: string, opts: OpenOptions = {}) => {
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
+    setFeatureLoading(true);
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).finally(() =>
+      setFeatureLoading(false),
+    );
     if (res.ok) {
       const data = await res.json();
       const parsed = featureFromResponse(data, file);
@@ -1305,11 +1181,11 @@ export function App() {
       setRenameDraft(null);
       setConflict(null);
       if (opts.editDescription) openDescriptionEditor(file, parsed.description);
-      setStatus(
-        missingScenario
-          ? `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`
-          : "",
-      );
+      if (missingScenario) {
+        toast.error(
+          `Scenario "${missingScenario}" not found — it may have been renamed or deleted.`,
+        );
+      }
     } else {
       // The file is gone — deleted, renamed by the `.feature.md` migration, or
       // a stale deep link. Drop a stale selection rather than re-fetching it
@@ -1320,10 +1196,9 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        setStatus("");
       }
       if (opts.push || opts.scenario !== undefined) {
-        setStatus(`Feature "${file}" not found — the link may be stale.`);
+        toast.error(`Feature "${file}" not found — the link may be stale.`);
       }
       await loadFeatures();
     }
@@ -1345,7 +1220,6 @@ export function App() {
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
-    setStatus("");
     if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
@@ -1367,7 +1241,6 @@ export function App() {
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
-      setStatus("");
     }
   };
 
@@ -1413,7 +1286,7 @@ export function App() {
       // editor.feature.md "Edit feature descrition").
       await openFeature(data.fileName, { push: true, editDescription: true });
     } else {
-      setStatus(data.error);
+      toast.error(data.error ?? "Could not create the feature");
     }
   };
 
@@ -1569,7 +1442,7 @@ export function App() {
       setSelectedFolder(data.path);
       await loadFeatures();
     } else {
-      setStatus(data.error ?? "Could not create the folder");
+      toast.error(data.error ?? "Could not create the folder");
     }
   };
 
@@ -1588,9 +1461,23 @@ export function App() {
       // A selection under the deleted folder points nowhere — drop it.
       setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
       await loadFeatures();
+      toast.success(`Deleted folder "${path}".`, {
+        action: { label: "Undo", run: () => void restoreFolder(path) },
+      });
     } else {
-      setStatus(data.error ?? "Could not delete the folder");
+      toast.error(data.error ?? "Could not delete the folder");
     }
+  };
+
+  /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
+  const restoreFolder = async (path: string) => {
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (res.ok) await loadFeatures();
+    else toast.error(`Could not restore "${path}".`);
   };
 
   // Drag-move (specs/folders.spec.md): the server does a `git mv` into
@@ -1609,10 +1496,14 @@ export function App() {
       await loadFeatures();
       if (data.fileName !== fileName) {
         if (selected === fileName) await openFeature(data.fileName);
-        setStatus(`Moved to ${folder || "the top level"} — ${data.message}.`);
+        // Undo moves it straight back to where it came from.
+        const from = fileName.includes("/") ? fileName.slice(0, fileName.lastIndexOf("/")) : "";
+        toast.success(`Moved to ${folder || "the top level"} — ${data.message}.`, {
+          action: { label: "Undo", run: () => void moveTo(data.fileName, from) },
+        });
       }
     } else {
-      setStatus(data.error ?? "Move failed");
+      toast.error(data.error ?? "Move failed");
     }
   };
 
@@ -1640,12 +1531,12 @@ export function App() {
         setRenameDraft(null);
         await loadFeatures();
         await openFeature(selected);
-        setStatus(`Renamed to "${data.name}" — ${data.message}.`);
+        toast.success(`Renamed to "${data.name}" — ${data.message}.`);
       } else {
-        setStatus(data.error ?? "Rename failed");
+        toast.error(data.error ?? "Rename failed");
       }
     } catch {
-      setStatus("Rename failed — is the server running?");
+      toast.error("Rename failed — is the server running?");
     } finally {
       setRenaming(false);
     }
@@ -1677,10 +1568,10 @@ export function App() {
       await loadFeatures();
       if (data.fileName !== fileName) {
         if (selected === fileName) await openFeature(data.fileName);
-        setStatus(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
+        toast.success(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
       }
     } else {
-      setStatus(data.error ?? "Rename failed");
+      toast.error(data.error ?? "Rename failed");
     }
   };
 
@@ -1706,9 +1597,9 @@ export function App() {
         setSelectedScenario(null);
       }
       await loadFeatures();
-      setStatus(`Deleted "${f.name}" — ${data.message}.`);
+      toast.success(`Deleted "${f.name}" — ${data.message}.`);
     } else {
-      setStatus(data.error ?? "Delete failed");
+      toast.error(data.error ?? "Delete failed");
     }
   };
 
@@ -1735,14 +1626,14 @@ export function App() {
       if (res.status === 409 && data.status === "conflict") {
         setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
         setConflictDraft(data.ours);
-        setStatus("Merge conflict — choose a resolution below.");
+        toast.info("Merge conflict — choose a resolution below.");
       } else if (res.ok) {
         await openFeature(selected);
       } else {
-        setStatus(data.error ?? "Publish failed");
+        toast.error(data.error ?? "Publish failed");
       }
     } catch {
-      setStatus("Publish failed — is the server running?");
+      toast.error("Publish failed — is the server running?");
     } finally {
       setPublishing(null);
     }
@@ -1758,13 +1649,13 @@ export function App() {
       const res = await fetch("/api/reload", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
-        setStatus(data.error ?? "Sync failed");
+        toast.error(data.error ?? "Sync failed");
         return;
       }
       await loadFeatures();
       if (selected && !dirty && !editing && !conflict) await openFeature(selected);
     } catch {
-      setStatus("Sync failed — is the server running?");
+      toast.error("Sync failed — is the server running?");
     } finally {
       setSyncing(false);
     }
@@ -1773,7 +1664,6 @@ export function App() {
   const resolveWith = async (which: "ours" | "theirs" | "draft", resolved: string) => {
     if (!selected || resolving) return;
     setResolving(which);
-    setStatus("Publishing resolution…");
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
         method: "PUT",
@@ -1792,10 +1682,10 @@ export function App() {
         // openFeature closes the dialog by clearing the conflict.
         await openFeature(selected);
       } else {
-        setStatus(data.error ?? "Publish failed");
+        toast.error(data.error ?? "Publish failed");
       }
     } catch {
-      setStatus("Publish failed — is the server running?");
+      toast.error("Publish failed — is the server running?");
     } finally {
       setResolving(null);
     }
@@ -1805,7 +1695,7 @@ export function App() {
       in the repo, so Publish brings the same choices back. */
   const dismissConflict = () => {
     setConflict(null);
-    setStatus("Merge conflict left unresolved — Publish again to pick a resolution.");
+    toast.info("Merge conflict left unresolved — Publish again to pick a resolution.");
   };
 
   /** Handle a link in-app on a plain click; cmd/ctrl/shift-clicks keep their
@@ -1836,7 +1726,7 @@ export function App() {
       const ok = document.execCommand("copy");
       ta.remove();
       if (!ok) {
-        setStatus("Could not copy the link to the clipboard.");
+        toast.error("Could not copy the link to the clipboard.");
         return;
       }
     }
@@ -1845,10 +1735,10 @@ export function App() {
   };
 
   // specs/crud-feature.spec.md ("Scenario is automatically saved locally and
-  // pushed to GitHub"): show 'Saved' on the top banner for 2 sec.
-  const flashSaved = () => {
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2000);
+  // pushed to GitHub"): a landed save updates the header's Saved indicator.
+  const markSaved = () => {
+    setSaving(false);
+    setSavedAt(Date.now());
   };
 
   /**
@@ -1895,6 +1785,7 @@ export function App() {
     setFeature(next);
     if (close) setEditing(null);
     const session = editorSession.current;
+    setSaving(true);
     const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1943,21 +1834,14 @@ export function App() {
       // A published scenario's editor can only have changed its links — test
       // links (specs/traceability.spec.md) and its ticket link — so there is
       // nothing left to publish.
-      if (stillHere) {
-        setStatus(
-          s.status === "published"
-            ? `Saved the links of "${s.name}" v${s.version}.`
-            : s.status === "draft"
-              ? `Saved "${s.name}" v${s.version} as a draft — drafts stay out of the feature file.`
-              : "Saved — publish scenarios from their cards, or press Publish All.",
-        );
-        flashSaved();
-      }
+      if (stillHere) markSaved();
+      else setSaving(false);
       return true;
     }
+    setSaving(false);
     if (stillHere) {
       setDirty(true);
-      setStatus(data.error ?? "Save failed");
+      toast.error(data.error ?? "Save failed");
     }
     return false;
   };
@@ -2002,7 +1886,7 @@ export function App() {
     const name = editing.scenario.name.trim();
     const version = draftVersion;
     if (await commitScenario(tests, true, "proposed")) {
-      setStatus(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
+      toast.success(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
     }
   };
 
@@ -2086,6 +1970,7 @@ export function App() {
     if (content === null || content === readmeSaved.current) return;
     if (readmeInFlight.current) return; // the previous tick is still saving
     readmeInFlight.current = true;
+    setSaving(true);
     const session = readmeSession.current;
     try {
       const res = await fetch("/api/readme", {
@@ -2094,15 +1979,19 @@ export function App() {
         body: JSON.stringify({ content }),
       });
       if (res.ok) {
-        if (session === readmeSession.current) readmeSaved.current = content;
+        if (session === readmeSession.current) {
+          readmeSaved.current = content;
+          markSaved();
+        }
       } else {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setStatus(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`README.md not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`README.md not saved: ${(e as Error).message} — will retry.`);
     } finally {
       readmeInFlight.current = false;
+      setSaving(false);
     }
   };
   const readmeTick = useRef(autosaveReadme);
@@ -2138,7 +2027,7 @@ export function App() {
     if (!res.ok || typeof data.content !== "string") {
       // Gone — deleted, renamed, or a stale deep link.
       if (roadmapPageRef.current?.fileName === fileName) closeRoadmapPage({ save: false });
-      setStatus(data.error ?? `Roadmap page "${fileName}" not found — the link may be stale.`);
+      toast.error(data.error ?? `Roadmap page "${fileName}" not found — the link may be stale.`);
       await loadRoadmapPages();
       return;
     }
@@ -2155,7 +2044,6 @@ export function App() {
     if (opts.push && location.pathname !== roadmapPath(fileName)) {
       history.pushState(null, "", roadmapPath(fileName));
     }
-    setStatus("");
   };
 
   /** The listing fields of a page response, without its content. */
@@ -2187,6 +2075,7 @@ export function App() {
     if (roadmapInFlight.current) return; // the previous tick is still saving
     roadmapInFlight.current = true;
     const session = roadmapSession.current;
+    setSaving(true);
     try {
       const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
         method: "PUT",
@@ -2200,6 +2089,7 @@ export function App() {
           // document's projection, which can be tidier than the buffer, and
           // taking that back would have every tick save the same text again.
           roadmapSaved.current = content;
+          markSaved();
           // Only when the heading or the assignment actually moved: a new
           // listing object on every tick would restart the timers watching it.
           setRoadmapPage((open) =>
@@ -2209,12 +2099,13 @@ export function App() {
           );
         }
       } else {
-        setStatus(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
     } finally {
       roadmapInFlight.current = false;
+      setSaving(false);
     }
   };
   const roadmapTick = useRef(autosaveRoadmap);
@@ -2272,16 +2163,17 @@ export function App() {
         roadmapTextRef.current = data.content;
         setRoadmapText(data.content);
         setRoadmapPage(roadmapListing(data));
-        setStatus(
+        toast.success(
           assigned ? `Assigned to ${assigned} — saved locally.` : "Assignment cleared — saved locally.",
+          { action: { label: "Undo", run: () => void saveRoadmapAssigned(_previous ?? "") } },
         );
-        flashSaved();
+        markSaved();
         void loadRoadmapPages();
       } else {
-        setStatus(data.error ?? "Could not save the assignment");
+        toast.error(data.error ?? "Could not save the assignment");
       }
     } catch {
-      setStatus("Could not save the assignment — is the server running?");
+      toast.error("Could not save the assignment — is the server running?");
     } finally {
       setRoadmapAssignedSaving(false);
     }
@@ -2303,7 +2195,7 @@ export function App() {
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {
-      setStatus(data.error ?? "Could not create the roadmap page");
+      toast.error(data.error ?? "Could not create the roadmap page");
       return;
     }
     // Reveal the new page: the section may be folded shut, and a page that
@@ -2311,6 +2203,60 @@ export function App() {
     toggleRoadmapSection(false);
     await loadRoadmapPages();
     await openRoadmapPage(data.fileName, { push: true });
+  };
+
+  /** Rename a page (its `# heading`), saved through the page's document. */
+  const renameRoadmapPage = async (page: RoadmapListing) => {
+    const name = await prompt({
+      title: "Rename roadmap page",
+      initial: page.name,
+      confirmLabel: "Rename",
+    });
+    if (!name || name.trim() === page.name) return;
+    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`);
+    const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
+    if (!res.ok || typeof data.content !== "string") {
+      toast.error(data.error ?? "Could not read the roadmap page");
+      return;
+    }
+    const next = serializeRoadmap({ ...parseRoadmap(data.content), name: name.trim() });
+    const put = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    const saved = (await put.json().catch(() => ({}))) as { error?: string };
+    if (!put.ok) {
+      toast.error(saved.error ?? "Could not rename the roadmap page");
+      return;
+    }
+    toast.success(`Renamed to “${name.trim()}” — saved locally.`);
+    await loadRoadmapPages();
+    if (roadmapPageRef.current?.fileName === page.fileName) await openRoadmapPage(page.fileName);
+  };
+
+  /** Delete a page — committed and pushed right away, so it is confirmed first. */
+  const removeRoadmapPage = async (page: RoadmapListing) => {
+    const ok = await confirm({
+      title: "Delete roadmap page",
+      body: `Delete “${page.name}”? This is committed and pushed right away.`,
+      confirmLabel: "Delete page",
+    });
+    if (!ok) return;
+    if (roadmapPageRef.current?.fileName === page.fileName) {
+      closeRoadmapPage({ save: false });
+      history.replaceState(null, "", "/");
+    }
+    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+      method: "DELETE",
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not delete the roadmap page");
+      return;
+    }
+    toast.success(`Deleted “${page.name}”${data.message ? ` — ${data.message}` : ""}.`);
+    await loadRoadmapPages();
   };
 
   /** Fold the Roadmap section away, or open it back up; the choice sticks. */
@@ -2343,6 +2289,7 @@ export function App() {
     if (edit.text === descSaved.current) return;
     if (descInFlight.current) return; // the previous tick is still saving
     descInFlight.current = true;
+    setSaving(true);
     const next: Feature = { ...feature, description: edit.text.trim() };
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
@@ -2361,15 +2308,16 @@ export function App() {
         if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
         if (selectedRef.current === edit.file) {
           setFeature(featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file));
-          flashSaved();
+          markSaved();
         }
       } else {
-        setStatus(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
+        toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {
-      setStatus(`Description not saved: ${(e as Error).message} — will retry.`);
+      toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
     } finally {
       descInFlight.current = false;
+      setSaving(false);
     }
   };
   const descTick = useRef(autosaveDescription);
@@ -2778,12 +2726,12 @@ export function App() {
         setFeature(featureFromResponse(data, selected));
         setDirty(false);
         setFeatureLinkDraft(null);
-        setStatus(
+        toast.success(
           resolved.link
             ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
             : `Ticket link removed — ${data.message}.`,
         );
-        flashSaved();
+        markSaved();
       } else {
         setFeatureLinkError(data.error ?? "Could not save the ticket link");
       }
@@ -2829,15 +2777,16 @@ export function App() {
       if (res.ok) {
         setFeature(featureFromResponse(data, selected));
         setDirty(false);
-        setStatus(
+        toast.success(
           assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
+          { action: { label: "Undo", run: () => void saveAssigned(_previous ?? "") } },
         );
-        flashSaved();
+        markSaved();
       } else {
-        setStatus(data.error ?? "Could not save the assignment");
+        toast.error(data.error ?? "Could not save the assignment");
       }
     } catch {
-      setStatus("Could not save the assignment — is the server running?");
+      toast.error("Could not save the assignment — is the server running?");
     } finally {
       setAssignedSaving(false);
     }
@@ -2986,11 +2935,11 @@ export function App() {
       // content with the remaining drafts folded back in.
       setFeature(featureFromResponse(data, selected));
       setDirty(false);
-      setStatus(done);
-      flashSaved();
+      toast.success(done);
+      markSaved();
     } else {
       setDirty(true);
-      setStatus(data.error ?? "Delete failed");
+      toast.error(data.error ?? "Delete failed");
     }
   };
 
@@ -3081,16 +3030,19 @@ export function App() {
       return next;
     });
 
-  /** Open a search hit exactly like its deep link (specs/search.spec.md). */
-  const openResult = (r: SearchResultItem) => {
+  /**
+   * Open a search hit exactly like its deep link (specs/search.spec.md): a
+   * scenario hit opens that scenario's page — or, with ⌘⏎ in the palette,
+   * its feature page with the card highlighted.
+   */
+  const openResult = (r: SearchResultItem, onFeaturePage = false) => {
     setSelectedFolder(null);
     void openFeature(r.fileName, {
       push: true,
       scenario: r.scenario
         ? { slug: slugify(r.scenario.name), version: r.scenario.version }
         : null,
-      // Like the deep link: a scenario hit opens that scenario's page.
-      pane: true,
+      pane: r.scenario !== undefined && !onFeaturePage,
     });
   };
 
@@ -3111,7 +3063,7 @@ export function App() {
     const entry = specSelection.get(f.fileName);
     return (
       <div key={f.fileName}>
-        <div className="tree-row">
+        <div className={`tree-row${matchesFilter(f) ? "" : " dim"}`}>
           {/* Code gen selection (specs/agents/claude.spec.md): checking a
               spec here takes the whole thing; a dash means some of its
               scenarios are picked, which is done on the scenario cards.
@@ -3140,6 +3092,10 @@ export function App() {
       <a
         href={featurePath(f.fileName)}
         className={`tree-feature${f.fileName === selected ? " active" : ""}`}
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-current={f.fileName === selected ? "page" : undefined}
+        data-file={f.fileName}
         /* The checkbox carries the depth indent; without it the link does. */
         style={{ paddingLeft: codeGen ? "0.4rem" : `${0.6 + depth * 0.9}rem` }}
         draggable
@@ -3162,59 +3118,55 @@ export function App() {
       >
         {f.name}
       </a>
+      {/* The feature's rollup (specs/ui/ui.feature.md "Design system"): how
+          many of its scenarios are published, as a small ring. */}
+      <PublishRing
+        published={f.scenarios.filter((s) => s.status === "published").length}
+        total={f.scenarios.length}
+      />
       {/* Drop down menu (specs/ui.spec.md "Feature entry menu"): File →
           Rename edits the underlying file name; Delete removes the file. */}
       <span className="tree-row-menu">
-        <button
-          type="button"
-          className="tree-menu-btn"
-          title={`Menu for ${f.fileName}`}
-          aria-haspopup="menu"
-          aria-expanded={treeMenu === f.fileName}
-          onClick={() => {
-            setTreeMenuFile(false);
-            setTreeMenu((m) => (m === f.fileName ? null : f.fileName));
-          }}
-        >
-          ⋯
-        </button>
-        {treeMenu === f.fileName && (
-          <div className="tree-menu" role="menu" aria-label={`Menu for ${f.fileName}`}>
-            <button
-              role="menuitem"
-              aria-haspopup="menu"
-              aria-expanded={treeMenuFile}
-              onClick={() => setTreeMenuFile((o) => !o)}
-            >
-              File {treeMenuFile ? "▾" : "▸"}
-            </button>
-            {treeMenuFile && (
-              <div className="tree-submenu" role="menu" aria-label="File">
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setTreeMenu(null);
-                    setTreeMenuFile(false);
-                    void renameFile(f.fileName);
-                  }}
-                >
-                  Rename “{fileStem(f.fileName)}”
-                </button>
-              </div>
-            )}
-            <button
-              role="menuitem"
-              className="danger"
-              onClick={() => {
-                setTreeMenu(null);
-                setTreeMenuFile(false);
-                void removeFeature(f);
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
+        <Tooltip label="More actions">
+          <button
+            type="button"
+            className="tree-menu-btn"
+            aria-label={`Menu for ${f.fileName}`}
+            aria-haspopup="menu"
+            aria-expanded={treeMenu === f.fileName}
+            onClick={() => setTreeMenu((m) => (m === f.fileName ? null : f.fileName))}
+          >
+            <Ellipsis size={14} aria-hidden="true" />
+          </button>
+        </Tooltip>
+        <Menu
+          open={treeMenu === f.fileName}
+          onClose={() => setTreeMenu(null)}
+          label={`Menu for ${f.fileName}`}
+          className="tree-menu"
+          containerSelector=".tree-row-menu"
+          items={[
+            {
+              id: "file",
+              label: "File",
+              items: [
+                {
+                  id: "rename",
+                  label: `Rename “${fileStem(f.fileName)}”`,
+                  icon: <Pencil size={13} />,
+                  onSelect: () => void renameFile(f.fileName),
+                },
+              ],
+            },
+            {
+              id: "delete",
+              label: "Delete",
+              icon: <Trash2 size={13} />,
+              danger: true,
+              onSelect: () => void removeFeature(f),
+            },
+          ]}
+        />
       </span>
         </div>
       </div>
@@ -3257,31 +3209,634 @@ export function App() {
             <button
               type="button"
               className="folder-toggle"
+              role="treeitem"
+              aria-level={depth + 1}
               aria-expanded={!collapsed.has(child.path)}
+              data-folder={child.path}
               onClick={() => {
                 setSelectedFolder(child.path);
                 toggleFolder(child.path);
               }}
             >
-              <span className="twist">{collapsed.has(child.path) ? "▸" : "▾"}</span> {child.name}
+              <span className="twist">
+                {collapsed.has(child.path) ? (
+                  <ChevronRight size={12} aria-hidden="true" />
+                ) : (
+                  <ChevronDown size={12} aria-hidden="true" />
+                )}
+              </span>{" "}
+              {child.name}
             </button>
-            <button
-              type="button"
-              className="folder-delete"
-              title={`Delete folder ${child.path}`}
-              onClick={() => void removeFolder(child.path)}
-            >
-              ✕
-            </button>
+            <Tooltip label="Delete folder">
+              <button
+                type="button"
+                className="folder-delete"
+                aria-label={`Delete folder ${child.path}`}
+                onClick={() => void removeFolder(child.path)}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
-          {!collapsed.has(child.path) && renderTree(child, depth + 1)}
+          {!collapsed.has(child.path) && <div role="group">{renderTree(child, depth + 1)}</div>}
         </div>
       ))}
       {node.features.map((f) => featureItem(f, depth))}
     </>
   );
 
-  if (loading) return <main className="centered">Loading…</main>;
+  // One keyboard model (specs/ui/ui.feature.md "Design system"): every
+  // shortcut is declared once here, dispatched by one listener
+  // (src/frontend/shortcuts.tsx) and listed by the `?` cheat sheet from the
+  // same list. Single keys stay quiet while a dialog or menu is open and
+  // while typing in a field; ESC works everywhere.
+  const dialogOpen =
+    settingsOpen ||
+    userInfoOpen ||
+    modalOpen ||
+    conflict !== null ||
+    featureLinkOpen ||
+    sessionError !== null ||
+    sheetOpen ||
+    palette !== null;
+  const menuOpen =
+    treeMenu !== null ||
+    recentMenuOpen ||
+    userMenuOpen ||
+    featureMenuOpen ||
+    cardMenu !== null ||
+    assigneeMenuOpen ||
+    roadmapAssigneeMenuOpen ||
+    filterMenuOpen ||
+    roadmapMenu !== null;
+  const quiet = dialogOpen || menuOpen;
+  const onFeaturePage = selected !== null && feature !== null && editing === null;
+  const toggleSidebar = () =>
+    setSidebarCollapsed((c) => {
+      storeSidebarCollapsed(!c);
+      return !c;
+    });
+  const newScenario = () =>
+    setEditing({
+      index: null,
+      isNew: true,
+      scenario: { name: "", version: 1, status: "draft", body: "", tests: [] },
+    });
+  // specs/ui.spec.md "Select scenarios via up and down keys": the highlight
+  // walks the cards; Enter opens the highlighted one in the editor pane.
+  const moveScenarioSelection = (e: KeyboardEvent, delta: 1 | -1) => {
+    if (!feature) return;
+    const count = feature.scenarios.length;
+    // Steal focus from a clicked button (e.g. the feature just opened in the
+    // sidebar) so a following Enter edits the highlighted scenario instead
+    // of re-activating that button.
+    if (e.target instanceof HTMLElement) e.target.blur();
+    setSelectedScenario((i) =>
+      delta > 0
+        ? i === null
+          ? 0
+          : Math.min(i + 1, count - 1)
+        : i === null
+          ? count - 1
+          : Math.max(i - 1, 0),
+    );
+  };
+  const openSelectedScenario = (e: KeyboardEvent): void | false => {
+    if (!feature || selectedScenario === null) return false;
+    const t = e.target;
+    if (e.key === "Enter") {
+      // A focused button or link keeps its native Enter activation — except
+      // the highlighted card's own title link, which a click left focused:
+      // Enter there edits the scenario rather than re-selecting it.
+      const titleLink = scenarioRefs.current[selectedScenario]?.querySelector(
+        ".scenario-title > a",
+      );
+      if (t instanceof HTMLButtonElement) return false;
+      if (t instanceof HTMLAnchorElement && t !== titleLink) return false;
+    }
+    const s = feature.scenarios[selectedScenario];
+    if (s) setEditing({ index: selectedScenario, scenario: { ...s } });
+  };
+  // ESC closes whatever is on top (specs/ui.spec.md "Dialogs"): a dialog;
+  // then the editor pane — its way back, leaving the scenario autosaved
+  // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
+  // key came from the sidebar, which stays reachable beside the pane; then
+  // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
+  const closeTopmost = (e: KeyboardEvent): void | false => {
+    if (sessionError !== null) return setSessionError(null);
+    if (conflict) {
+      if (resolving) return false;
+      dismissConflict();
+      return;
+    }
+    if (settingsOpen) return setSettingsOpen(false);
+    if (userInfoOpen) return setUserInfoOpen(false);
+    if (featureLinkOpen) return setFeatureLinkDraft(null);
+    if (modalOpen || sheetOpen || menuOpen) return false;
+    const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
+    if (editing && !fromSidebar) {
+      editorRef.current.back();
+      return;
+    }
+    if (isTypingTarget(e.target)) return false;
+    if (selectedFolder !== null) return setSelectedFolder(null);
+    return false;
+  };
+  const shortcuts: Shortcut[] = [
+    {
+      id: "search",
+      keys: ["mod+k", "/", "mod+f"],
+      label: "Search specs and commands",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => setPalette({ query: "" }),
+    },
+    {
+      id: "sheet",
+      keys: "?",
+      label: "Keyboard shortcuts",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => setSheetOpen(true),
+    },
+    {
+      id: "go-home",
+      keys: "g h",
+      label: "Go to Home (README)",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => {
+        goHome();
+        void loadReadme();
+      },
+    },
+    {
+      id: "go-roadmap",
+      keys: "g r",
+      label: "Go to the roadmap",
+      group: "Navigate",
+      when: () => !quiet && roadmapPages.length > 0,
+      run: () => {
+        const page = roadmapPages[0];
+        if (page) void openRoadmapPage(page.fileName, { push: true });
+      },
+    },
+    {
+      id: "settings",
+      keys: ["mod+,", "g s"],
+      label: "Settings",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => openSettings(),
+    },
+    {
+      id: "theme",
+      keys: "mod+shift+l",
+      label: "Cycle the theme",
+      group: "Navigate",
+      inFields: true,
+      when: () => !quiet,
+      run: () => {
+        const order: ThemePref[] = ["system", "light", "dark"];
+        const next = order[(order.indexOf(theme) + 1) % order.length]!;
+        setTheme(next);
+        applyThemePref(next);
+        toast.info(`Theme: ${next}`);
+      },
+    },
+    {
+      id: "sidebar",
+      keys: "[",
+      label: sidebarCollapsed ? "Expand the sidebar" : "Collapse the sidebar",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => toggleSidebar(),
+    },
+    {
+      id: "escape",
+      keys: "escape",
+      label: "Close, go back, or clear the selection",
+      group: "Navigate",
+      inFields: true,
+      run: closeTopmost,
+    },
+    {
+      id: "create",
+      keys: "c",
+      label: onFeaturePage ? "New scenario" : "New feature",
+      group: "Create",
+      when: () => !quiet && editing === null,
+      run: () => {
+        if (onFeaturePage) newScenario();
+        else void createFeature();
+      },
+    },
+    {
+      id: "next",
+      keys: ["j", "arrowdown"],
+      label: "Next scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
+      run: (e) => moveScenarioSelection(e, 1),
+    },
+    {
+      id: "prev",
+      keys: ["k", "arrowup"],
+      label: "Previous scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
+      run: (e) => moveScenarioSelection(e, -1),
+    },
+    {
+      id: "open",
+      keys: ["enter", "e", "o"],
+      label: "Open the selected scenario",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && selectedScenario !== null,
+      run: openSelectedScenario,
+    },
+    {
+      id: "publish",
+      keys: "mod+enter",
+      label: editing
+        ? editing.scenario.status === "draft"
+          ? "Propose the scenario"
+          : "Publish the scenario"
+        : "Publish all",
+      group: "Publish",
+      inFields: true,
+      when: () => !quiet && (editing !== null || onFeaturePage),
+      run: () => {
+        if (publishing !== null) return false;
+        if (editing) {
+          if (editing.scenario.status === "published" || !editing.scenario.name.trim())
+            return false;
+          if (editing.scenario.status === "draft") void proposeScenario();
+          else void publishScenario();
+          return;
+        }
+        void publish();
+      },
+    },
+    {
+      id: "copy-link",
+      keys: "mod+shift+c",
+      label: "Copy link to this page",
+      group: "Share",
+      inFields: true,
+      when: () => !quiet && (selected !== null || roadmapPage !== null),
+      run: () => {
+        if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
+        else if (selected) void copyLink(featurePath(selected));
+        else if (roadmapPage) void copyLink(roadmapPath(roadmapPage.fileName));
+      },
+    },
+    // Handled by the fields themselves (src/frontend/MarkdownEditor.tsx and
+    // the sidebar divider); listed so the cheat sheet is complete.
+    {
+      id: "md-bold",
+      keys: "mod+b",
+      label: "Bold (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "md-italic",
+      keys: "mod+i",
+      label: "Italic (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "md-link",
+      keys: "mod+k",
+      label: "Insert a link (in a text editor)",
+      group: "Editor",
+      displayOnly: true,
+      run: () => false,
+    },
+    {
+      id: "divider",
+      keys: ["arrowleft", "arrowright"],
+      label: "Resize the sidebar (divider focused)",
+      group: "Navigate",
+      displayOnly: true,
+      run: () => false,
+    },
+  ];
+  useShortcuts(shortcuts);
+
+  // The command palette's contents (src/frontend/CommandPalette.tsx): the
+  // actions by name — the keyboard registry's, plus the ones without a key —
+  // and, for a query, the full-text search's hits (specs/search.feature.md)
+  // and the roadmap pages.
+  const shortcutAction = (id: string, icon: ReactNode): PaletteItem | null => {
+    const s = shortcuts.find((x) => x.id === id);
+    if (!s || (s.when && !s.when())) return null;
+    return {
+      id: `action:${id}`,
+      group: "Actions",
+      label: s.label,
+      text: s.label,
+      icon,
+      keys: Array.isArray(s.keys) ? s.keys[0] : s.keys,
+      run: () => void s.run(new KeyboardEvent("keydown", { key: "Enter" })),
+    };
+  };
+  const moveFeaturePrompt = async () => {
+    if (!selected) return;
+    const target = await prompt({
+      title: "Move to folder",
+      hint: "The folder's path, e.g. billing/renewals. Use / for nesting.",
+      confirmLabel: "Move",
+    });
+    if (!target) return;
+    await moveTo(selected, target.trim().replace(/^\/+|\/+$/g, ""));
+  };
+  const action = (
+    id: string,
+    label: string,
+    icon: ReactNode,
+    run: () => void,
+    extra: Partial<PaletteItem> = {},
+  ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
+  const listing = selected ? features.find((f) => f.fileName === selected) : undefined;
+  const paletteActions: PaletteItem[] = [
+    shortcutAction("create", <Plus size={14} />),
+    action("new-folder", "New folder", <FolderInput size={14} />, () => void createFolder()),
+    shortcutAction("publish", <StatusIcon status="published" size={14} />),
+    shortcutAction("copy-link", <Link size={14} />),
+    ...(selected && feature
+      ? [
+          action("rename", "Rename feature", <Pencil size={14} />, () =>
+            setRenameDraft(feature.name || titleFromFileName(selected)),
+          ),
+          action("move", "Move feature to folder…", <FolderInput size={14} />, () =>
+            void moveFeaturePrompt(),
+          ),
+          ...(listing
+            ? [
+                action("delete", "Delete feature", <Trash2 size={14} />, () =>
+                  void removeFeature(listing),
+                ),
+              ]
+            : []),
+        ]
+      : []),
+    ...(codeGen && specSelection.size > 0 && !sessionRunning
+      ? [action("session", "Start code-gen session", <Play size={14} />, () => void startSession())]
+      : []),
+    ...(!demo
+      ? [
+          action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
+          action("repo", "Change data folder", <FolderInput size={14} />, () => void changeRepo()),
+        ]
+      : []),
+    shortcutAction("go-home", <Home size={14} />),
+    shortcutAction("go-roadmap", <MapIcon size={14} />),
+    shortcutAction("settings", <Settings size={14} />),
+    shortcutAction(
+      "sidebar",
+      sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />,
+    ),
+    ...(["system", "light", "dark"] as ThemePref[]).map((pref) =>
+      action(`theme-${pref}`, `Theme: ${pref}`, <Sun size={14} />, () => {
+        setTheme(pref);
+        applyThemePref(pref);
+      }),
+    ),
+    shortcutAction("sheet", <Keyboard size={14} />),
+  ].filter((x): x is PaletteItem => x !== null);
+
+  const scenarioStatus = (fileName: string, s: { name: string; version: number }) =>
+    features
+      .find((f) => f.fileName === fileName)
+      ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
+  const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal });
+    const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
+    if (!res.ok) throw new Error(data.error ?? "Search failed");
+    const hits = (data.results ?? []).map(
+      (r): PaletteItem => ({
+        id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
+        group: r.scenario ? "Scenarios" : "Features",
+        label: r.scenario ? r.scenario.name : r.featureName,
+        text: r.scenario ? r.scenario.name : r.featureName,
+        sub: r.scenario ? (
+          <>
+            {r.featureName}
+            {r.snippet && <> · {markSnippet(r.snippet, r.terms)}</>}
+          </>
+        ) : r.snippet ? (
+          markSnippet(r.snippet, r.terms)
+        ) : undefined,
+        icon: r.scenario ? (
+          <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
+        ) : (
+          <FileText size={14} />
+        ),
+        href: resultHref(r),
+        run: ({ alt }) => openResult(r, alt),
+      }),
+    );
+    const ql = q.toLowerCase();
+    const pages = roadmapPages
+      .filter((p) => p.name.toLowerCase().includes(ql))
+      .map(
+        (p): PaletteItem => ({
+          id: `roadmap:${p.fileName}`,
+          group: "Roadmap",
+          label: p.name,
+          text: p.name,
+          icon: <MapIcon size={14} />,
+          href: roadmapPath(p.fileName),
+          run: () => void openRoadmapPage(p.fileName, { push: true }),
+        }),
+      );
+    return [...hits, ...pages];
+  };
+  const recentItems: PaletteItem[] = recent.map((e) => ({
+    id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
+    group: "Recent",
+    label: e.scenario ? e.scenario.name : e.name,
+    text: e.scenario ? e.scenario.name : e.name,
+    sub: e.scenario ? e.name : e.kind === "roadmap" ? "Roadmap" : undefined,
+    icon:
+      e.kind === "roadmap" ? (
+        <MapIcon size={14} />
+      ) : e.scenario ? (
+        <StatusIcon status={scenarioStatus(e.fileName, e.scenario)} size={14} />
+      ) : (
+        <FileText size={14} />
+      ),
+    href:
+      e.kind === "roadmap"
+        ? roadmapPath(e.fileName)
+        : e.scenario
+          ? scenarioPath(e.fileName, e.scenario)
+          : featurePath(e.fileName),
+    run: ({ alt }) => {
+      if (e.kind === "roadmap") void openRoadmapPage(e.fileName, { push: true });
+      else
+        openResult(
+          {
+            kind: e.scenario ? "scenario" : "feature",
+            fileName: e.fileName,
+            featureName: e.name,
+            scenario: e.scenario,
+            score: 0,
+            terms: [],
+            snippet: "",
+          },
+          alt,
+        );
+    },
+  }));
+  // Remember what is open, for the palette's empty state.
+  useEffect(() => {
+    if (loading) return;
+    let entry: RecentEntry | null = null;
+    if (selected) {
+      const name = features.find((f) => f.fileName === selected)?.name ?? titleFromFileName(selected);
+      entry = paneScenario
+        ? {
+            kind: "scenario",
+            fileName: selected,
+            name,
+            scenario: { name: paneScenario.name, version: paneScenario.version },
+          }
+        : { kind: "feature", fileName: selected, name };
+    } else if (roadmapPage) {
+      entry = { kind: "roadmap", fileName: roadmapPage.fileName, name: roadmapPage.name };
+    }
+    if (!entry) return;
+    const added = entry;
+    const key = (e: RecentEntry) =>
+      `${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`;
+    setRecent((prev) => {
+      const next = [added, ...prev.filter((e) => key(e) !== key(added))].slice(0, 8);
+      writeRecent(next);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, selected, paneScenario?.name, paneScenario?.version, roadmapPage?.fileName]);
+
+  // The header's trail (src/frontend/Breadcrumbs.tsx): the data folder, then
+  // the feature's folders — a click selects the folder in the sidebar, so
+  // "+ New folder" and "+ New feature" land beside the feature.
+  const repoName = demo ? "demo-data" : dataRepo ? repoDisplayName(dataRepo) : "SpecDriven";
+  const repoCrumb: Crumb = {
+    label: repoName,
+    href: "/",
+    title: "Home",
+    onClick: (e) =>
+      spaClick(e, () => {
+        goHome();
+        void loadReadme();
+      }),
+  };
+  const folderCrumbs = (fileName: string): Crumb[] => {
+    const parts = fileName.split("/").slice(0, -1);
+    return parts.map((part, i) => {
+      const path = parts.slice(0, i + 1).join("/");
+      return {
+        label: part,
+        title: `Select the folder ${path}`,
+        onClick: () => {
+          setSelectedFolder(path);
+          setCollapsed((prev) => {
+            const next = new Set(prev);
+            for (let k = 1; k <= i + 1; k++) next.delete(parts.slice(0, k).join("/"));
+            return next;
+          });
+        },
+      };
+    });
+  };
+
+  // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
+  // matches by having a scenario in the chosen status, and by its assignee.
+  const matchesFilter = (f: FeatureListing) =>
+    (filter.status === null || f.scenarios.some((s) => s.status === filter.status)) &&
+    (filter.assignee === null || f.assigned === filter.assignee);
+  const me = user?.name || user?.login || user?.username || null;
+  const filtering = filter.status !== null || filter.assignee !== null;
+
+  // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
+  // in), ← closes it or climbs to it from a feature, Home/End jump,
+  // Shift+F10 or the menu key opens a feature's ⋯. Enter stays the row's own.
+  const onTreeKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=treeitem]")];
+    const i = rows.indexOf(t);
+    if (i === -1) return;
+    const move = (to: number) => rows[Math.max(0, Math.min(rows.length - 1, to))]?.focus();
+    const folderPath = t.dataset.folder;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        move(i + 1);
+        return;
+      case "ArrowUp":
+        e.preventDefault();
+        move(i - 1);
+        return;
+      case "Home":
+        e.preventDefault();
+        move(0);
+        return;
+      case "End":
+        e.preventDefault();
+        move(rows.length - 1);
+        return;
+      case "ArrowRight":
+        if (folderPath === undefined) return;
+        e.preventDefault();
+        if (collapsed.has(folderPath)) toggleFolder(folderPath);
+        else move(i + 1);
+        return;
+      case "ArrowLeft": {
+        e.preventDefault();
+        if (folderPath !== undefined && !collapsed.has(folderPath)) {
+          toggleFolder(folderPath);
+          return;
+        }
+        t.closest("[role=group]")
+          ?.parentElement?.querySelector<HTMLElement>("[role=treeitem]")
+          ?.focus();
+        return;
+      }
+      case "F10":
+        if (!e.shiftKey || !t.dataset.file) return;
+        e.preventDefault();
+        setTreeMenu(t.dataset.file);
+        return;
+      case "ContextMenu":
+        if (!t.dataset.file) return;
+        e.preventDefault();
+        setTreeMenu(t.dataset.file);
+        return;
+    }
+  };
+
+  if (loading)
+    return (
+      <main className="layout skeleton-shell" aria-busy="true" aria-label="Loading">
+        <aside>
+          <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
+          <span className="skeleton" style={{ height: "2rem" }} />
+          {[70, 55, 65, 50, 60, 45].map((w, i) => (
+            <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
+          ))}
+        </aside>
+        <section className="editor">
+          <PageSkeleton cards={3} />
+        </section>
+      </main>
+    );
 
   if (needsRepo) {
     return (
@@ -3331,10 +3886,73 @@ export function App() {
 
   return (
     <main
-      className={resizingSidebar ? "layout resizing" : "layout"}
+      className={`layout${resizingSidebar ? " resizing" : ""}${sidebarCollapsed ? " collapsed" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
     >
-      {savedFlash && <div className="saved-banner">Saved</div>}
+      {sidebarCollapsed ? (
+        /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
+           folded to its icons — search, Home, Roadmap, and the way back out. */
+        <aside className="rail">
+          <Tooltip label="Expand the sidebar" keys="[">
+            <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+              <Logo size={24} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Search or run a command" keys="mod+k">
+            <button
+              type="button"
+              className="rail-btn"
+              aria-label="Search or run a command"
+              onClick={() => setPalette({ query: "" })}
+            >
+              <Search size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
+          <Tooltip label="Home" keys="g h">
+            <a
+              href="/"
+              className={`rail-link${!selected && !roadmapPage ? " active" : ""}`}
+              aria-label="Home"
+              onClick={(e) =>
+                spaClick(e, () => {
+                  goHome();
+                  void loadReadme();
+                })
+              }
+            >
+              <Home size={16} aria-hidden="true" />
+            </a>
+          </Tooltip>
+          {roadmap && roadmapPages.length > 0 && (
+            <Tooltip label="Roadmap" keys="g r">
+              <a
+                href={roadmapPath(roadmapPages[0]!.fileName)}
+                className={`rail-link${roadmapPage ? " active" : ""}`}
+                aria-label="Roadmap"
+                onClick={(e) =>
+                  spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
+                }
+              >
+                <MapIcon size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
+          <div className="rail-bottom">
+            <Tooltip label="Expand the sidebar" keys="[">
+              <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+                <PanelLeftOpen size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            <Tooltip label="Settings" keys="mod+,">
+              <button type="button" className="rail-btn" aria-label="Settings" onClick={() => openSettings()}>
+                <span className="avatar" aria-hidden="true">
+                  {initials}
+                </span>
+              </button>
+            </Tooltip>
+          </div>
+        </aside>
+      ) : (
       <aside>
         <header>
           <h1>
@@ -3388,49 +4006,44 @@ export function App() {
                     />
                   </svg>
                 </button>
-                {recentMenuOpen && (
-                  <div className="repo-recent-menu" role="menu" aria-label="Recent data folders">
-                    {recentRepos.map((repo) => {
-                      const current = repo === dataRepo;
-                      return (
-                        <button
-                          key={repo}
-                          role="menuitemradio"
-                          aria-checked={current}
-                          className={current ? "current" : undefined}
-                          title={repo}
-                          onClick={() => {
-                            setRecentMenuOpen(false);
-                            if (current) {
-                              goHome();
-                              void loadReadme();
-                            } else {
-                              void switchRepo(repo);
-                            }
-                          }}
-                        >
-                          <span className="check" aria-hidden="true">
-                            {current ? "✓" : ""}
-                          </span>
-                          <span className="repo-recent-name">{repoDisplayName(repo)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <Menu
+                  open={recentMenuOpen}
+                  onClose={() => setRecentMenuOpen(false)}
+                  label="Recent data folders"
+                  className="repo-recent-menu"
+                  containerSelector=".repo-recent"
+                  items={recentRepos.map((repo) => {
+                    const current = repo === dataRepo;
+                    return {
+                      id: repo,
+                      label: repoDisplayName(repo),
+                      title: repo,
+                      checked: current,
+                      onSelect: () => {
+                        if (current) {
+                          goHome();
+                          void loadReadme();
+                        } else {
+                          void switchRepo(repo);
+                        }
+                      },
+                    };
+                  })}
+                />
               </div>
             )}
             {!demo && (
-              <button
-                type="button"
-                className="repo-edit"
-                title="Change data directory"
-                aria-label="Change data directory"
-                disabled={settingRepo}
-                onClick={() => void changeRepo()}
-              >
-                ✎
-              </button>
+              <Tooltip label="Change data directory">
+                <button
+                  type="button"
+                  className="repo-edit"
+                  aria-label="Change data directory"
+                  disabled={settingRepo}
+                  onClick={() => void changeRepo()}
+                >
+                  <Pencil size={13} aria-hidden="true" />
+                </button>
+              </Tooltip>
             )}
             {/* Sync (specs/ui.spec.md "Main page"): immediate data reload,
                 next to the folder it reloads. Disabled with a progress label
@@ -3445,58 +4058,83 @@ export function App() {
                 disabled={syncing}
                 onClick={() => void syncNow()}
               >
-                <SyncIcon spinning={syncing} />
+                <RefreshCw
+                  size={14}
+                  className={syncing ? "sync-icon spinning" : "sync-icon"}
+                  aria-hidden="true"
+                />
                 {syncing ? "Syncing…" : "Sync"}
               </button>
             )}
           </div>
+          <Tooltip label="Collapse the sidebar" keys="[">
+            <button
+              type="button"
+              className="ibtn collapse-btn"
+              aria-label="Collapse the sidebar"
+              onClick={toggleSidebar}
+            >
+              <PanelLeftClose size={15} aria-hidden="true" />
+            </button>
+          </Tooltip>
         </header>
         {/* Demo mode: say what the sandbox does — edits are ephemeral. */}
         {demo && <div className="demo-banner">Demo — edits reset on refresh</div>}
-        {/* Search field (specs/search.spec.md): top-left, under the header
-            so the macOS drag region above it stays draggable. */}
+        {/* Search (specs/search.spec.md): top-left, under the header so the
+            macOS drag region above it stays draggable. The field opens the
+            command palette, where the results are. */}
         <div className="sidebar-search">
-          <SearchIcon />
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="Search specs"
-            aria-label="Search specs"
-            enterKeyHint="search"
-            spellCheck={false}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setQuery("");
-                e.currentTarget.blur();
-              } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                if (!searchResults || searchResults.length === 0) return;
-                e.preventDefault();
-                const max = searchResults.length - 1;
-                setActiveResult((i) =>
-                  e.key === "ArrowDown" ? Math.min(i + 1, max) : Math.max(i - 1, 0),
-                );
-              } else if (e.key === "Enter") {
-                const r = searchResults?.[activeResult];
-                if (r) openResult(r);
+          <button
+            type="button"
+            className="sidebar-search-btn"
+            aria-label="Search specs or run a command"
+            onClick={() => setPalette({ query: "" })}
+          >
+            <Search size={14} className="search-icon" aria-hidden="true" />
+            <span>Search or run a command…</span>
+            <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+        </div>
+        {/* Primary nav (specs/ui/ui.feature.md "Design system"): Home is the
+            README, Roadmap the first page, My specs the assignee filter set
+            to the current user. */}
+        <nav className="side-nav" aria-label="Primary">
+          <a
+            href="/"
+            className={!selected && !roadmapPage ? "active" : ""}
+            onClick={(e) =>
+              spaClick(e, () => {
+                goHome();
+                void loadReadme();
+              })
+            }
+          >
+            <Home size={14} aria-hidden="true" /> Home
+          </a>
+          {roadmap && roadmapPages.length > 0 && (
+            <a
+              href={roadmapPath(roadmapPages[0]!.fileName)}
+              className={roadmapPage ? "active" : ""}
+              onClick={(e) =>
+                spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
               }
-            }}
-          />
-          {query && (
+            >
+              <MapIcon size={14} aria-hidden="true" /> Roadmap
+            </a>
+          )}
+          {assignments && me && (
             <button
               type="button"
-              className="search-clear"
-              aria-label="Clear search"
-              onClick={() => {
-                setQuery("");
-                searchRef.current?.focus();
-              }}
+              className={filter.assignee === me ? "active" : ""}
+              aria-pressed={filter.assignee === me}
+              onClick={() =>
+                setFilter((f) => ({ ...f, assignee: f.assignee === me ? null : me }))
+              }
             >
-              ✕
+              <UserRound size={14} aria-hidden="true" /> My specs
             </button>
           )}
-        </div>
+        </nav>
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
           <button onClick={createFeature}>+ New feature</button>
@@ -3516,9 +4154,14 @@ export function App() {
                     : `Start a code gen session with ${selectionLabel}`
                 }
               >
-                {sessionRunning
-                  ? "Session running…"
-                  : `▶ Start session${specSelection.size > 0 ? ` (${specSelection.size})` : ""}`}
+                {sessionRunning ? (
+                  "Session running…"
+                ) : (
+                  <>
+                    <Play size={12} aria-hidden="true" /> Start session
+                    {specSelection.size > 0 ? ` (${specSelection.size})` : ""}
+                  </>
+                )}
               </button>
             </div>
             {/* What a session would run over, so a scenario checked on a card
@@ -3532,9 +4175,8 @@ export function App() {
         {loadError && <p className="error">{loadError}</p>}
         {/* The roadmap folder sits on top of the feature folders
             (specs/app/roadmap.feature.md), and only while the Settings
-            switch shows it. Search takes the whole area below, so the
-            section steps aside with the tree. */}
-        {roadmap && !query.trim() && (
+            switch shows it. */}
+        {roadmap && (
           <div className="roadmap-list">
             <div className="roadmap-head">
               {/* The section folds away like a folder's subtree, with the same
@@ -3547,74 +4189,203 @@ export function App() {
                 title={roadmapCollapsed ? "Show the roadmap pages" : "Hide the roadmap pages"}
                 onClick={() => toggleRoadmapSection(!roadmapCollapsed)}
               >
-                <span className="twist">{roadmapCollapsed ? "▸" : "▾"}</span> Roadmap
+                <span className="twist">
+                  {roadmapCollapsed ? (
+                    <ChevronRight size={12} aria-hidden="true" />
+                  ) : (
+                    <ChevronDown size={12} aria-hidden="true" />
+                  )}
+                </span>{" "}
+                Roadmap
               </button>
-              <button
-                type="button"
-                className="roadmap-add"
-                title="New roadmap page"
-                onClick={() => void newRoadmapPage()}
-              >
-                +
-              </button>
-            </div>
-            {!roadmapCollapsed &&
-              roadmapPages.map((page) => (
-                <a
-                  key={page.fileName}
-                  href={roadmapPath(page.fileName)}
-                  className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
-                  title={page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name}
-                  onClick={(e) => spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))}
+              <Tooltip label="New roadmap page">
+                <button
+                  type="button"
+                  className="roadmap-add"
+                  aria-label="New roadmap page"
+                  onClick={() => void newRoadmapPage()}
                 >
-                  {page.name}
-                </a>
+                  <Plus size={13} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            </div>
+            {/* Pages grouped by their subfolder under roadmap/, each with a
+                ⋯ menu: Rename, Copy link, Delete. */}
+            {!roadmapCollapsed &&
+              roadmapGroups(roadmapPages).map(({ dir, pages }) => (
+                <div key={dir || "."}>
+                  {dir && <div className="roadmap-group">{dir}</div>}
+                  {pages.map((page) => (
+                    <div key={page.fileName} className={`roadmap-row${dir ? " nested" : ""}`}>
+                      <a
+                        href={roadmapPath(page.fileName)}
+                        className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
+                        title={
+                          page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
+                        }
+                        aria-current={page.fileName === roadmapPage?.fileName ? "page" : undefined}
+                        onClick={(e) =>
+                          spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))
+                        }
+                      >
+                        {page.name}
+                      </a>
+                      <span className="tree-row-menu">
+                        <Tooltip label="More actions">
+                          <button
+                            type="button"
+                            className="tree-menu-btn"
+                            aria-label={`Menu for ${page.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={roadmapMenu === page.fileName}
+                            onClick={() =>
+                              setRoadmapMenu((m) => (m === page.fileName ? null : page.fileName))
+                            }
+                          >
+                            <Ellipsis size={14} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
+                        <Menu
+                          open={roadmapMenu === page.fileName}
+                          onClose={() => setRoadmapMenu(null)}
+                          label={`Menu for ${page.name}`}
+                          className="tree-menu"
+                          containerSelector=".tree-row-menu"
+                          items={[
+                            {
+                              id: "rename",
+                              label: "Rename",
+                              icon: <Pencil size={13} />,
+                              onSelect: () => void renameRoadmapPage(page),
+                            },
+                            {
+                              id: "copy",
+                              label: "Copy link",
+                              icon: <Link size={13} />,
+                              onSelect: () => void copyLink(roadmapPath(page.fileName)),
+                            },
+                            {
+                              id: "delete",
+                              label: "Delete",
+                              icon: <Trash2 size={13} />,
+                              danger: true,
+                              onSelect: () => void removeRoadmapPage(page),
+                            },
+                          ]}
+                        />
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ))}
             {!roadmapCollapsed && roadmapPages.length === 0 && (
               <p className="empty">No roadmap pages yet</p>
             )}
           </div>
         )}
-        {query.trim() ? (
-          /* Ranked results take the tree's slot while a query is active
-             (specs/search.spec.md); clearing the query restores the tree. */
-          <div className="search-results" role="listbox" aria-label="Search results">
-            {searchError && <p className="error">{searchError}</p>}
-            {(searchResults ?? []).map((r, i) => (
-              <a
-                key={`${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`}
-                href={resultHref(r)}
-                role="option"
-                aria-selected={i === activeResult}
-                className={`search-result${i === activeResult ? " active" : ""}`}
-                onClick={(e) => spaClick(e, () => openResult(r))}
-                onMouseEnter={() => setActiveResult(i)}
+        {/* The Features section head carries the filter: by status, by
+            assignee. Active filters show as chips that clear on click. */}
+        <div className="section-head">
+          Features
+          <span className="filter-anchor">
+            {filter.status && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label={`Clear the ${filter.status} filter`}
+                onClick={() => setFilter((f) => ({ ...f, status: null }))}
               >
-                <span className="search-result-title">
-                  {r.featureName}
-                  {r.scenario && (
-                    <span className="crumb">
-                      {" "}
-                      › {r.scenario.name} v{r.scenario.version}
-                    </span>
-                  )}
-                </span>
-                {r.snippet && (
-                  <span className="search-result-snippet">
-                    {markSnippet(r.snippet, r.terms)}
-                  </span>
-                )}
-              </a>
-            ))}
-            {searchResults !== null && !searchError && searchResults.length === 0 && (
-              <p className="empty">No matches for "{query.trim()}"</p>
+                <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
+                <X size={11} aria-hidden="true" />
+              </button>
             )}
-          </div>
-        ) : (
-          /* Folder tree (specs/folders.spec.md): folders are drop targets
-             for drag-moving features; the tree background is the top level. */
+            {filter.assignee && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label="Clear the assignee filter"
+                onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
+              >
+                {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            <Tooltip label="Filter features">
+              <button
+                type="button"
+                className={`chip${filtering ? " on" : ""}`}
+                aria-label="Filter features"
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+                onClick={() => setFilterMenuOpen((o) => !o)}
+              >
+                <ListFilter size={12} aria-hidden="true" /> Filter
+              </button>
+            </Tooltip>
+            <Menu
+              open={filterMenuOpen}
+              onClose={() => setFilterMenuOpen(false)}
+              label="Filter features"
+              className="filter-menu"
+              containerSelector=".filter-anchor"
+              items={[
+                {
+                  id: "status",
+                  label: "Status",
+                  items: [
+                    {
+                      id: "status-any",
+                      label: "Any status",
+                      checked: filter.status === null,
+                      onSelect: () => setFilter((f) => ({ ...f, status: null })),
+                    },
+                    ...(["draft", "proposed", "published"] as const).map((st) => ({
+                      id: `status-${st}`,
+                      label: st[0]!.toUpperCase() + st.slice(1),
+                      icon: <StatusIcon status={st} size={13} />,
+                      checked: filter.status === st,
+                      onSelect: () => setFilter((f) => ({ ...f, status: st })),
+                    })),
+                  ],
+                },
+                ...(assignments
+                  ? [
+                      {
+                        id: "assignee",
+                        label: "Assignee",
+                        items: [
+                          {
+                            id: "assignee-any",
+                            label: "Anyone",
+                            checked: filter.assignee === null,
+                            onSelect: () => setFilter((f) => ({ ...f, assignee: null })),
+                          },
+                          ...members.map((m) => ({
+                            id: `assignee-${m.name}`,
+                            label: m.name,
+                            icon: (
+                              <span className="avatar chip-avatar" aria-hidden="true">
+                                {initialsOf(m.name)}
+                              </span>
+                            ),
+                            checked: filter.assignee === m.name,
+                            onSelect: () => setFilter((f) => ({ ...f, assignee: m.name })),
+                          })),
+                        ],
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          </span>
+        </div>
+        {/* Folder tree (specs/folders.spec.md): folders are drop targets
+            for drag-moving features; the tree background is the top level. */}
+        {(
           <div
             className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
+            role="tree"
+            aria-label="Features"
+            onKeyDown={onTreeKeyDown}
             onClick={(e) => {
               // A click on the bare background deselects the folder, so the
               // next "+ New folder" creates at the top level again.
@@ -3642,28 +4413,28 @@ export function App() {
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
-          {userMenuOpen && (
-            <div className="user-menu" role="menu" aria-label="User menu">
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  setUserInfoOpen(true);
-                }}
-              >
-                User info
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  openSettings();
-                }}
-              >
-                ⚙ Settings
-              </button>
-            </div>
-          )}
+          <Menu
+            open={userMenuOpen}
+            onClose={() => setUserMenuOpen(false)}
+            label="User menu"
+            className="user-menu"
+            containerSelector=".user-corner"
+            items={[
+              {
+                id: "user-info",
+                label: "User info",
+                icon: <UserRound size={13} />,
+                onSelect: () => setUserInfoOpen(true),
+              },
+              {
+                id: "settings",
+                label: "Settings",
+                icon: <Settings size={13} />,
+                keys: "mod+,",
+                onSelect: openSettings,
+              },
+            ]}
+          />
           <button
             className="user-chip"
             aria-haspopup="menu"
@@ -3679,8 +4450,11 @@ export function App() {
           </button>
         </div>
       </aside>
+      )}
       {/* Divider (specs/ui.spec.md "Sidebar resize"): drag to resize the
-          left pane, double-click to restore the default width. */}
+          left pane, double-click to restore the default width. Gone while
+          the sidebar is a rail. */}
+      {!sidebarCollapsed && (
       <div
         className="sidebar-divider"
         role="separator"
@@ -3716,47 +4490,62 @@ export function App() {
           storeSidebarWidth(w);
         }}
       />
-      <section className="editor">
+      )}
+      <section className="editor" aria-busy={featureLoading || undefined}>
+        {/* A render error in one view shows a note with a way back, never a
+            blank window; the key follows the page so navigating resets it. */}
+        <ErrorBoundary key={selected ?? roadmapPage?.fileName ?? "home"}>
         {editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
              beside it — with a bar on top and one scrolling column below. */
           <div className="scenario-pane">
-            <div className="editor-bar scenario-pane-bar">
+            <div className="editor-bar scenario-pane-bar page-header">
               <div className="scenario-pane-title">
-                {/* The way back: like ESC, it leaves the scenario in its
-                    autosaved state and lands on the scenario's card. */}
-                <button
-                  type="button"
-                  className="back-button"
-                  aria-label={`Back to ${feature.name || titleFromFileName(selected)}`}
-                  title={`Back to ${feature.name || titleFromFileName(selected)}`}
-                  autoFocus={editingPublished}
-                  onClick={backToFeature}
-                >
-                  <BackIcon />
-                </button>
-                {/* specs/ui.spec.md "Scenario editor": the scenario name
-                    is the title — editable unless published. */}
-                {editingPublished ? (
-                  <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
-                ) : (
-                  <input
-                    className="scenario-pane-name"
-                    // While this field has the caret autosave stands down, so
-                    // the name is saved once, whole
-                    // (specs/editor-autosave.feature.md).
-                    ref={nameFieldRef}
-                    value={editing.scenario.name}
-                    placeholder="Scenario name"
-                    aria-label="Scenario name"
-                    autoFocus
-                    spellCheck={false}
-                    onChange={(e) =>
-                      setEditing({ ...editing, scenario: { ...editing.scenario, name: e.target.value } })
-                    }
-                  />
-                )}
+                {/* The trail is the way back: the feature crumb, like ESC,
+                    leaves the scenario in its autosaved state and lands on
+                    its card. The last crumb is the scenario name itself
+                    (specs/ui.spec.md "Scenario editor") — editable unless
+                    published. */}
+                <Breadcrumbs
+                  items={[
+                    repoCrumb,
+                    ...folderCrumbs(selected),
+                    {
+                      label: feature.name || titleFromFileName(selected),
+                      href: featurePath(selected),
+                      title: `Back to ${feature.name || titleFromFileName(selected)}`,
+                      onClick: (e) => {
+                        e.preventDefault();
+                        backToFeature();
+                      },
+                    },
+                  ]}
+                  tail={
+                    editingPublished ? (
+                      <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
+                    ) : (
+                      <input
+                        className="scenario-pane-name"
+                        // While this field has the caret autosave stands down,
+                        // so the name is saved once, whole
+                        // (specs/editor-autosave.feature.md).
+                        ref={nameFieldRef}
+                        value={editing.scenario.name}
+                        placeholder="Scenario name"
+                        aria-label="Scenario name"
+                        autoFocus
+                        spellCheck={false}
+                        onChange={(e) =>
+                          setEditing({
+                            ...editing,
+                            scenario: { ...editing.scenario, name: e.target.value },
+                          })
+                        }
+                      />
+                    )
+                  }
+                />
                 {/* The version is assigned by the app, never typed: a new
                     scenario takes the next version for its name
                     (specs/ui.spec.md). The status rides along as a badge: a
@@ -3765,12 +4554,14 @@ export function App() {
                     it (specs/editor/spec-editor.feature.md). */}
                 <p className="version-field">
                   Version <span className="version">v{draftVersion}</span>
-                  <span className={`badge ${editing.scenario.status}`}>
+                  <span className="status-field">
+                    <StatusIcon status={editing.scenario.status} size={14} />
                     {editing.scenario.status}
                   </span>
                 </p>
               </div>
               <div className="editor-actions scenario-pane-actions">
+                <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
                 {/* Proposed scenarios and drafts can be deleted
                     (specs/editor/spec-editor.feature.md) — published ones too
                     while Settings allows it ("Delete Published Spec") —
@@ -3913,17 +4704,19 @@ export function App() {
                                 type="button"
                                 className="link"
                                 title={`Edit ${t}`}
+                                aria-label={`Edit ${t}`}
                                 onClick={() => startTestEdit(i)}
                               >
-                                ✎
+                                <Pencil size={12} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
                                 className="link"
                                 title={`Remove ${t}`}
+                                aria-label={`Remove ${t}`}
                                 onClick={() => removeTest(i)}
                               >
-                                ✕
+                                <X size={12} aria-hidden="true" />
                               </button>
                             </>
                           )}
@@ -3957,145 +4750,333 @@ export function App() {
                 </div>
               )}
             </div>
-            {status && <p className="status">{status}</p>}
           </div>
         ) : selected && feature ? (
           <>
-            <div className="editor-bar">
-              {/* specs/ui.spec.md "Main page": the top of the page shows
-                  "Feature: <name>", not the file name. The Edit link edits
-                  this feature name (the file's `# <name>` heading), committed
-                  and pushed on the server; the file name never changes. */}
-              <div className="feature-title">
-                {renameDraft === null ? (
-                  <>
-                    <h2>Feature: {feature.name || titleFromFileName(selected)}</h2>
-                    <button
-                      className="link"
-                      onClick={() =>
-                        setRenameDraft(feature.name || titleFromFileName(selected))
-                      }
-                    >
-                      Edit
-                    </button>
-                    <button className="link" onClick={() => copyLink(featurePath(selected))}>
-                      {copied === featurePath(selected) ? "Copied" : "Copy link"}
-                    </button>
-                    {/* The feature's ticket (specs/external-links/project-
-                        management-jira-linear-etc.feature.md "Add link to
-                        feature"): a chip opening the ticket, and the dialog
-                        that sets or clears it. */}
-                    {projectManagement && feature.link && (
-                      <a
-                        className="ext-link"
-                        href={feature.link.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={feature.link.url}
-                      >
-                        {externalLinkLabel(feature.link)}
-                      </a>
-                    )}
-                    {projectManagement && (
+            <header className="editor-bar page-header">
+              {/* specs/ui.spec.md "Main page": the trail ends in the feature
+                  name (the file's `# <name>` heading), never the file name.
+                  Clicking the name edits it — committed and pushed on the
+                  server; the file name never changes. */}
+              <Breadcrumbs
+                items={[repoCrumb, ...folderCrumbs(selected)]}
+                tail={
+                  renameDraft === null ? (
+                    <Tooltip label="Rename feature">
                       <button
-                        className="link"
-                        onClick={() => {
-                          setFeatureLinkError(null);
-                          setFeatureLinkDraft(linkDraftOf(feature.link));
-                        }}
+                        type="button"
+                        className="crumb current"
+                        onClick={() =>
+                          setRenameDraft(feature.name || titleFromFileName(selected))
+                        }
                       >
-                        {feature.link ? "Edit ticket" : "Link ticket"}
+                        {feature.name || titleFromFileName(selected)}
                       </button>
-                    )}
-                    {/* The description editor (specs/editor/feature-editor
-                        .feature.md): switches the description pane below
-                        between rendered and editable. */}
-                    {descOpen ? (
-                      <button className="link" onClick={() => void closeDescriptionEditor()}>
-                        Done
-                      </button>
-                    ) : (
-                      <button
-                        className="link"
-                        onClick={() => openDescriptionEditor(selected, feature.description)}
-                      >
-                        {feature.description ? "Edit description" : "Add description"}
-                      </button>
-                    )}
-                    {/* Assignment (src/server/members.ts): the project member
-                        this feature is assigned to, chosen from the data
-                        repo's project-settings.json. Saved on the spot, like
-                        the ticket link. Off by default — the Settings switch
-                        decides whether this project assigns features at all. */}
-                    {assignments && (
-                      <label className="assigned-field">
-                        <span>Assigned</span>
-                        <select
-                          className="assigned-select"
-                          aria-label="Assigned member"
-                          value={feature.assigned ?? ""}
-                          disabled={assignedSaving}
-                          onChange={(e) => void saveAssigned(e.target.value)}
-                        >
-                          <option value="">Unassigned</option>
-                          {assignableMembers().map((m) => (
-                            <option key={m.name} value={m.name}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                  </>
-                ) : (
-                  <form
-                    className="rename-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void renameSelected();
-                    }}
-                  >
-                    <input
-                      className="rename-input"
-                      value={renameDraft}
-                      aria-label="Feature name"
-                      autoFocus
-                      spellCheck={false}
-                      onChange={(e) => setRenameDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") setRenameDraft(null);
+                    </Tooltip>
+                  ) : (
+                    <form
+                      className="rename-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void renameSelected();
                       }}
-                    />
-                    <button
-                      type="submit"
-                      className="link"
-                      disabled={renaming || !renameDraft.trim()}
                     >
-                      {renaming ? "Renaming…" : "Save"}
+                      <input
+                        className="rename-input"
+                        value={renameDraft}
+                        aria-label="Feature name"
+                        autoFocus
+                        spellCheck={false}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") setRenameDraft(null);
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="link"
+                        disabled={renaming || !renameDraft.trim()}
+                      >
+                        {renaming ? "Renaming…" : "Save"}
+                      </button>
+                      <button type="button" className="link" onClick={() => setRenameDraft(null)}>
+                        Cancel
+                      </button>
+                    </form>
+                  )
+                }
+              />
+              <div className="editor-actions page-actions">
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
+                />
+                <Tooltip
+                  label={copied === featurePath(selected) ? "Copied" : "Copy link"}
+                  keys="mod+shift+c"
+                >
+                  <button
+                    type="button"
+                    className="ibtn"
+                    aria-label="Copy link"
+                    onClick={() => void copyLink(featurePath(selected))}
+                  >
+                    {copied === featurePath(selected) ? (
+                      <Check size={15} aria-hidden="true" />
+                    ) : (
+                      <Link size={15} aria-hidden="true" />
+                    )}
+                  </button>
+                </Tooltip>
+                {/* The description editor (specs/editor/feature-editor
+                    .feature.md): switches the description pane below between
+                    rendered and editable. */}
+                <Tooltip
+                  label={
+                    descOpen
+                      ? "Done editing the description"
+                      : feature.description
+                        ? "Edit description"
+                        : "Add description"
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`ibtn${descOpen ? " active" : ""}`}
+                    aria-label={descOpen ? "Done editing the description" : "Edit description"}
+                    aria-pressed={descOpen}
+                    onClick={() =>
+                      descOpen
+                        ? void closeDescriptionEditor()
+                        : openDescriptionEditor(selected, feature.description)
+                    }
+                  >
+                    <Pencil size={15} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+                <span className="page-more">
+                  <Tooltip label="More actions">
+                    <button
+                      type="button"
+                      className="ibtn"
+                      aria-label="More actions"
+                      aria-haspopup="menu"
+                      aria-expanded={featureMenuOpen}
+                      onClick={() => setFeatureMenuOpen((o) => !o)}
+                    >
+                      <Ellipsis size={15} aria-hidden="true" />
                     </button>
-                    <button type="button" className="link" onClick={() => setRenameDraft(null)}>
-                      Cancel
-                    </button>
-                  </form>
-                )}
-              </div>
-              <div className="editor-actions">
+                  </Tooltip>
+                  <Menu
+                    open={featureMenuOpen}
+                    onClose={() => setFeatureMenuOpen(false)}
+                    label="Feature actions"
+                    className="page-menu"
+                    containerSelector=".page-more"
+                    items={[
+                      {
+                        id: "rename",
+                        label: "Rename feature",
+                        icon: <Pencil size={13} />,
+                        onSelect: () =>
+                          setRenameDraft(feature.name || titleFromFileName(selected)),
+                      },
+                      {
+                        id: "rename-file",
+                        label: `Rename file “${fileStem(selected)}”`,
+                        icon: <FileText size={13} />,
+                        onSelect: () => void renameFile(selected),
+                      },
+                      {
+                        id: "move",
+                        label: "Move to folder…",
+                        icon: <FolderInput size={13} />,
+                        onSelect: () => void moveFeaturePrompt(),
+                      },
+                      ...(codeGen
+                        ? [
+                            {
+                              id: "session",
+                              label: "Start code-gen session",
+                              icon: <Play size={13} />,
+                              disabled: sessionRunning || specSelection.size === 0,
+                              onSelect: () => void startSession(),
+                            },
+                          ]
+                        : []),
+                      {
+                        id: "delete",
+                        label: "Delete feature",
+                        icon: <Trash2 size={13} />,
+                        danger: true,
+                        onSelect: () => {
+                          const listing = features.find((f) => f.fileName === selected);
+                          if (listing) void removeFeature(listing);
+                        },
+                      },
+                    ]}
+                  />
+                </span>
                 {/* Publish All (specs/crud-feature.spec.md "publish each
                     scenario individually"): marks every scenario published;
-                    individual scenarios publish from their cards. Sync lives
-                    in the sidebar header, beside the data folder. */}
+                    individual scenarios publish from their cards. The dot
+                    means there is something unpublished. Sync lives in the
+                    sidebar header, beside the data folder. */}
                 <button
-                  className="secondary"
+                  className="primary-action"
                   onClick={() => void publish()}
                   disabled={publishing !== null}
                 >
-                  {publishing === "all"
-                    ? "Publishing…"
-                    : dirty || hasProposed
-                      ? "Publish All *"
-                      : "Publish All"}
+                  {publishing === "all" ? "Publishing…" : "Publish all"}
+                  {publishing === null && (dirty || hasProposed) && (
+                    <span className="dot" role="img" aria-label="unpublished changes" />
+                  )}
                 </button>
               </div>
+            </header>
+            {/* Properties as chips (specs/ui/ui.feature.md "Design system"):
+                the publish rollup; the assignee (src/server/members.ts —
+                the data repo's project-settings.json, saved on the spot,
+                off unless Settings turns assignments on); the ticket
+                (specs/external-links/project-management-jira-linear-etc
+                .feature.md "Add link to feature"), edited in a popover. */}
+            <div className="props">
+              <span className="chip static">
+                <StatusIcon status="published" size={14} />
+                {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
+                {feature.scenarios.length} published
+              </span>
+              {assignments && (
+                <span className="chip-anchor assignee-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.assigned ? "" : " muted"}`}
+                    aria-haspopup="menu"
+                    aria-expanded={assigneeMenuOpen}
+                    aria-label={`Assigned: ${feature.assigned ?? "nobody"}`}
+                    disabled={assignedSaving}
+                    onClick={() => setAssigneeMenuOpen((o) => !o)}
+                  >
+                    {feature.assigned ? (
+                      <span className="avatar chip-avatar" aria-hidden="true">
+                        {initialsOf(feature.assigned)}
+                      </span>
+                    ) : (
+                      <UserRound size={14} aria-hidden="true" />
+                    )}
+                    {feature.assigned ?? "Unassigned"}
+                  </button>
+                  <Menu
+                    open={assigneeMenuOpen}
+                    onClose={() => setAssigneeMenuOpen(false)}
+                    label="Assigned member"
+                    className="chip-menu"
+                    containerSelector=".assignee-anchor"
+                    items={[
+                      {
+                        id: "",
+                        label: "Unassigned",
+                        checked: !feature.assigned,
+                        onSelect: () => void saveAssigned(""),
+                      },
+                      ...assignableMembers().map((m) => ({
+                        id: m.name,
+                        label: m.name,
+                        checked: feature.assigned === m.name,
+                        icon: (
+                          <span className="avatar chip-avatar" aria-hidden="true">
+                            {initialsOf(m.name)}
+                          </span>
+                        ),
+                        onSelect: () => void saveAssigned(m.name),
+                      })),
+                    ]}
+                  />
+                </span>
+              )}
+              {projectManagement && (
+                <span className="chip-anchor ticket-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.link ? "" : " muted"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={featureLinkOpen}
+                    onClick={() => {
+                      if (featureLinkOpen) {
+                        setFeatureLinkDraft(null);
+                      } else {
+                        setFeatureLinkError(null);
+                        setFeatureLinkDraft(linkDraftOf(feature.link));
+                      }
+                    }}
+                  >
+                    <Ticket size={14} aria-hidden="true" />
+                    {feature.link ? externalLinkLabel(feature.link) : "Link ticket"}
+                  </button>
+                  {feature.link && (
+                    <a
+                      className="chip-ext"
+                      href={feature.link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={feature.link.url}
+                      aria-label={`Open ${externalLinkLabel(feature.link)}`}
+                    >
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
+                  <Popover
+                    open={featureLinkOpen}
+                    onClose={() => setFeatureLinkDraft(null)}
+                    label="Ticket for this feature"
+                    className="chip-popover"
+                    containerSelector=".ticket-anchor"
+                  >
+                    {featureLinkDraft !== null && (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void saveFeatureLink();
+                        }}
+                      >
+                        <p className="hint">
+                          The {projectManagementTool} ticket that tracks this feature. Clear
+                          the url to remove the link.
+                        </p>
+                        <div className="link-field">
+                          <ExternalLinkField
+                            draft={featureLinkDraft}
+                            onChange={(draft) => {
+                              setFeatureLinkError(null);
+                              setFeatureLinkDraft(draft);
+                            }}
+                            error={featureLinkError}
+                            autoFocus
+                            tool={projectManagementTool}
+                          />
+                        </div>
+                        <div className="dialog-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => setFeatureLinkDraft(null)}
+                          >
+                            Cancel
+                          </button>
+                          <button type="submit" disabled={featureLinkSaving}>
+                            {featureLinkSaving
+                              ? "Saving…"
+                              : feature.link && isBlankLinkDraft(featureLinkDraft)
+                                ? "Remove link"
+                                : "Save"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </Popover>
+                </span>
+              )}
             </div>
             {descOpen && descEdit ? (
               /* specs/editor/feature-editor.feature.md "Edit feature
@@ -4134,15 +5115,14 @@ export function App() {
               className="scenarios"
               style={{ "--preview-lines": previewLines } as CSSProperties}
             >
-              {feature.scenarios.map((s, i) => (
+              {feature.scenarios.map((s, i) =>
+                filter.status !== null && s.status !== filter.status ? null : (
                 <article
                   key={i}
                   ref={(el) => {
                     scenarioRefs.current[i] = el;
                   }}
-                  className={`scenario-card${s.status === "published" ? " published" : ""}${
-                    i === selectedScenario ? " selected" : ""
-                  }`}
+                  className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}`}
                   // A click anywhere on the card highlights it (the title link
                   // does so itself); a double-click opens it in the editor
                   // pane, like Enter. The card's controls keep their own
@@ -4154,6 +5134,14 @@ export function App() {
                   onDoubleClick={(e) => {
                     if (isCardControl(e.target)) return;
                     setEditing({ index: i, scenario: { ...s } });
+                  }}
+                  // A right-click opens the card's ⋯ menu, on the card it
+                  // also highlights.
+                  onContextMenu={(e) => {
+                    if (isCardControl(e.target)) return;
+                    e.preventDefault();
+                    setSelectedScenario(i);
+                    setCardMenu(i);
                   }}
                 >
                   <header>
@@ -4176,6 +5164,9 @@ export function App() {
                       )}
                       {/* The title is the scenario's permalink
                           (specs/navigation.spec.md "share a link"). */}
+                      {/* Status as a glyph, not a word (specs/ui/ui.feature.md
+                          "Design system"): draft, proposed or published. */}
+                      <StatusIcon status={s.status} />
                       <a
                         href={scenarioPath(selected, s)}
                         onClick={(e) => spaClick(e, () => setSelectedScenario(i))}
@@ -4183,11 +5174,6 @@ export function App() {
                         {s.name}
                       </a>{" "}
                       <span className="version">v{s.version}</span>
-                      {s.status === "published" && <span className="badge">published</span>}
-                      {s.status === "proposed" && (
-                        <span className="badge proposed">proposed</span>
-                      )}
-                      {s.status === "draft" && <span className="badge draft">draft</span>}
                       {/* The scenario's ticket (specs/external-links/project-
                           management-jira-linear-etc.feature.md "Add link at
                           spec level"), opening in a new tab. */}
@@ -4204,38 +5190,72 @@ export function App() {
                       )}
                     </span>
                     <span className="card-actions">
-                      {/* Unpublished cards: Edit, Publish, Copy link — in that
-                          order (specs/crud-feature.spec.md "publish each
-                          scenario individually"). A published card opens the
-                          same dialog as `Edit`: its test links
+                      {/* Edit up front, the rest behind ⋯ — Publish or New
+                          version, Copy link (specs/crud-feature.spec.md
+                          "publish each scenario individually"). Shown while
+                          the card is hovered, focused or selected; a
+                          right-click opens the same menu. A published card's
+                          Edit opens the same pane: its test links
                           (specs/traceability.spec.md) and its ticket link
                           stay editable. */}
-                      <button
-                        className="link"
-                        onClick={() => setEditing({ index: i, scenario: { ...s } })}
-                      >
-                        Edit
-                      </button>
-                      {s.status !== "published" && (
+                      <Tooltip label="Edit" keys="e">
                         <button
-                          className="link"
-                          disabled={publishing !== null}
-                          onClick={() => void publish(scenarioTarget(s))}
+                          type="button"
+                          className="ibtn"
+                          aria-label={`Edit ${s.name}`}
+                          onClick={() => setEditing({ index: i, scenario: { ...s } })}
                         >
-                          {publishing === scenarioKey(s) ? "Publishing…" : "Publish"}
+                          <Pencil size={14} aria-hidden="true" />
                         </button>
-                      )}
-                      {s.status === "published" && (
-                        <button className="link" onClick={() => newVersion(i)}>
-                          New version
+                      </Tooltip>
+                      <Tooltip label="More actions">
+                        <button
+                          type="button"
+                          className="ibtn"
+                          aria-label={`Menu for ${s.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={cardMenu === i}
+                          onClick={() => setCardMenu((m) => (m === i ? null : i))}
+                        >
+                          <Ellipsis size={14} aria-hidden="true" />
                         </button>
-                      )}
-                      <button
-                        className="link"
-                        onClick={() => copyLink(scenarioPath(selected, s))}
-                      >
-                        {copied === scenarioPath(selected, s) ? "Copied" : "Copy link"}
-                      </button>
+                      </Tooltip>
+                      <Menu
+                        open={cardMenu === i}
+                        onClose={() => setCardMenu(null)}
+                        label={`Menu for ${s.name}`}
+                        className="card-menu"
+                        containerSelector=".card-actions"
+                        items={[
+                          {
+                            id: "edit",
+                            label: "Edit",
+                            icon: <Pencil size={13} />,
+                            keys: "e",
+                            onSelect: () => setEditing({ index: i, scenario: { ...s } }),
+                          },
+                          s.status !== "published"
+                            ? {
+                                id: "publish",
+                                label: publishing === scenarioKey(s) ? "Publishing…" : "Publish",
+                                icon: <StatusIcon status="published" size={13} />,
+                                disabled: publishing !== null,
+                                onSelect: () => void publish(scenarioTarget(s)),
+                              }
+                            : {
+                                id: "new-version",
+                                label: "New version",
+                                icon: <Plus size={13} />,
+                                onSelect: () => newVersion(i),
+                              },
+                          {
+                            id: "copy",
+                            label: copied === scenarioPath(selected, s) ? "Copied" : "Copy link",
+                            icon: <Link size={13} />,
+                            onSelect: () => void copyLink(scenarioPath(selected, s)),
+                          },
+                        ]}
+                      />
                     </span>
                   </header>
                   {s.body && (
@@ -4246,7 +5266,15 @@ export function App() {
                       Settings toggle hides it (default ON). */}
                   {showTestLinks && testsTable(s.tests)}
                 </article>
-              ))}
+                ),
+              )}
+              {filter.status !== null &&
+                feature.scenarios.length > 0 &&
+                !feature.scenarios.some((s) => s.status === filter.status) && (
+                  <p className="empty">
+                    No {filter.status} scenarios here — the sidebar filter hides the rest.
+                  </p>
+                )}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
             </div>
             <div>
@@ -4274,62 +5302,116 @@ export function App() {
                 + Add Scenario
               </button>
             </div>
-            {status && <p className="status">{status}</p>}
           </>
+        ) : selected && !feature && featureLoading ? (
+          /* A feature opened by deep link, still on its way. */
+          <PageSkeleton cards={3} />
+        ) : roadmapPage && roadmapText === null ? (
+          <PageSkeleton cards={1} />
         ) : roadmapPage && roadmapText !== null ? (
           /* A roadmap page (specs/app/roadmap.feature.md): a regular markdown
              file, edited and autosaved like the README — with the "Assigned"
              dropdown a feature has, when assignments are on. */
           <>
-            <div className="editor-bar">
-              <div className="feature-title">
-                <h2>{roadmapPage.name || roadmapPage.fileName}</h2>
+            <header className="editor-bar page-header">
+              <Breadcrumbs
+                items={[repoCrumb, { label: "Roadmap" }]}
+                tail={
+                  <span className="crumb current plain">
+                    {roadmapPage.name || roadmapPage.fileName}
+                  </span>
+                }
+              />
+              <div className="editor-actions page-actions">
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={roadmapText !== roadmapSaved.current}
+                />
                 <span className="readme-hint">
-                  {`Saved automatically every ${autosaveSeconds} seconds; the next sync pushes it.`}
+                  {`Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
                 </span>
               </div>
-              {assignments && (
-                <label className="assigned-field">
-                  <span>Assigned</span>
-                  <select
-                    className="assigned-select"
-                    aria-label="Assigned member"
-                    value={roadmapPage.assigned ?? ""}
+            </header>
+            {assignments && (
+              <div className="props">
+                <span className="chip-anchor roadmap-assignee-anchor">
+                  <button
+                    type="button"
+                    className={`chip${roadmapPage.assigned ? "" : " muted"}`}
+                    aria-haspopup="menu"
+                    aria-expanded={roadmapAssigneeMenuOpen}
+                    aria-label={`Assigned: ${roadmapPage.assigned ?? "nobody"}`}
                     disabled={roadmapAssignedSaving}
-                    onChange={(e) => void saveRoadmapAssigned(e.target.value)}
+                    onClick={() => setRoadmapAssigneeMenuOpen((o) => !o)}
                   >
-                    <option value="">Unassigned</option>
-                    {roadmapAssignableMembers().map((m) => (
-                      <option key={m.name} value={m.name}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
+                    {roadmapPage.assigned ? (
+                      <span className="avatar chip-avatar" aria-hidden="true">
+                        {initialsOf(roadmapPage.assigned)}
+                      </span>
+                    ) : (
+                      <UserRound size={14} aria-hidden="true" />
+                    )}
+                    {roadmapPage.assigned ?? "Unassigned"}
+                  </button>
+                  <Menu
+                    open={roadmapAssigneeMenuOpen}
+                    onClose={() => setRoadmapAssigneeMenuOpen(false)}
+                    label="Assigned member"
+                    className="chip-menu"
+                    containerSelector=".roadmap-assignee-anchor"
+                    items={[
+                      {
+                        id: "",
+                        label: "Unassigned",
+                        checked: !roadmapPage.assigned,
+                        onSelect: () => void saveRoadmapAssigned(""),
+                      },
+                      ...roadmapAssignableMembers().map((m) => ({
+                        id: m.name,
+                        label: m.name,
+                        checked: roadmapPage.assigned === m.name,
+                        icon: (
+                          <span className="avatar chip-avatar" aria-hidden="true">
+                            {initialsOf(m.name)}
+                          </span>
+                        ),
+                        onSelect: () => void saveRoadmapAssigned(m.name),
+                      })),
+                    ]}
+                  />
+                </span>
+              </div>
+            )}
             <MarkdownEditor
               value={roadmapText}
               onChange={setRoadmapText}
               placeholder="Write this roadmap page in Markdown…"
             />
-            {status && <p className="status">{status}</p>}
           </>
         ) : (
           <>
             {/* Home (specs/app-startup.feature.md "App Starts with existing
                 specs folder selected"): the data repo's README.md, open for
                 editing and autosaved at the scenario editor's interval. */}
-            <div className="editor-bar">
-              <div className="feature-title">
-                <h2>README.md</h2>
+            <header className="editor-bar page-header">
+              <Breadcrumbs
+                items={[repoCrumb]}
+                tail={<span className="crumb current plain">README.md</span>}
+              />
+              <div className="editor-actions page-actions">
+                <SaveIndicator
+                  saving={saving}
+                  savedAt={savedAt}
+                  dirty={readme !== null && readme !== readmeSaved.current}
+                />
                 <span className="readme-hint">
                   {readme === null
                     ? "Loading…"
-                    : `Saved automatically every ${autosaveSeconds} seconds; the next sync pushes it.`}
+                    : `Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
                 </span>
               </div>
-            </div>
+            </header>
             {readme !== null && (
               <MarkdownEditor
                 value={readme}
@@ -4338,9 +5420,9 @@ export function App() {
               />
             )}
             {/* A stale deep link lands here with a note (specs/navigation.spec.md). */}
-            {status && <p className="status">{status}</p>}
           </>
         )}
+        </ErrorBoundary>
       </section>
       {/* specs/crud-feature.spec.md "Publish feature with merge conflict": a
           dialog rather than a strip appended to the page, so the two sides
@@ -4352,6 +5434,9 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => resolving === null && dismissConflict()}>
           <div
             className="dialog conflict-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Merge conflict"
             ref={conflictTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4435,6 +5520,9 @@ export function App() {
         <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
           <div
             className="dialog settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Settings"
             ref={settingsTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
@@ -4449,7 +5537,7 @@ export function App() {
                 aria-label="Close settings"
                 onClick={() => setSettingsOpen(false)}
               >
-                ✕
+                <X size={14} aria-hidden="true" />
               </button>
             </div>
             <section className="settings-group">
@@ -4925,7 +6013,14 @@ export function App() {
       )}
       {userInfoOpen && (
         <div className="dialog-backdrop" onClick={() => setUserInfoOpen(false)}>
-          <div className="dialog" ref={userInfoTrapRef} onClick={(e) => e.stopPropagation()}>
+          <div
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="User info"
+            ref={userInfoTrapRef}
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3>User info</h3>
             <dl className="user-info">
               <dt>OS user</dt>
@@ -4949,55 +6044,6 @@ export function App() {
           </div>
         </div>
       )}
-      {/* The feature's ticket-link dialog (specs/external-links/project-
-          management-jira-linear-etc.feature.md "Add link to feature"). */}
-      {featureLinkDraft !== null && feature && (
-        <div className="dialog-backdrop" onClick={() => setFeatureLinkDraft(null)}>
-          <div
-            className="dialog link-dialog"
-            ref={featureLinkTrapRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void saveFeatureLink();
-              }}
-            >
-              <h3>Ticket for this feature</h3>
-              <p className="hint">
-                The {projectManagementTool} ticket that tracks “
-                {feature.name || titleFromFileName(selected!)}”. Clear the url to remove the
-                link.
-              </p>
-              <div className="link-field">
-                <ExternalLinkField
-                  draft={featureLinkDraft}
-                  onChange={(draft) => {
-                    setFeatureLinkError(null);
-                    setFeatureLinkDraft(draft);
-                  }}
-                  error={featureLinkError}
-                  autoFocus
-                  tool={projectManagementTool}
-                />
-              </div>
-              <div className="dialog-actions">
-                <button type="button" className="secondary" onClick={() => setFeatureLinkDraft(null)}>
-                  Cancel
-                </button>
-                <button type="submit" disabled={featureLinkSaving}>
-                  {featureLinkSaving
-                    ? "Saving…"
-                    : feature.link && isBlankLinkDraft(featureLinkDraft)
-                      ? "Remove link"
-                      : "Save"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {/* Error box (specs/agents/claude.spec.md): what the Claude CLI said
           when it exited with an error code. */}
       {sessionError && (
@@ -5005,7 +6051,9 @@ export function App() {
           <div
             className="dialog"
             role="alertdialog"
+            aria-modal="true"
             aria-label="Code gen session failed"
+            ref={sessionErrorTrapRef}
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Code gen session failed</h3>
@@ -5016,8 +6064,19 @@ export function App() {
           </div>
         </div>
       )}
+      {sheetOpen && <ShortcutSheet shortcuts={shortcuts} onClose={() => setSheetOpen(false)} />}
+      {palette && (
+        <CommandPalette
+          initialQuery={palette.query}
+          onClose={() => setPalette(null)}
+          actions={paletteActions}
+          recent={recentItems}
+          resolve={resolvePalette}
+        />
+      )}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
       {modal}
+      <Toaster />
     </main>
   );
 }

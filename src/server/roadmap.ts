@@ -28,7 +28,7 @@ import {
   saveRoadmapDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
-import { commitAndPush } from "./git";
+import { commitAndPush, removeAndPush } from "./git";
 import { parseRoadmap, slugify, titleFromFileName, type Roadmap } from "./parser";
 import { getLogger, withSpan } from "./telemetry";
 
@@ -138,6 +138,25 @@ export async function createRoadmapPage(dataDir: string, name: string): Promise<
     `Create roadmap page: ${pageName}`,
   );
   return fileName;
+}
+
+/**
+ * Delete a page — the markdown and its document — committed and pushed like
+ * a deleted feature (specs/app/roadmap.feature.md). The sidebar's ⋯ menu
+ * offers it; Undo is not possible past the push, so the client confirms.
+ */
+export async function deleteRoadmapPage(
+  dataDir: string,
+  fileName: string,
+): Promise<{ message: string }> {
+  const file = safe(fileName);
+  if (!(await fileExists(`${dataDir}/${file}`))) {
+    throw new Error(`Roadmap page not found: ${file}`);
+  }
+  const paths = await pagePaths(dataDir, file);
+  const sync = await removeAndPush(dataDir, paths, `Delete roadmap page: ${file}`);
+  await removeRoadmapDoc(dataDir, file);
+  return { message: sync.message };
 }
 
 /**

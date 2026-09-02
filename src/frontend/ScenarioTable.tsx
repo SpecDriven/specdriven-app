@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { InputHTMLAttributes } from "react";
 import { createColumnHelper, getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import { X } from "lucide-react";
 import { extractVars, findTable, replaceTable } from "./mdtable";
 import type { MdTable } from "./mdtable";
 
@@ -158,7 +159,7 @@ export function ScenarioTable({ body, onChange }: ScenarioTableProps) {
                       aria-label={`Remove column ${name || c + 1}`}
                       onClick={() => removeColumn(c)}
                     >
-                      ✕
+                      <X size={12} aria-hidden="true" />
                     </button>
                   </div>
                 </th>
@@ -194,7 +195,7 @@ export function ScenarioTable({ body, onChange }: ScenarioTableProps) {
                   aria-label={`Remove row ${row.index + 1}`}
                   onClick={() => removeRow(row.index)}
                 >
-                  ✕
+                  <X size={12} aria-hidden="true" />
                 </button>
               </td>
             </tr>
