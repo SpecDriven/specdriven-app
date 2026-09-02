@@ -506,103 +506,38 @@ aside header h1 {
 }
 
 .sidebar-search .search-icon {
-  position: absolute;
-  left: 0.6rem;
+  flex: none;
   color: var(--text-3);
-  pointer-events: none;
 }
 
-.sidebar-search input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.42rem 1.7rem 0.42rem 1.9rem;
-  border: 1px solid var(--border-strong);
+.sidebar-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem 0.4rem 0.6rem;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  color: var(--text-1);
-  font-size: 0.8125rem;
-}
-
-.sidebar-search input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.search-clear {
-  position: absolute;
-  right: 0.3rem;
-  padding: 0.1rem 0.35rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-3);
-  font-size: 0.75rem;
-}
-
-.search-clear:hover {
-  color: var(--text-1);
-  background: var(--hover);
-}
-
-/* Search results (specs/search.spec.md): ranked rows in the tree's sidebar
-   slot — same flex and scroll so the user corner stays pinned below. */
-.search-results {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-height: 4rem;
-  overflow-y: auto;
-}
-
-.search-result {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  color: var(--text-1);
-}
-
-.search-result:hover {
-  background: var(--hover);
-}
-
-.search-result.active {
-  background: var(--accent-soft);
-}
-
-.search-result-title {
   font-size: 0.8125rem;
-  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-search-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-2);
+}
+
+.sidebar-search-btn > span {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.search-result-title .crumb {
-  color: var(--text-2);
-  font-weight: 400;
-}
-
-.search-result-snippet {
-  font-size: 0.75rem;
-  color: var(--text-2);
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.search-result-snippet mark {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  border-radius: 3px;
-  padding: 0 1px;
-}
 
 /* Folder tree (specs/folders.spec.md). The tree fills the sidebar so
    its background doubles as the top-level drop zone; it scrolls on its
@@ -2479,30 +2414,6 @@ button.table-add:hover {
   font-size: 0.75rem;
 }
 
-/* Assignment (src/server/members.ts): the "Assigned" dropdown beside the
-   feature name, offering the data repo's project members. */
-.assigned-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--text-3);
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.assigned-select {
-  max-width: 12rem;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font-size: 0.75rem;
-}
-
-.assigned-select:disabled {
-  opacity: 0.6;
-}
 
 /* The dialogs' ticket-link fields: url first (pasting it fills the other
    two), then the tool's short name and the ticket id. */
@@ -2933,4 +2844,398 @@ kbd {
 .shortcut-alt {
   display: inline-flex;
   align-items: center;
+}
+
+/* ---- Page header: breadcrumbs, icon actions, one primary button ---- */
+.page-header {
+  min-height: 2.5rem;
+  gap: 0.75rem;
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+}
+
+.crumbs ol {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.crumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.crumbs li.crumb-tail {
+  flex: 1;
+  min-width: 0;
+}
+
+.crumb-sep {
+  flex: none;
+  color: var(--text-3);
+}
+
+.crumb,
+.editor-bar button.crumb {
+  display: inline-flex;
+  align-items: center;
+  max-width: 16rem;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+a.crumb:hover,
+.editor-bar button.crumb:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.crumb.plain {
+  cursor: default;
+}
+
+.crumb.current,
+.editor-bar button.crumb.current {
+  max-width: none;
+  color: var(--text-1);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.crumbs .scenario-pane-heading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.crumbs .rename-form {
+  flex: 1;
+}
+
+.page-actions {
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.page-actions .readme-hint {
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+.ibtn,
+.editor-bar button.ibtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.ibtn:hover:not(:disabled),
+.ibtn.active,
+.editor-bar button.ibtn:hover:not(:disabled),
+.editor-bar button.ibtn.active {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.ibtn:focus-visible,
+.editor-bar button.ibtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.page-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.page-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+}
+
+.editor-bar button.primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.5rem;
+}
+
+.primary-action .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-proposed);
+}
+
+/* ---- Property chips: status rollup, assignee, ticket ---- */
+.props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.chip-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.5rem;
+  padding: 0 0.55rem 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
+button.chip:disabled {
+  opacity: 0.6;
+}
+
+.chip.muted {
+  color: var(--text-2);
+}
+
+.chip-avatar {
+  width: 0.9rem;
+  height: 0.9rem;
+  font-size: 0.5rem;
+}
+
+.chip-ext {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.15rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+}
+
+.chip-ext:hover {
+  color: var(--accent-strong);
+  background: var(--hover);
+}
+
+.chip-menu,
+.chip-popover {
+  top: calc(100% + 0.25rem);
+  left: 0;
+}
+
+.popover {
+  position: absolute;
+  z-index: 10;
+  min-width: 24rem;
+  padding: 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.popover .hint {
+  margin: 0 0 0.5rem;
+}
+
+.popover .dialog-actions {
+  margin-top: 0.6rem;
+}
+
+/* ---- Scenario cards: Edit and ⋯ appear on hover, focus, or selection ---- */
+.scenario-card header {
+  align-items: center;
+}
+
+.card-actions {
+  position: relative;
+  align-items: center;
+  gap: 0.15rem;
+  opacity: 0;
+}
+
+.scenario-card:hover .card-actions,
+.scenario-card:focus-within .card-actions,
+.scenario-card.selected .card-actions {
+  opacity: 1;
+}
+
+.card-menu {
+  top: calc(100% + 0.2rem);
+  right: 0;
+}
+
+/* ---- Command palette (src/frontend/CommandPalette.tsx) ---- */
+.palette-backdrop {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 70vh;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 2.75rem;
+  padding: 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.palette-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 3rem;
+  overflow-y: auto;
+  padding: 0.35rem;
+}
+
+.palette-group {
+  padding: 0.4rem 0.5rem 0.15rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.palette-item.active {
+  background: var(--accent-soft);
+}
+
+.palette-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-2);
+}
+
+.palette-label {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-sub {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-sub mark,
+.palette-label mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.palette-item .keys {
+  margin-left: auto;
+}
+
+.palette-foot {
+  display: flex;
+  gap: 1rem;
+  padding: 0.4rem 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+
+.palette-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.palette-list .empty,
+.palette-list .error {
+  margin: 0;
+  padding: 0.75rem;
 }
