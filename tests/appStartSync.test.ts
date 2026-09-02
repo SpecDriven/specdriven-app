@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyStartupState, handleApi, reloader } from "../src/server/api";
+import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setGitEngine } from "../src/server/git";
 import { writeState } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
@@ -26,6 +26,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // applyStartupState() fires the app-start sync without awaiting it. Let it
+  // finish before teardown, or it runs on into the next test file — and into
+  // whatever that file records (tests/telemetry.test.ts saw its git span).
+  await syncedOnStart();
   reloader.stop();
   stopServers();
   setGitEngine(null);
