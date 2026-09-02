@@ -4,7 +4,7 @@
 // a plain icon button that takes the bar's colour.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BackIcon } from "../src/frontend/BackIcon";
+import { ChevronLeft } from "lucide-react";
 import { cardOfScenario, isCardControl, pageScenario, withScenario } from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";
 
@@ -81,10 +81,10 @@ describe("the scenario the open page names", () => {
 
 describe("the back button", () => {
   test("its icon is decorative and takes the button's colour", () => {
-    const html = renderToStaticMarkup(<BackIcon />);
+    const html = renderToStaticMarkup(<ChevronLeft size={16} aria-hidden="true" />);
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain('stroke="currentColor"');
-    expect(html).toContain("<polyline");
+    expect(html).toContain("<path");
   });
 });
 

@@ -1,115 +1,69 @@
-/* Design system (specs/ui.spec.md "Design system"): warm neutrals, a
-   terracotta accent and serif display type. Colors flow only through the
-   tokens below; components never hardcode a color. */
+/* Design system (specs/ui/ui.feature.md "Design system"): quiet, dense,
+   keyboard-first. Colors flow only through the tokens below; components
+   never hardcode a color. Every token carries its light and dark value in
+   one place via light-dark(), so the two themes cannot drift apart. The
+   theme choice (specs/ui.spec.md "Settings") only sets color-scheme —
+   "system" follows the OS, light and dark pin it. */
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
-  /* Surfaces: app canvas (ivory) → sidebar/toolbars (oat) → cards (white) */
-  --surface-0: #faf9f5;
-  --surface-1: #f0eee6;
-  --surface-2: #ffffff;
-  --code-bg: #f4f2e9;
-  --hover: rgba(33, 32, 28, 0.06);
+  /* Surfaces: app canvas → sidebar/toolbars → cards and popovers */
+  --surface-0: light-dark(#ffffff, #191a1c);
+  --surface-1: light-dark(#f7f8f8, #1f2023);
+  --surface-2: light-dark(#ffffff, #232427);
+  --code-bg: light-dark(#f3f4f5, #26272b);
+  --hover: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.05));
 
-  --text-1: #21201c;
-  --text-2: #6e6a60;
-  --text-3: #a29d90;
+  --text-1: light-dark(#282a30, #e6e6e8);
+  --text-2: light-dark(#6b6f76, #9a9da3);
+  --text-3: light-dark(#9a9ea6, #6b6f76);
 
-  --border: #e5e1d5;
-  --border-strong: #d5d0c2;
+  --border: light-dark(#e6e7e9, rgba(255, 255, 255, 0.08));
+  --border-strong: light-dark(#d3d5d8, rgba(255, 255, 255, 0.14));
 
-  --accent: #c6613f;
-  --accent-hover: #ac4f2f;
-  --accent-strong: #a44e2e; /* accent that stays readable as small text */
-  --accent-soft: rgba(198, 97, 63, 0.11);
+  --accent: light-dark(#5e6ad2, #6e79e6);
+  --accent-hover: light-dark(#4f5bc4, #7f89ee);
+  --accent-strong: light-dark(#4a55b8, #8a93f0); /* accent that stays readable as small text */
+  --accent-soft: light-dark(rgba(94, 106, 210, 0.12), rgba(110, 121, 230, 0.18));
   --on-accent: #ffffff;
-  --ring: rgba(198, 97, 63, 0.35);
+  --ring: light-dark(rgba(94, 106, 210, 0.4), rgba(110, 121, 230, 0.5));
 
-  --danger-fg: #a83a2a;
-  --danger-bg: #fbeeea;
-  --danger-border: #efcfc4;
-  --danger-solid: #b2402e;
-  --danger-solid-hover: #99341f;
+  --danger-fg: light-dark(#d0473f, #f16b62);
+  --danger-bg: light-dark(rgba(208, 71, 63, 0.08), rgba(241, 107, 98, 0.12));
+  --danger-border: light-dark(rgba(208, 71, 63, 0.3), rgba(241, 107, 98, 0.35));
+  --danger-solid: light-dark(#d0473f, #e25c53);
+  --danger-solid-hover: light-dark(#b93a33, #f16b62);
 
-  /* Published scenarios (specs/ui.spec.md): a parchment wash — "sealed". */
-  --pub-bg: #faf3e3;
-  --pub-border: #e7dab9;
+  /* Scenario status (specs/crud-feature.spec.md "Scenario status"): shown
+     as glyphs, never as text badges — draft grey, proposed amber, published
+     green. */
+  --status-draft: light-dark(#8a8f98, #7c8088);
+  --status-proposed: light-dark(#e0a03c, #f2b64a);
+  --status-published: light-dark(#3fa56b, #4cc283);
 
-  --shadow-sm: 0 1px 2px rgba(70, 60, 45, 0.06);
-  --shadow-md: 0 2px 10px rgba(70, 60, 45, 0.09), 0 1px 2px rgba(70, 60, 45, 0.05);
-  --shadow-lg: 0 20px 50px rgba(60, 50, 35, 0.22), 0 4px 12px rgba(60, 50, 35, 0.08);
+  /* Elevation: none on panes and cards; popovers medium, dialogs large. */
+  --shadow-c1: light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.4));
+  --shadow-c2: light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.3));
+  --shadow-c3: light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.6));
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px var(--shadow-c1), 0 1px 3px var(--shadow-c2);
+  --shadow-lg: 0 24px 60px var(--shadow-c3), 0 4px 12px var(--shadow-c2);
 
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
 
   --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-serif: "Source Serif 4 Variable", "Iowan Old Style", Georgia, serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
 }
 
-/* Dark tokens. Applied two ways — an explicit dark choice, or the OS
-   preference while the choice is "system" (specs/ui.spec.md "Settings").
-   Keep both blocks identical. */
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --surface-0: #262624;
-  --surface-1: #1e1d1b;
-  --surface-2: #31302d;
-  --code-bg: #282723;
-  --hover: rgba(237, 235, 230, 0.07);
-  --text-1: #edebe6;
-  --text-2: #a7a299;
-  --text-3: #7a756b;
-  --border: #3b3a36;
-  --border-strong: #4d4b45;
-  --accent: #d97757;
-  --accent-hover: #e08662;
-  --accent-strong: #e79877;
-  --accent-soft: rgba(217, 119, 87, 0.16);
-  --on-accent: #ffffff;
-  --ring: rgba(217, 119, 87, 0.45);
-  --danger-fg: #e5806c;
-  --danger-bg: #3b2721;
-  --danger-border: #5c382e;
-  --danger-solid: #c4543f;
-  --danger-solid-hover: #d1614c;
-  --pub-bg: #322e23;
-  --pub-border: #575038;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --surface-0: #262624;
-    --surface-1: #1e1d1b;
-    --surface-2: #31302d;
-    --code-bg: #282723;
-    --hover: rgba(237, 235, 230, 0.07);
-    --text-1: #edebe6;
-    --text-2: #a7a299;
-    --text-3: #7a756b;
-    --border: #3b3a36;
-    --border-strong: #4d4b45;
-    --accent: #d97757;
-    --accent-hover: #e08662;
-    --accent-strong: #e79877;
-    --accent-soft: rgba(217, 119, 87, 0.16);
-    --on-accent: #ffffff;
-    --ring: rgba(217, 119, 87, 0.45);
-    --danger-fg: #e5806c;
-    --danger-bg: #3b2721;
-    --danger-border: #5c382e;
-    --pub-bg: #322e23;
-    --pub-border: #575038;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-    --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
-    --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.3);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * {
@@ -124,7 +78,8 @@ html {
 body {
   margin: 0;
   font-family: var(--font-sans);
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
   background: var(--surface-0);
   color: var(--text-1);
 }
@@ -181,7 +136,6 @@ body {
 
 .repo-prompt h1 {
   margin: 0;
-  font-family: var(--font-serif);
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -189,7 +143,7 @@ body {
 .repo-prompt p {
   margin: 0;
   color: var(--text-2);
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
 
@@ -199,7 +153,7 @@ body {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-1);
-  font-size: 0.95rem;
+  font-size: 0.8125rem;
 }
 
 /* Path field + native "Browse…" chooser (specs/app-start.spec.md), used in
@@ -222,7 +176,7 @@ body {
   border-radius: var(--radius-md);
   background: var(--surface-2);
   color: var(--text-1);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease;
 }
@@ -358,7 +312,7 @@ aside header h1 {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  font-size: 1.05rem;
+  font-size: 0.875rem;
 }
 
 .logo {
@@ -381,7 +335,7 @@ aside header h1 {
 .repo-name {
   color: var(--text-2);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -432,48 +386,9 @@ aside header h1 {
 /* The sidebar clips its overflow, so the menu hangs from the header and
    spans the sidebar's width rather than floating beside the toggle. */
 .repo-recent-menu {
-  position: absolute;
   top: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.repo-recent-menu button {
-  display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr);
-  column-gap: 0.2rem;
-  align-items: center;
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.5rem 0.35rem 0.3rem;
-  color: var(--text-1);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.repo-recent-menu button:hover {
-  background: var(--hover);
-}
-
-.repo-recent-menu .check {
-  color: var(--accent);
-  font-size: 0.8rem;
-}
-
-.repo-recent-menu .repo-recent-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .repo-edit {
@@ -505,7 +420,7 @@ aside header h1 {
   color: var(--text-3);
   padding: 0.1rem 0.4rem;
   border-radius: var(--radius-sm);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   flex-shrink: 0;
   white-space: nowrap;
   /* Stays clickable inside the macOS drag-region header (desktop app). */
@@ -529,7 +444,7 @@ aside header h1 {
 /* Demo mode: a quiet one-line note under the header, telling visitors the
    dataset is a sandbox that resets on refresh. */
 .demo-banner {
-  font-size: 0.72rem;
+  font-size: 0.6875rem;
   color: var(--accent-strong);
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
@@ -570,7 +485,7 @@ aside header h1 {
 
 .session-notice {
   color: var(--text-2);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   margin: 0.3rem 0 0;
 }
 
@@ -591,103 +506,38 @@ aside header h1 {
 }
 
 .sidebar-search .search-icon {
-  position: absolute;
-  left: 0.6rem;
+  flex: none;
   color: var(--text-3);
-  pointer-events: none;
 }
 
-.sidebar-search input {
-  flex: 1;
-  min-width: 0;
-  padding: 0.42rem 1.7rem 0.42rem 1.9rem;
-  border: 1px solid var(--border-strong);
+.sidebar-search-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem 0.4rem 0.6rem;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  color: var(--text-1);
-  font-size: 0.845rem;
-}
-
-.sidebar-search input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.search-clear {
-  position: absolute;
-  right: 0.3rem;
-  padding: 0.1rem 0.35rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-3);
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
 }
 
-.search-clear:hover {
-  color: var(--text-1);
-  background: var(--hover);
+.sidebar-search-btn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-2);
 }
 
-/* Search results (specs/search.spec.md): ranked rows in the tree's sidebar
-   slot — same flex and scroll so the user corner stays pinned below. */
-.search-results {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.sidebar-search-btn > span {
   flex: 1;
-  min-height: 4rem;
-  overflow-y: auto;
-}
-
-.search-result {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.45rem 0.6rem;
-  border-radius: var(--radius-sm);
-  text-decoration: none;
-  color: var(--text-1);
-}
-
-.search-result:hover {
-  background: var(--hover);
-}
-
-.search-result.active {
-  background: var(--accent-soft);
-}
-
-.search-result-title {
-  font-size: 0.845rem;
-  font-weight: 500;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.search-result-title .crumb {
-  color: var(--text-2);
-  font-weight: 400;
-}
-
-.search-result-snippet {
-  font-size: 0.78rem;
-  color: var(--text-2);
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.search-result-snippet mark {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  border-radius: 3px;
-  padding: 0 1px;
-}
 
 /* Folder tree (specs/folders.spec.md). The tree fills the sidebar so
    its background doubles as the top-level drop zone; it scrolls on its
@@ -712,7 +562,7 @@ aside header h1 {
   border-radius: var(--radius-sm);
   color: var(--text-1);
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .tree-row:has(> a.tree-feature.active) {
@@ -751,7 +601,7 @@ aside header h1 {
   border: none;
   background: transparent;
   color: var(--text-3);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -770,7 +620,7 @@ aside header h1 {
   border: none;
   background: transparent;
   color: var(--text-3);
-  font-size: 1rem;
+  font-size: 0.875rem;
   line-height: 1;
   padding: 0.1rem 0.3rem;
   border-radius: var(--radius-sm);
@@ -789,7 +639,7 @@ a.roadmap-entry {
   border-radius: var(--radius-sm);
   color: var(--text-1);
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 a.roadmap-entry:hover {
@@ -803,7 +653,7 @@ a.roadmap-entry.active {
 
 .roadmap-list .empty {
   padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .folder-row {
@@ -820,7 +670,7 @@ a.roadmap-entry.active {
   border: none;
   background: transparent;
   color: var(--text-2);
-  font-size: 0.845rem;
+  font-size: 0.8125rem;
   font-weight: 550;
   border-radius: var(--radius-sm);
 }
@@ -846,9 +696,11 @@ a.roadmap-entry.active {
   color: var(--text-3);
 }
 
-/* Deleting is a quiet affordance: visible only while on the row. */
+/* Deleting is a quiet affordance: visible while on the row, by pointer or
+   by keyboard focus. Faded rather than hidden — a hidden control could not
+   take focus at all. */
 .folder-delete {
-  visibility: hidden;
+  opacity: 0;
   border: none;
   background: transparent;
   color: var(--text-3);
@@ -856,8 +708,9 @@ a.roadmap-entry.active {
   border-radius: var(--radius-sm);
 }
 
-.folder-row:hover .folder-delete {
-  visibility: visible;
+.folder-row:hover .folder-delete,
+.folder-row:focus-within .folder-delete {
+  opacity: 1;
 }
 
 .folder-delete:hover {
@@ -885,9 +738,10 @@ a.roadmap-entry.active {
   white-space: nowrap;
 }
 
-/* Like folder-delete, a quiet affordance: visible on the row or while open. */
+/* Like folder-delete, a quiet affordance: visible on the row, while it has
+   keyboard focus, or while its menu is open. */
 .tree-menu-btn {
-  visibility: hidden;
+  opacity: 0;
   border: none;
   background: transparent;
   color: var(--text-3);
@@ -897,8 +751,9 @@ a.roadmap-entry.active {
 }
 
 .tree-row:hover .tree-menu-btn,
+.tree-row:focus-within .tree-menu-btn,
 .tree-menu-btn[aria-expanded="true"] {
-  visibility: visible;
+  opacity: 1;
 }
 
 .tree-menu-btn:hover {
@@ -908,45 +763,9 @@ a.roadmap-entry.active {
 
 /* The drop down: File (submenu with Rename) and Delete. */
 .tree-menu {
-  position: absolute;
   top: calc(100% + 0.2rem);
   right: 0.25rem;
-  min-width: 10rem;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.tree-menu button {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.42rem 0.6rem;
-  color: var(--text-1);
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.tree-menu button:hover {
-  background: var(--hover);
-}
-
-.tree-submenu {
-  display: flex;
-  flex-direction: column;
-  border-left: 2px solid var(--border);
-  margin-left: 0.6rem;
-}
-
-.tree-menu button.danger:hover {
-  color: var(--danger-fg);
-  background: var(--danger-bg);
+  min-width: 11rem;
 }
 
 /* Where the dragged feature would land (specs/folders.spec.md). */
@@ -971,7 +790,7 @@ button {
   border-radius: var(--radius-md);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
@@ -989,7 +808,7 @@ button {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
@@ -1017,8 +836,7 @@ button {
 /* "Feature: <name>" heading (specs/ui.spec.md "Main page") */
 .editor-bar h2 {
   margin: 0;
-  font-family: var(--font-serif);
-  font-size: 1.35rem;
+  font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.012em;
 }
@@ -1046,7 +864,7 @@ button {
   background: var(--surface-2);
   color: var(--text-1);
   font-family: var(--font-mono);
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
 }
 
 .editor-actions {
@@ -1108,7 +926,7 @@ button {
 
 .feature-desc-editor .readme-hint {
   color: var(--text-3);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .scenarios {
@@ -1135,10 +953,18 @@ button {
   border-color: var(--border-strong);
 }
 
-/* Published scenarios are shaded differently (specs/ui.spec.md) */
+/* Status (specs/ui.spec.md): a status-coloured left edge beside the glyph
+   in the title — draft grey, proposed amber, published green. */
+.scenario-card {
+  border-left: 3px solid var(--status-draft);
+}
+
+.scenario-card.proposed {
+  border-left-color: var(--status-proposed);
+}
+
 .scenario-card.published {
-  background: var(--pub-bg);
-  border-color: var(--pub-border);
+  border-left-color: var(--status-published);
 }
 
 /* Scenario selected with the up/down keys (specs/ui.spec.md); an outline so it
@@ -1156,8 +982,7 @@ button {
 }
 
 .scenario-title {
-  font-family: var(--font-serif);
-  font-size: 1.02rem;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 
@@ -1185,54 +1010,11 @@ button {
 .scenario-title .version {
   color: var(--text-3);
   font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 400;
 }
 
-.badge {
-  margin-left: 0.5rem;
-  padding: 0.13rem 0.5rem;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-family: var(--font-sans);
-  font-size: 0.66rem;
-  font-weight: 650;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  vertical-align: middle;
-}
 
-/* Proposed marker — saved but not yet published (specs/crud-feature.spec.md,
-   [proposed] chip) */
-.badge.proposed {
-  background: var(--hover);
-  color: var(--text-2);
-}
-
-/* Draft marker — stored in the app only, never in the .feature.md
-   (specs/crud-feature.spec.md "Scenario status") */
-.badge.draft {
-  background: transparent;
-  color: var(--text-3);
-  border: 1px dashed var(--text-3);
-}
-
-/* Transient 'Saved' toast, shown for 2 sec after an auto-save */
-.saved-banner {
-  position: fixed;
-  top: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  padding: 0.4rem 1rem;
-  border-radius: 999px;
-  background: var(--text-1);
-  color: var(--surface-0);
-  font-size: 0.8rem;
-  font-weight: 550;
-  box-shadow: var(--shadow-lg);
-}
 
 .card-actions {
   display: flex;
@@ -1245,7 +1027,7 @@ button.link {
   border: none;
   padding: 0;
   color: var(--accent-strong);
-  font-size: 0.83rem;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -1270,7 +1052,7 @@ button.link:disabled {
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0.5rem 0 0;
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
@@ -1301,8 +1083,7 @@ button.link:disabled {
 
 .dialog h3 {
   margin: 0;
-  font-family: var(--font-serif);
-  font-size: 1.25rem;
+  font-size: 0.9375rem;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
@@ -1311,7 +1092,7 @@ button.link:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  font-size: 0.83rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-2);
 }
@@ -1327,7 +1108,7 @@ button.link:disabled {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-1);
-  font-size: 0.92rem;
+  font-size: 0.8125rem;
   font-weight: 400;
 }
 
@@ -1348,7 +1129,7 @@ button.link:disabled {
 .dialog textarea {
   min-height: 14rem;
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.55;
   resize: vertical;
 }
@@ -1373,7 +1154,7 @@ button.link:disabled {
   border-radius: var(--radius-md);
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
@@ -1438,7 +1219,7 @@ button.link:disabled {
 .modal-body {
   margin: 0;
   color: var(--text-2);
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
   word-break: break-word;
 }
@@ -1503,8 +1284,7 @@ button.link:disabled {
   flex: 1 1 12rem;
   min-width: 8rem;
   max-width: 36rem;
-  font-family: var(--font-serif);
-  font-size: 1.35rem;
+  font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.012em;
   padding: 0.15rem 0;
@@ -1569,7 +1349,7 @@ button.link:disabled {
 .scenario-pane .version-field {
   margin: 0;
   color: var(--text-2);
-  font-size: 0.83rem;
+  font-size: 0.75rem;
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -1585,7 +1365,7 @@ button.link:disabled {
 }
 
 .field-label {
-  font-size: 0.83rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-2);
 }
@@ -1624,7 +1404,7 @@ button.link:disabled {
   color: var(--text-2);
   padding: 0.2rem 0.6rem;
   border-radius: 7px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .md-tabs button.active {
@@ -1645,7 +1425,7 @@ button.link:disabled {
    toolbar, left of the buttons, without moving them. */
 .md-upload-status,
 .md-upload-error {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   margin-right: 0.4rem;
   white-space: nowrap;
 }
@@ -1665,10 +1445,13 @@ button.link:disabled {
   min-width: 1.7rem;
   padding: 0.2rem 0.35rem;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   color: var(--text-2);
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   line-height: 1.2;
 }
 
@@ -1687,7 +1470,7 @@ button.link:disabled {
 
 .md-tools button.code {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
 }
 
 .md-editor .md-textarea {
@@ -1698,7 +1481,7 @@ button.link:disabled {
   resize: none;
   padding: 0.6rem 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.55;
 }
 
@@ -1722,7 +1505,7 @@ button.link:disabled {
 }
 
 .md-preview {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.6;
 }
 
@@ -1735,21 +1518,21 @@ button.link:disabled {
 }
 
 .md-preview h1 {
-  font-size: 1.25rem;
+  font-size: 0.9375rem;
 }
 
 .md-preview h2 {
-  font-size: 1.1rem;
+  font-size: 0.875rem;
 }
 
 .md-preview h3 {
-  font-size: 1rem;
+  font-size: 0.875rem;
 }
 
 .md-preview h4,
 .md-preview h5,
 .md-preview h6 {
-  font-size: 0.95rem;
+  font-size: 0.8125rem;
 }
 
 .md-preview h1,
@@ -1759,7 +1542,6 @@ button.link:disabled {
 .md-preview h5,
 .md-preview h6 {
   margin: 0.9em 0 0.4em;
-  font-family: var(--font-serif);
   letter-spacing: -0.008em;
 }
 
@@ -1788,7 +1570,7 @@ button.link:disabled {
   border: none;
   background: none;
   padding: 0;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .md-preview blockquote {
@@ -1861,7 +1643,7 @@ aside > .user-corner {
   border-radius: var(--radius-md);
   padding: 0.38rem 0.5rem;
   color: var(--text-1);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
@@ -1898,38 +1680,14 @@ aside > .user-corner {
   flex: none;
   margin-left: auto;
   color: var(--text-3);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   white-space: nowrap;
 }
 
 .user-menu {
-  position: absolute;
   bottom: calc(100% + 0.35rem);
   left: 0;
   right: 0;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.3rem;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-lg);
-  z-index: 10;
-}
-
-.user-menu button {
-  text-align: left;
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.42rem 0.6rem;
-  color: var(--text-1);
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.user-menu button:hover {
-  background: var(--hover);
 }
 
 /* User info dialog */
@@ -1938,7 +1696,7 @@ aside > .user-corner {
   grid-template-columns: auto 1fr;
   gap: 0.35rem 1rem;
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
 }
 
 .user-info dt {
@@ -1956,7 +1714,7 @@ aside > .user-corner {
 
 .hint {
   color: var(--text-2);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.45;
   margin: 0;
@@ -1970,7 +1728,7 @@ aside > .user-corner {
 }
 
 .auth-title {
-  font-size: 0.83rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-2);
 }
@@ -1980,7 +1738,7 @@ aside > .user-corner {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
 }
 
 .auth-row button,
@@ -1990,7 +1748,7 @@ aside > .user-corner {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-1);
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   cursor: pointer;
 }
 
@@ -2000,7 +1758,7 @@ aside > .user-corner {
 
 .auth-device p {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
 }
 
 .device-code {
@@ -2010,21 +1768,16 @@ aside > .user-corner {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   font-family: var(--font-mono);
-  font-size: 1rem;
+  font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   user-select: all;
 }
 
-.status {
-  color: var(--text-2);
-  font-size: 0.83rem;
-  margin: 0;
-}
 
 .error {
   color: var(--danger-fg);
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   margin: 0;
 }
 
@@ -2077,8 +1830,7 @@ aside > .user-corner {
 .conflict-pane h4,
 .conflict-edit h4 {
   margin: 0;
-  font-family: var(--font-serif);
-  font-size: 0.95rem;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
@@ -2098,7 +1850,7 @@ aside > .user-corner {
   padding: 0.5rem;
   overflow: auto;
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   line-height: 1.5;
 }
 
@@ -2259,7 +2011,7 @@ aside > .user-corner {
   color: var(--text-3);
   cursor: pointer;
   padding: 0.15rem 0.4rem;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   border-radius: 6px;
 }
 
@@ -2283,7 +2035,7 @@ button.table-add {
   color: var(--text-2);
   border-radius: var(--radius-sm);
   padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   cursor: pointer;
   align-self: flex-start;
   transition: color 120ms ease, border-color 120ms ease;
@@ -2301,7 +2053,7 @@ button.table-add:hover {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-2);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
@@ -2360,7 +2112,7 @@ button.table-add:hover {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
 }
 
 .test-list li {
@@ -2394,7 +2146,7 @@ button.table-add:hover {
 .test-add input,
 .test-edit input {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: 0.8125rem;
   padding: 0.35rem 0.6rem;
 }
 
@@ -2498,7 +2250,7 @@ button.table-add:hover {
   border-radius: 50%;
   background: var(--hover);
   color: var(--text-2);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   line-height: 1;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
@@ -2552,7 +2304,7 @@ button.table-add:hover {
 }
 
 .settings-row-hint {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 400;
   line-height: 1.45;
   color: var(--text-2);
@@ -2638,7 +2390,7 @@ button.table-add:hover {
   background: var(--surface-2);
   color: var(--accent-strong);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.6875rem;
   font-weight: 500;
   text-decoration: none;
   vertical-align: middle;
@@ -2659,33 +2411,9 @@ button.table-add:hover {
 
 .feature-title .ext-link {
   margin-left: 0;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
 }
 
-/* Assignment (src/server/members.ts): the "Assigned" dropdown beside the
-   feature name, offering the data repo's project members. */
-.assigned-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--text-3);
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
-.assigned-select {
-  max-width: 12rem;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font-size: 0.8rem;
-}
-
-.assigned-select:disabled {
-  opacity: 0.6;
-}
 
 /* The dialogs' ticket-link fields: url first (pasting it fills the other
    two), then the tool's short name and the ticket id. */
@@ -2736,7 +2464,7 @@ button.table-add:hover {
 
 .link-preview {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
 }
 
 .link-preview code {
@@ -2754,5 +2482,1060 @@ button.table-add:hover {
    editor takes the rest of the pane. */
 .feature-title .readme-hint {
   color: var(--text-3);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+}
+
+/* ---- Icons (lucide, bundled — the desktop app renders offline) ---- */
+.lucide {
+  flex: none;
+  vertical-align: -0.2em;
+}
+
+/* ---- Status glyphs (src/frontend/StatusIcon.tsx) ---- */
+.status-icon {
+  flex: none;
+  vertical-align: -0.2em;
+}
+
+.status-icon.draft {
+  color: var(--status-draft);
+}
+
+.status-icon.proposed {
+  color: var(--status-proposed);
+}
+
+.status-icon.published {
+  color: var(--status-published);
+}
+
+.scenario-title .status-icon {
+  margin-right: 0.45rem;
+}
+
+/* The editor pane's status, glyph plus word, beside the version. */
+.status-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.6rem;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  text-transform: capitalize;
+}
+
+/* A feature's rollup in the tree: the share of its scenarios published. */
+.tree-row .publish-ring {
+  flex: none;
+  margin-right: 0.45rem;
+}
+
+/* ---- Tooltip (src/frontend/Tooltip.tsx) ---- */
+.tooltip {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, 0);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--text-1);
+  color: var(--surface-0);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-md);
+}
+
+.tooltip.above {
+  transform: translate(-50%, -100%);
+}
+
+.tooltip kbd {
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--surface-0) 22%, transparent);
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+/* ---- Keycaps (shortcut hints in menus, tooltips, the cheat sheet) ---- */
+kbd {
+  display: inline-block;
+  min-width: 1.3em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.keys-then,
+.keys-or {
+  margin: 0 0.25rem;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+/* ---- Menu (src/frontend/Menu.tsx) ---- */
+.menu {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: 10rem;
+  padding: 0.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.menu-entry {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.menu-item:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.menu-item.danger {
+  color: var(--danger-fg);
+}
+
+.menu-item.danger:hover,
+.menu-item.danger:focus-visible {
+  background: var(--danger-bg);
+}
+
+.menu-check {
+  display: inline-flex;
+  width: 0.9rem;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.menu-icon {
+  display: inline-flex;
+  color: var(--text-2);
+}
+
+.menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item .keys {
+  margin-left: auto;
+}
+
+.menu-submenu {
+  display: flex;
+  flex-direction: column;
+  margin-left: 0.75rem;
+  padding-left: 0.25rem;
+  border-left: 2px solid var(--border);
+}
+
+/* ---- Toasts (src/frontend/Toasts.tsx) ---- */
+.toaster {
+  position: fixed;
+  left: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: min(28rem, calc(100vw - 1.5rem));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  box-shadow: var(--shadow-md);
+}
+
+.toast > svg {
+  flex: none;
+}
+
+.toast.success > svg {
+  color: var(--status-published);
+}
+
+.toast.info > svg {
+  color: var(--text-2);
+}
+
+.toast.error {
+  border-color: var(--danger-border);
+}
+
+.toast.error > svg {
+  color: var(--danger-fg);
+}
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-action {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--accent-strong);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.toast-action:hover {
+  background: var(--accent-soft);
+}
+
+.toast-close {
+  flex: none;
+  display: inline-flex;
+  padding: 0.25rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.toast-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in 160ms ease-out;
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(0.4rem);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+/* ---- Save indicator (page headers) ---- */
+.save-indicator {
+  flex: none;
+  align-self: center;
+  margin: 0 0.5rem;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.save-indicator.unsaved {
+  color: var(--status-proposed);
+}
+
+/* ---- Cheat sheet (src/frontend/shortcuts.tsx) ---- */
+.shortcut-sheet {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+}
+
+.shortcut-groups {
+  columns: 2;
+  column-gap: 2rem;
+}
+
+@media (max-width: 40rem) {
+  .shortcut-groups {
+    columns: 1;
+  }
+}
+
+.shortcut-group {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+.shortcut-group h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: none;
+}
+
+.shortcut-alt {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Page header: breadcrumbs, icon actions, one primary button ---- */
+.page-header {
+  min-height: 2.5rem;
+  gap: 0.75rem;
+}
+
+.crumbs {
+  flex: 1;
+  min-width: 0;
+}
+
+.crumbs ol {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.crumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.crumbs li.crumb-tail {
+  flex: 1;
+  min-width: 0;
+}
+
+.crumb-sep {
+  flex: none;
+  color: var(--text-3);
+}
+
+.crumb,
+.editor-bar button.crumb {
+  display: inline-flex;
+  align-items: center;
+  max-width: 16rem;
+  padding: 0.15rem 0.35rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+a.crumb:hover,
+.editor-bar button.crumb:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.crumb.plain {
+  cursor: default;
+}
+
+.crumb.current,
+.editor-bar button.crumb.current {
+  max-width: none;
+  color: var(--text-1);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.crumbs .scenario-pane-heading {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.crumbs .rename-form {
+  flex: 1;
+}
+
+.page-actions {
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.page-actions .readme-hint {
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+.ibtn,
+.editor-bar button.ibtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.ibtn:hover:not(:disabled),
+.ibtn.active,
+.editor-bar button.ibtn:hover:not(:disabled),
+.editor-bar button.ibtn.active {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.ibtn:focus-visible,
+.editor-bar button.ibtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.page-more {
+  position: relative;
+  display: inline-flex;
+}
+
+.page-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+}
+
+.editor-bar button.primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.5rem;
+}
+
+.primary-action .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-proposed);
+}
+
+/* ---- Property chips: status rollup, assignee, ticket ---- */
+.props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.chip-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.5rem;
+  padding: 0 0.55rem 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
+button.chip:disabled {
+  opacity: 0.6;
+}
+
+.chip.muted {
+  color: var(--text-2);
+}
+
+.chip-avatar {
+  width: 0.9rem;
+  height: 0.9rem;
+  font-size: 0.5rem;
+}
+
+.chip-ext {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.15rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+}
+
+.chip-ext:hover {
+  color: var(--accent-strong);
+  background: var(--hover);
+}
+
+.chip-menu,
+.chip-popover {
+  top: calc(100% + 0.25rem);
+  left: 0;
+}
+
+.popover {
+  position: absolute;
+  z-index: 10;
+  min-width: 24rem;
+  padding: 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.popover .hint {
+  margin: 0 0 0.5rem;
+}
+
+.popover .dialog-actions {
+  margin-top: 0.6rem;
+}
+
+/* ---- Scenario cards: Edit and ⋯ appear on hover, focus, or selection ---- */
+.scenario-card header {
+  align-items: center;
+}
+
+.card-actions {
+  position: relative;
+  align-items: center;
+  gap: 0.15rem;
+  opacity: 0;
+}
+
+.scenario-card:hover .card-actions,
+.scenario-card:focus-within .card-actions,
+.scenario-card.selected .card-actions {
+  opacity: 1;
+}
+
+.card-menu {
+  top: calc(100% + 0.2rem);
+  right: 0;
+}
+
+/* ---- Command palette (src/frontend/CommandPalette.tsx) ---- */
+.palette-backdrop {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 70vh;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 2.75rem;
+  padding: 0 0.9rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.palette-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text-1);
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 3rem;
+  overflow-y: auto;
+  padding: 0.35rem;
+}
+
+.palette-group {
+  padding: 0.4rem 0.5rem 0.15rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.palette-item.active {
+  background: var(--accent-soft);
+}
+
+.palette-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-2);
+}
+
+.palette-label {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-sub {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-sub mark,
+.palette-label mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.palette-item .keys {
+  margin-left: auto;
+}
+
+.palette-foot {
+  display: flex;
+  gap: 1rem;
+  padding: 0.4rem 0.9rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+
+.palette-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.palette-list .empty,
+.palette-list .error {
+  margin: 0;
+  padding: 0.75rem;
+}
+
+/* ---- Sidebar: collapse to a rail ("[") ---- */
+.layout.collapsed {
+  --sw: 2.75rem;
+}
+
+aside.rail {
+  align-items: center;
+  padding: 0.75rem 0.35rem;
+  gap: 0.35rem;
+}
+
+aside.rail .rail-btn,
+aside.rail .rail-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+aside.rail .rail-btn:hover,
+aside.rail .rail-link:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+aside.rail .rail-link.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+aside.rail .rail-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+aside header .collapse-btn {
+  margin-left: auto;
+}
+
+/* ---- Primary nav under the search field ---- */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.side-nav a,
+.side-nav button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.side-nav a:hover,
+.side-nav button:hover {
+  background: var(--hover);
+}
+
+.side-nav a.active,
+.side-nav button.active {
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+.side-nav svg {
+  color: var(--text-2);
+}
+
+/* ---- Section header with the filter ---- */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.6rem;
+  padding: 0 0.35rem 0 0.6rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.section-head .filter-anchor {
+  position: relative;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.section-head .chip {
+  height: 1.3rem;
+  padding: 0 0.4rem 0 0.35rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.section-head .chip.on {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.filter-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 12rem;
+}
+
+.filter-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+/* Rows outside the filter fade rather than vanish — the tree keeps its shape. */
+.tree-row.dim > a.tree-feature,
+.tree-row.dim .publish-ring {
+  opacity: 0.4;
+}
+
+/* ---- Roadmap entries: grouped by subfolder, with a ⋯ menu ---- */
+.roadmap-group {
+  padding: 0.35rem 0.6rem 0.1rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.roadmap-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.roadmap-row:hover,
+.roadmap-row:focus-within {
+  background: var(--hover);
+}
+
+.roadmap-row > a.roadmap-entry {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roadmap-row.nested > a.roadmap-entry {
+  padding-left: 1.2rem;
+}
+
+.roadmap-row .tree-menu-btn {
+  margin-right: 0.15rem;
+}
+
+.roadmap-row:hover .tree-menu-btn,
+.roadmap-row:focus-within .tree-menu-btn {
+  opacity: 1;
+}
+
+/* ---- Skeletons ---- */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    background: linear-gradient(90deg, var(--hover) 25%, var(--border) 50%, var(--hover) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.skeleton-page .skeleton-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+}
+
+.skeleton-card {
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeleton-shell aside {
+  gap: 0.6rem;
+}
+
+.palette-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+}
+
+/* ---- Error boundary fallback ---- */
+.view-error {
+  display: flex;
+  gap: 0.9rem;
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--text-1);
+}
+
+.view-error > svg {
+  flex: none;
+  color: var(--danger-fg);
+}
+
+.view-error h2 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+.view-error p {
+  margin: 0 0 0.75rem;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.view-error-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-error-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.view-error-actions button.secondary {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
 }

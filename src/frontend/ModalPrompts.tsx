@@ -105,7 +105,14 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
         }
       }}
     >
-      <div className="dialog modal-dialog" ref={trapRef} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="dialog modal-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={request.opts.title}
+        ref={trapRef}
+        onClick={(e) => e.stopPropagation()}
+      >
         <h3>{request.opts.title}</h3>
         {request.kind === "prompt" ? (
           <>
