@@ -13,6 +13,7 @@ import { syncDataDir } from "../src/server/reload";
 import {
   ROADMAP_FOLDER,
   createRoadmapPage,
+  deleteRoadmapPage,
   ensureRoadmapFolder,
   importRoadmapDrift,
   isRoadmapPath,
@@ -135,6 +136,20 @@ test("a page is created, read and saved through its document", async () => {
   expect((await readRoadmapPage(clones.a, fileName))?.content).toBe(saved.content);
   const loaded = await loadRoadmapDoc(clones.a, fileName);
   expect(loaded?.doc.body).toBe("Charge for it.");
+});
+
+// The sidebar's ⋯ menu deletes a page: the markdown and its document go,
+// committed and pushed like a deleted feature.
+test("a page is deleted with its document, committed and pushed", async () => {
+  const clones = await twoClones(root);
+  const fileName = await createRoadmapPage(clones.a, "Pricing");
+  await deleteRoadmapPage(clones.a, fileName);
+  expect(await Bun.file(join(clones.a, fileName)).exists()).toBe(false);
+  expect(await exists(join(clones.a, roadmapDocDirRel(fileName)))).toBe(false);
+  expect((await listRoadmap(clones.a)).map((p) => p.fileName)).toEqual([]);
+  await git(clones.b, "pull", "origin", "main");
+  expect(await Bun.file(join(clones.b, fileName)).exists()).toBe(false);
+  expect(deleteRoadmapPage(clones.a, fileName)).rejects.toThrow("not found");
 });
 
 // "allow Assignment for a roadmap doc just like for a feature": the member

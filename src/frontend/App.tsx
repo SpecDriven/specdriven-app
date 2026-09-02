@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent, ReactNode } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent,
+  ReactNode,
+} from "react";
 import {
   parseFeature,
   parseRoadmap,
@@ -33,7 +38,10 @@ import {
   Home,
   Keyboard,
   Link,
+  ListFilter,
   Map as MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Sun,
   Ticket,
@@ -47,6 +55,7 @@ import { Menu } from "./Menu";
 import { Popover } from "./Popover";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -374,6 +383,65 @@ function writeRecent(list: RecentEntry[]) {
   }
 }
 
+/** The sidebar collapsed to a rail ("["), remembered on this device. */
+const COLLAPSED_KEY = "sd-sidebar-collapsed";
+
+function readSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function storeSidebarCollapsed(collapsed: boolean) {
+  try {
+    if (collapsed) localStorage.setItem(COLLAPSED_KEY, "1");
+    else localStorage.removeItem(COLLAPSED_KEY);
+  } catch {
+    // Storage unavailable: the choice just does not survive a reload.
+  }
+}
+
+/** The sidebar's filter: features by scenario status and by assignee. */
+interface TreeFilter {
+  status: Scenario["status"] | null;
+  assignee: string | null;
+}
+
+/** Roadmap pages grouped by the subfolder under `roadmap/`, top level first. */
+function roadmapGroups(pages: RoadmapListing[]): { dir: string; pages: RoadmapListing[] }[] {
+  const groups = new Map<string, RoadmapListing[]>();
+  for (const page of pages) {
+    const dir = page.fileName.split("/").slice(1, -1).join("/");
+    const list = groups.get(dir) ?? [];
+    list.push(page);
+    groups.set(dir, list);
+  }
+  return [...groups]
+    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
+    .map(([dir, list]) => ({ dir, pages: list }));
+}
+
+/** Placeholder for a page while its content is on the way. */
+function PageSkeleton({ cards }: { cards: number }) {
+  return (
+    <div className="skeleton-page" aria-busy="true" aria-label="Loading">
+      <div className="skeleton-bar">
+        <span className="skeleton" style={{ height: "1.1rem", width: "18rem" }} />
+        <span className="skeleton" style={{ height: "1.75rem", width: "6rem", marginLeft: "auto" }} />
+      </div>
+      {Array.from({ length: cards }, (_, i) => (
+        <div key={i} className="skeleton-card">
+          <span className="skeleton" style={{ height: "0.9rem", width: `${40 + (i % 3) * 10}%` }} />
+          <span className="skeleton" style={{ height: "0.7rem", width: "90%" }} />
+          <span className="skeleton" style={{ height: "0.7rem", width: "72%" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Two-letter initials for an assignee chip. */
 function initialsOf(name: string): string {
   return (
@@ -481,6 +549,15 @@ export function App() {
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   const [roadmapAssigneeMenuOpen, setRoadmapAssigneeMenuOpen] = useState(false);
+  /** Sidebar collapsed to a rail ("["), remembered on this device. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  /** The sidebar's filter, and its menu. */
+  const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  /** A roadmap entry's ⋯ menu (file name), if open. */
+  const [roadmapMenu, setRoadmapMenu] = useState<string | null>(null);
+  /** A feature is being fetched — the skeleton shows until it lands. */
+  const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
   /** Draft for the inline file-name editor; null while not editing. */
@@ -1061,7 +1138,10 @@ export function App() {
   };
 
   const openFeature = async (file: string, opts: OpenOptions = {}) => {
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}`);
+    setFeatureLoading(true);
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}`).finally(() =>
+      setFeatureLoading(false),
+    );
     if (res.ok) {
       const data = await res.json();
       const parsed = featureFromResponse(data, file);
@@ -2125,6 +2205,60 @@ export function App() {
     await openRoadmapPage(data.fileName, { push: true });
   };
 
+  /** Rename a page (its `# heading`), saved through the page's document. */
+  const renameRoadmapPage = async (page: RoadmapListing) => {
+    const name = await prompt({
+      title: "Rename roadmap page",
+      initial: page.name,
+      confirmLabel: "Rename",
+    });
+    if (!name || name.trim() === page.name) return;
+    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`);
+    const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
+    if (!res.ok || typeof data.content !== "string") {
+      toast.error(data.error ?? "Could not read the roadmap page");
+      return;
+    }
+    const next = serializeRoadmap({ ...parseRoadmap(data.content), name: name.trim() });
+    const put = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: next }),
+    });
+    const saved = (await put.json().catch(() => ({}))) as { error?: string };
+    if (!put.ok) {
+      toast.error(saved.error ?? "Could not rename the roadmap page");
+      return;
+    }
+    toast.success(`Renamed to “${name.trim()}” — saved locally.`);
+    await loadRoadmapPages();
+    if (roadmapPageRef.current?.fileName === page.fileName) await openRoadmapPage(page.fileName);
+  };
+
+  /** Delete a page — committed and pushed right away, so it is confirmed first. */
+  const removeRoadmapPage = async (page: RoadmapListing) => {
+    const ok = await confirm({
+      title: "Delete roadmap page",
+      body: `Delete “${page.name}”? This is committed and pushed right away.`,
+      confirmLabel: "Delete page",
+    });
+    if (!ok) return;
+    if (roadmapPageRef.current?.fileName === page.fileName) {
+      closeRoadmapPage({ save: false });
+      history.replaceState(null, "", "/");
+    }
+    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+      method: "DELETE",
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not delete the roadmap page");
+      return;
+    }
+    toast.success(`Deleted “${page.name}”${data.message ? ` — ${data.message}` : ""}.`);
+    await loadRoadmapPages();
+  };
+
   /** Fold the Roadmap section away, or open it back up; the choice sticks. */
   const toggleRoadmapSection = (collapsed: boolean) => {
     setRoadmapCollapsed(collapsed);
@@ -2929,7 +3063,7 @@ export function App() {
     const entry = specSelection.get(f.fileName);
     return (
       <div key={f.fileName}>
-        <div className="tree-row">
+        <div className={`tree-row${matchesFilter(f) ? "" : " dim"}`}>
           {/* Code gen selection (specs/agents/claude.spec.md): checking a
               spec here takes the whole thing; a dash means some of its
               scenarios are picked, which is done on the scenario cards.
@@ -2958,6 +3092,10 @@ export function App() {
       <a
         href={featurePath(f.fileName)}
         className={`tree-feature${f.fileName === selected ? " active" : ""}`}
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-current={f.fileName === selected ? "page" : undefined}
+        data-file={f.fileName}
         /* The checkbox carries the depth indent; without it the link does. */
         style={{ paddingLeft: codeGen ? "0.4rem" : `${0.6 + depth * 0.9}rem` }}
         draggable
@@ -3071,7 +3209,10 @@ export function App() {
             <button
               type="button"
               className="folder-toggle"
+              role="treeitem"
+              aria-level={depth + 1}
               aria-expanded={!collapsed.has(child.path)}
+              data-folder={child.path}
               onClick={() => {
                 setSelectedFolder(child.path);
                 toggleFolder(child.path);
@@ -3097,7 +3238,7 @@ export function App() {
               </button>
             </Tooltip>
           </div>
-          {!collapsed.has(child.path) && renderTree(child, depth + 1)}
+          {!collapsed.has(child.path) && <div role="group">{renderTree(child, depth + 1)}</div>}
         </div>
       ))}
       {node.features.map((f) => featureItem(f, depth))}
@@ -3125,9 +3266,16 @@ export function App() {
     featureMenuOpen ||
     cardMenu !== null ||
     assigneeMenuOpen ||
-    roadmapAssigneeMenuOpen;
+    roadmapAssigneeMenuOpen ||
+    filterMenuOpen ||
+    roadmapMenu !== null;
   const quiet = dialogOpen || menuOpen;
   const onFeaturePage = selected !== null && feature !== null && editing === null;
+  const toggleSidebar = () =>
+    setSidebarCollapsed((c) => {
+      storeSidebarCollapsed(!c);
+      return !c;
+    });
   const newScenario = () =>
     setEditing({
       index: null,
@@ -3255,6 +3403,14 @@ export function App() {
         applyThemePref(next);
         toast.info(`Theme: ${next}`);
       },
+    },
+    {
+      id: "sidebar",
+      keys: "[",
+      label: sidebarCollapsed ? "Expand the sidebar" : "Collapse the sidebar",
+      group: "Navigate",
+      when: () => !quiet,
+      run: () => toggleSidebar(),
     },
     {
       id: "escape",
@@ -3441,6 +3597,10 @@ export function App() {
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
     shortcutAction("settings", <Settings size={14} />),
+    shortcutAction(
+      "sidebar",
+      sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />,
+    ),
     ...(["system", "light", "dark"] as ThemePref[]).map((pref) =>
       action(`theme-${pref}`, `Theme: ${pref}`, <Sun size={14} />, () => {
         setTheme(pref);
@@ -3596,7 +3756,87 @@ export function App() {
     });
   };
 
-  if (loading) return <main className="centered">Loading…</main>;
+  // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
+  // matches by having a scenario in the chosen status, and by its assignee.
+  const matchesFilter = (f: FeatureListing) =>
+    (filter.status === null || f.scenarios.some((s) => s.status === filter.status)) &&
+    (filter.assignee === null || f.assigned === filter.assignee);
+  const me = user?.name || user?.login || user?.username || null;
+  const filtering = filter.status !== null || filter.assignee !== null;
+
+  // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
+  // in), ← closes it or climbs to it from a feature, Home/End jump,
+  // Shift+F10 or the menu key opens a feature's ⋯. Enter stays the row's own.
+  const onTreeKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
+    const rows = [...e.currentTarget.querySelectorAll<HTMLElement>("[role=treeitem]")];
+    const i = rows.indexOf(t);
+    if (i === -1) return;
+    const move = (to: number) => rows[Math.max(0, Math.min(rows.length - 1, to))]?.focus();
+    const folderPath = t.dataset.folder;
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        move(i + 1);
+        return;
+      case "ArrowUp":
+        e.preventDefault();
+        move(i - 1);
+        return;
+      case "Home":
+        e.preventDefault();
+        move(0);
+        return;
+      case "End":
+        e.preventDefault();
+        move(rows.length - 1);
+        return;
+      case "ArrowRight":
+        if (folderPath === undefined) return;
+        e.preventDefault();
+        if (collapsed.has(folderPath)) toggleFolder(folderPath);
+        else move(i + 1);
+        return;
+      case "ArrowLeft": {
+        e.preventDefault();
+        if (folderPath !== undefined && !collapsed.has(folderPath)) {
+          toggleFolder(folderPath);
+          return;
+        }
+        t.closest("[role=group]")
+          ?.parentElement?.querySelector<HTMLElement>("[role=treeitem]")
+          ?.focus();
+        return;
+      }
+      case "F10":
+        if (!e.shiftKey || !t.dataset.file) return;
+        e.preventDefault();
+        setTreeMenu(t.dataset.file);
+        return;
+      case "ContextMenu":
+        if (!t.dataset.file) return;
+        e.preventDefault();
+        setTreeMenu(t.dataset.file);
+        return;
+    }
+  };
+
+  if (loading)
+    return (
+      <main className="layout skeleton-shell" aria-busy="true" aria-label="Loading">
+        <aside>
+          <span className="skeleton" style={{ height: "1.75rem", width: "60%" }} />
+          <span className="skeleton" style={{ height: "2rem" }} />
+          {[70, 55, 65, 50, 60, 45].map((w, i) => (
+            <span key={i} className="skeleton" style={{ height: "1.1rem", width: `${w}%` }} />
+          ))}
+        </aside>
+        <section className="editor">
+          <PageSkeleton cards={3} />
+        </section>
+      </main>
+    );
 
   if (needsRepo) {
     return (
@@ -3646,9 +3886,73 @@ export function App() {
 
   return (
     <main
-      className={resizingSidebar ? "layout resizing" : "layout"}
+      className={`layout${resizingSidebar ? " resizing" : ""}${sidebarCollapsed ? " collapsed" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
     >
+      {sidebarCollapsed ? (
+        /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
+           folded to its icons — search, Home, Roadmap, and the way back out. */
+        <aside className="rail">
+          <Tooltip label="Expand the sidebar" keys="[">
+            <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+              <Logo size={24} />
+            </button>
+          </Tooltip>
+          <Tooltip label="Search or run a command" keys="mod+k">
+            <button
+              type="button"
+              className="rail-btn"
+              aria-label="Search or run a command"
+              onClick={() => setPalette({ query: "" })}
+            >
+              <Search size={16} aria-hidden="true" />
+            </button>
+          </Tooltip>
+          <Tooltip label="Home" keys="g h">
+            <a
+              href="/"
+              className={`rail-link${!selected && !roadmapPage ? " active" : ""}`}
+              aria-label="Home"
+              onClick={(e) =>
+                spaClick(e, () => {
+                  goHome();
+                  void loadReadme();
+                })
+              }
+            >
+              <Home size={16} aria-hidden="true" />
+            </a>
+          </Tooltip>
+          {roadmap && roadmapPages.length > 0 && (
+            <Tooltip label="Roadmap" keys="g r">
+              <a
+                href={roadmapPath(roadmapPages[0]!.fileName)}
+                className={`rail-link${roadmapPage ? " active" : ""}`}
+                aria-label="Roadmap"
+                onClick={(e) =>
+                  spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
+                }
+              >
+                <MapIcon size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
+          <div className="rail-bottom">
+            <Tooltip label="Expand the sidebar" keys="[">
+              <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+                <PanelLeftOpen size={16} aria-hidden="true" />
+              </button>
+            </Tooltip>
+            <Tooltip label="Settings" keys="mod+,">
+              <button type="button" className="rail-btn" aria-label="Settings" onClick={() => openSettings()}>
+                <span className="avatar" aria-hidden="true">
+                  {initials}
+                </span>
+              </button>
+            </Tooltip>
+          </div>
+        </aside>
+      ) : (
       <aside>
         <header>
           <h1>
@@ -3763,6 +4067,16 @@ export function App() {
               </button>
             )}
           </div>
+          <Tooltip label="Collapse the sidebar" keys="[">
+            <button
+              type="button"
+              className="ibtn collapse-btn"
+              aria-label="Collapse the sidebar"
+              onClick={toggleSidebar}
+            >
+              <PanelLeftClose size={15} aria-hidden="true" />
+            </button>
+          </Tooltip>
         </header>
         {/* Demo mode: say what the sandbox does — edits are ephemeral. */}
         {demo && <div className="demo-banner">Demo — edits reset on refresh</div>}
@@ -3781,6 +4095,46 @@ export function App() {
             <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
           </button>
         </div>
+        {/* Primary nav (specs/ui/ui.feature.md "Design system"): Home is the
+            README, Roadmap the first page, My specs the assignee filter set
+            to the current user. */}
+        <nav className="side-nav" aria-label="Primary">
+          <a
+            href="/"
+            className={!selected && !roadmapPage ? "active" : ""}
+            onClick={(e) =>
+              spaClick(e, () => {
+                goHome();
+                void loadReadme();
+              })
+            }
+          >
+            <Home size={14} aria-hidden="true" /> Home
+          </a>
+          {roadmap && roadmapPages.length > 0 && (
+            <a
+              href={roadmapPath(roadmapPages[0]!.fileName)}
+              className={roadmapPage ? "active" : ""}
+              onClick={(e) =>
+                spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
+              }
+            >
+              <MapIcon size={14} aria-hidden="true" /> Roadmap
+            </a>
+          )}
+          {assignments && me && (
+            <button
+              type="button"
+              className={filter.assignee === me ? "active" : ""}
+              aria-pressed={filter.assignee === me}
+              onClick={() =>
+                setFilter((f) => ({ ...f, assignee: f.assignee === me ? null : me }))
+              }
+            >
+              <UserRound size={14} aria-hidden="true" /> My specs
+            </button>
+          )}
+        </nav>
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
           <button onClick={createFeature}>+ New feature</button>
@@ -3855,28 +4209,183 @@ export function App() {
                 </button>
               </Tooltip>
             </div>
+            {/* Pages grouped by their subfolder under roadmap/, each with a
+                ⋯ menu: Rename, Copy link, Delete. */}
             {!roadmapCollapsed &&
-              roadmapPages.map((page) => (
-                <a
-                  key={page.fileName}
-                  href={roadmapPath(page.fileName)}
-                  className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
-                  title={page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name}
-                  onClick={(e) => spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))}
-                >
-                  {page.name}
-                </a>
+              roadmapGroups(roadmapPages).map(({ dir, pages }) => (
+                <div key={dir || "."}>
+                  {dir && <div className="roadmap-group">{dir}</div>}
+                  {pages.map((page) => (
+                    <div key={page.fileName} className={`roadmap-row${dir ? " nested" : ""}`}>
+                      <a
+                        href={roadmapPath(page.fileName)}
+                        className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
+                        title={
+                          page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
+                        }
+                        aria-current={page.fileName === roadmapPage?.fileName ? "page" : undefined}
+                        onClick={(e) =>
+                          spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))
+                        }
+                      >
+                        {page.name}
+                      </a>
+                      <span className="tree-row-menu">
+                        <Tooltip label="More actions">
+                          <button
+                            type="button"
+                            className="tree-menu-btn"
+                            aria-label={`Menu for ${page.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={roadmapMenu === page.fileName}
+                            onClick={() =>
+                              setRoadmapMenu((m) => (m === page.fileName ? null : page.fileName))
+                            }
+                          >
+                            <Ellipsis size={14} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
+                        <Menu
+                          open={roadmapMenu === page.fileName}
+                          onClose={() => setRoadmapMenu(null)}
+                          label={`Menu for ${page.name}`}
+                          className="tree-menu"
+                          containerSelector=".tree-row-menu"
+                          items={[
+                            {
+                              id: "rename",
+                              label: "Rename",
+                              icon: <Pencil size={13} />,
+                              onSelect: () => void renameRoadmapPage(page),
+                            },
+                            {
+                              id: "copy",
+                              label: "Copy link",
+                              icon: <Link size={13} />,
+                              onSelect: () => void copyLink(roadmapPath(page.fileName)),
+                            },
+                            {
+                              id: "delete",
+                              label: "Delete",
+                              icon: <Trash2 size={13} />,
+                              danger: true,
+                              onSelect: () => void removeRoadmapPage(page),
+                            },
+                          ]}
+                        />
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ))}
             {!roadmapCollapsed && roadmapPages.length === 0 && (
               <p className="empty">No roadmap pages yet</p>
             )}
           </div>
         )}
+        {/* The Features section head carries the filter: by status, by
+            assignee. Active filters show as chips that clear on click. */}
+        <div className="section-head">
+          Features
+          <span className="filter-anchor">
+            {filter.status && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label={`Clear the ${filter.status} filter`}
+                onClick={() => setFilter((f) => ({ ...f, status: null }))}
+              >
+                <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
+                <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            {filter.assignee && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label="Clear the assignee filter"
+                onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
+              >
+                {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            <Tooltip label="Filter features">
+              <button
+                type="button"
+                className={`chip${filtering ? " on" : ""}`}
+                aria-label="Filter features"
+                aria-haspopup="menu"
+                aria-expanded={filterMenuOpen}
+                onClick={() => setFilterMenuOpen((o) => !o)}
+              >
+                <ListFilter size={12} aria-hidden="true" /> Filter
+              </button>
+            </Tooltip>
+            <Menu
+              open={filterMenuOpen}
+              onClose={() => setFilterMenuOpen(false)}
+              label="Filter features"
+              className="filter-menu"
+              containerSelector=".filter-anchor"
+              items={[
+                {
+                  id: "status",
+                  label: "Status",
+                  items: [
+                    {
+                      id: "status-any",
+                      label: "Any status",
+                      checked: filter.status === null,
+                      onSelect: () => setFilter((f) => ({ ...f, status: null })),
+                    },
+                    ...(["draft", "proposed", "published"] as const).map((st) => ({
+                      id: `status-${st}`,
+                      label: st[0]!.toUpperCase() + st.slice(1),
+                      icon: <StatusIcon status={st} size={13} />,
+                      checked: filter.status === st,
+                      onSelect: () => setFilter((f) => ({ ...f, status: st })),
+                    })),
+                  ],
+                },
+                ...(assignments
+                  ? [
+                      {
+                        id: "assignee",
+                        label: "Assignee",
+                        items: [
+                          {
+                            id: "assignee-any",
+                            label: "Anyone",
+                            checked: filter.assignee === null,
+                            onSelect: () => setFilter((f) => ({ ...f, assignee: null })),
+                          },
+                          ...members.map((m) => ({
+                            id: `assignee-${m.name}`,
+                            label: m.name,
+                            icon: (
+                              <span className="avatar chip-avatar" aria-hidden="true">
+                                {initialsOf(m.name)}
+                              </span>
+                            ),
+                            checked: filter.assignee === m.name,
+                            onSelect: () => setFilter((f) => ({ ...f, assignee: m.name })),
+                          })),
+                        ],
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          </span>
+        </div>
         {/* Folder tree (specs/folders.spec.md): folders are drop targets
             for drag-moving features; the tree background is the top level. */}
         {(
           <div
             className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
+            role="tree"
+            aria-label="Features"
+            onKeyDown={onTreeKeyDown}
             onClick={(e) => {
               // A click on the bare background deselects the folder, so the
               // next "+ New folder" creates at the top level again.
@@ -3941,8 +4450,11 @@ export function App() {
           </button>
         </div>
       </aside>
+      )}
       {/* Divider (specs/ui.spec.md "Sidebar resize"): drag to resize the
-          left pane, double-click to restore the default width. */}
+          left pane, double-click to restore the default width. Gone while
+          the sidebar is a rail. */}
+      {!sidebarCollapsed && (
       <div
         className="sidebar-divider"
         role="separator"
@@ -3978,7 +4490,11 @@ export function App() {
           storeSidebarWidth(w);
         }}
       />
-      <section className="editor">
+      )}
+      <section className="editor" aria-busy={featureLoading || undefined}>
+        {/* A render error in one view shows a note with a way back, never a
+            blank window; the key follows the page so navigating resets it. */}
+        <ErrorBoundary key={selected ?? roadmapPage?.fileName ?? "home"}>
         {editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
@@ -4599,7 +5115,8 @@ export function App() {
               className="scenarios"
               style={{ "--preview-lines": previewLines } as CSSProperties}
             >
-              {feature.scenarios.map((s, i) => (
+              {feature.scenarios.map((s, i) =>
+                filter.status !== null && s.status !== filter.status ? null : (
                 <article
                   key={i}
                   ref={(el) => {
@@ -4749,7 +5266,15 @@ export function App() {
                       Settings toggle hides it (default ON). */}
                   {showTestLinks && testsTable(s.tests)}
                 </article>
-              ))}
+                ),
+              )}
+              {filter.status !== null &&
+                feature.scenarios.length > 0 &&
+                !feature.scenarios.some((s) => s.status === filter.status) && (
+                  <p className="empty">
+                    No {filter.status} scenarios here — the sidebar filter hides the rest.
+                  </p>
+                )}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
             </div>
             <div>
@@ -4778,6 +5303,11 @@ export function App() {
               </button>
             </div>
           </>
+        ) : selected && !feature && featureLoading ? (
+          /* A feature opened by deep link, still on its way. */
+          <PageSkeleton cards={3} />
+        ) : roadmapPage && roadmapText === null ? (
+          <PageSkeleton cards={1} />
         ) : roadmapPage && roadmapText !== null ? (
           /* A roadmap page (specs/app/roadmap.feature.md): a regular markdown
              file, edited and autosaved like the README — with the "Assigned"
@@ -4892,6 +5422,7 @@ export function App() {
             {/* A stale deep link lands here with a note (specs/navigation.spec.md). */}
           </>
         )}
+        </ErrorBoundary>
       </section>
       {/* specs/crud-feature.spec.md "Publish feature with merge conflict": a
           dialog rather than a strip appended to the page, so the two sides

@@ -59,6 +59,8 @@ export interface FeatureListing {
       (specs/agents/claude.spec.md) and the sidebar's publish rollup
       (specs/ui/ui.feature.md "Design system"). */
   scenarios: (ScenarioPick & { status: ScenarioStatus })[];
+  /** The project member the feature is assigned to, for the sidebar filter. */
+  assigned?: string;
 }
 
 /**
@@ -71,10 +73,12 @@ export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
   return Promise.all(
     entries.map(async (fileName) => {
       let name = "";
+      let assigned: string | undefined;
       let scenarios: FeatureListing["scenarios"] = [];
       try {
         const parsed = parseFeature(await readFile(`${dataDir}/${fileName}`, "utf8"));
         name = parsed.name;
+        assigned = parsed.assigned;
         scenarios = parsed.scenarios.map(({ name, version, status }) => ({
           name,
           version,
@@ -83,7 +87,12 @@ export async function listFeatures(dataDir: string): Promise<FeatureListing[]> {
       } catch {
         // unreadable (e.g. deleted mid-listing): fall back to the stem
       }
-      return { fileName, name: name || titleFromFileName(fileName), scenarios };
+      return {
+        fileName,
+        name: name || titleFromFileName(fileName),
+        scenarios,
+        ...(assigned ? { assigned } : {}),
+      };
     }),
   );
 }

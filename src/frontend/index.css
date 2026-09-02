@@ -3239,3 +3239,303 @@ button.chip:disabled {
   margin: 0;
   padding: 0.75rem;
 }
+
+/* ---- Sidebar: collapse to a rail ("[") ---- */
+.layout.collapsed {
+  --sw: 2.75rem;
+}
+
+aside.rail {
+  align-items: center;
+  padding: 0.75rem 0.35rem;
+  gap: 0.35rem;
+}
+
+aside.rail .rail-btn,
+aside.rail .rail-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+aside.rail .rail-btn:hover,
+aside.rail .rail-link:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+aside.rail .rail-link.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+aside.rail .rail-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+aside header .collapse-btn {
+  margin-left: auto;
+}
+
+/* ---- Primary nav under the search field ---- */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.side-nav a,
+.side-nav button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.side-nav a:hover,
+.side-nav button:hover {
+  background: var(--hover);
+}
+
+.side-nav a.active,
+.side-nav button.active {
+  background: var(--accent-soft);
+  font-weight: 500;
+}
+
+.side-nav svg {
+  color: var(--text-2);
+}
+
+/* ---- Section header with the filter ---- */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.6rem;
+  padding: 0 0.35rem 0 0.6rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.section-head .filter-anchor {
+  position: relative;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.section-head .chip {
+  height: 1.3rem;
+  padding: 0 0.4rem 0 0.35rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.section-head .chip.on {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.filter-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 12rem;
+}
+
+.filter-note {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.5rem;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+/* Rows outside the filter fade rather than vanish — the tree keeps its shape. */
+.tree-row.dim > a.tree-feature,
+.tree-row.dim .publish-ring {
+  opacity: 0.4;
+}
+
+/* ---- Roadmap entries: grouped by subfolder, with a ⋯ menu ---- */
+.roadmap-group {
+  padding: 0.35rem 0.6rem 0.1rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.roadmap-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.roadmap-row:hover,
+.roadmap-row:focus-within {
+  background: var(--hover);
+}
+
+.roadmap-row > a.roadmap-entry {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roadmap-row.nested > a.roadmap-entry {
+  padding-left: 1.2rem;
+}
+
+.roadmap-row .tree-menu-btn {
+  margin-right: 0.15rem;
+}
+
+.roadmap-row:hover .tree-menu-btn,
+.roadmap-row:focus-within .tree-menu-btn {
+  opacity: 1;
+}
+
+/* ---- Skeletons ---- */
+.skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--hover);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    background: linear-gradient(90deg, var(--hover) 25%, var(--border) 50%, var(--hover) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+}
+
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.skeleton-page .skeleton-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+}
+
+.skeleton-card {
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.skeleton-shell aside {
+  gap: 0.6rem;
+}
+
+.palette-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+}
+
+/* ---- Error boundary fallback ---- */
+.view-error {
+  display: flex;
+  gap: 0.9rem;
+  margin: 1rem 0;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--text-1);
+}
+
+.view-error > svg {
+  flex: none;
+  color: var(--danger-fg);
+}
+
+.view-error h2 {
+  margin: 0 0 0.25rem;
+  font-size: 0.9375rem;
+}
+
+.view-error p {
+  margin: 0 0 0.75rem;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.view-error-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-error-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.view-error-actions button.secondary {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+}

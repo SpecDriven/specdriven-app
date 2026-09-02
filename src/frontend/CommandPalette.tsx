@@ -50,6 +50,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState(initialQuery);
   const [found, setFound] = useState<PaletteItem[]>([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -66,9 +67,11 @@ export function CommandPalette({
     if (!q) {
       setFound([]);
       setError(null);
+      setLoading(false);
       return;
     }
     const controller = new AbortController();
+    setLoading(true);
     const timer = window.setTimeout(async () => {
       try {
         setFound(await resolve(q, controller.signal));
@@ -76,6 +79,8 @@ export function CommandPalette({
       } catch (e) {
         if (controller.signal.aborted) return;
         setError((e as Error).message || "Search failed");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 150);
     return () => {
@@ -212,7 +217,14 @@ export function CommandPalette({
         <div id="palette-list" className="palette-list" role="listbox" ref={listRef}>
           {error && <p className="error">{error}</p>}
           {rows}
-          {query.trim() && !error && items.length === 0 && (
+          {loading && found.length === 0 && (
+            <div className="palette-loading" aria-busy="true" aria-label="Searching">
+              {[60, 45, 70].map((w, i) => (
+                <span key={i} className="skeleton" style={{ height: "1rem", width: `${w}%` }} />
+              ))}
+            </div>
+          )}
+          {query.trim() && !error && !loading && items.length === 0 && (
             <p className="empty">No matches for “{query.trim()}”</p>
           )}
         </div>
