@@ -40,6 +40,7 @@ import {
   Link,
   ListFilter,
   Map as MapIcon,
+  Menu as MenuIcon,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -383,6 +384,31 @@ function writeRecent(list: RecentEntry[]) {
   }
 }
 
+/**
+ * Small screens — phones, and tablets held narrower than this — get one pane:
+ * the sidebar becomes a drawer over the page, opened from a top bar. Keep in
+ * sync with the `--compact` breakpoint in index.css.
+ */
+export const COMPACT_QUERY = "(max-width: 47.99rem)";
+
+/** Tracks a media query live, so rotating a tablet flips the layout. */
+function useMediaQuery(query: string): boolean {
+  const read = () =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(query).matches;
+  const [matches, setMatches] = useState(read);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
 /** The sidebar collapsed to a rail ("["), remembered on this device. */
 const COLLAPSED_KEY = "sd-sidebar-collapsed";
 
@@ -551,6 +577,11 @@ export function App() {
   const [roadmapAssigneeMenuOpen, setRoadmapAssigneeMenuOpen] = useState(false);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  /** One pane (a phone, a narrow tablet): the sidebar is a drawer over the
+      page, closed by default and closed again by navigating anywhere. */
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerTrapRef = useFocusTrap(compact && drawerOpen);
   /** The sidebar's filter, and its menu. */
   const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -3271,11 +3302,23 @@ export function App() {
     roadmapMenu !== null;
   const quiet = dialogOpen || menuOpen;
   const onFeaturePage = selected !== null && feature !== null && editing === null;
-  const toggleSidebar = () =>
+  // On a small screen "[" and the sidebar buttons work the drawer instead of
+  // the rail; the rail preference is left alone for the next big window.
+  const toggleSidebar = () => {
+    if (compact) {
+      setDrawerOpen((o) => !o);
+      return;
+    }
     setSidebarCollapsed((c) => {
       storeSidebarCollapsed(!c);
       return !c;
     });
+  };
+  // The drawer closes behind any navigation — a feature, a roadmap page, the
+  // scenario editor — and when the window grows back into two panes.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [compact, selected, roadmapPage?.fileName, editing !== null]);
   const newScenario = () =>
     setEditing({
       index: null,
@@ -3333,6 +3376,7 @@ export function App() {
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
+    if (compact && drawerOpen) return setDrawerOpen(false);
     const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
     if (editing && !fromSidebar) {
       editorRef.current.back();
@@ -3407,7 +3451,13 @@ export function App() {
     {
       id: "sidebar",
       keys: "[",
-      label: sidebarCollapsed ? "Expand the sidebar" : "Collapse the sidebar",
+      label: compact
+        ? drawerOpen
+          ? "Close the menu"
+          : "Open the menu"
+        : sidebarCollapsed
+          ? "Expand the sidebar"
+          : "Collapse the sidebar",
       group: "Navigate",
       when: () => !quiet,
       run: () => toggleSidebar(),
@@ -3599,7 +3649,13 @@ export function App() {
     shortcutAction("settings", <Settings size={14} />),
     shortcutAction(
       "sidebar",
-      sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />,
+      compact ? (
+        <MenuIcon size={14} />
+      ) : sidebarCollapsed ? (
+        <PanelLeftOpen size={14} />
+      ) : (
+        <PanelLeftClose size={14} />
+      ),
     ),
     ...(["system", "light", "dark"] as ThemePref[]).map((pref) =>
       action(`theme-${pref}`, `Theme: ${pref}`, <Sun size={14} />, () => {
@@ -3886,10 +3942,57 @@ export function App() {
 
   return (
     <main
-      className={`layout${resizingSidebar ? " resizing" : ""}${sidebarCollapsed ? " collapsed" : ""}`}
+      className={`layout${resizingSidebar ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
     >
-      {sidebarCollapsed ? (
+      {compact && (
+        /* One pane: a top bar stands in for the sidebar's header — the menu
+           button opens the drawer, the mark is the way home, and search opens
+           the palette, since ⌘K has no key to live on. */
+        <div className="topbar">
+          <button
+            type="button"
+            className="ibtn topbar-menu"
+            aria-label={drawerOpen ? "Close the menu" : "Open the menu"}
+            aria-expanded={drawerOpen}
+            aria-controls="sidebar"
+            onClick={toggleSidebar}
+          >
+            <MenuIcon size={18} aria-hidden="true" />
+          </button>
+          <a
+            href="/"
+            className="topbar-home"
+            aria-label="Open the data folder's README"
+            onClick={(e) =>
+              spaClick(e, () => {
+                goHome();
+                void loadReadme();
+              })
+            }
+          >
+            <Logo size={22} />
+            {dataRepo && (
+              <span className="topbar-repo">{demo ? "demo-data" : repoDisplayName(dataRepo)}</span>
+            )}
+          </a>
+          <button
+            type="button"
+            className="ibtn"
+            aria-label="Search or run a command"
+            onClick={() => setPalette({ query: "" })}
+          >
+            <Search size={18} aria-hidden="true" />
+          </button>
+          {/* Demo mode: the sandbox note sits under the bar here, since a
+              phone visitor may never open the drawer that holds it. */}
+          {demo && <div className="demo-banner topbar-banner">Demo — edits reset on refresh</div>}
+        </div>
+      )}
+      {compact && drawerOpen && (
+        <div className="drawer-backdrop" aria-hidden="true" onClick={() => setDrawerOpen(false)} />
+      )}
+      {sidebarCollapsed && !compact ? (
         /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
            folded to its icons — search, Home, Roadmap, and the way back out. */
         <aside className="rail">
@@ -3953,7 +4056,19 @@ export function App() {
           </div>
         </aside>
       ) : (
-      <aside>
+      <aside
+        id="sidebar"
+        className={compact ? `drawer${drawerOpen ? " open" : ""}` : undefined}
+        ref={drawerTrapRef}
+        aria-hidden={compact && !drawerOpen ? true : undefined}
+        // Following any link in the drawer — a feature, a roadmap page,
+        // Home — is leaving it; buttons that only change the drawer itself
+        // (folder twists, the filter, My specs) keep it open.
+        onClickCapture={(e) => {
+          if (compact && e.target instanceof Element && e.target.closest("a[href]"))
+            setDrawerOpen(false);
+        }}
+      >
         <header>
           <h1>
             <Logo size={28} />
@@ -4067,19 +4182,24 @@ export function App() {
               </button>
             )}
           </div>
-          <Tooltip label="Collapse the sidebar" keys="[">
+          <Tooltip label={compact ? "Close the menu" : "Collapse the sidebar"} keys="[">
             <button
               type="button"
               className="ibtn collapse-btn"
-              aria-label="Collapse the sidebar"
+              aria-label={compact ? "Close the menu" : "Collapse the sidebar"}
               onClick={toggleSidebar}
             >
-              <PanelLeftClose size={15} aria-hidden="true" />
+              {compact ? (
+                <X size={16} aria-hidden="true" />
+              ) : (
+                <PanelLeftClose size={15} aria-hidden="true" />
+              )}
             </button>
           </Tooltip>
         </header>
-        {/* Demo mode: say what the sandbox does — edits are ephemeral. */}
-        {demo && <div className="demo-banner">Demo — edits reset on refresh</div>}
+        {/* Demo mode: say what the sandbox does — edits are ephemeral. On a
+            small screen the top bar carries the note instead. */}
+        {demo && !compact && <div className="demo-banner">Demo — edits reset on refresh</div>}
         {/* Search (specs/search.spec.md): top-left, under the header so the
             macOS drag region above it stays draggable. The field opens the
             command palette, where the results are. */}
@@ -4424,14 +4544,20 @@ export function App() {
                 id: "user-info",
                 label: "User info",
                 icon: <UserRound size={13} />,
-                onSelect: () => setUserInfoOpen(true),
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  setUserInfoOpen(true);
+                },
               },
               {
                 id: "settings",
                 label: "Settings",
                 icon: <Settings size={13} />,
                 keys: "mod+,",
-                onSelect: openSettings,
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openSettings();
+                },
               },
             ]}
           />
@@ -4453,8 +4579,8 @@ export function App() {
       )}
       {/* Divider (specs/ui.spec.md "Sidebar resize"): drag to resize the
           left pane, double-click to restore the default width. Gone while
-          the sidebar is a rail. */}
-      {!sidebarCollapsed && (
+          the sidebar is a rail, and on one-pane screens. */}
+      {!sidebarCollapsed && !compact && (
       <div
         className="sidebar-divider"
         role="separator"
