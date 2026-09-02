@@ -1,5 +1,17 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent } from "react";
+import type { ClipboardEvent, KeyboardEvent, ReactElement } from "react";
+import {
+  Bold,
+  Code,
+  Heading,
+  Image,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
+  Quote,
+} from "lucide-react";
+import { Tooltip } from "./Tooltip";
 import {
   insertImage,
   insertLink,
@@ -109,16 +121,19 @@ export function MarkdownEditor({ value, onChange, readOnly = false, placeholder 
     }
   };
 
-  const tools = [
-    { label: "H", cls: "", title: "Heading", run: () => apply((t, s, e) => toggleHeading(t, s, e)) },
-    { label: "B", cls: "b", title: "Bold (⌘B)", run: () => apply((t, s, e) => toggleInline(t, s, e, "**")) },
-    { label: "I", cls: "i", title: "Italic (⌘I)", run: () => apply((t, s, e) => toggleInline(t, s, e, "*")) },
-    { label: "<>", cls: "code", title: "Inline code", run: () => apply((t, s, e) => toggleInline(t, s, e, "`")) },
-    { label: "❝", cls: "", title: "Quote", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "> ", /^> /)) },
-    { label: "•", cls: "", title: "Bullet list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "- ", /^[-*+] /)) },
-    { label: "1.", cls: "code", title: "Numbered list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, (i) => `${i + 1}. `, /^\d+[.)] /)) },
-    { label: "🔗", cls: "", title: "Link (⌘K)", run: () => apply(insertLink) },
-    { label: "🖼", cls: "", title: "Image (or paste one)", run: () => fileRef.current?.click() },
+  // The toolbar (specs/ui/ui.feature.md "Design system"): icon buttons, each
+  // with a tooltip naming the action and, where there is one, its shortcut.
+  const size = 14;
+  const tools: { icon: ReactElement; title: string; keys?: string; run: () => void }[] = [
+    { icon: <Heading size={size} />, title: "Heading", run: () => apply((t, s, e) => toggleHeading(t, s, e)) },
+    { icon: <Bold size={size} />, title: "Bold", keys: "⌘B", run: () => apply((t, s, e) => toggleInline(t, s, e, "**")) },
+    { icon: <Italic size={size} />, title: "Italic", keys: "⌘I", run: () => apply((t, s, e) => toggleInline(t, s, e, "*")) },
+    { icon: <Code size={size} />, title: "Inline code", run: () => apply((t, s, e) => toggleInline(t, s, e, "`")) },
+    { icon: <Quote size={size} />, title: "Quote", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "> ", /^> /)) },
+    { icon: <List size={size} />, title: "Bullet list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "- ", /^[-*+] /)) },
+    { icon: <ListOrdered size={size} />, title: "Numbered list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, (i) => `${i + 1}. `, /^\d+[.)] /)) },
+    { icon: <Link size={size} />, title: "Link", keys: "⌘K", run: () => apply(insertLink) },
+    { icon: <Image size={size} />, title: "Image (or paste one)", run: () => fileRef.current?.click() },
   ];
 
   return (
@@ -149,9 +164,11 @@ export function MarkdownEditor({ value, onChange, readOnly = false, placeholder 
             {uploadError && <span className="md-upload-error">{uploadError}</span>}
             {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
             {tools.map((t) => (
-              <button key={t.title} type="button" className={t.cls} title={t.title} aria-label={t.title} onClick={t.run}>
-                {t.label}
-              </button>
+              <Tooltip key={t.title} label={t.title} keys={t.keys}>
+                <button type="button" aria-label={t.title} onClick={t.run}>
+                  {t.icon}
+                </button>
+              </Tooltip>
             ))}
           </div>
         )}

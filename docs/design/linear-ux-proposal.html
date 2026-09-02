@@ -1,0 +1,591 @@
+<title>SpecDriven, Linear-grade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ffffff; --bg-1: #f7f8f8; --bg-2: #ffffff;
+    --hover: rgba(0,0,0,.04);
+    --border: #e6e7e9; --border-strong: #d3d5d8;
+    --t1: #282a30; --t2: #6b6f76; --t3: #9a9ea6;
+    --accent: #5e6ad2; --accent-soft: rgba(94,106,210,.12); --on-accent: #fff;
+    --s-draft: #8a8f98; --s-proposed: #e0a03c; --s-published: #3fa56b;
+    --danger: #d0473f; --danger-soft: rgba(208,71,63,.1);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.10), 0 1px 3px rgba(0,0,0,.06);
+    --shadow-lg: 0 24px 60px rgba(0,0,0,.18), 0 4px 12px rgba(0,0,0,.08);
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #191a1c; --bg-1: #1f2023; --bg-2: #232427;
+      --hover: rgba(255,255,255,.05);
+      --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.14);
+      --t1: #e6e6e8; --t2: #9a9da3; --t3: #6b6f76;
+      --accent: #6e79e6; --accent-soft: rgba(110,121,230,.18);
+      --s-draft: #7c8088; --s-proposed: #f2b64a; --s-published: #4cc283;
+      --danger: #f16b62; --danger-soft: rgba(241,107,98,.14);
+      --shadow-md: 0 4px 16px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+      --shadow-lg: 0 24px 60px rgba(0,0,0,.6), 0 4px 12px rgba(0,0,0,.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #191a1c; --bg-1: #1f2023; --bg-2: #232427;
+    --hover: rgba(255,255,255,.05);
+    --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.14);
+    --t1: #e6e6e8; --t2: #9a9da3; --t3: #6b6f76;
+    --accent: #6e79e6; --accent-soft: rgba(110,121,230,.18);
+    --s-draft: #7c8088; --s-proposed: #f2b64a; --s-published: #4cc283;
+    --danger: #f16b62; --danger-soft: rgba(241,107,98,.14);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+    --shadow-lg: 0 24px 60px rgba(0,0,0,.6), 0 4px 12px rgba(0,0,0,.4);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--t1); font-family: var(--sans); font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code, kbd, .mono { font-family: var(--mono); font-size: .86em; }
+  code { background: var(--bg-1); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+  kbd { display: inline-block; min-width: 1.5em; padding: 1px 5px; text-align: center; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--bg-2); color: var(--t2); font-size: 11px; line-height: 1.4; }
+
+  .page { display: grid; grid-template-columns: 1fr; max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+  @media (min-width: 1100px) { .page { grid-template-columns: 200px minmax(0, 1fr); gap: 56px; } }
+  nav.toc { display: none; }
+  @media (min-width: 1100px) {
+    nav.toc { display: block; position: sticky; top: 24px; align-self: start; padding-top: 88px; font-size: 12.5px; }
+    nav.toc a { display: block; color: var(--t2); padding: 4px 0; border-left: 2px solid transparent; padding-left: 10px; margin-left: -12px; }
+    nav.toc a:hover { color: var(--t1); text-decoration: none; }
+    nav.toc .grp { margin-top: 14px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--t3); }
+  }
+  main { min-width: 0; }
+  .prose { max-width: 720px; }
+  header.hero { padding: 72px 0 40px; border-bottom: 1px solid var(--border); margin-bottom: 40px; }
+  .eyebrow { font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--t2); font-weight: 500; }
+  h1 { font-size: 34px; line-height: 1.15; letter-spacing: -.02em; font-weight: 600; margin: 10px 0 14px; text-wrap: balance; }
+  .lede { font-size: 16px; color: var(--t2); max-width: 640px; margin: 0; }
+  .decisions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+  .decisions span { font-size: 12px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--t2); background: var(--bg-1); }
+  .decisions span b { color: var(--t1); font-weight: 500; }
+  h2 { font-size: 22px; letter-spacing: -.015em; font-weight: 600; margin: 56px 0 12px; text-wrap: balance; }
+  h2 .n { color: var(--t3); font-weight: 500; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  h3 { font-size: 15px; font-weight: 600; margin: 28px 0 8px; }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 14px; padding-left: 20px; }
+  li { margin: 3px 0; }
+  li::marker { color: var(--t3); }
+  .replaces { font-size: 12.5px; color: var(--t2); border-left: 2px solid var(--border-strong); padding: 2px 0 2px 12px; margin: 10px 0 16px; }
+  .replaces code { font-size: 11.5px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0 18px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--t2); font-weight: 500; }
+  td:first-child { white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0 8px; max-width: 900px; }
+  .principle { border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; background: var(--bg-2); }
+  .principle b { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13.5px; }
+  .principle p { font-size: 13px; color: var(--t2); margin: 0; }
+  blockquote { margin: 12px 0 16px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-1); font-size: 13.5px; }
+  blockquote p:last-child { margin: 0; }
+  .callout { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; font-size: 13px; color: var(--t2); margin: 14px 0 20px; background: var(--bg-2); }
+
+  /* ---------- Mockup frames ---------- */
+  figure { margin: 22px 0 28px; max-width: 960px; }
+  figure.wide { max-width: 100%; }
+  figcaption { font-size: 12.5px; color: var(--t2); margin-top: 10px; max-width: 720px; }
+  .frame { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg); overflow: hidden; box-shadow: var(--shadow-md); font-size: 13px; line-height: 1.4; }
+  .frame-scroll { overflow-x: auto; }
+  .app { display: grid; grid-template-columns: 224px minmax(0,1fr); min-width: 860px; height: 520px; position: relative; }
+  .app.rail { grid-template-columns: 44px minmax(0,1fr); }
+  .titlebar { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
+  .titlebar i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-strong); display: inline-block; }
+  .side { background: var(--bg-1); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 8px; gap: 2px; min-height: 0; }
+  .side .ws { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-weight: 600; font-size: 13px; }
+  .side .ws:hover { background: var(--hover); }
+  .logo { width: 18px; height: 18px; border-radius: 5px; background: var(--accent); color: var(--on-accent); font-size: 10px; font-weight: 700; display: inline-grid; place-items: center; letter-spacing: -.02em; flex: none; }
+  .search { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); color: var(--t3); margin: 6px 0 8px; }
+  .search kbd { margin-left: auto; }
+  .row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; color: var(--t1); white-space: nowrap; }
+  .row:hover, .row.hover { background: var(--hover); }
+  .row.active { background: var(--accent-soft); color: var(--t1); font-weight: 500; }
+  .row .ico { width: 16px; height: 16px; flex: none; color: var(--t2); }
+  .row .more { margin-left: auto; color: var(--t3); visibility: hidden; }
+  .row:hover .more, .row.hover .more { visibility: visible; }
+  .row .ring { margin-left: auto; }
+  .sect { display: flex; align-items: center; height: 26px; margin-top: 10px; padding: 0 8px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--t3); font-weight: 500; }
+  .sect .chip { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+  .tree .row { padding-left: 8px; }
+  .tree .row.l2 { padding-left: 24px; }
+  .side .user { margin-top: auto; }
+  .avatar { width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-weight: 600; display: inline-grid; place-items: center; flex: none; }
+  .mainpane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .hdr { height: 40px; display: flex; align-items: center; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border); flex: none; }
+  .crumbs { display: flex; align-items: center; gap: 4px; color: var(--t2); min-width: 0; }
+  .crumbs .sep { color: var(--t3); }
+  .crumbs .cur { color: var(--t1); font-weight: 600; }
+  .hdr .actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .ibtn { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--t2); position: relative; }
+  .ibtn:hover { background: var(--hover); color: var(--t1); }
+  .ibtn svg { width: 16px; height: 16px; }
+  .btn { height: 28px; padding: 0 12px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; font-size: 12.5px; border: 1px solid var(--border-strong); background: var(--bg-2); color: var(--t1); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--s-proposed); }
+  .props { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--border); flex: none; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); font-size: 12px; color: var(--t1); white-space: nowrap; }
+  .chip:hover { background: var(--hover); }
+  .chip .ico { width: 14px; height: 14px; }
+  .chip.muted { color: var(--t2); }
+  .content { padding: 16px; overflow: hidden; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .desc { color: var(--t2); font-size: 13px; max-width: 560px; }
+  .card { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-2); padding: 10px 12px; position: relative; overflow: hidden; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--edge, transparent); }
+  .card .ch { display: flex; align-items: center; gap: 8px; }
+  .card .ch .ico { width: 16px; height: 16px; flex: none; }
+  .card .t { font-weight: 500; }
+  .card .v { color: var(--t3); font-family: var(--mono); font-size: 11px; }
+  .card .ch .more { margin-left: auto; color: var(--t3); visibility: hidden; }
+  .card:hover .ch .more, .card.hover .ch .more { visibility: visible; }
+  .card .body { color: var(--t2); font-size: 12.5px; margin-top: 4px; max-width: 620px; }
+  .card.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .ico.draft { color: var(--s-draft); } .ico.proposed { color: var(--s-proposed); } .ico.published { color: var(--s-published); }
+  .card.draft { --edge: var(--s-draft); } .card.proposed { --edge: var(--s-proposed); } .card.published { --edge: var(--s-published); }
+  .card.open { overflow: visible; }
+
+  .menu { position: absolute; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-md); padding: 4px; min-width: 190px; z-index: 3; }
+  .menu .mi { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 5px; font-size: 12.5px; }
+  .menu .mi.hover { background: var(--hover); }
+  .menu .mi kbd { margin-left: auto; }
+  .menu .mi.danger { color: var(--danger); }
+  .menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+  .toasts { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 4; }
+  .toast { display: flex; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px 8px 12px; box-shadow: var(--shadow-md); font-size: 12.5px; min-width: 260px; }
+  .toast .ico { width: 16px; height: 16px; flex: none; }
+  .toast .undo { margin-left: auto; color: var(--accent); font-weight: 500; }
+  .toast .x { color: var(--t3); }
+  .toast.err { border-color: var(--danger); }
+  .toast.err .ico { color: var(--danger); }
+  .saved { margin-left: 8px; color: var(--t3); font-size: 11.5px; }
+
+  .backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.4); backdrop-filter: blur(2px); display: grid; place-items: start center; padding-top: 60px; z-index: 5; }
+  .palette { width: 560px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: hidden; }
+  .palette .in { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .palette .in .caret { width: 1px; height: 16px; background: var(--t1); }
+  .palette .in .hint { margin-left: auto; color: var(--t3); font-size: 12px; }
+  .palette .g { padding: 6px 6px 2px; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--t3); font-weight: 500; }
+  .palette .r { display: flex; align-items: center; gap: 10px; height: 32px; margin: 0 6px; padding: 0 8px; border-radius: 6px; font-size: 13px; }
+  .palette .r.hover { background: var(--accent-soft); }
+  .palette .r .ico { width: 16px; height: 16px; flex: none; color: var(--t2); }
+  .palette .r .sub { color: var(--t3); font-size: 12px; }
+  .palette .r mark { background: transparent; color: var(--accent); font-weight: 600; }
+  .palette .r kbd { margin-left: auto; }
+  .palette .foot { display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--t3); }
+  .palette .foot span { display: inline-flex; gap: 4px; align-items: center; }
+
+  .glyphs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; max-width: 800px; margin: 12px 0 20px; }
+  .glyph { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--bg-2); }
+  .glyph svg { width: 28px; height: 28px; flex: none; }
+  .glyph b { display: block; font-weight: 600; font-size: 13px; }
+  .glyph span { font-size: 12px; color: var(--t2); }
+
+  .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 900px; margin: 12px 0 20px; }
+  @media (max-width: 720px) { .swatches { grid-template-columns: 1fr; } }
+  .sw-col h4 { margin: 0 0 8px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--t2); font-weight: 500; }
+  .sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+  .sw { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 10.5px; }
+  .sw i { display: block; height: 40px; }
+  .sw span { display: block; padding: 4px 6px; color: var(--t2); font-family: var(--mono); font-size: 10px; line-height: 1.3; }
+  .sw span b { display: block; color: var(--t1); font-family: var(--sans); font-weight: 500; font-size: 11px; }
+  .typesample { border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; background: var(--bg-2); max-width: 720px; display: grid; gap: 8px; }
+  .typesample .l { color: var(--t3); font-size: 10.5px; font-family: var(--mono); }
+  .shortcuts { columns: 2; column-gap: 32px; max-width: 760px; }
+  @media (max-width: 640px) { .shortcuts { columns: 1; } }
+  .shortcuts .sc { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); break-inside: avoid; font-size: 13px; }
+  .shortcuts .sc .keys { margin-left: auto; display: flex; gap: 3px; align-items: center; }
+  .phases td:nth-child(1) { font-family: var(--mono); color: var(--t2); }
+  footer { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--t3); }
+  @media (prefers-reduced-motion: no-preference) { .row, .chip, .ibtn, .btn { transition: background 120ms ease; } }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="g-draft" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2.2 2.2"/></symbol>
+    <symbol id="g-proposed" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 3.5a4.5 4.5 0 0 1 0 9z" fill="currentColor"/></symbol>
+    <symbol id="g-published" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.8" fill="currentColor"/><path d="M5 8.3l2 2 4-4.3" fill="none" stroke="var(--bg-2)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="g-newver" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.8" fill="currentColor"/><path d="M5 8.3l2 2 4-4.3" fill="none" stroke="var(--bg-2)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="3" r="3" fill="var(--bg-2)"/><path d="M13 1.6v2.8M11.6 3h2.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-home" viewBox="0 0 16 16"><path d="M2.5 7.5 8 3l5.5 4.5V13a.5.5 0 0 1-.5.5H9.5V10h-3v3.5H3a.5.5 0 0 1-.5-.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-map" viewBox="0 0 16 16"><path d="M2.5 4l4-1.5 3 1.5 4-1.5v9l-4 1.5-3-1.5-4 1.5z M6.5 2.5v9M9.5 4v9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-user" viewBox="0 0 16 16"><circle cx="8" cy="5.5" r="2.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 13.5c.6-2.6 2.6-4 5.2-4s4.6 1.4 5.2 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v6a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12z" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 16 16"><path d="M4 2h5l3 3v9H4z M9 2v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.2 10.2 13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.5 9.5a3 3 0 0 0 4.2 0l2-2a3 3 0 0 0-4.2-4.2l-1 1M9.5 6.5a3 3 0 0 0-4.2 0l-2 2a3 3 0 0 0 4.2 4.2l1-1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 16 16"><path d="M3 13h3l7-7-3-3-7 7z M9 4l3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6 3v10" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 16 16"><path d="M2.5 4h11M4.5 8h7M6.5 12h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-ticket" viewBox="0 0 16 16"><path d="M2.5 5.5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1.2a1.3 1.3 0 0 0 0 2.6v1.2a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V9.3a1.3 1.3 0 0 0 0-2.6z" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.8v3.8M8 11h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+<nav class="toc" aria-label="Contents">
+  <div class="grp">Proposal</div>
+  <a href="#today">Where it stands</a>
+  <a href="#principles">Principles</a>
+  <a href="#mockup">The whole picture</a>
+  <div class="grp">Proposals</div>
+  <a href="#p1">1 · Command palette</a>
+  <a href="#p2">2 · Keyboard model</a>
+  <a href="#p3">3 · Header &amp; breadcrumbs</a>
+  <a href="#p4">4 · Property chips</a>
+  <a href="#p5">5 · Status glyphs</a>
+  <a href="#p6">6 · Sidebar</a>
+  <a href="#p7">7 · Feedback &amp; a11y</a>
+  <a href="#p8">8 · Roadmap</a>
+  <a href="#p9">9 · Icons &amp; tooltips</a>
+  <div class="grp">Foundation</div>
+  <a href="#tokens">Tokens &amp; type</a>
+  <a href="#spec">Spec change</a>
+  <a href="#phases">Phased backlog</a>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">UI / UX proposal · SpecDriven desktop</div>
+  <h1>SpecDriven, Linear-grade</h1>
+  <p class="lede">Nine changes that turn the current web-page feel into a dense, keyboard-first desktop tool, modeled on Linear. This page is set in the proposed token system, so what you're reading is the sample.</p>
+  <div class="decisions">
+    <span>Direction · <b>shift toward Linear's look</b></span>
+    <span>Scope · <b>proposal only, no code</b></span>
+    <span>Focus · <b>palette, header, status, feedback</b></span>
+  </div>
+</header>
+
+<div class="prose">
+<h2 id="today">Where it stands</h2>
+<p>The frontend is React 19 with hand-written CSS, no component library, no router, no icon set. One <code>App()</code> component holds every view, dialog and fetch. It works, and it reads as a web page rather than a desktop tool:</p>
+<ul>
+  <li><b>Actions are text links.</b> "Edit · Copy link · Edit description · Publish" strung across the feature header; four links per scenario card.</li>
+  <li><b>Icons are unicode.</b> <code>✎ ✕ ▸ ▾ ⋯ ⚙ ✓ 🔗 🖼 ▶</code> plus four hand-drawn SVG files.</li>
+  <li><b>Status is a word badge</b> on cards only. The sidebar tree shows nothing about a feature's state.</li>
+  <li><b>Search swaps out the tree.</b> No command menu, no action search.</li>
+  <li><b>Feedback is one status line.</b> Fifty <code>setStatus()</code> call sites land in the same <code>&lt;p&gt;</code>, styled the same for "Moved" and "Publish failed", never auto-dismissed.</li>
+  <li><b>Hover-only row menus.</b> The tree's ⋯ and folder delete use <code>visibility: hidden</code> until hover, so keyboard users can't reach them.</li>
+  <li><b>Ten separate keydown listeners</b> share one hand-maintained "Escape owned elsewhere" flag.</li>
+</ul>
+<div class="tablewrap"><table>
+  <tr><th>Measure</th><th>Today</th></tr>
+  <tr><td>App.tsx</td><td>5,023 lines, ~90 <code>useState</code> hooks, all four views in one nested ternary</td></tr>
+  <tr><td>index.css</td><td>2,758 lines; dark tokens duplicated in two blocks kept in sync by hand</td></tr>
+  <tr><td>Media queries</td><td>2, both for the merge-conflict dialog</td></tr>
+  <tr><td>Live regions</td><td>0 (no <code>aria-live</code>, <code>role="status"</code>, or <code>aria-busy</code>)</td></tr>
+  <tr><td>Loading states</td><td>1 full-page "Loading…"</td></tr>
+</table></div>
+
+<h2 id="principles">What "Linear-like" means here</h2>
+</div>
+<div class="principles">
+  <div class="principle"><b>Keyboard first</b><p>Every action reachable via ⌘K; single keys for the top ten; every tooltip and menu item shows its key.</p></div>
+  <div class="principle"><b>Quiet chrome, dense content</b><p>13px UI text, 1px low-contrast borders, 6px radii. No shadows on panes; shadows only on popovers and dialogs.</p></div>
+  <div class="principle"><b>Status is a glyph</b><p>One icon vocabulary for draft, proposed, published, used identically in tree, cards, editor, palette, filters.</p></div>
+  <div class="principle"><b>Properties are chips</b><p>Assignee, ticket, status are pill buttons opening a searchable popover. Never a native select, never a text link.</p></div>
+  <div class="principle"><b>Feedback is reversible</b><p>Toasts with Undo. Autosave shows a quiet "Saved" indicator in the header, not a banner.</p></div>
+  <div class="principle"><b>One implementation per pattern</b><p>One Menu, one Popover, one Tooltip, one Toast, one shortcut dispatcher, one Icon component.</p></div>
+</div>
+
+<div class="prose">
+<h2 id="mockup">The whole picture</h2>
+<p>A feature page after proposals 3 through 7 land. Hover states are frozen on the second tree row and the second card so the quiet affordances are visible.</p>
+</div>
+
+<figure class="wide">
+<div class="frame"><div class="frame-scroll">
+<div class="titlebar"><i></i><i></i><i></i></div>
+<div class="app">
+  <aside class="side">
+    <div class="ws"><span class="logo">SD</span> specs-insurance <svg class="ico" style="width:14px;height:14px;color:var(--t3)"><use href="#i-down"/></svg></div>
+    <div class="search"><svg class="ico" style="width:14px;height:14px"><use href="#i-search"/></svg> Search or run a command… <kbd>⌘K</kbd></div>
+    <div class="row"><svg class="ico"><use href="#i-home"/></svg> Home</div>
+    <div class="row"><svg class="ico"><use href="#i-map"/></svg> Roadmap</div>
+    <div class="row"><svg class="ico"><use href="#i-user"/></svg> My specs</div>
+    <div class="sect">Features <span class="chip"><svg class="ico"><use href="#i-filter"/></svg> Filter</span></div>
+    <div class="tree">
+      <div class="row"><svg class="ico" style="width:12px;height:12px;color:var(--t3)"><use href="#i-down"/></svg> <svg class="ico"><use href="#i-folder"/></svg> claims</div>
+      <div class="row l2 active"><svg class="ico"><use href="#i-file"/></svg> Claim intake
+        <svg class="ring" width="14" height="14" viewBox="0 0 14 14" aria-label="3 of 5 published"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--border-strong)" stroke-width="2"/><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--s-published)" stroke-width="2" stroke-dasharray="20.7 34.6" transform="rotate(-90 7 7)"/></svg></div>
+      <div class="row l2 hover"><svg class="ico"><use href="#i-file"/></svg> Fraud flags
+        <svg class="ico more" style="width:14px;height:14px"><use href="#i-more"/></svg></div>
+      <div class="row l2"><svg class="ico"><use href="#i-file"/></svg> Payout schedule
+        <svg class="ring" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--border-strong)" stroke-width="2"/><circle cx="7" cy="7" r="5.5" fill="none" stroke="var(--s-published)" stroke-width="2" stroke-dasharray="34.6 34.6" transform="rotate(-90 7 7)"/></svg></div>
+      <div class="row"><svg class="ico" style="width:12px;height:12px;color:var(--t3)"><use href="#i-chev"/></svg> <svg class="ico"><use href="#i-folder"/></svg> policies</div>
+      <div class="row"><svg class="ico" style="width:12px;height:12px;color:var(--t3)"><use href="#i-chev"/></svg> <svg class="ico"><use href="#i-folder"/></svg> underwriting</div>
+    </div>
+    <div class="row user"><span class="avatar">DV</span> David Vydra <svg class="ico" style="width:12px;height:12px;margin-left:auto;color:var(--t3)"><use href="#i-more"/></svg></div>
+  </aside>
+  <section class="mainpane">
+    <div class="hdr">
+      <div class="crumbs"><span>specs-insurance</span><span class="sep">›</span><span>claims</span><span class="sep">›</span><span class="cur">Claim intake</span><span class="saved">Saved · 2s ago</span></div>
+      <div class="actions">
+        <span class="ibtn" title="Copy link  ⌘⇧C"><svg><use href="#i-link"/></svg></span>
+        <span class="ibtn" title="Edit description  E"><svg><use href="#i-edit"/></svg></span>
+        <span class="ibtn" title="More"><svg><use href="#i-more"/></svg></span>
+        <span class="btn primary"><span class="dot"></span> Publish all</span>
+      </div>
+    </div>
+    <div class="props">
+      <span class="chip"><svg class="ico published"><use href="#g-published"/></svg> 3 / 5 published</span>
+      <span class="chip"><span class="avatar" style="width:14px;height:14px;font-size:7px">DV</span> David Vydra</span>
+      <span class="chip"><svg class="ico" style="color:var(--t2)"><use href="#i-ticket"/></svg> INS-142</span>
+      <span class="chip muted"><svg class="ico"><use href="#i-plus"/></svg> Add property</span>
+    </div>
+    <div class="content">
+      <div class="desc">Intake covers the first contact with a claimant: identity checks, incident capture, and the hand-off to triage. Anything after triage lives in the payout schedule feature.</div>
+      <div class="card published"><div class="ch"><svg class="ico published"><use href="#g-published"/></svg><span class="t">Capture a new claim from the phone script</span><span class="v">v2</span><svg class="ico more"><use href="#i-more"/></svg></div><div class="body">Given a caller with a valid policy number, the agent records the incident date, location, and a free-text summary; the claim gets a claim id before the call ends.</div></div>
+      <div class="card proposed hover open"><div class="ch"><svg class="ico proposed"><use href="#g-proposed"/></svg><span class="t">Reject a claim on an expired policy</span><span class="v">v1</span><svg class="ico more"><use href="#i-more"/></svg></div><div class="body">Given the policy end date is before the incident date, intake refuses the claim and offers the reinstatement path instead.</div>
+        <div class="menu" style="right:12px;top:34px">
+          <div class="mi"><svg class="ico" style="width:14px;height:14px;color:var(--t2)"><use href="#i-edit"/></svg> Edit <kbd>E</kbd></div>
+          <div class="mi hover"><svg class="ico published" style="width:14px;height:14px"><use href="#g-published"/></svg> Publish <kbd>⌘⏎</kbd></div>
+          <div class="mi"><svg class="ico" style="width:14px;height:14px;color:var(--t2)"><use href="#i-link"/></svg> Copy link <kbd>⌘⇧C</kbd></div>
+          <hr>
+          <div class="mi danger"><svg class="ico" style="width:14px;height:14px"><use href="#i-x"/></svg> Delete draft</div>
+        </div>
+      </div>
+      <div class="card draft"><div class="ch"><svg class="ico draft"><use href="#g-draft"/></svg><span class="t">Flag duplicate claims for the same incident</span><span class="v">v1</span><svg class="ico more"><use href="#i-more"/></svg></div><div class="body">Given two claims within 48 hours on the same policy and location, the second one is held for review.</div></div>
+    </div>
+    <div class="toasts">
+      <div class="toast"><svg class="ico published"><use href="#g-published"/></svg> Moved "Fraud flags" to claims <span class="undo">Undo</span> <svg class="ico x" style="width:12px;height:12px"><use href="#i-x"/></svg></div>
+    </div>
+  </section>
+</div>
+</div></div>
+<figcaption>Feature page after the header (3), chips (4), glyphs (5), sidebar sections (6) and toasts (7) land. Sidebar: workspace switcher, ⌘K search, primary nav, a filterable Features tree with per-feature publish rings. Header: breadcrumb trail, autosave indicator, icon actions, one primary button. Cards: glyph, title, version, and a ⋯ menu on hover or focus.</figcaption>
+</figure>
+
+<div class="prose">
+<h2 id="p1"><span class="n">1</span>Command palette</h2>
+<p>A centered overlay on <kbd>⌘K</kbd>, 560px wide, input on top, grouped results below: Features, Scenarios (with their parent feature), Roadmap pages, Actions. Typing filters every group at once. <kbd>↑</kbd><kbd>↓</kbd> moves, <kbd>⏎</kbd> opens, <kbd>⌘⏎</kbd> opens in the editor pane, <kbd>Esc</kbd> closes. Empty query shows recent items.</p>
+<p>Actions available by name: New feature, New folder, New scenario, Publish, Publish all, Propose, New version, Copy link, Rename, Move to folder…, Delete, Sync now, Start code-gen session, Toggle sidebar, Theme: light / dark / system, Settings, Change data repo, Open README, Open roadmap page…</p>
+<div class="replaces">Replaces the results-replace-the-tree behaviour (<code>App.tsx:3578-3612</code>). Reuses <code>/api/search</code> and MiniSearch ranking (<code>App.tsx:1032-1063</code>), <code>useFocusTrap</code>, <code>markSnippet</code>, and the <code>route.ts</code> path builders. The sidebar search field stays and opens the palette prefilled, as Linear's sidebar search does. Fixes the half-built combobox at <code>App.tsx:3460</code> with <code>role="combobox"</code>, <code>aria-expanded</code>, <code>aria-controls</code>, <code>aria-activedescendant</code>.</div>
+</div>
+
+<figure class="wide">
+<div class="frame"><div class="frame-scroll">
+<div class="app" style="height:420px;grid-template-columns:1fr">
+  <div style="background:var(--bg-1)"></div>
+  <div class="backdrop">
+    <div class="palette">
+      <div class="in"><svg class="ico" style="width:16px;height:16px;color:var(--t3)"><use href="#i-search"/></svg><span>pub</span><span class="caret"></span><span class="hint">Esc to close</span></div>
+      <div class="g">Actions</div>
+      <div class="r hover"><svg class="ico published"><use href="#g-published"/></svg><span><mark>Pub</mark>lish all scenarios in Claim intake</span><kbd>⌘⏎</kbd></div>
+      <div class="r"><svg class="ico published"><use href="#g-published"/></svg><span><mark>Pub</mark>lish "Reject a claim on an expired policy"</span></div>
+      <div class="g">Scenarios</div>
+      <div class="r"><svg class="ico published"><use href="#g-published"/></svg><span>Capture a new claim from the phone script</span><span class="sub">Claim intake · "…<mark>pub</mark>lished intake form…"</span></div>
+      <div class="r"><svg class="ico draft"><use href="#g-draft"/></svg><span><mark>Pub</mark>lic holiday cut-off</span><span class="sub">Payout schedule</span></div>
+      <div class="g">Roadmap</div>
+      <div class="r"><svg class="ico"><use href="#i-map"/></svg><span>Q4 · <mark>Pub</mark>lic launch checklist</span></div>
+      <div class="foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘⏎</kbd> open in editor</span><span><kbd>Esc</kbd> close</span></div>
+    </div>
+  </div>
+</div>
+</div></div>
+<figcaption>The palette with a partial query. Actions rank above navigation when the query matches an action verb; scenario rows carry their feature and a body snippet; the footer teaches the keys.</figcaption>
+</figure>
+
+<div class="prose">
+<h2 id="p2"><span class="n">2</span>Unified keyboard model</h2>
+<p>One <code>useShortcuts()</code> hook with a scope stack (global → page → dialog → field) replaces ten ad-hoc <code>keydown</code> listeners and the hand-maintained <code>escapeOwnedElsewhere</code> flag. The cheat sheet on <kbd>?</kbd> renders from the same registry the dispatcher uses, so it cannot drift. Tooltips and menu items render their <code>&lt;kbd&gt;</code> from the registry too.</p>
+<div class="replaces">Replaces listeners at <code>App.tsx:762, 863, 891, 905, 940, 962, 987, 1003, 1068, 3710</code> and the flag at <code>App.tsx:882</code>. Linear's own bindings, confirmed from its docs: ⌘K menu, C to create, [ to toggle the sidebar, ? for help, G-then-key chords.</div>
+</div>
+<div class="shortcuts" style="margin-bottom:8px">
+  <div class="sc">Command palette <span class="keys"><kbd>⌘</kbd><kbd>K</kbd></span></div>
+  <div class="sc">Search (palette, prefilled) <span class="keys"><kbd>/</kbd></span></div>
+  <div class="sc">New scenario / new feature <span class="keys"><kbd>C</kbd></span></div>
+  <div class="sc">Toggle sidebar <span class="keys"><kbd>[</kbd></span></div>
+  <div class="sc">Shortcut cheat sheet <span class="keys"><kbd>?</kbd></span></div>
+  <div class="sc">Move selection <span class="keys"><kbd>J</kbd><kbd>K</kbd> · <kbd>↑</kbd><kbd>↓</kbd></span></div>
+  <div class="sc">Open selected <span class="keys"><kbd>⏎</kbd> · <kbd>O</kbd></span></div>
+  <div class="sc">Edit selected scenario <span class="keys"><kbd>E</kbd></span></div>
+  <div class="sc">Publish, or propose a draft <span class="keys"><kbd>⌘</kbd><kbd>⏎</kbd></span></div>
+  <div class="sc">Copy link to current item <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>C</kbd></span></div>
+  <div class="sc">Go to Home / Roadmap / Settings <span class="keys"><kbd>G</kbd> then <kbd>H</kbd><kbd>R</kbd><kbd>S</kbd></span></div>
+  <div class="sc">Settings <span class="keys"><kbd>⌘</kbd><kbd>,</kbd></span></div>
+  <div class="sc">Cycle theme <span class="keys"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>L</kbd></span></div>
+  <div class="sc">Close top of stack <span class="keys"><kbd>Esc</kbd></span></div>
+</div>
+
+<div class="prose">
+<h2 id="p3"><span class="n">3</span>Page header with breadcrumbs and an action bar</h2>
+<p>A 40px sticky header replaces the "Feature: name" heading and its row of text links. Left: a breadcrumb trail <em>repo › folder › Feature</em>, each segment a real link, the last one inline-editable on click (replacing the rename form). In the scenario editor the trail extends to <em>› Scenario</em> and the back chevron goes. Right: icon buttons with tooltips (Copy link, Edit description, ⋯ for Rename, Move, Delete, Start code-gen) and one context-dependent primary button: Publish all, Publish, or Propose. The <code>*</code> suffix on "Publish All *" becomes a small dot on the button.</p>
+<p>Cards lose their four text links. Each shows glyph, title, version, and a ⋯ menu visible on hover <em>and</em> focus-within, mirrored as a right-click context menu.</p>
+<div class="replaces">Replaces <code>editor-bar</code> (<code>App.tsx:3964-4099</code>), the rename form (<code>4051-4080</code>) and the card links (<code>4213-4239</code>).</div>
+
+<h2 id="p4"><span class="n">4</span>Property chips with popover menus</h2>
+<p>Status, Assignee, Ticket and version become 24px chips under the header. Clicking one opens a popover anchored below: a searchable list with <kbd>↑</kbd><kbd>↓</kbd> <kbd>⏎</kbd> <kbd>Esc</kbd>, a checkmark on the current value, and an optional key hint per row. Assignee rows show a 16px avatar built from the same initials logic as the user corner.</p>
+<p>One <code>Menu</code> component backs the chip popovers, the tree ⋯ menu, the recent-repos menu, the user menu, and right-click menus. It owns outside-click, Escape, typeahead, Home/End, menu roles, and focus return.</p>
+<div class="replaces">Replaces the Assigned <code>&lt;select&gt;</code> (<code>App.tsx:4030-4047</code>) and the three per-menu effects (<code>933-998</code>). <code>ExternalLinkField.tsx</code> moves inside the Ticket popover; <code>externallinks.ts</code> is unchanged.</div>
+
+<h2 id="p5"><span class="n">5</span>Status glyph system</h2>
+<p>Four 16px inline SVG glyphs, coloured by one status token each, used everywhere a scenario or feature appears. Features roll up as a small ring: the share of published scenarios, like Linear's project progress circle.</p>
+</div>
+<div class="glyphs">
+  <div class="glyph"><svg class="ico draft"><use href="#g-draft"/></svg><div><b>Draft</b><span>Dashed circle · <code>--status-draft</code></span></div></div>
+  <div class="glyph"><svg class="ico proposed"><use href="#g-proposed"/></svg><div><b>Proposed</b><span>Half fill · <code>--status-proposed</code></span></div></div>
+  <div class="glyph"><svg class="ico published"><use href="#g-published"/></svg><div><b>Published</b><span>Filled + check · <code>--status-published</code></span></div></div>
+  <div class="glyph"><svg class="ico published"><use href="#g-newver"/></svg><div><b>New version pending</b><span>Published glyph with a + corner mark</span></div></div>
+</div>
+<div class="prose">
+<div class="replaces">Replaces <code>.badge</code>, <code>.badge.proposed</code>, <code>.badge.draft</code> on cards (<code>App.tsx:4186-4190</code>) and the editor status badge (<code>3766-3808</code>). The parchment "sealed" wash (<code>--pub-bg</code>, <code>--pub-border</code>) is dropped for a 3px left-edge status colour on the card.</div>
+
+<h2 id="p6"><span class="n">6</span>Sidebar: collapse, hierarchy, filters, keyboard tree</h2>
+<ul>
+  <li><b>Collapse</b> on <kbd>[</kbd> or the header icon. Collapsed keeps a 44px rail with logo, ⌘K and a hover-to-peek flyout. Persisted next to <code>sd-sidebar-width</code>.</li>
+  <li><b>Sections</b> in Linear order: workspace switcher (repo name + recents), primary nav (Home, Roadmap, My specs = features assigned to me), then the Features tree. Section headers 11px uppercase, collapsible.</li>
+  <li><b>Filter row</b> above the tree adds chips for status and assignee. Non-matching tree rows dim; non-matching cards hide. There is no filtering today.</li>
+  <li><b>Tree semantics</b>: <code>role="tree"</code> / <code>treeitem</code> / <code>aria-level</code> / <code>aria-expanded</code>; ↑↓ move, ←→ collapse and expand, ⏎ opens, ⋯ menu on <kbd>⇧F10</kbd>. Row actions become visible on <code>:focus-within</code>, not just hover.</li>
+  <li><b>Drag and drop</b> keeps working, with a 2px insertion line and an accent-soft drop highlight on folders.</li>
+</ul>
+</div>
+
+<figure>
+<div class="frame"><div class="frame-scroll">
+<div class="app rail" style="height:300px;min-width:640px">
+  <aside class="side" style="padding:8px 6px;align-items:center;gap:6px">
+    <span class="logo">SD</span>
+    <span class="ibtn" title="Search  ⌘K"><svg><use href="#i-search"/></svg></span>
+    <span class="ibtn" title="Home"><svg><use href="#i-home"/></svg></span>
+    <span class="ibtn" title="Roadmap"><svg><use href="#i-map"/></svg></span>
+    <span class="ibtn" title="My specs"><svg><use href="#i-user"/></svg></span>
+    <span class="ibtn" style="margin-top:auto" title="Expand sidebar  ["><svg><use href="#i-panel"/></svg></span>
+    <span class="avatar">DV</span>
+  </aside>
+  <section class="mainpane">
+    <div class="hdr"><div class="crumbs"><span>specs-insurance</span><span class="sep">›</span><span>claims</span><span class="sep">›</span><span class="cur">Claim intake</span></div>
+      <div class="actions"><span class="ibtn"><svg><use href="#i-link"/></svg></span><span class="ibtn"><svg><use href="#i-more"/></svg></span><span class="btn primary">Publish all</span></div></div>
+    <div class="props"><span class="chip"><svg class="ico published"><use href="#g-published"/></svg> 3 / 5 published</span><span class="chip"><span class="avatar" style="width:14px;height:14px;font-size:7px">DV</span> David Vydra</span></div>
+    <div class="content"><div class="card published"><div class="ch"><svg class="ico published"><use href="#g-published"/></svg><span class="t">Capture a new claim from the phone script</span><span class="v">v2</span></div></div></div>
+  </section>
+</div>
+</div></div>
+<figcaption>The collapsed rail: 44px, icon-only, tooltips carry the labels and keys. Hovering the rail peeks the full sidebar as a flyout.</figcaption>
+</figure>
+
+<div class="prose">
+<h2 id="p7"><span class="n">7</span>Feedback, loading, accessibility</h2>
+<ul>
+  <li><b>Toast system.</b> Bottom-left stack. Success auto-dismisses after 3.5s; errors stay until dismissed; optional Undo with a 5s window. Success uses <code>aria-live="polite"</code>, errors <code>role="alert"</code>. Undo wires to delete draft, delete folder, move feature, unassign. The server already has the inverse operations.</li>
+  <li><b>Saved indicator.</b> README, roadmap and description autosave stop toasting; the header shows <em>Saving… / Saved · 2s ago / Unsaved</em>.</li>
+  <li><b>Skeletons</b> for the feature page (header + three card outlines), palette results, roadmap page, with <code>aria-busy</code> on the pane.</li>
+  <li><b>Error boundary</b> around the main pane with a "Reload view" button.</li>
+  <li><b>Dialogs</b> all get <code>role="dialog"</code> and <code>aria-modal="true"</code>; the code-gen session error dialog gets the focus trap and Escape like the others.</li>
+</ul>
+<div class="replaces">Replaces <code>.saved-banner</code> (<code>App.tsx:3337</code>), fifty <code>setStatus()</code> sites, the lone "Loading…" (<code>3284</code>), and the untrapped alert dialog (<code>5003</code>).</div>
+</div>
+
+<figure>
+<div class="frame" style="max-width:420px;padding:14px;background:var(--bg-1)">
+  <div class="toasts" style="position:static;display:flex;flex-direction:column;gap:8px">
+    <div class="toast"><svg class="ico published"><use href="#g-published"/></svg> Published "Reject a claim on an expired policy" <svg class="ico x" style="width:12px;height:12px;margin-left:auto"><use href="#i-x"/></svg></div>
+    <div class="toast"><svg class="ico" style="color:var(--t2)"><use href="#i-folder"/></svg> Deleted folder "archive" <span class="undo">Undo</span> <svg class="ico x" style="width:12px;height:12px"><use href="#i-x"/></svg></div>
+    <div class="toast err"><svg class="ico"><use href="#i-alert"/></svg> Publish failed: the data repo has unpulled changes. <span class="undo">Sync now</span> <svg class="ico x" style="width:12px;height:12px"><use href="#i-x"/></svg></div>
+  </div>
+</div>
+<figcaption>The toast vocabulary: plain success, success with Undo, and a persistent error whose action is the fix.</figcaption>
+</figure>
+
+<div class="prose">
+<h2 id="p8"><span class="n">8</span>Roadmap polish</h2>
+<ul>
+  <li>Rename and delete from the same ⋯ menu. Server: add <code>DELETE /api/roadmap/:file</code>; <code>removeRoadmapDoc</code> already exists in the Automerge store.</li>
+  <li>Nested pages grouped by folder with indentation. <code>listRoadmap</code> already returns the path; the sidebar prints only the name today.</li>
+  <li>Same breadcrumb header and Saved indicator as feature pages.</li>
+</ul>
+
+<h2 id="p9"><span class="n">9</span>Icons and tooltips</h2>
+<p>Vendor Lucide as inline SVG components, bundled with the app like the fonts so the desktop build stays offline. Every unicode glyph and the four hand-drawn icon files go. A <code>Tooltip</code> component with a 350ms delay, 12px text and a <code>&lt;kbd&gt;</code> suffix wires to every icon button via <code>aria-describedby</code>.</p>
+
+<h2 id="tokens">Tokens and type</h2>
+<p>The token block at the top of <code>index.css</code> is replaced, and the dark ruleset is written once, applied through both <code>[data-theme="dark"]</code> and the system-preference media query, ending the two duplicated blocks the CSS comment asks to keep in sync by hand.</p>
+</div>
+<div class="swatches">
+  <div class="sw-col"><h4>Before · warm terracotta</h4>
+    <div class="sw-grid">
+      <div class="sw"><i style="background:#faf9f5"></i><span><b>surface-0</b>#faf9f5</span></div>
+      <div class="sw"><i style="background:#f0eee6"></i><span><b>surface-1</b>#f0eee6</span></div>
+      <div class="sw"><i style="background:#e5e1d5"></i><span><b>border</b>#e5e1d5</span></div>
+      <div class="sw"><i style="background:#21201c"></i><span><b>text-1</b>#21201c</span></div>
+      <div class="sw"><i style="background:#6e6a60"></i><span><b>text-2</b>#6e6a60</span></div>
+      <div class="sw"><i style="background:#c6613f"></i><span><b>accent</b>#c6613f</span></div>
+      <div class="sw"><i style="background:#faf3e3;border-bottom:1px solid #e7dab9"></i><span><b>published</b>parchment</span></div>
+      <div class="sw"><i style="background:#262624"></i><span><b>dark surface</b>#262624</span></div>
+    </div></div>
+  <div class="sw-col"><h4>After · Linear direction</h4>
+    <div class="sw-grid">
+      <div class="sw"><i style="background:#ffffff"></i><span><b>surface-0</b>#ffffff</span></div>
+      <div class="sw"><i style="background:#f7f8f8"></i><span><b>surface-1</b>#f7f8f8</span></div>
+      <div class="sw"><i style="background:#e6e7e9"></i><span><b>border</b>#e6e7e9</span></div>
+      <div class="sw"><i style="background:#282a30"></i><span><b>text-1</b>#282a30</span></div>
+      <div class="sw"><i style="background:#6b6f76"></i><span><b>text-2</b>#6b6f76</span></div>
+      <div class="sw"><i style="background:#5e6ad2"></i><span><b>accent</b>#5e6ad2</span></div>
+      <div class="sw"><i style="background:linear-gradient(90deg,#8a8f98 33%,#e0a03c 33% 66%,#3fa56b 66%)"></i><span><b>status</b>grey · amber · green</span></div>
+      <div class="sw"><i style="background:#191a1c"></i><span><b>dark surface</b>#191a1c</span></div>
+    </div></div>
+</div>
+<div class="prose">
+<div class="tablewrap"><table>
+  <tr><th>Token</th><th>Light</th><th>Dark</th></tr>
+  <tr><td><code>--surface-0</code> canvas</td><td class="mono">#ffffff</td><td class="mono">#191a1c</td></tr>
+  <tr><td><code>--surface-1</code> sidebar</td><td class="mono">#f7f8f8</td><td class="mono">#1f2023</td></tr>
+  <tr><td><code>--surface-2</code> cards, popovers</td><td class="mono">#ffffff</td><td class="mono">#232427</td></tr>
+  <tr><td><code>--hover</code></td><td class="mono">rgba(0,0,0,.04)</td><td class="mono">rgba(255,255,255,.05)</td></tr>
+  <tr><td><code>--border</code> / <code>--border-strong</code></td><td class="mono">#e6e7e9 / #d3d5d8</td><td class="mono">white 8% / 14%</td></tr>
+  <tr><td><code>--text-1</code> / <code>-2</code> / <code>-3</code></td><td class="mono">#282a30 / #6b6f76 / #9a9ea6</td><td class="mono">#e6e6e8 / #9a9da3 / #6b6f76</td></tr>
+  <tr><td><code>--accent</code> / <code>--accent-soft</code></td><td class="mono">#5e6ad2 / 12%</td><td class="mono">#6e79e6 / 18%</td></tr>
+  <tr><td><code>--status-draft</code> / <code>-proposed</code> / <code>-published</code></td><td class="mono">#8a8f98 / #e0a03c / #3fa56b</td><td class="mono">#7c8088 / #f2b64a / #4cc283</td></tr>
+  <tr><td><code>--danger-fg</code></td><td class="mono">#d0473f</td><td class="mono">#f16b62</td></tr>
+  <tr><td><code>--radius-sm/md/lg</code></td><td class="mono">4 / 6 / 8px</td><td class="mono">same</td></tr>
+</table></div>
+</div>
+<div class="typesample">
+  <div><span class="l">page title · Inter 15/600</span><div style="font-size:15px;font-weight:600">Claim intake</div></div>
+  <div><span class="l">card title · Inter 13/500</span><div style="font-size:13px;font-weight:500">Capture a new claim from the phone script</div></div>
+  <div><span class="l">body · Inter 13/400 · lh 1.45</span><div style="font-size:13px;line-height:1.45;color:var(--t2);max-width:60ch">Given a caller with a valid policy number, the agent records the incident date, location, and a free-text summary.</div></div>
+  <div><span class="l">section label · Inter 11/500 · +7% tracking · uppercase</span><div style="font-size:11px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:var(--t3)">Features</div></div>
+  <div><span class="l">code, file names · JetBrains Mono 12</span><div class="mono" style="font-size:12px">claims/claim-intake.feature.md</div></div>
+</div>
+<div class="prose">
+<ul style="margin-top:14px">
+  <li><b>Type:</b> Inter for all UI text at 13px, line-height 1.45; serif display faces removed; JetBrains Mono kept for code. Drop the <code>@fontsource-variable/source-serif-4</code> dependency.</li>
+  <li><b>Spacing:</b> 4px grid; tree rows 28px; card padding 12px 14px; header 40px.</li>
+  <li><b>Elevation:</b> none on panes; medium on popovers, large on dialogs; dialog backdrop 40% black with a 2px blur.</li>
+  <li><b>Focus:</b> 2px accent ring, 1px offset, on <code>:focus-visible</code> only (kept from today).</li>
+</ul>
+
+<h2 id="spec">Spec change to apply</h2>
+<p>The spec repo is never edited from a session, so this is the replacement text for the <em>Design system</em> section of <code>specs/ui/ui.feature.md</code>, for you to paste in:</p>
+<blockquote><p>Quiet, dense, keyboard-first, Linear-like. All colors flow through CSS tokens in <code>src/frontend/index.css</code>; components never hardcode a color. Surfaces: white canvas, faint-grey sidebar (light); near-black equivalents (dark). Accent: indigo, used for primary buttons, focus rings, and the active row. Status has its own three colors (draft grey, proposed amber, published green) shown as glyphs, never as text badges. Type: Inter for all UI text at 13px; JetBrains Mono for code and file names; fonts ship with the app. Borders are 1px low-contrast; radii 4–8px; shadows only on popovers and dialogs. Focus is always visible. Every action is available from the ⌘K command menu, and every menu item and tooltip shows its shortcut.</p></blockquote>
+<div class="callout">While there: the "Draft checkbox" rule in the same file (lines 112–119) still reads as current, but the editor uses Propose / Publish buttons and a status badge. Mark it superseded.</div>
+
+<h2 id="phases">Phased backlog</h2>
+<p>Each phase also extracts its views out of <code>App.tsx</code> into components (Sidebar, FeaturePage, ScenarioEditor, RoadmapPage, dialogs). The 5,023-line file is the practical obstacle to everything above.</p>
+<div class="tablewrap"><table class="phases">
+  <tr><th>Phase</th><th>Items</th><th>Why this order</th></tr>
+  <tr><td>1</td><td>Tokens and type retune · icon set and Tooltip (9) · status glyphs (5) · <code>focus-within</code> row actions · dialog <code>aria-modal</code> and the session-error fixes</td><td>Mostly CSS, lowest risk, and it makes everything after it look right.</td></tr>
+  <tr><td>2</td><td>Shortcut dispatcher and cheat sheet (2) · Menu and Popover component (4) · Toast system and Saved indicator (7)</td><td>Foundations the rest depend on.</td></tr>
+  <tr><td>3</td><td>Command palette (1) · page header, breadcrumbs and chips (3)</td><td>The biggest visible change, built on phase 2.</td></tr>
+  <tr><td>4</td><td>Sidebar collapse, sections, filters, tree semantics (6) · roadmap polish (8) · skeletons and error boundary (7)</td><td>Finish and polish.</td></tr>
+</table></div>
+<p>Verification for each phase: run the demo configuration (<code>DEMO_MODE=1</code>, no git push), screenshot every view in both themes, tab through the tree and a dialog, and run <code>bun test</code>.</p>
+</div>
+
+<footer>Linear conventions confirmed from <a href="https://linear.app/changelog/unpublished-collapsible-sidebar">Linear's collapsible sidebar changelog</a>, <a href="https://linear.app/changelog/2021-03-25-keyboard-shortcuts-help">Linear's keyboard shortcuts help changelog</a>, <a href="https://fastshortcuts.com/shortcuts/linear/">fastshortcuts</a> and <a href="https://shortcut.fyi/linear-shortcuts">shortcut.fyi</a>. Line references are against <code>main</code> at 42c9045.</footer>
+</main>
+</div>

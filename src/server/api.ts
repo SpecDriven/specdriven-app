@@ -77,6 +77,7 @@ import { searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import {
   createRoadmapPage,
+  deleteRoadmapPage,
   ensureRoadmapFolder,
   isRoadmapPath,
   listRoadmap,
@@ -713,6 +714,16 @@ const putRoadmapPage = withDataDir(async (dir, req, params) => {
   }
 });
 
+// Deleting a page (specs/app/roadmap.feature.md): the markdown and its
+// document go, committed and pushed like a deleted feature.
+const deleteRoadmapPageRoute = withDataDir(async (dir, _req, params) => {
+  try {
+    return json(await deleteRoadmapPage(dir, params.file ?? ""));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
@@ -1084,6 +1095,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/roadmap", postRoadmap],
   ["GET", "/api/roadmap/:file", getRoadmapPage],
   ["PUT", "/api/roadmap/:file", putRoadmapPage],
+  ["DELETE", "/api/roadmap/:file", deleteRoadmapPageRoute],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
