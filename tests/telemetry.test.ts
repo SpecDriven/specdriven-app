@@ -70,9 +70,13 @@ describe("withSpan", () => {
         span.setAttribute("file", "a.feature.md");
       });
     });
-    const finished = spans.getFinishedSpans();
+    // Only this test's trace: a span from work another test left running
+    // must not land in the assertion.
+    const parent = spans.getFinishedSpans().find((s) => s.name === "parent")!;
+    const finished = spans
+      .getFinishedSpans()
+      .filter((s) => s.spanContext().traceId === parent.spanContext().traceId);
     expect(finished.map((s) => s.name).sort()).toEqual(["child", "parent"]);
-    const parent = finished.find((s) => s.name === "parent")!;
     const child = finished.find((s) => s.name === "child")!;
     expect(child.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
     expect(parent.attributes["kind"]).toBe("tick");
