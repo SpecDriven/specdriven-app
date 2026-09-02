@@ -115,6 +115,8 @@ body {
 
 .centered {
   min-height: 100vh;
+  min-height: 100dvh;
+  padding: 1rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -198,7 +200,10 @@ body {
   --sw: min(var(--sidebar-w, 16rem), 70vw);
   display: grid;
   grid-template-columns: var(--sw) 1fr;
+  /* dvh where it exists: a phone's address bar comes and goes, and 100vh
+     would leave the user corner under it. */
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
 }
@@ -825,6 +830,9 @@ button {
   padding: 1.1rem 1.6rem;
   gap: 0.8rem;
   min-height: 0;
+  /* A grid item's floor is its content's width; a toolbar that cannot wrap
+     would push the pane past a narrow window instead of shrinking. */
+  min-width: 0;
 }
 
 .editor-bar {
@@ -1074,6 +1082,7 @@ button.link:disabled {
   padding: 1.4rem 1.5rem;
   width: min(40rem, 90vw);
   max-height: 85vh;
+  max-height: 85dvh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -3538,4 +3547,383 @@ aside header .collapse-btn {
   border-color: var(--border-strong);
   background: var(--surface-2);
   color: var(--text-1);
+}
+
+/* ---- Tablets and small windows: two panes, less room ---- */
+
+/* The sidebar keeps its stored width but never more than two fifths of a
+   tablet's width; page headers wrap their actions under the trail instead
+   of squeezing the name to nothing. */
+@media (max-width: 64rem) {
+  .layout {
+    --sw: min(var(--sidebar-w, 16rem), 40vw);
+  }
+
+  .page-header {
+    flex-wrap: wrap;
+  }
+
+  /* A long trail wraps the actions under it rather than shrinking; when it
+     must shrink, the parents give way first and the page's own name last. */
+  .page-header .crumbs {
+    flex: 1 1 22rem;
+  }
+
+  .crumbs li:not(.crumb-tail) {
+    flex: 0 4 auto;
+  }
+
+  .crumbs li.crumb-tail {
+    flex: 1 1 auto;
+    min-width: 6rem;
+  }
+
+  .page-actions {
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+
+  .scenario-pane-title {
+    flex-wrap: wrap;
+  }
+
+  .popover {
+    min-width: 0;
+    width: min(24rem, calc(100vw - 2rem));
+  }
+}
+
+/* ---- Phones, and tablets held narrow: one pane ----
+   Keep the breakpoint in sync with COMPACT_QUERY in App.tsx. The sidebar
+   turns into a drawer over the page, opened from the top bar; everything
+   that was sized for a wide window — dialogs, the palette, popovers, the
+   breadcrumb trail — takes the width there is. */
+@media (max-width: 47.99rem) {
+  .layout.compact {
+    --sw: 0px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+    padding-top: env(safe-area-inset-top);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-1);
+  }
+
+  .topbar .ibtn {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .topbar-home {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: var(--radius-sm);
+    color: var(--text-2);
+    text-decoration: none;
+  }
+
+  .topbar-home:hover,
+  .topbar-home:focus-visible {
+    color: var(--text-1);
+    background: var(--hover);
+  }
+
+  .topbar-repo {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The demo note takes a full row under the bar's controls. */
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .topbar .topbar-banner {
+    flex: 1 1 100%;
+    margin: 0 0 0.4rem;
+  }
+
+  /* The drawer: the whole sidebar, slid in from the left over a dimmed page.
+     Below the dialogs (z 10) so a prompt opened from its menus — rename a
+     roadmap page, delete a folder — lands on top of it. */
+  .layout.compact aside.drawer {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 9;
+    width: min(20rem, 85vw);
+    padding-top: max(0.9rem, env(safe-area-inset-top));
+    padding-bottom: max(0.9rem, env(safe-area-inset-bottom));
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform 200ms ease,
+      visibility 0s linear 200ms;
+  }
+
+  .layout.compact aside.drawer.open {
+    transform: none;
+    visibility: visible;
+    box-shadow: var(--shadow-lg);
+    transition:
+      transform 200ms ease,
+      visibility 0s;
+  }
+
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 8;
+    background: rgba(35, 30, 24, 0.45);
+  }
+
+  /* The loading shell: no drawer yet, just the page skeleton. */
+  .skeleton-shell aside {
+    display: none;
+  }
+
+  .skeleton-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .editor {
+    padding: 0.75rem 0.9rem;
+    gap: 0.7rem;
+  }
+
+  .page-actions .readme-hint {
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+
+  /* The markdown toolbar's buttons wrap onto a second row. */
+  .md-toolbar,
+  .md-tools {
+    flex-wrap: wrap;
+  }
+
+  /* The trail keeps its last two steps — the way back, and where you are. */
+  .crumbs li:not(:nth-last-child(-n + 2)) {
+    display: none;
+  }
+
+  .crumb,
+  .editor-bar button.crumb {
+    max-width: 10rem;
+  }
+
+  .rename-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .crumbs .rename-form {
+    flex-wrap: wrap;
+  }
+
+  /* The scenario editor's bar: the trail and name on one line, the actions
+     right-aligned on the next, so the name field never runs under them. */
+  .scenario-pane-title {
+    flex-basis: 100%;
+  }
+
+  .scenario-pane-actions {
+    margin-left: auto;
+  }
+
+  .scenario-pane input.scenario-pane-name {
+    min-width: 0;
+  }
+
+  .editor-bar button.danger {
+    margin-right: 0.25rem;
+  }
+
+  .scenario-card {
+    padding: 0.7rem 0.8rem;
+  }
+
+  .feature-desc {
+    padding: 0.5rem 0.7rem;
+  }
+
+  /* Dialogs fill the screen but for a thin margin, and never outgrow it. */
+  .dialog,
+  .dialog.modal-dialog,
+  .dialog.link-dialog,
+  .dialog.conflict-dialog,
+  .shortcut-sheet {
+    width: calc(100vw - 1rem);
+    max-width: none;
+    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
+    padding: 1rem;
+  }
+
+  .dialog.conflict-dialog {
+    height: calc(100dvh - 1rem);
+    resize: none;
+  }
+
+  .settings-header {
+    padding-top: 1rem;
+  }
+
+  .dialog .settings-row {
+    flex-wrap: wrap;
+  }
+
+  .settings-row select {
+    max-width: 100%;
+  }
+
+  .settings-row-hint {
+    max-width: none;
+  }
+
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .link-inputs .link-url {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .palette-backdrop {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+
+  .palette {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .palette-label {
+    max-width: none;
+    flex: 0 1 auto;
+  }
+
+  /* Anchored popovers become a sheet under the top bar: a chip sits at the
+     left edge, so anchoring would push its editor off the right side. */
+  .popover {
+    position: fixed;
+    top: 3.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    min-width: 0;
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+  }
+
+  .menu {
+    max-width: calc(100vw - 1rem);
+  }
+
+  .toaster {
+    right: 0.75rem;
+    max-width: none;
+  }
+
+  .repo-prompt {
+    padding: 1.4rem 1.2rem;
+  }
+
+  /* Reduced motion: the drawer appears in place. */
+  @media (prefers-reduced-motion: reduce) {
+    .layout.compact aside.drawer,
+    .layout.compact aside.drawer.open {
+      transition: none;
+    }
+  }
+}
+
+/* ---- Touch: no hover, fat fingers ----
+   Row actions that appear on hover are always there; targets grow to a
+   finger's width; keyboard hints go, since there is no keyboard to press. */
+@media (hover: none), (pointer: coarse) {
+  .card-actions,
+  .tree-menu-btn,
+  .folder-delete {
+    opacity: 1;
+  }
+
+  .ibtn,
+  .editor-bar button.ibtn,
+  .tree-menu-btn,
+  .roadmap-add,
+  .repo-edit,
+  .repo-recent-toggle,
+  .settings-close,
+  aside.rail .rail-btn,
+  aside.rail .rail-link {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+  }
+
+  .tree a.tree-feature,
+  a.roadmap-entry,
+  .folder-toggle {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .side-nav a,
+  .side-nav button {
+    height: 2.25rem;
+  }
+
+  .menu-item {
+    min-height: 2.25rem;
+  }
+
+  .palette-item {
+    min-height: 2.5rem;
+  }
+
+  .chip {
+    height: 1.9rem;
+  }
+
+  .sidebar-search-btn {
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+
+  .sidebar-search-btn kbd,
+  .palette-foot,
+  .menu-item .keys,
+  .palette-item .keys,
+  .settings-footnote:has(kbd) {
+    display: none;
+  }
+}
+
+/* iOS zooms the page into any field smaller than 16px on focus. On a
+   touch phone every field is 1rem — the one override loud enough to beat
+   the per-surface sizes above. */
+@media (max-width: 47.99rem) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 1rem !important;
+  }
 }
