@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
+import { TEST_REF_RE, renderTestInEditor } from "./testref";
 
 // Markdown support for the scenario edit dialog (specs/ui.spec.md "Scenario
 // edit dialog"). The preview is built from React elements — never innerHTML —
 // so untrusted feature-file content cannot inject markup.
+//
+// Beyond standard markdown the preview knows one house token: `[test:<url>]`
+// (specs/external-links/test-traceability.feature.md), shown as a link named
+// after the test — see ./testref.
 
 /** Only these destinations are allowed for links/images in the preview. */
 function safeUrl(url: string): string | null {
@@ -17,6 +22,7 @@ const INLINE = new RegExp(
     "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
     "~~(?<strike>.+?)~~",
     "!\\[(?<alt>[^\\]]*)\\]\\((?<src>[^)]+)\\)",
+    TEST_REF_RE.source.replace("(?<url>", "(?<test>"),
     "\\[(?<text>[^\\]]+)\\]\\((?<href>[^)]+)\\)",
   ].join("|"),
 );
@@ -47,6 +53,17 @@ function parseInline(input: string, keyBase: string): ReactNode[] {
     } else if (g.src !== undefined) {
       const src = safeUrl(g.src);
       out.push(src ? <img key={key} src={src} alt={g.alt ?? ""} /> : m[0]);
+    } else if (g.test !== undefined) {
+      const { label, href, title } = renderTestInEditor.render(g.test);
+      out.push(
+        href ? (
+          <a key={key} className="test-ref" href={href} target="_blank" rel="noreferrer" title={title}>
+            {label}
+          </a>
+        ) : (
+          m[0]
+        ),
+      );
     } else {
       const href = safeUrl(g.href!);
       out.push(

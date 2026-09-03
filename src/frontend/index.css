@@ -1620,6 +1620,22 @@ button.link:disabled {
   color: var(--accent-strong);
 }
 
+/* `[test:<url>]` references, shown by the test's name
+   (specs/external-links/test-traceability.feature.md). */
+.md-preview a.test-ref {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.05em 0.35em;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  text-decoration: none;
+}
+
+.md-preview a.test-ref:hover {
+  text-decoration: underline;
+}
+
 .md-preview img {
   max-width: 100%;
 }
