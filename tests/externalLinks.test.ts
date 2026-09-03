@@ -75,11 +75,7 @@ Quotes for potential customers.
 - **Given** a potential customer has an account
 - **Then** a quote is provided
 
-### Tests
-
-| Test |
-| --- |
-| https://github.com/acme/repo/blob/main/quote.test.ts |
+[test: https://github.com/acme/repo/blob/main/quote.test.ts ]
 
 ## Declined Quote @v2 [published]
 

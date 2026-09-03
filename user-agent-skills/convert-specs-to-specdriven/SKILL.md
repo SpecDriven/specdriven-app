@@ -113,8 +113,8 @@ Rating and quoting for personal auto.
 
 - Block order: `# <name>` → ticket link line → `**Assigned:**` line →
   description → scenarios. Each scenario: `## <name> @v<N> [proposed]` →
-  scenario ticket link line → body → `### Tests` table. Exactly one blank
-  line between blocks; single trailing newline.
+  scenario ticket link line → body → `[test: <url> ]` lines. Exactly one
+  blank line between blocks; single trailing newline.
 - Sort scenarios by name (locale string order), then version ascending — the
   order the app writes, so any other order churns on first save.
 - Version: `@v1` for new scenarios. If the target file already exists and has
@@ -125,10 +125,11 @@ Rating and quoting for personal auto.
   a chipless heading parses as an app-internal draft and is **removed from
   the file** by the app's next sync. Never `[draft]` or `[saved]`
   (wire-format and legacy tokens).
-- A `### Tests` section only when the source names real automated tests:
-  `### Tests`, blank line, `| Test |`, `| --- |`, one `| <url> |` row each —
-  `https://github.com/…` URLs only, unique, and nothing else after the
-  heading. Place it last in the scenario.
+- Test lines only when the source names real automated tests: one
+  `[test: <url> ]` line per test, last in the scenario —
+  `https://github.com/…` URLs only, unique. A test that covers one rule
+  rather than the scenario goes on that rule's own line instead. The older
+  `### Tests` table is still read, but never write it.
 
 ## Mapping: Gherkin / Cucumber `.feature`
 
@@ -190,7 +191,7 @@ Sort each piece of source content with these rules, in order:
 2. A cohesive *capability* → a feature file.
 3. A *grouping* of capabilities → a folder.
 4. A *ticket reference* → a link line; a *test URL on github.com* → a
-   `### Tests` row; an *owner* who is a project member → feature-level
+   `[test: <url> ]` line; an *owner* who is a project member → feature-level
    `**Assigned:**`.
 5. Everything else — statuses, priorities, dates, estimates, tags,
    comments — is prose in the description/body, or a line in the report.
@@ -221,10 +222,10 @@ grep:
    slugify identically (deep links resolve to the first only).
 6. Fences balance: the count of lines matching `` ^\s{0,3}(```|~~~) `` is
    even in every file — an unclosed fence swallows every later scenario.
-7. `### Tests` (match case-insensitively — a lowercase `### tests` decoy
-   also triggers the parser) appears at most once per scenario, last, in the
-   canonical table shape, `https://github.com/…` URLs only, no duplicates,
-   nothing else after the heading.
+7. Test links are `[test: <url> ]` lines, last in the scenario,
+   `https://github.com/…` URLs only, no duplicates. No `### Tests` heading
+   is written (match case-insensitively — a lowercase `### tests` decoy also
+   triggers the parser's legacy table reader).
 8. No `**Assigned:**` line under any scenario heading (it would be silent
    prose — assignment is feature-level).
 9. Statuses: every converted scenario is `[proposed]`; any pre-existing

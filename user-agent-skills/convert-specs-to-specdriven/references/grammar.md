@@ -244,28 +244,31 @@ conventions make specs uniform and testable:
   uploads are capped at 10 MB. These references render inside the app but not
   on GitHub (GitHub has no `/api/images/` route).
 
-## 9. The Tests section
+## 9. Test links
 
-A scenario may end with a `### Tests` section linking the automated tests
-that cover it. The canonical shape is a single-column table:
+A scenario may end with the automated tests that cover it, one
+`[test: <url> ]` line each, after the body:
 
 ```text
-### Tests
-
-| Test |
-| --- |
-| https://github.com/acme/policy-service/blob/main/test/bind.test.ts#L12 |
+[test: https://github.com/acme/policy-service/blob/main/test/bind.test.ts#L12 ]
 ```
 
 Parser behavior to respect:
 
-- The heading match is case-insensitive with flexible spacing (`### tests`
-  also triggers it), and the parser takes the **last** such heading outside
-  code fences in the body.
-- Every line after that heading containing a URL becomes a test entry — the
-  URL is lifted mid-line and trailing `|`, `)`, `]`, `>`, `,`, `.` characters
-  are trimmed. Keep the section pure: nothing after the heading but the
-  table, and place it last in the scenario.
+- A line made only of `[test: <url> ]` tokens is lifted out of the body into
+  the scenario's test links, wherever it stands; the canonical place is last
+  in the scenario. Spaces around the url are optional (`[test:<url>]` reads
+  the same) and the url may not contain spaces or `]`.
+- A token inside a rule's own line — `- **Then** the quote is priced
+  [test: <url> ]` — traces that one rule, not the scenario. It stays in the
+  body, and the app's preview shows it as a link named after the test: the
+  file name without its extension and line anchor,
+  `QuoteHomeownersPolicyTest`, opening the full url in a new tab.
+- The older form, a trailing `### Tests` section with a single-column
+  `| Test |` table, is still read (heading match case-insensitive, last such
+  heading outside code fences, every following line with a url counts). The
+  app rewrites it as test lines the first time it writes the file, so new
+  files should use the lines.
 - Valid test links are `https://github.com/…` or `https://www.github.com/…`
   only, unique within the scenario. Other URLs may survive parsing but
   violate the spec and the app's link validation.
@@ -279,7 +282,7 @@ form directly means the app's first save of your file is a zero diff:
 
 1. Blocks in order: `# <name>` → feature link line → `**Assigned:**` line →
    description → scenarios. Each scenario: heading → scenario link line →
-   body → `### Tests` table.
+   body → `[test: <url> ]` lines.
 2. Every block separated from the next by **exactly one blank line**; no
    leading/trailing blank lines inside blocks; the file ends with a single
    `\n`.
@@ -287,8 +290,8 @@ form directly means the app's first save of your file is a zero diff:
    explicit chip.
 4. Scenarios sorted by name (locale-aware string comparison), then by version
    ascending — regardless of source order.
-5. Tests tables exactly as in section 9: `### Tests`, blank line, `| Test |`,
-   `| --- |`, one `| <url> |` row per link.
+5. Test links exactly as in section 9: one `[test: <url> ]` line per link,
+   last in the scenario, one blank line after the body.
 6. A scenario with an empty body is just its heading.
 
 ## 11. Deep links and back-references
@@ -375,11 +378,7 @@ Renewals and mid-term endorsements.
 | card           | yes       |
 | ACH            | yes       |
 
-### Tests
-
-| Test |
-| --- |
-| https://github.com/acme/policy-service/blob/main/test/bind.test.ts#L12 |
+[test: https://github.com/acme/policy-service/blob/main/test/bind.test.ts#L12 ]
 
 ## Bind an accepted quote @v2 [proposed]
 
@@ -407,7 +406,7 @@ Reading it top to bottom:
 3. The description runs to the first scenario heading and freely contains an
    `### Out of scope` section — no version, so plain content.
 4. `Bind an accepted quote @v1 [published]` is immutable; its example table
-   is plain markdown; its `### Tests` table names the covering test.
+   is plain markdown; its `[test: <url> ]` line names the covering test.
 5. `@v2 [proposed]` is a new version of the same scenario name, superseding
    v1 when published. Its body states its delta and full behavior; it has no
    Tests section yet.
