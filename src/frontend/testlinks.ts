@@ -6,9 +6,13 @@
 
 import { isTestLink } from "../server/parser";
 
-/** Shown as the link's path within GitHub — the host prefix carries no information. */
+/**
+ * Shown as just the test's file name — the repo path and line anchor only
+ * clutter the row; the full url stays on the link's title and href.
+ */
 export function testLinkLabel(url: string): string {
-  return url.replace(/^https:\/\/(www\.)?github\.com\//, "");
+  const path = url.replace(/[?#].*$/, "").replace(/\/+$/, "");
+  return path.slice(path.lastIndexOf("/") + 1) || url;
 }
 
 /**
