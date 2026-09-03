@@ -215,11 +215,10 @@ test("a cleared or invalid ✎ row blocks the save", () => {
   expect(cleared.error).toContain("Not a GitHub url");
 });
 
-test("the label drops the github.com prefix", () => {
-  expect(testLinkLabel(URL_A)).toBe(
-    "vydra/GatlingGen/blob/main/app/src/test/java/ggen/GatlingCodeGeneratorTest.java",
-  );
-  expect(testLinkLabel("https://www.github.com/o/r")).toBe("o/r");
+test("the label is just the test's file name, without repo path or line anchor", () => {
+  expect(testLinkLabel(URL_A)).toBe("GatlingCodeGeneratorTest.java");
+  expect(testLinkLabel(`${URL_A}#L34`)).toBe("GatlingCodeGeneratorTest.java");
+  expect(testLinkLabel("https://www.github.com/o/r")).toBe("r");
 });
 
 // The display setting is optional with default ON (specs/traceability.spec.md).
