@@ -27,7 +27,11 @@ test("only GitHub urls are test links", () => {
   expect(isTestLink("")).toBe(false);
 });
 
-test("a trailing Tests table is lifted out of the scenario body", () => {
+// Test links are written as `[test: <url> ]` lines at the end of the scenario
+// (specs/external-links/test-traceability.feature.md); the older `### Tests`
+// table is still read so existing files keep their links.
+
+test("a legacy trailing Tests table is lifted out of the scenario body", () => {
   const feature = parseFeature(
     `# F\n\n## S @v1\n\n- **Given** a thing\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n| ${URL_B} |\n`,
   );
@@ -35,19 +39,62 @@ test("a trailing Tests table is lifted out of the scenario body", () => {
   expect(feature.scenarios[0]!.body).toBe("- **Given** a thing");
 });
 
-test("test links survive a parse/serialize round trip", () => {
+test("test lines are lifted out of the scenario body", () => {
+  const feature = parseFeature(
+    `# F\n\n## S @v1\n\n- **Given** a thing\n\n[test: ${URL_A} ]\n[test:${URL_B}]\n`,
+  );
+  expect(feature.scenarios[0]!.tests).toEqual([URL_A, URL_B]);
+  expect(feature.scenarios[0]!.body).toBe("- **Given** a thing");
+});
+
+test("test links are written as test lines and survive a round trip", () => {
   const feature = parseFeature(`# F\n\n## S @v1 [published]\n\nbody\n`);
-  feature.scenarios[0]!.tests = [URL_A];
+  feature.scenarios[0]!.tests = [URL_A, URL_B];
   const text = serializeFeature(feature);
-  expect(text).toContain("### Tests");
-  expect(text).toContain(`| ${URL_A} |`);
+  expect(text).toBe(`# F\n\n## S @v1 [published]\n\nbody\n\n[test: ${URL_A} ]\n[test: ${URL_B} ]\n`);
+  expect(text).not.toContain("### Tests");
   expect(parseFeature(text)).toEqual(feature);
 });
 
-test("scenarios without test links serialize without a Tests section", () => {
+test("a legacy table moves to test lines the first time the file is written", () => {
+  const legacy = `# F\n\n## S @v1 [published]\n\nbody\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n`;
+  const feature = parseFeature(legacy);
+  const text = serializeFeature(feature);
+  expect(text).toBe(`# F\n\n## S @v1 [published]\n\nbody\n\n[test: ${URL_A} ]\n`);
+  expect(parseFeature(text)).toEqual(feature);
+});
+
+test("a test line anywhere in the body counts, and the body closes up around it", () => {
+  const { body, tests } = splitTests(`step one\n\n[test: ${URL_A} ]\n\nstep two`);
+  expect(tests).toEqual([URL_A]);
+  expect(body).toBe("step one\n\nstep two");
+});
+
+test("a token inside a rule's line traces that rule and stays in the body", () => {
+  const src = `- **Then** it is priced [test: ${URL_A} ]\n- **And** it is logged`;
+  const { body, tests } = splitTests(src);
+  expect(tests).toEqual([]);
+  expect(body).toBe(src);
+});
+
+test("test lines and a legacy table combine without repeats", () => {
+  const { tests } = splitTests(
+    `body\n\n[test: ${URL_A} ]\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n| ${URL_B} |`,
+  );
+  expect(tests).toEqual([URL_A, URL_B]);
+});
+
+test("a test line inside a code fence is ordinary content", () => {
+  const src = "```\n[test: https://github.com/o/r ]\n```";
+  const { body, tests } = splitTests(src);
+  expect(tests).toEqual([]);
+  expect(body).toBe(src);
+});
+
+test("scenarios without test links serialize without test lines", () => {
   const feature = parseFeature("# F\n\n## S @v1\n\nbody\n");
   expect(feature.scenarios[0]!.tests).toEqual([]);
-  expect(serializeFeature(feature)).not.toContain("### Tests");
+  expect(serializeFeature(feature)).not.toContain("[test:");
 });
 
 test("list items and bare urls under the heading also count", () => {

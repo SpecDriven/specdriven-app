@@ -143,13 +143,24 @@ export function titleFromFileName(fileName: string): string {
 }
 
 /**
- * Test links are stored inside the scenario as a trailing `### Tests` markdown
- * table (specs/traceability.spec.md) — like the scenario table, plain markdown
- * that renders naturally on GitHub. The parser lifts the urls out of that
- * section into `Scenario.tests`; serializeFeature writes them back.
+ * Test links are stored inside the scenario as `[test: <url> ]` lines at the
+ * end of its body (specs/external-links/test-traceability.feature.md) — plain
+ * text that GitHub shows verbatim. Older files carry a trailing `### Tests`
+ * markdown table instead (specs/traceability.spec.md); the parser still reads
+ * it, and serializeFeature writes the lines, so a file moves to the new form
+ * the first time it is written. Either way the links land in
+ * `Scenario.tests`, apart from the body — which is what lets a published
+ * scenario's tests keep changing while its body stays immutable.
+ *
+ * A `[test:…]` token inside a rule's own line traces that one rule, not the
+ * scenario: it stays in the body and the preview renders it where it stands.
  */
 const TESTS_HEADING_RE = /^###\s+Tests\s*$/i;
 const URL_RE = /https?:\/\/\S+/;
+/** One `[test: <url> ]` token; the spaces around the url are optional. */
+const TEST_REF_RE = /\[test:\s*([^\]\s]+)\s*\]/g;
+/** A line holding nothing but test tokens. */
+const TEST_LINE_RE = /^\s*(?:\[test:\s*[^\]\s]+\s*\]\s*)+$/;
 
 /** Only GitHub urls are stored as test links (specs/traceability.spec.md). */
 export function isTestLink(url: string): boolean {
@@ -157,10 +168,12 @@ export function isTestLink(url: string): boolean {
 }
 
 /**
- * Split a scenario body into its content and the test links held by a
- * trailing `### Tests` section: one url per table row (or list item —
- * anything with a url on the line counts, markdown punctuation trimmed).
- * Headings inside fenced code blocks don't start a tests section.
+ * Split a scenario body into its content and its test links: every line
+ * made only of `[test: <url> ]` tokens, plus — in older files — a trailing
+ * `### Tests` section, one url per table row (or list item; anything with a
+ * url on the line counts, markdown punctuation trimmed). Lines and headings
+ * inside fenced code blocks are content. Links are returned in the order
+ * met, without repeats.
  */
 export function splitTests(body: string): { body: string; tests: string[] } {
   const lines = body.split("\n");
@@ -170,17 +183,34 @@ export function splitTests(body: string): { body: string; tests: string[] } {
     if (FENCE_RE.test(lines[i]!)) inFence = !inFence;
     else if (!inFence && TESTS_HEADING_RE.test(lines[i]!)) headingAt = i;
   }
-  if (headingAt === -1) return { body, tests: [] };
   const tests: string[] = [];
-  for (const line of lines.slice(headingAt + 1)) {
-    const m = line.match(URL_RE);
-    if (m) tests.push(m[0]!.replace(/[|)\]>,.]+$/, ""));
+  const kept: string[] = [];
+  let lifted = false;
+  inFence = false;
+  for (const line of headingAt === -1 ? lines : lines.slice(0, headingAt)) {
+    if (FENCE_RE.test(line)) inFence = !inFence;
+    else if (!inFence && TEST_LINE_RE.test(line)) {
+      for (const m of line.matchAll(TEST_REF_RE)) tests.push(m[1]!);
+      lifted = true;
+      continue;
+    }
+    kept.push(line);
   }
-  return { body: lines.slice(0, headingAt).join("\n").trim(), tests };
+  if (headingAt !== -1) {
+    for (const line of lines.slice(headingAt + 1)) {
+      const m = line.match(URL_RE);
+      if (m) tests.push(m[0]!.replace(/[|)\]>,.]+$/, ""));
+    }
+  }
+  if (!lifted && headingAt === -1) return { body, tests: [] };
+  // Removing a token line can leave two blank lines back to back.
+  const text = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return { body: text, tests: [...new Set(tests)] };
 }
 
-function testsTable(tests: string[]): string {
-  return ["### Tests", "", "| Test |", "| --- |", ...tests.map((t) => `| ${t} |`)].join("\n");
+/** The lines a scenario's test links are written as. */
+function testsLines(tests: string[]): string {
+  return tests.map((t) => `[test: ${t} ]`).join("\n");
 }
 
 /**
@@ -464,7 +494,7 @@ export function serializeFeature(feature: Feature, { links = true }: SerializeOp
     const chunks = [header(s.name, s.version, s.status)];
     if (links && s.link) chunks.push(formatExternalLink(s.link));
     if (s.body) chunks.push(s.body);
-    if (s.tests.length > 0) chunks.push(testsTable(s.tests));
+    if (s.tests.length > 0) chunks.push(testsLines(s.tests));
     parts.push(chunks.join("\n\n"));
   }
   return parts.join("\n\n") + "\n";
