@@ -1,6 +1,6 @@
 {
   "name": "specdriven",
-  "version": "0.1.32",
+  "version": "0.1.33",
   "description": "Enterprise spec-driven development workspace",
   "module": "src/index.ts",
   "main": "dist/electron/main.js",
