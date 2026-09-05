@@ -9,6 +9,7 @@ import {
   normalizeAssignments,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
+  normalizeCodeGenTarget,
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
   normalizeDeletePublished,
   normalizeProjectManagement,
@@ -67,7 +68,13 @@ import {
   resolveFeatureConflict,
 } from "./features";
 import type { FeatureView, ScenarioTarget } from "./features";
-import { claudeAvailable, runCodeGenSession } from "./agent";
+import {
+  claudeAvailable,
+  claudeDesktopAvailable,
+  launchDesktopSession,
+  runCodeGenSession,
+  sessionsDirectory,
+} from "./agent";
 import type { SpecInput } from "./agent";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { readProjectMembers } from "./members";
@@ -281,6 +288,12 @@ async function stateFields(state: SpecDrivenState) {
     projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
     codeGen: normalizeCodeGen(state.codeGen),
+    // Where "Start session" runs (specs/agents/claude.feature.md): the
+    // remembered choice, or null for "desktop when it is there, else cli".
+    codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget),
+    // Whether Claude.app is installed here, so a session can open in Claude
+    // Code Desktop — gates the "Run in" choice of the session dialog.
+    canOpenClaudeDesktop: claudeDesktopAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
@@ -333,6 +346,7 @@ const putState: Handler = async (req) => {
     projectManagementTool?: string;
     publishExternalLinks?: boolean;
     codeGen?: boolean;
+    codeGenTarget?: string;
     deletePublished?: boolean;
     assignments?: boolean;
     roadmap?: boolean;
@@ -349,6 +363,7 @@ const putState: Handler = async (req) => {
     body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
     body.codeGen === undefined &&
+    body.codeGenTarget === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.roadmap === undefined &&
@@ -357,7 +372,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, deletePublished, assignments, roadmap or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap or syncServerUrl is required",
       },
       400,
     );
@@ -496,6 +511,13 @@ const putState: Handler = async (req) => {
     }
     if (body.codeGen) delete state.codeGen;
     else state.codeGen = false;
+  }
+  // Session target (specs/agents/claude.feature.md): the last "Run in"
+  // choice of the session dialog, so the next dialog opens on it.
+  if (body.codeGenTarget !== undefined) {
+    const target = normalizeCodeGenTarget(body.codeGenTarget);
+    if (target === null) return json({ error: "codeGenTarget must be desktop or cli" }, 400);
+    state.codeGenTarget = target;
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — the default OFF is an absent key.
@@ -1006,19 +1028,22 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
 }
 
 // Code gen session (specs/agents/claude.spec.md): the client sends the
-// session name and the selected specs — whole files or per-file scenario
-// subsets; we build one prompt from them and pass it to the Claude CLI to
-// execute and exit. A non-zero exit comes back as an error for the client's
-// error box.
+// session name, the selected specs — whole files or per-file scenario
+// subsets — and where to run; we build one prompt from them and either pass
+// it to the Claude CLI to execute and exit, or open it in Claude Code
+// Desktop. A failure comes back as an error for the client's error box.
 const postAgentSession = withDataDir(async (dir, req) => {
   // The Settings switch is the gate, enforced here and not only in the UI:
-  // switched off, nothing can hand a spec to the CLI.
+  // switched off, nothing can hand a spec to Claude.
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  const body = (await req.json()) as { name?: string; files?: unknown };
+  const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
+  // An absent target is the original CLI session, unchanged.
+  const target = body.target === undefined ? "cli" : normalizeCodeGenTarget(body.target);
+  if (target === null) return json({ error: "target must be desktop or cli" }, 400);
   const files = parseSessionFiles(body.files);
   if (files === null) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
@@ -1042,6 +1067,17 @@ const postAgentSession = withDataDir(async (dir, req) => {
       }
     }
     specs.push({ fileName, content, partial: scenarios !== undefined });
+  }
+  if (target === "desktop") {
+    if (!claudeDesktopAvailable()) {
+      return json({ error: "Claude Code Desktop not found — install Claude.app" }, 502);
+    }
+    try {
+      const sessionsDir = await sessionsDirectory(getAppRoot());
+      return json(await launchDesktopSession(dir, name, specs, { sessionsDir }));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
   }
   if (!claudeAvailable()) {
     return json({ error: "Claude CLI not found — install the `claude` command" }, 502);

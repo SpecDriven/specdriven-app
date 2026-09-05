@@ -7,7 +7,9 @@ import {
   writeState,
   needsDataRepo,
   normalizeCodeGen,
+  normalizeCodeGenTarget,
   normalizeScenarioPreviewLines,
+  settingsDirectory,
   DEFAULT_SCENARIO_PREVIEW_LINES,
   LEGACY_STATE_FILE,
   statePath,
@@ -148,4 +150,29 @@ test("code generation is on unless explicitly switched off", () => {
 test("the code gen switch round-trips through the settings file", async () => {
   await writeState({ dataRepo: "data", codeGen: false }, dir);
   expect(normalizeCodeGen((await readState(dir)).codeGen)).toBe(false);
+});
+
+// Where "Start session" runs (specs/agents/claude.feature.md): the last
+// "Run in" choice; absent or unusable means "not chosen", and the client
+// falls back on whether Claude.app is installed.
+test("the session target is only ever desktop or cli", () => {
+  expect(normalizeCodeGenTarget("desktop")).toBe("desktop");
+  expect(normalizeCodeGenTarget("cli")).toBe("cli");
+  expect(normalizeCodeGenTarget(undefined)).toBeNull();
+  expect(normalizeCodeGenTarget("terminal")).toBeNull();
+});
+
+test("the session target round-trips through the settings file", async () => {
+  await writeState({ dataRepo: "data", codeGenTarget: "desktop" }, dir);
+  expect(normalizeCodeGenTarget((await readState(dir)).codeGenTarget)).toBe("desktop");
+});
+
+// Session records live beside the settings file (src/server/agent.ts), so
+// they follow the same local-then-home rule as a settings save.
+test("the settings directory is the project's, unless only the home file exists", async () => {
+  expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
+  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+  expect(await settingsDirectory(dir)).toBe(home);
+  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
 });
