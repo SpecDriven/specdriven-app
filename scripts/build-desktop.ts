@@ -11,6 +11,29 @@
  * app:// protocol), bundle the Electron main process, then hand both to
  * electron-builder. The web build (`bun run build`) is separate and
  * untouched. Targets and architectures live under "build" in package.json.
+ *
+ * macOS signing: the .app is code-signed with the Developer ID Application
+ * identity in the login keychain (electron-builder finds it on its own).
+ * Notarization is off for now — package.json pins `build.mac.notarize` to
+ * false. It carries no comments, so the future setup lives here:
+ *
+ *   1. package.json, under "build":
+ *
+ *        "mac": {
+ *          "notarize": { "teamId": "<APPLE_TEAM_ID>" },
+ *          "hardenedRuntime": true,
+ *          "gatekeeperAssess": false
+ *        },
+ *        "afterSign": "scripts/notarize.ts"   // only if a custom hook is needed
+ *
+ *   2. Export the Apple credentials before building (Bun loads .env, which
+ *      already holds APPLE_TEAM_ID):
+ *
+ *        APPLE_ID=<apple-id-email>
+ *        APPLE_APP_SPECIFIC_PASSWORD=<app-specific-password>
+ *        APPLE_TEAM_ID=<team-id>
+ *
+ *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
  */
 import { $ } from "bun";
 import { rm } from "node:fs/promises";
