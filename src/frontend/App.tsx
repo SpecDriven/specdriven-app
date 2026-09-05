@@ -63,6 +63,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { applyVimPref, useVimMode } from "./vimPref";
 import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
@@ -881,6 +882,9 @@ export function App() {
   const [webConnecting, setWebConnecting] = useState(false);
   const [authStatus, setAuthStatus] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemePref>(readThemePref);
+  // Vim mode (specs/ui.spec.md "Settings"): device-local like the theme;
+  // every open Markdown editor follows the switch (src/frontend/vimPref.ts).
+  const vimMode = useVimMode();
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
   // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
@@ -5997,6 +6001,27 @@ export function App() {
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                 </select>
+              </label>
+              {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
+                  on this device like the theme (src/frontend/VimEditor.tsx). */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Vim mode
+                  <span className="settings-row-hint">
+                    Adds a Vim tab to every Markdown editor: modal editing with Vim&apos;s
+                    keys and a status line for : commands. Esc stays inside the editor.
+                    Remembered on this device.
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={vimMode}
+                    onChange={(e) => applyVimPref(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
               </label>
             </section>
             {/* Demo mode has nothing to sync with: the whole autosync/live
