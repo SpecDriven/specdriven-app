@@ -12,8 +12,8 @@
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
-import { ensureRoadmapFolder, importRoadmapDrift } from "./roadmap";
-import { readState, needsDataRepo, normalizeRoadmap } from "./state";
+import { ROADMAP, TASKS, ensurePageFolder, importPageDrift, type PageFolder } from "./pages";
+import { readState, needsDataRepo, normalizeRoadmap, normalizeTasks } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
@@ -38,7 +38,10 @@ export async function reloadData(rootDir: string): Promise<string> {
     return "data repo not configured; skipped reload";
   }
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
-  return syncDataDir(dir, { roadmap: normalizeRoadmap(state.roadmap) });
+  return syncDataDir(dir, {
+    roadmap: normalizeRoadmap(state.roadmap),
+    tasks: normalizeTasks(state.tasks),
+  });
 }
 
 /** What a tick does beyond pulling and pushing. */
@@ -49,12 +52,14 @@ export interface SyncOptions {
    * with their markdown. Off, the folder is none of the app's business.
    */
   roadmap?: boolean;
+  /** The Tasks setting (specs/app/tasks.feature.md), the same for `tasks`. */
+  tasks?: boolean;
 }
 
 /** The tick itself, on an already-resolved data dir (shared with tests). */
 export async function syncDataDir(
   dir: string,
-  { roadmap = false }: SyncOptions = {},
+  { roadmap = false, tasks = false }: SyncOptions = {},
 ): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
     const pulled = await pull(dir);
@@ -72,13 +77,18 @@ export async function syncDataDir(
     if (!merging) {
       const drifted = await importDrift(dir);
       if (drifted) parts.push(drifted);
-      // Scenario "Create roadmap folder if necessary": the folder is made
-      // here when the setting asks for one and the repo has none — and the
-      // push below commits everything in it, like any other saved change.
-      if (roadmap) {
-        await ensureRoadmapFolder(dir);
-        const roadmapDrift = await importRoadmapDrift(dir);
-        if (roadmapDrift) parts.push(roadmapDrift);
+      // Scenario "Create roadmap folder if necessary", and its twin for the
+      // tasks folder: the folder is made here when the setting asks for one
+      // and the repo has none — and the push below commits everything in it,
+      // like any other saved change.
+      const shown: PageFolder[] = [
+        ...(roadmap ? [ROADMAP] : []),
+        ...(tasks ? [TASKS] : []),
+      ];
+      for (const kind of shown) {
+        await ensurePageFolder(dir, kind);
+        const drift = await importPageDrift(dir, kind);
+        if (drift) parts.push(drift);
       }
     }
     const synced = await syncSavedChanges(dir);

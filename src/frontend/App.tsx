@@ -7,9 +7,9 @@ import type {
 } from "react";
 import {
   parseFeature,
-  parseRoadmap,
+  parsePage,
   serializeFeature,
-  serializeRoadmap,
+  serializePage,
   slugify,
   sortScenarios,
   titleFromFileName,
@@ -17,7 +17,7 @@ import {
 import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
-import type { RoadmapListing } from "../server/roadmap";
+import type { PageListing } from "../server/pages";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import type { CodeGenTarget } from "../server/state";
@@ -40,6 +40,7 @@ import {
   Keyboard,
   Link,
   ListFilter,
+  ListTodo,
   Map as MapIcon,
   Menu as MenuIcon,
   PanelLeftClose,
@@ -93,7 +94,8 @@ import {
   parseRoute,
   repoDisplayName,
   resolveScenario,
-  roadmapPath,
+  pageFolderOf,
+  pageLink,
   scenarioPath,
 } from "./route";
 import {
@@ -221,15 +223,47 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
-// The sidebar has two tabs (specs/app/roadmap.feature.md): Specs, the feature
-// tree, and Roadmap, the page list. They share the one column, so the choice
-// is remembered like the sidebar width — a tab left open is meant to stay
-// open, not to reset on every reload.
-type SidebarTab = "specs" | "roadmap";
+// The sidebar's tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
+// .md): Specs, the feature tree, and one tab per special folder the settings
+// show — Roadmap and Tasks, each a list of markdown pages. They all share the
+// one column, so the choice is remembered like the sidebar width: a tab left
+// open is meant to stay open, not to reset on every reload.
+interface PageTab {
+  /** The data repo's folder — the tab's id, and its `/api/<folder>` routes. */
+  folder: "roadmap" | "tasks";
+  /** The tab's label, the breadcrumb above one of its pages, and the palette
+      group its pages fall under. */
+  title: "Roadmap" | "Tasks";
+  /** What one of its pages is called, in buttons and messages. */
+  noun: string;
+  /** What the tab says when the folder holds nothing yet. */
+  empty: string;
+  icon: typeof MapIcon;
+}
+
+const PAGE_TABS: PageTab[] = [
+  { folder: "roadmap", title: "Roadmap", noun: "page", empty: "No roadmap pages yet", icon: MapIcon },
+  { folder: "tasks", title: "Tasks", noun: "task", empty: "No tasks yet", icon: ListTodo },
+];
+
+/** The tab a page's file name belongs to — its folder is the first segment. */
+function pageTabOf(fileName: string): PageTab {
+  const folder = pageFolderOf(fileName);
+  return PAGE_TABS.find((tab) => tab.folder === folder) ?? PAGE_TABS[0]!;
+}
+
+/** The icon of the tab a page belongs to — the map, or the task list. */
+function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number }) {
+  const Icon = pageTabOf(fileName).icon;
+  return <Icon size={size} aria-hidden="true" />;
+}
+
+type SidebarTab = "specs" | PageTab["folder"];
 
 function readSidebarTab(): SidebarTab {
   try {
-    return localStorage.getItem("sd-sidebar-tab") === "roadmap" ? "roadmap" : "specs";
+    const stored = localStorage.getItem("sd-sidebar-tab");
+    return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
   } catch {
     return "specs";
   }
@@ -374,7 +408,8 @@ export function pageScenario(
 
 /** What the command palette offers before typing: the last pages opened. */
 interface RecentEntry {
-  kind: "feature" | "scenario" | "roadmap";
+  /** `page` covers both special folders; `roadmap` is what older lists hold. */
+  kind: "feature" | "scenario" | "page";
   fileName: string;
   name: string;
   scenario?: { name: string; version: number };
@@ -386,7 +421,12 @@ function readRecent(): RecentEntry[] {
   try {
     const raw = localStorage.getItem(RECENT_KEY);
     const list = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
-    return Array.isArray(list) ? list.slice(0, 8) : [];
+    if (!Array.isArray(list)) return [];
+    // A list written before the tasks folder existed calls its pages
+    // "roadmap"; they are pages like any other.
+    return list
+      .slice(0, 8)
+      .map((e) => ((e.kind as string) === "roadmap" ? { ...e, kind: "page" as const } : e));
   } catch {
     return [];
   }
@@ -491,9 +531,9 @@ interface TreeFilter {
   assignee: string | null;
 }
 
-/** Roadmap pages grouped by the subfolder under `roadmap/`, top level first. */
-function roadmapGroups(pages: RoadmapListing[]): { dir: string; pages: RoadmapListing[] }[] {
-  const groups = new Map<string, RoadmapListing[]>();
+/** Pages grouped by the subfolder under their own folder, top level first. */
+function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
+  const groups = new Map<string, PageListing[]>();
   for (const page of pages) {
     const dir = page.fileName.split("/").slice(1, -1).join("/");
     const list = groups.get(dir) ?? [];
@@ -640,7 +680,7 @@ export function App() {
   const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
-  const [roadmapAssigneeMenuOpen, setRoadmapAssigneeMenuOpen] = useState(false);
+  const [pageAssigneeMenuOpen, setPageAssigneeMenuOpen] = useState(false);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   /** One pane (a phone, a narrow tablet): the sidebar is a drawer over the
@@ -651,8 +691,8 @@ export function App() {
   /** The sidebar's filter, and its menu. */
   const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  /** A roadmap entry's ⋯ menu (file name), if open. */
-  const [roadmapMenu, setRoadmapMenu] = useState<string | null>(null);
+  /** A page entry's ⋯ menu (file name), if open. */
+  const [pageMenu, setPageMenu] = useState<string | null>(null);
   /** A feature is being fetched — the skeleton shows until it lands. */
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -682,7 +722,7 @@ export function App() {
    */
   const [searchTerms, setSearchTerms] = useState<string[] | null>(null);
   /** The same for the open roadmap page's editor. */
-  const [roadmapTerms, setRoadmapTerms] = useState<string[] | null>(null);
+  const [pageTerms, setPageTerms] = useState<string[] | null>(null);
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
@@ -782,34 +822,46 @@ export function App() {
   // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
   // dropdown shows only once the Settings switch turns assignments on.
   const [assignments, setAssignments] = useState(false);
-  // The roadmap folder (specs/app/roadmap.feature.md): opt-in — with the
-  // switch on, the folder's markdown pages are listed above the feature
-  // folders and one of them can be open in the main pane. `roadmapPage` is
-  // the open page's listing (name and assignment), `roadmapText` what its
-  // editor holds; the refs are what the last landed save put on disk and
-  // whether one is still on its way, read by a tick between renders — the
-  // same shape the README editor uses.
+  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
+  // .feature.md): each opt-in — with its switch on, the folder's markdown
+  // pages get a sidebar tab and one of them can be open in the main pane.
+  // The lists are per folder; the open page is not, since a page and a
+  // feature share the one pane. `openPage` is the open page's listing (name
+  // and assignment), `openPageText` what its editor holds; the refs are what
+  // the last landed save put on disk and whether one is still on its way,
+  // read by a tick between renders — the same shape the README editor uses.
   const [roadmap, setRoadmap] = useState(false);
-  const [roadmapPages, setRoadmapPages] = useState<RoadmapListing[]>([]);
-  const [roadmapPage, setRoadmapPage] = useState<RoadmapListing | null>(null);
-  const roadmapPageRef = useRef<RoadmapListing | null>(null);
-  roadmapPageRef.current = roadmapPage;
-  const [roadmapText, setRoadmapText] = useState<string | null>(null);
-  const roadmapTextRef = useRef<string | null>(null);
-  roadmapTextRef.current = roadmapText;
-  const roadmapSaved = useRef<string | null>(null);
-  const roadmapInFlight = useRef(false);
+  const [tasks, setTasks] = useState(false);
+  const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
+  const [taskPages, setTaskPages] = useState<PageListing[]>([]);
+  const [openPage, setOpenPage] = useState<PageListing | null>(null);
+  const openPageRef = useRef<PageListing | null>(null);
+  openPageRef.current = openPage;
+  const [openPageText, setOpenPageText] = useState<string | null>(null);
+  const openPageTextRef = useRef<string | null>(null);
+  openPageTextRef.current = openPageText;
+  const openPageSaved = useRef<string | null>(null);
+  const openPageInFlight = useRef(false);
   /** Bumped per page load, so a save landing after a move stamps nothing. */
-  const roadmapSession = useRef(0);
+  const openPageSession = useRef(0);
   /** Whether an assignment change on the open page is in flight. */
-  const [roadmapAssignedSaving, setRoadmapAssignedSaving] = useState(false);
+  const [pageAssignedSaving, setPageAssignedSaving] = useState(false);
   /** The open page's file name — what effects watch, since the listing object
       is replaced on every save and would restart their timers. */
-  const roadmapFile = roadmapPage?.fileName ?? null;
-  /** Which sidebar tab is open, Specs or Roadmap; remembered. */
+  const openPageFile = openPage?.fileName ?? null;
+  /** Which sidebar tab is open — Specs, Roadmap or Tasks; remembered. */
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
-  /** The tab on screen: Roadmap only while the Settings switch shows it. */
-  const shownTab: SidebarTab = roadmap && sidebarTab === "roadmap" ? "roadmap" : "specs";
+  /** The page tabs on offer: one per folder its Settings switch shows. */
+  const shownPageTabs = PAGE_TABS.filter((tab) =>
+    tab.folder === "tasks" ? tasks : roadmap,
+  );
+  /** The tab on screen: a page tab only while its switch still shows it. */
+  const shownTab: SidebarTab = shownPageTabs.some((tab) => tab.folder === sidebarTab)
+    ? sidebarTab
+    : "specs";
+  /** The pages of one special folder, as the sidebar and palette list them. */
+  const pagesIn = (folder: PageTab["folder"]): PageListing[] =>
+    folder === "tasks" ? taskPages : roadmapPages;
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -830,6 +882,7 @@ export function App() {
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
+  const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -918,13 +971,25 @@ export function App() {
     return null;
   }, []);
 
-  /** The roadmap folder's pages, for the sidebar section above the tree. */
-  const loadRoadmapPages = useCallback(async (): Promise<void> => {
-    const res = await fetch("/api/roadmap");
+  /** One special folder's pages, for its sidebar tab. */
+  const loadPages = useCallback(async (folder: PageTab["folder"]): Promise<void> => {
+    const res = await fetch(`/api/${folder}`);
     if (!res.ok) return;
-    const data = (await res.json()) as { pages?: RoadmapListing[] };
-    setRoadmapPages(Array.isArray(data.pages) ? data.pages : []);
+    const data = (await res.json()) as { pages?: PageListing[] };
+    const pages = Array.isArray(data.pages) ? data.pages : [];
+    if (folder === "tasks") setTaskPages(pages);
+    else setRoadmapPages(pages);
   }, []);
+
+  /** The pages of whichever folders a settings payload says are shown. */
+  const loadShownPages = useCallback(
+    async (shown: { roadmap?: unknown; tasks?: unknown }): Promise<void> => {
+      await Promise.all(
+        PAGE_TABS.filter((tab) => shown[tab.folder] === true).map((tab) => loadPages(tab.folder)),
+      );
+    },
+    [loadPages],
+  );
 
   /** Read the data repo's README into the home editor, dropping any unsaved edit. */
   const loadReadme = useCallback(async (): Promise<void> => {
@@ -982,6 +1047,9 @@ export function App() {
       if (typeof state.roadmap === "boolean") {
         setRoadmap(state.roadmap);
       }
+      if (typeof state.tasks === "boolean") {
+        setTasks(state.tasks);
+      }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setDemo(Boolean(state.demo));
@@ -998,15 +1066,15 @@ export function App() {
         await Promise.all([
           loadFeatures(),
           loadReadme(),
-          // The roadmap pages ride along when the folder is shown at all.
-          state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
+          // The special folders' pages ride along when they are shown at all.
+          loadShownPages(state),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
       }
       setLoading(false);
     })();
-  }, [loadFeatures, loadReadme, loadRoadmapPages]);
+  }, [loadFeatures, loadReadme, loadShownPages]);
 
   // Mirror the server's cron reload (specs/crud-feature.spec.md): refresh the
   // feature list on the same cadence so pulled changes show up, without
@@ -1022,14 +1090,14 @@ export function App() {
       if (selected && !dirty && !editing && !conflict && !descPending) void openFeature(selected);
       // A pulled README shows up too — unless the home editor holds an edit
       // that hasn't landed yet.
-      if (!selected && !roadmapFile && readmeText.current === readmeSaved.current) void loadReadme();
-      // The roadmap pages follow the same rule: the list refreshes, and the
-      // open page only while its editor has nothing unsaved in it.
-      if (roadmap) {
-        void loadRoadmapPages();
-        if (roadmapFile && roadmapTextRef.current === roadmapSaved.current) {
-          void openRoadmapPage(roadmapFile);
-        }
+      if (!selected && !openPageFile && readmeText.current === readmeSaved.current) void loadReadme();
+      // The special folders follow the same rule: each shown list refreshes,
+      // and the open page only while its editor has nothing unsaved in it.
+      for (const tab of PAGE_TABS) {
+        if (tab.folder === "tasks" ? tasks : roadmap) void loadPages(tab.folder);
+      }
+      if (openPageFile && openPageTextRef.current === openPageSaved.current) {
+        void showPage(openPageFile);
       }
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
@@ -1042,10 +1110,11 @@ export function App() {
     editing,
     conflict,
     roadmap,
-    roadmapFile,
+    tasks,
+    openPageFile,
     loadFeatures,
     loadReadme,
-    loadRoadmapPages,
+    loadPages,
   ]);
 
   // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
@@ -1189,14 +1258,10 @@ export function App() {
         setNeedsRepo(false);
         // A freshly picked folder opens on its README, like a start does
         // (specs/app-startup.feature.md "A newly picked data folder opens on
-        // its README") — unless there is a deep link to honor. The roadmap
-        // pages ride along, as they do on a start with a folder already
-        // configured (specs/app/roadmap.feature.md).
-        await Promise.all([
-          loadFeatures(),
-          loadReadme(),
-          state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
-        ]);
+        // its README") — unless there is a deep link to honor. The special
+        // folders' pages ride along, as they do on a start with a folder
+        // already configured (specs/app/roadmap.feature.md).
+        await Promise.all([loadFeatures(), loadReadme(), loadShownPages(state)]);
         await openFromLocation(entryPath);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
@@ -1249,11 +1314,11 @@ export function App() {
     readmeText.current = null;
     setReadme(null);
     await editorRef.current.close();
-    // An open roadmap page belongs to the old folder too (specs/app/roadmap
-    // .feature.md): its last save goes out there, then the pane empties so no
-    // later tick writes what it held into the new folder.
-    await roadmapTick.current();
-    closeRoadmapPage({ save: false });
+    // An open page belongs to the old folder too (specs/app/roadmap.feature
+    // .md): its last save goes out there, then the pane empties so no later
+    // tick writes what it held into the new folder.
+    await pageTick.current();
+    closePage({ save: false });
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -1267,20 +1332,17 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        // The old folder's pages are not this folder's: the sidebar section
-        // empties, and refills below when the Roadmap setting shows it at all.
+        // The old folder's pages are not this folder's: the tabs empty, and
+        // refill below for whichever folders the settings show.
         setRoadmapPages([]);
+        setTaskPages([]);
         // A page url from the old folder would only miss in the new one, and
         // nothing else resets it — the selection was already empty while a
-        // roadmap page was open, so the canonical-url effect has no change to
-        // react to.
+        // page was open, so the canonical-url effect has no change to react
+        // to.
         if (location.pathname !== "/") history.replaceState(null, "", "/");
         // Home is the new folder's README (specs/app-startup.feature.md).
-        await Promise.all([
-          loadFeatures(),
-          loadReadme(),
-          state.roadmap === true ? loadRoadmapPages() : Promise.resolve(),
-        ]);
+        await Promise.all([loadFeatures(), loadReadme(), loadShownPages(state)]);
       } else {
         toast.error(state.error ?? "Could not use this directory");
       }
@@ -1304,9 +1366,9 @@ export function App() {
       // here must land on top of, not under. And not before the fetch, or
       // the old feature page would show for the duration of the request.
       editorRef.current.close();
-      // Opening a feature leaves the roadmap page, saving what its editor
-      // still holds — the same courtesy the README editor gets.
-      closeRoadmapPage();
+      // Opening a feature leaves the open page, saving what its editor still
+      // holds — the same courtesy the README editor gets.
+      closePage();
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -1374,7 +1436,7 @@ export function App() {
    */
   const goHome = () => {
     editorRef.current.close();
-    closeRoadmapPage();
+    closePage();
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1385,8 +1447,8 @@ export function App() {
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
-    if (route.roadmap) {
-      await openRoadmapPage(route.roadmap);
+    if (route.page) {
+      await showPage(route.page);
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
@@ -1396,7 +1458,7 @@ export function App() {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
       editorRef.current.close();
-      closeRoadmapPage();
+      closePage();
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -2249,7 +2311,7 @@ export function App() {
   // feature opens) saves what was typed since the last tick, so nothing
   // written on the home view is lost to the navigation.
   const readmeOpen =
-    !loading && !needsRepo && selected === null && roadmapFile === null && readme !== null;
+    !loading && !needsRepo && selected === null && openPageFile === null && readme !== null;
   useEffect(() => {
     if (!readmeOpen) return;
     const id = setInterval(() => void readmeTick.current(), autosaveSeconds * 1000);
@@ -2260,12 +2322,13 @@ export function App() {
   }, [readmeOpen, autosaveSeconds]);
 
   /**
-   * Open a roadmap page (specs/app/roadmap.feature.md): its markdown takes
+   * Open a page of a special folder — a roadmap page (specs/app/roadmap
+   * .feature.md) or a task (specs/app/tasks.feature.md): its markdown takes
    * the main pane, autosaved on the scenario editor's interval like the
    * README. A page and a feature share the pane, so opening one drops the
    * other. Called again on the cron tick to show what a pull brought.
    */
-  const openRoadmapPage = async (
+  const showPage = async (
     fileName: string,
     opts: {
       push?: boolean;
@@ -2273,91 +2336,95 @@ export function App() {
       terms?: string[];
     } = {},
   ) => {
-    const res = await fetch(`/api/roadmap/${encodeURIComponent(fileName)}`);
-    const data = (await res.json().catch(() => ({}))) as RoadmapListing & {
+    const tab = pageTabOf(fileName);
+    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`);
+    const data = (await res.json().catch(() => ({}))) as PageListing & {
       content?: string;
       error?: string;
     };
     if (!res.ok || typeof data.content !== "string") {
       // Gone — deleted, renamed, or a stale deep link.
-      if (roadmapPageRef.current?.fileName === fileName) closeRoadmapPage({ save: false });
-      toast.error(data.error ?? `Roadmap page "${fileName}" not found — the link may be stale.`);
-      await loadRoadmapPages();
+      if (openPageRef.current?.fileName === fileName) closePage({ save: false });
+      toast.error(data.error ?? `The ${tab.noun} "${fileName}" was not found — the link may be stale.`);
+      await loadPages(tab.folder);
       return;
     }
     editorRef.current.close();
-    // The page's row lives on the Roadmap tab, so a deep link or the palette
+    // The page's row lives on its own tab, so a deep link or the palette
     // turns the sidebar there; a refresh of the open page leaves it alone.
-    const samePage = roadmapPageRef.current?.fileName === fileName;
-    if (!samePage) selectSidebarTab("roadmap");
+    const samePage = openPageRef.current?.fileName === fileName;
+    if (!samePage) selectSidebarTab(tab.folder);
     // A refresh of the open page (the reload cron, a rename) keeps its search
     // marks too; a hit's terms replace them, and another page starts without.
-    if (opts.terms !== undefined || !samePage) setRoadmapTerms(opts.terms ?? null);
+    if (opts.terms !== undefined || !samePage) setPageTerms(opts.terms ?? null);
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
-    roadmapSession.current += 1;
-    roadmapSaved.current = data.content;
-    roadmapTextRef.current = data.content;
-    setRoadmapText(data.content);
-    setRoadmapPage(roadmapListing(data));
-    if (opts.push && location.pathname !== roadmapPath(fileName)) {
-      history.pushState(null, "", roadmapPath(fileName));
+    openPageSession.current += 1;
+    openPageSaved.current = data.content;
+    openPageTextRef.current = data.content;
+    setOpenPageText(data.content);
+    setOpenPage(pageListingOf(data));
+    if (opts.push && location.pathname !== pageLink(fileName)) {
+      history.pushState(null, "", pageLink(fileName));
     }
   };
 
   /** The listing fields of a page response, without its content. */
-  const roadmapListing = (page: RoadmapListing): RoadmapListing => ({
+  const pageListingOf = (page: PageListing): PageListing => ({
     fileName: page.fileName,
     name: page.name,
     ...(page.assigned ? { assigned: page.assigned } : {}),
   });
 
   /**
-   * Leave the open roadmap page. What its editor holds goes out first, so
+   * Leave the open page. What its editor holds goes out first, so
    * nothing typed there is lost to the navigation — the way the README
    * editor's unmount tick saves it.
    */
-  const closeRoadmapPage = ({ save = true }: { save?: boolean } = {}) => {
-    if (roadmapPageRef.current === null) return;
-    if (save) void roadmapTick.current();
-    roadmapPageRef.current = null;
-    roadmapTextRef.current = null;
-    setRoadmapPage(null);
-    setRoadmapText(null);
-    setRoadmapTerms(null);
+  const closePage = ({ save = true }: { save?: boolean } = {}) => {
+    if (openPageRef.current === null) return;
+    if (save) void pageTick.current();
+    openPageRef.current = null;
+    openPageTextRef.current = null;
+    setOpenPage(null);
+    setOpenPageText(null);
+    setPageTerms(null);
   };
 
-  /** One autosave tick of the open roadmap page — autosaveReadme's twin. */
-  const autosaveRoadmap = async () => {
-    const content = roadmapTextRef.current;
-    const page = roadmapPageRef.current;
-    if (content === null || page === null || content === roadmapSaved.current) return;
-    if (roadmapInFlight.current) return; // the previous tick is still saving
-    roadmapInFlight.current = true;
-    const session = roadmapSession.current;
+  /** One autosave tick of the open page — autosaveReadme's twin. */
+  const autosavePage = async () => {
+    const content = openPageTextRef.current;
+    const page = openPageRef.current;
+    if (content === null || page === null || content === openPageSaved.current) return;
+    if (openPageInFlight.current) return; // the previous tick is still saving
+    openPageInFlight.current = true;
+    const session = openPageSession.current;
     setSaving(true);
     try {
-      const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-      const data = (await res.json().catch(() => ({}))) as RoadmapListing & { error?: string };
+      const res = await fetch(
+        `/api/${pageTabOf(page.fileName).folder}/${encodeURIComponent(page.fileName)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
       if (res.ok) {
-        if (session === roadmapSession.current) {
+        if (session === openPageSession.current) {
           // What went out is what counts as saved: the file holds the
           // document's projection, which can be tidier than the buffer, and
           // taking that back would have every tick save the same text again.
-          roadmapSaved.current = content;
+          openPageSaved.current = content;
           markSaved();
           // Only when the heading or the assignment actually moved: a new
           // listing object on every tick would restart the timers watching it.
-          setRoadmapPage((open) =>
+          setOpenPage((open) =>
             open === null || (open.name === data.name && (open.assigned ?? "") === (data.assigned ?? ""))
               ? open
-              : roadmapListing(data),
+              : pageListingOf(data),
           );
         }
       } else {
@@ -2366,159 +2433,165 @@ export function App() {
     } catch (e) {
       toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
     } finally {
-      roadmapInFlight.current = false;
+      openPageInFlight.current = false;
       setSaving(false);
     }
   };
-  const roadmapTick = useRef(autosaveRoadmap);
+  const pageTick = useRef(autosavePage);
   useEffect(() => {
-    roadmapTick.current = autosaveRoadmap;
+    pageTick.current = autosavePage;
   });
-  const roadmapOpen = !loading && !needsRepo && roadmapFile !== null && roadmapText !== null;
+  const pageEditorOpen = !loading && !needsRepo && openPageFile !== null && openPageText !== null;
   useEffect(() => {
-    if (!roadmapOpen) return;
-    const id = setInterval(() => void roadmapTick.current(), autosaveSeconds * 1000);
+    if (!pageEditorOpen) return;
+    const id = setInterval(() => void pageTick.current(), autosaveSeconds * 1000);
     return () => {
       clearInterval(id);
-      void roadmapTick.current();
+      void pageTick.current();
     };
-  }, [roadmapOpen, autosaveSeconds]);
+  }, [pageEditorOpen, autosaveSeconds]);
 
   /**
    * The members the open page's "Assigned" dropdown offers — the project's,
    * plus whoever it is assigned to when that name is no longer on the list
    * (assignableMembers, for features).
    */
-  const roadmapAssignableMembers = (): ProjectMember[] => {
-    const assigned = roadmapPage?.assigned;
+  const pageAssignableMembers = (): ProjectMember[] => {
+    const assigned = openPage?.assigned;
     if (!assigned || members.some((m) => m.name === assigned)) return members;
     return [...members, { name: assigned }];
   };
 
   /**
-   * Assign the open roadmap page to a project member, or to nobody — just
-   * like a feature (src/server/members.ts). The name lands on the page's
-   * `**Assigned:**` line, saved on the spot; the cron pushes it.
+   * Assign the open page to a project member, or to nobody — just like a
+   * feature (src/server/members.ts), and the whole of what makes a task a
+   * task. The name lands on the page's `**Assigned:**` line, saved on the
+   * spot; the cron pushes it.
    */
-  const saveRoadmapAssigned = async (name: string) => {
-    const page = roadmapPage;
-    const content = roadmapText;
+  const savePageAssigned = async (name: string) => {
+    const page = openPage;
+    const content = openPageText;
     if (!page || content === null) return;
     const assigned = name.trim();
     if ((page.assigned ?? "") === assigned) return;
-    const { assigned: _previous, ...rest } = parseRoadmap(content);
-    const next = serializeRoadmap(assigned ? { ...rest, assigned } : rest);
-    setRoadmapAssignedSaving(true);
+    const { assigned: _previous, ...rest } = parsePage(content);
+    const next = serializePage(assigned ? { ...rest, assigned } : rest);
+    const tab = pageTabOf(page.fileName);
+    setPageAssignedSaving(true);
     try {
-      const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+      const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: next }),
       });
-      const data = (await res.json().catch(() => ({}))) as RoadmapListing & {
+      const data = (await res.json().catch(() => ({}))) as PageListing & {
         content?: string;
         error?: string;
       };
       if (res.ok && typeof data.content === "string") {
-        roadmapSession.current += 1;
-        roadmapSaved.current = data.content;
-        roadmapTextRef.current = data.content;
-        setRoadmapText(data.content);
-        setRoadmapPage(roadmapListing(data));
+        openPageSession.current += 1;
+        openPageSaved.current = data.content;
+        openPageTextRef.current = data.content;
+        setOpenPageText(data.content);
+        setOpenPage(pageListingOf(data));
         toast.success(
           assigned ? `Assigned to ${assigned} — saved locally.` : "Assignment cleared — saved locally.",
-          { action: { label: "Undo", run: () => void saveRoadmapAssigned(_previous ?? "") } },
+          { action: { label: "Undo", run: () => void savePageAssigned(_previous ?? "") } },
         );
         markSaved();
-        void loadRoadmapPages();
+        void loadPages(tab.folder);
       } else {
         toast.error(data.error ?? "Could not save the assignment");
       }
     } catch {
       toast.error("Could not save the assignment — is the server running?");
     } finally {
-      setRoadmapAssignedSaving(false);
+      setPageAssignedSaving(false);
     }
   };
 
-  /** "+ New page": a markdown file in the roadmap folder, opened right away. */
-  const newRoadmapPage = async () => {
+  /** "+ New page" / "+ New task": a markdown file in the tab's folder,
+      opened right away. */
+  const newPage = async (tab: PageTab) => {
     const input = await prompt({
-      title: "New roadmap page",
-      hint: "Use folder/name to create inside a subfolder of roadmap.",
-      placeholder: "Pricing",
-      confirmLabel: "Create page",
+      title: `New ${tab.noun}`,
+      hint: `Use folder/name to create inside a subfolder of ${tab.folder}.`,
+      placeholder: tab.folder === "tasks" ? "Ship v2" : "Pricing",
+      confirmLabel: `Create ${tab.noun}`,
     });
     if (!input) return;
-    const res = await fetch("/api/roadmap", {
+    const res = await fetch(`/api/${tab.folder}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: input }),
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {
-      toast.error(data.error ?? "Could not create the roadmap page");
+      toast.error(data.error ?? `Could not create the ${tab.noun}`);
       return;
     }
-    await loadRoadmapPages();
-    await openRoadmapPage(data.fileName, { push: true });
+    await loadPages(tab.folder);
+    await showPage(data.fileName, { push: true });
   };
 
   /** Rename a page (its `# heading`), saved through the page's document. */
-  const renameRoadmapPage = async (page: RoadmapListing) => {
+  const renamePage = async (page: PageListing) => {
+    const tab = pageTabOf(page.fileName);
     const name = await prompt({
-      title: "Rename roadmap page",
+      title: `Rename ${tab.noun}`,
       initial: page.name,
       confirmLabel: "Rename",
     });
     if (!name || name.trim() === page.name) return;
-    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`);
+    const url = `/api/${tab.folder}/${encodeURIComponent(page.fileName)}`;
+    const res = await fetch(url);
     const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
     if (!res.ok || typeof data.content !== "string") {
-      toast.error(data.error ?? "Could not read the roadmap page");
+      toast.error(data.error ?? `Could not read the ${tab.noun}`);
       return;
     }
-    const next = serializeRoadmap({ ...parseRoadmap(data.content), name: name.trim() });
-    const put = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+    const next = serializePage({ ...parsePage(data.content), name: name.trim() });
+    const put = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: next }),
     });
     const saved = (await put.json().catch(() => ({}))) as { error?: string };
     if (!put.ok) {
-      toast.error(saved.error ?? "Could not rename the roadmap page");
+      toast.error(saved.error ?? `Could not rename the ${tab.noun}`);
       return;
     }
     toast.success(`Renamed to “${name.trim()}” — saved locally.`);
-    await loadRoadmapPages();
-    if (roadmapPageRef.current?.fileName === page.fileName) await openRoadmapPage(page.fileName);
+    await loadPages(tab.folder);
+    if (openPageRef.current?.fileName === page.fileName) await showPage(page.fileName);
   };
 
   /** Delete a page — committed and pushed right away, so it is confirmed first. */
-  const removeRoadmapPage = async (page: RoadmapListing) => {
+  const removePage = async (page: PageListing) => {
+    const tab = pageTabOf(page.fileName);
     const ok = await confirm({
-      title: "Delete roadmap page",
+      title: `Delete ${tab.noun}`,
       body: `Delete “${page.name}”? This is committed and pushed right away.`,
-      confirmLabel: "Delete page",
+      confirmLabel: `Delete ${tab.noun}`,
     });
     if (!ok) return;
-    if (roadmapPageRef.current?.fileName === page.fileName) {
-      closeRoadmapPage({ save: false });
+    if (openPageRef.current?.fileName === page.fileName) {
+      closePage({ save: false });
       history.replaceState(null, "", "/");
     }
-    const res = await fetch(`/api/roadmap/${encodeURIComponent(page.fileName)}`, {
+    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
       method: "DELETE",
     });
     const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
     if (!res.ok) {
-      toast.error(data.error ?? "Could not delete the roadmap page");
+      toast.error(data.error ?? `Could not delete the ${tab.noun}`);
       return;
     }
     toast.success(`Deleted “${page.name}”${data.message ? ` — ${data.message}` : ""}.`);
-    await loadRoadmapPages();
+    await loadPages(tab.folder);
   };
 
-  /** Switch the sidebar to the Specs or Roadmap tab; the choice sticks. */
+  /** Switch the sidebar to the Specs, Roadmap or Tasks tab; the choice sticks. */
   const selectSidebarTab = (tab: SidebarTab) => {
     setSidebarTab(tab);
     storeSidebarTab(tab);
@@ -2632,6 +2705,7 @@ export function App() {
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
     setSettingsRoadmapDraft(roadmap);
+    setSettingsTasksDraft(tasks);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -2794,6 +2868,7 @@ export function App() {
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
     setRoadmap(data.roadmap === true);
+    setTasks(data.tasks === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -2918,22 +2993,26 @@ export function App() {
     if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
   };
 
-  // The roadmap folder (specs/app/roadmap.feature.md): switched on, the
-  // server creates the folder if the data repo has none and the sidebar
-  // lists its pages. Off, the folder is simply not shown — an open page
-  // leaves the pane, and the files stay where they are.
-  const toggleRoadmap = async (on: boolean) => {
-    setSettingsRoadmapDraft(on);
-    if (!(await patchSettings({ roadmap: on }))) {
-      setSettingsRoadmapDraft(!on);
+  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
+  // .feature.md): switched on, the server creates the folder if the data repo
+  // has none and the sidebar lists its pages. Off, the folder is simply not
+  // shown — a page of it that is open leaves the pane, and the files stay
+  // where they are.
+  const togglePageFolder = async (tab: PageTab, on: boolean) => {
+    const setDraft = tab.folder === "tasks" ? setSettingsTasksDraft : setSettingsRoadmapDraft;
+    setDraft(on);
+    if (!(await patchSettings({ [tab.folder]: on }))) {
+      setDraft(!on);
       return;
     }
     if (on) {
-      await loadRoadmapPages();
+      await loadPages(tab.folder);
       return;
     }
-    setRoadmapPages([]);
-    if (roadmapPageRef.current !== null) goHome();
+    if (tab.folder === "tasks") setTaskPages([]);
+    else setRoadmapPages([]);
+    const open = openPageRef.current;
+    if (open && pageTabOf(open.fileName).folder === tab.folder) goHome();
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -3522,9 +3601,9 @@ export function App() {
     featureMenuOpen ||
     cardMenu !== null ||
     assigneeMenuOpen ||
-    roadmapAssigneeMenuOpen ||
+    pageAssigneeMenuOpen ||
     filterMenuOpen ||
-    roadmapMenu !== null;
+    pageMenu !== null;
   const quiet = dialogOpen || menuOpen;
   const onFeaturePage = selected !== null && feature !== null && editing === null;
   // On a small screen "[" and the sidebar buttons work the drawer instead of
@@ -3539,11 +3618,11 @@ export function App() {
       return !c;
     });
   };
-  // The drawer closes behind any navigation — a feature, a roadmap page, the
+  // The drawer closes behind any navigation — a feature, a page, the
   // scenario editor — and when the window grows back into two panes.
   useEffect(() => {
     setDrawerOpen(false);
-  }, [compact, selected, roadmapPage?.fileName, editing !== null]);
+  }, [compact, selected, openPage?.fileName, editing !== null]);
   const newScenario = () =>
     setEditing({
       index: null,
@@ -3658,7 +3737,18 @@ export function App() {
       when: () => !quiet && roadmapPages.length > 0,
       run: () => {
         const page = roadmapPages[0];
-        if (page) void openRoadmapPage(page.fileName, { push: true });
+        if (page) void showPage(page.fileName, { push: true });
+      },
+    },
+    {
+      id: "go-tasks",
+      keys: "g t",
+      label: "Go to the tasks",
+      group: "Navigate",
+      when: () => !quiet && taskPages.length > 0,
+      run: () => {
+        const page = taskPages[0];
+        if (page) void showPage(page.fileName, { push: true });
       },
     },
     {
@@ -3770,11 +3860,11 @@ export function App() {
       label: "Copy link to this page",
       group: "Share",
       inFields: true,
-      when: () => !quiet && (selected !== null || roadmapPage !== null),
+      when: () => !quiet && (selected !== null || openPage !== null),
       run: () => {
         if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
         else if (selected) void copyLink(featurePath(selected));
-        else if (roadmapPage) void copyLink(roadmapPath(roadmapPage.fileName));
+        else if (openPage) void copyLink(pageLink(openPage.fileName));
       },
     },
     // Handled by the fields themselves (src/frontend/MarkdownEditor.tsx and
@@ -3818,7 +3908,8 @@ export function App() {
   // actions by name — the keyboard registry's, plus the ones without a key —
   // and, for a query, the full-text search's hits (specs/search.feature.md).
   // The sidebar tab on screen picks what is searched: the Specs tab the spec
-  // files, the Roadmap tab the roadmap pages (specs/app/roadmap.feature.md).
+  // files, a page tab that folder's pages (specs/app/roadmap.feature.md,
+  // specs/app/tasks.feature.md).
   const shortcutAction = (id: string, icon: ReactNode): PaletteItem | null => {
     const s = shortcuts.find((x) => x.id === id);
     if (!s || (s.when && !s.when())) return null;
@@ -3883,6 +3974,7 @@ export function App() {
       : []),
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
+    shortcutAction("go-tasks", <ListTodo size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
       ? [
@@ -3923,17 +4015,19 @@ export function App() {
     );
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
-    if (shownTab === "roadmap") {
+    // A page tab searched its own folder, so every hit belongs to that tab.
+    const pageTab = shownPageTabs.find((tab) => tab.folder === shownTab);
+    if (pageTab) {
       return (data.results ?? []).map(
         (r): PaletteItem => ({
-          id: `roadmap:${r.fileName}`,
-          group: "Roadmap",
+          id: `${pageTab.folder}:${r.fileName}`,
+          group: pageTab.title,
           label: r.featureName,
           text: r.featureName,
           sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
-          icon: <MapIcon size={14} />,
-          href: roadmapPath(r.fileName),
-          run: () => void openRoadmapPage(r.fileName, { push: true, terms: r.terms }),
+          icon: <pageTab.icon size={14} />,
+          href: pageLink(r.fileName),
+          run: () => void showPage(r.fileName, { push: true, terms: r.terms }),
         }),
       );
     }
@@ -3966,23 +4060,23 @@ export function App() {
     group: "Recent",
     label: e.scenario ? e.scenario.name : e.name,
     text: e.scenario ? e.scenario.name : e.name,
-    sub: e.scenario ? e.name : e.kind === "roadmap" ? "Roadmap" : undefined,
+    sub: e.scenario ? e.name : e.kind === "page" ? pageTabOf(e.fileName).title : undefined,
     icon:
-      e.kind === "roadmap" ? (
-        <MapIcon size={14} />
+      e.kind === "page" ? (
+        <PageTabIcon fileName={e.fileName} />
       ) : e.scenario ? (
         <StatusIcon status={scenarioStatus(e.fileName, e.scenario)} size={14} />
       ) : (
         <FileText size={14} />
       ),
     href:
-      e.kind === "roadmap"
-        ? roadmapPath(e.fileName)
+      e.kind === "page"
+        ? pageLink(e.fileName)
         : e.scenario
           ? scenarioPath(e.fileName, e.scenario)
           : featurePath(e.fileName),
     run: ({ alt }) => {
-      if (e.kind === "roadmap") void openRoadmapPage(e.fileName, { push: true });
+      if (e.kind === "page") void showPage(e.fileName, { push: true });
       else
         openResult(
           {
@@ -4012,8 +4106,8 @@ export function App() {
             scenario: { name: paneScenario.name, version: paneScenario.version },
           }
         : { kind: "feature", fileName: selected, name };
-    } else if (roadmapPage) {
-      entry = { kind: "roadmap", fileName: roadmapPage.fileName, name: roadmapPage.name };
+    } else if (openPage) {
+      entry = { kind: "page", fileName: openPage.fileName, name: openPage.name };
     }
     if (!entry) return;
     const added = entry;
@@ -4025,7 +4119,7 @@ export function App() {
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, selected, paneScenario?.name, paneScenario?.version, roadmapPage?.fileName]);
+  }, [loading, selected, paneScenario?.name, paneScenario?.version, openPage?.fileName]);
 
   // The header's trail (src/frontend/Breadcrumbs.tsx): the data folder, then
   // the feature's folders — a click selects the folder in the sidebar, so
@@ -4256,7 +4350,8 @@ export function App() {
       )}
       {sidebarCollapsed && !compact ? (
         /* The rail (specs/ui/ui.feature.md "Design system"): the sidebar
-           folded to its icons — search, Home, Roadmap, and the way back out. */
+           folded to its icons — search, Home, the page tabs, and the way
+           back out. */
         <aside className="rail">
           <Tooltip label="Expand the sidebar" keys="[">
             <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
@@ -4276,7 +4371,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !roadmapPage ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -4288,20 +4383,27 @@ export function App() {
               <Home size={16} aria-hidden="true" />
             </a>
           </Tooltip>
-          {roadmap && roadmapPages.length > 0 && (
-            <Tooltip label="Roadmap" keys="g r">
-              <a
-                href={roadmapPath(roadmapPages[0]!.fileName)}
-                className={`rail-link${roadmapPage ? " active" : ""}`}
-                aria-label="Roadmap"
-                onClick={(e) =>
-                  spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
-                }
+          {shownPageTabs.map((tab) => {
+            const first = pagesIn(tab.folder)[0];
+            if (!first) return null;
+            const active = openPage !== null && pageTabOf(openPage.fileName).folder === tab.folder;
+            return (
+              <Tooltip
+                key={tab.folder}
+                label={tab.title}
+                keys={tab.folder === "tasks" ? "g t" : "g r"}
               >
-                <MapIcon size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          )}
+                <a
+                  href={pageLink(first.fileName)}
+                  className={`rail-link${active ? " active" : ""}`}
+                  aria-label={tab.title}
+                  onClick={(e) => spaClick(e, () => void showPage(first.fileName, { push: true }))}
+                >
+                  <PageTabIcon fileName={first.fileName} size={16} />
+                </a>
+              </Tooltip>
+            );
+          })}
           <div className="rail-bottom">
             {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
@@ -4336,7 +4438,7 @@ export function App() {
         className={compact ? `drawer${drawerOpen ? " open" : ""}` : undefined}
         ref={drawerTrapRef}
         aria-hidden={compact && !drawerOpen ? true : undefined}
-        // Following any link in the drawer — a feature, a roadmap page,
+        // Following any link in the drawer — a feature, a page,
         // Home — is leaving it; buttons that only change the drawer itself
         // (folder twists, the filter, the tabs) keep it open.
         onClickCapture={(e) => {
@@ -4503,10 +4605,12 @@ export function App() {
             <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
           </button>
         </div>
-        {/* Sidebar tabs (specs/app/roadmap.feature.md): Specs is the feature
-            tree, Roadmap the page list. The bar only shows while the Settings
-            switch shows the roadmap — one tab is no tab bar. */}
-        {roadmap && (
+        {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
+            .md): Specs is the feature tree, and each special folder the
+            Settings switches show adds its own list beside it. The bar only
+            shows once there is something to switch to — one tab is no tab
+            bar. */}
+        {shownPageTabs.length > 0 && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -4519,25 +4623,28 @@ export function App() {
             >
               <FileText size={14} aria-hidden="true" /> Specs
             </button>
-            <button
-              type="button"
-              role="tab"
-              id="side-tab-roadmap"
-              aria-selected={shownTab === "roadmap"}
-              aria-controls="side-panel-roadmap"
-              className={shownTab === "roadmap" ? "active" : ""}
-              onClick={() => selectSidebarTab("roadmap")}
-            >
-              <MapIcon size={14} aria-hidden="true" /> Roadmap
-            </button>
+            {shownPageTabs.map((tab) => (
+              <button
+                key={tab.folder}
+                type="button"
+                role="tab"
+                id={`side-tab-${tab.folder}`}
+                aria-selected={shownTab === tab.folder}
+                aria-controls={`side-panel-${tab.folder}`}
+                className={shownTab === tab.folder ? "active" : ""}
+                onClick={() => selectSidebarTab(tab.folder)}
+              >
+                <tab.icon size={14} aria-hidden="true" /> {tab.title}
+              </button>
+            ))}
           </div>
         )}
         {shownTab === "specs" && (
         <div
           className="side-panel"
-          role={roadmap ? "tabpanel" : undefined}
+          role={shownPageTabs.length > 0 ? "tabpanel" : undefined}
           id="side-panel-specs"
-          aria-labelledby={roadmap ? "side-tab-specs" : undefined}
+          aria-labelledby={shownPageTabs.length > 0 ? "side-tab-specs" : undefined}
         >
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
@@ -4706,35 +4813,39 @@ export function App() {
         )}
         </div>
         )}
-        {/* The Roadmap tab (specs/app/roadmap.feature.md): the page list, with
-            a "New page" button where the Specs tab has its "New" buttons. */}
-        {shownTab === "roadmap" && (
+        {/* The page tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
+            .md): one folder's page list, with a "New page" / "New task" button
+            where the Specs tab has its "New" buttons. */}
+        {shownPageTabs
+          .filter((tab) => tab.folder === shownTab)
+          .map((tab) => (
           <div
-            className="side-panel roadmap-list"
+            key={tab.folder}
+            className="side-panel page-list"
             role="tabpanel"
-            id="side-panel-roadmap"
-            aria-labelledby="side-tab-roadmap"
+            id={`side-panel-${tab.folder}`}
+            aria-labelledby={`side-tab-${tab.folder}`}
           >
             <div className="sidebar-actions">
-              <button onClick={() => void newRoadmapPage()}>+ New page</button>
+              <button onClick={() => void newPage(tab)}>+ New {tab.noun}</button>
             </div>
-            <div className="roadmap-pages">
-            {/* Pages grouped by their subfolder under roadmap/, each with a
+            <div className="page-rows">
+            {/* Pages grouped by their subfolder under the folder, each with a
                 ⋯ menu: Rename, Copy link, Delete. */}
-            {roadmapGroups(roadmapPages).map(({ dir, pages }) => (
+            {pageGroups(pagesIn(tab.folder)).map(({ dir, pages }) => (
                 <div key={dir || "."}>
-                  {dir && <div className="roadmap-group">{dir}</div>}
+                  {dir && <div className="page-group">{dir}</div>}
                   {pages.map((page) => (
-                    <div key={page.fileName} className={`roadmap-row${dir ? " nested" : ""}`}>
+                    <div key={page.fileName} className={`page-row${dir ? " nested" : ""}`}>
                       <a
-                        href={roadmapPath(page.fileName)}
-                        className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
+                        href={pageLink(page.fileName)}
+                        className={`page-entry${page.fileName === openPage?.fileName ? " active" : ""}`}
                         title={
                           page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
                         }
-                        aria-current={page.fileName === roadmapPage?.fileName ? "page" : undefined}
+                        aria-current={page.fileName === openPage?.fileName ? "page" : undefined}
                         onClick={(e) =>
-                          spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))
+                          spaClick(e, () => void showPage(page.fileName, { push: true }))
                         }
                       >
                         {page.name}
@@ -4746,17 +4857,17 @@ export function App() {
                             className="tree-menu-btn"
                             aria-label={`Menu for ${page.name}`}
                             aria-haspopup="menu"
-                            aria-expanded={roadmapMenu === page.fileName}
+                            aria-expanded={pageMenu === page.fileName}
                             onClick={() =>
-                              setRoadmapMenu((m) => (m === page.fileName ? null : page.fileName))
+                              setPageMenu((m) => (m === page.fileName ? null : page.fileName))
                             }
                           >
                             <Ellipsis size={14} aria-hidden="true" />
                           </button>
                         </Tooltip>
                         <Menu
-                          open={roadmapMenu === page.fileName}
-                          onClose={() => setRoadmapMenu(null)}
+                          open={pageMenu === page.fileName}
+                          onClose={() => setPageMenu(null)}
                           label={`Menu for ${page.name}`}
                           className="tree-menu"
                           containerSelector=".tree-row-menu"
@@ -4765,20 +4876,20 @@ export function App() {
                               id: "rename",
                               label: "Rename",
                               icon: <Pencil size={13} />,
-                              onSelect: () => void renameRoadmapPage(page),
+                              onSelect: () => void renamePage(page),
                             },
                             {
                               id: "copy",
                               label: "Copy link",
                               icon: <Link size={13} />,
-                              onSelect: () => void copyLink(roadmapPath(page.fileName)),
+                              onSelect: () => void copyLink(pageLink(page.fileName)),
                             },
                             {
                               id: "delete",
                               label: "Delete",
                               icon: <Trash2 size={13} />,
                               danger: true,
-                              onSelect: () => void removeRoadmapPage(page),
+                              onSelect: () => void removePage(page),
                             },
                           ]}
                         />
@@ -4787,12 +4898,10 @@ export function App() {
                   ))}
                 </div>
               ))}
-            {roadmapPages.length === 0 && (
-              <p className="empty">No roadmap pages yet</p>
-            )}
+            {pagesIn(tab.folder).length === 0 && <p className="empty">{tab.empty}</p>}
             </div>
           </div>
-        )}
+          ))}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
@@ -4883,7 +4992,7 @@ export function App() {
       <section className="editor" aria-busy={featureLoading || undefined}>
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
-        <ErrorBoundary key={selected ?? roadmapPage?.fileName ?? "home"}>
+        <ErrorBoundary key={selected ?? openPage?.fileName ?? "home"}>
         {editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
@@ -5696,19 +5805,21 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
-        ) : roadmapPage && roadmapText === null ? (
+        ) : openPage && openPageText === null ? (
           <PageSkeleton cards={1} />
-        ) : roadmapPage && roadmapText !== null ? (
-          /* A roadmap page (specs/app/roadmap.feature.md): a regular markdown
-             file, edited and autosaved like the README — with the "Assigned"
-             dropdown a feature has, when assignments are on. */
+        ) : openPage && openPageText !== null ? (
+          /* A roadmap page (specs/app/roadmap.feature.md) or a task
+             (specs/app/tasks.feature.md): a regular markdown file, edited and
+             autosaved like the README — with the "Assigned" dropdown a feature
+             has, when assignments are on. Assigning is what makes a task a
+             task, so the dropdown is the point of the tab. */
           <>
             <header className="editor-bar page-header">
               <Breadcrumbs
-                items={[repoCrumb, { label: "Roadmap" }]}
+                items={[repoCrumb, { label: pageTabOf(openPage.fileName).title }]}
                 tail={
                   <span className="crumb current plain">
-                    {roadmapPage.name || roadmapPage.fileName}
+                    {openPage.name || openPage.fileName}
                   </span>
                 }
               />
@@ -5716,7 +5827,7 @@ export function App() {
                 <SaveIndicator
                   saving={saving}
                   savedAt={savedAt}
-                  dirty={roadmapText !== roadmapSaved.current}
+                  dirty={openPageText !== openPageSaved.current}
                 />
                 <span className="readme-hint">
                   {`Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
@@ -5725,48 +5836,48 @@ export function App() {
             </header>
             {assignments && (
               <div className="props">
-                <span className="chip-anchor roadmap-assignee-anchor">
+                <span className="chip-anchor page-assignee-anchor">
                   <button
                     type="button"
-                    className={`chip${roadmapPage.assigned ? "" : " muted"}`}
+                    className={`chip${openPage.assigned ? "" : " muted"}`}
                     aria-haspopup="menu"
-                    aria-expanded={roadmapAssigneeMenuOpen}
-                    aria-label={`Assigned: ${roadmapPage.assigned ?? "nobody"}`}
-                    disabled={roadmapAssignedSaving}
-                    onClick={() => setRoadmapAssigneeMenuOpen((o) => !o)}
+                    aria-expanded={pageAssigneeMenuOpen}
+                    aria-label={`Assigned: ${openPage.assigned ?? "nobody"}`}
+                    disabled={pageAssignedSaving}
+                    onClick={() => setPageAssigneeMenuOpen((o) => !o)}
                   >
-                    {roadmapPage.assigned ? (
+                    {openPage.assigned ? (
                       <span className="avatar chip-avatar" aria-hidden="true">
-                        {initialsOf(roadmapPage.assigned)}
+                        {initialsOf(openPage.assigned)}
                       </span>
                     ) : (
                       <UserRound size={14} aria-hidden="true" />
                     )}
-                    {roadmapPage.assigned ?? "Unassigned"}
+                    {openPage.assigned ?? "Unassigned"}
                   </button>
                   <Menu
-                    open={roadmapAssigneeMenuOpen}
-                    onClose={() => setRoadmapAssigneeMenuOpen(false)}
+                    open={pageAssigneeMenuOpen}
+                    onClose={() => setPageAssigneeMenuOpen(false)}
                     label="Assigned member"
                     className="chip-menu"
-                    containerSelector=".roadmap-assignee-anchor"
+                    containerSelector=".page-assignee-anchor"
                     items={[
                       {
                         id: "",
                         label: "Unassigned",
-                        checked: !roadmapPage.assigned,
-                        onSelect: () => void saveRoadmapAssigned(""),
+                        checked: !openPage.assigned,
+                        onSelect: () => void savePageAssigned(""),
                       },
-                      ...roadmapAssignableMembers().map((m) => ({
+                      ...pageAssignableMembers().map((m) => ({
                         id: m.name,
                         label: m.name,
-                        checked: roadmapPage.assigned === m.name,
+                        checked: openPage.assigned === m.name,
                         icon: (
                           <span className="avatar chip-avatar" aria-hidden="true">
                             {initialsOf(m.name)}
                           </span>
                         ),
-                        onSelect: () => void saveRoadmapAssigned(m.name),
+                        onSelect: () => void savePageAssigned(m.name),
                       })),
                     ]}
                   />
@@ -5774,10 +5885,10 @@ export function App() {
               </div>
             )}
             <MarkdownEditor
-              value={roadmapText}
-              onChange={setRoadmapText}
-              highlight={roadmapTerms ?? undefined}
-              placeholder="Write this roadmap page in Markdown…"
+              value={openPageText}
+              onChange={setOpenPageText}
+              highlight={pageTerms ?? undefined}
+              placeholder={`Write this ${pageTabOf(openPage.fileName).noun} in Markdown…`}
             />
           </>
         ) : (
@@ -6323,7 +6434,29 @@ export function App() {
                     type="checkbox"
                     role="switch"
                     checked={settingsRoadmapDraft}
-                    onChange={(e) => void toggleRoadmap(e.target.checked)}
+                    onChange={(e) => void togglePageFolder(PAGE_TABS[0]!, e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* The tasks folder (specs/app/tasks.feature.md): the roadmap
+                  switch's twin — the folder's markdown pages become a Tasks
+                  tab, each assignable to a project member. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Tasks
+                  <span className="settings-row-hint">
+                    {settingsTasksDraft
+                      ? "The data folder's tasks folder — a markdown page per task, assignable to a project member, on their own sidebar tab. It is created if it isn't there yet."
+                      : "The tasks folder is not shown; nothing in it is touched."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsTasksDraft}
+                    onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
