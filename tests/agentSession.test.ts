@@ -73,7 +73,7 @@ const FILES = [{ fileName: "quote.feature.md" }];
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
   expect(res.status).toBe(400);
-  expect((await res.json()).error).toContain("target must be desktop or cli");
+  expect((await res.json()).error).toContain("target must be desktop, cli or pane");
   expect(calls).toHaveLength(0);
 });
 
@@ -177,5 +177,5 @@ test("the Run in choice round-trips through the settings file", async () => {
   expect((await readState(root)).codeGenTarget).toBe("cli");
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop or cli");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, cli or pane");
 });

@@ -31,7 +31,7 @@ Users that have read/write access to the repo that stores data.
 # Integration with AI coding agents
 
 "Start session" builds one prompt from the selected specs and hands it to
-Claude in one of two ways (src/server/agent.ts). Headless: `claude -p <prompt>`
+Claude in one of three ways (src/server/agent.ts). Headless: `claude -p <prompt>`
 runs in the data repo and its output is shown when it exits. Desktop: the full
 prompt and a `session.json` record are written under
 `<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
@@ -41,6 +41,28 @@ the new Claude Code Desktop session to title itself with the session name and
 work from the prompt file. The deep link and its limits (`q` capped at 14336
 chars) were read from the shipped Claude.app bundle, not from public docs, so
 they are version-coupled.
+
+Pane: for developers with the Claude CLI but not Claude Code Desktop, the app
+drives a live Claude Code session itself (src/server/agentChat.ts,
+src/frontend/AgentPane.tsx). One long-lived `query()` from
+`@anthropic-ai/claude-agent-sdk` per chat, in streaming-input mode, spawns the
+developer's own `claude` binary with the project's `code-repo` (else the data
+repo) as its working directory and Claude Code's own system prompt and
+settings. The SDK's messages become an in-memory event log with sequence
+numbers; the browser reads it over a one-way NDJSON stream from the same route
+table (no WebSocket, so it works over Electron's `app://` too) and reopens the
+stream from the last sequence it saw. Permission requests and clarifying
+questions round-trip through cards in the pane; the "/" popup lists whatever
+`supportedCommands()` reports for the session. A `session.json` with
+`agent: "pane"` and Claude's own session id goes under
+`<settings dir>/sessions/<uuid>/`, so resuming a past pane session
+(`resume: claudeSessionId`) is a cheap follow-up. When a project names a
+`code-repo`, the session runs there and the data repo is an additional
+directory, so Claude can read the specs the prompt points at.
+
+The feature spec lives in the spec repo as
+`specs/agents/coding-agent-ui.feature.md`; the spec repo is never edited from
+this one.
 
 # Decisions
 

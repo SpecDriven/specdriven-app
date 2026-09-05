@@ -5,7 +5,9 @@
 
 import { app, BrowserWindow, dialog, nativeTheme, protocol, screen, session, shell } from "electron";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { endAllChatSessions } from "../server/agentChat";
 import { applyStartupState, handleApi } from "../server/api";
 import { setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
@@ -47,6 +49,9 @@ process.env.SPECDRIVEN_REPOS_DIR ||= join(userData, "repos");
 initTelemetry();
 let telemetryFlushed = false;
 app.on("will-quit", (event) => {
+  // Coding agent sessions (src/server/agentChat.ts) are Claude subprocesses;
+  // none may outlive the window that showed them.
+  void endAllChatSessions();
   if (telemetryFlushed || !telemetryActive()) return;
   telemetryFlushed = true;
   event.preventDefault();
@@ -56,10 +61,11 @@ app.on("will-quit", (event) => {
 // A packaged macOS app launches with a minimal PATH; append the usual
 // Homebrew locations so git and gh can be found there — every git operation
 // needs the one, the default engine needs the other
-// (specs/desktop-app.spec.md "Git").
+// (specs/desktop-app.spec.md "Git") — and ~/.local/bin, where the native
+// Claude installer puts `claude` (specs/agents/coding-agent-ui.feature.md).
 if (process.platform === "darwin") {
   const parts = (process.env.PATH || "").split(":");
-  for (const dir of ["/usr/local/bin", "/opt/homebrew/bin"]) {
+  for (const dir of ["/usr/local/bin", "/opt/homebrew/bin", join(homedir(), ".local", "bin")]) {
     if (!parts.includes(dir)) parts.push(dir);
   }
   process.env.PATH = parts.join(":");

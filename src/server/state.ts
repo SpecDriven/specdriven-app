@@ -64,9 +64,11 @@ export interface SpecDrivenState {
   codeGen?: boolean;
   /**
    * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
-   * opens a new session in Claude Code Desktop, "cli" runs `claude -p`
-   * headless. Absent means desktop when Claude.app is installed, else cli —
-   * the client resolves that from canOpenClaudeDesktop.
+   * opens a new session in Claude Code Desktop, "pane" opens one in the
+   * app's own coding agent pane (specs/agents/coding-agent-ui.feature.md),
+   * "cli" runs `claude -p` headless. Absent means desktop when Claude.app is
+   * installed, else pane when the Claude CLI is, else cli — the client
+   * resolves that from canOpenClaudeDesktop and canRunAgentPane.
    */
   codeGenTarget?: CodeGenTarget;
   /**
@@ -186,13 +188,16 @@ export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
 }
 
-/** The two places a code gen session can run (specs/agents/claude.feature.md). */
-export type CodeGenTarget = "desktop" | "cli";
+/** The places a code gen session can run (specs/agents/claude.feature.md,
+    specs/agents/coding-agent-ui.feature.md). */
+export type CodeGenTarget = "desktop" | "cli" | "pane";
+
+export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "cli", "pane"];
 
 /** Stored session target, or null when absent or unusable — the client
-    then picks desktop when Claude.app is installed, else cli. */
+    then picks desktop when Claude.app is installed, else pane, else cli. */
 export function normalizeCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "cli" ? value : null;
+  return (CODE_GEN_TARGETS as readonly unknown[]).includes(value) ? (value as CodeGenTarget) : null;
 }
 
 /**
