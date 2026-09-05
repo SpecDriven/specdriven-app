@@ -9,7 +9,12 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { desktopOpener, setDesktopAvailability, setDesktopRunner } from "../src/server/agent";
+import {
+  desktopOpener,
+  setDesktopAvailability,
+  setDesktopRunner,
+  setPiAvailability,
+} from "../src/server/agent";
 import type { Runner } from "../src/server/agent";
 import { createFeature, saveFeature } from "../src/server/features";
 import type { RunOptions } from "../src/server/run";
@@ -38,6 +43,9 @@ beforeEach(async () => {
   calls = [];
   setDesktopAvailability(() => true);
   setDesktopRunner(recordingRunner);
+  // Pi is not on the developer's or CI's PATH; the pi session itself is
+  // driven by a fake in tests/piChat.test.ts.
+  setPiAvailability(() => true);
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
   await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
@@ -47,6 +55,7 @@ afterEach(async () => {
   reloader.stop();
   setDesktopAvailability(null);
   setDesktopRunner(null);
+  setPiAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -73,7 +82,7 @@ const FILES = [{ fileName: "quote.feature.md" }];
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
   expect(res.status).toBe(400);
-  expect((await res.json()).error).toContain("target must be desktop, cli or pane");
+  expect((await res.json()).error).toContain("target must be desktop, cli, pane or pi");
   expect(calls).toHaveLength(0);
 });
 
@@ -168,6 +177,25 @@ test("the state reports whether Claude Code Desktop can be opened", async () => 
   );
 });
 
+// Pi (specs/agents/integration-with-pi-dev-agent.feature.md): Pi is a choice
+// of agent at the route; the session it opens is the pane one, driven over
+// pi's RPC mode (tests/piChat.test.ts).
+test("without the pi CLI the pi target is refused before anything runs", async () => {
+  setPiAvailability(() => false);
+  const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "pi" });
+  expect(res.status).toBe(502);
+  expect((await res.json()).error).toContain("Pi CLI not found");
+  expect(calls).toHaveLength(0);
+});
+
+test("the state reports whether a session can run in Pi", async () => {
+  const res = (await handleApi(new Request("http://localhost/api/state")))!;
+  expect(((await res.json()) as { canRunPi: boolean }).canRunPi).toBe(true);
+  setPiAvailability(() => false);
+  const again = (await handleApi(new Request("http://localhost/api/state")))!;
+  expect(((await again.json()) as { canRunPi: boolean }).canRunPi).toBe(false);
+});
+
 test("the Run in choice round-trips through the settings file", async () => {
   const before = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await before.json()) as { codeGenTarget: unknown }).codeGenTarget).toBeNull();
@@ -177,5 +205,5 @@ test("the Run in choice round-trips through the settings file", async () => {
   expect((await readState(root)).codeGenTarget).toBe("cli");
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, cli or pane");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, cli, pane or pi");
 });
