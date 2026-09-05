@@ -8,6 +8,12 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import {
+  setClaudeAvailability,
+  setDesktopAvailability,
+  setPiAvailability,
+} from "../src/server/agent";
+import { setQueryFactory } from "../src/server/agentChat";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setupDemo } from "../src/server/demo";
 import { setFolderChooser } from "../src/server/folderChooser";
@@ -50,6 +56,12 @@ afterEach(async () => {
   reloader.stop();
   setGitEngine(null);
   setFolderChooser(realChooser);
+  // setupDemo fills these four (src/server/demo.ts); left in place they would
+  // hand a fake Claude to every later test file in the run.
+  setQueryFactory(null);
+  setClaudeAvailability(null);
+  setPiAvailability(null);
+  setDesktopAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(source, { recursive: true, force: true });
   for (const [name, value] of [
@@ -92,6 +104,18 @@ test("boot state names the demo: ephemeral folder, no chooser, js git, no cron",
   expect(state.gitEngine).toBe("js");
   expect(state.reloadFrequencySeconds).toBe(0);
   expect(basename(state.dataRepo)).toMatch(/^data-\d+$/);
+});
+
+// Code gen sessions are the demo's point (specs/roadmap/demo.md "Demo App"),
+// but only the simulated pane: the other two targets report unavailable, so
+// the session dialog offers no choice and nothing can reach a real CLI.
+test("the coding agent pane is on and is the only target on offer", async () => {
+  const state = await bootState();
+  expect(state.codeGen).toBe(true);
+  expect(state.codeGenTarget).toBe("pane");
+  expect(state.canRunAgentPane).toBe(true);
+  expect(state.canOpenClaudeDesktop).toBe(false);
+  expect(state.canRunPi).toBe(false);
 });
 
 // The roadmap folder is opt-in (specs/app/roadmap.feature.md), so the demo has
