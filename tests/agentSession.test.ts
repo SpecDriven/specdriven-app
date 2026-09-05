@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { setDesktopAvailability, setDesktopRunner } from "../src/server/agent";
+import { desktopOpener, setDesktopAvailability, setDesktopRunner } from "../src/server/agent";
 import type { Runner } from "../src/server/agent";
 import { createFeature, saveFeature } from "../src/server/features";
 import type { RunOptions } from "../src/server/run";
@@ -98,7 +98,8 @@ test("a desktop session saves the prompt beside the settings and opens Claude.ap
   // Nothing of the session lands in the data repo, which is pushed to git.
   expect(stat(join(data, ".specdriven", "sessions"))).rejects.toThrow();
   expect(calls).toHaveLength(1);
-  expect(calls[0]!.cmd).toBe("open");
+  // The platform's own opener: open on macOS, xdg-open on Linux CI.
+  expect(calls[0]!.cmd).toBe(desktopOpener().cmd);
   expect(new URL(calls[0]!.args[0]!).searchParams.get("folder")).toBe(data);
 });
 
