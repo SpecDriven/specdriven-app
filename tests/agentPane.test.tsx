@@ -4,7 +4,12 @@
 // rows render what a reader needs. Pure helpers and static markup — no DOM.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MODE_LABEL, STATUS_LABEL, TranscriptRow } from "../src/frontend/AgentPane";
+import {
+  MODE_LABEL,
+  STATUS_LABEL,
+  SimulationWatermark,
+  TranscriptRow,
+} from "../src/frontend/AgentPane";
 import {
   EMPTY_TRANSCRIPT,
   applyCommand,
@@ -313,5 +318,18 @@ describe("TranscriptRow", () => {
       ["awaiting_input", "ended", "error", "idle", "running", "starting"].sort(),
     );
     expect(Object.keys(MODE_LABEL).sort()).toEqual(["acceptEdits", "bypassPermissions", "default", "plan"]);
+  });
+});
+
+// Demo mode (src/server/demoAgent.ts): the pane's agent is a script, and the
+// watermark is what a screen recording of it shows. Decorative — the header
+// chip carries the same fact for a screen reader — so it is hidden from the
+// accessibility tree and must never swallow a click.
+describe("SimulationWatermark", () => {
+  test("repeats the label, hidden from assistive tech and inert", () => {
+    const html = renderToStaticMarkup(<SimulationWatermark />);
+    expect(html).toContain("agent-sim-watermark");
+    expect(html).toContain("aria-hidden=\"true\"");
+    expect(html.match(/Simulation…/g)?.length).toBeGreaterThan(1);
   });
 });
