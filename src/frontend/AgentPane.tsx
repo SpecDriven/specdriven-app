@@ -94,11 +94,14 @@ function basename(path: string): string {
 
 export function AgentPane({
   compact,
+  demo,
   codeRepo,
   dataRepo,
   onClose,
 }: {
   compact: boolean;
+  /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
+  demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
   onClose: () => void;
@@ -107,26 +110,48 @@ export function AgentPane({
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
   return (
     <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
-      <AgentHeader store={store} session={session} onClose={onClose} />
+      <AgentHeader store={store} session={session} demo={demo} onClose={onClose} />
       {session ? (
         <>
           <Transcript session={session} />
           <Composer session={session} />
         </>
       ) : (
-        <EmptyState store={store} codeRepo={codeRepo} dataRepo={dataRepo} />
+        <EmptyState store={store} demo={demo} codeRepo={codeRepo} dataRepo={dataRepo} />
       )}
+      {demo && <SimulationWatermark />}
     </aside>
+  );
+}
+
+/**
+ * The demo's watermark: nothing in this pane is a real agent, and a screen
+ * recording of it must not be mistaken for one. Decorative and inert —
+ * pointer-events off so it never eats a click, aria-hidden because the
+ * "Simulation" chip in the header says the same thing to a screen reader.
+ * Exported so a static-markup test can assert on it.
+ */
+export function SimulationWatermark() {
+  return (
+    <div className="agent-sim-watermark" aria-hidden="true">
+      {/* Repeated, because the pane is a tall column and one line of it
+          would sit off screen for most of the transcript. */}
+      {[0, 1, 2].map((i) => (
+        <span key={i}>Simulation…</span>
+      ))}
+    </div>
   );
 }
 
 function AgentHeader({
   store,
   session,
+  demo,
   onClose,
 }: {
   store: AgentChatStore;
   session: SessionState | null;
+  demo: boolean;
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -198,6 +223,16 @@ function AgentHeader({
         />
       )}
       <span className="spacer" />
+      {/* The watermark over the transcript is decorative; this is the same
+          fact in text, for a screen reader and for a narrow pane where the
+          diagonal lettering is easy to read past. */}
+      {demo && (
+        <Tooltip label="Scripted output — no coding agent runs in the demo">
+          <span className="agent-sim-chip" tabIndex={0}>
+            Simulation
+          </span>
+        </Tooltip>
+      )}
       {/* Pi's RPC mode has no permission protocol — it runs its own tools,
           so there is no mode to offer and the pane says as much. */}
       {meta && meta.agent === "pi" && (
@@ -253,10 +288,12 @@ function AgentHeader({
 
 function EmptyState({
   store,
+  demo,
   codeRepo,
   dataRepo,
 }: {
   store: AgentChatStore;
+  demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
 }) {
@@ -302,16 +339,26 @@ function EmptyState({
       }}
     >
       <h3>New coding agent session</h3>
-      <p>
-        A live {picked === "pi" ? "Pi" : "Claude Code"} session, run by SpecDriven.
-        {workDir && (
-          <>
-            {" "}
-            Works in <span className="agent-workdir">{workDir}</span>
-            {codeRepo ? " — the code repo from project-settings.json." : " — the data repo."}
-          </>
-        )}
-      </p>
+      {/* The demo runs the script in src/server/demoAgent.ts, not an agent —
+          say so here as well as on the watermark, since this is the screen a
+          visitor reads before starting anything. */}
+      {demo ? (
+        <p>
+          A simulated Claude Code session: the transcript, the tool rows and the
+          permission prompt are scripted, and nothing runs or is written to disk.
+        </p>
+      ) : (
+        <p>
+          A live {picked === "pi" ? "Pi" : "Claude Code"} session, run by SpecDriven.
+          {workDir && (
+            <>
+              {" "}
+              Works in <span className="agent-workdir">{workDir}</span>
+              {codeRepo ? " — the code repo from project-settings.json." : " — the data repo."}
+            </>
+          )}
+        </p>
+      )}
       {agents.length > 1 && (
         <fieldset className="choice-group" role="radiogroup" aria-label="Agent">
           <legend>Agent</legend>

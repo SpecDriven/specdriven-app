@@ -5829,6 +5829,7 @@ export function App() {
       {paneShown && (
         <AgentPane
           compact={compact}
+          demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
           onClose={() => agentChat.closePane()}
