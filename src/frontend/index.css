@@ -1550,6 +1550,111 @@ button.link:disabled {
   color: inherit;
 }
 
+/* Vim tab (specs/ui.spec.md "Settings"): a CodeMirror editor running the vim
+   extension, dressed like the textarea beside it — same font, padding and
+   colours, the block cursor and status line in the accent. CodeMirror's own
+   theme classes are generated, so these rules win on specificity alone. */
+.md-vim {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.md-vim-loading {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
+.md-vim .cm-editor {
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.md-vim .cm-editor.cm-focused {
+  outline: none;
+}
+
+.md-vim .cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  padding: 0.6rem 0.75rem;
+}
+
+.md-vim .cm-editor .cm-content {
+  padding: 0;
+  caret-color: var(--text-1);
+}
+
+.md-vim .cm-editor .cm-line {
+  padding: 0;
+}
+
+.md-vim .cm-editor .cm-placeholder {
+  color: var(--text-3);
+}
+
+.md-vim .cm-editor .cm-cursor,
+.md-vim .cm-editor .cm-dropCursor {
+  border-left-color: var(--text-1);
+}
+
+/* Normal mode's block cursor. */
+.md-vim .cm-editor .cm-fat-cursor {
+  background: var(--accent);
+  color: var(--on-accent);
+  outline: none;
+}
+
+.md-vim .cm-editor:not(.cm-focused) .cm-fat-cursor {
+  background: transparent;
+  color: inherit;
+  outline: 1px solid var(--accent);
+}
+
+.md-vim .cm-editor .cm-selectionBackground,
+.md-vim .cm-editor.cm-focused .cm-selectionBackground,
+.md-vim .cm-editor .cm-content ::selection {
+  background: var(--accent-soft);
+}
+
+/* Search marks (specs/search.feature.md), the same as the other tabs'. */
+.md-vim .md-vim-mark {
+  border-radius: 2px;
+  background: var(--accent-mark);
+}
+
+/* The vim status line: the mode, and the : command line while one is typed. */
+.md-vim .cm-editor .cm-panels {
+  background: var(--surface-1);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+
+.md-vim .cm-editor .cm-vim-panel {
+  padding: 0.15rem 0.75rem;
+  min-height: 1.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+
+.md-vim .cm-editor .cm-vim-panel input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  padding: 0;
+  box-shadow: none;
+}
+
 /* Typography below is shared by every rendered-markdown surface (the editor's
    Preview tab and the scenario cards); this block is the editor pane itself. */
 .md-editor .md-preview {
