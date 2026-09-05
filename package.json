@@ -59,6 +59,7 @@
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
+      "notarize": false,
       "target": [
         {
           "target": "dmg",
