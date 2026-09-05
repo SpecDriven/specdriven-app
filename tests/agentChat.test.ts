@@ -1,0 +1,707 @@
+// Automates specs/agents/coding-agent-ui.feature.md over the routes: a
+// coding agent session is a live Claude Code chat the app drives itself.
+// The Claude Agent SDK is swapped for a fake query the test steers from
+// both ends — what Claude "says" and what it asks — so nothing spawns.
+
+import { test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { handleApi, reloader } from "../src/server/api";
+import { setClaudeAvailability } from "../src/server/agent";
+import {
+  InputQueue,
+  endAllChatSessions,
+  getChatEvents,
+  mapSdkMessage,
+  setQueryFactory,
+} from "../src/server/agentChat";
+import type { ChatEvent, ChatSessionMeta, QueryLike, SlashCommandInfo } from "../src/server/agentChat";
+import { createFeature, saveFeature } from "../src/server/features";
+import { PROJECT_SETTINGS_FILE } from "../src/server/members";
+import { readState, writeState } from "../src/server/state";
+
+/** A stand-in for the SDK's Query: the test pushes Claude's messages in and
+    reads the user messages the app pushed out. */
+class FakeQuery implements QueryLike {
+  readonly out = new InputQueue<SDKMessage>();
+  readonly inputs: SDKUserMessage[] = [];
+  interrupts = 0;
+  modes: string[] = [];
+  commands: SlashCommandInfo[] = [
+    { name: "compact", description: "Compact the conversation", argumentHint: "" },
+    { name: "review", description: "Review code", argumentHint: "[files]" },
+  ];
+  private waiters: (() => void)[] = [];
+
+  constructor(
+    prompt: AsyncIterable<SDKUserMessage>,
+    readonly options: Options,
+  ) {
+    void (async () => {
+      for await (const m of prompt) {
+        this.inputs.push(m);
+        for (const w of this.waiters.splice(0)) w();
+      }
+    })();
+    options.abortController?.signal.addEventListener("abort", () => this.out.close());
+  }
+
+  emit(message: SDKMessage): void {
+    this.out.push(message);
+  }
+
+  /** The n-th user message the app pushed (1-based), once it is there. */
+  async input(n = 1): Promise<SDKUserMessage> {
+    while (this.inputs.length < n) await new Promise<void>((r) => this.waiters.push(r));
+    return this.inputs[n - 1]!;
+  }
+
+  [Symbol.asyncIterator]() {
+    return this.out[Symbol.asyncIterator]();
+  }
+  async interrupt() {
+    this.interrupts += 1;
+  }
+  async setPermissionMode(mode: string) {
+    this.modes.push(mode);
+  }
+  async supportedCommands() {
+    return this.commands;
+  }
+}
+
+let root: string;
+let home: string;
+let data: string;
+let fakes: FakeQuery[];
+const realRoot = process.env.SPECDRIVEN_ROOT;
+const realHome = process.env.SPECDRIVEN_HOME;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "specdriven-agent-chat-"));
+  home = await mkdtemp(join(tmpdir(), "specdriven-agent-chat-home-"));
+  process.env.SPECDRIVEN_ROOT = root;
+  process.env.SPECDRIVEN_HOME = home;
+  data = join(root, "data");
+  fakes = [];
+  setClaudeAvailability(() => true);
+  setQueryFactory(({ prompt, options }) => {
+    const fake = new FakeQuery(prompt, options);
+    fakes.push(fake);
+    return fake;
+  });
+  await writeState({ dataRepo: data }, root);
+  await createFeature(data, "Quote");
+  await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+});
+
+afterEach(async () => {
+  await endAllChatSessions();
+  reloader.stop();
+  setClaudeAvailability(null);
+  setQueryFactory(null);
+  await rm(root, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
+  for (const [name, value] of [
+    ["SPECDRIVEN_ROOT", realRoot],
+    ["SPECDRIVEN_HOME", realHome],
+  ] as const) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+});
+
+function api(path: string, method = "GET", body?: unknown): Promise<Response> {
+  return handleApi(
+    new Request(`http://localhost${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+  ) as Promise<Response>;
+}
+
+interface Snapshot {
+  meta: ChatSessionMeta;
+  commands: SlashCommandInfo[];
+  events: ChatEvent[];
+}
+
+async function snapshot(id: string): Promise<Snapshot> {
+  const res = await api(`/api/agent/chat/${id}`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as Snapshot;
+}
+
+/** The pump is asynchronous; poll until the log says what we wait for. */
+async function until<T>(read: () => Promise<T>, ok: (v: T) => boolean, ms = 3000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await read();
+    if (ok(v)) return v;
+    if (Date.now() > end) throw new Error(`timed out waiting; last: ${JSON.stringify(v).slice(0, 400)}`);
+    await Bun.sleep(10);
+  }
+}
+
+const untilStatus = (id: string, status: string) =>
+  until(() => snapshot(id), (s) => s.meta.status === status);
+
+/** The third argument of canUseTool, as the SDK passes it. */
+const askContext = (extra: Record<string, unknown> = {}) =>
+  ({ signal: new AbortController().signal, toolUseID: "tu", requestId: "rq", ...extra }) as Parameters<
+    NonNullable<Options["canUseTool"]>
+  >[2];
+
+// --- SDK messages as Claude Code emits them (shapes from sdk.d.ts) ---------
+
+const sdk = (m: unknown) => m as SDKMessage;
+const init = (sessionId = "claude-1") =>
+  sdk({
+    type: "system",
+    subtype: "init",
+    apiKeySource: "none",
+    claude_code_version: "2.1.247",
+    cwd: "/work",
+    tools: ["Bash", "Read", "Edit"],
+    mcp_servers: [],
+    model: "claude-opus-5",
+    permissionMode: "default",
+    slash_commands: ["compact", "review"],
+    output_style: "default",
+    skills: [],
+    plugins: [],
+    uuid: "u-init",
+    session_id: sessionId,
+  });
+const messageStart = (id: string) =>
+  sdk({
+    type: "stream_event",
+    event: { type: "message_start", message: { id, type: "message", role: "assistant", content: [] } },
+    parent_tool_use_id: null,
+    uuid: "u-ms",
+    session_id: "claude-1",
+  });
+const delta = (text: string, index = 0) =>
+  sdk({
+    type: "stream_event",
+    event: { type: "content_block_delta", index, delta: { type: "text_delta", text } },
+    parent_tool_use_id: null,
+    uuid: "u-d",
+    session_id: "claude-1",
+  });
+const assistant = (id: string, content: unknown[]) =>
+  sdk({
+    type: "assistant",
+    message: { id, type: "message", role: "assistant", model: "claude-opus-5", content, stop_reason: null },
+    parent_tool_use_id: null,
+    uuid: "u-a",
+    session_id: "claude-1",
+  });
+const toolResult = (toolUseId: string, content: unknown, isError = false) =>
+  sdk({
+    type: "user",
+    message: {
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: toolUseId, content, is_error: isError }],
+    },
+    parent_tool_use_id: null,
+    uuid: "u-tr",
+    session_id: "claude-1",
+  });
+const result = (extra: Record<string, unknown> = {}) =>
+  sdk({
+    type: "result",
+    subtype: "success",
+    duration_ms: 1200,
+    duration_api_ms: 1000,
+    is_error: false,
+    num_turns: 2,
+    result: "Done.",
+    stop_reason: "end_turn",
+    total_cost_usd: 0.0123,
+    usage: {},
+    modelUsage: {},
+    permission_denials: [],
+    uuid: "u-r",
+    session_id: "claude-1",
+    ...extra,
+  });
+
+/** A session that has said hello: created, init in, idle. */
+async function idleSession(): Promise<{ id: string; fake: FakeQuery }> {
+  const res = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(res.status).toBe(200);
+  const meta = (await res.json()) as ChatSessionMeta;
+  const fake = fakes.at(-1)!;
+  fake.emit(init());
+  await untilStatus(meta.id, "idle");
+  return { id: meta.id, fake };
+}
+
+test("a session starts Claude on the data repo and is ready once Claude answers", async () => {
+  const res = await api("/api/agent/chat", "POST", { name: "first chat" });
+  expect(res.status).toBe(200);
+  const meta = (await res.json()) as ChatSessionMeta;
+  expect(["starting", "idle"]).toContain(meta.status);
+  expect(meta.cwd).toBe(data);
+  expect(meta.name).toBe("first chat");
+  expect(fakes).toHaveLength(1);
+  const { options } = fakes[0]!;
+  expect(options.cwd).toBe(data);
+  expect(options.includePartialMessages).toBe(true);
+  expect(options.permissionMode).toBe("default");
+  // A session like the CLI would open: Claude Code's prompt and settings.
+  expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
+  expect(options.settingSources).toEqual(["user", "project", "local"]);
+  expect(options.additionalDirectories).toBeUndefined();
+  expect(typeof options.canUseTool).toBe("function");
+  // A dev server started from a Claude Code terminal must not pass the
+  // nesting marker on.
+  expect(options.env?.CLAUDECODE).toBeUndefined();
+
+  // Ready before any turn: Claude Code answers the command list as soon as
+  // it is up, and sends init only with the first message.
+  const ready = await untilStatus(meta.id, "idle");
+  expect(ready.commands.some((c) => c.description === "Review code")).toBe(true);
+  expect(ready.meta.claudeSessionId).toBeUndefined();
+  expect(ready.events.filter((e) => e.kind === "status").at(-1)).toMatchObject({
+    status: "idle",
+    commands: expect.arrayContaining([expect.objectContaining({ name: "review" })]),
+  });
+
+  fakes[0]!.emit(init("claude-abc"));
+  const snap = await until(() => snapshot(meta.id), (s) => s.meta.claudeSessionId === "claude-abc");
+  expect(snap.meta.status).toBe("idle");
+  expect(snap.meta.model).toBe("claude-opus-5");
+  const kinds = snap.events.map((e) => e.kind);
+  expect(kinds[0]).toBe("status");
+  expect(snap.events.find((e) => e.kind === "note")).toMatchObject({
+    code: "init",
+    text: expect.stringContaining("claude-opus-5"),
+  });
+  // The init status carries what the session is made of.
+  expect(snap.events.find((e) => e.kind === "status" && e.tools)).toMatchObject({
+    status: "idle",
+    tools: ["Bash", "Read", "Edit"],
+    claudeSessionId: "claude-abc",
+  });
+
+  // The record sits beside the settings — never in the data repo, which is
+  // pushed to git.
+  const record = JSON.parse(
+    await readFile(join(root, ".specdriven", "sessions", meta.id, "session.json"), "utf8"),
+  );
+  expect(record).toMatchObject({ agent: "pane", cwd: data, dataRepo: data, claudeSessionId: "claude-abc" });
+  expect(stat(join(data, ".specdriven", "sessions"))).rejects.toThrow();
+
+  const list = (await (await api("/api/agent/chat")).json()) as { sessions: ChatSessionMeta[] };
+  expect(list.sessions.map((s) => s.id)).toEqual([meta.id]);
+});
+
+test("a turn goes to Claude and its reply streams into the event log", async () => {
+  const { id, fake } = await idleSession();
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", { text: "list the files here" });
+  expect(sent.status).toBe(200);
+  expect(((await sent.json()) as { event: ChatEvent }).event).toMatchObject({
+    kind: "user",
+    text: "list the files here",
+  });
+  const input = await fake.input(1);
+  expect(input.message.content).toBe("list the files here");
+  expect((await snapshot(id)).meta.status).toBe("running");
+
+  // One turn at a time — the pane says Stop first.
+  const again = await api(`/api/agent/chat/${id}/message`, "POST", { text: "and again" });
+  expect(again.status).toBe(409);
+  expect((await again.json()).error).toContain("Stop");
+
+  fake.emit(messageStart("msg_1"));
+  fake.emit(delta("Here "));
+  fake.emit(delta("you go."));
+  await until(
+    () => snapshot(id),
+    (s) => s.events.filter((e) => e.kind === "text_delta").length === 2,
+  );
+  expect((await snapshot(id)).events.filter((e) => e.kind === "text_delta")).toMatchObject([
+    { messageId: "msg_1", text: "Here " },
+    { messageId: "msg_1", text: "you go." },
+  ]);
+  fake.emit(
+    assistant("msg_1", [
+      { type: "text", text: "Here you go." },
+      { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+    ]),
+  );
+  fake.emit(toolResult("tu_1", "a.txt\nb.txt"));
+  fake.emit(result());
+  const snap = await untilStatus(id, "idle");
+  const kinds = snap.events.map((e) => e.kind);
+  // The deltas are gone once the final message covers them.
+  expect(kinds).not.toContain("text_delta");
+  const order = ["user", "assistant", "tool_result", "result"].map((k) => (kinds as string[]).indexOf(k));
+  expect(order.every((i, n) => i >= 0 && (n === 0 || i > order[n - 1]!))).toBe(true);
+  expect(snap.events.find((e) => e.kind === "assistant")).toMatchObject({
+    messageId: "msg_1",
+    turn: 1,
+    blocks: [
+      { type: "text", text: "Here you go." },
+      { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+    ],
+  });
+  expect(snap.events.find((e) => e.kind === "tool_result")).toMatchObject({
+    toolUseId: "tu_1",
+    content: "a.txt\nb.txt",
+    isError: false,
+  });
+  expect(snap.events.find((e) => e.kind === "result")).toMatchObject({
+    turn: 1,
+    subtype: "success",
+    costUsd: 0.0123,
+    durationMs: 1200,
+    numTurns: 2,
+    text: "Done.",
+    denials: 0,
+  });
+  // Sequence numbers only ever go up, gaps included.
+  const seqs = snap.events.map((e) => e.seq);
+  expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+  expect(snap.meta.lastSeq).toBe(seqs.at(-1)!);
+});
+
+test("the event stream replays what a reconnecting pane missed", async () => {
+  const { id, fake } = await idleSession();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hi" });
+  fake.emit(assistant("msg_1", [{ type: "text", text: "Hello." }]));
+  fake.emit(result());
+  const snap = await untilStatus(id, "idle");
+  const assistantSeq = snap.events.find((e) => e.kind === "assistant")!.seq;
+  const later = getChatEvents(id, assistantSeq);
+  expect(later.map((e) => e.kind)).toEqual(["result", "status"]);
+  expect(later.every((e) => e.seq > assistantSeq)).toBe(true);
+
+  const res = await api(`/api/agent/chat/${id}/events?after=${assistantSeq}`);
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (text.split("\n").filter(Boolean).length < 2) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+  const lines = text.split("\n").filter(Boolean).map((l) => JSON.parse(l) as ChatEvent);
+  expect(lines.map((e) => e.kind)).toEqual(["result", "status"]);
+
+  const missing = await api(`/api/agent/chat/nope/events`);
+  expect(missing.status).toBe(404);
+});
+
+test("a permission request waits for the pane's answer", async () => {
+  const { id, fake } = await idleSession();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "clean up" });
+  const suggestion = {
+    type: "addRules" as const,
+    rules: [{ toolName: "Bash", ruleContent: "rm *" }],
+    behavior: "allow" as const,
+    destination: "localSettings" as const,
+  };
+  const asked = fake.options.canUseTool!(
+    "Bash",
+    { command: "rm -rf build" },
+    askContext({ suggestions: [suggestion] }),
+  );
+  const snap = await untilStatus(id, "awaiting_input");
+  const request = snap.events.find((e) => e.kind === "permission_request")!;
+  expect(request).toMatchObject({
+    toolName: "Bash",
+    input: { command: "rm -rf build" },
+    suggestions: [suggestion],
+  });
+  const requestId = (request as { requestId: string }).requestId;
+
+  // Allow always: the SDK's own suggested rule goes back with the answer.
+  const ok = await api(`/api/agent/chat/${id}/permission`, "POST", {
+    requestId,
+    behavior: "allow",
+    remember: true,
+  });
+  expect(ok.status).toBe(200);
+  expect(await asked).toEqual({
+    behavior: "allow",
+    updatedInput: { command: "rm -rf build" },
+    updatedPermissions: [suggestion],
+  });
+  const after = await untilStatus(id, "running");
+  expect(after.events.find((e) => e.kind === "permission_resolved")).toMatchObject({
+    requestId,
+    behavior: "allow",
+    via: "user",
+  });
+  // Answered is answered.
+  const twice = await api(`/api/agent/chat/${id}/permission`, "POST", { requestId, behavior: "deny" });
+  expect(twice.status).toBe(404);
+
+  // Deny, with a reason Claude gets to read.
+  const denied = fake.options.canUseTool!("Write", { file_path: "x" }, askContext());
+  const s2 = await until(
+    () => snapshot(id),
+    (s) => s.events.filter((e) => e.kind === "permission_request").length === 2,
+  );
+  const r2 = (s2.events.filter((e) => e.kind === "permission_request").at(-1) as { requestId: string })
+    .requestId;
+  await api(`/api/agent/chat/${id}/permission`, "POST", { requestId: r2, behavior: "deny", message: "not that file" });
+  expect(await denied).toEqual({ behavior: "deny", message: "not that file" });
+
+  // A clarifying question: the answers travel in updatedInput.
+  const questions = [
+    {
+      question: "Which format?",
+      header: "Format",
+      options: [
+        { label: "Summary", description: "short" },
+        { label: "Detailed", description: "long" },
+      ],
+      multiSelect: false,
+    },
+  ];
+  const question = fake.options.canUseTool!("AskUserQuestion", { questions }, askContext());
+  const s3 = await until(
+    () => snapshot(id),
+    (s) => s.events.filter((e) => e.kind === "permission_request").length === 3,
+  );
+  const r3 = (s3.events.filter((e) => e.kind === "permission_request").at(-1) as { requestId: string })
+    .requestId;
+  await api(`/api/agent/chat/${id}/permission`, "POST", {
+    requestId: r3,
+    behavior: "allow",
+    updatedInput: { questions, answers: { "Which format?": "Summary" } },
+  });
+  expect(await question).toEqual({
+    behavior: "allow",
+    updatedInput: { questions, answers: { "Which format?": "Summary" } },
+  });
+
+  const bad = await api(`/api/agent/chat/${id}/permission`, "POST", { requestId: "x", behavior: "maybe" });
+  expect(bad.status).toBe(400);
+});
+
+test("Stop interrupts the turn and withdraws its open question", async () => {
+  const { id, fake } = await idleSession();
+  const idle = await api(`/api/agent/chat/${id}/interrupt`, "POST");
+  expect(idle.status).toBe(409);
+
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "go" });
+  const asked = fake.options.canUseTool!("Bash", { command: "ls" }, askContext());
+  await untilStatus(id, "awaiting_input");
+  const stopped = await api(`/api/agent/chat/${id}/interrupt`, "POST");
+  expect(stopped.status).toBe(200);
+  expect(fake.interrupts).toBe(1);
+  expect(await asked).toMatchObject({ behavior: "deny" });
+  const snap = await untilStatus(id, "running");
+  expect(snap.events.find((e) => e.kind === "permission_resolved")).toMatchObject({ via: "interrupt" });
+  expect(snap.events.find((e) => e.kind === "note" && e.code === "interrupted")).toBeDefined();
+  // Claude answers the interrupt with a result, and the session is idle again.
+  fake.emit(result({ subtype: "success", result: "" }));
+  await untilStatus(id, "idle");
+});
+
+test("the permission mode switches mid-session", async () => {
+  const created = await api("/api/agent/chat", "POST", { name: "chat", permissionMode: "acceptEdits" });
+  const id = ((await created.json()) as ChatSessionMeta).id;
+  const fake = fakes.at(-1)!;
+  expect(fake.options.permissionMode).toBe("acceptEdits");
+  // The control channel is up before the first turn, so the mode can change
+  // before init; init then reports the mode Claude is in.
+  await untilStatus(id, "idle");
+
+  const res = await api(`/api/agent/chat/${id}/mode`, "PUT", { permissionMode: "plan" });
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { meta: ChatSessionMeta }).meta.permissionMode).toBe("plan");
+  expect(fake.modes).toEqual(["plan"]);
+  expect((await snapshot(id)).events.find((e) => e.kind === "mode")).toMatchObject({ permissionMode: "plan" });
+  fake.emit(sdk({ ...(init() as object), permissionMode: "plan" }));
+  await until(() => snapshot(id), (s) => s.meta.claudeSessionId === "claude-1");
+  expect((await snapshot(id)).meta.permissionMode).toBe("plan");
+
+  const bad = await api(`/api/agent/chat/${id}/mode`, "PUT", { permissionMode: "yolo" });
+  expect(bad.status).toBe(400);
+  expect((await bad.json()).error).toContain("permissionMode must be one of");
+  const badCreate = await api("/api/agent/chat", "POST", { name: "x", permissionMode: "yolo" });
+  expect(badCreate.status).toBe(400);
+});
+
+test("the pane is gated by the Settings switch and the CLI on PATH", async () => {
+  await writeState({ dataRepo: data, codeGen: false }, root);
+  const off = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(off.status).toBe(403);
+  expect((await off.json()).error).toContain("switched off in Settings");
+  await writeState({ dataRepo: data }, root);
+
+  const state = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
+  expect(state.canRunAgentPane).toBe(true);
+  setClaudeAvailability(() => false);
+  const noCli = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(noCli.status).toBe(502);
+  expect((await noCli.json()).error).toContain("Claude CLI not found");
+  const again = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
+  expect(again.canRunAgentPane).toBe(false);
+  expect(fakes).toHaveLength(0);
+});
+
+test("a code repo named in project-settings.json is where the chat works", async () => {
+  const code = join(root, "code");
+  await mkdir(code);
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const res = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(res.status).toBe(200);
+  const meta = (await res.json()) as ChatSessionMeta;
+  expect(meta.cwd).toBe(code);
+  expect(meta.codeRepo).toBe(code);
+  expect(meta.dataRepo).toBe(data);
+  const { options } = fakes[0]!;
+  expect(options.cwd).toBe(code);
+  // The specs are not in the cwd; Claude may still read them.
+  expect(options.additionalDirectories).toEqual([data]);
+
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../missing" }));
+  const gone = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(gone.status).toBe(400);
+  expect((await gone.json()).error).toContain("Code repo not found");
+  expect(fakes).toHaveLength(1);
+});
+
+test("Start session can open the generated prompt in the pane", async () => {
+  const res = await api("/api/agent/session", "POST", {
+    name: "implement quotes",
+    files: [{ fileName: "quote.feature.md" }],
+    target: "pane",
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { id: string; name: string; target: string };
+  expect(body).toMatchObject({ name: "implement quotes", target: "pane" });
+  const fake = fakes.at(-1)!;
+  const first = await fake.input(1);
+  expect(first.message.content).toContain("SpecDriven code gen session: implement quotes");
+  expect(first.message.content).toContain("## Spec: quote.feature.md");
+  expect(first.message.content).toContain("## Basic @v1");
+  const snap = await snapshot(body.id);
+  expect(snap.meta.name).toBe("implement quotes");
+  expect(snap.events.find((e) => e.kind === "user")).toMatchObject({
+    text: expect.stringContaining("## Spec: quote.feature.md"),
+  });
+  // The prompt is already in flight, so the session is running once ready,
+  // and init lands on it.
+  await untilStatus(body.id, "running");
+  fake.emit(init());
+  await until(() => snapshot(body.id), (s) => s.meta.claudeSessionId === "claude-1");
+  expect((await snapshot(body.id)).meta.status).toBe("running");
+
+  const stored = await api("/api/state", "PUT", { codeGenTarget: "pane" });
+  expect(stored.status).toBe(200);
+  expect((await readState(root)).codeGenTarget).toBe("pane");
+});
+
+test("ending a session aborts Claude, denies what it asked, and keeps the record", async () => {
+  const { id, fake } = await idleSession();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "go" });
+  const asked = fake.options.canUseTool!("Bash", { command: "ls" }, askContext());
+  await untilStatus(id, "awaiting_input");
+  const res = await api(`/api/agent/chat/${id}`, "DELETE");
+  expect(res.status).toBe(200);
+  expect(fake.options.abortController!.signal.aborted).toBe(true);
+  expect(await asked).toMatchObject({ behavior: "deny" });
+  expect((await api(`/api/agent/chat/${id}`)).status).toBe(404);
+  const list = (await (await api("/api/agent/chat")).json()) as { sessions: ChatSessionMeta[] };
+  expect(list.sessions).toEqual([]);
+  const record = JSON.parse(
+    await readFile(join(root, ".specdriven", "sessions", id, "session.json"), "utf8"),
+  );
+  expect(record.status).toBe("ended");
+  expect(typeof record.endedAt).toBe("string");
+  expect((await api(`/api/agent/chat/${id}`, "DELETE")).status).toBe(404);
+});
+
+test("Claude exiting on its own ends the session with a note", async () => {
+  const { id, fake } = await idleSession();
+  fake.out.close();
+  const snap = await untilStatus(id, "ended");
+  expect(snap.events.find((e) => e.kind === "note" && e.code === "ended")).toMatchObject({
+    text: expect.stringContaining("exited"),
+  });
+  const res = await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello?" });
+  expect(res.status).toBe(409);
+  // A final session still shows its transcript, and its stream closes at once.
+  const events = await api(`/api/agent/chat/${id}/events`);
+  const text = await events.text();
+  const last = JSON.parse(text.trim().split("\n").at(-1)!) as ChatEvent;
+  expect(last).toMatchObject({ kind: "status", status: "ended" });
+});
+
+test("a Claude that cannot start is a 502 with its words", async () => {
+  setQueryFactory(() => {
+    throw new Error("spawn claude ENOENT");
+  });
+  const res = await api("/api/agent/chat", "POST", { name: "chat" });
+  expect(res.status).toBe(502);
+  expect((await res.json()).error).toContain("spawn claude ENOENT");
+  const list = (await (await api("/api/agent/chat")).json()) as { sessions: ChatSessionMeta[] };
+  expect(list.sessions).toEqual([]);
+});
+
+test("InputQueue hands items over in order and ends when closed", async () => {
+  const q = new InputQueue<number>();
+  const seen: number[] = [];
+  const consumer = (async () => {
+    for await (const n of q) seen.push(n);
+  })();
+  q.push(1);
+  q.push(2);
+  await Bun.sleep(1);
+  q.push(3);
+  q.close();
+  await consumer;
+  expect(seen).toEqual([1, 2, 3]);
+  expect(q.closed).toBe(true);
+  expect(() => q.push(4)).toThrow();
+});
+
+test("mapSdkMessage keeps only what the pane renders", () => {
+  const stream = { messageId: null as string | null };
+  expect(mapSdkMessage(messageStart("msg_9"), { turn: 1 }, stream)).toEqual([]);
+  expect(stream.messageId).toBe("msg_9");
+  expect(mapSdkMessage(delta("x", 2), { turn: 1 }, stream)).toEqual([
+    { kind: "text_delta", messageId: "msg_9", index: 2, text: "x" },
+  ]);
+  // Our own input coming back is not news.
+  const replay = sdk({
+    type: "user",
+    message: { role: "user", content: "hi" },
+    parent_tool_use_id: null,
+    uuid: "u",
+    session_id: "s",
+    isReplay: true,
+  });
+  expect(mapSdkMessage(replay, { turn: 1 })).toEqual([]);
+  // A structured tool result flattens to text; images are named.
+  expect(
+    mapSdkMessage(
+      toolResult("tu", [{ type: "text", text: "one" }, { type: "image", source: {} }], true),
+      { turn: 1 },
+    ),
+  ).toEqual([
+    { kind: "tool_result", toolUseId: "tu", content: "one\n[image]", isError: true, parentToolUseId: null },
+  ]);
+  // A failed turn carries the CLI's errors as its text.
+  expect(
+    mapSdkMessage(
+      result({ subtype: "error_during_execution", is_error: true, errors: ["boom"], result: undefined }),
+      { turn: 3 },
+    ),
+  ).toMatchObject([{ kind: "result", turn: 3, subtype: "error_during_execution", isError: true, text: "boom" }]);
+  expect(mapSdkMessage(sdk({ type: "system", subtype: "status", status: "compacting" }), { turn: 1 })).toEqual([]);
+});
