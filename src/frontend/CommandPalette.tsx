@@ -5,15 +5,18 @@ import { useFocusTrap } from "./useFocusTrap";
 
 /**
  * The command palette on ⌘K (specs/ui/ui.feature.md "Design system",
- * specs/search.feature.md): one field that finds features, scenarios and
- * roadmap pages — the full-text search, with its ranking and snippets — and
- * runs the app's actions by name. Empty, it offers what was opened recently
- * and every action; typing narrows all groups at once. ↑/↓ move, ⏎ opens,
- * ⌘⏎ opens a scenario on its feature page instead of in the editor, ESC
- * closes. A combobox for assistive tech: the field owns the list and names
- * the active option.
+ * specs/search.feature.md): one field that finds features and scenarios —
+ * or, opened from the sidebar's Roadmap tab, roadmap pages — with the
+ * full-text search's ranking and snippets, and runs the app's actions by
+ * name. Empty, it offers what was opened recently and every action; typing
+ * narrows all groups at once. ↑/↓ move, ⏎ opens, ⌘⏎ opens a scenario on its
+ * feature page instead of in the editor, ESC closes. A combobox for
+ * assistive tech: the field owns the list and names the active option.
  */
 export type PaletteGroup = "Recent" | "Actions" | "Features" | "Scenarios" | "Roadmap";
+
+/** What the query searches, after the sidebar tab the palette opened from. */
+export type PaletteScope = "specs" | "roadmap";
 
 export interface PaletteItem {
   id: string;
@@ -32,18 +35,21 @@ const GROUP_ORDER: PaletteGroup[] = ["Recent", "Actions", "Features", "Scenarios
 
 export function CommandPalette({
   initialQuery,
+  scope = "specs",
   onClose,
   actions,
   recent,
   resolve,
 }: {
   initialQuery: string;
+  /** Specs or roadmap pages — names the field and the results' scope. */
+  scope?: PaletteScope;
   onClose: () => void;
   /** Every action, filtered here by name. */
   actions: PaletteItem[];
   /** What to show before typing. */
   recent: PaletteItem[];
-  /** Features, scenarios and roadmap pages matching a query. */
+  /** Features and scenarios — or roadmap pages — matching a query. */
   resolve: (query: string, signal: AbortSignal) => Promise<PaletteItem[]>;
 }) {
   const trapRef = useFocusTrap(true);
@@ -204,8 +210,8 @@ export function CommandPalette({
             aria-controls="palette-list"
             aria-activedescendant={items.length ? `palette-opt-${active}` : undefined}
             aria-autocomplete="list"
-            aria-label="Search specs or type a command"
-            placeholder="Search specs or type a command…"
+            aria-label={`Search ${scope} or type a command`}
+            placeholder={`Search ${scope} or type a command…`}
             spellCheck={false}
             autoComplete="off"
             value={query}
@@ -236,9 +242,11 @@ export function CommandPalette({
           <span>
             <Keys spec="enter" /> open
           </span>
-          <span>
-            <Keys spec="mod+enter" /> show on the feature page
-          </span>
+          {scope === "specs" && (
+            <span>
+              <Keys spec="mod+enter" /> show on the feature page
+            </span>
+          )}
         </div>
       </div>
     </div>
