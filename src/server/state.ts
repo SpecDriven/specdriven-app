@@ -60,17 +60,17 @@ export interface SpecDrivenState {
   publishExternalLinks?: boolean;
   /** Offer code gen sessions (specs/agents/claude.spec.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
-      nothing in the app can hand a spec to the Claude CLI. */
+      nothing in the app can hand a spec to a coding agent. */
   codeGen?: boolean;
   /**
    * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
    * opens a new session in Claude Code Desktop, "pane" opens one in the
    * app's own coding agent pane (specs/agents/coding-agent-ui.feature.md),
-   * "cli" runs `claude -p` headless, "pi" runs `pi -p` headless
+   * "pi" the same pane driven by Pi
    * (specs/agents/integration-with-pi-dev-agent.feature.md). Absent means
-   * desktop when Claude.app is installed, else pane when the Claude CLI is,
-   * else cli — the client resolves that from canOpenClaudeDesktop,
-   * canRunAgentPane and canRunPi.
+   * desktop when Claude.app is installed, else pane when the Claude CLI is —
+   * the client resolves that from canOpenClaudeDesktop, canRunAgentPane and
+   * canRunPi.
    */
   codeGenTarget?: CodeGenTarget;
   /**
@@ -193,15 +193,15 @@ export function normalizeCodeGen(value: unknown): boolean {
 /** The agents a code gen session can run in (specs/agents/claude.feature.md,
     specs/agents/coding-agent-ui.feature.md,
     specs/agents/integration-with-pi-dev-agent.feature.md). */
-export type CodeGenTarget = "desktop" | "cli" | "pane" | "pi";
+export type CodeGenTarget = "desktop" | "pane" | "pi";
 
-export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "cli", "pane", "pi"];
+export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "pane", "pi"];
 
 /** The targets as the error messages list them, in one place. */
-export const CODE_GEN_TARGET_LIST = "desktop, cli, pane or pi";
+export const CODE_GEN_TARGET_LIST = "desktop, pane or pi";
 
 /** Stored session target, or null when absent or unusable — the client
-    then picks desktop when Claude.app is installed, else pane, else cli. */
+    then picks desktop when Claude.app is installed, else the pane. */
 export function normalizeCodeGenTarget(value: unknown): CodeGenTarget | null {
   return (CODE_GEN_TARGETS as readonly unknown[]).includes(value) ? (value as CodeGenTarget) : null;
 }
