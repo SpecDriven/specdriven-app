@@ -579,61 +579,15 @@ aside header h1 {
   font-weight: 500;
 }
 
-/* The roadmap folder (specs/app/roadmap.feature.md): its pages sit above the
-   feature tree, under a quiet header with the "new page" button — a section,
-   not a folder row, since the folder itself is never a drop target. */
-.roadmap-list {
+/* The Roadmap tab (specs/app/roadmap.feature.md): the page list under its
+   "New page" button, scrolling on its own like the feature tree. */
+.roadmap-pages {
   display: flex;
   flex-direction: column;
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.roadmap-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.2rem 0.3rem;
-}
-
-/* The section header doubles as its twist: click to fold the pages away. */
-.roadmap-title {
+  gap: 1px;
   flex: 1;
-  display: block;
-  text-align: left;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.roadmap-title:hover {
-  color: var(--text-1);
-}
-
-.roadmap-title .twist {
-  letter-spacing: normal;
-}
-
-.roadmap-add {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 0.875rem;
-  line-height: 1;
-  padding: 0.1rem 0.3rem;
-  border-radius: var(--radius-sm);
-}
-
-.roadmap-add:hover {
-  color: var(--text-1);
-  background: var(--hover);
+  min-height: 4rem;
+  overflow-y: auto;
 }
 
 a.roadmap-entry {
@@ -3357,43 +3311,46 @@ aside header .collapse-btn {
   margin-left: auto;
 }
 
-/* ---- Primary nav under the search field ---- */
-.side-nav {
+/* ---- Sidebar tabs under the search field ---- */
+.side-tabs {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
 }
 
-.side-nav a,
-.side-nav button {
+.side-tabs button {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  height: 1.75rem;
-  padding: 0 0.6rem;
+  gap: 0.4rem;
+  height: 1.9rem;
+  padding: 0 0.5rem;
+  margin-bottom: -1px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-bottom: 2px solid transparent;
   background: none;
-  color: var(--text-1);
+  color: var(--text-2);
   font-size: 0.8125rem;
-  text-align: left;
-  text-decoration: none;
   cursor: pointer;
 }
 
-.side-nav a:hover,
-.side-nav button:hover {
-  background: var(--hover);
+.side-tabs button:hover {
+  color: var(--text-1);
 }
 
-.side-nav a.active,
-.side-nav button.active {
-  background: var(--accent-soft);
+.side-tabs button.active {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
   font-weight: 500;
 }
 
-.side-nav svg {
-  color: var(--text-2);
+/* A tab's panel takes the column the aside gives it, laid out like the aside
+   itself, so the tree (or the page list) is still the one scroll region. */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---- Section header with the filter ---- */
@@ -3945,8 +3902,7 @@ aside header .collapse-btn {
     padding-bottom: 0.55rem;
   }
 
-  .side-nav a,
-  .side-nav button {
+  .side-tabs button {
     height: 2.25rem;
   }
 
