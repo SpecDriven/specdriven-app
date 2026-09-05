@@ -1,9 +1,9 @@
 // Automates specs/agents/claude.spec.md: a named code gen session builds
-// one prompt from the selected specs and passes it to the Claude CLI to
-// execute and exit; an error code surfaces as an error for the error box.
-// And specs/roadmap/start-session-in-claude-code-desktop.md: the same prompt
-// can instead open as a new session in Claude Code Desktop — saved to disk,
-// with a short bootstrap prompt in the deep link that titles the session.
+// one prompt from the selected specs, for the agent it runs in. And
+// specs/roadmap/start-session-in-claude-code-desktop.md: the prompt opens as
+// a new session in Claude Code Desktop — saved to disk, with a short
+// bootstrap prompt in the deep link that titles the session; a failed launch
+// surfaces as an error for the error box.
 
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -14,12 +14,10 @@ import {
   buildSessionPrompt,
   claudeDesktopInstalled,
   claudeDesktopUrl,
-  CLAUDE_BIN,
   CLAUDE_DESKTOP_PROMPT_MAX,
   DESKTOP_AGENT,
   desktopOpener,
   launchDesktopSession,
-  runCodeGenSession,
   SESSION_TITLE_MAX,
   sessionTitle,
 } from "../src/server/agent";
@@ -73,47 +71,6 @@ describe("buildSessionPrompt", () => {
     const prompt = buildSessionPrompt("s", [{ ...SPECS[0]!, partial: true }, SPECS[1]!]);
     expect(prompt).toContain("## Spec: billing/quotes.feature.md (selected scenarios only)");
     expect(prompt).toContain("## Spec: search.feature.md\n");
-  });
-});
-
-describe("runCodeGenSession", () => {
-  test("runs in the code repo when the place names one", async () => {
-    const { runner, calls } = fakeRunner({ stdout: "done" });
-    await runCodeGenSession({ dataRepo: "/data", codeRepo: "/code" }, "s", SPECS, runner);
-    expect(calls[0]!.options?.cwd).toBe("/code");
-    expect(calls[0]!.args[1]).toContain("data repository at /data");
-  });
-
-  test("passes the prompt to the CLI in print mode, in the data dir", async () => {
-    const { runner, calls } = fakeRunner({ stdout: "done\n" });
-    const result = await runCodeGenSession("/data", "implement quotes", SPECS, runner);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.cmd).toBe(CLAUDE_BIN);
-    expect(calls[0]!.args[0]).toBe("-p");
-    expect(calls[0]!.args[1]).toBe(buildSessionPrompt("implement quotes", SPECS));
-    expect(calls[0]!.options?.cwd).toBe("/data");
-    expect(result).toEqual({ name: "implement quotes", output: "done\n" });
-  });
-
-  test("an error code becomes an error carrying the CLI's words", async () => {
-    const { runner } = fakeRunner({ exitCode: 2, stderr: "no API key\n" });
-    expect(runCodeGenSession("/data", "s", SPECS, runner)).rejects.toThrow(
-      "Claude exited with code 2: no API key",
-    );
-  });
-
-  test("a silent failure still reports the exit code", async () => {
-    const { runner } = fakeRunner({ exitCode: 1 });
-    expect(runCodeGenSession("/data", "s", SPECS, runner)).rejects.toThrow(
-      "Claude exited with code 1",
-    );
-  });
-
-  test("stdout stands in when stderr is empty", async () => {
-    const { runner } = fakeRunner({ exitCode: 3, stdout: "usage: claude …\n" });
-    expect(runCodeGenSession("/data", "s", SPECS, runner)).rejects.toThrow(
-      "Claude exited with code 3: usage: claude …",
-    );
   });
 });
 

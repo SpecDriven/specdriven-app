@@ -201,11 +201,9 @@ describe("Start session targets with the pane", () => {
     expect(CODE_GEN_TARGET_LABEL.pane).toBe("Coding agent pane");
     expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
     expect(resolveCodeGenTarget("pane", true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget("pane", false, false)).toBe("cli");
     expect(resolveCodeGenTarget(null, false, true)).toBe("pane");
     expect(resolveCodeGenTarget(null, true, true)).toBe("desktop");
     expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
-    expect(resolveCodeGenTarget("cli", true, true)).toBe("cli");
   });
 });
 

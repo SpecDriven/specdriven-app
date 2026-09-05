@@ -82,7 +82,7 @@ const FILES = [{ fileName: "quote.feature.md" }];
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
   expect(res.status).toBe(400);
-  expect((await res.json()).error).toContain("target must be desktop, cli, pane or pi");
+  expect((await res.json()).error).toContain("target must be desktop, pane or pi");
   expect(calls).toHaveLength(0);
 });
 
@@ -199,11 +199,11 @@ test("the state reports whether a session can run in Pi", async () => {
 test("the Run in choice round-trips through the settings file", async () => {
   const before = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await before.json()) as { codeGenTarget: unknown }).codeGenTarget).toBeNull();
-  const res = await api("/api/state", "PUT", { codeGenTarget: "cli" });
+  const res = await api("/api/state", "PUT", { codeGenTarget: "pane" });
   expect(res.status).toBe(200);
-  expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("cli");
-  expect((await readState(root)).codeGenTarget).toBe("cli");
+  expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("pane");
+  expect((await readState(root)).codeGenTarget).toBe("pane");
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, cli, pane or pi");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, pane or pi");
 });

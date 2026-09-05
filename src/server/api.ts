@@ -75,7 +75,6 @@ import {
   claudeDesktopAvailable,
   launchDesktopSession,
   piAvailable,
-  runCodeGenSession,
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
@@ -1068,9 +1067,9 @@ const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.de
 
 // Code gen session (specs/agents/claude.spec.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
-// subsets — and where to run; we build one prompt from them and either pass
-// it to the Claude CLI to execute and exit, or open it in Claude Code
-// Desktop. A failure comes back as an error for the client's error box.
+// subsets — and where to run; we build one prompt from them and either open
+// it in the app's own coding agent pane or in Claude Code Desktop. A failure
+// comes back as an error for the client's error box.
 const postAgentSession = withDataDir(async (dir, req) => {
   // The Settings switch is the gate, enforced here and not only in the UI:
   // switched off, nothing can hand a spec to Claude.
@@ -1080,8 +1079,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
-  // An absent target is the original CLI session, unchanged.
-  const target = body.target === undefined ? "cli" : normalizeCodeGenTarget(body.target);
+  const target = normalizeCodeGenTarget(body.target);
   if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
   const files = parseSessionFiles(body.files);
   if (files === null) {
@@ -1140,20 +1138,12 @@ const postAgentSession = withDataDir(async (dir, req) => {
       return chatError(e);
     }
   }
-  if (target === "desktop") {
-    if (!claudeDesktopAvailable()) {
-      return json({ error: "Claude Code Desktop not found — install Claude.app" }, 502);
-    }
-    try {
-      const sessionsDir = await sessionsDirectory(getAppRoot());
-      return json(await launchDesktopSession(place, name, specs, { sessionsDir }));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 502);
-    }
+  if (!claudeDesktopAvailable()) {
+    return json({ error: "Claude Code Desktop not found — install Claude.app" }, 502);
   }
-  if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
   try {
-    return json(await runCodeGenSession(place, name, specs));
+    const sessionsDir = await sessionsDirectory(getAppRoot());
+    return json(await launchDesktopSession(place, name, specs, { sessionsDir }));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
