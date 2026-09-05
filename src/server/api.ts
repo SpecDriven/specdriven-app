@@ -69,6 +69,7 @@ import {
 } from "./features";
 import type { FeatureView, ScenarioTarget } from "./features";
 import {
+  buildSessionPrompt,
   claudeAvailable,
   claudeDesktopAvailable,
   launchDesktopSession,
@@ -76,6 +77,24 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
+import {
+  ChatError,
+  answerPermission,
+  createChatSession,
+  endChatSession,
+  getChatCommands,
+  getChatEvents,
+  getChatSession,
+  interruptChat,
+  isFinalStatus,
+  listChatSessions,
+  normalizePermissionMode,
+  PERMISSION_MODES,
+  sendChatMessage,
+  setChatPermissionMode,
+  subscribeChat,
+} from "./agentChat";
+import type { ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
@@ -295,6 +314,9 @@ async function stateFields(state: SpecDrivenState) {
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: claudeDesktopAvailable(),
+    // Whether the Claude CLI is on PATH, so a session can run in the app's
+    // own coding agent pane (specs/agents/coding-agent-ui.feature.md).
+    canRunAgentPane: claudeAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
@@ -517,7 +539,7 @@ const putState: Handler = async (req) => {
   // choice of the session dialog, so the next dialog opens on it.
   if (body.codeGenTarget !== undefined) {
     const target = normalizeCodeGenTarget(body.codeGenTarget);
-    if (target === null) return json({ error: "codeGenTarget must be desktop or cli" }, 400);
+    if (target === null) return json({ error: "codeGenTarget must be desktop, cli or pane" }, 400);
     state.codeGenTarget = target;
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
@@ -1031,6 +1053,8 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
   return files;
 }
 
+const CLI_MISSING = "Claude CLI not found — install the `claude` command";
+
 // Code gen session (specs/agents/claude.spec.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
 // subsets — and where to run; we build one prompt from them and either pass
@@ -1047,7 +1071,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   if (!name) return json({ error: "name is required" }, 400);
   // An absent target is the original CLI session, unchanged.
   const target = body.target === undefined ? "cli" : normalizeCodeGenTarget(body.target);
-  if (target === null) return json({ error: "target must be desktop or cli" }, 400);
+  if (target === null) return json({ error: "target must be desktop, cli or pane" }, 400);
   const files = parseSessionFiles(body.files);
   if (files === null) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
@@ -1084,6 +1108,22 @@ const postAgentSession = withDataDir(async (dir, req) => {
     );
   }
   const place: SessionPlace = codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
+  // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
+  // live chat in the app; the client shows it and the conversation goes on.
+  if (target === "pane") {
+    if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+    try {
+      const meta = await createChatSession({
+        place,
+        name,
+        prompt: buildSessionPrompt(name, specs, place),
+        sessionsDir: await sessionsDirectory(getAppRoot()),
+      });
+      return json({ name, id: meta.id, target: "pane" });
+    } catch (e) {
+      return chatError(e);
+    }
+  }
   if (target === "desktop") {
     if (!claudeDesktopAvailable()) {
       return json({ error: "Claude Code Desktop not found — install Claude.app" }, 502);
@@ -1095,15 +1135,218 @@ const postAgentSession = withDataDir(async (dir, req) => {
       return json({ error: (e as Error).message }, 502);
     }
   }
-  if (!claudeAvailable()) {
-    return json({ error: "Claude CLI not found — install the `claude` command" }, 502);
-  }
+  if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
   try {
     return json(await runCodeGenSession(place, name, specs));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Coding agent pane (specs/agents/coding-agent-ui.feature.md): a live Claude
+// Code chat the app drives itself (src/server/agentChat.ts). Creating one
+// needs the data repo — for the code repo its project-settings.json names —
+// so it goes through withDataDir; everything after that addresses a session
+// by id. Events reach the client over a one-way NDJSON stream, the only kind
+// of push that works over both Bun.serve and Electron's app:// protocol.
+
+/** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
+async function agentPanePlace(dir: string): Promise<SessionPlace | Response> {
+  if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
+    return json({ error: "Code generation is switched off in Settings" }, 403);
+  }
+  if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  const { codeRepo } = await readProjectSettings(dir);
+  if (codeRepo !== null && !(await directoryExists(codeRepo))) {
+    return json(
+      { error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` },
+      400,
+    );
+  }
+  return codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
+}
+
+/** A ChatError carries its status; anything else is a 500 with its words. */
+function chatError(e: unknown): Response {
+  if (e instanceof ChatError) return json({ error: e.message }, e.status);
+  return json({ error: (e as Error).message }, 500);
+}
+
+const postAgentChat = withDataDir(async (dir, req) => {
+  const place = await agentPanePlace(dir);
+  if (place instanceof Response) return place;
+  const body = (await req.json().catch(() => ({}))) as {
+    name?: unknown;
+    prompt?: unknown;
+    permissionMode?: unknown;
+  };
+  const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Coding agent session";
+  const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt : undefined;
+  let permissionMode: ReturnType<typeof normalizePermissionMode> = null;
+  if (body.permissionMode !== undefined) {
+    permissionMode = normalizePermissionMode(body.permissionMode);
+    if (permissionMode === null) return json({ error: MODE_ERROR }, 400);
+  }
+  try {
+    const meta = await createChatSession({
+      place,
+      name,
+      ...(prompt ? { prompt } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+      sessionsDir: await sessionsDirectory(getAppRoot()),
+    });
+    return json(meta);
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
+const MODE_ERROR = `permissionMode must be one of ${PERMISSION_MODES.join(", ")}`;
+
+const getAgentChats: Handler = () => json({ sessions: listChatSessions() });
+
+const getAgentChat: Handler = (_req, params) => {
+  const meta = getChatSession(params.id!);
+  if (!meta) return json({ error: "coding agent session not found" }, 404);
+  return json({ meta, commands: getChatCommands(meta.id), events: getChatEvents(meta.id) });
+};
+
+/** Blank lines keep the connection under Bun.serve's idle timeout. */
+const HEARTBEAT_MS = 20_000;
+
+// The event stream: the backlog after `after`, then live events, one JSON
+// object per line, until the session reaches a final status. A client that
+// lost the stream reopens it with the last sequence it saw.
+const getAgentChatEvents: Handler = (req, params) => {
+  const id = params.id!;
+  if (!getChatSession(id)) return json({ error: "coding agent session not found" }, 404);
+  const after = Number(new URL(req.url).searchParams.get("after") ?? "0") || 0;
+  const encoder = new TextEncoder();
+  let unsubscribe: (() => void) | null = null;
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const stop = () => {
+    unsubscribe?.();
+    unsubscribe = null;
+    if (timer) clearInterval(timer);
+    timer = null;
+  };
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let open = true;
+      const close = () => {
+        if (!open) return;
+        open = false;
+        stop();
+        try {
+          controller.close();
+        } catch {
+          // already closed by the client
+        }
+      };
+      const send = (event: ChatEvent) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        } catch {
+          close();
+          return;
+        }
+        if (event.kind === "status" && isFinalStatus(event.status)) close();
+      };
+      for (const event of getChatEvents(id, after)) send(event);
+      const meta = getChatSession(id);
+      if (!open || !meta || isFinalStatus(meta.status)) {
+        close();
+        return;
+      }
+      unsubscribe = subscribeChat(id, send);
+      timer = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode("\n"));
+        } catch {
+          close();
+        }
+      }, HEARTBEAT_MS);
+    },
+    cancel() {
+      stop();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
+};
+
+const postAgentChatMessage: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { text?: unknown };
+  if (typeof body.text !== "string") return json({ error: "text is required" }, 400);
+  try {
+    return json({ event: sendChatMessage(params.id!, body.text) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const postAgentChatPermission: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as Partial<PermissionAnswer> & {
+    updatedInput?: unknown;
+  };
+  if (typeof body.requestId !== "string") return json({ error: "requestId is required" }, 400);
+  if (body.behavior !== "allow" && body.behavior !== "deny") {
+    return json({ error: "behavior must be allow or deny" }, 400);
+  }
+  const updatedInput =
+    body.updatedInput && typeof body.updatedInput === "object" && !Array.isArray(body.updatedInput)
+      ? (body.updatedInput as Record<string, unknown>)
+      : undefined;
+  try {
+    answerPermission(params.id!, {
+      requestId: body.requestId,
+      behavior: body.behavior,
+      ...(typeof body.message === "string" ? { message: body.message } : {}),
+      ...(updatedInput ? { updatedInput } : {}),
+      remember: body.remember === true,
+    });
+    return json({ ok: true });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const postAgentChatInterrupt: Handler = async (_req, params) => {
+  try {
+    await interruptChat(params.id!);
+    return json({ ok: true });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const putAgentChatMode: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { permissionMode?: unknown };
+  const mode = normalizePermissionMode(body.permissionMode);
+  if (mode === null) return json({ error: MODE_ERROR }, 400);
+  try {
+    await setChatPermissionMode(params.id!, mode);
+    return json({ meta: getChatSession(params.id!) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const deleteAgentChat: Handler = async (_req, params) => {
+  try {
+    await endChatSession(params.id!);
+    return json({ ok: true });
+  } catch (e) {
+    return chatError(e);
+  }
+};
 
 // Native folder chooser (specs/app-start.spec.md "picking the data directory
 // with the native folder chooser"): opens the OS dialog on the machine the
@@ -1159,6 +1402,15 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/agent/session", postAgentSession],
+  ["POST", "/api/agent/chat", postAgentChat],
+  ["GET", "/api/agent/chat", getAgentChats],
+  ["GET", "/api/agent/chat/:id", getAgentChat],
+  ["GET", "/api/agent/chat/:id/events", getAgentChatEvents],
+  ["POST", "/api/agent/chat/:id/message", postAgentChatMessage],
+  ["POST", "/api/agent/chat/:id/permission", postAgentChatPermission],
+  ["POST", "/api/agent/chat/:id/interrupt", postAgentChatInterrupt],
+  ["PUT", "/api/agent/chat/:id/mode", putAgentChatMode],
+  ["DELETE", "/api/agent/chat/:id", deleteAgentChat],
 ];
 
 export interface ApiMatch {

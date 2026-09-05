@@ -50,6 +50,8 @@ import {
   Trash2,
   UserRound,
   X,
+  ArrowDown,
+  Bot,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
@@ -63,6 +65,15 @@ import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } fr
 import { MarkdownEditor } from "./MarkdownEditor";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
+import { AgentPane } from "./AgentPane";
+import {
+  AGENT_DEFAULT_WIDTH,
+  AGENT_MIN_WIDTH,
+  agentChat,
+  clampAgentWidth,
+  defaultSessionName,
+  useAgentChat,
+} from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
 import {
   EMPTY_LINK_DRAFT,
@@ -393,46 +404,38 @@ function writeRecent(list: RecentEntry[]) {
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
 // Code gen sessions (specs/agents/claude.feature.md): where "Start session"
-// runs — a new session in Claude Code Desktop, or the Claude CLI headless.
+// runs — a new session in Claude Code Desktop, the app's own coding agent
+// pane (specs/agents/coding-agent-ui.feature.md), or the Claude CLI headless.
 export type { CodeGenTarget };
 
 /** The stored target as the server reports it; anything else is "not chosen". */
 export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "cli" ? value : null;
+  return value === "desktop" || value === "cli" || value === "pane" ? value : null;
 }
 
 export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
   desktop: "Claude Code Desktop",
+  pane: "Coding agent pane",
   cli: "Claude CLI (headless)",
 };
 
 /** The target a session dialog opens on: the remembered choice when it is
-    still usable, else desktop when Claude.app is installed, else cli. */
+    still usable, else desktop when Claude.app is installed, else the pane
+    when the Claude CLI is, else cli. */
 export function resolveCodeGenTarget(
   stored: string | null | undefined,
   canOpenDesktop: boolean,
+  canRunPane = false,
 ): CodeGenTarget {
   if (stored === "cli") return "cli";
   if (stored === "desktop" && canOpenDesktop) return "desktop";
-  return canOpenDesktop ? "desktop" : "cli";
+  if (stored === "pane" && canRunPane) return "pane";
+  return canOpenDesktop ? "desktop" : canRunPane ? "pane" : "cli";
 }
 
-/**
- * The name a session gets when the user types none —
- * "Session 2026-09-04 15:30:30 PDT" (specs/launch-ai-agent-session.feature.md
- * step 8): local time, with the zone's short name so the log reads the same
- * from anywhere.
- */
-export function defaultSessionName(date: Date = new Date()): string {
-  const two = (n: number) => String(n).padStart(2, "0");
-  const stamp =
-    `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ` +
-    `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
-  const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
-    .formatToParts(date)
-    .find((part) => part.type === "timeZoneName")?.value;
-  return zone ? `Session ${stamp} ${zone}` : `Session ${stamp}`;
-}
+// The default session name lives with the pane's helpers now; re-exported
+// here since the session dialog and its tests know it by this door.
+export { defaultSessionName };
 
 /** Tracks a media query live, so rotating a tablet flips the layout. */
 function useMediaQuery(query: string): boolean {
@@ -730,6 +733,17 @@ export function App() {
   const [canOpenClaudeDesktop, setCanOpenClaudeDesktop] = useState(false);
   /** The last "Run in" choice, remembered in settings; null means not chosen yet. */
   const [codeGenTarget, setCodeGenTarget] = useState<CodeGenTarget | null>(null);
+  /** Whether the Claude CLI is on PATH, so a session can run in the coding
+      agent pane (specs/agents/coding-agent-ui.feature.md). */
+  const [canRunAgentPane, setCanRunAgentPane] = useState(false);
+  // The coding agent pane's own state (src/frontend/agentChat.ts): open,
+  // width, sessions. Restored once on boot — the pane, its width and the
+  // last session come back the way they were left.
+  const pane = useAgentChat();
+  const [resizingAgent, setResizingAgent] = useState(false);
+  useEffect(() => {
+    void agentChat.restore();
+  }, []);
   // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — published scenarios stay immutable until the
   // Settings switch turns deletion on.
@@ -919,6 +933,8 @@ export function App() {
         setCodeGen(state.codeGen);
       }
       setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
+      setCanRunAgentPane(Boolean(state.canRunAgentPane));
+      agentChat.setAvailable(Boolean(state.canRunAgentPane));
       setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
       if (typeof state.deletePublished === "boolean") {
         setDeletePublished(state.deletePublished);
@@ -1463,7 +1479,7 @@ export function App() {
   const selectionLabel = describeSelection(sessionFiles());
 
   /** The target the next session dialog opens on. */
-  const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop);
+  const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, canRunAgentPane);
 
   // Code gen session (specs/agents/claude.spec.md): with specs or single
   // scenarios selected, "Start session" asks for a name — prefilled with a
@@ -1487,29 +1503,43 @@ export function App() {
     };
     let sessionName: string;
     let target: CodeGenTarget;
-    if (canOpenClaudeDesktop) {
+    // Every place the session can run here; a choice only when there is one.
+    const repoWord = codeRepo ? "the code repo" : "the data repo";
+    const choices = [
+      ...(canOpenClaudeDesktop
+        ? [
+            {
+              value: "desktop",
+              label: CODE_GEN_TARGET_LABEL.desktop,
+              hint: `Opens a new session in the Claude app, on ${repoWord}`,
+            },
+          ]
+        : []),
+      ...(canRunAgentPane
+        ? [
+            {
+              value: "pane",
+              label: CODE_GEN_TARGET_LABEL.pane,
+              hint: `Chats with Claude in a pane here, on ${repoWord}`,
+            },
+          ]
+        : []),
+      {
+        value: "cli",
+        label: CODE_GEN_TARGET_LABEL.cli,
+        hint: "Runs claude -p here and shows its output when it exits",
+      },
+    ];
+    if (choices.length > 1) {
       const picked = await promptWithChoice({
         ...dialog,
         choicesLabel: "Run in",
-        choices: [
-          {
-            value: "desktop",
-            label: CODE_GEN_TARGET_LABEL.desktop,
-            hint: codeRepo
-              ? "Opens a new session in the Claude app, on the code repo"
-              : "Opens a new session in the Claude app, on the data repo",
-          },
-          {
-            value: "cli",
-            label: CODE_GEN_TARGET_LABEL.cli,
-            hint: "Runs claude -p here and shows its output when it exits",
-          },
-        ],
+        choices,
         initialChoice: sessionTarget,
       });
       if (picked === null || !picked.text.trim()) return;
       sessionName = picked.text.trim();
-      target = picked.choice === "cli" ? "cli" : "desktop";
+      target = readCodeGenTarget(picked.choice) ?? "cli";
       // Remembered, so the next dialog opens on the same choice.
       if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
     } else {
@@ -1522,7 +1552,9 @@ export function App() {
     setSessionNotice(
       target === "desktop"
         ? `Opening "${sessionName}" in Claude Code Desktop…`
-        : `Session "${sessionName}" running…`,
+        : target === "pane"
+          ? `Opening "${sessionName}" in the coding agent pane…`
+          : `Session "${sessionName}" running…`,
     );
     try {
       const res = await fetch("/api/agent/session", {
@@ -1536,6 +1568,12 @@ export function App() {
         // whether the prompt is sent or only prefilled is the app's call.
         setSessionNotice(`Session "${sessionName}" opened in Claude Code Desktop.`);
         setSpecSelection(new Map());
+      } else if (res.ok && target === "pane") {
+        // The chat is up with the prompt as its first turn; show it.
+        setSessionNotice(`Session "${sessionName}" opened in the coding agent pane.`);
+        setSpecSelection(new Map());
+        await agentChat.openSession(data.id as string);
+        agentChat.openPane();
       } else if (res.ok) {
         setSessionNotice(`Session "${sessionName}" finished.`);
         setSpecSelection(new Map());
@@ -2666,6 +2704,8 @@ export function App() {
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
     setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
+    setCanRunAgentPane(Boolean(data.canRunAgentPane));
+    agentChat.setAvailable(Boolean(data.canRunAgentPane));
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
@@ -3486,6 +3526,7 @@ export function App() {
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
+    if (compact && pane.open) return agentChat.closePane();
     const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
     if (editing && !fromSidebar) {
       editorRef.current.back();
@@ -3511,6 +3552,16 @@ export function App() {
       group: "Navigate",
       when: () => !quiet,
       run: () => setSheetOpen(true),
+    },
+    // The right pane on "]", as the left one is on "["
+    // (specs/agents/coding-agent-ui.feature.md).
+    {
+      id: "agent-pane",
+      keys: "]",
+      label: pane.open ? "Close the coding agent pane" : "Open the coding agent pane",
+      group: "Navigate",
+      when: () => !quiet && codeGen && canRunAgentPane,
+      run: () => agentChat.togglePane(),
     },
     {
       id: "go-home",
@@ -3755,6 +3806,15 @@ export function App() {
       : []),
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
+    shortcutAction("agent-pane", <Bot size={14} />),
+    ...(codeGen && canRunAgentPane
+      ? [
+          action("agent-new", "New coding agent session", <Bot size={14} />, () => {
+            agentChat.setActive(null);
+            agentChat.openPane();
+          }),
+        ]
+      : []),
     shortcutAction("settings", <Settings size={14} />),
     shortcutAction(
       "sidebar",
@@ -4049,10 +4109,13 @@ export function App() {
     savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
+  // The coding agent pane shows only while code gen is on at all.
+  const paneShown = pane.open && codeGen;
+
   return (
     <main
-      className={`layout${resizingSidebar ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}`}
-      style={{ "--sidebar-w": `${sidebarWidth}px` } as CSSProperties}
+      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}`}
+      style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
     >
       {compact && (
         /* One pane: a top bar stands in for the sidebar's header — the menu
@@ -4093,6 +4156,17 @@ export function App() {
           >
             <Search size={18} aria-hidden="true" />
           </button>
+          {codeGen && canRunAgentPane && (
+            <button
+              type="button"
+              className="ibtn"
+              aria-label="Coding agent pane"
+              aria-pressed={paneShown}
+              onClick={() => agentChat.togglePane()}
+            >
+              <Bot size={18} aria-hidden="true" />
+            </button>
+          )}
           {/* Demo mode: the sandbox note sits under the bar here, since a
               phone visitor may never open the drawer that holds it. */}
           {demo && <div className="demo-banner topbar-banner">Demo — edits reset on refresh</div>}
@@ -4150,6 +4224,19 @@ export function App() {
             </Tooltip>
           )}
           <div className="rail-bottom">
+            {codeGen && canRunAgentPane && (
+              <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
+                <button
+                  type="button"
+                  className={`rail-btn${paneShown ? " active" : ""}`}
+                  aria-label="Coding agent pane"
+                  aria-pressed={paneShown}
+                  onClick={() => agentChat.togglePane()}
+                >
+                  <Bot size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip label="Expand the sidebar" keys="[">
               <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
                 <PanelLeftOpen size={16} aria-hidden="true" />
@@ -4291,6 +4378,19 @@ export function App() {
               </button>
             )}
           </div>
+          {codeGen && canRunAgentPane && (
+            <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
+              <button
+                type="button"
+                className={`ibtn${paneShown ? " active" : ""}`}
+                aria-label="Coding agent pane"
+                aria-pressed={paneShown}
+                onClick={() => agentChat.togglePane()}
+              >
+                <Bot size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip label={compact ? "Close the menu" : "Collapse the sidebar"} keys="[">
             <button
               type="button"
@@ -5659,6 +5759,52 @@ export function App() {
         )}
         </ErrorBoundary>
       </section>
+      {/* Coding agent pane (specs/agents/coding-agent-ui.feature.md): a third
+          column right of the editor, resized from its left edge the way the
+          sidebar is from its right; on one-pane screens it covers the page. */}
+      {paneShown && !compact && (
+        <div
+          className="agent-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the coding agent pane"
+          aria-valuemin={AGENT_MIN_WIDTH}
+          aria-valuenow={pane.width}
+          tabIndex={0}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setResizingAgent(true);
+          }}
+          onPointerMove={(e) => {
+            if (resizingAgent) {
+              agentChat.setWidth(clampAgentWidth(window.innerWidth - e.clientX, window.innerWidth), false);
+            }
+          }}
+          onPointerUp={(e) => {
+            if (!resizingAgent) return;
+            setResizingAgent(false);
+            agentChat.setWidth(clampAgentWidth(window.innerWidth - e.clientX, window.innerWidth));
+          }}
+          onLostPointerCapture={() => setResizingAgent(false)}
+          onDoubleClick={() => agentChat.setWidth(AGENT_DEFAULT_WIDTH)}
+          onKeyDown={(e) => {
+            // Left widens: the pane grows toward the editor.
+            const delta = e.key === "ArrowLeft" ? 16 : e.key === "ArrowRight" ? -16 : 0;
+            if (delta === 0) return;
+            e.preventDefault();
+            agentChat.setWidth(clampAgentWidth(pane.width + delta, window.innerWidth));
+          }}
+        />
+      )}
+      {paneShown && (
+        <AgentPane
+          compact={compact}
+          codeRepo={codeRepo}
+          dataRepo={dataRepo}
+          onClose={() => agentChat.closePane()}
+        />
+      )}
       {/* specs/crud-feature.spec.md "Publish feature with merge conflict": a
           dialog rather than a strip appended to the page, so the two sides
           never push the resolutions out of view. The dialog is capped to the

@@ -57,7 +57,10 @@ async function build(platforms: Platform[]): Promise<void> {
 
   console.log("Building main process…");
   await rm("dist/electron", { recursive: true, force: true });
-  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
+  // The Claude Agent SDK's optional per-platform binaries stay out: the app
+  // runs the developer's own `claude` (src/server/agentChat.ts).
+  const sdkBinaries = "@anthropic-ai/claude-agent-sdk-*";
+  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
 
   console.log(`Packaging with electron-builder (${platforms.join(", ")})…`);
   await $`bunx electron-builder ${platforms.map((p) => `--${p}`)}`;
