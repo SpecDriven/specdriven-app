@@ -26,6 +26,7 @@
   --accent-hover: light-dark(#4f5bc4, #7f89ee);
   --accent-strong: light-dark(#4a55b8, #8a93f0); /* accent that stays readable as small text */
   --accent-soft: light-dark(rgba(94, 106, 210, 0.12), rgba(110, 121, 230, 0.18));
+  --accent-mark: light-dark(rgba(94, 106, 210, 0.28), rgba(110, 121, 230, 0.4)); /* search marks under body text */
   --on-accent: #ffffff;
   --ring: light-dark(rgba(94, 106, 210, 0.4), rgba(110, 121, 230, 0.5));
 
@@ -1499,6 +1500,54 @@ button.link:disabled {
 
 .md-editor .md-textarea:read-only {
   color: var(--text-2);
+}
+
+/* Search marks in the source (specs/search.feature.md): a mirror of the
+   textarea's text sits behind it — the same font, padding and wrapping, its
+   ink transparent — painting only the marks; the textarea over it goes
+   transparent so they show through. Its size follows the textarea's client
+   box from script, so a scrollbar narrows both alike. Marks carry no
+   horizontal padding: a pixel either side would push the mirror's text out
+   of step with the textarea's. */
+.md-write {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.md-write .md-textarea {
+  position: relative; /* paints over the mirror */
+}
+
+.md-write.highlighted .md-textarea {
+  background: transparent;
+}
+
+.md-highlights {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0.6rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: transparent;
+  pointer-events: none;
+}
+
+.md-highlights mark,
+.md-editor .md-preview mark {
+  padding: 0;
+  border-radius: 2px;
+  background: var(--accent-mark);
+  color: inherit;
 }
 
 /* Typography below is shared by every rendered-markdown surface (the editor's
