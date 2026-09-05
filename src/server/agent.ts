@@ -1,9 +1,19 @@
 // Claude agent integration (specs/agents/claude.spec.md): a named code gen
-// session takes the selected specs, builds one prompt from them and hands it
-// to the Claude CLI in print mode (`claude -p …`), which executes and exits.
+// session takes the selected specs and builds one prompt from them. Two
+// targets: the Claude CLI in print mode (`claude -p …`), which executes and
+// exits; or Claude Code Desktop, opened on the data repo through its
+// `claude://code/new` deep link with a short bootstrap prompt that titles the
+// session and points it at the full prompt saved on disk. Node APIs only —
+// this module also runs under Electron (src/server/run.ts).
 
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { writeTextFile } from "./fsx";
 import { run, which } from "./run";
 import type { RunOptions, RunResult } from "./run";
+import { settingsDirectory } from "./state";
 
 /** The Claude CLI binary the session shells out to. */
 export const CLAUDE_BIN = "claude";
@@ -48,6 +58,11 @@ export function buildSessionPrompt(name: string, specs: SpecInput[]): string {
   return lines.join("\n") + "\n";
 }
 
+/** The CLI's own words for a failed run, for the client's error box. */
+function failureDetail(result: RunResult): string {
+  return result.stderr.trim() || result.stdout.trim();
+}
+
 /**
  * Run one code gen session: prompt in, `claude -p` out. A non-zero exit
  * becomes an Error whose message carries the CLI's own words, for the
@@ -62,7 +77,7 @@ export async function runCodeGenSession(
   const prompt = buildSessionPrompt(name, specs);
   const result = await runner(CLAUDE_BIN, ["-p", prompt], { cwd: dir });
   if (result.exitCode !== 0) {
-    const detail = result.stderr.trim() || result.stdout.trim();
+    const detail = failureDetail(result);
     throw new Error(
       detail
         ? `Claude exited with code ${result.exitCode}: ${detail}`
@@ -70,4 +85,199 @@ export async function runCodeGenSession(
     );
   }
   return { name, output: result.stdout };
+}
+
+// ---------------------------------------------------------------------------
+// Claude Code Desktop (specs/roadmap/start-session-in-claude-code-desktop.md)
+//
+// Claude.app registers `claude://`; its router's `code` host has a `/new`
+// route taking `q` (the prompt, sliced to CLAUDE_DESKTOP_PROMPT_MAX chars)
+// and repeatable `folder`. Read out of the shipped bundle (1.46388.3), not
+// from docs, so version-coupled. The full prompt can outgrow the cap, and
+// the `resume` route drops a CLI-given session name — so the prompt goes to
+// a file, and a short bootstrap prompt tells the session to title itself
+// (through the desktop's own set_session_title tool) and read that file.
+
+/** Claude.app's router slices `q` to this many chars; the bootstrap stays far below. */
+export const CLAUDE_DESKTOP_PROMPT_MAX = 14336;
+/** The agent recorded in a desktop session's session.json. */
+export const DESKTOP_AGENT = "claude-code-desktop";
+/** Session records live in <settings dir>/sessions/<id>/ — beside the
+    settings file, never inside the data repo, which is pushed to git. */
+export const SESSIONS_SUBDIR = "sessions";
+/** Longest session name the title instruction carries. */
+export const SESSION_TITLE_MAX = 120;
+
+/** Where the local session records go for an app root: <settings dir>/sessions. */
+export async function sessionsDirectory(rootDir: string): Promise<string> {
+  return join(await settingsDirectory(rootDir), SESSIONS_SUBDIR);
+}
+
+/**
+ * The name as it can sit inside the quoted title instruction: one line,
+ * control characters gone, quotes and backslashes escaped, cut at
+ * SESSION_TITLE_MAX.
+ */
+export function sessionTitle(name: string): string {
+  const oneLine = name
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return oneLine.slice(0, SESSION_TITLE_MAX).replace(/[\\"]/g, "\\$&");
+}
+
+/**
+ * The short `q` prompt: the session name, the title instruction, then a
+ * pointer to the full prompt on disk. Never starts with "/" — the router
+ * rejects a `q` that looks like a slash command.
+ */
+export function buildDesktopBootstrapPrompt(name: string, promptPath: string): string {
+  const title = sessionTitle(name);
+  const lines = [
+    `SpecDriven code gen session: ${title}`,
+    "",
+    `First set this session's title to "${title}".`,
+    "",
+    `Then read the session prompt at ${promptPath} and implement the specifications it contains.`,
+    "Work in the current directory and exit when done.",
+  ];
+  const text = lines.join("\n") + "\n";
+  // The first line is a fixed literal, so this only guards a future edit.
+  return text.startsWith("/") ? ` ${text}` : text;
+}
+
+/**
+ * claude://code/new?q=…&folder=… — encodeURIComponent rather than
+ * URLSearchParams, whose "+" for spaces is not what every reader decodes.
+ */
+export function claudeDesktopUrl(bootstrap: string, folder: string): string {
+  return `claude://code/new?q=${encodeURIComponent(bootstrap)}&folder=${encodeURIComponent(folder)}`;
+}
+
+/** The OS command that hands a url to the app registered for its scheme. */
+export function desktopOpener(platform: string = process.platform): {
+  cmd: string;
+  args: (url: string) => string[];
+} {
+  switch (platform) {
+    case "darwin":
+      return { cmd: "open", args: (url) => [url] };
+    case "linux":
+      return { cmd: "xdg-open", args: (url) => [url] };
+    case "win32":
+      // cmd.exe treats "&" in the url as a command separator and execFile
+      // cannot quote it away — escape as "^&" (or use
+      // `rundll32 url.dll,FileProtocolHandler`) before Claude Code Desktop
+      // is offered on Windows; claudeDesktopInstalled keeps it off for now.
+      return { cmd: "cmd", args: (url) => ["/c", "start", "", url] };
+    default:
+      throw new Error(`no way to open a url on ${platform}`);
+  }
+}
+
+/**
+ * Whether Claude.app is installed where macOS puts it (/Applications or
+ * ~/Applications). Other platforms answer false for now — the deep link
+ * was verified on macOS only.
+ */
+export function claudeDesktopInstalled(
+  platform: string = process.platform,
+  exists: (path: string) => boolean = existsSync,
+  home: string = homedir(),
+): boolean {
+  if (platform !== "darwin") return false;
+  return exists("/Applications/Claude.app") || exists(join(home, "Applications", "Claude.app"));
+}
+
+// Injection seams (the folderChooser pattern): tests and the desktop shell
+// swap the availability probe and the opener runner; null restores the
+// defaults.
+let availability: (() => boolean) | null = null;
+let desktopRunner: Runner | null = null;
+
+export function setDesktopAvailability(fn: (() => boolean) | null): (() => boolean) | null {
+  const previous = availability;
+  availability = fn;
+  return previous;
+}
+
+export function claudeDesktopAvailable(): boolean {
+  return availability ? availability() : claudeDesktopInstalled();
+}
+
+export function setDesktopRunner(runner: Runner | null): Runner | null {
+  const previous = desktopRunner;
+  desktopRunner = runner;
+  return previous;
+}
+
+/** The local, non-git record of a desktop session
+    (specs/launch-ai-agent-session.feature.md "Coding Session Entity"). */
+export interface SessionRecord {
+  id: string;
+  name: string;
+  /** ISO 8601 start time. */
+  startedAt: string;
+  agent: typeof DESKTOP_AGENT;
+  dataRepo: string;
+  specs: { fileName: string; partial: boolean }[];
+}
+
+export interface DesktopSessionResult {
+  name: string;
+  id: string;
+  /** Where the full prompt was written — the bootstrap points Claude here. */
+  promptPath: string;
+}
+
+export interface DesktopLaunchOptions {
+  /** <settings dir>/sessions — see sessionsDirectory. */
+  sessionsDir: string;
+  /** Default: the injected desktop runner, then run. */
+  runner?: Runner;
+  platform?: string;
+  /** Default: a fresh uuid. */
+  id?: string;
+  /** Default: now. */
+  now?: Date;
+}
+
+/**
+ * Open one code gen session in Claude Code Desktop: write the full prompt
+ * and a session record under <sessionsDir>/<id>/, then hand the deep link to
+ * the OS. A failed opener becomes an Error carrying its words.
+ */
+export async function launchDesktopSession(
+  dir: string,
+  name: string,
+  specs: SpecInput[],
+  options: DesktopLaunchOptions,
+): Promise<DesktopSessionResult> {
+  const id = options.id ?? randomUUID();
+  const now = options.now ?? new Date();
+  const runner = options.runner ?? desktopRunner ?? run;
+  const sessionDir = join(options.sessionsDir, id);
+  const promptPath = join(sessionDir, "prompt.md");
+  await writeTextFile(promptPath, buildSessionPrompt(name, specs));
+  const record: SessionRecord = {
+    id,
+    name,
+    startedAt: now.toISOString(),
+    agent: DESKTOP_AGENT,
+    dataRepo: dir,
+    specs: specs.map((s) => ({ fileName: s.fileName, partial: s.partial === true })),
+  };
+  await writeTextFile(join(sessionDir, "session.json"), JSON.stringify(record, null, 2) + "\n");
+  const url = claudeDesktopUrl(buildDesktopBootstrapPrompt(name, promptPath), dir);
+  const opener = desktopOpener(options.platform);
+  const result = await runner(opener.cmd, opener.args(url), { cwd: dir });
+  if (result.exitCode !== 0) {
+    const detail = failureDetail(result);
+    throw new Error(
+      detail
+        ? `Could not open Claude Code Desktop: ${detail}`
+        : `Could not open Claude Code Desktop (${opener.cmd} exited with code ${result.exitCode})`,
+    );
+  }
+  return { name, id, promptPath };
 }

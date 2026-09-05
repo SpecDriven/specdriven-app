@@ -3,7 +3,7 @@
 // native prompt() at all (specs/desktop-app.spec.md "Dialogs"), and the
 // native boxes never matched the design system anyway.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -21,6 +21,30 @@ export interface PromptOptions {
    */
   browse?: () => Promise<string | null>;
   browseLabel?: string;
+  /**
+   * A radio group under the field (specs/agents/claude.feature.md "Run in"):
+   * one of a few ways to act on the text. Read back through
+   * promptWithChoice; plain prompt ignores which one was picked.
+   */
+  choices?: PromptChoice[];
+  /** The group's legend, e.g. "Run in". */
+  choicesLabel?: string;
+  /** Preselected value; the first choice when absent or unknown. */
+  initialChoice?: string;
+}
+
+export interface PromptChoice {
+  label: string;
+  value: string;
+  /** Secondary line under the label. */
+  hint?: string;
+}
+
+/** What a prompt with choices resolves to: the text and the picked value. */
+export interface PromptResult {
+  text: string;
+  /** null when the prompt offered no choices. */
+  choice: string | null;
 }
 
 export interface ConfirmOptions {
@@ -30,13 +54,23 @@ export interface ConfirmOptions {
 }
 
 type Request =
-  | { kind: "prompt"; opts: PromptOptions; resolve: (value: string | null) => void }
+  | { kind: "prompt"; opts: PromptOptions; resolve: (value: PromptResult | null) => void }
   | { kind: "confirm"; opts: ConfirmOptions; resolve: (value: boolean) => void };
+
+/** The choice a prompt starts on: the initial one if offered, else the first. */
+export function initialChoiceOf(opts: PromptOptions): string | null {
+  const choices = opts.choices ?? [];
+  if (choices.length === 0) return null;
+  const wanted = choices.find((c) => c.value === opts.initialChoice);
+  return (wanted ?? choices[0]!).value;
+}
 
 /**
  * Returns `prompt`/`confirm` that resolve like their window counterparts
  * (null / false on cancel), plus the `modal` element to render and a
  * `modalOpen` flag for keyboard handlers that must idle behind a dialog.
+ * `promptWithChoice` is `prompt` for a dialog with a radio group: it
+ * resolves the text together with the picked value.
  */
 export function useModalPrompts() {
   const [request, setRequest] = useState<Request | null>(null);
@@ -47,8 +81,11 @@ export function useModalPrompts() {
     setRequest(req);
   };
 
-  const prompt = (opts: PromptOptions): Promise<string | null> =>
+  const promptWithChoice = (opts: PromptOptions): Promise<PromptResult | null> =>
     new Promise((resolve) => open({ kind: "prompt", opts, resolve }));
+
+  const prompt = (opts: PromptOptions): Promise<string | null> =>
+    promptWithChoice(opts).then((result) => (result === null ? null : result.text));
 
   const confirm = (opts: ConfirmOptions): Promise<boolean> =>
     new Promise((resolve) => open({ kind: "confirm", opts, resolve }));
@@ -58,7 +95,42 @@ export function useModalPrompts() {
     <ModalDialog key={seq} request={request} close={() => setRequest(null)} />
   ) : null;
 
-  return { modal, modalOpen: request !== null, prompt, confirm };
+  return { modal, modalOpen: request !== null, prompt, promptWithChoice, confirm };
+}
+
+/** The radio group of a prompt with choices — pure, so tests can render it. */
+export function PromptChoices({
+  label,
+  choices,
+  value,
+  onChange,
+}: {
+  label?: string;
+  choices: PromptChoice[];
+  value: string | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <fieldset className="choice-group" role="radiogroup" aria-label={label}>
+      {label && <legend>{label}</legend>}
+      {choices.map((c) => (
+        <label key={c.value} className="choice">
+          <input
+            type="radio"
+            name="modal-choice"
+            value={c.value}
+            aria-label={c.label}
+            checked={c.value === value}
+            onChange={() => onChange(c.value)}
+          />
+          <span className="choice-label">
+            {c.label}
+            {c.hint && <span className="hint">{c.hint}</span>}
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  );
 }
 
 function ModalDialog({ request, close }: { request: Request; close: () => void }) {
@@ -66,7 +138,18 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
   const [draft, setDraft] = useState(
     request.kind === "prompt" ? (request.opts.initial ?? "") : "",
   );
+  const [choice, setChoice] = useState<string | null>(
+    request.kind === "prompt" ? initialChoiceOf(request.opts) : null,
+  );
   const [browsing, setBrowsing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // A prefilled draft (a suggested session name) is there to be replaced:
+  // selected once the dialog is up, so typing overwrites it. Once only —
+  // clicking back into the field later must not grab the whole text again.
+  useEffect(() => {
+    if (request.kind === "prompt" && request.opts.initial) inputRef.current?.select();
+  }, [request]);
 
   const browse = async () => {
     if (request.kind !== "prompt" || !request.opts.browse) return;
@@ -87,7 +170,7 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
   const confirm = () => {
     if (request.kind === "prompt" && !draft.trim()) return;
     close();
-    if (request.kind === "prompt") request.resolve(draft);
+    if (request.kind === "prompt") request.resolve({ text: draft, choice });
     else request.resolve(true);
   };
 
@@ -127,6 +210,7 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
               <div className="input-row">
                 <input
                   autoFocus
+                  ref={inputRef}
                   value={draft}
                   placeholder={request.opts.placeholder}
                   onChange={(e) => setDraft(e.target.value)}
@@ -142,6 +226,14 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
                   </button>
                 )}
               </div>
+              {request.opts.choices && request.opts.choices.length > 0 && (
+                <PromptChoices
+                  label={request.opts.choicesLabel}
+                  choices={request.opts.choices}
+                  value={choice}
+                  onChange={setChoice}
+                />
+              )}
               <div className="dialog-actions">
                 <button type="button" className="secondary" onClick={cancel}>
                   Cancel

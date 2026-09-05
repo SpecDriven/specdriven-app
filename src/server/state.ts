@@ -5,7 +5,7 @@
 
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { writeTextFile } from "./fsx";
 import type { GitEngine } from "./git";
 
@@ -62,6 +62,13 @@ export interface SpecDrivenState {
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to the Claude CLI. */
   codeGen?: boolean;
+  /**
+   * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
+   * opens a new session in Claude Code Desktop, "cli" runs `claude -p`
+   * headless. Absent means desktop when Claude.app is installed, else cli —
+   * the client resolves that from canOpenClaudeDesktop.
+   */
+  codeGenTarget?: CodeGenTarget;
   /**
    * Offer feature assignment — the "Assigned" dropdown of project members
    * (src/server/members.ts); absent means OFF. Off hides the dropdown; an
@@ -177,6 +184,30 @@ export function normalizeShowTestLinks(value: unknown): boolean {
     (specs/agents/claude.spec.md). */
 export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
+}
+
+/** The two places a code gen session can run (specs/agents/claude.feature.md). */
+export type CodeGenTarget = "desktop" | "cli";
+
+/** Stored session target, or null when absent or unusable — the client
+    then picks desktop when Claude.app is installed, else cli. */
+export function normalizeCodeGenTarget(value: unknown): CodeGenTarget | null {
+  return value === "desktop" || value === "cli" ? value : null;
+}
+
+/**
+ * The directory holding the settings file writeState would write to:
+ * <root>/.specdriven, unless only ~/.specdriven/settings.json exists (same
+ * rule as writeState). Local, non-git session records live beside the
+ * settings (src/server/agent.ts). No legacy-file migration here: a stale
+ * plain `.specdriven` file blocks creating the directory until the next
+ * settings save moves it aside.
+ */
+export async function settingsDirectory(rootDir: string = process.cwd()): Promise<string> {
+  const local = statePath(rootDir);
+  const home = homeStatePath();
+  const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
+  return dirname(target);
 }
 
 /** Effective published-deletion setting: OFF unless explicitly turned on
