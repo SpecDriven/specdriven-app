@@ -55,6 +55,18 @@ describe("buildSessionPrompt", () => {
     expect(buildSessionPrompt("s", SPECS)).toContain("the following specifications.");
   });
 
+  // With a code repo the session runs away from the specs, so the prompt
+  // says where they are and that the code is what to change.
+  test("a code repo session is told where the specs live", () => {
+    const apart = buildSessionPrompt("s", SPECS, { dataRepo: "/data", codeRepo: "/code" });
+    expect(apart).toContain("The current directory is the code repository.");
+    expect(apart).toContain("data repository at /data");
+    expect(apart).toContain("edit the code, not the specifications");
+    const together = buildSessionPrompt("s", SPECS, { dataRepo: "/data" });
+    expect(together).not.toContain("code repository");
+    expect(together).toBe(buildSessionPrompt("s", SPECS));
+  });
+
   // A spec cut down to selected scenarios says so in its heading, so Claude
   // doesn't take the excerpt for the whole file.
   test("a partial spec's heading marks it as selected scenarios only", () => {
@@ -65,6 +77,13 @@ describe("buildSessionPrompt", () => {
 });
 
 describe("runCodeGenSession", () => {
+  test("runs in the code repo when the place names one", async () => {
+    const { runner, calls } = fakeRunner({ stdout: "done" });
+    await runCodeGenSession({ dataRepo: "/data", codeRepo: "/code" }, "s", SPECS, runner);
+    expect(calls[0]!.options?.cwd).toBe("/code");
+    expect(calls[0]!.args[1]).toContain("data repository at /data");
+  });
+
   test("passes the prompt to the CLI in print mode, in the data dir", async () => {
     const { runner, calls } = fakeRunner({ stdout: "done\n" });
     const result = await runCodeGenSession("/data", "implement quotes", SPECS, runner);
@@ -225,6 +244,25 @@ describe("launchDesktopSession", () => {
       expect(url.searchParams.get("folder")).toBe("/data");
       expect(url.searchParams.get("q")).toBe(
         buildDesktopBootstrapPrompt("implement quotes", promptPath),
+      );
+    }));
+
+  test("a code repo is where the session opens, and the record names it", async () =>
+    withSessionsDir(async (sessionsDir) => {
+      const { runner, calls } = fakeRunner({});
+      await launchDesktopSession(
+        { dataRepo: "/data", codeRepo: "/code" },
+        "s",
+        SPECS,
+        { sessionsDir, runner, platform: "darwin", id: ID, now: NOW },
+      );
+      const record = JSON.parse(await readFile(join(sessionsDir, ID, "session.json"), "utf8"));
+      expect(record.dataRepo).toBe("/data");
+      expect(record.codeRepo).toBe("/code");
+      expect(calls[0]!.options?.cwd).toBe("/code");
+      expect(new URL(calls[0]!.args[0]!).searchParams.get("folder")).toBe("/code");
+      expect(await readFile(join(sessionsDir, ID, "prompt.md"), "utf8")).toBe(
+        buildSessionPrompt("s", SPECS, { dataRepo: "/data", codeRepo: "/code" }),
       );
     }));
 

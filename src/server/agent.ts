@@ -37,6 +37,24 @@ export interface CodeGenResult {
   output: string;
 }
 
+/**
+ * Where a session runs (src/server/members.ts `code-repo`): the code repo
+ * when the data repo's project-settings.json names one, else the data repo
+ * itself. The prompt tells Claude where the specs are when they are not in
+ * the working directory.
+ */
+export interface SessionPlace {
+  /** The data repo the specs were read from. */
+  dataRepo: string;
+  /** The code repo the session works in; absent means the data repo. */
+  codeRepo?: string;
+}
+
+/** The folder a session runs in for a place. */
+export function sessionWorkDir(place: SessionPlace): string {
+  return place.codeRepo ?? place.dataRepo;
+}
+
 /** Injectable subprocess runner, so tests never spawn a real CLI. */
 export type Runner = (cmd: string, args: string[], options?: RunOptions) => Promise<RunResult>;
 
@@ -44,13 +62,24 @@ export type Runner = (cmd: string, args: string[], options?: RunOptions) => Prom
  * The generated prompt: the session name, the instruction, then every
  * selected spec verbatim under a heading that names its file.
  */
-export function buildSessionPrompt(name: string, specs: SpecInput[]): string {
+export function buildSessionPrompt(
+  name: string,
+  specs: SpecInput[],
+  place?: SessionPlace,
+): string {
   const lines = [
     `SpecDriven code gen session: ${name}`,
     "",
     `Implement the following ${specs.length === 1 ? "specification" : "specifications"}.`,
     "Work in the current directory and exit when done.",
   ];
+  // With a code repo, the session runs away from the specs; say where they
+  // are, and that the code — not the specs — is what to change.
+  if (place?.codeRepo) {
+    lines.push(
+      `The current directory is the code repository. The specifications live in the SpecDriven data repository at ${place.dataRepo}; edit the code, not the specifications.`,
+    );
+  }
   for (const spec of specs) {
     const heading = `## Spec: ${spec.fileName}${spec.partial ? " (selected scenarios only)" : ""}`;
     lines.push("", heading, "", spec.content.trimEnd());
@@ -69,13 +98,14 @@ function failureDetail(result: RunResult): string {
  * client's error box.
  */
 export async function runCodeGenSession(
-  dir: string,
+  place: string | SessionPlace,
   name: string,
   specs: SpecInput[],
   runner: Runner = run,
 ): Promise<CodeGenResult> {
-  const prompt = buildSessionPrompt(name, specs);
-  const result = await runner(CLAUDE_BIN, ["-p", prompt], { cwd: dir });
+  const where = typeof place === "string" ? { dataRepo: place } : place;
+  const prompt = buildSessionPrompt(name, specs, where);
+  const result = await runner(CLAUDE_BIN, ["-p", prompt], { cwd: sessionWorkDir(where) });
   if (result.exitCode !== 0) {
     const detail = failureDetail(result);
     throw new Error(
@@ -220,6 +250,9 @@ export interface SessionRecord {
   startedAt: string;
   agent: typeof DESKTOP_AGENT;
   dataRepo: string;
+  /** The code repo the session was opened on; absent when it ran in the
+      data repo (src/server/members.ts `code-repo`). */
+  codeRepo?: string;
   specs: { fileName: string; partial: boolean }[];
 }
 
@@ -248,23 +281,26 @@ export interface DesktopLaunchOptions {
  * the OS. A failed opener becomes an Error carrying its words.
  */
 export async function launchDesktopSession(
-  dir: string,
+  place: string | SessionPlace,
   name: string,
   specs: SpecInput[],
   options: DesktopLaunchOptions,
 ): Promise<DesktopSessionResult> {
+  const where = typeof place === "string" ? { dataRepo: place } : place;
+  const dir = sessionWorkDir(where);
   const id = options.id ?? randomUUID();
   const now = options.now ?? new Date();
   const runner = options.runner ?? desktopRunner ?? run;
   const sessionDir = join(options.sessionsDir, id);
   const promptPath = join(sessionDir, "prompt.md");
-  await writeTextFile(promptPath, buildSessionPrompt(name, specs));
+  await writeTextFile(promptPath, buildSessionPrompt(name, specs, where));
   const record: SessionRecord = {
     id,
     name,
     startedAt: now.toISOString(),
     agent: DESKTOP_AGENT,
-    dataRepo: dir,
+    dataRepo: where.dataRepo,
+    ...(where.codeRepo ? { codeRepo: where.codeRepo } : {}),
     specs: specs.map((s) => ({ fileName: s.fileName, partial: s.partial === true })),
   };
   await writeTextFile(join(sessionDir, "session.json"), JSON.stringify(record, null, 2) + "\n");

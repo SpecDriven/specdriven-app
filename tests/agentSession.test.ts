@@ -5,7 +5,7 @@
 // round-trips through the settings file.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
@@ -13,6 +13,7 @@ import { desktopOpener, setDesktopAvailability, setDesktopRunner } from "../src/
 import type { Runner } from "../src/server/agent";
 import { createFeature, saveFeature } from "../src/server/features";
 import type { RunOptions } from "../src/server/run";
+import { PROJECT_SETTINGS_FILE } from "../src/server/members";
 import { readState, writeState } from "../src/server/state";
 
 let root: string;
@@ -101,6 +102,52 @@ test("a desktop session saves the prompt beside the settings and opens Claude.ap
   // The platform's own opener: open on macOS, xdg-open on Linux CI.
   expect(calls[0]!.cmd).toBe(desktopOpener().cmd);
   expect(new URL(calls[0]!.args[0]!).searchParams.get("folder")).toBe(data);
+});
+
+// The code repo (src/server/members.ts `code-repo`): the data repo's
+// project-settings.json names where the code lives, and the session opens
+// there — Claude then edits the code, not the specs.
+test("a code repo named in project-settings.json is where the desktop session opens", async () => {
+  const code = join(root, "code");
+  await mkdir(code);
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const res = await api("/api/agent/session", "POST", {
+    name: "implement quotes",
+    files: FILES,
+    target: "desktop",
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { id: string; promptPath: string };
+  expect(new URL(calls[0]!.args[0]!).searchParams.get("folder")).toBe(code);
+  expect(calls[0]!.options?.cwd).toBe(code);
+  const record = JSON.parse(
+    await readFile(join(root, ".specdriven", "sessions", body.id, "session.json"), "utf8"),
+  );
+  expect(record.dataRepo).toBe(data);
+  expect(record.codeRepo).toBe(code);
+  // The prompt says where the specs are, since they are not in the cwd.
+  const prompt = await readFile(body.promptPath, "utf8");
+  expect(prompt).toContain(`The specifications live in the SpecDriven data repository at ${data}`);
+  expect(prompt).toContain("edit the code, not the specifications");
+});
+
+test("the listing carries the code repo, resolved against the data repo", async () => {
+  const before = (await handleApi(new Request("http://localhost/api/features")))!;
+  expect(((await before.json()) as { codeRepo: unknown }).codeRepo).toBeNull();
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const after = (await handleApi(new Request("http://localhost/api/features")))!;
+  expect(((await after.json()) as { codeRepo: unknown }).codeRepo).toBe(join(root, "code"));
+});
+
+test("a code repo that is not there refuses the session before anything runs", async () => {
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../missing" }));
+  const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "desktop" });
+  expect(res.status).toBe(400);
+  const error = (await res.json()).error as string;
+  expect(error).toContain("Code repo not found");
+  expect(error).toContain(join(root, "missing"));
+  expect(error).toContain(PROJECT_SETTINGS_FILE);
+  expect(calls).toHaveLength(0);
 });
 
 test("without Claude.app the desktop target is refused before anything runs", async () => {

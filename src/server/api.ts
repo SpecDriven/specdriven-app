@@ -75,9 +75,10 @@ import {
   runCodeGenSession,
   sessionsDirectory,
 } from "./agent";
-import type { SpecInput } from "./agent";
+import type { SessionPlace, SpecInput } from "./agent";
+import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
-import { readProjectMembers } from "./members";
+import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { searchSpecs } from "./search";
@@ -686,20 +687,23 @@ const getAuthWebCallback: Handler = async (req) => {
   return callbackPage(result.ok, result.message);
 };
 
-// The listing carries the project's members along with it (src/server/
-// members.ts): the "Assigned" dropdown offers them, and they come from the
-// data repo, so they change when the folder does and refresh on every
-// reload tick — the same rhythm as the feature list itself.
-const getFeatures = withDataDir(async (dir) =>
-  json({
+// The listing carries the project's settings along with it (src/server/
+// members.ts): the members the "Assigned" dropdown offers, and the code repo
+// a session runs in. They come from the data repo, so they change when the
+// folder does and refresh on every reload tick — the same rhythm as the
+// feature list itself.
+const getFeatures = withDataDir(async (dir) => {
+  const settings = await readProjectSettings(dir);
+  return json({
     features: await listFeatures(dir),
     // The roadmap folder is not a feature folder (specs/app/roadmap.feature
     // .md): it holds markdown pages, listed on their own above the tree, so
     // it never shows as an empty folder among the feature ones.
     folders: (await listFolders(dir)).filter((folder) => !isRoadmapPath(folder)),
-    members: await readProjectMembers(dir),
-  }),
-);
+    members: settings.members,
+    codeRepo: settings.codeRepo,
+  });
+});
 
 // Roadmap pages (specs/app/roadmap.feature.md): the markdown files in the
 // data repo's `roadmap` folder, listed with the member each is assigned to.
@@ -1068,13 +1072,25 @@ const postAgentSession = withDataDir(async (dir, req) => {
     }
     specs.push({ fileName, content, partial: scenarios !== undefined });
   }
+  // Where the session runs (src/server/members.ts `code-repo`): the code
+  // repo the data repo's project-settings.json names, else the data repo.
+  // A code repo that isn't there is the user's to fix — the setting is
+  // checked in, so the message names the folder it resolved to.
+  const { codeRepo } = await readProjectSettings(dir);
+  if (codeRepo !== null && !(await directoryExists(codeRepo))) {
+    return json(
+      { error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` },
+      400,
+    );
+  }
+  const place: SessionPlace = codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
   if (target === "desktop") {
     if (!claudeDesktopAvailable()) {
       return json({ error: "Claude Code Desktop not found — install Claude.app" }, 502);
     }
     try {
       const sessionsDir = await sessionsDirectory(getAppRoot());
-      return json(await launchDesktopSession(dir, name, specs, { sessionsDir }));
+      return json(await launchDesktopSession(place, name, specs, { sessionsDir }));
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
@@ -1083,7 +1099,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
     return json({ error: "Claude CLI not found — install the `claude` command" }, 502);
   }
   try {
-    return json(await runCodeGenSession(dir, name, specs));
+    return json(await runCodeGenSession(place, name, specs));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
