@@ -3776,8 +3776,9 @@ export function App() {
 
   // The command palette's contents (src/frontend/CommandPalette.tsx): the
   // actions by name — the keyboard registry's, plus the ones without a key —
-  // and, for a query, the full-text search's hits (specs/search.feature.md)
-  // and the roadmap pages.
+  // and, for a query, the full-text search's hits (specs/search.feature.md).
+  // The sidebar tab on screen picks what is searched: the Specs tab the spec
+  // files, the Roadmap tab the roadmap pages (specs/app/roadmap.feature.md).
   const shortcutAction = (id: string, icon: ReactNode): PaletteItem | null => {
     const s = shortcuts.find((x) => x.id === id);
     if (!s || (s.when && !s.when())) return null;
@@ -3876,10 +3877,27 @@ export function App() {
       .find((f) => f.fileName === fileName)
       ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal });
+    const res = await fetch(
+      `/api/search?scope=${shownTab}&q=${encodeURIComponent(q)}`,
+      { signal },
+    );
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
-    const hits = (data.results ?? []).map(
+    if (shownTab === "roadmap") {
+      return (data.results ?? []).map(
+        (r): PaletteItem => ({
+          id: `roadmap:${r.fileName}`,
+          group: "Roadmap",
+          label: r.featureName,
+          text: r.featureName,
+          sub: r.snippet ? markSnippet(r.snippet, r.terms) : undefined,
+          icon: <MapIcon size={14} />,
+          href: roadmapPath(r.fileName),
+          run: () => void openRoadmapPage(r.fileName, { push: true }),
+        }),
+      );
+    }
+    return (data.results ?? []).map(
       (r): PaletteItem => ({
         id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
         group: r.scenario ? "Scenarios" : "Features",
@@ -3902,21 +3920,6 @@ export function App() {
         run: ({ alt }) => openResult(r, alt),
       }),
     );
-    const ql = q.toLowerCase();
-    const pages = roadmapPages
-      .filter((p) => p.name.toLowerCase().includes(ql))
-      .map(
-        (p): PaletteItem => ({
-          id: `roadmap:${p.fileName}`,
-          group: "Roadmap",
-          label: p.name,
-          text: p.name,
-          icon: <MapIcon size={14} />,
-          href: roadmapPath(p.fileName),
-          run: () => void openRoadmapPage(p.fileName, { push: true }),
-        }),
-      );
-    return [...hits, ...pages];
   };
   const recentItems: PaletteItem[] = recent.map((e) => ({
     id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
@@ -6462,6 +6465,7 @@ export function App() {
       {palette && (
         <CommandPalette
           initialQuery={palette.query}
+          scope={shownTab}
           onClose={() => setPalette(null)}
           actions={paletteActions}
           recent={recentItems}
