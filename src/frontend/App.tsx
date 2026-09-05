@@ -219,21 +219,23 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
-// The Roadmap section folds away (specs/app/roadmap.feature.md): it sits above
-// the feature tree, so a long list of pages pushes the tree off screen. Unlike
-// a folder's twist this choice is remembered, like the sidebar width — a
-// section folded shut is meant to stay shut, not to reopen on every reload.
-function readRoadmapCollapsed(): boolean {
+// The sidebar has two tabs (specs/app/roadmap.feature.md): Specs, the feature
+// tree, and Roadmap, the page list. They share the one column, so the choice
+// is remembered like the sidebar width — a tab left open is meant to stay
+// open, not to reset on every reload.
+type SidebarTab = "specs" | "roadmap";
+
+function readSidebarTab(): SidebarTab {
   try {
-    return localStorage.getItem("sd-roadmap-collapsed") === "1";
+    return localStorage.getItem("sd-sidebar-tab") === "roadmap" ? "roadmap" : "specs";
   } catch {
-    return false;
+    return "specs";
   }
 }
 
-function storeRoadmapCollapsed(collapsed: boolean): void {
+function storeSidebarTab(tab: SidebarTab): void {
   try {
-    localStorage.setItem("sd-roadmap-collapsed", collapsed ? "1" : "0");
+    localStorage.setItem("sd-sidebar-tab", tab);
   } catch {
     // Storage unavailable (private mode): the choice just won't stick.
   }
@@ -786,8 +788,10 @@ export function App() {
   /** The open page's file name — what effects watch, since the listing object
       is replaced on every save and would restart their timers. */
   const roadmapFile = roadmapPage?.fileName ?? null;
-  /** Whether the sidebar's Roadmap section is folded shut; remembered. */
-  const [roadmapCollapsed, setRoadmapCollapsed] = useState(readRoadmapCollapsed);
+  /** Which sidebar tab is open, Specs or Roadmap; remembered. */
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
+  /** The tab on screen: Roadmap only while the Settings switch shows it. */
+  const shownTab: SidebarTab = roadmap && sidebarTab === "roadmap" ? "roadmap" : "specs";
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -1271,6 +1275,9 @@ export function App() {
       // Opening a feature leaves the roadmap page, saving what its editor
       // still holds — the same courtesy the README editor gets.
       closeRoadmapPage();
+      // A new feature shows up in the tree, so the sidebar turns to the Specs
+      // tab; a same-file refresh (sync, cron) leaves the tab where it is.
+      if (file !== selected) selectSidebarTab("specs");
       setSelected(file);
       setFeature(parsed);
       let missingScenario: string | null = null;
@@ -2236,6 +2243,9 @@ export function App() {
       return;
     }
     editorRef.current.close();
+    // The page's row lives on the Roadmap tab, so a deep link or the palette
+    // turns the sidebar there; a refresh of the open page leaves it alone.
+    if (roadmapPageRef.current?.fileName !== fileName) selectSidebarTab("roadmap");
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
@@ -2402,9 +2412,6 @@ export function App() {
       toast.error(data.error ?? "Could not create the roadmap page");
       return;
     }
-    // Reveal the new page: the section may be folded shut, and a page that
-    // cannot be seen is a poor thing to have just created.
-    toggleRoadmapSection(false);
     await loadRoadmapPages();
     await openRoadmapPage(data.fileName, { push: true });
   };
@@ -2463,10 +2470,10 @@ export function App() {
     await loadRoadmapPages();
   };
 
-  /** Fold the Roadmap section away, or open it back up; the choice sticks. */
-  const toggleRoadmapSection = (collapsed: boolean) => {
-    setRoadmapCollapsed(collapsed);
-    storeRoadmapCollapsed(collapsed);
+  /** Switch the sidebar to the Specs or Roadmap tab; the choice sticks. */
+  const selectSidebarTab = (tab: SidebarTab) => {
+    setSidebarTab(tab);
+    storeSidebarTab(tab);
   };
 
   /**
@@ -4288,7 +4295,7 @@ export function App() {
         aria-hidden={compact && !drawerOpen ? true : undefined}
         // Following any link in the drawer — a feature, a roadmap page,
         // Home — is leaving it; buttons that only change the drawer itself
-        // (folder twists, the filter, My specs) keep it open.
+        // (folder twists, the filter, the tabs) keep it open.
         onClickCapture={(e) => {
           if (compact && e.target instanceof Element && e.target.closest("a[href]"))
             setDrawerOpen(false);
@@ -4453,46 +4460,42 @@ export function App() {
             <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
           </button>
         </div>
-        {/* Primary nav (specs/ui/ui.feature.md "Design system"): Home is the
-            README, Roadmap the first page, My specs the assignee filter set
-            to the current user. */}
-        <nav className="side-nav" aria-label="Primary">
-          <a
-            href="/"
-            className={!selected && !roadmapPage ? "active" : ""}
-            onClick={(e) =>
-              spaClick(e, () => {
-                goHome();
-                void loadReadme();
-              })
-            }
-          >
-            <Home size={14} aria-hidden="true" /> Home
-          </a>
-          {roadmap && roadmapPages.length > 0 && (
-            <a
-              href={roadmapPath(roadmapPages[0]!.fileName)}
-              className={roadmapPage ? "active" : ""}
-              onClick={(e) =>
-                spaClick(e, () => void openRoadmapPage(roadmapPages[0]!.fileName, { push: true }))
-              }
-            >
-              <MapIcon size={14} aria-hidden="true" /> Roadmap
-            </a>
-          )}
-          {assignments && me && (
+        {/* Sidebar tabs (specs/app/roadmap.feature.md): Specs is the feature
+            tree, Roadmap the page list. The bar only shows while the Settings
+            switch shows the roadmap — one tab is no tab bar. */}
+        {roadmap && (
+          <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
-              className={filter.assignee === me ? "active" : ""}
-              aria-pressed={filter.assignee === me}
-              onClick={() =>
-                setFilter((f) => ({ ...f, assignee: f.assignee === me ? null : me }))
-              }
+              role="tab"
+              id="side-tab-specs"
+              aria-selected={shownTab === "specs"}
+              aria-controls="side-panel-specs"
+              className={shownTab === "specs" ? "active" : ""}
+              onClick={() => selectSidebarTab("specs")}
             >
-              <UserRound size={14} aria-hidden="true" /> My specs
+              <FileText size={14} aria-hidden="true" /> Specs
             </button>
-          )}
-        </nav>
+            <button
+              type="button"
+              role="tab"
+              id="side-tab-roadmap"
+              aria-selected={shownTab === "roadmap"}
+              aria-controls="side-panel-roadmap"
+              className={shownTab === "roadmap" ? "active" : ""}
+              onClick={() => selectSidebarTab("roadmap")}
+            >
+              <MapIcon size={14} aria-hidden="true" /> Roadmap
+            </button>
+          </div>
+        )}
+        {shownTab === "specs" && (
+        <div
+          className="side-panel"
+          role={roadmap ? "tabpanel" : undefined}
+          id="side-panel-specs"
+          aria-labelledby={roadmap ? "side-tab-specs" : undefined}
+        >
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
           <button onClick={createFeature}>+ New feature</button>
@@ -4531,116 +4534,6 @@ export function App() {
         )}
         {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
         {loadError && <p className="error">{loadError}</p>}
-        {/* The roadmap folder sits on top of the feature folders
-            (specs/app/roadmap.feature.md), and only while the Settings
-            switch shows it. */}
-        {roadmap && (
-          <div className="roadmap-list">
-            <div className="roadmap-head">
-              {/* The section folds away like a folder's subtree, with the same
-                  twist — it sits above the tree, so a long page list would
-                  otherwise crowd the folders out. */}
-              <button
-                type="button"
-                className="roadmap-title"
-                aria-expanded={!roadmapCollapsed}
-                title={roadmapCollapsed ? "Show the roadmap pages" : "Hide the roadmap pages"}
-                onClick={() => toggleRoadmapSection(!roadmapCollapsed)}
-              >
-                <span className="twist">
-                  {roadmapCollapsed ? (
-                    <ChevronRight size={12} aria-hidden="true" />
-                  ) : (
-                    <ChevronDown size={12} aria-hidden="true" />
-                  )}
-                </span>{" "}
-                Roadmap
-              </button>
-              <Tooltip label="New roadmap page">
-                <button
-                  type="button"
-                  className="roadmap-add"
-                  aria-label="New roadmap page"
-                  onClick={() => void newRoadmapPage()}
-                >
-                  <Plus size={13} aria-hidden="true" />
-                </button>
-              </Tooltip>
-            </div>
-            {/* Pages grouped by their subfolder under roadmap/, each with a
-                ⋯ menu: Rename, Copy link, Delete. */}
-            {!roadmapCollapsed &&
-              roadmapGroups(roadmapPages).map(({ dir, pages }) => (
-                <div key={dir || "."}>
-                  {dir && <div className="roadmap-group">{dir}</div>}
-                  {pages.map((page) => (
-                    <div key={page.fileName} className={`roadmap-row${dir ? " nested" : ""}`}>
-                      <a
-                        href={roadmapPath(page.fileName)}
-                        className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
-                        title={
-                          page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
-                        }
-                        aria-current={page.fileName === roadmapPage?.fileName ? "page" : undefined}
-                        onClick={(e) =>
-                          spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))
-                        }
-                      >
-                        {page.name}
-                      </a>
-                      <span className="tree-row-menu">
-                        <Tooltip label="More actions">
-                          <button
-                            type="button"
-                            className="tree-menu-btn"
-                            aria-label={`Menu for ${page.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={roadmapMenu === page.fileName}
-                            onClick={() =>
-                              setRoadmapMenu((m) => (m === page.fileName ? null : page.fileName))
-                            }
-                          >
-                            <Ellipsis size={14} aria-hidden="true" />
-                          </button>
-                        </Tooltip>
-                        <Menu
-                          open={roadmapMenu === page.fileName}
-                          onClose={() => setRoadmapMenu(null)}
-                          label={`Menu for ${page.name}`}
-                          className="tree-menu"
-                          containerSelector=".tree-row-menu"
-                          items={[
-                            {
-                              id: "rename",
-                              label: "Rename",
-                              icon: <Pencil size={13} />,
-                              onSelect: () => void renameRoadmapPage(page),
-                            },
-                            {
-                              id: "copy",
-                              label: "Copy link",
-                              icon: <Link size={13} />,
-                              onSelect: () => void copyLink(roadmapPath(page.fileName)),
-                            },
-                            {
-                              id: "delete",
-                              label: "Delete",
-                              icon: <Trash2 size={13} />,
-                              danger: true,
-                              onSelect: () => void removeRoadmapPage(page),
-                            },
-                          ]}
-                        />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            {!roadmapCollapsed && roadmapPages.length === 0 && (
-              <p className="empty">No roadmap pages yet</p>
-            )}
-          </div>
-        )}
         {/* The Features section head carries the filter: by status, by
             assignee. Active filters show as chips that clear on click. */}
         <div className="section-head">
@@ -4766,6 +4659,95 @@ export function App() {
             {features.length === 0 && folders.length === 0 && (
               <p className="empty">No feature files yet</p>
             )}
+          </div>
+        )}
+        </div>
+        )}
+        {/* The Roadmap tab (specs/app/roadmap.feature.md): the page list, with
+            a "New page" button where the Specs tab has its "New" buttons. */}
+        {shownTab === "roadmap" && (
+          <div
+            className="side-panel roadmap-list"
+            role="tabpanel"
+            id="side-panel-roadmap"
+            aria-labelledby="side-tab-roadmap"
+          >
+            <div className="sidebar-actions">
+              <button onClick={() => void newRoadmapPage()}>+ New page</button>
+            </div>
+            <div className="roadmap-pages">
+            {/* Pages grouped by their subfolder under roadmap/, each with a
+                ⋯ menu: Rename, Copy link, Delete. */}
+            {roadmapGroups(roadmapPages).map(({ dir, pages }) => (
+                <div key={dir || "."}>
+                  {dir && <div className="roadmap-group">{dir}</div>}
+                  {pages.map((page) => (
+                    <div key={page.fileName} className={`roadmap-row${dir ? " nested" : ""}`}>
+                      <a
+                        href={roadmapPath(page.fileName)}
+                        className={`roadmap-entry${page.fileName === roadmapPage?.fileName ? " active" : ""}`}
+                        title={
+                          page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
+                        }
+                        aria-current={page.fileName === roadmapPage?.fileName ? "page" : undefined}
+                        onClick={(e) =>
+                          spaClick(e, () => void openRoadmapPage(page.fileName, { push: true }))
+                        }
+                      >
+                        {page.name}
+                      </a>
+                      <span className="tree-row-menu">
+                        <Tooltip label="More actions">
+                          <button
+                            type="button"
+                            className="tree-menu-btn"
+                            aria-label={`Menu for ${page.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={roadmapMenu === page.fileName}
+                            onClick={() =>
+                              setRoadmapMenu((m) => (m === page.fileName ? null : page.fileName))
+                            }
+                          >
+                            <Ellipsis size={14} aria-hidden="true" />
+                          </button>
+                        </Tooltip>
+                        <Menu
+                          open={roadmapMenu === page.fileName}
+                          onClose={() => setRoadmapMenu(null)}
+                          label={`Menu for ${page.name}`}
+                          className="tree-menu"
+                          containerSelector=".tree-row-menu"
+                          items={[
+                            {
+                              id: "rename",
+                              label: "Rename",
+                              icon: <Pencil size={13} />,
+                              onSelect: () => void renameRoadmapPage(page),
+                            },
+                            {
+                              id: "copy",
+                              label: "Copy link",
+                              icon: <Link size={13} />,
+                              onSelect: () => void copyLink(roadmapPath(page.fileName)),
+                            },
+                            {
+                              id: "delete",
+                              label: "Delete",
+                              icon: <Trash2 size={13} />,
+                              danger: true,
+                              onSelect: () => void removeRoadmapPage(page),
+                            },
+                          ]}
+                        />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            {roadmapPages.length === 0 && (
+              <p className="empty">No roadmap pages yet</p>
+            )}
+            </div>
           </div>
         )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
