@@ -26,9 +26,17 @@ const server = Bun.serve({
     "/": index,
 
     // Deep links (specs/navigation.spec.md): every /features/... url serves
-    // the app shell; the client resolves it against /api/features/:file.
+    // the app shell; the client resolves it against /api/features/:file. The
+    // special folders' pages address the same way (specs/app/roadmap.feature
+    // .md, specs/app/tasks.feature.md), so their urls serve the shell too —
+    // the desktop shell already falls back to it for any unbundled path
+    // (src/electron/static.ts).
     "/features": index,
     "/features/*": index,
+    "/roadmap": index,
+    "/roadmap/*": index,
+    "/tasks": index,
+    "/tasks/*": index,
   },
   fetch: async (req) => (await handleApi(req)) ?? new Response("Not Found", { status: 404 }),
   // `bun run build` compiles with --production, which inlines NODE_ENV here:

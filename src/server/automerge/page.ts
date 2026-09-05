@@ -1,20 +1,23 @@
-// The Automerge system-of-record for a roadmap page (specs/app/roadmap.feature
-// .md), the plain-markdown counterpart of project.ts + reconcile.ts. A page's
-// `roadmap/<name>.md` is a deterministic projection of its document, so two
+// The Automerge system-of-record for a markdown page — a roadmap page
+// (specs/app/roadmap.feature.md) or a task (specs/app/tasks.feature.md) —
+// the plain-markdown counterpart of project.ts + reconcile.ts. A page's
+// `<folder>/<name>.md` is a deterministic projection of its document, so two
 // people editing the same page merge at the CRDT level — the body as
 // collaborative text, the assignment replaced whole — instead of meeting in a
 // git conflict.
 //
 // A page has no scenarios and no ticket link, so there is one projection form
 // rather than the feature's two: the document's markdown is the file's bytes.
+// Roadmap pages and tasks share this module whole — a task is a markdown page
+// with an assignee, which is exactly what a roadmap page is.
 
 import * as A from "@automerge/automerge";
-import { serializeRoadmap, type Roadmap } from "../parser";
-import type { RoadmapDoc } from "./schema";
-import { newRoadmapDoc } from "./store";
+import { serializePage, type MarkdownPage } from "../parser";
+import type { PageDoc } from "./schema";
+import { newPageDoc } from "./store";
 
 /** The doc's view of the page. */
-export function docToRoadmap(doc: A.Doc<RoadmapDoc>): Roadmap {
+export function docToPage(doc: A.Doc<PageDoc>): MarkdownPage {
   return {
     name: doc.name,
     body: doc.body,
@@ -23,18 +26,18 @@ export function docToRoadmap(doc: A.Doc<RoadmapDoc>): Roadmap {
 }
 
 /** The markdown this document projects to. */
-export function projectRoadmap(doc: A.Doc<RoadmapDoc>): string {
-  return serializeRoadmap(docToRoadmap(doc));
+export function projectPage(doc: A.Doc<PageDoc>): string {
+  return serializePage(docToPage(doc));
 }
 
 /** Whether `text` is what this document projects to. */
-export function isRoadmapProjectionOf(text: string, doc: A.Doc<RoadmapDoc>): boolean {
-  return text === projectRoadmap(doc);
+export function isPageProjectionOf(text: string, doc: A.Doc<PageDoc>): boolean {
+  return text === projectPage(doc);
 }
 
-/** Create a document from a parsed roadmap page (first import). */
-export function importRoadmapDoc(page: Roadmap): A.Doc<RoadmapDoc> {
-  return newRoadmapDoc({
+/** Create a document from a parsed page (first import). */
+export function importPageDoc(page: MarkdownPage): A.Doc<PageDoc> {
+  return newPageDoc({
     name: page.name,
     body: page.body,
     ...(page.assigned ? { assigned: page.assigned } : {}),
@@ -47,7 +50,7 @@ export function importRoadmapDoc(page: Roadmap): A.Doc<RoadmapDoc> {
  * — it is one member, not text to merge, and concurrent assignments resolve
  * to the same winner on every peer (reconcile.ts).
  */
-export function reconcileRoadmap(doc: A.Doc<RoadmapDoc>, target: Roadmap): A.Doc<RoadmapDoc> {
+export function reconcilePage(doc: A.Doc<PageDoc>, target: MarkdownPage): A.Doc<PageDoc> {
   const assigned = doc.assigned;
   return A.change(doc, (d) => {
     if (d.name !== target.name) A.updateText(d, ["name"], target.name);

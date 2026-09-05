@@ -66,15 +66,18 @@ export type FeatureDoc = {
   assigned?: string;
 };
 
-// Roadmap documents (specs/app/roadmap.feature.md) get the same treatment as
-// features: the markdown file in the data repo's `roadmap/` folder is a
-// projection of the document below, so two people editing the same roadmap
-// page merge at the CRDT level instead of conflicting in git. Their own
-// schema line — a roadmap page has no scenarios, so nothing of FeatureDoc
-// applies to it beyond the identity and the assignment.
-export const ROADMAP_SCHEMA_VERSION = 1;
+// Page documents — the roadmap folder's (specs/app/roadmap.feature.md) and
+// the tasks folder's (specs/app/tasks.feature.md) — get the same treatment as
+// features: the markdown file in the data repo's `roadmap/` or `tasks/`
+// folder is a projection of the document below, so two people editing the
+// same page merge at the CRDT level instead of conflicting in git. Their own
+// schema line — a page has no scenarios, so nothing of FeatureDoc applies to
+// it beyond the identity and the assignment. One shape serves both folders:
+// a task is a markdown page with an assignee, which is what a roadmap page
+// is too.
+export const PAGE_SCHEMA_VERSION = 1;
 
-export type RoadmapDoc = {
+export type PageDoc = {
   schemaVersion: number;
   /** Stable identity of the document, independent of its file path. */
   id: string;
