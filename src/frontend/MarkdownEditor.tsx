@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import {
   Bold,
@@ -22,6 +22,13 @@ import {
 } from "./markdown";
 import type { Edit } from "./markdown";
 import { markNodes, markText } from "./highlight";
+import { useVimMode } from "./vimPref";
+import type { TextSurface } from "./VimEditor";
+
+// CodeMirror and the vim extension are only mounted once a Vim tab is shown.
+// Loaded lazily so a bundler that splits can keep them out of the main bundle
+// (Bun's dev bundle inlines them; a server render shows the fallback).
+const VimEditor = lazy(() => import("./VimEditor").then((m) => ({ default: m.VimEditor })));
 
 /** POST the image to the data repo; resolves to the url for `![...](url)`. */
 async function uploadImage(file: File): Promise<string> {
@@ -47,10 +54,13 @@ interface MarkdownEditorProps {
   highlight?: string[];
 }
 
+type Tab = "write" | "vim" | "preview";
+
 /**
  * Embedded markdown editor for the scenario body (specs/ui.spec.md "Scenario
  * edit dialog"): a formatting toolbar over a source textarea, with a rendered
- * Preview tab.
+ * Preview tab — and, with Vim mode on in Settings, a Vim tab editing the same
+ * text with Vim's keys (src/frontend/VimEditor.tsx).
  */
 export function MarkdownEditor({
   value,
@@ -59,8 +69,19 @@ export function MarkdownEditor({
   placeholder,
   highlight,
 }: MarkdownEditorProps) {
-  const [tab, setTab] = useState<"write" | "preview">(readOnly ? "preview" : "write");
+  const vimOn = useVimMode();
+  const [tab, setTab] = useState<Tab>(readOnly ? "preview" : vimOn ? "vim" : "write");
+  // The Settings switch flipping while an editor is open moves it over; a
+  // read-only body has nothing to edit, so it never shows the Vim tab.
+  useEffect(() => {
+    if (readOnly) return;
+    if (vimOn && tab === "write") setTab("vim");
+    if (!vimOn && tab === "vim") setTab("write");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vimOn, readOnly]);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const vimRef = useRef<TextSurface>(null);
+  const editing = tab === "write" || tab === "vim";
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -118,15 +139,29 @@ export function MarkdownEditor({
       ta.setSelectionRange(s.start, s.end);
   }, [value]);
 
-  const apply = (edit: (text: string, start: number, end: number) => Edit) => {
+  // The pane being edited, seen the same way whichever it is: the toolbar
+  // and shortcuts read the selection from it and put it back after an edit.
+  const surface = (): TextSurface | null => {
+    if (tab === "vim") return vimRef.current;
     const ta = ref.current;
-    if (!ta) return;
-    const r = edit(ta.value, ta.selectionStart, ta.selectionEnd);
+    if (!ta) return null;
+    return {
+      focus: () => ta.focus(),
+      get: () => ({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }),
+      select: (start, end) => ta.setSelectionRange(start, end),
+    };
+  };
+
+  const apply = (edit: (text: string, start: number, end: number) => Edit) => {
+    const s = surface();
+    if (!s) return;
+    const { text, start, end } = s.get();
+    const r = edit(text, start, end);
     onChange(r.text);
     // Restore focus and selection once React has committed the new value.
     requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(r.start, r.end);
+      s.focus();
+      s.select(r.start, r.end);
     });
   };
 
@@ -159,7 +194,7 @@ export function MarkdownEditor({
     void addImages(files);
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === "b") {
@@ -204,6 +239,17 @@ export function MarkdownEditor({
           >
             {readOnly ? "Source" : "Write"}
           </button>
+          {vimOn && !readOnly && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "vim"}
+              className={tab === "vim" ? "active" : ""}
+              onClick={() => setTab("vim")}
+            >
+              Vim
+            </button>
+          )}
           <button
             type="button"
             role="tab"
@@ -214,7 +260,7 @@ export function MarkdownEditor({
             Preview
           </button>
         </div>
-        {!readOnly && tab === "write" && (
+        {!readOnly && editing && (
           <div className="md-tools">
             {uploadError && <span className="md-upload-error">{uploadError}</span>}
             {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
@@ -266,6 +312,18 @@ export function MarkdownEditor({
             onPaste={readOnly ? undefined : onPaste}
           />
         </div>
+      ) : tab === "vim" ? (
+        <Suspense fallback={<div className="md-vim-loading">Loading Vim…</div>}>
+          <VimEditor
+            ref={vimRef}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            highlight={marks}
+            onPasteFiles={(files) => void addImages(files)}
+            onShortcut={onKeyDown}
+          />
+        </Suspense>
       ) : (
         <div ref={previewRef} className="md-preview">
           {preview === null ? (
