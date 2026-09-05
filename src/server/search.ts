@@ -1,8 +1,8 @@
 // Full-text search over the data repo (specs/search.spec.md): an in-memory
 // MiniSearch index over feature names/descriptions and scenario names/bodies,
-// and a second one over the roadmap folder's pages (specs/app/roadmap
-// .feature.md) — the sidebar's Roadmap tab searches those instead of the
-// specs. Each index is cached per data dir and rebuilt only when a stat
+// and one more over each special folder's pages — the roadmap's (specs/app
+// /roadmap.feature.md) and the tasks folder's (specs/app/tasks.feature.md) —
+// which is what that folder's sidebar tab searches instead of the specs. Each index is cached per data dir and rebuilt only when a stat
 // fingerprint of its files changes, so edits made by the API, the reload
 // cron's `git pull`, or an external editor are all picked up.
 
@@ -10,14 +10,14 @@ import { stat } from "node:fs/promises";
 import MiniSearch from "minisearch";
 import { walk } from "./walk";
 import { readTextFile } from "./fsx";
-import { parseFeature, parseRoadmap, titleFromFileName } from "./parser";
-import { roadmapFiles } from "./roadmap";
+import { parseFeature, parsePage, titleFromFileName } from "./parser";
+import { PAGE_FOLDERS, pageFiles, pageFolderNamed, type PageFolder } from "./pages";
 
-/** What a search runs over: the spec files, or the roadmap folder's pages. */
-export type SearchScope = "specs" | "roadmap";
+/** What a search runs over: the spec files, or a special folder's pages. */
+export type SearchScope = "specs" | (typeof PAGE_FOLDERS)[number]["folder"];
 
 export function isSearchScope(value: unknown): value is SearchScope {
-  return value === "specs" || value === "roadmap";
+  return value === "specs" || (typeof value === "string" && pageFolderNamed(value) !== null);
 }
 
 interface SearchDoc {
@@ -26,7 +26,7 @@ interface SearchDoc {
   name: string;
   /** Indexed: feature description, scenario body (tests table excluded) or page body. */
   text: string;
-  kind: "feature" | "scenario" | "roadmap";
+  kind: "feature" | "scenario" | "page";
   fileName: string;
   featureName: string;
   scenarioName?: string;
@@ -34,10 +34,10 @@ interface SearchDoc {
 }
 
 export interface SearchResultItem {
-  kind: "feature" | "scenario" | "roadmap";
+  kind: "feature" | "scenario" | "page";
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
-  /** The feature's display name — for a roadmap hit, the page's. */
+  /** The feature's display name — for a page hit, the page's. */
   featureName: string;
   /** Scenario hits only — enough to open the result like its deep link. */
   scenario?: { name: string; version: number };
@@ -117,8 +117,8 @@ async function buildSpecsIndex(dataDir: string, files: string[]): Promise<MiniSe
   return index;
 }
 
-/** One document per roadmap page: its heading is the name, the rest the text. */
-async function buildRoadmapIndex(
+/** One document per page: its heading is the name, the rest the text. */
+async function buildPageIndex(
   dataDir: string,
   files: string[],
 ): Promise<MiniSearch<SearchDoc>> {
@@ -126,9 +126,9 @@ async function buildRoadmapIndex(
   for (const fileName of files) {
     const content = await readTextFile(`${dataDir}/${fileName}`);
     if (content === null) continue;
-    const page = parseRoadmap(content);
+    const page = parsePage(content);
     const name = page.name || titleFromFileName(fileName.replace(/\.md$/, ""));
-    docs.push({ id: `R:${fileName}`, kind: "roadmap", name, text: page.body, fileName, featureName: name });
+    docs.push({ id: `P:${fileName}`, kind: "page", name, text: page.body, fileName, featureName: name });
   }
   const index = newIndex();
   index.addAll(docs);
@@ -136,16 +136,17 @@ async function buildRoadmapIndex(
 }
 
 async function getIndex(dataDir: string, scope: SearchScope): Promise<MiniSearch<SearchDoc>> {
-  const files =
-    scope === "roadmap" ? await roadmapFiles(dataDir) : (await walk(dataDir)).files.sort();
+  const folder = scope === "specs" ? null : pageFolderNamed(scope);
+  const files = folder
+    ? await pageFiles(dataDir, folder.folder)
+    : (await walk(dataDir)).files.sort();
   const fp = await fingerprint(dataDir, files);
   const key = `${scope}:${dataDir}`;
   const cached = cache.get(key);
   if (cached && cached.fingerprint === fp) return cached.index;
-  const index =
-    scope === "roadmap"
-      ? await buildRoadmapIndex(dataDir, files)
-      : await buildSpecsIndex(dataDir, files);
+  const index = folder
+    ? await buildPageIndex(dataDir, files)
+    : await buildSpecsIndex(dataDir, files);
   cache.set(key, { fingerprint: fp, index });
   return index;
 }
@@ -193,13 +194,14 @@ export async function searchSpecs(
   return search(dataDir, "specs", query, limit);
 }
 
-/** The same search over the roadmap folder's pages: one hit per page. */
-export async function searchRoadmap(
+/** The same search over a special folder's pages: one hit per page. */
+export async function searchPages(
   dataDir: string,
+  kind: PageFolder,
   query: string,
   limit = 20,
 ): Promise<SearchResultItem[]> {
-  return search(dataDir, "roadmap", query, limit);
+  return search(dataDir, kind.folder, query, limit);
 }
 
 async function search(
