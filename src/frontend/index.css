@@ -580,9 +580,10 @@ aside header h1 {
   font-weight: 500;
 }
 
-/* The Roadmap tab (specs/app/roadmap.feature.md): the page list under its
+/* The page tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature.md):
+   the Roadmap's and the Tasks' page list under its
    "New page" button, scrolling on its own like the feature tree. */
-.roadmap-pages {
+.page-rows {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -591,7 +592,7 @@ aside header h1 {
   overflow-y: auto;
 }
 
-a.roadmap-entry {
+a.page-entry {
   display: block;
   text-align: left;
   text-decoration: none;
@@ -602,16 +603,16 @@ a.roadmap-entry {
   font-size: 0.8125rem;
 }
 
-a.roadmap-entry:hover {
+a.page-entry:hover {
   background: var(--hover);
 }
 
-a.roadmap-entry.active {
+a.page-entry.active {
   background: var(--accent-soft);
   font-weight: 500;
 }
 
-.roadmap-list .empty {
+.page-list .empty {
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
 }
@@ -3564,8 +3565,8 @@ aside header .collapse-btn {
   opacity: 0.4;
 }
 
-/* ---- Roadmap entries: grouped by subfolder, with a ⋯ menu ---- */
-.roadmap-group {
+/* ---- Page entries (Roadmap, Tasks): grouped by subfolder, with a ⋯ menu ---- */
+.page-group {
   padding: 0.35rem 0.6rem 0.1rem;
   font-size: 0.6875rem;
   font-weight: 500;
@@ -3574,19 +3575,19 @@ aside header .collapse-btn {
   color: var(--text-3);
 }
 
-.roadmap-row {
+.page-row {
   position: relative;
   display: flex;
   align-items: center;
   border-radius: var(--radius-sm);
 }
 
-.roadmap-row:hover,
-.roadmap-row:focus-within {
+.page-row:hover,
+.page-row:focus-within {
   background: var(--hover);
 }
 
-.roadmap-row > a.roadmap-entry {
+.page-row > a.page-entry {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -3594,16 +3595,16 @@ aside header .collapse-btn {
   white-space: nowrap;
 }
 
-.roadmap-row.nested > a.roadmap-entry {
+.page-row.nested > a.page-entry {
   padding-left: 1.2rem;
 }
 
-.roadmap-row .tree-menu-btn {
+.page-row .tree-menu-btn {
   margin-right: 0.15rem;
 }
 
-.roadmap-row:hover .tree-menu-btn,
-.roadmap-row:focus-within .tree-menu-btn {
+.page-row:hover .tree-menu-btn,
+.page-row:focus-within .tree-menu-btn {
   opacity: 1;
 }
 
@@ -4050,7 +4051,7 @@ aside header .collapse-btn {
   }
 
   .tree a.tree-feature,
-  a.roadmap-entry,
+  a.page-entry,
   .folder-toggle {
     padding-top: 0.55rem;
     padding-bottom: 0.55rem;

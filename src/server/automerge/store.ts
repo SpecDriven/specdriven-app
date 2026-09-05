@@ -1,8 +1,9 @@
 // Chunked Automerge storage inside the data repo, synced by git alongside the
 // markdown projections. One directory per document under
 // `.specdriven/automerge/<kind>/<fileName>/` — `features` for the
-// `.feature.md` documents, `docs` for the roadmap folder's plain markdown
-// pages (specs/app/roadmap.feature.md):
+// `.feature.md` documents, `docs` for the special folders' plain markdown
+// pages — the roadmap's and the tasks' (specs/app/roadmap.feature.md,
+// specs/app/tasks.feature.md):
 //
 //   docid                  stable document identity, shared via git
 //   snapshot-<hash>.bin    full document (Automerge.save)
@@ -25,10 +26,10 @@ import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
 import {
-  ROADMAP_SCHEMA_VERSION,
+  PAGE_SCHEMA_VERSION,
   SCHEMA_VERSION,
   type FeatureDoc,
-  type RoadmapDoc,
+  type PageDoc,
   type SpecEntry,
   type SpecType,
 } from "./schema";
@@ -141,8 +142,10 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
 /**
  * The kinds of document the store holds, each under its own directory:
  * `features` for the `.feature.md` documents, `docs` for the plain markdown
- * pages — today the roadmap folder's (specs/app/roadmap.feature.md). Inside
- * either, the path is the file's repo-relative name.
+ * pages of the special folders — the roadmap's (specs/app/roadmap.feature.md)
+ * and the tasks' (specs/app/tasks.feature.md). Inside either, the path is the
+ * file's repo-relative name, so the folder in that path is what tells one
+ * kind of page from the other.
  */
 export type DocKind = "features" | "docs";
 
@@ -155,8 +158,8 @@ export function docDirRel(fileName: string): string {
   return dirRel("features", fileName);
 }
 
-/** Repo-relative path of a roadmap page's doc directory, for git pathspecs. */
-export function roadmapDocDirRel(fileName: string): string {
+/** Repo-relative path of a page's doc directory, for git pathspecs. */
+export function pageDocDirRel(fileName: string): string {
   return dirRel("docs", fileName);
 }
 
@@ -178,8 +181,8 @@ export async function hasFeatureDoc(dataDir: string, fileName: string): Promise<
   return hasDoc(dataDir, "features", fileName);
 }
 
-/** True when the roadmap page has a doc directory with at least one chunk. */
-export async function hasRoadmapDoc(dataDir: string, fileName: string): Promise<boolean> {
+/** True when the page has a doc directory with at least one chunk. */
+export async function hasPageDoc(dataDir: string, fileName: string): Promise<boolean> {
   return hasDoc(dataDir, "docs", fileName);
 }
 
@@ -262,12 +265,12 @@ export async function loadFeatureDoc(
   return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated);
 }
 
-/** Load a roadmap page's document (specs/app/roadmap.feature.md). */
-export async function loadRoadmapDoc(
+/** Load a page's document (specs/app/roadmap.feature.md, tasks.feature.md). */
+export async function loadPageDoc(
   dataDir: string,
   fileName: string,
-): Promise<LoadedDoc<RoadmapDoc> | null> {
-  return loadDoc<RoadmapDoc>(dataDir, "docs", fileName);
+): Promise<LoadedDoc<PageDoc> | null> {
+  return loadDoc<PageDoc>(dataDir, "docs", fileName);
 }
 
 /**
@@ -302,11 +305,11 @@ export async function createFeatureDoc(
   return createDoc(dataDir, "features", fileName, doc);
 }
 
-export async function createRoadmapDoc(
+export async function createPageDoc(
   dataDir: string,
   fileName: string,
-  doc: A.Doc<RoadmapDoc>,
-): Promise<LoadedDoc<RoadmapDoc>> {
+  doc: A.Doc<PageDoc>,
+): Promise<LoadedDoc<PageDoc>> {
   return createDoc(dataDir, "docs", fileName, doc);
 }
 
@@ -349,10 +352,10 @@ export async function saveFeatureDoc(
   return saveDoc(dataDir, "features", fileName, doc, sinceHeads);
 }
 
-export async function saveRoadmapDoc(
+export async function savePageDoc(
   dataDir: string,
   fileName: string,
-  doc: A.Doc<RoadmapDoc>,
+  doc: A.Doc<PageDoc>,
   sinceHeads: A.Heads,
 ): Promise<void> {
   return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
@@ -399,8 +402,8 @@ export async function removeFeatureDoc(dataDir: string, fileName: string): Promi
   log.debug(`removed document for ${fileName}`);
 }
 
-/** Remove a roadmap page's document directory (page deleted). */
-export async function removeRoadmapDoc(dataDir: string, fileName: string): Promise<void> {
+/** Remove a page's document directory (the page was deleted). */
+export async function removePageDoc(dataDir: string, fileName: string): Promise<void> {
   await rm(kindDir(dataDir, "docs", fileName), { recursive: true, force: true });
   log.debug(`removed document for ${fileName}`);
 }
@@ -438,9 +441,14 @@ export async function listFeatureDocs(dataDir: string): Promise<string[]> {
   return listDocs(dataDir, "features", ".feature.md");
 }
 
-/** Every roadmap page that has a document (specs/app/roadmap.feature.md). */
-export async function listRoadmapDocs(dataDir: string): Promise<string[]> {
-  return listDocs(dataDir, "docs", ".md");
+/**
+ * Every page of one special folder that has a document. `folder` scopes the
+ * listing, so the roadmap's drift pass never sees the tasks' documents, nor
+ * the other way round (specs/app/roadmap.feature.md, tasks.feature.md).
+ */
+export async function listPageDocs(dataDir: string, folder: string): Promise<string[]> {
+  const docs = await listDocs(dataDir, "docs", ".md");
+  return docs.filter((fileName) => fileName.startsWith(`${folder}/`));
 }
 
 /** Mint an empty feature document with a fresh identity. */
@@ -452,10 +460,10 @@ export function newFeatureDoc(init: Omit<FeatureDoc, "schemaVersion" | "id">): A
   });
 }
 
-/** Mint an empty roadmap document with a fresh identity. */
-export function newRoadmapDoc(init: Omit<RoadmapDoc, "schemaVersion" | "id">): A.Doc<RoadmapDoc> {
-  return A.from<RoadmapDoc>({
-    schemaVersion: ROADMAP_SCHEMA_VERSION,
+/** Mint an empty page document with a fresh identity. */
+export function newPageDoc(init: Omit<PageDoc, "schemaVersion" | "id">): A.Doc<PageDoc> {
+  return A.from<PageDoc>({
+    schemaVersion: PAGE_SCHEMA_VERSION,
     id: randomUUID(),
     ...init,
   });
