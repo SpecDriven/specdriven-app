@@ -33,3 +33,11 @@ export async function fileExists(path: string): Promise<boolean> {
     () => false,
   );
 }
+
+/** True when a directory exists at the path. */
+export async function directoryExists(path: string): Promise<boolean> {
+  return stat(path).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+}
