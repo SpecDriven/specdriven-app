@@ -92,6 +92,14 @@ export interface SpecDrivenState {
    */
   roadmap?: boolean;
   /**
+   * Show the data repo's `tasks` folder — the same markdown pages as the
+   * roadmap's, called tasks and listed on their own sidebar tab
+   * (specs/app/tasks.feature.md); absent means OFF. On, the folder is created
+   * if the repo has none, and the sidebar lists its tasks; off, the folder
+   * and its tasks are simply not shown.
+   */
+  tasks?: boolean;
+  /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
    * or empty means OFF — git stays the only transport. On a public server,
@@ -237,6 +245,12 @@ export function normalizeAssignments(value: unknown): boolean {
 /** Effective roadmap setting: OFF unless explicitly turned on — the roadmap
     folder is opt-in (specs/app/roadmap.feature.md). */
 export function normalizeRoadmap(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective tasks setting: OFF unless explicitly turned on — the tasks
+    folder is opt-in like the roadmap's (specs/app/tasks.feature.md). */
+export function normalizeTasks(value: unknown): boolean {
   return value === true;
 }
 

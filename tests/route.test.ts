@@ -5,7 +5,7 @@ import {
   parseRoute,
   repoDisplayName,
   resolveScenario,
-  roadmapPath,
+  pageLink,
   scenarioPath,
 } from "../src/frontend/route";
 import type { Scenario } from "../src/server/parser";
@@ -25,16 +25,20 @@ describe("parseRoute", () => {
     expect(parseRoute("/settings")).toEqual({});
   });
 
-  // Roadmap pages (specs/app/roadmap.feature.md) address the markdown files
-  // in the data repo's roadmap folder.
+  // Roadmap pages (specs/app/roadmap.feature.md) and tasks (specs/app/tasks
+  // .feature.md) address the markdown files in those data-repo folders.
   test("roadmap pages", () => {
-    expect(parseRoute("/roadmap/pricing")).toEqual({ roadmap: "roadmap/pricing.md" });
-    expect(parseRoute("/roadmap/q3/pricing")).toEqual({ roadmap: "roadmap/q3/pricing.md" });
+    expect(parseRoute("/roadmap/pricing")).toEqual({ page: "roadmap/pricing.md" });
+    expect(parseRoute("/roadmap/q3/pricing")).toEqual({ page: "roadmap/q3/pricing.md" });
     // A hand-typed link carrying the suffix doesn't double it up.
-    expect(parseRoute("/roadmap/pricing.md")).toEqual({ roadmap: "roadmap/pricing.md" });
+    expect(parseRoute("/roadmap/pricing.md")).toEqual({ page: "roadmap/pricing.md" });
     expect(parseRoute("/roadmap")).toEqual({});
-    expect(roadmapPath("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
-    expect(parseRoute(roadmapPath("roadmap/a b.md"))).toEqual({ roadmap: "roadmap/a b.md" });
+    expect(pageLink("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
+    expect(parseRoute(pageLink("roadmap/a b.md"))).toEqual({ page: "roadmap/a b.md" });
+    // Tasks read the same way, under their own folder.
+    expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
+    expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
+    expect(parseRoute("/tasks")).toEqual({});
   });
 
   test("feature url restores the file suffix", () => {
