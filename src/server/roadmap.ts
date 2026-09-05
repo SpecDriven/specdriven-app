@@ -241,7 +241,7 @@ function listing(fileName: string, page: Roadmap | null): RoadmapListing {
 }
 
 /** Markdown files under the roadmap folder, repo-relative and sorted. */
-async function roadmapFiles(dataDir: string, rel = ROADMAP_FOLDER): Promise<string[]> {
+export async function roadmapFiles(dataDir: string, rel = ROADMAP_FOLDER): Promise<string[]> {
   let entries: import("node:fs").Dirent[];
   try {
     entries = await readdir(`${dataDir}/${rel}`, { withFileTypes: true });
