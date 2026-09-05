@@ -30,7 +30,17 @@ Users that have read/write access to the repo that stores data.
 
 # Integration with AI coding agents
 
-We will use the MCP protocol
+"Start session" builds one prompt from the selected specs and hands it to
+Claude in one of two ways (src/server/agent.ts). Headless: `claude -p <prompt>`
+runs in the data repo and its output is shown when it exits. Desktop: the full
+prompt and a `session.json` record are written under
+`<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
+in the auto-pushed data repo — and the app opens
+`claude://code/new?q=<bootstrap>&folder=<data repo>`, a short prompt that tells
+the new Claude Code Desktop session to title itself with the session name and
+work from the prompt file. The deep link and its limits (`q` capped at 14336
+chars) were read from the shipped Claude.app bundle, not from public docs, so
+they are version-coupled.
 
 # Decisions
 
