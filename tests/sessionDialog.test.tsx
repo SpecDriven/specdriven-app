@@ -45,9 +45,18 @@ describe("resolveCodeGenTarget", () => {
     expect(resolveCodeGenTarget("nope", true)).toBe("desktop");
   });
 
-  test("reads only the two known targets off the state", () => {
+  test("the pane is a target too, and the fallback when only the CLI is there", () => {
+    expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
+    expect(resolveCodeGenTarget("pane", true, false)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, true)).toBe("pane");
+    expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
+    expect(resolveCodeGenTarget("cli", true, true)).toBe("cli");
+  });
+
+  test("reads only the known targets off the state", () => {
     expect(readCodeGenTarget("desktop")).toBe("desktop");
     expect(readCodeGenTarget("cli")).toBe("cli");
+    expect(readCodeGenTarget("pane")).toBe("pane");
     expect(readCodeGenTarget(null)).toBeNull();
     expect(readCodeGenTarget("x")).toBeNull();
   });

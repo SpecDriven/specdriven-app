@@ -18,8 +18,18 @@ import { settingsDirectory } from "./state";
 /** The Claude CLI binary the session shells out to. */
 export const CLAUDE_BIN = "claude";
 
+// Injection seam (the desktop one below): tests run on a PATH without the
+// CLI, so a test of the coding agent pane swaps the probe; null restores it.
+let cliAvailability: (() => boolean) | null = null;
+
+export function setClaudeAvailability(fn: (() => boolean) | null): (() => boolean) | null {
+  const previous = cliAvailability;
+  cliAvailability = fn;
+  return previous;
+}
+
 export function claudeAvailable(): boolean {
-  return which(CLAUDE_BIN) !== null;
+  return cliAvailability ? cliAvailability() : which(CLAUDE_BIN) !== null;
 }
 
 /** One spec picked into the session: its repo-relative file and its text. */
@@ -132,6 +142,9 @@ export async function runCodeGenSession(
 export const CLAUDE_DESKTOP_PROMPT_MAX = 14336;
 /** The agent recorded in a desktop session's session.json. */
 export const DESKTOP_AGENT = "claude-code-desktop";
+/** The agent recorded for a session run in the app's own coding agent pane
+    (specs/agents/coding-agent-ui.feature.md, src/server/agentChat.ts). */
+export const PANE_AGENT = "pane";
 /** Session records live in <settings dir>/sessions/<id>/ — beside the
     settings file, never inside the data repo, which is pushed to git. */
 export const SESSIONS_SUBDIR = "sessions";
@@ -248,7 +261,7 @@ export interface SessionRecord {
   name: string;
   /** ISO 8601 start time. */
   startedAt: string;
-  agent: typeof DESKTOP_AGENT;
+  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT;
   dataRepo: string;
   /** The code repo the session was opened on; absent when it ran in the
       data repo (src/server/members.ts `code-repo`). */
