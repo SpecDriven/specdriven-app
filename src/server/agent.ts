@@ -1,7 +1,6 @@
 // Coding agent integration (specs/agents/claude.spec.md): a named code gen
 // session takes the selected specs and builds one prompt from them. The
-// targets: the Claude CLI in print mode (`claude -p …`), which executes and
-// exits; the app's own coding agent pane, driven by Claude or by Pi
+// targets: the app's own coding agent pane, driven by Claude or by Pi
 // (specs/agents/integration-with-pi-dev-agent.feature.md); or Claude Code
 // Desktop, opened on the data repo through its
 // `claude://code/new` deep link with a short bootstrap prompt that titles the
@@ -41,12 +40,6 @@ export interface SpecInput {
   /** True when content carries only the selected scenarios, not the whole
       spec — the prompt says so, so Claude doesn't take it for the full file. */
   partial?: boolean;
-}
-
-export interface CodeGenResult {
-  name: string;
-  /** What the CLI printed — shown as the session's outcome. */
-  output: string;
 }
 
 /**
@@ -99,41 +92,11 @@ export function buildSessionPrompt(
   return lines.join("\n") + "\n";
 }
 
-/** The CLI's own words for a failed run, for the client's error box. */
-function failureDetail(result: RunResult): string {
-  return result.stderr.trim() || result.stdout.trim();
-}
-
-/**
- * Run one code gen session: prompt in, `claude -p` out. A non-zero exit
- * becomes an Error whose message carries the CLI's own words, for the
- * client's error box.
- */
-export async function runCodeGenSession(
-  place: string | SessionPlace,
-  name: string,
-  specs: SpecInput[],
-  runner: Runner = run,
-): Promise<CodeGenResult> {
-  const where = typeof place === "string" ? { dataRepo: place } : place;
-  const prompt = buildSessionPrompt(name, specs, where);
-  const result = await runner(CLAUDE_BIN, ["-p", prompt], { cwd: sessionWorkDir(where) });
-  if (result.exitCode !== 0) {
-    const detail = failureDetail(result);
-    throw new Error(
-      detail
-        ? `Claude exited with code ${result.exitCode}: ${detail}`
-        : `Claude exited with code ${result.exitCode}`,
-    );
-  }
-  return { name, output: result.stdout };
-}
-
 // ---------------------------------------------------------------------------
 // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): pi.dev's
 // terminal coding agent, more minimal and less opinionated than Claude. It
 // runs in the app's own coding agent pane, driven over its RPC mode
-// (src/server/piChat.ts) — there is no headless target for it.
+// (src/server/piChat.ts).
 
 /** The Pi CLI binary a pane session spawns. */
 export const PI_BIN = "pi";
@@ -177,6 +140,11 @@ export const PI_PANE_AGENT = "pi-pane";
 export const SESSIONS_SUBDIR = "sessions";
 /** Longest session name the title instruction carries. */
 export const SESSION_TITLE_MAX = 120;
+
+/** The opener's own words for a failed launch, for the client's error box. */
+function failureDetail(result: RunResult): string {
+  return result.stderr.trim() || result.stdout.trim();
+}
 
 /** Where the local session records go for an app root: <settings dir>/sessions. */
 export async function sessionsDirectory(rootDir: string): Promise<string> {

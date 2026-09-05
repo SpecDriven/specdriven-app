@@ -31,9 +31,8 @@ Users that have read/write access to the repo that stores data.
 # Integration with AI coding agents
 
 "Start session" builds one prompt from the selected specs and hands it to an
-agent — Claude in one of three ways, or Pi in the pane (src/server/agent.ts).
-Headless: `claude -p <prompt>` runs in the data repo and its output is shown
-when it exits. Desktop: the full prompt and a `session.json` record are
+agent — Claude Code Desktop, or the app's own pane driven by Claude or by Pi
+(src/server/agent.ts). Desktop: the full prompt and a `session.json` record are
 written under
 `<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
 in the auto-pushed data repo — and the app opens

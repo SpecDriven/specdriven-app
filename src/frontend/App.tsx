@@ -404,44 +404,39 @@ function writeRecent(list: RecentEntry[]) {
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
-// session" runs in — a new session in Claude Code Desktop, the app's own
+// session" runs in — a new session in Claude Code Desktop, or the app's own
 // coding agent pane (specs/agents/coding-agent-ui.feature.md) with Claude or
-// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md), or the
-// Claude CLI headless.
+// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md).
 export type { CodeGenTarget };
 
 /** The stored target as the server reports it; anything else is "not chosen". */
 export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "cli" || value === "pane" || value === "pi"
-    ? value
-    : null;
+  return value === "desktop" || value === "pane" || value === "pi" ? value : null;
 }
 
 export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
   desktop: "Claude Code Desktop",
   pane: "Coding agent pane",
-  cli: "Claude CLI (headless)",
   pi: "Pi in the coding agent pane",
 };
 
 /** The target a session dialog opens on: the remembered choice when it is
     still usable, else desktop when Claude.app is installed, else the pane
-    when the Claude CLI is. Pi comes ahead of the headless CLI only where
-    Claude is not installed at all — with Claude there, Pi is picked, never
-    defaulted to. */
+    when the Claude CLI is. Pi is picked, never defaulted to — an unchosen
+    dialog opens on it only where there is no Claude at all. With nothing
+    installed the answer is desktop, and the server says what is missing. */
 export function resolveCodeGenTarget(
   stored: string | null | undefined,
   canOpenDesktop: boolean,
   canRunPane = false,
   canRunPi = false,
 ): CodeGenTarget {
-  if (stored === "cli") return "cli";
   if (stored === "desktop" && canOpenDesktop) return "desktop";
   if (stored === "pane" && canRunPane) return "pane";
   if (stored === "pi" && canRunPi) return "pi";
   if (canOpenDesktop) return "desktop";
   if (canRunPane) return "pane";
-  return canRunPi ? "pi" : "cli";
+  return canRunPi ? "pi" : "desktop";
 }
 
 // The default session name lives with the pane's helpers now; re-exported
@@ -614,7 +609,7 @@ export function App() {
   const [dragging, setDragging] = useState<string | null>(null);
   // Code gen sessions (specs/agents/claude.spec.md): specs checked in the
   // sidebar, and scenarios checked on their cards, go into a named session
-  // that runs the Claude CLI. Per file the selection is the whole spec
+  // that runs the coding agent. Per file the selection is the whole spec
   // ("all") or a set of scenario keys.
   const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
   const [sessionRunning, setSessionRunning] = useState(false);
@@ -1505,10 +1500,10 @@ export function App() {
 
   // Code gen session (specs/agents/claude.spec.md): with specs or single
   // scenarios selected, "Start session" asks for a name — prefilled with a
-  // timestamp name, so confirming straight away works — and, with Claude.app
-  // installed, where to run. The server builds a prompt from the selection
-  // and either opens it in Claude Code Desktop or passes it to the Claude
-  // CLI to execute and exit. A failure lands in the error box.
+  // timestamp name, so confirming straight away works — and, with more than
+  // one agent installed, where to run. The server builds a prompt from the
+  // selection and opens it in Claude Code Desktop or in the coding agent
+  // pane. A failure lands in the error box.
   const startSession = async () => {
     const files = sessionFiles();
     if (files.length === 0 || sessionRunning) return;
@@ -1551,17 +1546,21 @@ export function App() {
             },
           ]
         : []),
-      {
-        value: "cli",
-        label: CODE_GEN_TARGET_LABEL.cli,
-        hint: "Runs claude -p here and shows its output when it exits",
-      },
     ];
+    // No agent installed: nothing to run the session in, so say so instead
+    // of asking for a name.
+    if (choices.length === 0) {
+      setSessionError(
+        "No coding agent found — install Claude.app or the `claude` command to start a session",
+      );
+      return;
+    }
+    const only = choices[0]!.value as CodeGenTarget;
     const dialog = {
       title: "Name the session",
       // With a choice of agents each option says what it runs, so the hint
-      // names none of them; with only one, the one is Claude's headless CLI.
-      hint: `Runs ${choices.length > 1 ? "the chosen agent" : "Claude"} over ${describeSelection(files)}${where}.`,
+      // names none of them; with only one, it names that one's agent.
+      hint: `Runs ${choices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : "Claude"} over ${describeSelection(files)}${where}.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start session",
@@ -1575,22 +1574,20 @@ export function App() {
       });
       if (picked === null || !picked.text.trim()) return;
       sessionName = picked.text.trim();
-      target = readCodeGenTarget(picked.choice) ?? "cli";
+      target = readCodeGenTarget(picked.choice) ?? only;
       // Remembered, so the next dialog opens on the same choice.
       if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
     } else {
       const name = await prompt(dialog);
       if (name === null || !name.trim()) return;
       sessionName = name.trim();
-      target = "cli";
+      target = only;
     }
     setSessionRunning(true);
     setSessionNotice(
       target === "desktop"
         ? `Opening "${sessionName}" in Claude Code Desktop…`
-        : target === "pane" || target === "pi"
-          ? `Opening "${sessionName}" in the coding agent pane…`
-          : `Session "${sessionName}" running…`,
+        : `Opening "${sessionName}" in the coding agent pane…`,
     );
     try {
       const res = await fetch("/api/agent/session", {
@@ -1604,17 +1601,12 @@ export function App() {
         // whether the prompt is sent or only prefilled is the app's call.
         setSessionNotice(`Session "${sessionName}" opened in Claude Code Desktop.`);
         setSpecSelection(new Map());
-      } else if (res.ok && (target === "pane" || target === "pi")) {
+      } else if (res.ok) {
         // The chat is up with the prompt as its first turn; show it.
         setSessionNotice(`Session "${sessionName}" opened in the coding agent pane.`);
         setSpecSelection(new Map());
         await agentChat.openSession(data.id as string);
         agentChat.openPane();
-      } else if (res.ok) {
-        setSessionNotice(`Session "${sessionName}" finished.`);
-        setSpecSelection(new Map());
-        // The session may have edited specs — show what it left behind.
-        await loadFeatures();
       } else {
         setSessionNotice(null);
         setSessionError(data.error ?? "Code gen session failed");
@@ -6227,7 +6219,7 @@ export function App() {
                   Code generation
                   <span className="settings-row-hint">
                     {settingsCodeGenDraft
-                      ? "Specs and scenarios can be selected and handed to Claude — a new session in Claude Code Desktop, or the Claude CLI run headless — which implements them in the data repo."
+                      ? "Specs and scenarios can be selected and handed to a coding agent — a new session in Claude Code Desktop, or a chat in the app's own coding agent pane — which implements them in the data repo."
                       : "Code generation is off: no selection checkboxes, and sessions are refused."}
                   </span>
                 </span>
@@ -6463,7 +6455,7 @@ export function App() {
           </div>
         </div>
       )}
-      {/* Error box (specs/agents/claude.spec.md): what the Claude CLI said
+      {/* Error box (specs/agents/claude.spec.md): what the coding agent said
           when it exited with an error code. */}
       {sessionError && (
         <div className="dialog-backdrop" onClick={() => setSessionError(null)}>
