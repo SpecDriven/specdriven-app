@@ -1,7 +1,9 @@
-// Claude agent integration (specs/agents/claude.spec.md): a named code gen
-// session takes the selected specs and builds one prompt from them. Two
+// Coding agent integration (specs/agents/claude.spec.md): a named code gen
+// session takes the selected specs and builds one prompt from them. The
 // targets: the Claude CLI in print mode (`claude -p …`), which executes and
-// exits; or Claude Code Desktop, opened on the data repo through its
+// exits; the app's own coding agent pane, driven by Claude or by Pi
+// (specs/agents/integration-with-pi-dev-agent.feature.md); or Claude Code
+// Desktop, opened on the data repo through its
 // `claude://code/new` deep link with a short bootstrap prompt that titles the
 // session and points it at the full prompt saved on disk. Node APIs only —
 // this module also runs under Electron (src/server/run.ts).
@@ -128,6 +130,29 @@ export async function runCodeGenSession(
 }
 
 // ---------------------------------------------------------------------------
+// Pi (specs/agents/integration-with-pi-dev-agent.feature.md): pi.dev's
+// terminal coding agent, more minimal and less opinionated than Claude. It
+// runs in the app's own coding agent pane, driven over its RPC mode
+// (src/server/piChat.ts) — there is no headless target for it.
+
+/** The Pi CLI binary a pane session spawns. */
+export const PI_BIN = "pi";
+
+// Injection seam (the Claude and desktop ones above): tests run on a PATH
+// without pi and must never spawn it; null restores the probe.
+let piCliAvailability: (() => boolean) | null = null;
+
+export function setPiAvailability(fn: (() => boolean) | null): (() => boolean) | null {
+  const previous = piCliAvailability;
+  piCliAvailability = fn;
+  return previous;
+}
+
+export function piAvailable(): boolean {
+  return piCliAvailability ? piCliAvailability() : which(PI_BIN) !== null;
+}
+
+// ---------------------------------------------------------------------------
 // Claude Code Desktop (specs/roadmap/start-session-in-claude-code-desktop.md)
 //
 // Claude.app registers `claude://`; its router's `code` host has a `/new`
@@ -145,6 +170,8 @@ export const DESKTOP_AGENT = "claude-code-desktop";
 /** The agent recorded for a session run in the app's own coding agent pane
     (specs/agents/coding-agent-ui.feature.md, src/server/agentChat.ts). */
 export const PANE_AGENT = "pane";
+/** The same pane, driven by Pi over its RPC mode (src/server/piChat.ts). */
+export const PI_PANE_AGENT = "pi-pane";
 /** Session records live in <settings dir>/sessions/<id>/ — beside the
     settings file, never inside the data repo, which is pushed to git. */
 export const SESSIONS_SUBDIR = "sessions";
@@ -261,7 +288,7 @@ export interface SessionRecord {
   name: string;
   /** ISO 8601 start time. */
   startedAt: string;
-  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT;
+  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT | typeof PI_PANE_AGENT;
   dataRepo: string;
   /** The code repo the session was opened on; absent when it ran in the
       data repo (src/server/members.ts `code-repo`). */

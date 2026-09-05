@@ -15,6 +15,7 @@
 import { useSyncExternalStore } from "react";
 import type {
   AssistantBlock,
+  ChatAgent,
   ChatEvent,
   ChatSessionMeta,
   ChatStatus,
@@ -23,7 +24,17 @@ import type {
 } from "../server/agentChat";
 import { toast } from "./Toasts";
 
-export type { ChatEvent, ChatSessionMeta, ChatStatus, PermissionMode, SlashCommandInfo };
+export type {
+  ChatAgent,
+  ChatEvent,
+  ChatSessionMeta,
+  ChatStatus,
+  PermissionMode,
+  SlashCommandInfo,
+};
+
+/** What the pane calls each agent. */
+export const AGENT_LABEL: Record<ChatAgent, string> = { claude: "Claude", pi: "Pi" };
 
 // --- Transcript ------------------------------------------------------------
 
@@ -435,6 +446,8 @@ export interface AgentChatStore {
   list: ChatSessionMeta[];
   /** Whether the Claude CLI is there (from /api/state). */
   available: boolean;
+  /** Whether the Pi CLI is there — a pane session can run on either. */
+  piAvailable: boolean;
 }
 
 let state: AgentChatStore = {
@@ -444,6 +457,7 @@ let state: AgentChatStore = {
   sessions: {},
   list: [],
   available: false,
+  piAvailable: false,
 };
 const listeners = new Set<() => void>();
 const streams = new Map<string, AbortController>();
@@ -493,7 +507,7 @@ function receive(id: string, ev: ChatEvent): void {
   let commands = s.commands;
   if (ev.kind === "status") {
     meta.status = ev.status;
-    if (ev.claudeSessionId) meta.claudeSessionId = ev.claudeSessionId;
+    if (ev.agentSessionId) meta.agentSessionId = ev.agentSessionId;
     if (ev.model) meta.model = ev.model;
     if (ev.permissionMode) meta.permissionMode = ev.permissionMode;
     if (ev.commands) commands = ev.commands;
@@ -505,7 +519,8 @@ function receive(id: string, ev: ChatEvent): void {
   set({ list: state.list.map((m) => (m.id === id ? meta : m)) });
   // A question nobody is looking at would hang the session in silence.
   if (ev.kind === "permission_request" && (!state.open || state.activeId !== id)) {
-    toast.info("Claude is waiting for your approval in the coding agent pane");
+    const who = AGENT_LABEL[s.meta.agent] ?? "The agent";
+    toast.info(`${who} is waiting for your approval in the coding agent pane`);
   }
 }
 
@@ -591,13 +606,17 @@ function forget(id: string): void {
 
 export interface CreateSessionOptions {
   name: string;
+  /** Which agent drives the chat; absent is Claude. */
+  agent?: ChatAgent;
   prompt?: string;
   permissionMode?: PermissionMode;
 }
 
 export const agentChat = {
-  setAvailable(available: boolean): void {
-    if (available !== state.available) set({ available });
+  setAvailable(available: boolean, piAvailable = state.piAvailable): void {
+    if (available !== state.available || piAvailable !== state.piAvailable) {
+      set({ available, piAvailable });
+    }
   },
   openPane(): void {
     if (!state.open) set({ open: true });

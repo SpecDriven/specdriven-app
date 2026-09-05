@@ -30,10 +30,11 @@ Users that have read/write access to the repo that stores data.
 
 # Integration with AI coding agents
 
-"Start session" builds one prompt from the selected specs and hands it to
-Claude in one of three ways (src/server/agent.ts). Headless: `claude -p <prompt>`
-runs in the data repo and its output is shown when it exits. Desktop: the full
-prompt and a `session.json` record are written under
+"Start session" builds one prompt from the selected specs and hands it to an
+agent — Claude in one of three ways, or Pi in the pane (src/server/agent.ts).
+Headless: `claude -p <prompt>` runs in the data repo and its output is shown
+when it exits. Desktop: the full prompt and a `session.json` record are
+written under
 `<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
 in the auto-pushed data repo — and the app opens
 `claude://code/new?q=<bootstrap>&folder=<data repo>`, a short prompt that tells
@@ -54,11 +55,25 @@ table (no WebSocket, so it works over Electron's `app://` too) and reopens the
 stream from the last sequence it saw. Permission requests and clarifying
 questions round-trip through cards in the pane; the "/" popup lists whatever
 `supportedCommands()` reports for the session. A `session.json` with
-`agent: "pane"` and Claude's own session id goes under
-`<settings dir>/sessions/<uuid>/`, so resuming a past pane session
-(`resume: claudeSessionId`) is a cheap follow-up. When a project names a
+`agent: "pane"` and Claude's own session id (`agentSessionId`) goes under
+`<settings dir>/sessions/<uuid>/`, so resuming a past pane session is a cheap
+follow-up. When a project names a
 `code-repo`, the session runs there and the data repo is an additional
 directory, so Claude can read the specs the prompt points at.
+
+Pi: the same pane, driven by pi.dev's agent instead (src/server/piChat.ts,
+specs/agents/integration-with-pi-dev-agent.feature.md), offered when the `pi`
+binary is on PATH. `pi --mode rpc` speaks JSON lines on stdin/stdout: commands
+out (`prompt`, `abort`, `get_state`, `get_commands`), a `response` per command
+correlated by id, and a stream of events in. Those events are translated into
+the very same event log Claude's messages fill, so the transcript, the browser
+stream and the session record are shared; the record says `agent: "pi-pane"`.
+Framing is strict JSONL — split on `\n` only, strip a trailing `\r`, never a
+generic line reader, since U+2028 is legal inside JSON strings. Pi's RPC mode
+has no permission protocol: it runs its own tools, so those sessions raise no
+permission cards, offer no permission mode, and say so in the transcript.
+Extension dialogs, which would otherwise block pi forever, are cancelled with
+a note.
 
 The feature spec lives in the spec repo as
 `specs/agents/coding-agent-ui.feature.md`; the spec repo is never edited from

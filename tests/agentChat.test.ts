@@ -266,14 +266,14 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
   // it is up, and sends init only with the first message.
   const ready = await untilStatus(meta.id, "idle");
   expect(ready.commands.some((c) => c.description === "Review code")).toBe(true);
-  expect(ready.meta.claudeSessionId).toBeUndefined();
+  expect(ready.meta.agentSessionId).toBeUndefined();
   expect(ready.events.filter((e) => e.kind === "status").at(-1)).toMatchObject({
     status: "idle",
     commands: expect.arrayContaining([expect.objectContaining({ name: "review" })]),
   });
 
   fakes[0]!.emit(init("claude-abc"));
-  const snap = await until(() => snapshot(meta.id), (s) => s.meta.claudeSessionId === "claude-abc");
+  const snap = await until(() => snapshot(meta.id), (s) => s.meta.agentSessionId === "claude-abc");
   expect(snap.meta.status).toBe("idle");
   expect(snap.meta.model).toBe("claude-opus-5");
   const kinds = snap.events.map((e) => e.kind);
@@ -286,7 +286,7 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
   expect(snap.events.find((e) => e.kind === "status" && e.tools)).toMatchObject({
     status: "idle",
     tools: ["Bash", "Read", "Edit"],
-    claudeSessionId: "claude-abc",
+    agentSessionId: "claude-abc",
   });
 
   // The record sits beside the settings — never in the data repo, which is
@@ -294,7 +294,8 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
   const record = JSON.parse(
     await readFile(join(root, ".specdriven", "sessions", meta.id, "session.json"), "utf8"),
   );
-  expect(record).toMatchObject({ agent: "pane", cwd: data, dataRepo: data, claudeSessionId: "claude-abc" });
+  expect(record).toMatchObject({ agent: "pane", cwd: data, dataRepo: data, agentSessionId: "claude-abc" });
+  expect(ready.meta.agent).toBe("claude");
   expect(stat(join(data, ".specdriven", "sessions"))).rejects.toThrow();
 
   const list = (await (await api("/api/agent/chat")).json()) as { sessions: ChatSessionMeta[] };
@@ -525,7 +526,7 @@ test("the permission mode switches mid-session", async () => {
   expect(fake.modes).toEqual(["plan"]);
   expect((await snapshot(id)).events.find((e) => e.kind === "mode")).toMatchObject({ permissionMode: "plan" });
   fake.emit(sdk({ ...(init() as object), permissionMode: "plan" }));
-  await until(() => snapshot(id), (s) => s.meta.claudeSessionId === "claude-1");
+  await until(() => snapshot(id), (s) => s.meta.agentSessionId === "claude-1");
   expect((await snapshot(id)).meta.permissionMode).toBe("plan");
 
   const bad = await api(`/api/agent/chat/${id}/mode`, "PUT", { permissionMode: "yolo" });
@@ -598,7 +599,7 @@ test("Start session can open the generated prompt in the pane", async () => {
   // and init lands on it.
   await untilStatus(body.id, "running");
   fake.emit(init());
-  await until(() => snapshot(body.id), (s) => s.meta.claudeSessionId === "claude-1");
+  await until(() => snapshot(body.id), (s) => s.meta.agentSessionId === "claude-1");
   expect((await snapshot(body.id)).meta.status).toBe("running");
 
   const stored = await api("/api/state", "PUT", { codeGenTarget: "pane" });

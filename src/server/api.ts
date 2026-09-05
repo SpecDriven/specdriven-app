@@ -10,6 +10,7 @@ import {
   normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeCodeGenTarget,
+  CODE_GEN_TARGET_LIST,
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
   normalizeDeletePublished,
   normalizeProjectManagement,
@@ -73,6 +74,7 @@ import {
   claudeAvailable,
   claudeDesktopAvailable,
   launchDesktopSession,
+  piAvailable,
   runCodeGenSession,
   sessionsDirectory,
 } from "./agent";
@@ -88,13 +90,15 @@ import {
   interruptChat,
   isFinalStatus,
   listChatSessions,
+  normalizeChatAgent,
   normalizePermissionMode,
+  CHAT_AGENTS,
   PERMISSION_MODES,
   sendChatMessage,
   setChatPermissionMode,
   subscribeChat,
 } from "./agentChat";
-import type { ChatEvent, PermissionAnswer } from "./agentChat";
+import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
@@ -317,6 +321,10 @@ async function stateFields(state: SpecDrivenState) {
     // Whether the Claude CLI is on PATH, so a session can run in the app's
     // own coding agent pane (specs/agents/coding-agent-ui.feature.md).
     canRunAgentPane: claudeAvailable(),
+    // Whether the Pi CLI is on PATH, so a session can run in Pi
+    // (specs/agents/integration-with-pi-dev-agent.feature.md) — gates the
+    // Pi entry of the session dialog's agent choice.
+    canRunPi: piAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
@@ -539,7 +547,9 @@ const putState: Handler = async (req) => {
   // choice of the session dialog, so the next dialog opens on it.
   if (body.codeGenTarget !== undefined) {
     const target = normalizeCodeGenTarget(body.codeGenTarget);
-    if (target === null) return json({ error: "codeGenTarget must be desktop, cli or pane" }, 400);
+    if (target === null) {
+      return json({ error: `codeGenTarget must be ${CODE_GEN_TARGET_LIST}` }, 400);
+    }
     state.codeGenTarget = target;
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
@@ -1054,6 +1064,7 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
 }
 
 const CLI_MISSING = "Claude CLI not found — install the `claude` command";
+const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";
 
 // Code gen session (specs/agents/claude.spec.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
@@ -1071,7 +1082,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   if (!name) return json({ error: "name is required" }, 400);
   // An absent target is the original CLI session, unchanged.
   const target = body.target === undefined ? "cli" : normalizeCodeGenTarget(body.target);
-  if (target === null) return json({ error: "target must be desktop, cli or pane" }, 400);
+  if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
   const files = parseSessionFiles(body.files);
   if (files === null) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
@@ -1110,16 +1121,21 @@ const postAgentSession = withDataDir(async (dir, req) => {
   const place: SessionPlace = codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
-  if (target === "pane") {
-    if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  // "pane" is that chat with Claude, "pi" the same chat with Pi
+  // (specs/agents/integration-with-pi-dev-agent.feature.md).
+  if (target === "pane" || target === "pi") {
+    const agent = target === "pi" ? "pi" : "claude";
+    if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
+    if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
     try {
       const meta = await createChatSession({
         place,
         name,
+        agent,
         prompt: buildSessionPrompt(name, specs, place),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
-      return json({ name, id: meta.id, target: "pane" });
+      return json({ name, id: meta.id, target });
     } catch (e) {
       return chatError(e);
     }
@@ -1152,11 +1168,12 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // of push that works over both Bun.serve and Electron's app:// protocol.
 
 /** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
-async function agentPanePlace(dir: string): Promise<SessionPlace | Response> {
+async function agentPanePlace(dir: string, agent: ChatAgent): Promise<SessionPlace | Response> {
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  if (!claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
+  if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
     return json(
@@ -1174,13 +1191,17 @@ function chatError(e: unknown): Response {
 }
 
 const postAgentChat = withDataDir(async (dir, req) => {
-  const place = await agentPanePlace(dir);
-  if (place instanceof Response) return place;
   const body = (await req.json().catch(() => ({}))) as {
     name?: unknown;
     prompt?: unknown;
     permissionMode?: unknown;
+    agent?: unknown;
   };
+  // Which agent drives the chat; absent is Claude, as it was before Pi.
+  const agent = body.agent === undefined ? "claude" : normalizeChatAgent(body.agent);
+  if (agent === null) return json({ error: `agent must be ${CHAT_AGENTS.join(" or ")}` }, 400);
+  const place = await agentPanePlace(dir, agent);
+  if (place instanceof Response) return place;
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Coding agent session";
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt : undefined;
   let permissionMode: ReturnType<typeof normalizePermissionMode> = null;
@@ -1192,6 +1213,7 @@ const postAgentChat = withDataDir(async (dir, req) => {
     const meta = await createChatSession({
       place,
       name,
+      agent,
       ...(prompt ? { prompt } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       sessionsDir: await sessionsDirectory(getAppRoot()),
