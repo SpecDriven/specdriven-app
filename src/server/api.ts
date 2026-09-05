@@ -17,6 +17,7 @@ import {
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
   normalizeRoadmap,
+  normalizeTasks,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -103,17 +104,21 @@ import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
-import { isSearchScope, searchRoadmap, searchSpecs } from "./search";
+import { isSearchScope, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import {
-  createRoadmapPage,
-  deleteRoadmapPage,
-  ensureRoadmapFolder,
-  isRoadmapPath,
-  listRoadmap,
-  readRoadmapPage,
-  saveRoadmapPage,
-} from "./roadmap";
+  ROADMAP,
+  TASKS,
+  createPage,
+  deletePage,
+  ensurePageFolder,
+  isPageFolderPath,
+  listPages,
+  pageFolderNamed,
+  readPage,
+  savePage,
+  type PageFolder,
+} from "./pages";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -327,6 +332,7 @@ async function stateFields(state: SpecDrivenState) {
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
+    tasks: normalizeTasks(state.tasks),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -380,6 +386,7 @@ const putState: Handler = async (req) => {
     deletePublished?: boolean;
     assignments?: boolean;
     roadmap?: boolean;
+    tasks?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -397,12 +404,13 @@ const putState: Handler = async (req) => {
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.roadmap === undefined &&
+    body.tasks === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks or syncServerUrl is required",
       },
       400,
     );
@@ -573,14 +581,25 @@ const putState: Handler = async (req) => {
   // The roadmap folder (specs/app/roadmap.feature.md): opt-in — the default
   // OFF is an absent key. Turning it on creates the folder below, once the
   // settings are written.
-  let roadmapTurnedOn = false;
+  const turnedOn: PageFolder[] = [];
   if (body.roadmap !== undefined) {
     if (typeof body.roadmap !== "boolean") {
       return json({ error: "roadmap must be a boolean" }, 400);
     }
-    roadmapTurnedOn = body.roadmap && !normalizeRoadmap(state.roadmap);
+    if (body.roadmap && !normalizeRoadmap(state.roadmap)) turnedOn.push(ROADMAP);
     if (body.roadmap) state.roadmap = true;
     else delete state.roadmap;
+  }
+  // The tasks folder (specs/app/tasks.feature.md): the roadmap switch's twin
+  // — opt-in, an absent key when off, and the folder made below when it goes
+  // on.
+  if (body.tasks !== undefined) {
+    if (typeof body.tasks !== "boolean") {
+      return json({ error: "tasks must be a boolean" }, 400);
+    }
+    if (body.tasks && !normalizeTasks(state.tasks)) turnedOn.push(TASKS);
+    if (body.tasks) state.tasks = true;
+    else delete state.tasks;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -603,10 +622,14 @@ const putState: Handler = async (req) => {
   // Scenario "Create roadmap folder if necessary": the switch is what asks
   // for the folder, so it is made on the spot rather than on the next tick.
   // A repo we cannot reach is left to that tick; the switch still stands.
-  if (roadmapTurnedOn && !needsDataRepo(state)) {
+  if (turnedOn.length > 0 && !needsDataRepo(state)) {
     try {
       const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
-      if (await ensureRoadmapFolder(dir)) reloadLog.info("created the roadmap folder");
+      for (const kind of turnedOn) {
+        if (await ensurePageFolder(dir, kind)) {
+          reloadLog.info(`created the ${kind.folder} folder`);
+        }
+      }
     } catch (e) {
       reloadLog.error((e as Error).message, errorAttributes(e));
     }
@@ -630,7 +653,12 @@ const putState: Handler = async (req) => {
   // is logged and the switch still stands; the folder is configured either way.
   if (pickedDir) {
     const dir = pickedDir;
-    await syncTick(() => syncDataDir(dir, { roadmap: normalizeRoadmap(state.roadmap) }));
+    await syncTick(() =>
+      syncDataDir(dir, {
+        roadmap: normalizeRoadmap(state.roadmap),
+        tasks: normalizeTasks(state.tasks),
+      }),
+    );
   }
   await applyNetSync(state);
   return json(await stateFields(state));
@@ -727,65 +755,76 @@ const getFeatures = withDataDir(async (dir) => {
   const settings = await readProjectSettings(dir);
   return json({
     features: await listFeatures(dir),
-    // The roadmap folder is not a feature folder (specs/app/roadmap.feature
-    // .md): it holds markdown pages, listed on their own above the tree, so
-    // it never shows as an empty folder among the feature ones.
-    folders: (await listFolders(dir)).filter((folder) => !isRoadmapPath(folder)),
+    // The roadmap and tasks folders are not feature folders (specs/app/roadmap
+    // .feature.md, specs/app/tasks.feature.md): they hold markdown pages,
+    // listed on their own tabs, so neither shows as an empty folder among the
+    // feature ones.
+    folders: (await listFolders(dir)).filter((folder) => !isPageFolderPath(folder)),
     members: settings.members,
     codeRepo: settings.codeRepo,
   });
 });
 
-// Roadmap pages (specs/app/roadmap.feature.md): the markdown files in the
-// data repo's `roadmap` folder, listed with the member each is assigned to.
-const getRoadmap = withDataDir(async (dir) => json({ pages: await listRoadmap(dir) }));
+// The special folders' pages (specs/app/roadmap.feature.md, specs/app/tasks
+// .feature.md): the markdown files in the data repo's `roadmap` and `tasks`
+// folders, listed with the member each is assigned to. One set of handlers
+// serves both — the folder a route is mounted under picks the descriptor.
+const listPagesRoute = (kind: PageFolder) =>
+  withDataDir(async (dir) => json({ pages: await listPages(dir, kind) }));
 
-const postRoadmap = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-  if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-  try {
-    return json({ fileName: await createRoadmapPage(dir, body.name) }, 201);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
+const createPageRoute = (kind: PageFolder) =>
+  withDataDir(async (dir, req) => {
+    const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
+    try {
+      return json({ fileName: await createPage(dir, kind, body.name) }, 201);
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  });
 
-const getRoadmapPage = withDataDir(async (dir, _req, params) => {
-  try {
-    const page = await readRoadmapPage(dir, params.file ?? "");
-    return page === null ? json({ error: "Roadmap page not found" }, 404) : json(page);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
+const readPageRoute = (kind: PageFolder) =>
+  withDataDir(async (dir, _req, params) => {
+    try {
+      const page = await readPage(dir, kind, params.file ?? "");
+      return page === null
+        ? json({ error: `${kind.label[0]!.toUpperCase()}${kind.label.slice(1)} not found` }, 404)
+        : json(page);
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  });
 
-// The roadmap editor's autosave: a local write through the page's document —
+// The page editor's autosave: a local write through the page's document —
 // the reload cron commits and pushes it, like a saved scenario.
-const putRoadmapPage = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
-  if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
-  try {
-    return json(await saveRoadmapPage(dir, params.file ?? "", body.content));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
+const savePageRoute = (kind: PageFolder) =>
+  withDataDir(async (dir, req, params) => {
+    const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
+    if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
+    try {
+      return json(await savePage(dir, kind, params.file ?? "", body.content));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  });
 
 // Deleting a page (specs/app/roadmap.feature.md): the markdown and its
 // document go, committed and pushed like a deleted feature.
-const deleteRoadmapPageRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    return json(await deleteRoadmapPage(dir, params.file ?? ""));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
+const deletePageRoute = (kind: PageFolder) =>
+  withDataDir(async (dir, _req, params) => {
+    try {
+      return json(await deletePage(dir, kind, params.file ?? ""));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  });
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
-// `scope=roadmap` searches the roadmap folder's pages instead — what the
-// sidebar's Roadmap tab searches (specs/app/roadmap.feature.md).
+// `scope=roadmap` or `scope=tasks` searches that folder's pages instead —
+// what the folder's own sidebar tab searches (specs/app/roadmap.feature.md,
+// specs/app/tasks.feature.md).
 // The data repo's README (specs/app-startup.feature.md "App Starts with
 // existing specs folder selected"): the home view opens it in an editor.
 const getReadme = withDataDir(async (dir) => json(await readReadme(dir)));
@@ -811,8 +850,10 @@ const getSearch = withDataDir(async (dir, req) => {
     Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 50) : 20;
   const scope = url.searchParams.get("scope") ?? "specs";
   if (!isSearchScope(scope)) return json({ error: `unknown search scope: ${scope}` }, 400);
-  const results =
-    scope === "roadmap" ? await searchRoadmap(dir, q, limit) : await searchSpecs(dir, q, limit);
+  const kind = scope === "specs" ? null : pageFolderNamed(scope);
+  const results = kind
+    ? await searchPages(dir, kind, q, limit)
+    : await searchSpecs(dir, q, limit);
   return json({ query: q, scope, results });
 });
 
@@ -1404,11 +1445,16 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/search", getSearch],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
-  ["GET", "/api/roadmap", getRoadmap],
-  ["POST", "/api/roadmap", postRoadmap],
-  ["GET", "/api/roadmap/:file", getRoadmapPage],
-  ["PUT", "/api/roadmap/:file", putRoadmapPage],
-  ["DELETE", "/api/roadmap/:file", deleteRoadmapPageRoute],
+  ["GET", "/api/roadmap", listPagesRoute(ROADMAP)],
+  ["POST", "/api/roadmap", createPageRoute(ROADMAP)],
+  ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
+  ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
+  ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
+  ["GET", "/api/tasks", listPagesRoute(TASKS)],
+  ["POST", "/api/tasks", createPageRoute(TASKS)],
+  ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
+  ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
+  ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

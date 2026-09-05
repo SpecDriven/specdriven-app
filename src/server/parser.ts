@@ -295,8 +295,8 @@ export function parseAssignedLine(line: string): string | null {
 
 /**
  * Lift a leading `**Assigned:**` line off a text — the assignment on its own,
- * without the ticket link splitFeatureMeta also looks for. What a roadmap
- * document carries (parseRoadmap): it has an assignment but no ticket.
+ * without the ticket link splitFeatureMeta also looks for. What a markdown
+ * page carries (parsePage): it has an assignment but no ticket.
  */
 export function splitAssigned(text: string): { text: string; assigned?: string } {
   const lines = text.split("\n");
@@ -631,14 +631,15 @@ export function markProposed(text: string): string {
   );
 }
 
-// Roadmap documents (specs/app/roadmap.feature.md) are the data repo's other
-// kind of markdown: regular files in the `roadmap/` folder, with no scenarios
-// in them. Like a feature, a roadmap document may carry the project member it
-// is assigned to on an `**Assigned:**` line under its heading; everything
+// Markdown pages (specs/app/roadmap.feature.md, specs/app/tasks.feature.md)
+// are the data repo's other kind of markdown: regular files in the special
+// `roadmap/` and `tasks/` folders, with no scenarios in them. Like a feature,
+// a page may carry the project member it is assigned to on an `**Assigned:**`
+// line under its heading — which is all a task needs to be a task; everything
 // else is free markdown, kept as written.
 
-/** A roadmap document: its heading, who it is assigned to, and its markdown. */
-export interface Roadmap {
+/** A markdown page: its heading, who it is assigned to, and its markdown. */
+export interface MarkdownPage {
   /** The `# <name>` heading, or "" for a file that opens without one. */
   name: string;
   /** Everything below the heading and the assignment line. */
@@ -647,18 +648,18 @@ export interface Roadmap {
   assigned?: string;
 }
 
-const ROADMAP_HEADING_RE = /^#\s+(.+?)\s*$/;
+const PAGE_HEADING_RE = /^#\s+(.+?)\s*$/;
 
 /**
- * Read a roadmap document. A leading `# <name>` heading is the name; a
+ * Read a markdown page. A leading `# <name>` heading is the name; a
  * `**Assigned:** <name>` line right under it is the assignment. A file that
  * starts with neither is all body — a plain markdown file must survive the
  * round trip unchanged apart from its surrounding blank lines.
  */
-export function parseRoadmap(text: string): Roadmap {
+export function parsePage(text: string): MarkdownPage {
   const lines = text.split("\n");
   const at = lines.findIndex((line) => line.trim() !== "");
-  const heading = at === -1 ? null : lines[at]!.match(ROADMAP_HEADING_RE);
+  const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
   const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
   const { text: body, assigned } = splitAssigned(rest);
   return {
@@ -668,8 +669,8 @@ export function parseRoadmap(text: string): Roadmap {
   };
 }
 
-/** The markdown a roadmap document is written as — the shape parseRoadmap reads. */
-export function serializeRoadmap(doc: Roadmap): string {
+/** The markdown a page is written as — the shape parsePage reads. */
+export function serializePage(doc: MarkdownPage): string {
   const parts: string[] = [];
   if (doc.name) parts.push(`# ${doc.name}`);
   if (doc.assigned) parts.push(formatAssigned(doc.assigned));
