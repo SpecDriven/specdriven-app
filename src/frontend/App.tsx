@@ -403,34 +403,45 @@ function writeRecent(list: RecentEntry[]) {
  */
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
-// Code gen sessions (specs/agents/claude.feature.md): where "Start session"
-// runs — a new session in Claude Code Desktop, the app's own coding agent
-// pane (specs/agents/coding-agent-ui.feature.md), or the Claude CLI headless.
+// Code gen sessions (specs/agents/claude.feature.md): which agent "Start
+// session" runs in — a new session in Claude Code Desktop, the app's own
+// coding agent pane (specs/agents/coding-agent-ui.feature.md) with Claude or
+// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md), or the
+// Claude CLI headless.
 export type { CodeGenTarget };
 
 /** The stored target as the server reports it; anything else is "not chosen". */
 export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "cli" || value === "pane" ? value : null;
+  return value === "desktop" || value === "cli" || value === "pane" || value === "pi"
+    ? value
+    : null;
 }
 
 export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
   desktop: "Claude Code Desktop",
   pane: "Coding agent pane",
   cli: "Claude CLI (headless)",
+  pi: "Pi in the coding agent pane",
 };
 
 /** The target a session dialog opens on: the remembered choice when it is
     still usable, else desktop when Claude.app is installed, else the pane
-    when the Claude CLI is, else cli. */
+    when the Claude CLI is. Pi comes ahead of the headless CLI only where
+    Claude is not installed at all — with Claude there, Pi is picked, never
+    defaulted to. */
 export function resolveCodeGenTarget(
   stored: string | null | undefined,
   canOpenDesktop: boolean,
   canRunPane = false,
+  canRunPi = false,
 ): CodeGenTarget {
   if (stored === "cli") return "cli";
   if (stored === "desktop" && canOpenDesktop) return "desktop";
   if (stored === "pane" && canRunPane) return "pane";
-  return canOpenDesktop ? "desktop" : canRunPane ? "pane" : "cli";
+  if (stored === "pi" && canRunPi) return "pi";
+  if (canOpenDesktop) return "desktop";
+  if (canRunPane) return "pane";
+  return canRunPi ? "pi" : "cli";
 }
 
 // The default session name lives with the pane's helpers now; re-exported
@@ -736,6 +747,11 @@ export function App() {
   /** Whether the Claude CLI is on PATH, so a session can run in the coding
       agent pane (specs/agents/coding-agent-ui.feature.md). */
   const [canRunAgentPane, setCanRunAgentPane] = useState(false);
+  /** Whether the Pi CLI is on PATH, so a pane session can be driven by Pi
+      (specs/agents/integration-with-pi-dev-agent.feature.md). */
+  const [canRunPi, setCanRunPi] = useState(false);
+  /** The pane is offered when either agent's CLI is on PATH. */
+  const canOpenAgentPane = canRunAgentPane || canRunPi;
   // The coding agent pane's own state (src/frontend/agentChat.ts): open,
   // width, sessions. Restored once on boot — the pane, its width and the
   // last session come back the way they were left.
@@ -934,7 +950,8 @@ export function App() {
       }
       setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
       setCanRunAgentPane(Boolean(state.canRunAgentPane));
-      agentChat.setAvailable(Boolean(state.canRunAgentPane));
+      setCanRunPi(Boolean(state.canRunPi));
+      agentChat.setAvailable(Boolean(state.canRunAgentPane), Boolean(state.canRunPi));
       setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
       if (typeof state.deletePublished === "boolean") {
         setDeletePublished(state.deletePublished);
@@ -1479,7 +1496,12 @@ export function App() {
   const selectionLabel = describeSelection(sessionFiles());
 
   /** The target the next session dialog opens on. */
-  const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, canRunAgentPane);
+  const sessionTarget = resolveCodeGenTarget(
+    codeGenTarget,
+    canOpenClaudeDesktop,
+    canRunAgentPane,
+    canRunPi,
+  );
 
   // Code gen session (specs/agents/claude.spec.md): with specs or single
   // scenarios selected, "Start session" asks for a name — prefilled with a
@@ -1494,16 +1516,10 @@ export function App() {
     // there, and the dialog says so — the folder is the session's whole
     // context, so it must not come as a surprise.
     const where = codeRepo ? ` in ${codeRepo}` : "";
-    const dialog = {
-      title: "Name the session",
-      hint: `Runs Claude over ${describeSelection(files)}${where}.`,
-      initial: defaultSessionName(),
-      placeholder: "e.g. implement billing quotes",
-      confirmLabel: "Start session",
-    };
     let sessionName: string;
     let target: CodeGenTarget;
-    // Every place the session can run here; a choice only when there is one.
+    // Every agent the session can run in here; a choice only when there is
+    // more than one.
     const repoWord = codeRepo ? "the code repo" : "the data repo";
     const choices = [
       ...(canOpenClaudeDesktop
@@ -1524,12 +1540,32 @@ export function App() {
             },
           ]
         : []),
+      // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): the same
+      // pane, driven over pi's RPC mode — offered when its CLI is on PATH.
+      ...(canRunPi
+        ? [
+            {
+              value: "pi",
+              label: CODE_GEN_TARGET_LABEL.pi,
+              hint: `Chats with Pi in a pane here, on ${repoWord} — Pi runs its own tools`,
+            },
+          ]
+        : []),
       {
         value: "cli",
         label: CODE_GEN_TARGET_LABEL.cli,
         hint: "Runs claude -p here and shows its output when it exits",
       },
     ];
+    const dialog = {
+      title: "Name the session",
+      // With a choice of agents each option says what it runs, so the hint
+      // names none of them; with only one, the one is Claude's headless CLI.
+      hint: `Runs ${choices.length > 1 ? "the chosen agent" : "Claude"} over ${describeSelection(files)}${where}.`,
+      initial: defaultSessionName(),
+      placeholder: "e.g. implement billing quotes",
+      confirmLabel: "Start session",
+    };
     if (choices.length > 1) {
       const picked = await promptWithChoice({
         ...dialog,
@@ -1552,7 +1588,7 @@ export function App() {
     setSessionNotice(
       target === "desktop"
         ? `Opening "${sessionName}" in Claude Code Desktop…`
-        : target === "pane"
+        : target === "pane" || target === "pi"
           ? `Opening "${sessionName}" in the coding agent pane…`
           : `Session "${sessionName}" running…`,
     );
@@ -1568,7 +1604,7 @@ export function App() {
         // whether the prompt is sent or only prefilled is the app's call.
         setSessionNotice(`Session "${sessionName}" opened in Claude Code Desktop.`);
         setSpecSelection(new Map());
-      } else if (res.ok && target === "pane") {
+      } else if (res.ok && (target === "pane" || target === "pi")) {
         // The chat is up with the prompt as its first turn; show it.
         setSessionNotice(`Session "${sessionName}" opened in the coding agent pane.`);
         setSpecSelection(new Map());
@@ -2705,7 +2741,8 @@ export function App() {
     setCodeGen(data.codeGen !== false);
     setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
     setCanRunAgentPane(Boolean(data.canRunAgentPane));
-    agentChat.setAvailable(Boolean(data.canRunAgentPane));
+    setCanRunPi(Boolean(data.canRunPi));
+    agentChat.setAvailable(Boolean(data.canRunAgentPane), Boolean(data.canRunPi));
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
@@ -3560,7 +3597,7 @@ export function App() {
       keys: "]",
       label: pane.open ? "Close the coding agent pane" : "Open the coding agent pane",
       group: "Navigate",
-      when: () => !quiet && codeGen && canRunAgentPane,
+      when: () => !quiet && codeGen && canOpenAgentPane,
       run: () => agentChat.togglePane(),
     },
     {
@@ -3807,7 +3844,7 @@ export function App() {
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
-    ...(codeGen && canRunAgentPane
+    ...(codeGen && canOpenAgentPane
       ? [
           action("agent-new", "New coding agent session", <Bot size={14} />, () => {
             agentChat.setActive(null);
@@ -4156,7 +4193,7 @@ export function App() {
           >
             <Search size={18} aria-hidden="true" />
           </button>
-          {codeGen && canRunAgentPane && (
+          {codeGen && canOpenAgentPane && (
             <button
               type="button"
               className="ibtn"
@@ -4224,7 +4261,7 @@ export function App() {
             </Tooltip>
           )}
           <div className="rail-bottom">
-            {codeGen && canRunAgentPane && (
+            {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
                 <button
                   type="button"
@@ -4378,7 +4415,7 @@ export function App() {
               </button>
             )}
           </div>
-          {codeGen && canRunAgentPane && (
+          {codeGen && canOpenAgentPane && (
             <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
               <button
                 type="button"

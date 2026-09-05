@@ -57,8 +57,24 @@ describe("resolveCodeGenTarget", () => {
     expect(readCodeGenTarget("desktop")).toBe("desktop");
     expect(readCodeGenTarget("cli")).toBe("cli");
     expect(readCodeGenTarget("pane")).toBe("pane");
+    expect(readCodeGenTarget("pi")).toBe("pi");
     expect(readCodeGenTarget(null)).toBeNull();
     expect(readCodeGenTarget("x")).toBeNull();
+  });
+
+  // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): a choice of
+  // agent, kept when it was the last one picked and pi is still on PATH —
+  // but never what an unchosen dialog falls back to.
+  test("Pi is remembered when its CLI is there, and is never the fallback", () => {
+    expect(CODE_GEN_TARGET_LABEL.pi).toBe("Pi in the coding agent pane");
+    expect(resolveCodeGenTarget("pi", false, false, true)).toBe("pi");
+    expect(resolveCodeGenTarget("pi", true, true, true)).toBe("pi");
+    expect(resolveCodeGenTarget("pi", true, true, false)).toBe("desktop");
+    expect(resolveCodeGenTarget("pi", false, false, false)).toBe("cli");
+    expect(resolveCodeGenTarget(null, true, true, true)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, true, true)).toBe("pane");
+    // Only where there is no Claude at all does an unchosen dialog open on Pi.
+    expect(resolveCodeGenTarget(null, false, false, true)).toBe("pi");
   });
 });
 
