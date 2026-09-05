@@ -103,7 +103,7 @@ import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
-import { searchSpecs } from "./search";
+import { isSearchScope, searchRoadmap, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import {
   createRoadmapPage,
@@ -784,6 +784,8 @@ const deleteRoadmapPageRoute = withDataDir(async (dir, _req, params) => {
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
+// `scope=roadmap` searches the roadmap folder's pages instead — what the
+// sidebar's Roadmap tab searches (specs/app/roadmap.feature.md).
 // The data repo's README (specs/app-startup.feature.md "App Starts with
 // existing specs folder selected"): the home view opens it in an editor.
 const getReadme = withDataDir(async (dir) => json(await readReadme(dir)));
@@ -807,7 +809,11 @@ const getSearch = withDataDir(async (dir, req) => {
   const rawLimit = Number(url.searchParams.get("limit"));
   const limit =
     Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 50) : 20;
-  return json({ query: q, results: await searchSpecs(dir, q, limit) });
+  const scope = url.searchParams.get("scope") ?? "specs";
+  if (!isSearchScope(scope)) return json({ error: `unknown search scope: ${scope}` }, 400);
+  const results =
+    scope === "roadmap" ? await searchRoadmap(dir, q, limit) : await searchSpecs(dir, q, limit);
+  return json({ query: q, scope, results });
 });
 
 const postFeatures = withDataDir(async (dir, req) => {

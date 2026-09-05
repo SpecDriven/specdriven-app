@@ -1,12 +1,20 @@
 // Automates specs/search.spec.md: indexed full-text search over the data
 // repo's feature files — ranking, prefix/fuzzy matching, snippets, and the
-// stat-fingerprint invalidation that follows external file changes.
+// stat-fingerprint invalidation that follows external file changes — and the
+// roadmap scope the sidebar's Roadmap tab searches (specs/app/roadmap
+// .feature.md): the roadmap folder's pages, apart from the specs.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeSnippet, resetSearchCache, searchSpecs } from "../src/server/search";
+import {
+  isSearchScope,
+  makeSnippet,
+  resetSearchCache,
+  searchRoadmap,
+  searchSpecs,
+} from "../src/server/search";
 
 let root: string;
 
@@ -167,4 +175,74 @@ test("makeSnippet falls back to the head when no term occurs in the text", () =>
 test("makeSnippet of empty text is empty", () => {
   expect(makeSnippet("", ["x"])).toBe("");
   expect(makeSnippet("   \n  ", ["x"])).toBe("");
+});
+
+// The Roadmap tab's search: the roadmap folder's pages, and only those.
+const PRICING = `# Pricing plans
+
+**Assigned:** David
+
+Move every premium tier to annual billing by Q3.
+`;
+
+test("the roadmap scope finds a page by a word in its body, with a snippet", async () => {
+  await mkdir(join(root, "roadmap"), { recursive: true });
+  await Bun.write(join(root, "roadmap/pricing.md"), PRICING);
+  const results = await searchRoadmap(root, "annual");
+  expect(results.length).toBe(1);
+  const [hit] = results;
+  expect(hit!.kind).toBe("roadmap");
+  expect(hit!.fileName).toBe("roadmap/pricing.md");
+  expect(hit!.featureName).toBe("Pricing plans");
+  expect(hit!.scenario).toBeUndefined();
+  expect(hit!.snippet.toLowerCase()).toContain("annual");
+  expect(hit!.terms).toContain("annual");
+});
+
+test("the roadmap scope finds a page by its heading, and names a headless page by its file", async () => {
+  await mkdir(join(root, "roadmap/later"), { recursive: true });
+  await Bun.write(join(root, "roadmap/pricing.md"), PRICING);
+  await Bun.write(join(root, "roadmap/later/mobile-app.md"), "just a stub for the pricing work\n");
+  const byName = await searchRoadmap(root, "pricing");
+  expect(byName.length).toBe(2);
+  // The heading match ranks above the body-only mention.
+  expect(byName[0]!.fileName).toBe("roadmap/pricing.md");
+  expect(byName[1]!.fileName).toBe("roadmap/later/mobile-app.md");
+  expect(byName[1]!.featureName).toBe("Mobile App");
+});
+
+test("the two scopes do not see each other's files", async () => {
+  await mkdir(join(root, "roadmap"), { recursive: true });
+  await Bun.write(join(root, "roadmap/pricing.md"), PRICING);
+  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  // "annual" is only in the roadmap page, "rider" only in the spec.
+  expect(await searchSpecs(root, "annual")).toEqual([]);
+  expect(await searchRoadmap(root, "rider")).toEqual([]);
+  // A word in both: each scope reports only its own kind.
+  expect((await searchSpecs(root, "premium")).every((r) => r.kind !== "roadmap")).toBe(true);
+  expect((await searchRoadmap(root, "premium")).map((r) => r.kind)).toEqual(["roadmap"]);
+});
+
+test("the roadmap index follows page edits and deletions", async () => {
+  await mkdir(join(root, "roadmap"), { recursive: true });
+  const file = join(root, "roadmap/pricing.md");
+  await Bun.write(file, PRICING);
+  expect((await searchRoadmap(root, "annual")).length).toBe(1);
+  await Bun.write(file, "# Pricing plans\n\nmonthly billing stays\n");
+  expect(await searchRoadmap(root, "annual")).toEqual([]);
+  expect((await searchRoadmap(root, "monthly")).length).toBe(1);
+  await rm(file);
+  expect(await searchRoadmap(root, "monthly")).toEqual([]);
+});
+
+test("without a roadmap folder the roadmap scope is simply empty", async () => {
+  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  expect(await searchRoadmap(root, "premium")).toEqual([]);
+});
+
+test("isSearchScope accepts the two scopes only", () => {
+  expect(isSearchScope("specs")).toBe(true);
+  expect(isSearchScope("roadmap")).toBe(true);
+  expect(isSearchScope("features")).toBe(false);
+  expect(isSearchScope(null)).toBe(false);
 });
