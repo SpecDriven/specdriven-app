@@ -1,8 +1,8 @@
 // Automates specs/agents/claude.feature.md "Create and name a code gen
 // session" and specs/launch-ai-agent-session.feature.md step 8: the session
-// dialog opens on a timestamp name, and — with Claude.app installed — a "Run
-// in" choice between Claude Code Desktop and the headless CLI, preselected
-// from the remembered choice.
+// dialog opens on a timestamp name, and — with more than one agent installed
+// — a "Run in" choice between Claude Code Desktop and the coding agent pane,
+// preselected from the remembered choice.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -33,16 +33,18 @@ describe("defaultSessionName", () => {
 
 describe("resolveCodeGenTarget", () => {
   test("keeps the remembered choice while it is usable", () => {
-    expect(resolveCodeGenTarget("cli", true)).toBe("cli");
-    expect(resolveCodeGenTarget("cli", false)).toBe("cli");
     expect(resolveCodeGenTarget("desktop", true)).toBe("desktop");
+    expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
   });
 
   test("falls back on whether Claude.app is installed", () => {
     expect(resolveCodeGenTarget(null, true)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, false)).toBe("cli");
-    expect(resolveCodeGenTarget("desktop", false)).toBe("cli");
     expect(resolveCodeGenTarget("nope", true)).toBe("desktop");
+    expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
+    // Nothing installed: desktop stands in, and the server says what is
+    // missing — the dialog does not open on it.
+    expect(resolveCodeGenTarget(null, false)).toBe("desktop");
+    expect(resolveCodeGenTarget("pane", false)).toBe("desktop");
   });
 
   test("the pane is a target too, and the fallback when only the CLI is there", () => {
@@ -50,14 +52,15 @@ describe("resolveCodeGenTarget", () => {
     expect(resolveCodeGenTarget("pane", true, false)).toBe("desktop");
     expect(resolveCodeGenTarget(null, false, true)).toBe("pane");
     expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
-    expect(resolveCodeGenTarget("cli", true, true)).toBe("cli");
   });
 
+  // The headless `claude -p` target is gone: only the desktop app and the
+  // coding agent pane (with Claude or Pi) run a session.
   test("reads only the known targets off the state", () => {
     expect(readCodeGenTarget("desktop")).toBe("desktop");
-    expect(readCodeGenTarget("cli")).toBe("cli");
     expect(readCodeGenTarget("pane")).toBe("pane");
     expect(readCodeGenTarget("pi")).toBe("pi");
+    expect(readCodeGenTarget("cli")).toBeNull();
     expect(readCodeGenTarget(null)).toBeNull();
     expect(readCodeGenTarget("x")).toBeNull();
   });
@@ -70,7 +73,6 @@ describe("resolveCodeGenTarget", () => {
     expect(resolveCodeGenTarget("pi", false, false, true)).toBe("pi");
     expect(resolveCodeGenTarget("pi", true, true, true)).toBe("pi");
     expect(resolveCodeGenTarget("pi", true, true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget("pi", false, false, false)).toBe("cli");
     expect(resolveCodeGenTarget(null, true, true, true)).toBe("desktop");
     expect(resolveCodeGenTarget(null, false, true, true)).toBe("pane");
     // Only where there is no Claude at all does an unchosen dialog open on Pi.
@@ -81,24 +83,26 @@ describe("resolveCodeGenTarget", () => {
 describe("PromptChoices", () => {
   const choices = [
     { value: "desktop", label: CODE_GEN_TARGET_LABEL.desktop, hint: "Opens the Claude app" },
-    { value: "cli", label: CODE_GEN_TARGET_LABEL.cli, hint: "Runs claude -p here" },
+    { value: "pane", label: CODE_GEN_TARGET_LABEL.pane, hint: "Chats with Claude here" },
   ];
 
   test("renders one radio per choice with the picked one checked", () => {
     const html = renderToStaticMarkup(
-      <PromptChoices label="Run in" choices={choices} value="cli" onChange={() => {}} />,
+      <PromptChoices label="Run in" choices={choices} value="pane" onChange={() => {}} />,
     );
     expect(html).toContain("<legend>Run in</legend>");
     expect(html.match(/type="radio"/g)).toHaveLength(2);
     expect(html.match(/checked=""/g)).toHaveLength(1);
-    expect(html).toMatch(/<input[^>]*checked=""[^>]*value="cli"|<input[^>]*value="cli"[^>]*checked=""/);
+    expect(html).toMatch(
+      /<input[^>]*checked=""[^>]*value="pane"|<input[^>]*value="pane"[^>]*checked=""/,
+    );
     expect(html).toContain("Claude Code Desktop");
     expect(html).toContain("Opens the Claude app");
     expect(html).toContain('role="radiogroup"');
   });
 
   test("the dialog starts on the remembered choice, or the first one", () => {
-    expect(initialChoiceOf({ title: "t", choices, initialChoice: "cli" })).toBe("cli");
+    expect(initialChoiceOf({ title: "t", choices, initialChoice: "pane" })).toBe("pane");
     expect(initialChoiceOf({ title: "t", choices, initialChoice: "nope" })).toBe("desktop");
     expect(initialChoiceOf({ title: "t", choices })).toBe("desktop");
     expect(initialChoiceOf({ title: "t" })).toBeNull();

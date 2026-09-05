@@ -157,10 +157,13 @@ test("the code gen switch round-trips through the settings file", async () => {
 // falls back on whether Claude.app is installed.
 test("the session target is only ever desktop or cli", () => {
   expect(normalizeCodeGenTarget("desktop")).toBe("desktop");
-  expect(normalizeCodeGenTarget("cli")).toBe("cli");
+  expect(normalizeCodeGenTarget("pane")).toBe("pane");
   expect(normalizeCodeGenTarget("pi")).toBe("pi");
   expect(normalizeCodeGenTarget(undefined)).toBeNull();
   expect(normalizeCodeGenTarget("terminal")).toBeNull();
+  // The headless `claude -p` target is gone; a settings file that still
+  // names it reads as "not chosen".
+  expect(normalizeCodeGenTarget("cli")).toBeNull();
 });
 
 test("the session target round-trips through the settings file", async () => {
