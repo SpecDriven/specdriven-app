@@ -20,6 +20,7 @@ import type { ProjectMember } from "../server/members";
 import type { RoadmapListing } from "../server/roadmap";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
+import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
   Check,
@@ -391,6 +392,48 @@ function writeRecent(list: RecentEntry[]) {
  */
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
+// Code gen sessions (specs/agents/claude.feature.md): where "Start session"
+// runs — a new session in Claude Code Desktop, or the Claude CLI headless.
+export type { CodeGenTarget };
+
+/** The stored target as the server reports it; anything else is "not chosen". */
+export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
+  return value === "desktop" || value === "cli" ? value : null;
+}
+
+export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
+  desktop: "Claude Code Desktop",
+  cli: "Claude CLI (headless)",
+};
+
+/** The target a session dialog opens on: the remembered choice when it is
+    still usable, else desktop when Claude.app is installed, else cli. */
+export function resolveCodeGenTarget(
+  stored: string | null | undefined,
+  canOpenDesktop: boolean,
+): CodeGenTarget {
+  if (stored === "cli") return "cli";
+  if (stored === "desktop" && canOpenDesktop) return "desktop";
+  return canOpenDesktop ? "desktop" : "cli";
+}
+
+/**
+ * The name a session gets when the user types none —
+ * "Session 2026-09-04 15:30:30 PDT" (specs/launch-ai-agent-session.feature.md
+ * step 8): local time, with the zone's short name so the log reads the same
+ * from anywhere.
+ */
+export function defaultSessionName(date: Date = new Date()): string {
+  const two = (n: number) => String(n).padStart(2, "0");
+  const stamp =
+    `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ` +
+    `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+  const zone = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
+    .formatToParts(date)
+    .find((part) => part.type === "timeZoneName")?.value;
+  return zone ? `Session ${stamp} ${zone}` : `Session ${stamp}`;
+}
+
 /** Tracks a media query live, so rotating a tablet flips the layout. */
 function useMediaQuery(query: string): boolean {
   const read = () =>
@@ -677,6 +720,11 @@ export function App() {
   );
   /** Code gen sessions offered at all (specs/agents/claude.spec.md). */
   const [codeGen, setCodeGen] = useState(true);
+  /** Whether Claude.app is installed, so a session can open in Claude Code
+      Desktop — the session dialog offers "Run in" only then. */
+  const [canOpenClaudeDesktop, setCanOpenClaudeDesktop] = useState(false);
+  /** The last "Run in" choice, remembered in settings; null means not chosen yet. */
+  const [codeGenTarget, setCodeGenTarget] = useState<CodeGenTarget | null>(null);
   // Deleting published scenarios (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — published scenarios stay immutable until the
   // Settings switch turns deletion on.
@@ -791,7 +839,7 @@ export function App() {
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
-  const { modal, modalOpen, prompt, confirm } = useModalPrompts();
+  const { modal, modalOpen, prompt, promptWithChoice, confirm } = useModalPrompts();
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -863,6 +911,8 @@ export function App() {
       if (typeof state.codeGen === "boolean") {
         setCodeGen(state.codeGen);
       }
+      setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
+      setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
       if (typeof state.deletePublished === "boolean") {
         setDeletePublished(state.deletePublished);
       }
@@ -1405,31 +1455,75 @@ export function App() {
 
   const selectionLabel = describeSelection(sessionFiles());
 
+  /** The target the next session dialog opens on. */
+  const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop);
+
   // Code gen session (specs/agents/claude.spec.md): with specs or single
-  // scenarios selected, "Start session" asks for a name, then the server
-  // builds a prompt from the selection and passes it to the Claude CLI to
-  // execute and exit. An error code lands in the error box.
+  // scenarios selected, "Start session" asks for a name — prefilled with a
+  // timestamp name, so confirming straight away works — and, with Claude.app
+  // installed, where to run. The server builds a prompt from the selection
+  // and either opens it in Claude Code Desktop or passes it to the Claude
+  // CLI to execute and exit. A failure lands in the error box.
   const startSession = async () => {
     const files = sessionFiles();
     if (files.length === 0 || sessionRunning) return;
-    const name = await prompt({
+    const dialog = {
       title: "Name the session",
       hint: `Runs Claude over ${describeSelection(files)}.`,
+      initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start session",
-    });
-    if (name === null || !name.trim()) return;
-    const sessionName = name.trim();
+    };
+    let sessionName: string;
+    let target: CodeGenTarget;
+    if (canOpenClaudeDesktop) {
+      const picked = await promptWithChoice({
+        ...dialog,
+        choicesLabel: "Run in",
+        choices: [
+          {
+            value: "desktop",
+            label: CODE_GEN_TARGET_LABEL.desktop,
+            hint: "Opens a new session in the Claude app, on the data repo",
+          },
+          {
+            value: "cli",
+            label: CODE_GEN_TARGET_LABEL.cli,
+            hint: "Runs claude -p here and shows its output when it exits",
+          },
+        ],
+        initialChoice: sessionTarget,
+      });
+      if (picked === null || !picked.text.trim()) return;
+      sessionName = picked.text.trim();
+      target = picked.choice === "cli" ? "cli" : "desktop";
+      // Remembered, so the next dialog opens on the same choice.
+      if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
+    } else {
+      const name = await prompt(dialog);
+      if (name === null || !name.trim()) return;
+      sessionName = name.trim();
+      target = "cli";
+    }
     setSessionRunning(true);
-    setSessionNotice(`Session "${sessionName}" running…`);
+    setSessionNotice(
+      target === "desktop"
+        ? `Opening "${sessionName}" in Claude Code Desktop…`
+        : `Session "${sessionName}" running…`,
+    );
     try {
       const res = await fetch("/api/agent/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: sessionName, files }),
+        body: JSON.stringify({ name: sessionName, files, target }),
       });
       const data = await res.json();
-      if (res.ok) {
+      if (res.ok && target === "desktop") {
+        // The session goes on in the Claude app from here; "opened", since
+        // whether the prompt is sent or only prefilled is the app's call.
+        setSessionNotice(`Session "${sessionName}" opened in Claude Code Desktop.`);
+        setSpecSelection(new Map());
+      } else if (res.ok) {
         setSessionNotice(`Session "${sessionName}" finished.`);
         setSpecSelection(new Map());
         // The session may have edited specs — show what it left behind.
@@ -2558,6 +2652,8 @@ export function App() {
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
+    setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
+    setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
     setRoadmap(data.roadmap === true);
@@ -4261,7 +4357,7 @@ export function App() {
         </div>
         {/* Code gen session (specs/agents/claude.spec.md): check whole specs
             here or single scenarios on their cards, then Start session asks
-            for a name and runs. The Settings switch takes it all away. */}
+            for a name and where to run. The Settings switch takes it all away. */}
         {codeGen && (
           <>
             <div className="sidebar-actions">
@@ -4271,7 +4367,7 @@ export function App() {
                 title={
                   specSelection.size === 0
                     ? "Select a spec here, or single scenarios on their cards"
-                    : `Start a code gen session with ${selectionLabel}`
+                    : `Start a code gen session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
                 }
               >
                 {sessionRunning ? (
@@ -5926,15 +6022,16 @@ export function App() {
             <section className="settings-group">
               {/* Code gen (specs/agents/claude.spec.md): off takes the selection
                   checkboxes and Start session away, and the server refuses a
-                  session, so no spec can reach the Claude CLI. Hidden in demo
-                  mode, where it is pinned off (no Claude CLI to hand specs to). */}
+                  session, so no spec can reach Claude — neither the CLI nor
+                  Claude Code Desktop. Hidden in demo mode, where it is pinned
+                  off (no Claude to hand specs to). */}
               {!demo && (
               <label className="settings-row">
                 <span className="settings-row-label">
                   Code generation
                   <span className="settings-row-hint">
                     {settingsCodeGenDraft
-                      ? "Specs and scenarios can be selected and handed to the Claude CLI, which implements them in the data repo."
+                      ? "Specs and scenarios can be selected and handed to Claude — a new session in Claude Code Desktop, or the Claude CLI run headless — which implements them in the data repo."
                       : "Code generation is off: no selection checkboxes, and sessions are refused."}
                   </span>
                 </span>

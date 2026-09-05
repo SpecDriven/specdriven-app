@@ -1225,6 +1225,49 @@ button.link:disabled {
   gap: 0.8rem;
 }
 
+/* A prompt's radio group (specs/agents/claude.feature.md "Run in"): a few
+   ways to act on the text, each with a one-line hint. */
+.modal-form .choice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.modal-form .choice-group legend {
+  padding: 0;
+  margin-bottom: 0.3rem;
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+/* Row, not the column `.dialog label` stacks a field under its caption. */
+.modal-form .choice {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.55rem;
+  cursor: pointer;
+}
+
+.modal-form .choice input[type="radio"] {
+  margin: 0.15rem 0 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.modal-form .choice-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.86rem;
+  color: var(--text-1);
+}
+
 .modal-body {
   margin: 0;
   color: var(--text-2);
