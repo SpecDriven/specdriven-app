@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, ReactElement } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import {
   Bold,
   Code,
@@ -21,6 +21,7 @@ import {
   toggleLinePrefix,
 } from "./markdown";
 import type { Edit } from "./markdown";
+import { markNodes, markText } from "./highlight";
 
 /** POST the image to the data repo; resolves to the url for `![...](url)`. */
 async function uploadImage(file: File): Promise<string> {
@@ -38,6 +39,12 @@ interface MarkdownEditorProps {
   /** Published scenarios are immutable: source is read-only, preview first. */
   readOnly?: boolean;
   placeholder?: string;
+  /**
+   * Words to mark in the text (specs/search.feature.md): the terms a search
+   * hit matched on, when the editor was opened from that hit. Marked in the
+   * source and in the preview, and the first one is scrolled into view.
+   */
+  highlight?: string[];
 }
 
 /**
@@ -45,12 +52,58 @@ interface MarkdownEditorProps {
  * edit dialog"): a formatting toolbar over a source textarea, with a rendered
  * Preview tab.
  */
-export function MarkdownEditor({ value, onChange, readOnly = false, placeholder }: MarkdownEditorProps) {
+export function MarkdownEditor({
+  value,
+  onChange,
+  readOnly = false,
+  placeholder,
+  highlight,
+}: MarkdownEditorProps) {
   const [tab, setTab] = useState<"write" | "preview">(readOnly ? "preview" : "write");
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Search-term marks (specs/search.feature.md). A textarea cannot carry
+  // markup, so a mirror of its text sits behind it — same font, padding and
+  // wrapping, transparent ink — painting only the marks; the textarea over
+  // it is made transparent so they show through. The mirror follows the
+  // textarea's scroll and its client width (a scrollbar narrows the text).
+  const marks = highlight && highlight.length > 0 ? highlight : null;
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const onScroll = (e: UIEvent<HTMLTextAreaElement>) => {
+    if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+  };
+  useEffect(() => {
+    const ta = ref.current;
+    const mirror = mirrorRef.current;
+    if (!ta || !mirror || typeof ResizeObserver === "undefined") return;
+    const fit = () => {
+      mirror.style.width = `${ta.clientWidth}px`;
+      mirror.style.height = `${ta.clientHeight}px`;
+      mirror.scrollTop = ta.scrollTop;
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, [marks !== null, tab]);
+  // Land on the first mark: a third of the way down the pane, so the lines
+  // around it read too. Once per set of terms and tab, not on every keystroke.
+  const marksKey = marks?.join(" ") ?? "";
+  useEffect(() => {
+    if (!marks) return;
+    const pane = tab === "write" ? ref.current : previewRef.current;
+    const marked = (tab === "write" ? mirrorRef.current : previewRef.current)?.querySelector("mark");
+    if (!pane || !marked) return;
+    const top =
+      marked.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+    pane.scrollTop = Math.max(0, top - pane.clientHeight / 3);
+    if (mirrorRef.current) mirrorRef.current.scrollTop = pane.scrollTop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marksKey, tab]);
 
   // The scenario table widget rewrites the body outside this textarea (e.g.
   // typing "{amount}" appends a table below the caret). A controlled textarea
@@ -136,6 +189,8 @@ export function MarkdownEditor({ value, onChange, readOnly = false, placeholder 
     { icon: <Image size={size} />, title: "Image (or paste one)", run: () => fileRef.current?.click() },
   ];
 
+  const preview = tab === "preview" ? renderMarkdown(value) : null;
+
   return (
     <div className="md-editor">
       <div className="md-toolbar">
@@ -187,22 +242,40 @@ export function MarkdownEditor({ value, onChange, readOnly = false, placeholder 
         />
       )}
       {tab === "write" ? (
-        <textarea
-          ref={ref}
-          className="md-textarea"
-          value={value}
-          readOnly={readOnly}
-          placeholder={placeholder}
-          spellCheck={false}
-          onChange={(e) => {
-            sel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
-            onChange(e.target.value);
-          }}
-          onKeyDown={readOnly ? undefined : onKeyDown}
-          onPaste={readOnly ? undefined : onPaste}
-        />
+        <div className={`md-write${marks ? " highlighted" : ""}`}>
+          {marks && (
+            <div ref={mirrorRef} className="md-highlights" aria-hidden="true">
+              {/* The trailing newline keeps a final empty line, as the textarea does. */}
+              {markText(value, marks)}
+              {"\n"}
+            </div>
+          )}
+          <textarea
+            ref={ref}
+            className="md-textarea"
+            value={value}
+            readOnly={readOnly}
+            placeholder={placeholder}
+            spellCheck={false}
+            onChange={(e) => {
+              sel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+              onChange(e.target.value);
+            }}
+            onScroll={marks ? onScroll : undefined}
+            onKeyDown={readOnly ? undefined : onKeyDown}
+            onPaste={readOnly ? undefined : onPaste}
+          />
+        </div>
       ) : (
-        <div className="md-preview">{renderMarkdown(value) ?? <p className="md-empty">Nothing to preview.</p>}</div>
+        <div ref={previewRef} className="md-preview">
+          {preview === null ? (
+            <p className="md-empty">Nothing to preview.</p>
+          ) : marks ? (
+            markNodes(preview, marks)
+          ) : (
+            preview
+          )}
+        </div>
       )}
     </div>
   );
