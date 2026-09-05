@@ -10,8 +10,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   PROJECT_SETTINGS_FILE,
+  normalizeCodeRepo,
   normalizeMembers,
   readProjectMembers,
+  readProjectSettings,
 } from "../src/server/members";
 import { handleApi, reloader } from "../src/server/api";
 import { normalizeAssignments, readState, writeState } from "../src/server/state";
@@ -128,6 +130,33 @@ describe("project-settings.json", () => {
         members: [DANA, "  ", { email: "nobody@acme.example" }, 7, null, { name: "dana whitfield" }],
       }),
     ).toEqual([{ name: DANA }]);
+  });
+
+  // The code repo (`code-repo`): where a code gen session runs. A relative
+  // path is relative to the data repo, so the checked-in setting holds for
+  // every teammate with the two repos side by side.
+  test("the code repo is read beside the members and resolved against the data repo", async () => {
+    await writeFile(
+      join(root, PROJECT_SETTINGS_FILE),
+      JSON.stringify({ members: [DANA], "code-repo": "../acme-app" }),
+    );
+    expect(await readProjectSettings(root)).toEqual({
+      members: [{ name: DANA }],
+      codeRepo: join(root, "..", "acme-app"),
+    });
+  });
+
+  test("no code repo, a blank one, or no file at all is null", async () => {
+    expect((await readProjectSettings(root)).codeRepo).toBeNull();
+    expect(normalizeCodeRepo({ members: [DANA] }, root)).toBeNull();
+    expect(normalizeCodeRepo({ "code-repo": "  " }, root)).toBeNull();
+    expect(normalizeCodeRepo({ "code-repo": 42 }, root)).toBeNull();
+    expect(normalizeCodeRepo([DANA], root)).toBeNull();
+  });
+
+  test("an absolute code repo stands as written, and camelCase is accepted", () => {
+    expect(normalizeCodeRepo({ "code-repo": "/srv/acme-app/" }, root)).toBe("/srv/acme-app");
+    expect(normalizeCodeRepo({ codeRepo: "app" }, root)).toBe(join(root, "app"));
   });
 
   test("anything but a list of members is no members", () => {

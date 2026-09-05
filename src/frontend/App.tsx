@@ -548,12 +548,14 @@ interface OpenOptions {
 }
 
 /** What /api/features returns: the flat feature list, the folder list, and
-    the project's members (src/server/members.ts) — who a feature can be
-    assigned to. */
+    the project's settings (src/server/members.ts) — the members a feature
+    can be assigned to, and the code repo a session runs in (null: the data
+    repo). */
 interface Listing {
   features: FeatureListing[];
   folders: string[];
   members: ProjectMember[];
+  codeRepo: string | null;
 }
 
 export function App() {
@@ -580,6 +582,9 @@ export function App() {
   // Project members (src/server/members.ts): the data repo's
   // project-settings.json, as the feature's "Assigned" dropdown offers them.
   const [members, setMembers] = useState<ProjectMember[]>([]);
+  // Code repo (src/server/members.ts `code-repo`): where a code gen session
+  // runs, from the same file; null means the data repo.
+  const [codeRepo, setCodeRepo] = useState<string | null>(null);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -850,10 +855,12 @@ export function App() {
         features: data.features,
         folders: data.folders ?? [],
         members: Array.isArray(data.members) ? data.members : [],
+        codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
       };
       setFeatures(listing.features);
       setFolders(listing.folders);
       setMembers(listing.members);
+      setCodeRepo(listing.codeRepo);
       setLoadError(null);
       return listing;
     }
@@ -1467,9 +1474,13 @@ export function App() {
   const startSession = async () => {
     const files = sessionFiles();
     if (files.length === 0 || sessionRunning) return;
+    // With a code repo named in project-settings.json the session runs
+    // there, and the dialog says so — the folder is the session's whole
+    // context, so it must not come as a surprise.
+    const where = codeRepo ? ` in ${codeRepo}` : "";
     const dialog = {
       title: "Name the session",
-      hint: `Runs Claude over ${describeSelection(files)}.`,
+      hint: `Runs Claude over ${describeSelection(files)}${where}.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start session",
@@ -1484,7 +1495,9 @@ export function App() {
           {
             value: "desktop",
             label: CODE_GEN_TARGET_LABEL.desktop,
-            hint: "Opens a new session in the Claude app, on the data repo",
+            hint: codeRepo
+              ? "Opens a new session in the Claude app, on the code repo"
+              : "Opens a new session in the Claude app, on the data repo",
           },
           {
             value: "cli",
