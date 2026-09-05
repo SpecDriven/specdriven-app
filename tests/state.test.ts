@@ -158,6 +158,7 @@ test("the code gen switch round-trips through the settings file", async () => {
 test("the session target is only ever desktop or cli", () => {
   expect(normalizeCodeGenTarget("desktop")).toBe("desktop");
   expect(normalizeCodeGenTarget("cli")).toBe("cli");
+  expect(normalizeCodeGenTarget("pi")).toBe("pi");
   expect(normalizeCodeGenTarget(undefined)).toBeNull();
   expect(normalizeCodeGenTarget("terminal")).toBeNull();
 });

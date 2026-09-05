@@ -66,9 +66,11 @@ export interface SpecDrivenState {
    * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
    * opens a new session in Claude Code Desktop, "pane" opens one in the
    * app's own coding agent pane (specs/agents/coding-agent-ui.feature.md),
-   * "cli" runs `claude -p` headless. Absent means desktop when Claude.app is
-   * installed, else pane when the Claude CLI is, else cli — the client
-   * resolves that from canOpenClaudeDesktop and canRunAgentPane.
+   * "cli" runs `claude -p` headless, "pi" runs `pi -p` headless
+   * (specs/agents/integration-with-pi-dev-agent.feature.md). Absent means
+   * desktop when Claude.app is installed, else pane when the Claude CLI is,
+   * else cli — the client resolves that from canOpenClaudeDesktop,
+   * canRunAgentPane and canRunPi.
    */
   codeGenTarget?: CodeGenTarget;
   /**
@@ -188,11 +190,15 @@ export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
 }
 
-/** The places a code gen session can run (specs/agents/claude.feature.md,
-    specs/agents/coding-agent-ui.feature.md). */
-export type CodeGenTarget = "desktop" | "cli" | "pane";
+/** The agents a code gen session can run in (specs/agents/claude.feature.md,
+    specs/agents/coding-agent-ui.feature.md,
+    specs/agents/integration-with-pi-dev-agent.feature.md). */
+export type CodeGenTarget = "desktop" | "cli" | "pane" | "pi";
 
-export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "cli", "pane"];
+export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "cli", "pane", "pi"];
+
+/** The targets as the error messages list them, in one place. */
+export const CODE_GEN_TARGET_LIST = "desktop, cli, pane or pi";
 
 /** Stored session target, or null when absent or unusable — the client
     then picks desktop when Claude.app is installed, else pane, else cli. */

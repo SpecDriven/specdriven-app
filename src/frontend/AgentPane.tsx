@@ -27,6 +27,7 @@ import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
 import {
+  AGENT_LABEL,
   agentChat,
   applyCommand,
   defaultSessionName,
@@ -37,6 +38,7 @@ import {
   shouldFollow,
   useAgentChat,
   type AgentChatStore,
+  type ChatAgent,
   type ChatStatus,
   type PermissionMode,
   type Question,
@@ -45,23 +47,30 @@ import {
 } from "./agentChat";
 
 /**
- * The coding agent pane (specs/agents/coding-agent-ui.feature.md): a Claude
- * Code chat inside SpecDriven for developers who have the CLI but not the
- * desktop app. Header (session, work dir, status, permission mode, Stop,
- * close), a scrolling transcript that follows new output until the reader
- * scrolls up, and a composer with a "/" popup listing the commands the
- * session supports. State lives in src/frontend/agentChat.ts; this file
- * only renders it and forwards what the user does.
+ * The coding agent pane (specs/agents/coding-agent-ui.feature.md): a live
+ * coding agent chat inside SpecDriven for developers who have a CLI but not
+ * Claude Code Desktop — Claude Code, or Pi over its RPC mode
+ * (specs/agents/integration-with-pi-dev-agent.feature.md). Header (session,
+ * work dir, status, permission mode, Stop, close), a scrolling transcript
+ * that follows new output until the reader scrolls up, and a composer with a
+ * "/" popup listing the commands the session supports. State lives in
+ * src/frontend/agentChat.ts; this file only renders it and forwards what the
+ * user does.
  */
 
 export const STATUS_LABEL: Record<ChatStatus, string> = {
-  starting: "Starting Claude…",
+  starting: "Starting…",
   idle: "Ready",
   running: "Working…",
   awaiting_input: "Waiting for your answer",
   ended: "Ended",
   error: "Failed",
 };
+
+/** The status as the pane says it: only "starting" names the agent. */
+export function statusLabel(status: ChatStatus, agent: ChatAgent = "claude"): string {
+  return status === "starting" ? `Starting ${AGENT_LABEL[agent]}…` : STATUS_LABEL[status];
+}
 
 export const MODE_LABEL: Record<PermissionMode, string> = {
   default: "Default",
@@ -128,7 +137,7 @@ function AgentHeader({
       id: m.id,
       label: m.name,
       checked: m.id === store.activeId,
-      title: `${STATUS_LABEL[m.status]} · ${m.cwd}`,
+      title: `${AGENT_LABEL[m.agent]} · ${statusLabel(m.status, m.agent)} · ${m.cwd}`,
       onSelect: () => agentChat.setActive(m.id),
     })),
     {
@@ -173,7 +182,7 @@ function AgentHeader({
         />
       </div>
       {meta && (
-        <Tooltip label={meta.cwd}>
+        <Tooltip label={`${AGENT_LABEL[meta.agent]} · ${meta.cwd}`}>
           <span className="chip muted agent-cwd" tabIndex={0}>
             {basename(meta.cwd)}
           </span>
@@ -184,12 +193,21 @@ function AgentHeader({
           className="agent-dot"
           data-status={meta.status}
           role="img"
-          aria-label={STATUS_LABEL[meta.status]}
-          title={STATUS_LABEL[meta.status]}
+          aria-label={statusLabel(meta.status, meta.agent)}
+          title={statusLabel(meta.status, meta.agent)}
         />
       )}
       <span className="spacer" />
-      {meta && (
+      {/* Pi's RPC mode has no permission protocol — it runs its own tools,
+          so there is no mode to offer and the pane says as much. */}
+      {meta && meta.agent === "pi" && (
+        <Tooltip label="Pi runs its own tools — SpecDriven cannot gate them">
+          <span className="chip muted" tabIndex={0}>
+            No permission gate
+          </span>
+        </Tooltip>
+      )}
+      {meta && meta.agent !== "pi" && (
         <select
           className="agent-mode"
           aria-label="Permission mode"
@@ -243,24 +261,32 @@ function EmptyState({
   dataRepo: string | null;
 }) {
   const [name, setName] = useState(() => defaultSessionName());
+  const [agent, setAgent] = useState<ChatAgent>(() => (store.available ? "claude" : "pi"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workDir = codeRepo ?? dataRepo;
-  if (!store.available) {
+  if (!store.available && !store.piAvailable) {
     return (
       <div className="agent-empty">
         <h3>Coding agent</h3>
         <p>
-          Claude CLI not found — install the <code>claude</code> command and reload.
+          No coding agent CLI found — install the <code>claude</code> command
+          (or <code>pi</code>, from pi.dev) and reload.
         </p>
       </div>
     );
   }
+  // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
+  const agents: ChatAgent[] = [
+    ...(store.available ? (["claude"] as ChatAgent[]) : []),
+    ...(store.piAvailable ? (["pi"] as ChatAgent[]) : []),
+  ];
+  const picked = agents.includes(agent) ? agent : agents[0]!;
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
-      await agentChat.createSession({ name: name.trim() || defaultSessionName() });
+      await agentChat.createSession({ name: name.trim() || defaultSessionName(), agent: picked });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -277,7 +303,7 @@ function EmptyState({
     >
       <h3>New coding agent session</h3>
       <p>
-        A live Claude Code session, run by SpecDriven.
+        A live {picked === "pi" ? "Pi" : "Claude Code"} session, run by SpecDriven.
         {workDir && (
           <>
             {" "}
@@ -286,6 +312,30 @@ function EmptyState({
           </>
         )}
       </p>
+      {agents.length > 1 && (
+        <fieldset className="choice-group" role="radiogroup" aria-label="Agent">
+          <legend>Agent</legend>
+          {agents.map((a) => (
+            <label key={a} className="choice">
+              <input
+                type="radio"
+                name="agent-empty-agent"
+                value={a}
+                checked={picked === a}
+                onChange={() => setAgent(a)}
+              />
+              <span>
+                <span>{AGENT_LABEL[a]}</span>
+                <div className="agent-option-desc">
+                  {a === "pi"
+                    ? "Minimal, and runs its own tools — nothing asks for permission"
+                    : "Claude Code, with permission cards and its own commands"}
+                </div>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       <label>
         Session name
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
@@ -340,9 +390,11 @@ function Transcript({ session }: { session: SessionState }) {
       aria-live="polite"
       aria-label="Session transcript"
     >
-      {items.length === 0 && <p className="agent-note">{STATUS_LABEL[session.meta.status]}</p>}
+      {items.length === 0 && (
+        <p className="agent-note">{statusLabel(session.meta.status, session.meta.agent)}</p>
+      )}
       {items.map((item) => (
-        <TranscriptRow key={item.id} item={item} onAnswer={answer} />
+        <TranscriptRow key={item.id} item={item} agent={session.meta.agent} onAnswer={answer} />
       ))}
       {session.connection === "reconnecting" && (
         <p className="agent-note" data-level="error">
@@ -361,9 +413,11 @@ function Transcript({ session }: { session: SessionState }) {
 /** One transcript entry. Exported so tests can render a row on its own. */
 export function TranscriptRow({
   item,
+  agent = "claude",
   onAnswer,
 }: {
   item: TranscriptItem;
+  agent?: ChatAgent;
   onAnswer?: (answer: Answer) => void;
 }) {
   switch (item.kind) {
@@ -383,7 +437,8 @@ export function TranscriptRow({
     case "question":
       return <QuestionCard item={item} onAnswer={onAnswer} />;
     case "result": {
-      const loginHint = item.isError && /not logged in/i.test(item.text ?? "");
+      const loginHint =
+        item.isError && /not logged in|no api key|unauthorized/i.test(item.text ?? "");
       return (
         <div className={`agent-turn-footer${item.isError ? " err" : ""}`}>
           <span>
@@ -398,8 +453,17 @@ export function TranscriptRow({
           {item.isError && item.text && <span className="agent-err-text">{item.text}</span>}
           {loginHint && (
             <span className="agent-err-text">
-              The Claude CLI is not signed in on this machine: run <code>claude auth login</code>{" "}
-              in a terminal, then start a new session.
+              {agent === "pi" ? (
+                <>
+                  Pi has no credentials for this model here: run <code>pi</code> in a terminal and{" "}
+                  <code>/login</code>, then start a new session.
+                </>
+              ) : (
+                <>
+                  The Claude CLI is not signed in on this machine: run{" "}
+                  <code>claude auth login</code> in a terminal, then start a new session.
+                </>
+              )}
             </span>
           )}
         </div>
@@ -630,6 +694,7 @@ function QuestionCard({
 function Composer({ session }: { session: SessionState }) {
   const id = session.meta.id;
   const status = session.meta.status;
+  const who = AGENT_LABEL[session.meta.agent];
   const [draft, setDraft] = useState("");
   const [caret, setCaret] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
@@ -707,11 +772,11 @@ function Composer({ session }: { session: SessionState }) {
     status === "idle"
       ? "Enter to send · Shift+Enter for a new line · / for commands"
       : status === "starting"
-        ? "Claude is starting…"
+        ? `${who} is starting…`
         : status === "running"
-          ? "Claude is working — Stop to send something else"
+          ? `${who} is working — Stop to send something else`
           : status === "awaiting_input"
-            ? "Answer Claude's request above"
+            ? `Answer ${who}'s request above`
             : "This session has ended — start a new one from the session menu";
   const listId = `agent-slash-${id}`;
   return (
@@ -740,7 +805,7 @@ function Composer({ session }: { session: SessionState }) {
         ref={ref}
         rows={1}
         value={draft}
-        placeholder={final ? "Session ended" : "Message Claude, or type / for a command"}
+        placeholder={final ? "Session ended" : `Message ${who}, or type / for a command`}
         disabled={final}
         aria-label="Message"
         aria-autocomplete="list"

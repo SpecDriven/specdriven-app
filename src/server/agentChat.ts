@@ -1,16 +1,25 @@
 // Coding agent pane (specs/agents/coding-agent-ui.feature.md): the app drives
-// a live Claude Code session itself, for developers who have the Claude CLI
-// but not Claude Code Desktop. One long-lived `query()` from the Claude Agent
-// SDK per chat, in streaming-input mode — the only mode in which permission
-// requests, interrupts and mode changes reach us — spawning the developer's
-// own `claude` binary with the code repo as its working directory. Every
-// message the SDK yields becomes an event in an in-memory log with a
-// sequence number; the browser reads the log over a one-way stream and, on
-// reconnect, asks for everything after the last sequence it saw.
+// a live coding agent session itself, for developers who have a CLI but not
+// Claude Code Desktop. Two agents share this machinery:
+//
+//   Claude — one long-lived `query()` from the Claude Agent SDK per chat, in
+//   streaming-input mode, the only mode in which permission requests,
+//   interrupts and mode changes reach us, spawning the developer's own
+//   `claude` binary with the code repo as its working directory.
+//
+//   Pi — `pi --mode rpc` over JSON lines (src/server/piChat.ts,
+//   specs/agents/integration-with-pi-dev-agent.feature.md). Pi runs its own
+//   tools and has no permission protocol, so those sessions offer no
+//   permission mode and never raise a permission card.
+//
+// Either way every message the agent produces becomes an event in an
+// in-memory log with a sequence number; the browser reads the log over a
+// one-way stream and, on reconnect, asks for everything after the last
+// sequence it saw.
 //
 // Node APIs only (src/server/run.ts): this module also runs inside Electron.
-// The SDK itself is imported lazily, on the first session, so booting the
-// server, `bun test` and the desktop shell never pay for it.
+// The Claude SDK itself is imported lazily, on the first session, so booting
+// the server, `bun test` and the desktop shell never pay for it.
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -22,10 +31,21 @@ import type {
   SDKUserMessage,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_BIN, PANE_AGENT, sessionWorkDir } from "./agent";
+import { CLAUDE_BIN, PANE_AGENT, PI_PANE_AGENT, sessionWorkDir } from "./agent";
 import type { SessionPlace } from "./agent";
 import { writeTextFile } from "./fsx";
+import { PiClient, mapPiEvent, newPiStream, piCommands, piState } from "./piChat";
+import type { PiEvent, PiStreamContext } from "./piChat";
 import { which } from "./run";
+
+/** Which agent a pane session runs (specs/agents/claude.feature.md,
+    specs/agents/integration-with-pi-dev-agent.feature.md). */
+export type ChatAgent = "claude" | "pi";
+export const CHAT_AGENTS: readonly ChatAgent[] = ["claude", "pi"];
+
+export function normalizeChatAgent(value: unknown): ChatAgent | null {
+  return (CHAT_AGENTS as readonly unknown[]).includes(value) ? (value as ChatAgent) : null;
+}
 
 /** The permission modes the pane offers; the SDK knows more (dontAsk, auto). */
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
@@ -59,7 +79,9 @@ export interface SlashCommandInfo {
 export interface ChatSessionMeta {
   id: string;
   name: string;
-  /** The folder Claude works in: the code repo, else the data repo. */
+  /** Which agent drives the chat. */
+  agent: ChatAgent;
+  /** The folder the agent works in: the code repo, else the data repo. */
   cwd: string;
   dataRepo: string;
   codeRepo?: string;
@@ -67,9 +89,11 @@ export interface ChatSessionMeta {
   startedAt: string;
   endedAt?: string;
   status: ChatStatus;
-  /** Claude Code's own session id, once its init message arrives. */
-  claudeSessionId?: string;
+  /** The agent's own session id — Claude Code's, or pi's — once it says it. */
+  agentSessionId?: string;
   model?: string;
+  /** Pi has none of these: its sessions sit on "bypassPermissions" and
+      refuse a change (see setChatPermissionMode). */
   permissionMode: PermissionMode;
   /** Sequence number of the last event in the log. */
   lastSeq: number;
@@ -84,7 +108,7 @@ export type ChatEventBody =
   | {
       kind: "status";
       status: ChatStatus;
-      claudeSessionId?: string;
+      agentSessionId?: string;
       model?: string;
       permissionMode?: PermissionMode;
       tools?: string[];
@@ -239,6 +263,8 @@ interface ChatSession {
   listeners: Set<(event: ChatEvent) => void>;
   input: InputQueue<SDKUserMessage>;
   query: QueryLike | null;
+  /** Pi sessions only: the RPC client in place of the SDK query. */
+  pi: PiClient | null;
   abort: AbortController;
   pending: Map<string, PendingPermission>;
   /** A user message is in and its result is not yet out. */
@@ -254,6 +280,8 @@ interface ChatSession {
   stderrTail: string[];
   /** Streaming state for mapSdkMessage. */
   stream: StreamContext;
+  /** Streaming state for mapPiEvent. */
+  piStream: PiStreamContext;
 }
 
 // The registry hangs off globalThis: `bun --hot` swaps modules but keeps
@@ -314,11 +342,11 @@ function recordOf(session: ChatSession) {
     name: m.name,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-    agent: PANE_AGENT,
+    agent: m.agent === "pi" ? PI_PANE_AGENT : PANE_AGENT,
     dataRepo: m.dataRepo,
     ...(m.codeRepo ? { codeRepo: m.codeRepo } : {}),
     cwd: m.cwd,
-    ...(m.claudeSessionId ? { claudeSessionId: m.claudeSessionId } : {}),
+    ...(m.agentSessionId ? { agentSessionId: m.agentSessionId } : {}),
     ...(m.model ? { model: m.model } : {}),
     permissionMode: m.permissionMode,
     status: m.status,
@@ -338,6 +366,8 @@ function saveRecord(session: ChatSession): Promise<void> {
 export interface CreateChatOptions {
   place: SessionPlace;
   name: string;
+  /** Default: Claude. */
+  agent?: ChatAgent;
   /** Sent as the first user message, before the pane says anything. */
   prompt?: string;
   permissionMode?: PermissionMode;
@@ -348,9 +378,9 @@ export interface CreateChatOptions {
 }
 
 /**
- * Start one chat: spawn Claude on the work dir and begin pumping its
+ * Start one chat: spawn the agent on the work dir and begin pumping its
  * messages into the event log. Resolves as soon as the subprocess is
- * requested; the `init` status follows on the stream.
+ * requested; the ready status follows on the stream.
  */
 export async function createChatSession(opts: CreateChatOptions): Promise<ChatSessionMeta> {
   if (live().length >= MAX_LIVE_SESSIONS) {
@@ -359,11 +389,15 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   const id = opts.id ?? randomUUID();
   const now = opts.now ?? new Date();
   const cwd = sessionWorkDir(opts.place);
-  const permissionMode = opts.permissionMode ?? "default";
+  const agent = opts.agent ?? "claude";
+  // Pi runs its own tools with no gate of any kind; saying "default" would
+  // promise a prompt that never comes.
+  const permissionMode = agent === "pi" ? "bypassPermissions" : (opts.permissionMode ?? "default");
   const session: ChatSession = {
     meta: {
       id,
       name: opts.name,
+      agent,
       cwd,
       dataRepo: opts.place.dataRepo,
       ...(opts.place.codeRepo ? { codeRepo: opts.place.codeRepo } : {}),
@@ -376,6 +410,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     listeners: new Set(),
     input: new InputQueue(),
     query: null,
+    pi: null,
     abort: new AbortController(),
     pending: new Map(),
     busy: false,
@@ -386,10 +421,17 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     saving: Promise.resolve(),
     stderrTail: [],
     stream: { messageId: null },
+    piStream: newPiStream(),
   };
   registry().set(id, session);
   installShutdownHook();
   emit(session, { kind: "status", status: "starting", permissionMode }, now);
+
+  if (agent === "pi") {
+    startPi(session, opts, now);
+    await saveRecord(session);
+    return { ...session.meta };
+  }
 
   // A dev server started from inside a Claude Code terminal inherits the
   // marker that makes a nested `claude` refuse to start; the chat is not
@@ -481,7 +523,7 @@ async function pump(session: ChatSession): Promise<void> {
       session,
       "error",
       tail ? `${(e as Error).message}\n${tail}` : (e as Error).message,
-      session.meta.claudeSessionId ? "ended" : "spawn_failed",
+      session.meta.agentSessionId ? "ended" : "spawn_failed",
     );
   }
 }
@@ -490,7 +532,7 @@ function handleMessage(session: ChatSession, msg: SDKMessage): void {
   if (msg.type === "system" && msg.subtype === "init") {
     const first = !session.initSeen;
     session.initSeen = true;
-    session.meta.claudeSessionId = msg.session_id;
+    session.meta.agentSessionId = msg.session_id;
     session.meta.model = msg.model;
     const mode = normalizePermissionMode(msg.permissionMode);
     if (mode) session.meta.permissionMode = mode;
@@ -514,7 +556,7 @@ function handleMessage(session: ChatSession, msg: SDKMessage): void {
   }
   if (msg.type === "system" && msg.subtype === "init") {
     setStatus(session, session.busy ? "running" : "idle", {
-      claudeSessionId: msg.session_id,
+      agentSessionId: msg.session_id,
       model: msg.model,
       permissionMode: session.meta.permissionMode,
       tools: msg.tools,
@@ -540,6 +582,102 @@ async function loadCommands(session: ChatSession): Promise<void> {
   } catch {
     // The names from init stand.
   }
+}
+
+// --- Pi (specs/agents/integration-with-pi-dev-agent.feature.md) -------------
+//
+// `pi --mode rpc` in place of the SDK query: commands out on stdin, events in
+// on stdout (src/server/piChat.ts). Pi has no permission protocol and no
+// control channel — a turn is a `prompt` command, a stop is `abort`, and the
+// session ends when the process does.
+
+/** Spawn pi for this session and wire its events into the log. */
+function startPi(session: ChatSession, opts: CreateChatOptions, now: Date): void {
+  session.pi = new PiClient({
+    cwd: session.meta.cwd,
+    name: session.meta.name,
+    onEvent: (event) => handlePiEvent(session, event),
+    onStderr: (line) => {
+      session.stderrTail = [...session.stderrTail, line].slice(-5);
+    },
+    onExit: (code, error) => void piExited(session, code, error),
+  });
+  // The prompt can go before pi has read a byte: the pipe holds it until its
+  // RPC loop starts.
+  if (opts.prompt) {
+    session.turn = 1;
+    session.busy = true;
+    session.pi.send({ type: "prompt", message: opts.prompt });
+    emit(session, { kind: "user", id: randomUUID(), text: opts.prompt }, now);
+  }
+  void piReady(session);
+}
+
+/**
+ * Pi answers commands as soon as its RPC loop is up, so the first answer is
+ * what says the session is ready to type into — and it brings the model, pi's
+ * own session id and the "/" commands.
+ */
+async function piReady(session: ChatSession): Promise<void> {
+  const client = session.pi!;
+  const [state, commands] = await Promise.all([
+    client.request({ type: "get_state" }),
+    client.request({ type: "get_commands" }),
+  ]);
+  if (FINAL.has(session.meta.status)) return;
+  const info = piState(state.data);
+  if (info.model) session.meta.model = info.model;
+  if (info.sessionId) session.meta.agentSessionId = info.sessionId;
+  session.commands = piCommands(commands.data);
+  emit(session, {
+    kind: "note",
+    level: "info",
+    code: "init",
+    text: `Pi · ${info.model ?? "no model"} · ${session.meta.cwd}`,
+  });
+  // The one thing a Claude user must not assume here.
+  emit(session, {
+    kind: "note",
+    level: "info",
+    code: "init",
+    text: "Pi runs its own tools — SpecDriven cannot gate them, so nothing asks for permission.",
+  });
+  void saveRecord(session);
+  if (session.meta.status === "starting") {
+    setStatus(session, session.busy ? "running" : "idle", {
+      ...(session.meta.model ? { model: session.meta.model } : {}),
+      ...(session.meta.agentSessionId ? { agentSessionId: session.meta.agentSessionId } : {}),
+      permissionMode: session.meta.permissionMode,
+      commands: session.commands,
+    });
+  }
+}
+
+function handlePiEvent(session: ChatSession, event: PiEvent): void {
+  if (FINAL.has(session.meta.status)) return;
+  if (event.type === "agent_start") {
+    session.busy = true;
+    if (session.meta.status === "idle") setStatus(session, "running");
+  }
+  for (const body of mapPiEvent(event, { turn: session.turn }, session.piStream)) {
+    emit(session, body);
+  }
+  if (event.type === "agent_settled") {
+    session.busy = false;
+    if (!FINAL.has(session.meta.status)) setStatus(session, "idle");
+  }
+}
+
+/** Pi is gone: an exit code of its own, or an Error where it never started. */
+function piExited(session: ChatSession, code: number | null, error?: Error): Promise<void> {
+  if (FINAL.has(session.meta.status)) return Promise.resolve();
+  const tail = session.stderrTail.join("\n");
+  const detail = (text: string) => (tail ? `${text}\n${tail}` : text);
+  if (error) {
+    return finish(session, "error", detail(`Could not start Pi: ${error.message}`), "spawn_failed");
+  }
+  if (code === 0 || code === null) return finish(session, "ended", "Pi exited.");
+  return finish(session, "error", detail(`Pi exited with code ${code}.`));
 }
 
 export interface StreamContext {
@@ -750,6 +888,7 @@ function finish(
   emit(session, { kind: "note", level: status === "error" ? "error" : "info", code, text });
   setStatus(session, status);
   session.input.close();
+  session.pi?.close();
   return saveRecord(session);
 }
 
@@ -787,7 +926,7 @@ export function subscribeChat(id: string, fn: (event: ChatEvent) => void): () =>
   };
 }
 
-/** One user turn: text (a plain message or a `/command`) to Claude. */
+/** One user turn: text (a plain message or a `/command`) to the agent. */
 export function sendChatMessage(id: string, text: string): ChatEvent {
   const session = get(id);
   const trimmed = text.trim();
@@ -796,7 +935,8 @@ export function sendChatMessage(id: string, text: string): ChatEvent {
   if (session.busy) throw new ChatError(409, "A turn is in progress — Stop it first");
   session.turn += 1;
   session.busy = true;
-  session.input.push(userMessage(trimmed));
+  if (session.pi) session.pi.send({ type: "prompt", message: trimmed });
+  else session.input.push(userMessage(trimmed));
   const event = emit(session, { kind: "user", id: randomUUID(), text: trimmed });
   if (session.meta.status === "idle") setStatus(session, "running");
   return event;
@@ -830,7 +970,7 @@ export function answerPermission(id: string, answer: PermissionAnswer): void {
   resolvePending(session, answer.requestId, result, "user");
 }
 
-/** Stop the current turn; Claude stays up for the next message. */
+/** Stop the current turn; the agent stays up for the next message. */
 export async function interruptChat(id: string): Promise<void> {
   const session = get(id);
   if (session.meta.status !== "running" && session.meta.status !== "awaiting_input") {
@@ -838,12 +978,21 @@ export async function interruptChat(id: string): Promise<void> {
   }
   denyAllPending(session, "interrupt", "Interrupted by the user");
   emit(session, { kind: "note", level: "info", code: "interrupted", text: "Stopped." });
+  if (session.pi) {
+    // Pi answers `abort` only once it is idle again; the turn's own
+    // `agent_settled` is what puts the session back to idle.
+    await session.pi.request({ type: "abort" });
+    return;
+  }
   await session.query!.interrupt();
 }
 
 export async function setChatPermissionMode(id: string, mode: PermissionMode): Promise<void> {
   const session = get(id);
   if (FINAL.has(session.meta.status)) throw new ChatError(409, "The session has ended");
+  if (session.meta.agent === "pi") {
+    throw new ChatError(409, "Pi has no permission modes — it runs its own tools");
+  }
   if (session.meta.status === "starting") throw new ChatError(409, "Claude is still starting");
   await session.query!.setPermissionMode(mode);
   session.meta.permissionMode = mode;
@@ -885,7 +1034,9 @@ function installShutdownHook(): void {
   flags[HOOK] = true;
   process.on("exit", () => {
     for (const session of registry().values()) {
-      if (!FINAL.has(session.meta.status)) session.abort.abort();
+      if (FINAL.has(session.meta.status)) continue;
+      session.abort.abort();
+      session.pi?.close();
     }
   });
 }
