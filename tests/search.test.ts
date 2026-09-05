@@ -1,20 +1,26 @@
 // Automates specs/search.spec.md: indexed full-text search over the data
 // repo's feature files — ranking, prefix/fuzzy matching, snippets, and the
 // stat-fingerprint invalidation that follows external file changes — and the
-// roadmap scope the sidebar's Roadmap tab searches (specs/app/roadmap
-// .feature.md): the roadmap folder's pages, apart from the specs.
+// page scopes a special folder's own sidebar tab searches (specs/app/roadmap
+// .feature.md, specs/app/tasks.feature.md): that folder's pages, apart from
+// the specs and from each other.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ROADMAP, TASKS } from "../src/server/pages";
 import {
   isSearchScope,
   makeSnippet,
   resetSearchCache,
-  searchRoadmap,
+  searchPages,
   searchSpecs,
 } from "../src/server/search";
+
+/** The roadmap scope, the one these tests read as the example page folder. */
+const searchRoadmap = (dataDir: string, query: string, limit?: number) =>
+  searchPages(dataDir, ROADMAP, query, limit);
 
 let root: string;
 
@@ -191,7 +197,7 @@ test("the roadmap scope finds a page by a word in its body, with a snippet", asy
   const results = await searchRoadmap(root, "annual");
   expect(results.length).toBe(1);
   const [hit] = results;
-  expect(hit!.kind).toBe("roadmap");
+  expect(hit!.kind).toBe("page");
   expect(hit!.fileName).toBe("roadmap/pricing.md");
   expect(hit!.featureName).toBe("Pricing plans");
   expect(hit!.scenario).toBeUndefined();
@@ -219,8 +225,8 @@ test("the two scopes do not see each other's files", async () => {
   expect(await searchSpecs(root, "annual")).toEqual([]);
   expect(await searchRoadmap(root, "rider")).toEqual([]);
   // A word in both: each scope reports only its own kind.
-  expect((await searchSpecs(root, "premium")).every((r) => r.kind !== "roadmap")).toBe(true);
-  expect((await searchRoadmap(root, "premium")).map((r) => r.kind)).toEqual(["roadmap"]);
+  expect((await searchSpecs(root, "premium")).every((r) => r.kind !== "page")).toBe(true);
+  expect((await searchRoadmap(root, "premium")).map((r) => r.kind)).toEqual(["page"]);
 });
 
 test("the roadmap index follows page edits and deletions", async () => {
@@ -240,9 +246,27 @@ test("without a roadmap folder the roadmap scope is simply empty", async () => {
   expect(await searchRoadmap(root, "premium")).toEqual([]);
 });
 
-test("isSearchScope accepts the two scopes only", () => {
+// Each special folder is its own scope, and a tasks tab search must not
+// return the roadmap's pages (specs/app/tasks.feature.md).
+test("each page folder is searched on its own", async () => {
+  await mkdir(join(root, "roadmap"), { recursive: true });
+  await mkdir(join(root, "tasks"), { recursive: true });
+  await Bun.write(join(root, "roadmap/pricing.md"), PRICING);
+  await Bun.write(join(root, "tasks/ship-v2.md"), "# Ship v2\n\nCut the annual build.\n");
+
+  const tasks = await searchPages(root, TASKS, "annual");
+  expect(tasks.map((r) => r.fileName)).toEqual(["tasks/ship-v2.md"]);
+  expect(tasks[0]!.featureName).toBe("Ship v2");
+  expect((await searchRoadmap(root, "annual")).map((r) => r.fileName)).toEqual([
+    "roadmap/pricing.md",
+  ]);
+  expect(await searchPages(root, TASKS, "rider")).toEqual([]);
+});
+
+test("isSearchScope accepts the specs scope and the page folders' only", () => {
   expect(isSearchScope("specs")).toBe(true);
   expect(isSearchScope("roadmap")).toBe(true);
+  expect(isSearchScope("tasks")).toBe(true);
   expect(isSearchScope("features")).toBe(false);
   expect(isSearchScope(null)).toBe(false);
 });

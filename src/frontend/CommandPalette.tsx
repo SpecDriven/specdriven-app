@@ -6,17 +6,17 @@ import { useFocusTrap } from "./useFocusTrap";
 /**
  * The command palette on ⌘K (specs/ui/ui.feature.md "Design system",
  * specs/search.feature.md): one field that finds features and scenarios —
- * or, opened from the sidebar's Roadmap tab, roadmap pages — with the
- * full-text search's ranking and snippets, and runs the app's actions by
+ * or, opened from one of the sidebar's page tabs, that folder's pages — with
+ * the full-text search's ranking and snippets, and runs the app's actions by
  * name. Empty, it offers what was opened recently and every action; typing
  * narrows all groups at once. ↑/↓ move, ⏎ opens, ⌘⏎ opens a scenario on its
  * feature page instead of in the editor, ESC closes. A combobox for
  * assistive tech: the field owns the list and names the active option.
  */
-export type PaletteGroup = "Recent" | "Actions" | "Features" | "Scenarios" | "Roadmap";
+export type PaletteGroup = "Recent" | "Actions" | "Features" | "Scenarios" | "Roadmap" | "Tasks";
 
 /** What the query searches, after the sidebar tab the palette opened from. */
-export type PaletteScope = "specs" | "roadmap";
+export type PaletteScope = "specs" | "roadmap" | "tasks";
 
 export interface PaletteItem {
   id: string;
@@ -31,7 +31,14 @@ export interface PaletteItem {
   run: (opts: { alt: boolean }) => void;
 }
 
-const GROUP_ORDER: PaletteGroup[] = ["Recent", "Actions", "Features", "Scenarios", "Roadmap"];
+const GROUP_ORDER: PaletteGroup[] = [
+  "Recent",
+  "Actions",
+  "Features",
+  "Scenarios",
+  "Roadmap",
+  "Tasks",
+];
 
 export function CommandPalette({
   initialQuery,
@@ -42,7 +49,7 @@ export function CommandPalette({
   resolve,
 }: {
   initialQuery: string;
-  /** Specs or roadmap pages — names the field and the results' scope. */
+  /** Specs, roadmap pages or tasks — names the field and the results' scope. */
   scope?: PaletteScope;
   onClose: () => void;
   /** Every action, filtered here by name. */

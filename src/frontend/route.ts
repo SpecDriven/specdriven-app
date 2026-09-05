@@ -2,6 +2,7 @@
 //
 //   /                                               home
 //   /roadmap/<page>                                 roadmap page
+//   /tasks/<task>                                   task
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
@@ -28,10 +29,12 @@ export interface Route {
   feature?: string;
   scenario?: ScenarioRef;
   /**
-   * Roadmap page file name, repo-relative and with the `.md` suffix restored
-   * (specs/app/roadmap.feature.md) — `roadmap/pricing.md`.
+   * A special folder's page — a roadmap page (specs/app/roadmap.feature.md)
+   * or a task (specs/app/tasks.feature.md) — as its file name, repo-relative
+   * and with the `.md` suffix restored: `roadmap/pricing.md`, `tasks/ship.md`.
+   * The folder it opens with is what says which of the two it is.
    */
-  roadmap?: string;
+  page?: string;
 }
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
@@ -47,11 +50,11 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
-  // A roadmap page is a plain path under the folder it lives in; a hand-typed
-  // link may carry the `.md` suffix already.
-  if (segs[0] === ROADMAP_FOLDER && segs[1]) {
+  // A roadmap page or a task is a plain path under the folder it lives in; a
+  // hand-typed link may carry the `.md` suffix already.
+  if (segs[0] && PAGE_FOLDERS.includes(segs[0]) && segs[1]) {
     const path = segs.slice(1).join("/").replace(/\.md$/, "");
-    return { roadmap: `${ROADMAP_FOLDER}/${path}.md` };
+    return { page: `${segs[0]}/${path}.md` };
   }
   if (segs[0] !== "features" || !segs[1]) return {};
   // The feature path runs up to the first `scenarios` segment that has a slug
@@ -97,13 +100,19 @@ export function repoDisplayName(repo: string): string {
   return repo.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/, "") || repo;
 }
 
-/** The roadmap folder's name, shared with the server (src/server/roadmap.ts). */
-const ROADMAP_FOLDER = "roadmap";
+/** The special folders' names, shared with the server (src/server/pages.ts). */
+export const PAGE_FOLDERS = ["roadmap", "tasks"];
 
-/** `roadmap/q3/pricing.md` -> `/roadmap/q3/pricing`. */
-export function roadmapPath(fileName: string): string {
-  const stem = fileName.replace(/^roadmap\//, "").replace(/\.md$/, "");
-  return `/${ROADMAP_FOLDER}/${stem.split("/").map(encodeURIComponent).join("/")}`;
+/** The folder a page's file name lives in — `roadmap` or `tasks`. */
+export function pageFolderOf(fileName: string): string {
+  return fileName.split("/")[0] ?? "";
+}
+
+/** `roadmap/q3/pricing.md` -> `/roadmap/q3/pricing`; `tasks/ship.md` likewise. */
+export function pageLink(fileName: string): string {
+  const folder = pageFolderOf(fileName);
+  const stem = fileName.slice(folder.length + 1).replace(/\.md$/, "");
+  return `/${folder}/${stem.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function featurePath(fileName: string): string {
