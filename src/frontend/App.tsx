@@ -63,6 +63,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
+import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
@@ -551,6 +552,11 @@ interface OpenOptions {
    */
   pane?: boolean;
   /**
+   * The words a search hit matched on (specs/search.feature.md): the pane
+   * opened for the hit marks them in the scenario's body.
+   */
+  terms?: string[];
+  /**
    * Open with the feature description editor on (specs/editor/feature-editor
    * .feature.md "Edit feature descrition"): a just-created feature is empty,
    * and describing it is the first thing to do.
@@ -664,7 +670,18 @@ export function App() {
    * the new one starts a fresh editor session — its own autosave baseline,
    * with the outgoing one's last save unable to reach back into it.
    */
-  const [paneRequest, setPaneRequest] = useState<Scenario | null>(null);
+  const [paneRequest, setPaneRequest] = useState<{
+    scenario: Scenario;
+    /** Search terms to mark in the pane (specs/search.feature.md), when a hit opened it. */
+    terms: string[] | null;
+  } | null>(null);
+  /**
+   * The words marked in the open scenario editor (specs/search.feature.md):
+   * the terms of the search hit that opened it, gone when the pane closes.
+   */
+  const [searchTerms, setSearchTerms] = useState<string[] | null>(null);
+  /** The same for the open roadmap page's editor. */
+  const [roadmapTerms, setRoadmapTerms] = useState<string[] | null>(null);
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
@@ -1067,9 +1084,20 @@ export function App() {
     if (!paneRequest) return;
     setPaneRequest(null);
     if (!feature) return;
-    const idx = cardOfScenario(feature.scenarios, paneRequest);
-    if (idx !== null) setEditing({ index: idx, scenario: { ...feature.scenarios[idx]! } });
+    const idx = cardOfScenario(feature.scenarios, paneRequest.scenario);
+    if (idx !== null) {
+      setEditing({ index: idx, scenario: { ...feature.scenarios[idx]! } });
+      setSearchTerms(paneRequest.terms);
+    }
   }, [paneRequest, feature]);
+
+  // The marks belong to the pane the hit opened: closing it takes them along,
+  // so the scenario reopened from its card shows plain text. Not while a pane
+  // request is pending — opening a hit closes the previous pane first, and
+  // the request above is what carries the new terms in.
+  useEffect(() => {
+    if (editing === null && paneRequest === null) setSearchTerms(null);
+  }, [editing === null, paneRequest]);
 
   // A "Save was blocked" message stops applying the moment the tests widgets
   // change — typing, adding, or opening/closing an ✎ row.
@@ -1289,7 +1317,11 @@ export function App() {
         setSelectedScenario(idx);
         // A scenario link opens that scenario's page (specs/navigation.spec.md
         // "open a scenario link") — the whole point of the card's "Copy link".
-        setPaneRequest(opts.pane && idx !== null ? parsed.scenarios[idx]! : null);
+        setPaneRequest(
+          opts.pane && idx !== null
+            ? { scenario: parsed.scenarios[idx]!, terms: opts.terms ?? null }
+            : null,
+        );
       } else {
         // Keep the keyboard highlight across a same-file refresh (sync, cron);
         // drop it when switching files or when the list shrank past it.
@@ -2229,7 +2261,14 @@ export function App() {
    * README. A page and a feature share the pane, so opening one drops the
    * other. Called again on the cron tick to show what a pull brought.
    */
-  const openRoadmapPage = async (fileName: string, opts: { push?: boolean } = {}) => {
+  const openRoadmapPage = async (
+    fileName: string,
+    opts: {
+      push?: boolean;
+      /** A search hit's matched words, marked in the page (specs/search.feature.md). */
+      terms?: string[];
+    } = {},
+  ) => {
     const res = await fetch(`/api/roadmap/${encodeURIComponent(fileName)}`);
     const data = (await res.json().catch(() => ({}))) as RoadmapListing & {
       content?: string;
@@ -2245,7 +2284,11 @@ export function App() {
     editorRef.current.close();
     // The page's row lives on the Roadmap tab, so a deep link or the palette
     // turns the sidebar there; a refresh of the open page leaves it alone.
-    if (roadmapPageRef.current?.fileName !== fileName) selectSidebarTab("roadmap");
+    const samePage = roadmapPageRef.current?.fileName === fileName;
+    if (!samePage) selectSidebarTab("roadmap");
+    // A refresh of the open page (the reload cron, a rename) keeps its search
+    // marks too; a hit's terms replace them, and another page starts without.
+    if (opts.terms !== undefined || !samePage) setRoadmapTerms(opts.terms ?? null);
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
@@ -2279,6 +2322,7 @@ export function App() {
     roadmapTextRef.current = null;
     setRoadmapPage(null);
     setRoadmapText(null);
+    setRoadmapTerms(null);
   };
 
   /** One autosave tick of the open roadmap page — autosaveReadme's twin. */
@@ -3259,20 +3303,12 @@ export function App() {
         ? { slug: slugify(r.scenario.name), version: r.scenario.version }
         : null,
       pane: r.scenario !== undefined && !onFeaturePage,
+      terms: r.terms,
     });
   };
 
   const resultHref = (r: SearchResultItem) =>
     r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
-
-  /** Snippet text with the matched terms wrapped in <mark>. */
-  const markSnippet = (snippet: string, terms: string[]) => {
-    const escaped = terms.filter(Boolean).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-    if (escaped.length === 0) return snippet;
-    // Split on the terms with a capture group: odd indices are the matches.
-    const parts = snippet.split(new RegExp(`(${escaped.join("|")})`, "gi"));
-    return parts.map((part, i) => (i % 2 === 1 ? <mark key={i}>{part}</mark> : part));
-  };
 
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => {
@@ -3890,10 +3926,10 @@ export function App() {
           group: "Roadmap",
           label: r.featureName,
           text: r.featureName,
-          sub: r.snippet ? markSnippet(r.snippet, r.terms) : undefined,
+          sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
           icon: <MapIcon size={14} />,
           href: roadmapPath(r.fileName),
-          run: () => void openRoadmapPage(r.fileName, { push: true }),
+          run: () => void openRoadmapPage(r.fileName, { push: true, terms: r.terms }),
         }),
       );
     }
@@ -3906,10 +3942,10 @@ export function App() {
         sub: r.scenario ? (
           <>
             {r.featureName}
-            {r.snippet && <> · {markSnippet(r.snippet, r.terms)}</>}
+            {r.snippet && <> · {markText(r.snippet, r.terms)}</>}
           </>
         ) : r.snippet ? (
-          markSnippet(r.snippet, r.terms)
+          markText(r.snippet, r.terms)
         ) : undefined,
         icon: r.scenario ? (
           <StatusIcon status={scenarioStatus(r.fileName, r.scenario)} size={14} />
@@ -4959,6 +4995,7 @@ export function App() {
                 <MarkdownEditor
                   value={editing.scenario.body}
                   readOnly={editingPublished}
+                  highlight={searchTerms ?? undefined}
                   placeholder="Describe the scenario in Markdown…"
                   onChange={(body) =>
                     setEditing({ ...editing, scenario: { ...editing.scenario, body } })
@@ -5735,6 +5772,7 @@ export function App() {
             <MarkdownEditor
               value={roadmapText}
               onChange={setRoadmapText}
+              highlight={roadmapTerms ?? undefined}
               placeholder="Write this roadmap page in Markdown…"
             />
           </>
