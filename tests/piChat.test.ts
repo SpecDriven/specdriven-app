@@ -392,8 +392,15 @@ test("a pi session spawns `pi --mode rpc` on the work dir and is ready once it a
   // rewritten as the session learns about itself, so wait for that.
   const file = join(root, ".specdriven", "sessions", meta.id, "session.json");
   const record = await until(
-    async () => JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>,
-    (r) => r.agentSessionId === "pi-session-1",
+    async () => {
+      try {
+        return JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      } catch {
+        // Caught mid-rewrite: the file is empty or half written for a moment.
+        return null;
+      }
+    },
+    (r) => r?.agentSessionId === "pi-session-1",
   );
   expect(record).toMatchObject({ agent: "pi-pane", cwd: data, dataRepo: data });
 });
