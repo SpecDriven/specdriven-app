@@ -114,7 +114,6 @@ import {
   canSetTestLink,
   removeTestLink,
   testDraftOf,
-  testLinkFile,
   testLinkHint,
   testLinkProblem,
   testLinkUrl,
@@ -3473,12 +3472,6 @@ export function App() {
                 <a href={testLinkUrl(t)} target="_blank" rel="noreferrer" title={testLinkUrl(t)}>
                   {testLinkLabel(t)}
                 </a>
-                {testLinkLabel(t) !== testLinkFile(t) && (
-                  <>
-                    {" "}
-                    <span className="test-file">{testLinkFile(t)}</span>
-                  </>
-                )}
               </td>
             </tr>
           ))}
@@ -5664,9 +5657,6 @@ export function App() {
                               >
                                 {testLinkLabel(t)}
                               </a>
-                              {testLinkLabel(t) !== testLinkFile(t) && (
-                                <span className="test-file">{testLinkFile(t)}</span>
-                              )}
                               <button
                                 type="button"
                                 className="link"
