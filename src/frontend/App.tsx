@@ -17,6 +17,7 @@ import {
 import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
+import type { GitHubRepo } from "../server/issues";
 import type { PageListing } from "../server/pages";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
@@ -42,6 +43,7 @@ import {
   ListFilter,
   ListTodo,
   FlaskConical,
+  Bug,
   Map as MapIcon,
   Menu as MenuIcon,
   PanelLeftClose,
@@ -72,6 +74,8 @@ import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
 import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
+import { IssuesPane, IssuesSidebar } from "./IssuesPane";
+import { issues, issuesKey, issuesTitle, searchIssues, useIssues } from "./issues";
 import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
@@ -102,6 +106,8 @@ import {
   scenarioPath,
   testsPath,
   type TestsRoute,
+  issuesPath,
+  type IssuesRoute,
 } from "./route";
 import {
   addTestLink,
@@ -263,12 +269,13 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
   return <Icon size={size} aria-hidden="true" />;
 }
 
-type SidebarTab = "specs" | PageTab["folder"] | "tests";
+type SidebarTab = "specs" | PageTab["folder"] | "tests" | "issues";
 
 function readSidebarTab(): SidebarTab {
   try {
     const stored = localStorage.getItem("sd-sidebar-tab");
     if (stored === "tests") return "tests";
+    if (stored === "issues") return "issues";
     return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
   } catch {
     return "specs";
@@ -620,6 +627,8 @@ interface Listing {
   folders: string[];
   members: ProjectMember[];
   codeRepo: string | null;
+  /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
+  issuesRepo: GitHubRepo | null;
 }
 
 export function App() {
@@ -649,6 +658,10 @@ export function App() {
   // Code repo (src/server/members.ts `code-repo`): where a code gen session
   // runs, from the same file; null means the data repo.
   const [codeRepo, setCodeRepo] = useState<string | null>(null);
+  // GitHub issues (specs/app/github-issues.feature.md): the repository the
+  // code repo pushes to, when it is a GitHub one — the Issues tab shows for
+  // it. Null (no code repo, or not on GitHub) means no tab.
+  const [issuesRepo, setIssuesRepo] = useState<GitHubRepo | null>(null);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -846,6 +859,17 @@ export function App() {
   const testsViewRef = useRef<TestsRoute | null>(null);
   testsViewRef.current = testsView;
   const testingStore = useTesting();
+  // GitHub issues (specs/app/github-issues.feature.md): which of the
+  // module's views has the pane — null when none. The issues themselves live
+  // in their own store (src/frontend/issues.ts).
+  const [issuesView, setIssuesView] = useState<IssuesRoute | null>(null);
+  const issuesViewRef = useRef<IssuesRoute | null>(null);
+  issuesViewRef.current = issuesView;
+  const issuesStore = useIssues();
+  // The Settings switch: off, there is no tab and nothing asks GitHub.
+  const [issuesSetting, setIssuesSetting] = useState(false);
+  /** Whether there is an Issues tab: the switch on and a GitHub code repo. */
+  const issuesOn = issuesSetting && issuesRepo !== null;
   const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
   const [taskPages, setTaskPages] = useState<PageListing[]>([]);
   const [openPage, setOpenPage] = useState<PageListing | null>(null);
@@ -872,7 +896,8 @@ export function App() {
   /** The tab on screen: a page tab only while its switch still shows it. */
   const shownTab: SidebarTab =
     shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
-    (sidebarTab === "tests" && testingOn)
+    (sidebarTab === "tests" && testingOn) ||
+    (sidebarTab === "issues" && issuesOn)
       ? sidebarTab
       : "specs";
   /** The pages of one special folder, as the sidebar and palette list them. */
@@ -900,6 +925,7 @@ export function App() {
   const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
   const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
   const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
+  const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -976,11 +1002,16 @@ export function App() {
         folders: data.folders ?? [],
         members: Array.isArray(data.members) ? data.members : [],
         codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
+        issuesRepo:
+          data.issuesRepo && typeof data.issuesRepo === "object" && typeof data.issuesRepo.owner === "string"
+            ? (data.issuesRepo as GitHubRepo)
+            : null,
       };
       setFeatures(listing.features);
       setFolders(listing.folders);
       setMembers(listing.members);
       setCodeRepo(listing.codeRepo);
+      setIssuesRepo(listing.issuesRepo);
       setLoadError(null);
       return listing;
     }
@@ -1070,6 +1101,9 @@ export function App() {
       if (typeof state.testing === "boolean") {
         setTestingOn(state.testing);
       }
+      if (typeof state.issues === "boolean") {
+        setIssuesSetting(state.issues);
+      }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setDemo(Boolean(state.demo));
@@ -1125,6 +1159,9 @@ export function App() {
       // The test management module too — unless one of its editors holds an
       // unsaved draft (the store checks).
       if (testingOn) void testing.refresh();
+      // The issues too — only while one of the module's views is open, so
+      // an idle app does not spend GitHub's rate limit on every tick.
+      if (issuesViewRef.current) void issues.refresh();
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
   }, [
@@ -1242,7 +1279,7 @@ export function App() {
     if (loading || needsRepo) return;
     // A tests view owns its url (openTests pushes it); with no feature
     // selected this effect would otherwise rewrite it to `/`.
-    if (testsView) return;
+    if (testsView || issuesView) return;
     const url = pagePath(selected, paneScenario);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -1253,7 +1290,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, testsView]);
+  }, [loading, needsRepo, selected, paneScenario, testsView, issuesView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1262,12 +1299,14 @@ export function App() {
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
     document.title = testsView
       ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
+      : issuesView
+        ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
       : !selected || !feature
         ? "SpecDriven"
         : s
           ? `SpecDriven — ${name} · ${s.name} v${s.version}`
           : `SpecDriven — ${name}`;
-  }, [selected, feature, paneScenario, testsView, testingStore]);
+  }, [selected, feature, paneScenario, testsView, testingStore, issuesView, issuesStore]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1375,6 +1414,9 @@ export function App() {
         // Nor are the old folder's test plans; the module reloads below.
         testing.reset();
         setTestsView(null);
+        // And the old folder's issues: the effect below reloads them for
+        // whichever GitHub repo the new folder's code repo is.
+        setIssuesView(null);
         // A page url from the old folder would only miss in the new one, and
         // nothing else resets it — the selection was already empty while a
         // page was open, so the canonical-url effect has no change to react
@@ -1414,6 +1456,7 @@ export function App() {
       // holds — the same courtesy the README editor gets.
       closePage();
       setTestsView(null);
+      setIssuesView(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -1483,6 +1526,7 @@ export function App() {
     editorRef.current.close();
     closePage();
     setTestsView(null);
+    setIssuesView(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1504,17 +1548,54 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab("tests");
+    setIssuesView(null);
     setTestsView(view);
     if (opts.push && location.pathname !== testsPath(view)) {
       history.pushState(null, "", testsPath(view));
     }
   };
 
+  /**
+   * Open a view of the GitHub issues module (specs/app/github-issues
+   * .feature.md) — openTests's twin: the pane is the module's alone, and the
+   * sidebar turns to the Issues tab.
+   */
+  const openIssues = (view: IssuesRoute, opts: { push?: boolean } = {}) => {
+    editorRef.current.close();
+    closePage();
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+    setSelectedFolder(null);
+    selectSidebarTab("issues");
+    setTestsView(null);
+    setIssuesView(view);
+    if (opts.push && location.pathname !== issuesPath(view)) {
+      history.pushState(null, "", issuesPath(view));
+    }
+  };
+
+  // The issues load once the code repo's GitHub repository is known, and
+  // reload when a different one takes its place (another data folder); with
+  // none, the store empties and the tab goes.
+  const issuesRepoKey = issuesOn ? `${issuesRepo!.owner}/${issuesRepo!.name}` : null;
+  useEffect(() => {
+    if (issuesRepoKey === null) {
+      issues.reset();
+      if (issuesViewRef.current) goHome();
+      return;
+    }
+    void issues.load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issuesRepoKey]);
+
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
     if (route.tests) {
       openTests(route.tests);
+    } else if (route.issues) {
+      openIssues(route.issues);
     } else if (route.page) {
       await showPage(route.page);
     } else if (route.feature) {
@@ -1528,6 +1609,7 @@ export function App() {
       editorRef.current.close();
       closePage();
       setTestsView(null);
+      setIssuesView(null);
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -2431,6 +2513,7 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     setTestsView(null);
+    setIssuesView(null);
     openPageSession.current += 1;
     openPageSaved.current = data.content;
     openPageTextRef.current = data.content;
@@ -2777,6 +2860,7 @@ export function App() {
     setSettingsRoadmapDraft(roadmap);
     setSettingsTasksDraft(tasks);
     setSettingsTestingDraft(testingOn);
+    setSettingsIssuesDraft(issuesSetting);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -2941,6 +3025,7 @@ export function App() {
     setRoadmap(data.roadmap === true);
     setTasks(data.tasks === true);
     setTestingOn(data.testing === true);
+    setIssuesSetting(data.issues === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -3103,6 +3188,19 @@ export function App() {
     }
     testing.reset();
     if (testsViewRef.current) goHome();
+  };
+
+  // GitHub issues (specs/app/github-issues.feature.md): switched on, the
+  // Issues tab appears (given a GitHub code repo) and the issues load; off,
+  // the tab goes and a view of it that is open leaves the pane — the
+  // effect on issuesRepoKey does both, as it does on a data folder change.
+  const toggleIssues = async (on: boolean) => {
+    setSettingsIssuesDraft(on);
+    if (!(await patchSettings({ issues: on }))) {
+      setSettingsIssuesDraft(!on);
+      return;
+    }
+    setIssuesSetting(on);
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -3850,6 +3948,14 @@ export function App() {
       run: () => openTests({ kind: "plans" }, { push: true }),
     },
     {
+      id: "go-issues",
+      keys: "g i",
+      label: "Go to the issues",
+      group: "Navigate",
+      when: () => !quiet && issuesOn,
+      run: () => openIssues({ kind: "list" }, { push: true }),
+    },
+    {
       id: "settings",
       keys: ["mod+,", "g s"],
       label: "Settings",
@@ -4084,6 +4190,10 @@ export function App() {
           ),
         ]
       : []),
+    shortcutAction("go-issues", <Bug size={14} />),
+    ...(issuesOn
+      ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
+      : []),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
       ? [
@@ -4131,6 +4241,21 @@ export function App() {
           icon: <FlaskConical size={14} />,
           href: hit.href,
           run: () => openTests(hit.view, { push: true }),
+        }),
+      );
+    }
+    // So does the Issues tab: the loaded issues, by number, title and body.
+    if (shownTab === "issues") {
+      return searchIssues(q, issuesStore).map(
+        (hit): PaletteItem => ({
+          id: `issues:${hit.number}`,
+          group: "Issues",
+          label: hit.label,
+          text: hit.label,
+          sub: hit.sub,
+          icon: <Bug size={14} />,
+          href: hit.href,
+          run: () => openIssues(hit.view, { push: true }),
         }),
       );
     }
@@ -4496,7 +4621,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !testsView ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !testsView && !issuesView ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -4538,6 +4663,18 @@ export function App() {
                 onClick={(e) => spaClick(e, () => openTests({ kind: "plans" }, { push: true }))}
               >
                 <FlaskConical size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
+          {issuesOn && (
+            <Tooltip label="Issues" keys="g i">
+              <a
+                href="/issues"
+                className={`rail-link${issuesView ? " active" : ""}`}
+                aria-label="Issues"
+                onClick={(e) => spaClick(e, () => openIssues({ kind: "list" }, { push: true }))}
+              >
+                <Bug size={16} aria-hidden="true" />
               </a>
             </Tooltip>
           )}
@@ -4747,7 +4884,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {(shownPageTabs.length > 0 || testingOn) && (
+        {(shownPageTabs.length > 0 || testingOn || issuesOn) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -4774,6 +4911,24 @@ export function App() {
                 <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
             ))}
+            {/* GitHub issues (specs/app/github-issues.feature.md): to the
+                right of Tasks, for the GitHub repo the code repo pushes to. */}
+            {issuesOn && (
+              <button
+                type="button"
+                role="tab"
+                id="side-tab-issues"
+                aria-selected={shownTab === "issues"}
+                aria-controls="side-panel-issues"
+                className={shownTab === "issues" ? "active" : ""}
+                onClick={() => {
+                  selectSidebarTab("issues");
+                  if (!issuesViewRef.current) openIssues({ kind: "list" }, { push: true });
+                }}
+              >
+                <Bug size={14} aria-hidden="true" /> Issues
+              </button>
+            )}
             {testingOn && (
               <button
                 type="button"
@@ -5062,6 +5217,11 @@ export function App() {
         {shownTab === "tests" && testingOn && (
           <TestsSidebar view={testsView} prompt={prompt} confirm={confirm} onNavigate={openTests} />
         )}
+        {/* The Issues tab (specs/app/github-issues.feature.md): the code
+            repo's GitHub issues, open or closed (src/frontend/IssuesPane.tsx). */}
+        {shownTab === "issues" && issuesOn && (
+          <IssuesSidebar view={issuesView} prompt={prompt} confirm={confirm} onNavigate={openIssues} />
+        )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
@@ -5153,7 +5313,11 @@ export function App() {
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
         <ErrorBoundary
-          key={selected ?? openPage?.fileName ?? (testsView ? testsKey(testsView) : "home")}
+          key={
+            selected ??
+            openPage?.fileName ??
+            (testsView ? testsKey(testsView) : issuesView ? issuesKey(issuesView) : "home")
+          }
         >
         {editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
@@ -5967,6 +6131,17 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
+        ) : issuesView && issuesOn ? (
+          /* GitHub issues (specs/app/github-issues.feature.md): the list,
+             the form and one issue take the whole pane (src/frontend/IssuesPane.tsx). */
+          <IssuesPane
+            view={issuesView}
+            repoCrumb={repoCrumb}
+            prompt={prompt}
+            confirm={confirm}
+            onNavigate={openIssues}
+            onOpenSettings={openSettings}
+          />
         ) : testsView && testingOn ? (
           /* The test management module (specs/app/tests.feature.md):
              plans, cases and runs take the whole pane (src/frontend/TestsPane
@@ -6656,6 +6831,29 @@ export function App() {
                     role="switch"
                     checked={settingsTestingDraft}
                     onChange={(e) => void toggleTesting(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* GitHub issues (specs/app/github-issues.feature.md): opt-in
+                  — the code repo's GitHub issues on their own tab and pane. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  GitHub issues
+                  <span className="settings-row-hint">
+                    {!settingsIssuesDraft
+                      ? "The Issues tab is not shown, and nothing asks GitHub for issues."
+                      : issuesRepo
+                        ? `An Issues tab with the issues of ${issuesRepo.owner}/${issuesRepo.name} — the GitHub repo the code-repo in the data folder's project-settings.json pushes to. Create, edit, comment on, close and reopen them here.`
+                        : "An Issues tab for the GitHub repo the code-repo in the data folder's project-settings.json pushes to. That file names no GitHub code repo yet, so the tab stays hidden until it does."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsIssuesDraft}
+                    onChange={(e) => void toggleIssues(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
