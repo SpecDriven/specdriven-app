@@ -3469,16 +3469,19 @@ aside header .collapse-btn {
 /* ---- Sidebar tabs under the search field ---- */
 .side-tabs {
   display: flex;
-  gap: 0.25rem;
+  /* Four or five tabs (Specs, Roadmap, Tasks, Issues, Tests) outgrow the
+     sidebar's width; a second row beats a clipped last tab. */
+  flex-wrap: wrap;
+  gap: 0 0.1rem;
   border-bottom: 1px solid var(--border);
 }
 
 .side-tabs button {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem;
   height: 1.9rem;
-  padding: 0 0.5rem;
+  padding: 0 0.4rem;
   margin-bottom: -1px;
   border: none;
   border-bottom: 2px solid transparent;
@@ -5311,4 +5314,260 @@ a.tests-title {
 .tests-add-anchor .popover {
   left: auto;
   right: 0;
+}
+
+/* --- GitHub issues (specs/app/github-issues.feature.md) ---------------------
+   The Issues tab and pane (src/frontend/IssuesPane.tsx): the list reuses the
+   test module's table and body layout; what is new is the state badge, the
+   labels, the open/closed switch, the forms and the comment cards. */
+
+.issue-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.05rem 0.5rem 0.05rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.issue-state.open {
+  color: var(--status-published);
+  background: color-mix(in srgb, var(--status-published) 14%, transparent);
+}
+
+.issue-state.closed {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.issue-state.not-planned {
+  color: var(--text-2);
+  background: var(--hover);
+}
+
+.issue-labels {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.issue-label {
+  display: inline-block;
+  padding: 0 0.45rem;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.issue-filter {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.issue-filter button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+.issue-filter button + button {
+  border-left: 1px solid var(--border);
+}
+
+.issue-filter button:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.issue-filter button.active {
+  color: var(--text-1);
+  background: var(--accent-soft);
+}
+
+.issue-filter.compact {
+  width: 100%;
+}
+
+.issue-filter.compact button {
+  flex: 1;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.page-group.issue-group {
+  padding: 0.35rem 0.6rem 0.4rem;
+}
+
+.issue-number {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-crumb-number {
+  margin-right: 0.35em;
+  font-weight: 400;
+}
+
+.issues-table td:first-child {
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-form {
+  gap: 0.75rem;
+}
+
+.issue-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 1.125rem;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.issue-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.issue-view {
+  gap: 1.25rem;
+}
+
+.issue-body,
+.issue-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.issue-section-title {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.issue-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.issue-edit:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.issue-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.issue-form-actions button {
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.issue-form-actions button.primary-action {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.issue-form-actions button.primary-action:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.issue-form-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.issue-markdown {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.issue-comment {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.issue-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: var(--hover);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+}
+
+.issue-comment-head a {
+  color: var(--text-2);
+  text-decoration: none;
+}
+
+.issue-comment-author {
+  font-weight: 600;
+}
+
+.issue-comment .issue-markdown {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.issue-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.issues-error {
+  align-items: center;
+  text-align: center;
+}
+
+.issues-error > svg {
+  color: var(--text-3);
 }

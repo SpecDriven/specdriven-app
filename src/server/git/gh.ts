@@ -63,6 +63,20 @@ export function ghSignedIn(): Promise<boolean> {
   })());
 }
 
+/**
+ * The token gh holds, or null when gh is missing or signed out. Asked for
+ * on every call — a token is a credential, never cached here — and used
+ * only for API requests the app makes on the user's behalf
+ * (src/server/issues.ts).
+ */
+export async function ghToken(): Promise<string | null> {
+  const path = ghPath();
+  if (!path) return null;
+  const res = await run(path, ["auth", "token"]);
+  const token = res.stdout.trim();
+  return res.exitCode === 0 && token ? token : null;
+}
+
 /** The signed-in gh account, or null when gh is missing, signed out or unreachable. */
 export function ghAccount(): Promise<GhAccount | null> {
   return (account ??= (async () => {

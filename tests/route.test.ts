@@ -8,6 +8,7 @@ import {
   pageLink,
   scenarioPath,
   testsPath,
+  issuesPath,
 } from "../src/frontend/route";
 import type { Scenario } from "../src/server/parser";
 
@@ -40,6 +41,24 @@ describe("parseRoute", () => {
     expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
     expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
     expect(parseRoute("/tasks")).toEqual({});
+  });
+
+  // GitHub issues (specs/app/github-issues.feature.md): the list, the
+  // new-issue form, and one issue by number.
+  test("issues routes", () => {
+    expect(parseRoute("/issues")).toEqual({ issues: { kind: "list" } });
+    expect(parseRoute("/issues/")).toEqual({ issues: { kind: "list" } });
+    expect(parseRoute("/issues/new")).toEqual({ issues: { kind: "new" } });
+    expect(parseRoute("/issues/12")).toEqual({ issues: { kind: "issue", number: 12 } });
+    // Anything else under /issues is the list, not home.
+    expect(parseRoute("/issues/0")).toEqual({ issues: { kind: "list" } });
+    expect(parseRoute("/issues/abc")).toEqual({ issues: { kind: "list" } });
+    expect(parseRoute("/issues/12/extra")).toEqual({ issues: { kind: "list" } });
+    expect(parseRoute("/issuesx")).toEqual({});
+    for (const view of [{ kind: "list" as const }, { kind: "new" as const }, { kind: "issue" as const, number: 7 }]) {
+      expect(parseRoute(issuesPath(view))).toEqual({ issues: view });
+    }
+    expect(issuesPath({ kind: "issue", number: 7 })).toBe("/issues/7");
   });
 
   // The test management module (specs/app/tests.feature.md): the
