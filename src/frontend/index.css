@@ -4803,3 +4803,512 @@ aside header .collapse-btn {
   white-space: nowrap;
   cursor: default;
 }
+
+/* ---- Test management (specs/app/tests.feature.md): the Tests pane —
+   plan and case tables, result badges, progress bars, the runner ---- */
+.tests-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tests-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tests-section h3 {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.tests-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tests-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.tests-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tests-table td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.tests-table tbody tr:hover {
+  background: var(--hover);
+}
+
+.tests-table .num {
+  text-align: right;
+  width: 3rem;
+  white-space: nowrap;
+}
+
+.tests-table .wide {
+  min-width: 12rem;
+}
+
+.tests-table .actions {
+  width: 2rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tests-table .row-tools {
+  width: 6rem;
+}
+
+.tests-table .row-tools .ibtn,
+.tests-table .tests-more {
+  opacity: 0;
+}
+
+.tests-table tr:hover .row-tools .ibtn,
+.tests-table tr:focus-within .row-tools .ibtn,
+.tests-table tr:hover .tests-more,
+.tests-table tr:focus-within .tests-more,
+.tests-table .tests-more:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+
+.tests-table a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tests-table a:hover,
+a.tests-title:hover {
+  color: var(--accent-strong);
+}
+
+a.tests-title {
+  color: var(--text-1);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.muted {
+  color: var(--text-2);
+}
+
+.small {
+  font-size: 0.75rem;
+}
+
+.tests-link {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  text-decoration: none;
+  padding: 0 0.5rem;
+}
+
+.tests-link:hover {
+  color: var(--accent-strong);
+}
+
+.tests-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 3rem 1rem;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.tests-empty p {
+  margin: 0;
+}
+
+.tests-empty .hint {
+  max-width: 28rem;
+}
+
+/* A verdict as a coloured word: passed green, failed red, blocked amber,
+   skipped grey, untested an outline. */
+.result-badge {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.result-badge.passed {
+  color: var(--status-published);
+  background: color-mix(in srgb, var(--status-published) 14%, transparent);
+}
+
+.result-badge.failed {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.result-badge.blocked {
+  color: var(--status-proposed);
+  background: color-mix(in srgb, var(--status-proposed) 16%, transparent);
+}
+
+.result-badge.skipped {
+  color: var(--text-2);
+  background: var(--hover);
+}
+
+.result-badge.untested {
+  color: var(--text-3);
+  border-color: var(--border);
+}
+
+.result-badge.muted {
+  opacity: 0.7;
+}
+
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.progress-bar {
+  display: flex;
+  width: 7rem;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--hover);
+  border: 1px solid var(--border);
+}
+
+.progress-seg {
+  display: block;
+  height: 100%;
+}
+
+.progress-seg.passed {
+  background: var(--status-published);
+}
+
+.progress-seg.failed {
+  background: var(--danger-solid);
+}
+
+.progress-seg.blocked {
+  background: var(--status-proposed);
+}
+
+.progress-seg.skipped {
+  background: var(--text-3);
+}
+
+.progress-seg.untested {
+  background: transparent;
+}
+
+.progress-text {
+  font-size: 0.6875rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.priority-chip {
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.priority-chip.high {
+  color: var(--danger-fg);
+}
+
+.priority-chip.medium {
+  color: var(--status-proposed);
+}
+
+.priority-chip.low {
+  color: var(--text-3);
+}
+
+.ref-chip a {
+  color: inherit;
+  text-decoration: none;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ref-chip a:hover {
+  color: var(--accent-strong);
+}
+
+.chip-x {
+  display: inline-flex;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  padding: 0.1rem;
+  margin-left: 0.1rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.chip-x:hover {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.refs-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.refs-cell .chip {
+  height: 1.3rem;
+  font-size: 0.6875rem;
+}
+
+.refs-row .props-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-right: 0.2rem;
+}
+
+.ref-picker,
+.case-picker {
+  min-width: 22rem;
+  max-width: 30rem;
+}
+
+.ref-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.ref-picker-body input[type="search"] {
+  width: 100%;
+}
+
+.ref-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow: auto;
+  font-size: 0.8125rem;
+}
+
+.ref-picker-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.4rem;
+}
+
+.ref-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0;
+}
+
+.ref-picker-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+}
+
+.ref-picker-twist {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  display: inline-flex;
+  padding: 0.1rem;
+  cursor: pointer;
+}
+
+.case-pick {
+  border: none;
+  background: none;
+  color: var(--text-1);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-size: inherit;
+}
+
+.case-pick:hover {
+  background: var(--hover);
+}
+
+/* The runner's verdict control: five options in one segmented row; the
+   chosen one takes its status colour. */
+.result-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.result-opt {
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.result-opt:last-child {
+  border-right: none;
+}
+
+.result-opt:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.result-opt:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.result-opt.on.passed {
+  background: var(--status-published);
+  color: #fff;
+}
+
+.result-opt.on.failed {
+  background: var(--danger-solid);
+  color: #fff;
+}
+
+.result-opt.on.blocked {
+  background: var(--status-proposed);
+  color: #fff;
+}
+
+.result-opt.on.skipped {
+  background: var(--text-2);
+  color: var(--surface-0);
+}
+
+.result-opt.on.untested {
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+.result-comment {
+  width: 100%;
+  min-width: 10rem;
+  font-size: 0.8125rem;
+}
+
+.result-row:focus {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.runner-hint {
+  margin: 0;
+}
+
+.runner-hint kbd {
+  font: inherit;
+  font-size: 0.6875rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+
+.run-state {
+  font-size: 0.75rem;
+  color: var(--status-proposed);
+  white-space: nowrap;
+}
+
+.run-state.finished {
+  color: var(--text-2);
+}
+
+.page-entry-meta {
+  float: right;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+
+.page-entry.tests-root {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.page-group a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.page-group a.active,
+.page-group a:hover {
+  color: var(--accent-strong);
+}
+
+@media (max-width: 47.99rem) {
+  .tests-body {
+    overflow-x: auto;
+  }
+
+  .tests-table {
+    min-width: 36rem;
+  }
+
+  .progress-bar {
+    width: 4rem;
+  }
+}
+
+/* The "Add cases" popover opens from the section's right edge; anchored on
+   the left it would push the scrolling pane sideways. */
+.tests-add-anchor .popover {
+  left: auto;
+  right: 0;
+}
