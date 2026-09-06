@@ -6,8 +6,8 @@ import { TEST_REF_RE, renderTestInEditor } from "./testref";
 // so untrusted feature-file content cannot inject markup.
 //
 // Beyond standard markdown the preview knows one house token: `[test:<url>]`
-// (specs/external-links/test-traceability.feature.md), shown as a link named
-// after the test — see ./testref.
+// or `[test:<name>:<url>]` (specs/external-links/test-traceability.feature.md),
+// shown as a link named after the test — see ./testref.
 
 /** Only these destinations are allowed for links/images in the preview. */
 function safeUrl(url: string): string | null {
@@ -22,7 +22,7 @@ const INLINE = new RegExp(
     "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
     "~~(?<strike>.+?)~~",
     "!\\[(?<alt>[^\\]]*)\\]\\((?<src>[^)]+)\\)",
-    TEST_REF_RE.source.replace("(?<url>", "(?<test>"),
+    TEST_REF_RE.source.replace("(?<url>", "(?<test>").replace("(?<name>", "(?<testname>"),
     "\\[(?<text>[^\\]]+)\\]\\((?<href>[^)]+)\\)",
   ].join("|"),
 );
@@ -54,7 +54,7 @@ function parseInline(input: string, keyBase: string): ReactNode[] {
       const src = safeUrl(g.src);
       out.push(src ? <img key={key} src={src} alt={g.alt ?? ""} /> : m[0]);
     } else if (g.test !== undefined) {
-      const { label, href, title } = renderTestInEditor.render(g.test);
+      const { label, href, title } = renderTestInEditor.render(g.test, g.testname);
       out.push(
         href ? (
           <a key={key} className="test-ref" href={href} target="_blank" rel="noreferrer" title={title}>

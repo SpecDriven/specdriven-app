@@ -167,10 +167,15 @@ export async function issuesToken(): Promise<string | null> {
 
 const API_VERSION = "2022-11-28";
 
-async function github<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+/** One request to the GitHub REST API, with the token and headers it wants. */
+async function githubRequest(
+  path: string,
+  accept: string,
+  init: RequestInit & { json?: unknown } = {},
+): Promise<Response> {
   const token = await issuesToken();
   const headers: Record<string, string> = {
-    Accept: "application/vnd.github+json",
+    Accept: accept,
     "User-Agent": "SpecDriven",
     "X-GitHub-Api-Version": API_VERSION,
   };
@@ -182,7 +187,23 @@ async function github<T>(path: string, init: RequestInit & { json?: unknown } = 
     body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
   });
   if (!res.ok) throw await describeFailure(res, token !== null);
+  return res;
+}
+
+async function github<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+  const res = await githubRequest(path, "application/vnd.github+json", init);
   return (await res.json()) as T;
+}
+
+/**
+ * A file's raw text through the contents endpoint —
+ * `/repos/{owner}/{repo}/contents/{path}?ref={ref}` with GitHub's raw media
+ * type — as src/server/testName.ts reads a test's source. Same token, same
+ * failure wording as every other call here.
+ */
+export async function githubText(path: string): Promise<string> {
+  const res = await githubRequest(path, "application/vnd.github.raw+json");
+  return res.text();
 }
 
 /** A GitHub failure as one sentence the pane can show, with the status kept. */

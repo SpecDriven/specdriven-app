@@ -300,11 +300,16 @@ the code and its tests point back at it.
 
 Specs written *in* the app (in a data repo) go further: a scenario is atomic,
 immutable, and versioned — `## <name> v<n> [proposed | published | deleted |
-archived]` — and ends with `[test: <url> ]` lines, one per GitHub url of a test
-that automates it (older files carry a `### Tests` table, still read). A single
-rule inside a scenario can name its test on its own line the same way, and the
-app shows every reference as a link named after the test file
-(`QuoteHomeownersPolicyTest`). Published scenarios never change; a new version
+archived]` — and ends with `[test: <test name> : <url> ]` lines, one per GitHub
+url of a test that automates it (older files carry a `### Tests` table, still
+read, and a `[test: <url> ]` line without a name is still fine). The url names
+a line (`…Test.java#L32`); when the link is added the app reads the test
+function declared there from GitHub — Java, Kotlin, TypeScript, JavaScript,
+Python and Go — and stores its name in the token. A single rule inside a
+scenario can name its test on its own line the same way, and the app shows
+every reference as a link named after the test (`quotesAHomeownersPolicy`, or
+the file name `QuoteHomeownersPolicyTest` when no name is stored). Published
+scenarios never change; a new version
 supersedes them. That link is bidirectional: the test carries a `@Spec` annotation naming
 `file#scenario@version`, so tooling can flag a spec that moved without its test.
 PMs publish spec versions; developers own the tests.
