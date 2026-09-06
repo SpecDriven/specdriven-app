@@ -2337,14 +2337,6 @@ button.table-add:hover {
   font-family: var(--font-mono);
 }
 
-/* A named row still says which file the test is in. */
-.test-list .test-file,
-.scenario-tests .test-file {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  word-break: break-all;
-}
-
 /* Why no name was found, or that one is being read, under the add field. */
 .test-name-hint {
   margin: 0;
