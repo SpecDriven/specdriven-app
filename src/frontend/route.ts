@@ -6,6 +6,9 @@
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
+//   /tests                                          test plans (specs/app/tests.feature.md)
+//   /tests/cases                                    the test case library
+//   /tests/cases/<id>, /tests/plans/<id>, /tests/runs/<id>
 //
 // <feature> is the file path minus `.feature.md` and may span several
 // segments when the feature lives in a folder (`billing/quotes`); <scenario>
@@ -35,7 +38,26 @@ export interface Route {
    * The folder it opens with is what says which of the two it is.
    */
   page?: string;
+  /** A view of the test management module (specs/app/tests.feature.md). */
+  tests?: TestsRoute;
 }
+
+/**
+ * The test management module's views: the plan list, the case library, or
+ * one case, plan or run by its document id.
+ */
+export type TestsRoute =
+  | { kind: "plans" }
+  | { kind: "cases" }
+  | { kind: "case"; id: string }
+  | { kind: "plan"; id: string }
+  | { kind: "run"; id: string };
+
+const TESTS_SEGMENTS: Record<string, "case" | "plan" | "run"> = {
+  cases: "case",
+  plans: "plan",
+  runs: "run",
+};
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
 
@@ -50,6 +72,15 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
+  // The test management module: `/tests` is its plan list, `/tests/cases`
+  // the library, and an id after `cases`, `plans` or `runs` opens that one.
+  // Anything else under `/tests` falls back to the plan list.
+  if (segs[0] === "tests") {
+    if (segs[1] === "cases" && !segs[2]) return { tests: { kind: "cases" } };
+    const kind = segs[1] ? TESTS_SEGMENTS[segs[1]] : undefined;
+    if (kind && segs[2]) return { tests: { kind, id: segs[2] } };
+    return { tests: { kind: "plans" } };
+  }
   // A roadmap page or a task is a plain path under the folder it lives in; a
   // hand-typed link may carry the `.md` suffix already.
   if (segs[0] && PAGE_FOLDERS.includes(segs[0]) && segs[1]) {
@@ -113,6 +144,22 @@ export function pageLink(fileName: string): string {
   const folder = pageFolderOf(fileName);
   const stem = fileName.slice(folder.length + 1).replace(/\.md$/, "");
   return `/${folder}/${stem.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** The url of a test management view — the inverse of parseRoute's `tests`. */
+export function testsPath(view: TestsRoute): string {
+  switch (view.kind) {
+    case "plans":
+      return "/tests";
+    case "cases":
+      return "/tests/cases";
+    case "case":
+      return `/tests/cases/${encodeURIComponent(view.id)}`;
+    case "plan":
+      return `/tests/plans/${encodeURIComponent(view.id)}`;
+    case "run":
+      return `/tests/runs/${encodeURIComponent(view.id)}`;
+  }
 }
 
 export function featurePath(fileName: string): string {

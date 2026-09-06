@@ -7,6 +7,7 @@ import {
   resolveScenario,
   pageLink,
   scenarioPath,
+  testsPath,
 } from "../src/frontend/route";
 import type { Scenario } from "../src/server/parser";
 
@@ -39,6 +40,31 @@ describe("parseRoute", () => {
     expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
     expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
     expect(parseRoute("/tasks")).toEqual({});
+  });
+
+  // The test management module (specs/app/tests.feature.md): the
+  // plan list, the case library, and one case, plan or run by id.
+  test("tests routes", () => {
+    expect(parseRoute("/tests")).toEqual({ tests: { kind: "plans" } });
+    expect(parseRoute("/tests/")).toEqual({ tests: { kind: "plans" } });
+    expect(parseRoute("/tests/cases")).toEqual({ tests: { kind: "cases" } });
+    expect(parseRoute("/tests/plans/p1")).toEqual({ tests: { kind: "plan", id: "p1" } });
+    expect(parseRoute("/tests/cases/a%20b")).toEqual({ tests: { kind: "case", id: "a b" } });
+    expect(parseRoute("/tests/runs/r1/extra")).toEqual({ tests: { kind: "run", id: "r1" } });
+    // Anything else under /tests is the plan list, not home.
+    expect(parseRoute("/tests/plans")).toEqual({ tests: { kind: "plans" } });
+    expect(parseRoute("/tests/nope/x")).toEqual({ tests: { kind: "plans" } });
+    expect(parseRoute("/testsy")).toEqual({});
+    for (const view of [
+      { kind: "plans" as const },
+      { kind: "cases" as const },
+      { kind: "case" as const, id: "a b" },
+      { kind: "plan" as const, id: "p1" },
+      { kind: "run" as const, id: "r/1" },
+    ]) {
+      expect(parseRoute(testsPath(view))).toEqual({ tests: view });
+    }
+    expect(testsPath({ kind: "run", id: "r/1" })).toBe("/tests/runs/r%2F1");
   });
 
   test("feature url restores the file suffix", () => {

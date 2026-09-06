@@ -18,6 +18,7 @@ import {
   normalizePublishExternalLinks,
   normalizeRoadmap,
   normalizeTasks,
+  normalizeTesting,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -119,6 +120,20 @@ import {
   savePage,
   type PageFolder,
 } from "./pages";
+import {
+  NotFoundError,
+  createCase,
+  createPlan,
+  deleteCase,
+  deleteExecution,
+  deletePlan,
+  readTesting,
+  setResult,
+  startExecution,
+  updateCase,
+  updateExecution,
+  updatePlan,
+} from "./testing";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -333,6 +348,7 @@ async function stateFields(state: SpecDrivenState) {
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
+    testing: normalizeTesting(state.testing),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -387,6 +403,7 @@ const putState: Handler = async (req) => {
     assignments?: boolean;
     roadmap?: boolean;
     tasks?: boolean;
+    testing?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -405,12 +422,13 @@ const putState: Handler = async (req) => {
     body.assignments === undefined &&
     body.roadmap === undefined &&
     body.tasks === undefined &&
+    body.testing === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, testing or syncServerUrl is required",
       },
       400,
     );
@@ -600,6 +618,16 @@ const putState: Handler = async (req) => {
     if (body.tasks && !normalizeTasks(state.tasks)) turnedOn.push(TASKS);
     if (body.tasks) state.tasks = true;
     else delete state.tasks;
+  }
+  // Test management (specs/app/tests.feature.md): opt-in — an absent
+  // key when off. Nothing to make on the spot: the module's document is
+  // minted on its first write.
+  if (body.testing !== undefined) {
+    if (typeof body.testing !== "boolean") {
+      return json({ error: "testing must be a boolean" }, 400);
+    }
+    if (body.testing) state.testing = true;
+    else delete state.testing;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -1426,6 +1454,80 @@ const unlessDemo =
       ? json({ error: "GitHub sign-in is disabled in demo mode" }, 403)
       : handler(req, params);
 
+// Test management (specs/app/tests.feature.md): the module's cases,
+// plans and executions, all in one Automerge document (src/server/testing.ts).
+// Served only while the Settings switch is on — enforced here and not only
+// in the UI, like the other switches. One read returns the whole module;
+// each write returns the entity it touched, for the client to merge in.
+const withTesting = (
+  handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
+): Handler =>
+  withDataDir(async (dir, req, params) => {
+    if (!normalizeTesting((await readState(getAppRoot())).testing)) {
+      return json({ error: "Test management is switched off in Settings" }, 404);
+    }
+    try {
+      return await handler(dir, req, params);
+    } catch (e) {
+      const status = e instanceof NotFoundError ? 404 : 400;
+      return json({ error: (e as Error).message }, status);
+    }
+  });
+
+const bodyOf = async (req: Request): Promise<Record<string, unknown>> => {
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("A JSON object body is required");
+  }
+  return body;
+};
+
+const getTesting = withTesting(async (dir) => json(await readTesting(dir)));
+
+const postTestCase = withTesting(async (dir, req) =>
+  json({ case: await createCase(dir, await bodyOf(req)) }, 201),
+);
+const putTestCase = withTesting(async (dir, req, params) =>
+  json({ case: await updateCase(dir, params.id ?? "", await bodyOf(req)) }),
+);
+const deleteTestCase = withTesting(async (dir, _req, params) => {
+  await deleteCase(dir, params.id ?? "");
+  return json({ ok: true });
+});
+
+const postTestPlan = withTesting(async (dir, req) =>
+  json({ plan: await createPlan(dir, await bodyOf(req)) }, 201),
+);
+const putTestPlan = withTesting(async (dir, req, params) =>
+  json({ plan: await updatePlan(dir, params.id ?? "", await bodyOf(req)) }),
+);
+const deleteTestPlan = withTesting(async (dir, _req, params) => {
+  await deletePlan(dir, params.id ?? "");
+  return json({ ok: true });
+});
+
+const postTestExecution = withTesting(async (dir, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+  return json({ execution: await startExecution(dir, params.id ?? "", body) }, 201);
+});
+const putTestExecution = withTesting(async (dir, req, params) =>
+  json({ execution: await updateExecution(dir, params.id ?? "", await bodyOf(req)) }),
+);
+const putTestResult = withTesting(async (dir, req, params) => {
+  const body = await bodyOf(req);
+  // Who recorded it: the git author when known, else the signed-in login,
+  // else the OS user (specs/user-info-settings.spec.md).
+  const user = await getCurrentUser();
+  const by = user.name ?? user.login ?? user.username;
+  return json({
+    execution: await setResult(dir, params.id ?? "", params.caseId ?? "", { ...body, by }),
+  });
+});
+const deleteTestExecution = withTesting(async (dir, _req, params) => {
+  await deleteExecution(dir, params.id ?? "");
+  return json({ ok: true });
+});
+
 /** Pattern segments starting with `:` bind the (decoded) path segment. */
 const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
@@ -1455,6 +1557,17 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
   ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
   ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
+  ["GET", "/api/tests", getTesting],
+  ["POST", "/api/tests/cases", postTestCase],
+  ["PUT", "/api/tests/cases/:id", putTestCase],
+  ["DELETE", "/api/tests/cases/:id", deleteTestCase],
+  ["POST", "/api/tests/plans", postTestPlan],
+  ["PUT", "/api/tests/plans/:id", putTestPlan],
+  ["DELETE", "/api/tests/plans/:id", deleteTestPlan],
+  ["POST", "/api/tests/plans/:id/executions", postTestExecution],
+  ["PUT", "/api/tests/executions/:id", putTestExecution],
+  ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
+  ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
