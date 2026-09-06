@@ -55,6 +55,27 @@ describe("matchApi", () => {
     expect(matchApi("PUT", "/api/roadmap/roadmap%2Fpricing.md")).not.toBeNull();
   });
 
+  // Test management (specs/app/tests.feature.md): one read of the
+  // whole module, and a write per entity.
+  test("test management routes match by method", () => {
+    expect(matchApi("GET", "/api/tests")).not.toBeNull();
+    expect(matchApi("POST", "/api/tests")).toBeNull();
+    expect(matchApi("GET", "/api/tests/cases")).toBeNull();
+    expect(matchApi("POST", "/api/tests/cases")).not.toBeNull();
+    expect(matchApi("PUT", "/api/tests/cases/c1")!.params).toEqual({ id: "c1" });
+    expect(matchApi("DELETE", "/api/tests/cases/c1")).not.toBeNull();
+    expect(matchApi("POST", "/api/tests/plans")).not.toBeNull();
+    expect(matchApi("PUT", "/api/tests/plans/p1")!.params).toEqual({ id: "p1" });
+    expect(matchApi("DELETE", "/api/tests/plans/p1")).not.toBeNull();
+    expect(matchApi("POST", "/api/tests/plans/p1/executions")!.params).toEqual({ id: "p1" });
+    expect(matchApi("GET", "/api/tests/plans/p1/executions")).toBeNull();
+    expect(matchApi("PUT", "/api/tests/executions/e1")!.params).toEqual({ id: "e1" });
+    expect(matchApi("DELETE", "/api/tests/executions/e1")).not.toBeNull();
+    const result = matchApi("PUT", "/api/tests/executions/e1/results/c%2F1");
+    expect(result!.params).toEqual({ id: "e1", caseId: "c/1" });
+    expect(matchApi("GET", "/api/tests/executions/e1/results/c1")).toBeNull();
+  });
+
   // Code gen session (specs/agents/claude.spec.md): the client posts the
   // session name and the selected specs.
   test("agent session route matches POST only", () => {

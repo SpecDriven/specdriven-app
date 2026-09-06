@@ -28,10 +28,12 @@ import { getLogger, withSpan } from "../telemetry";
 import {
   PAGE_SCHEMA_VERSION,
   SCHEMA_VERSION,
+  TESTING_SCHEMA_VERSION,
   type FeatureDoc,
   type PageDoc,
   type SpecEntry,
   type SpecType,
+  type TestingDoc,
 } from "./schema";
 
 const log = getLogger("automerge");
@@ -145,12 +147,22 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
  * pages of the special folders — the roadmap's (specs/app/roadmap.feature.md)
  * and the tasks' (specs/app/tasks.feature.md). Inside either, the path is the
  * file's repo-relative name, so the folder in that path is what tells one
- * kind of page from the other.
+ * kind of page from the other. `testing` holds the test management module's
+ * one document (specs/app/tests.feature.md), which has no markdown
+ * side at all — the chunks are the only copy.
  */
-export type DocKind = "features" | "docs";
+export type DocKind = "features" | "docs" | "testing";
+
+/** The test management module's single document, under `testing/`. */
+export const TESTING_DOC_NAME = "project";
 
 function dirRel(kind: DocKind, fileName: string): string {
   return `.specdriven/automerge/${kind}/${fileName}`;
+}
+
+/** Repo-relative path of the testing document's directory, for git pathspecs. */
+export function testingDocDirRel(): string {
+  return dirRel("testing", TESTING_DOC_NAME);
 }
 
 /** Repo-relative path of a feature's doc directory, for git pathspecs. */
@@ -184,6 +196,11 @@ export async function hasFeatureDoc(dataDir: string, fileName: string): Promise<
 /** True when the page has a doc directory with at least one chunk. */
 export async function hasPageDoc(dataDir: string, fileName: string): Promise<boolean> {
   return hasDoc(dataDir, "docs", fileName);
+}
+
+/** True once the data repo holds the test management document. */
+export async function hasTestingDoc(dataDir: string): Promise<boolean> {
+  return hasDoc(dataDir, "testing", TESTING_DOC_NAME);
 }
 
 function contentHash(bytes: Uint8Array): string {
@@ -274,6 +291,15 @@ export async function loadPageDoc(
 }
 
 /**
+ * Load the test management document, or null when the repo has none yet
+ * (the module was never used here). Schema v1 has nothing to migrate; the
+ * hook is where a later version's migration goes, like `migrated` above.
+ */
+export async function loadTestingDoc(dataDir: string): Promise<LoadedDoc<TestingDoc> | null> {
+  return loadDoc<TestingDoc>(dataDir, "testing", TESTING_DOC_NAME);
+}
+
+/**
  * Create a document directory from a fresh doc: full snapshot plus the docid
  * file that gives every peer the same identity for network sync.
  */
@@ -311,6 +337,13 @@ export async function createPageDoc(
   doc: A.Doc<PageDoc>,
 ): Promise<LoadedDoc<PageDoc>> {
   return createDoc(dataDir, "docs", fileName, doc);
+}
+
+export async function createTestingDoc(
+  dataDir: string,
+  doc: A.Doc<TestingDoc>,
+): Promise<LoadedDoc<TestingDoc>> {
+  return createDoc(dataDir, "testing", TESTING_DOC_NAME, doc);
 }
 
 /**
@@ -359,6 +392,14 @@ export async function savePageDoc(
   sinceHeads: A.Heads,
 ): Promise<void> {
   return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
+}
+
+export async function saveTestingDoc(
+  dataDir: string,
+  doc: A.Doc<TestingDoc>,
+  sinceHeads: A.Heads,
+): Promise<void> {
+  return saveDoc(dataDir, "testing", TESTING_DOC_NAME, doc, sinceHeads);
 }
 
 /**
@@ -467,4 +508,31 @@ export function newPageDoc(init: Omit<PageDoc, "schemaVersion" | "id">): A.Doc<P
     id: randomUUID(),
     ...init,
   });
+}
+
+// The testing document's genesis is deterministic: the same actor id, the
+// same zero timestamp, the same initial keys — so its first change hashes
+// identically on every machine. A feature's identity is its unique file
+// name, but there is exactly one testing document per repo, and two peers
+// each using the module for the first time before either has pushed would
+// otherwise mint two unrelated lineages. With a shared genesis their chunks
+// merge on the next pull like any other concurrent edits.
+export const TESTING_DOC_ID = "5f3c1a2e-7b4d-4c9a-9e1f-0d2b6c8a4e73";
+const TESTING_GENESIS_ACTOR = "5da7a5e5d0c94e0e9d5e3a1b2c3d4e5f";
+
+/** Mint the empty test management document — identical on every peer. */
+export function newTestingDoc(): A.Doc<TestingDoc> {
+  const empty = A.init<TestingDoc>({ actor: TESTING_GENESIS_ACTOR });
+  const genesis = A.change(empty, { time: 0, message: "genesis" }, (d) => {
+    d.schemaVersion = TESTING_SCHEMA_VERSION;
+    d.id = TESTING_DOC_ID;
+    d.cases = {};
+    d.plans = {};
+    d.executions = {};
+  });
+  // The shared actor id is for the genesis change only: every edit after it
+  // must come from an actor of this peer's own, or two peers' first edits
+  // would carry the same (actor, seq) and each would refuse the other's.
+  // A clone keeps the heads and takes a fresh random actor.
+  return A.clone(genesis);
 }
