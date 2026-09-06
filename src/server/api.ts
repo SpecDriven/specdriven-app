@@ -19,6 +19,7 @@ import {
   normalizeRoadmap,
   normalizeTasks,
   normalizeTesting,
+  normalizeIssues,
   normalizeScenarioPreviewLines,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
@@ -134,6 +135,18 @@ import {
   updateExecution,
   updatePlan,
 } from "./testing";
+import {
+  GitHubError,
+  addComment,
+  createIssue,
+  getIssue,
+  listComments,
+  listIssues,
+  parseIssueNumber,
+  readIssuesRepo,
+  updateIssue,
+  type IssueState,
+} from "./issues";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -349,6 +362,7 @@ async function stateFields(state: SpecDrivenState) {
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
     testing: normalizeTesting(state.testing),
+    issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -404,6 +418,7 @@ const putState: Handler = async (req) => {
     roadmap?: boolean;
     tasks?: boolean;
     testing?: boolean;
+    issues?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -423,12 +438,13 @@ const putState: Handler = async (req) => {
     body.roadmap === undefined &&
     body.tasks === undefined &&
     body.testing === undefined &&
+    body.issues === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, testing or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, testing, issues or syncServerUrl is required",
       },
       400,
     );
@@ -629,6 +645,15 @@ const putState: Handler = async (req) => {
     if (body.testing) state.testing = true;
     else delete state.testing;
   }
+  // GitHub issues (specs/app/github-issues.feature.md): opt-in — an
+  // absent key when off. Nothing else to do: the issues live on GitHub.
+  if (body.issues !== undefined) {
+    if (typeof body.issues !== "boolean") {
+      return json({ error: "issues must be a boolean" }, 400);
+    }
+    if (body.issues) state.issues = true;
+    else delete state.issues;
+  }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
   if (body.syncServerUrl !== undefined) {
@@ -790,6 +815,10 @@ const getFeatures = withDataDir(async (dir) => {
     folders: (await listFolders(dir)).filter((folder) => !isPageFolderPath(folder)),
     members: settings.members,
     codeRepo: settings.codeRepo,
+    // GitHub issue tracking (specs/app/github-issues.feature.md): the
+    // repository the code repo pushes to, when it is a GitHub one — the
+    // Issues tab shows for it, and only for it.
+    issuesRepo: settings.codeRepo === null ? null : await readIssuesRepo(dir),
   });
 });
 
@@ -1528,6 +1557,61 @@ const deleteTestExecution = withTesting(async (dir, _req, params) => {
   return json({ ok: true });
 });
 
+// GitHub issue tracking (specs/app/github-issues.feature.md): the issues of
+// the repository the data repo's code-repo pushes to (src/server/issues.ts).
+// Served only while the Settings switch is on — enforced here and not only
+// in the UI, like the other switches. Every call goes to GitHub as the
+// user; the demo never talks to GitHub, and a data repo whose code repo is
+// not a GitHub one has no issues to show.
+const withIssues = (
+  handler: (
+    repo: NonNullable<Awaited<ReturnType<typeof readIssuesRepo>>>,
+    req: Request,
+    params: Params,
+  ) => Response | Promise<Response>,
+): Handler =>
+  withDataDir(async (dir, req, params) => {
+    if (isDemoMode()) return json({ error: "GitHub issues are disabled in demo mode" }, 403);
+    if (!normalizeIssues((await readState(getAppRoot())).issues)) {
+      return json({ error: "GitHub issues are switched off in Settings" }, 404);
+    }
+    const repo = await readIssuesRepo(dir);
+    if (repo === null) {
+      return json(
+        { error: `No GitHub code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` },
+        404,
+      );
+    }
+    try {
+      return await handler(repo, req, params);
+    } catch (e) {
+      const status = e instanceof GitHubError ? e.status : 502;
+      return json({ error: (e as Error).message }, status);
+    }
+  });
+
+const ISSUE_STATES: IssueState[] = ["open", "closed", "all"];
+
+const getIssues = withIssues(async (repo, req) => {
+  const wanted = new URL(req.url).searchParams.get("state");
+  const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
+  return json({ repo, state, issues: await listIssues(repo, state) });
+});
+const getIssueRoute = withIssues(async (repo, _req, params) => {
+  const number = parseIssueNumber(params.number);
+  const [issue, comments] = await Promise.all([getIssue(repo, number), listComments(repo, number)]);
+  return json({ issue, comments });
+});
+const postIssue = withIssues(async (repo, req) =>
+  json({ issue: await createIssue(repo, await bodyOf(req)) }, 201),
+);
+const putIssue = withIssues(async (repo, req, params) =>
+  json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
+);
+const postIssueComment = withIssues(async (repo, req, params) =>
+  json({ comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) }, 201),
+);
+
 /** Pattern segments starting with `:` bind the (decoded) path segment. */
 const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
@@ -1568,6 +1652,11 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/tests/executions/:id", putTestExecution],
   ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
   ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
+  ["GET", "/api/issues", getIssues],
+  ["POST", "/api/issues", postIssue],
+  ["GET", "/api/issues/:number", getIssueRoute],
+  ["PUT", "/api/issues/:number", putIssue],
+  ["POST", "/api/issues/:number/comments", postIssueComment],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

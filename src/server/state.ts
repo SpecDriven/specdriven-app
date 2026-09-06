@@ -108,6 +108,14 @@ export interface SpecDrivenState {
    */
   testing?: boolean;
   /**
+   * GitHub issue tracking (specs/app/github-issues.feature.md): an Issues
+   * tab and pane for the issues of the GitHub repo the data repo's
+   * code-repo pushes to; absent means OFF. On, the tab appears once the
+   * project-settings.json names such a repo; off, nothing in the app asks
+   * GitHub for issues.
+   */
+  issues?: boolean;
+  /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
    * or empty means OFF — git stays the only transport. On a public server,
@@ -265,6 +273,12 @@ export function normalizeTasks(value: unknown): boolean {
 /** Effective test management setting: OFF unless explicitly turned on —
     opt-in like the roadmap and tasks (specs/app/tests.feature.md). */
 export function normalizeTesting(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective GitHub issues setting: OFF unless explicitly turned on —
+    opt-in like the other modules (specs/app/github-issues.feature.md). */
+export function normalizeIssues(value: unknown): boolean {
   return value === true;
 }
 

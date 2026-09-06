@@ -57,6 +57,19 @@ describe("matchApi", () => {
 
   // Test management (specs/app/tests.feature.md): one read of the
   // whole module, and a write per entity.
+  // GitHub issues (specs/app/github-issues.feature.md): list and create,
+  // one issue read and edited, and its comments added to.
+  test("issue routes match by method", () => {
+    expect(matchApi("GET", "/api/issues")).not.toBeNull();
+    expect(matchApi("POST", "/api/issues")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/issues")).toBeNull();
+    expect(matchApi("GET", "/api/issues/12")!.params).toEqual({ number: "12" });
+    expect(matchApi("PUT", "/api/issues/12")!.params).toEqual({ number: "12" });
+    expect(matchApi("DELETE", "/api/issues/12")).toBeNull();
+    expect(matchApi("POST", "/api/issues/12/comments")!.params).toEqual({ number: "12" });
+    expect(matchApi("GET", "/api/issues/12/comments")).toBeNull();
+  });
+
   test("test management routes match by method", () => {
     expect(matchApi("GET", "/api/tests")).not.toBeNull();
     expect(matchApi("POST", "/api/tests")).toBeNull();
