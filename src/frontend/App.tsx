@@ -113,6 +113,11 @@ import {
   addTestLink,
   canSetTestLink,
   removeTestLink,
+  testDraftOf,
+  testLinkHint,
+  testLinkProblem,
+  testLinkUrl,
+  type TestDraft,
   resolvePendingTests,
   testLinkLabel,
   updateTestLink,
@@ -931,9 +936,17 @@ export function App() {
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
   /** Url being typed into the edit dialog's "Add test link" field. */
   const [testDraft, setTestDraft] = useState("");
+  /** The test's name beside it: read from the code on GitHub, or typed. */
+  const [testNameDraft, setTestNameDraft] = useState("");
   /** Index of the test link opened for in-place ✎ editing, if any. */
   const [testEdit, setTestEdit] = useState<number | null>(null);
-  const [testEditDraft, setTestEditDraft] = useState("");
+  const [testEditDraft, setTestEditDraft] = useState<TestDraft>({ url: "", name: "" });
+  /** What the last name lookup is doing or why it found nothing, under the field. */
+  const [testNameHint, setTestNameHint] = useState<string | null>(null);
+  /** Serial of the latest name lookup: an older one landing late is ignored. */
+  const testLookup = useRef(0);
+  /** The url and name an ✎ row opened with, to tell a changed url from a re-open. */
+  const testEditOpened = useRef<TestDraft>({ url: "", name: "" });
   /** Why the last Save was blocked by the tests field, if it was. */
   const [testsError, setTestsError] = useState<string | null>(null);
   /** The edit dialog's "Ticket link" fields as typed
@@ -1194,7 +1207,10 @@ export function App() {
   const panePushed = useRef(false);
   useEffect(() => {
     setTestDraft("");
+    setTestNameDraft("");
     setTestEdit(null);
+    setTestNameHint(null);
+    testLookup.current++;
     // The ticket-link fields open showing the scenario's link, if any.
     setLinkDraft(linkDraftOf(editing?.scenario.link));
   }, [editingOpen]);
@@ -1240,7 +1256,7 @@ export function App() {
   // change — typing, adding, or opening/closing an ✎ row.
   useEffect(() => {
     setTestsError(null);
-  }, [editingOpen, testDraft, testEditDraft, testEdit]);
+  }, [editingOpen, testDraft, testNameDraft, testEditDraft, testEdit]);
 
   useEffect(() => {
     setLinkError(null);
@@ -2324,8 +2340,8 @@ export function App() {
     }
     const pending = resolvePendingTests(
       editing.scenario.tests,
-      testEdit === null ? null : { index: testEdit, url: testEditDraft },
-      testDraft,
+      testEdit === null ? null : { index: testEdit, ...testEditDraft },
+      { url: testDraft, name: testNameDraft },
     );
     if (pending.error) {
       setTestsError(pending.error);
@@ -3323,17 +3339,105 @@ export function App() {
     }
   };
 
-  const addTest = () => {
-    if (!editing || !canSetTestLink(editing.scenario.tests, null, testDraft)) return;
-    setTests(addTestLink(editing.scenario.tests, testDraft));
-    setTestDraft("");
+  /**
+   * Fill a Name field from the code on GitHub (specs/external-links/
+   * test-traceability.feature.md "the test name is read from the code on
+   * GitHub"): the latest lookup wins, and every way of finding nothing —
+   * a private repository, a language the server doesn't read, no test near
+   * the line — becomes a hint under the field while the link stays.
+   */
+  const lookupTestName = (url: string, apply: (name: string) => void) => {
+    const id = ++testLookup.current;
+    setTestNameHint("Reading the test name from GitHub…");
+    void (async () => {
+      let name: string | null = null;
+      let reason = "Could not read the test name — is the server running?";
+      try {
+        const res = await fetch(`/api/test-name?url=${encodeURIComponent(url)}`);
+        const data = (await res.json()) as { name?: string | null; reason?: string; error?: string };
+        name = data.name ?? null;
+        reason = data.reason ?? data.error ?? reason;
+      } catch {
+        // keep the generic reason
+      }
+      if (id !== testLookup.current) return;
+      if (name) {
+        apply(name);
+        setTestNameHint(null);
+      } else {
+        setTestNameHint(reason);
+      }
+    })();
   };
 
-  /** Open a row for in-place editing, seeded with the url it holds. */
+  // A url with a #L anchor typed into the add field is looked up a moment
+  // after typing stops; a name already typed by hand is left alone.
+  useEffect(() => {
+    if (!editing) return;
+    const url = testDraft.trim();
+    if (!url || testLinkProblem(editing.scenario.tests, null, { url, name: "" }) !== null) {
+      // Nothing to look up: a hint from an earlier url no longer applies,
+      // and a GitHub url still missing its #L anchor says so right away.
+      testLookup.current++;
+      setTestNameHint(testLinkHint(url));
+      return;
+    }
+    const timer = setTimeout(
+      () => lookupTestName(url, (name) => setTestNameDraft((current) => (current.trim() ? current : name))),
+      400,
+    );
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testDraft]);
+
+  // The same for an ✎ row whose url was changed: the name it opened with
+  // belongs to the old url, so it is replaced; one typed since is kept.
+  useEffect(() => {
+    if (!editing || testEdit === null) return;
+    const url = testEditDraft.url.trim();
+    if (url === testEditOpened.current.url) return;
+    if (testLinkProblem(editing.scenario.tests, testEdit, { url, name: "" }) !== null) {
+      testLookup.current++;
+      setTestNameHint(testLinkHint(url));
+      return;
+    }
+    const timer = setTimeout(
+      () =>
+        lookupTestName(url, (name) =>
+          setTestEditDraft((current) => {
+            const typed = current.name.trim() && current.name !== testEditOpened.current.name;
+            return typed ? current : { ...current, name };
+          }),
+        ),
+      400,
+    );
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testEditDraft.url, testEdit]);
+
+  /** Forget a lookup still in flight, so it cannot land in the next row's fields. */
+  const cancelTestLookup = () => {
+    testLookup.current++;
+    setTestNameHint(null);
+  };
+
+  const addTest = () => {
+    const draft = { url: testDraft, name: testNameDraft };
+    if (!editing || !canSetTestLink(editing.scenario.tests, null, draft)) return;
+    setTests(addTestLink(editing.scenario.tests, draft));
+    setTestDraft("");
+    setTestNameDraft("");
+    cancelTestLookup();
+  };
+
+  /** Open a row for in-place editing, seeded with the url and name it holds. */
   const startTestEdit = (index: number) => {
     if (!editing) return;
+    const draft = testDraftOf(editing.scenario.tests[index] ?? "");
+    testEditOpened.current = draft;
     setTestEdit(index);
-    setTestEditDraft(editing.scenario.tests[index] ?? "");
+    setTestEditDraft(draft);
+    cancelTestLookup();
   };
 
   const commitTestEdit = () => {
@@ -3341,6 +3445,7 @@ export function App() {
     if (!canSetTestLink(editing.scenario.tests, testEdit, testEditDraft)) return;
     setTests(updateTestLink(editing.scenario.tests, testEdit, testEditDraft));
     setTestEdit(null);
+    cancelTestLookup();
   };
 
   const removeTest = (index: number) => {
@@ -3364,7 +3469,7 @@ export function App() {
           {tests.map((t) => (
             <tr key={t}>
               <td>
-                <a href={t} target="_blank" rel="noreferrer" title={t}>
+                <a href={testLinkUrl(t)} target="_blank" rel="noreferrer" title={testLinkUrl(t)}>
                   {testLinkLabel(t)}
                 </a>
               </td>
@@ -3501,8 +3606,8 @@ export function App() {
       // than holding the pane open.
       const tests = resolvePendingTests(
         editing.scenario.tests,
-        testEdit === null ? null : { index: testEdit, url: testEditDraft },
-        testDraft,
+        testEdit === null ? null : { index: testEdit, ...testEditDraft },
+        { url: testDraft, name: testNameDraft },
       ).tests;
       if (scenarioSignature({ ...editing.scenario, tests }, draftVersion) !== autosaved.current) {
         saving = commitScenario(tests, false);
@@ -5490,17 +5595,36 @@ export function App() {
                               }}
                             >
                               <input
-                                value={testEditDraft}
-                                aria-label="Test link (GitHub url)"
+                                value={testEditDraft.url}
+                                aria-label="Test link (GitHub url with #L line)"
                                 spellCheck={false}
                                 autoFocus
-                                onChange={(e) => setTestEditDraft(e.target.value)}
+                                onChange={(e) =>
+                                  setTestEditDraft({ ...testEditDraft, url: e.target.value })
+                                }
                                 // ESC backs out of the row, not out of the
                                 // whole editor pane (specs/ui.spec.md).
                                 onKeyDown={(e) => {
                                   if (e.key !== "Escape") return;
                                   e.stopPropagation();
                                   setTestEdit(null);
+                                  cancelTestLookup();
+                                }}
+                              />
+                              <input
+                                className="test-name"
+                                value={testEditDraft.name}
+                                placeholder="test name"
+                                aria-label="Test name"
+                                spellCheck={false}
+                                onChange={(e) =>
+                                  setTestEditDraft({ ...testEditDraft, name: e.target.value })
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key !== "Escape") return;
+                                  e.stopPropagation();
+                                  setTestEdit(null);
+                                  cancelTestLookup();
                                 }}
                               />
                               <button
@@ -5515,21 +5639,29 @@ export function App() {
                               <button
                                 type="button"
                                 className="link"
-                                onClick={() => setTestEdit(null)}
+                                onClick={() => {
+                                  setTestEdit(null);
+                                  cancelTestLookup();
+                                }}
                               >
                                 Cancel
                               </button>
                             </form>
                           ) : (
                             <>
-                              <a href={t} target="_blank" rel="noreferrer" title={t}>
+                              <a
+                                href={testLinkUrl(t)}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={testLinkUrl(t)}
+                              >
                                 {testLinkLabel(t)}
                               </a>
                               <button
                                 type="button"
                                 className="link"
-                                title={`Edit ${t}`}
-                                aria-label={`Edit ${t}`}
+                                title={`Edit ${testLinkUrl(t)}`}
+                                aria-label={`Edit ${testLinkUrl(t)}`}
                                 onClick={() => startTestEdit(i)}
                               >
                                 <Pencil size={12} aria-hidden="true" />
@@ -5537,8 +5669,8 @@ export function App() {
                               <button
                                 type="button"
                                 className="link"
-                                title={`Remove ${t}`}
-                                aria-label={`Remove ${t}`}
+                                title={`Remove ${testLinkUrl(t)}`}
+                                aria-label={`Remove ${testLinkUrl(t)}`}
                                 onClick={() => removeTest(i)}
                               >
                                 <X size={12} aria-hidden="true" />
@@ -5558,19 +5690,33 @@ export function App() {
                   >
                     <input
                       value={testDraft}
-                      placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java"
-                      aria-label="Test link (GitHub url)"
+                      placeholder="https://github.com/owner/repo/blob/main/…/MyTest.java#L32"
+                      aria-label="Test link (GitHub url with #L line)"
                       spellCheck={false}
                       onChange={(e) => setTestDraft(e.target.value)}
+                    />
+                    <input
+                      className="test-name"
+                      value={testNameDraft}
+                      placeholder="test name"
+                      aria-label="Test name"
+                      spellCheck={false}
+                      onChange={(e) => setTestNameDraft(e.target.value)}
                     />
                     <button
                       type="submit"
                       className="link"
-                      disabled={!canSetTestLink(editing.scenario.tests, null, testDraft)}
+                      disabled={
+                        !canSetTestLink(editing.scenario.tests, null, {
+                          url: testDraft,
+                          name: testNameDraft,
+                        })
+                      }
                     >
                       Add
                     </button>
                   </form>
+                  {testNameHint && <p className="test-name-hint">{testNameHint}</p>}
                   {testsError && <p className="error">{testsError}</p>}
                 </div>
               )}
