@@ -37,6 +37,10 @@ const server = Bun.serve({
     "/roadmap/*": index,
     "/tasks": index,
     "/tasks/*": index,
+    // The test management module (specs/app/tests.feature.md): its
+    // plans, cases and runs address the same way.
+    "/tests": index,
+    "/tests/*": index,
   },
   fetch: async (req) => (await handleApi(req)) ?? new Response("Not Found", { status: 404 }),
   // `bun run build` compiles with --production, which inlines NODE_ENV here:

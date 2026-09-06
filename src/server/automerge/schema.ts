@@ -93,3 +93,94 @@ export type PageDoc = {
    */
   assigned?: string;
 };
+
+// Test management (specs/app/tests.feature.md): a lightweight
+// TestRail/Xray-style module — a library of test cases, plans that group
+// them, and executions that record one result per case of a plan. Unlike
+// features and pages, nothing here has a markdown projection: this document
+// is the only copy, and it travels through git as chunks like the others.
+// One document per data repo, so every entity of the module lives in one
+// place and a plan's `caseIds` never point outside the document. Maps keyed
+// by id rather than lists, so two peers creating and deleting concurrently
+// never fight over positions.
+export const TESTING_SCHEMA_VERSION = 1;
+
+/** How one run of one case ended (TestRail's set, minus Retest). */
+export type ResultStatus = "untested" | "passed" | "failed" | "blocked" | "skipped";
+
+export const RESULT_STATUSES: readonly ResultStatus[] = [
+  "untested",
+  "passed",
+  "failed",
+  "blocked",
+  "skipped",
+];
+
+export type CasePriority = "low" | "medium" | "high";
+
+export const CASE_PRIORITIES: readonly CasePriority[] = ["low", "medium", "high"];
+
+/**
+ * What a test case covers: a whole feature (its repo-relative file name), or
+ * one scenario of it — the `scenario` key tells which. Scenario identity is
+ * (name, version), the same pick the code gen session dialog uses.
+ */
+export type SpecRef = {
+  fileName: string;
+  scenario?: { name: string; version: number };
+};
+
+export type TestCase = {
+  id: string;
+  title: string;
+  /** Preconditions, steps, expected results — collaborative markdown. */
+  body: string;
+  priority: CasePriority;
+  /** Replaced whole on save: small, and rarely edited by two people at once. */
+  refs: SpecRef[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TestPlan = {
+  id: string;
+  name: string;
+  /** Collaborative markdown. */
+  description: string;
+  /** The plan's cases in order; reconciled in place like a feature's specs. */
+  caseIds: string[];
+  /** Project member the plan is assigned to; set whole, like a page's. */
+  assigned?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CaseResult = {
+  status: ResultStatus;
+  comment: string;
+  /** Who recorded it, when — for the runner's "by" column. */
+  by?: string;
+  at?: string;
+};
+
+export type TestPlanExecution = {
+  id: string;
+  planId: string;
+  name: string;
+  /** The plan's cases when the run started — later plan edits leave it alone. */
+  caseIds: string[];
+  /** One current result per case of the snapshot; history is other runs. */
+  results: { [caseId: string]: CaseResult };
+  assigned?: string;
+  startedAt: string;
+  finishedAt?: string;
+};
+
+export type TestingDoc = {
+  schemaVersion: number;
+  /** The fixed genesis id (store.ts newTestingDoc) — one lineage everywhere. */
+  id: string;
+  cases: { [id: string]: TestCase };
+  plans: { [id: string]: TestPlan };
+  executions: { [id: string]: TestPlanExecution };
+};
