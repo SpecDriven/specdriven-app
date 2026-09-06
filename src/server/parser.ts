@@ -84,8 +84,13 @@ export interface Scenario {
   version: number;
   status: ScenarioStatus;
   body: string;
-  /** GitHub urls of the automated tests covering this scenario
-      (specs/traceability.spec.md). */
+  /**
+   * The automated tests covering this scenario (specs/external-links/
+   * test-traceability.feature.md), each as the text inside its `[test: … ]`
+   * token: the GitHub url alone, or `<test name> : <url>` when the test's
+   * function name is known — see parseTestRef / formatTestRef. Kept as
+   * strings so the Automerge document and the file agree on the entry.
+   */
   tests: string[];
   /**
    * The document's id for the scenario
@@ -143,12 +148,15 @@ export function titleFromFileName(fileName: string): string {
 }
 
 /**
- * Test links are stored inside the scenario as `[test: <url> ]` lines at the
- * end of its body (specs/external-links/test-traceability.feature.md) — plain
- * text that GitHub shows verbatim. Older files carry a trailing `### Tests`
- * markdown table instead (specs/traceability.spec.md); the parser still reads
- * it, and serializeFeature writes the lines, so a file moves to the new form
- * the first time it is written. Either way the links land in
+ * Test links are stored inside the scenario as `[test: <url> ]` or
+ * `[test: <test name> : <url> ]` lines at the end of its body
+ * (specs/external-links/test-traceability.feature.md) — plain text that
+ * GitHub shows verbatim. The name is the test function the url's `#L<n>`
+ * anchor points at, read from the code when the link is added
+ * (src/server/testName.ts). Older files carry a trailing `### Tests`
+ * markdown table instead (specs/traceability.spec.md); the parser still
+ * reads it, and serializeFeature writes the lines, so a file moves to the
+ * new form the first time it is written. Either way the links land in
  * `Scenario.tests`, apart from the body — which is what lets a published
  * scenario's tests keep changing while its body stays immutable.
  *
@@ -157,14 +165,61 @@ export function titleFromFileName(fileName: string): string {
  */
 const TESTS_HEADING_RE = /^###\s+Tests\s*$/i;
 const URL_RE = /https?:\/\/\S+/;
-/** One `[test: <url> ]` token; the spaces around the url are optional. */
-const TEST_REF_RE = /\[test:\s*([^\]\s]+)\s*\]/g;
+/**
+ * What sits inside one token: an optional name (anything but `:` and `]`),
+ * a colon, then an http(s) url. The url must start with a scheme so that
+ * `https` is never mistaken for a name in front of `//…`.
+ */
+const TEST_TOKEN = String.raw`\[test:\s*((?:[^\]:]*?\s*:\s*)?https?:\/\/[^\]\s]+)\s*\]`;
+/** One `[test: … ]` token, capturing its text; spaces around it are optional. */
+const TEST_REF_RE = new RegExp(TEST_TOKEN, "g");
 /** A line holding nothing but test tokens. */
-const TEST_LINE_RE = /^\s*(?:\[test:\s*[^\]\s]+\s*\]\s*)+$/;
+const TEST_LINE_RE = new RegExp(String.raw`^\s*(?:${TEST_TOKEN}\s*)+$`);
 
 /** Only GitHub urls are stored as test links (specs/traceability.spec.md). */
 export function isTestLink(url: string): boolean {
   return /^https:\/\/(www\.)?github\.com\/.+/.test(url.trim());
+}
+
+/** The line a test url's `#L<n>` anchor names, or null without one. */
+export function testLine(url: string): number | null {
+  const m = url.trim().match(/#L(\d+)(?:-L\d+)?$/);
+  return m ? Number(m[1]) : null;
+}
+
+/** One entry of `Scenario.tests`, taken apart. */
+export interface TestRef {
+  /** The GitHub url of the test, line anchor included. */
+  url: string;
+  /** The test's function name, when the reference carries one. */
+  name?: string;
+}
+
+/**
+ * A test name the token syntax can carry: something, on one line, with no
+ * `:` (the separator) and no `]` (the token's end).
+ */
+export function isTestName(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed.length > 0 && !/[:\]\n]/.test(trimmed);
+}
+
+/**
+ * Take a test reference apart: `<name> : <url>` gives both, a bare url just
+ * the url. The name is what stands before the first colon that is followed
+ * by the url — a url's own `https:` never counts as a separator.
+ */
+export function parseTestRef(text: string): TestRef {
+  const m = text.trim().match(/^(?:([^:]*?)\s*:\s*)?(https?:\/\/\S+)$/);
+  if (!m) return { url: text.trim() };
+  const name = m[1]?.trim();
+  return name ? { url: m[2]!, name } : { url: m[2]! };
+}
+
+/** The text a reference is written as inside its token. */
+export function formatTestRef(ref: TestRef): string {
+  const name = ref.name?.trim();
+  return name ? `${name} : ${ref.url.trim()}` : ref.url.trim();
 }
 
 /**
@@ -173,7 +228,8 @@ export function isTestLink(url: string): boolean {
  * `### Tests` section, one url per table row (or list item; anything with a
  * url on the line counts, markdown punctuation trimmed). Lines and headings
  * inside fenced code blocks are content. Links are returned in the order
- * met, without repeats.
+ * met, in their canonical `<name> : <url>` spelling, one per url — the
+ * first mention of a url wins.
  */
 export function splitTests(body: string): { body: string; tests: string[] } {
   const lines = body.split("\n");
@@ -190,7 +246,7 @@ export function splitTests(body: string): { body: string; tests: string[] } {
   for (const line of headingAt === -1 ? lines : lines.slice(0, headingAt)) {
     if (FENCE_RE.test(line)) inFence = !inFence;
     else if (!inFence && TEST_LINE_RE.test(line)) {
-      for (const m of line.matchAll(TEST_REF_RE)) tests.push(m[1]!);
+      for (const m of line.matchAll(TEST_REF_RE)) tests.push(formatTestRef(parseTestRef(m[1]!)));
       lifted = true;
       continue;
     }
@@ -205,7 +261,12 @@ export function splitTests(body: string): { body: string; tests: string[] } {
   if (!lifted && headingAt === -1) return { body, tests: [] };
   // Removing a token line can leave two blank lines back to back.
   const text = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return { body: text, tests: [...new Set(tests)] };
+  const byUrl = new Map<string, string>();
+  for (const t of tests) {
+    const url = parseTestRef(t).url;
+    if (!byUrl.has(url)) byUrl.set(url, t);
+  }
+  return { body: text, tests: [...byUrl.values()] };
 }
 
 /** The lines a scenario's test links are written as. */
