@@ -9,6 +9,9 @@
 //   /tests                                          test plans (specs/app/tests.feature.md)
 //   /tests/cases                                    the test case library
 //   /tests/cases/<id>, /tests/plans/<id>, /tests/runs/<id>
+//   /issues                                         GitHub issues (specs/app/github-issues.feature.md)
+//   /issues/new                                     the new-issue form
+//   /issues/<number>                                one issue
 //
 // <feature> is the file path minus `.feature.md` and may span several
 // segments when the feature lives in a folder (`billing/quotes`); <scenario>
@@ -40,7 +43,12 @@ export interface Route {
   page?: string;
   /** A view of the test management module (specs/app/tests.feature.md). */
   tests?: TestsRoute;
+  /** A view of the GitHub issues module (specs/app/github-issues.feature.md). */
+  issues?: IssuesRoute;
 }
+
+/** The GitHub issues module's views: the list, the new-issue form, or one issue. */
+export type IssuesRoute = { kind: "list" } | { kind: "new" } | { kind: "issue"; number: number };
 
 /**
  * The test management module's views: the plan list, the case library, or
@@ -80,6 +88,14 @@ export function parseRoute(pathname: string): Route {
     const kind = segs[1] ? TESTS_SEGMENTS[segs[1]] : undefined;
     if (kind && segs[2]) return { tests: { kind, id: segs[2] } };
     return { tests: { kind: "plans" } };
+  }
+  // GitHub issues: `/issues` is the list, `/issues/new` the form, and a
+  // number opens that issue. Anything else under `/issues` is the list.
+  if (segs[0] === "issues") {
+    if (segs[1] === "new" && !segs[2]) return { issues: { kind: "new" } };
+    const number = segs[1] && /^[1-9]\d*$/.test(segs[1]) && !segs[2] ? Number(segs[1]) : null;
+    if (number !== null) return { issues: { kind: "issue", number } };
+    return { issues: { kind: "list" } };
   }
   // A roadmap page or a task is a plain path under the folder it lives in; a
   // hand-typed link may carry the `.md` suffix already.
@@ -159,6 +175,18 @@ export function testsPath(view: TestsRoute): string {
       return `/tests/plans/${encodeURIComponent(view.id)}`;
     case "run":
       return `/tests/runs/${encodeURIComponent(view.id)}`;
+  }
+}
+
+/** The url of a GitHub issues view — the inverse of parseRoute's `issues`. */
+export function issuesPath(view: IssuesRoute): string {
+  switch (view.kind) {
+    case "list":
+      return "/issues";
+    case "new":
+      return "/issues/new";
+    case "issue":
+      return `/issues/${view.number}`;
   }
 }
 
