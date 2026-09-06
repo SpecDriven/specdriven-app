@@ -100,6 +100,14 @@ export interface SpecDrivenState {
    */
   tasks?: boolean;
   /**
+   * Show the test management module (specs/app/tests.feature.md) —
+   * test cases, plans and executions on their own sidebar tab and pane;
+   * absent means OFF. On, the tab appears and the module's document is
+   * made in the data repo on its first write; off, the tab is simply not
+   * shown and the document, if any, is left alone.
+   */
+  testing?: boolean;
+  /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
    * or empty means OFF — git stays the only transport. On a public server,
@@ -251,6 +259,12 @@ export function normalizeRoadmap(value: unknown): boolean {
 /** Effective tasks setting: OFF unless explicitly turned on — the tasks
     folder is opt-in like the roadmap's (specs/app/tasks.feature.md). */
 export function normalizeTasks(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective test management setting: OFF unless explicitly turned on —
+    opt-in like the roadmap and tasks (specs/app/tests.feature.md). */
+export function normalizeTesting(value: unknown): boolean {
   return value === true;
 }
 

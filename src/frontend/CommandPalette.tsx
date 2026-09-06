@@ -13,10 +13,17 @@ import { useFocusTrap } from "./useFocusTrap";
  * feature page instead of in the editor, ESC closes. A combobox for
  * assistive tech: the field owns the list and names the active option.
  */
-export type PaletteGroup = "Recent" | "Actions" | "Features" | "Scenarios" | "Roadmap" | "Tasks";
+export type PaletteGroup =
+  | "Recent"
+  | "Actions"
+  | "Features"
+  | "Scenarios"
+  | "Roadmap"
+  | "Tasks"
+  | "Tests";
 
 /** What the query searches, after the sidebar tab the palette opened from. */
-export type PaletteScope = "specs" | "roadmap" | "tasks";
+export type PaletteScope = "specs" | "roadmap" | "tasks" | "tests";
 
 export interface PaletteItem {
   id: string;
@@ -38,6 +45,7 @@ const GROUP_ORDER: PaletteGroup[] = [
   "Scenarios",
   "Roadmap",
   "Tasks",
+  "Tests",
 ];
 
 export function CommandPalette({

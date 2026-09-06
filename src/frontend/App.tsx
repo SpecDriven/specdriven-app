@@ -41,6 +41,7 @@ import {
   Link,
   ListFilter,
   ListTodo,
+  FlaskConical,
   Map as MapIcon,
   Menu as MenuIcon,
   PanelLeftClose,
@@ -69,6 +70,8 @@ import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
+import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
+import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
 import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
@@ -97,6 +100,8 @@ import {
   pageFolderOf,
   pageLink,
   scenarioPath,
+  testsPath,
+  type TestsRoute,
 } from "./route";
 import {
   addTestLink,
@@ -258,11 +263,12 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
   return <Icon size={size} aria-hidden="true" />;
 }
 
-type SidebarTab = "specs" | PageTab["folder"];
+type SidebarTab = "specs" | PageTab["folder"] | "tests";
 
 function readSidebarTab(): SidebarTab {
   try {
     const stored = localStorage.getItem("sd-sidebar-tab");
+    if (stored === "tests") return "tests";
     return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
   } catch {
     return "specs";
@@ -832,6 +838,14 @@ export function App() {
   // read by a tick between renders — the same shape the README editor uses.
   const [roadmap, setRoadmap] = useState(false);
   const [tasks, setTasks] = useState(false);
+  // Test management (specs/app/tests.feature.md): the Settings
+  // switch, and which of the module's views has the pane — null when none.
+  // The module's data lives in its own store (src/frontend/testing.ts).
+  const [testingOn, setTestingOn] = useState(false);
+  const [testsView, setTestsView] = useState<TestsRoute | null>(null);
+  const testsViewRef = useRef<TestsRoute | null>(null);
+  testsViewRef.current = testsView;
+  const testingStore = useTesting();
   const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
   const [taskPages, setTaskPages] = useState<PageListing[]>([]);
   const [openPage, setOpenPage] = useState<PageListing | null>(null);
@@ -856,9 +870,11 @@ export function App() {
     tab.folder === "tasks" ? tasks : roadmap,
   );
   /** The tab on screen: a page tab only while its switch still shows it. */
-  const shownTab: SidebarTab = shownPageTabs.some((tab) => tab.folder === sidebarTab)
-    ? sidebarTab
-    : "specs";
+  const shownTab: SidebarTab =
+    shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
+    (sidebarTab === "tests" && testingOn)
+      ? sidebarTab
+      : "specs";
   /** The pages of one special folder, as the sidebar and palette list them. */
   const pagesIn = (folder: PageTab["folder"]): PageListing[] =>
     folder === "tasks" ? taskPages : roadmapPages;
@@ -883,6 +899,7 @@ export function App() {
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
   const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
+  const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -1050,6 +1067,9 @@ export function App() {
       if (typeof state.tasks === "boolean") {
         setTasks(state.tasks);
       }
+      if (typeof state.testing === "boolean") {
+        setTestingOn(state.testing);
+      }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setDemo(Boolean(state.demo));
@@ -1068,6 +1088,9 @@ export function App() {
           loadReadme(),
           // The special folders' pages ride along when they are shown at all.
           loadShownPages(state),
+          // So do the test plans, when the module is on — before the deep
+          // link below, which may name one of them.
+          state.testing === true ? testing.load() : Promise.resolve(),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
@@ -1099,6 +1122,9 @@ export function App() {
       if (openPageFile && openPageTextRef.current === openPageSaved.current) {
         void showPage(openPageFile);
       }
+      // The test management module too — unless one of its editors holds an
+      // unsaved draft (the store checks).
+      if (testingOn) void testing.refresh();
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
   }, [
@@ -1111,6 +1137,7 @@ export function App() {
     conflict,
     roadmap,
     tasks,
+    testingOn,
     openPageFile,
     loadFeatures,
     loadReadme,
@@ -1213,6 +1240,9 @@ export function App() {
   // must not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
+    // A tests view owns its url (openTests pushes it); with no feature
+    // selected this effect would otherwise rewrite it to `/`.
+    if (testsView) return;
     const url = pagePath(selected, paneScenario);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -1223,20 +1253,21 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario]);
+  }, [loading, needsRepo, selected, paneScenario, testsView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
   useEffect(() => {
     const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
-    document.title =
-      !selected || !feature
+    document.title = testsView
+      ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
+      : !selected || !feature
         ? "SpecDriven"
         : s
           ? `SpecDriven — ${name} · ${s.name} v${s.version}`
           : `SpecDriven — ${name}`;
-  }, [selected, feature, paneScenario]);
+  }, [selected, feature, paneScenario, testsView, testingStore]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1261,7 +1292,12 @@ export function App() {
         // its README") — unless there is a deep link to honor. The special
         // folders' pages ride along, as they do on a start with a folder
         // already configured (specs/app/roadmap.feature.md).
-        await Promise.all([loadFeatures(), loadReadme(), loadShownPages(state)]);
+        await Promise.all([
+          loadFeatures(),
+          loadReadme(),
+          loadShownPages(state),
+          state.testing === true ? testing.load() : Promise.resolve(),
+        ]);
         await openFromLocation(entryPath);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
@@ -1336,13 +1372,21 @@ export function App() {
         // refill below for whichever folders the settings show.
         setRoadmapPages([]);
         setTaskPages([]);
+        // Nor are the old folder's test plans; the module reloads below.
+        testing.reset();
+        setTestsView(null);
         // A page url from the old folder would only miss in the new one, and
         // nothing else resets it — the selection was already empty while a
         // page was open, so the canonical-url effect has no change to react
         // to.
         if (location.pathname !== "/") history.replaceState(null, "", "/");
         // Home is the new folder's README (specs/app-startup.feature.md).
-        await Promise.all([loadFeatures(), loadReadme(), loadShownPages(state)]);
+        await Promise.all([
+          loadFeatures(),
+          loadReadme(),
+          loadShownPages(state),
+          state.testing === true ? testing.load() : Promise.resolve(),
+        ]);
       } else {
         toast.error(state.error ?? "Could not use this directory");
       }
@@ -1369,6 +1413,7 @@ export function App() {
       // Opening a feature leaves the open page, saving what its editor still
       // holds — the same courtesy the README editor gets.
       closePage();
+      setTestsView(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -1437,6 +1482,7 @@ export function App() {
   const goHome = () => {
     editorRef.current.close();
     closePage();
+    setTestsView(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1444,10 +1490,32 @@ export function App() {
     if (location.pathname !== "/") history.pushState(null, "", "/");
   };
 
+  /**
+   * Open a view of the test management module (specs/app/tests.feature.md).
+   * The pane is the module's alone, so the feature and the page
+   * leave — saving what their editors hold, the way goHome does — and the
+   * sidebar turns to the Tests tab. The view owns its url from here on.
+   */
+  const openTests = (view: TestsRoute, opts: { push?: boolean } = {}) => {
+    editorRef.current.close();
+    closePage();
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+    setSelectedFolder(null);
+    selectSidebarTab("tests");
+    setTestsView(view);
+    if (opts.push && location.pathname !== testsPath(view)) {
+      history.pushState(null, "", testsPath(view));
+    }
+  };
+
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
-    if (route.page) {
+    if (route.tests) {
+      openTests(route.tests);
+    } else if (route.page) {
       await showPage(route.page);
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
@@ -1459,6 +1527,7 @@ export function App() {
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
       editorRef.current.close();
       closePage();
+      setTestsView(null);
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -2361,6 +2430,7 @@ export function App() {
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
+    setTestsView(null);
     openPageSession.current += 1;
     openPageSaved.current = data.content;
     openPageTextRef.current = data.content;
@@ -2706,6 +2776,7 @@ export function App() {
     setSettingsAssignmentsDraft(assignments);
     setSettingsRoadmapDraft(roadmap);
     setSettingsTasksDraft(tasks);
+    setSettingsTestingDraft(testingOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -2869,6 +2940,7 @@ export function App() {
     setAssignments(data.assignments === true);
     setRoadmap(data.roadmap === true);
     setTasks(data.tasks === true);
+    setTestingOn(data.testing === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -3013,6 +3085,24 @@ export function App() {
     else setRoadmapPages([]);
     const open = openPageRef.current;
     if (open && pageTabOf(open.fileName).folder === tab.folder) goHome();
+  };
+
+  // Test management (specs/app/tests.feature.md): switched on, the
+  // Tests tab appears and the module loads; off, the tab goes and a view of
+  // it that is open leaves the pane. The document in the data repo, if any,
+  // is left where it is either way.
+  const toggleTesting = async (on: boolean) => {
+    setSettingsTestingDraft(on);
+    if (!(await patchSettings({ testing: on }))) {
+      setSettingsTestingDraft(!on);
+      return;
+    }
+    if (on) {
+      await testing.load();
+      return;
+    }
+    testing.reset();
+    if (testsViewRef.current) goHome();
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -3752,6 +3842,14 @@ export function App() {
       },
     },
     {
+      id: "go-tests",
+      keys: "g e",
+      label: "Go to the tests",
+      group: "Navigate",
+      when: () => !quiet && testingOn,
+      run: () => openTests({ kind: "plans" }, { push: true }),
+    },
+    {
       id: "settings",
       keys: ["mod+,", "g s"],
       label: "Settings",
@@ -3975,6 +4073,17 @@ export function App() {
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
     shortcutAction("go-tasks", <ListTodo size={14} />),
+    shortcutAction("go-tests", <FlaskConical size={14} />),
+    ...(testingOn
+      ? [
+          action("new-plan", "New test plan", <FlaskConical size={14} />, () =>
+            void newPlanFlow(prompt, openTests),
+          ),
+          action("new-case", "New test case", <FlaskConical size={14} />, () =>
+            void newCaseFlow(prompt, openTests),
+          ),
+        ]
+      : []),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
       ? [
@@ -4009,6 +4118,22 @@ export function App() {
       .find((f) => f.fileName === fileName)
       ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
+    // The Tests tab searches the module's own store: the server's full-text
+    // index knows only markdown (src/frontend/testing.ts searchTests).
+    if (shownTab === "tests") {
+      return searchTests(q, testingStore).map(
+        (hit): PaletteItem => ({
+          id: `tests:${hit.kind}:${hit.id}`,
+          group: "Tests",
+          label: hit.label,
+          text: hit.label,
+          sub: hit.sub,
+          icon: <FlaskConical size={14} />,
+          href: hit.href,
+          run: () => openTests(hit.view, { push: true }),
+        }),
+      );
+    }
     const res = await fetch(
       `/api/search?scope=${shownTab}&q=${encodeURIComponent(q)}`,
       { signal },
@@ -4371,7 +4496,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !testsView ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -4404,6 +4529,18 @@ export function App() {
               </Tooltip>
             );
           })}
+          {testingOn && (
+            <Tooltip label="Tests" keys="g e">
+              <a
+                href="/tests"
+                className={`rail-link${testsView ? " active" : ""}`}
+                aria-label="Tests"
+                onClick={(e) => spaClick(e, () => openTests({ kind: "plans" }, { push: true }))}
+              >
+                <FlaskConical size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
           <div className="rail-bottom">
             {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
@@ -4610,7 +4747,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {shownPageTabs.length > 0 && (
+        {(shownPageTabs.length > 0 || testingOn) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -4637,6 +4774,24 @@ export function App() {
                 <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
             ))}
+            {testingOn && (
+              <button
+                type="button"
+                role="tab"
+                id="side-tab-tests"
+                aria-selected={shownTab === "tests"}
+                aria-controls="side-panel-tests"
+                className={shownTab === "tests" ? "active" : ""}
+                onClick={() => {
+                  selectSidebarTab("tests");
+                  // The tab is the module's door: with none of its views
+                  // open yet, it opens the plan list.
+                  if (!testsViewRef.current) openTests({ kind: "plans" }, { push: true });
+                }}
+              >
+                <FlaskConical size={14} aria-hidden="true" /> Tests
+              </button>
+            )}
           </div>
         )}
         {shownTab === "specs" && (
@@ -4902,6 +5057,11 @@ export function App() {
             </div>
           </div>
           ))}
+        {/* The Tests tab (specs/app/tests.feature.md): the plans and
+            the case library, with their ⋯ menus (src/frontend/TestsPane.tsx). */}
+        {shownTab === "tests" && testingOn && (
+          <TestsSidebar view={testsView} prompt={prompt} confirm={confirm} onNavigate={openTests} />
+        )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
@@ -4992,7 +5152,9 @@ export function App() {
       <section className="editor" aria-busy={featureLoading || undefined}>
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
-        <ErrorBoundary key={selected ?? openPage?.fileName ?? "home"}>
+        <ErrorBoundary
+          key={selected ?? openPage?.fileName ?? (testsView ? testsKey(testsView) : "home")}
+        >
         {editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
@@ -5805,6 +5967,21 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
+        ) : testsView && testingOn ? (
+          /* The test management module (specs/app/tests.feature.md):
+             plans, cases and runs take the whole pane (src/frontend/TestsPane
+             .tsx); App only knows which view is open. */
+          <TestsPane
+            view={testsView}
+            features={features}
+            members={members}
+            assignments={assignments}
+            repoCrumb={repoCrumb}
+            autosaveSeconds={autosaveSeconds}
+            prompt={prompt}
+            confirm={confirm}
+            onNavigate={openTests}
+          />
         ) : openPage && openPageText === null ? (
           <PageSkeleton cards={1} />
         ) : openPage && openPageText !== null ? (
@@ -6457,6 +6634,28 @@ export function App() {
                     role="switch"
                     checked={settingsTasksDraft}
                     onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* Test management (specs/app/tests.feature.md): opt-in
+                  — test plans, cases and runs on their own tab and pane,
+                  kept in the app's documents rather than in markdown. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Test management
+                  <span className="settings-row-hint">
+                    {settingsTestingDraft
+                      ? "A Tests tab with test plans, a test case library and run results. Stored in the data folder's documents, synced like everything else — no markdown files."
+                      : "The Tests tab is not shown; test plans already recorded stay in the data folder."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsTestingDraft}
+                    onChange={(e) => void toggleTesting(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
