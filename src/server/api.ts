@@ -147,6 +147,7 @@ import {
   updateIssue,
   type IssueState,
 } from "./issues";
+import { parseTestUrl, resolveTestName } from "./testName";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -1592,6 +1593,22 @@ const withIssues = (
 
 const ISSUE_STATES: IssueState[] = ["open", "closed", "all"];
 
+/**
+ * The name of the test a reference url points at (specs/external-links/
+ * test-traceability.feature.md), read from the code on GitHub
+ * (src/server/testName.ts). A malformed url is a 400; every other failure
+ * is a 200 with `name: null` and a `reason` for the editor's hint — the
+ * link is kept either way, only the name is missing.
+ */
+const getTestName: Handler = async (req) => {
+  const url = new URL(req.url).searchParams.get("url") ?? "";
+  if (!parseTestUrl(url)) {
+    return json({ error: "url must be a GitHub file url with a #L<line> anchor" }, 400);
+  }
+  if (isDemoMode()) return json({ name: null, reason: "Test names are not read from GitHub in demo mode." });
+  return json(await resolveTestName(url));
+};
+
 const getIssues = withIssues(async (repo, req) => {
   const wanted = new URL(req.url).searchParams.get("state");
   const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
@@ -1652,6 +1669,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/tests/executions/:id", putTestExecution],
   ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
   ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
+  ["GET", "/api/test-name", getTestName],
   ["GET", "/api/issues", getIssues],
   ["POST", "/api/issues", postIssue],
   ["GET", "/api/issues/:number", getIssueRoute],
