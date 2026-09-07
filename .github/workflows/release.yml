@@ -47,8 +47,13 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          notes="Source snapshot of SpecDriven/specdriven_app at v$VERSION ($GITHUB_SHA).
+
+**Download \`specdriven-$VERSION-src.zip\`** and verify it against \`SHASUMS256.txt\`.
+
+Ignore the auto-generated *Source code (zip)* and *Source code (tar.gz)* entries below: GitHub attaches them to every release and they only contain this repository's README, not the app."
           gh release create "v$VERSION" \
             --repo SpecDriven/specdriven-app-release \
             --title "SpecDriven v$VERSION" \
-            --notes "Source snapshot of SpecDriven/specdriven_app at v$VERSION ($GITHUB_SHA)." \
+            --notes "$notes" \
             "specdriven-$VERSION-src.zip" SHASUMS256.txt
