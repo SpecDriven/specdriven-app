@@ -1,8 +1,8 @@
-# License to Vibecode, Version 1.0
+# SpecDriven Source Available License, Version 1.0
 
 ## Abbreviation
 
-LtV-1.0
+SSAL-1.0
 
 ## Notice
 
@@ -10,146 +10,222 @@ Required Notice: Copyright (c) 2026 David Vydra
 
 ## Purpose
 
-This license lets you use specdriven.app Community Edition for free, run it for yourself,
-and "vibecode" your own bug fixes and new features — with an AI coding
-assistant, by hand, or both. In exchange, you agree not to use the
-software commercially and not to publish its source code, or your
-modifications to it, on any public code hosting service.
+This license lets you use specdriven.app Community Edition for free,
+inside your own organization, for any purpose including commercial
+and production use. You may read the source, modify it, and build on
+it, whether by hand, with an AI coding assistant, or both. In
+exchange, you agree not to offer the software to third parties as a
+hosted or managed service, not to build a competing product with it,
+not to circumvent any license key or edition restrictions, not to
+publish its source code (or your modifications) on any public code
+hosting service, and not to remove our notices.
+
+This Purpose section is a plain-language summary. The Terms and
+Conditions below control.
 
 ## Terms and Conditions
 
-### Licensor ("We")
+### 1. Acceptance
 
-The party offering the Software under these Terms and Conditions:
-the maker of specdriven.app.
+By installing, downloading, accessing, using, copying, or modifying
+the Software, you agree to all of these Terms and Conditions. In
+order to receive any license under these terms, you must agree to
+them as both strict obligations and conditions to all your licenses.
 
-### The Software
+### 2. Copyright License
 
-The "Software" is each version of the specdriven.app application, in
-source or binary form, that we make available under these Terms and
-Conditions, as indicated by our inclusion of these Terms and Conditions
-with the Software. The Software includes any configuration files,
-specifications, assets, and documentation we distribute with it.
+Subject to your compliance with these Terms and Conditions, the
+Licensor grants you a non-exclusive, royalty-free, worldwide,
+non-sublicensable, non-transferable license to use, copy, modify,
+prepare derivative works of, and distribute within Your Company the
+Software, for any purpose, including commercial and production use,
+in each case subject to the Limitations in Section 3.
 
-### You
+Changes and new works based on the Software are welcome, whether
+written by hand, generated with the assistance of AI coding tools, or
+any combination of the two. A Modified Version remains subject to
+these Terms and Conditions.
 
-"You" means the individual or entity agreeing to these Terms and
-Conditions. Your license is personal to you. You may not sublicense
-or transfer it to anyone else.
+### 3. Limitations
 
-### Vibecoding
+#### 3.1 Hosted or Managed Service
 
-"Vibecoding" means creating changes and new works based on the
-Software — bug fixes, new features, integrations, refactors, and
-experiments — whether written by hand, generated with the assistance
-of AI coding tools, or any combination of the two. Vibecoding for a
-Permitted Purpose is expressly allowed and encouraged under this
-license.
+You may not provide the Software or a Modified Version to third
+parties as a hosted or managed service, where the service provides
+users with access to any substantial set of the features or
+functionality of the Software, and you may not otherwise make the
+functionality of the Software or a Modified Version available to
+third parties.
 
-### License Grant
+Making the functionality of the Software or a Modified Version
+available to third parties includes, without limitation: enabling
+third parties to interact with the functionality of the Software or a
+Modified Version in distributed form or remotely through a computer
+network; offering a product or service the value of which entirely or
+primarily derives from the value of the Software or a Modified
+Version; or offering a product or service that accomplishes for users
+the primary purpose of the Software or a Modified Version.
 
-Subject to your compliance with these Terms and Conditions, we grant
-you a copyright license to run, use, copy, and modify the Software,
-including by Vibecoding, for any Permitted Purpose. This grant does
-not include the right to distribute or publish the Software or your
-modifications, except as expressly allowed in Sharing Fixes below.
+#### 3.2 Competing Products
 
-### Permitted Purpose
+You may not use the Software or a Modified Version to build, offer,
+market, or operate a product or service that substitutes for, or
+competes with, specdriven.app or any product or service the Licensor
+offers, whether offered for a fee or for free.
 
-A Permitted Purpose is any noncommercial purpose. Without limiting
-that, the following are expressly Permitted Purposes:
-
-1. running the Software for your own personal use;
-
-2. Vibecoding bug fixes to the Software for your own use;
-
-3. Vibecoding new features and modifications to the Software for
-   your own use;
-
-4. personal study, research, experimentation, testing, hobby
-   projects, and private entertainment, without any anticipated
-   commercial application.
-
-### Commercial Use Not Permitted
-
-Any commercial purpose is not a Permitted Purpose. Commercial
-purposes include, without limitation: selling the Software or access
-to it; offering the Software or any modification of it as a product
-or hosted service; using the Software in the operation of a business
-or for the benefit of paying clients; and using the Software to
-compete with any product or service we offer. If you want a
-commercial license, contact us.
-
-### No Public Publication
+#### 3.3 No Public Publication
 
 You may not publish, upload, mirror, or otherwise make available the
-source code of the Software, or of any modification or derivative of
-it, on any public server or publicly accessible service. This
-includes, without limitation: public repositories on GitHub, GitLab,
-Bitbucket, Codeberg, or any similar code hosting service; public
-package registries such as npm or PyPI; paste services; file-sharing
-services; and your own publicly accessible servers or websites.
+source code of the Software, or of any Modified Version, on any
+public server or publicly accessible service. This includes, without
+limitation: public repositories on GitHub, GitLab, Bitbucket,
+Codeberg, or any similar code hosting service; public package
+registries such as npm or PyPI; paste services; file-sharing
+services; and publicly accessible servers or websites operated by
+you or on your behalf.
 
-Storing the Software or your modifications in a private repository
-that only you (or, for an entity licensee, only your personnel) can
-access is permitted. You are responsible for keeping such storage
-private; a private repository that becomes public is a publication.
+Storing the Software or a Modified Version in a private repository
+that only you and Your Company can access is permitted. You are
+responsible for keeping such storage private. A private repository
+that becomes public is a publication under this Section.
 
-You may not permit any AI coding tool or service you use for
-Vibecoding to republish the Software's source code publicly. Using
-such tools on your local copy or in a private workspace is permitted.
+You may not permit any AI coding tool or service you use to
+republish the source code of the Software or a Modified Version
+publicly. Using such tools on your local copy or in a private
+workspace accessible only to Your Company is permitted.
 
-### Sharing Fixes
+#### 3.4 License Keys and Editions
 
-You may share your bug fixes and modifications privately with us or anyone else in your organization.
-If you choose to share your generated code with us, we may use it without restriction.
-Apart from that, you may not distribute the Software or your modifications to anyone else,
+You may not move, change, disable, or circumvent the license key,
+edition, or entitlement functionality in the Software, and you may
+not remove or obscure any functionality in the Software that is
+protected by such functionality.
+
+#### 3.5 Notices
+
+You may not alter, remove, or obscure any licensing, copyright, or
+other notices of the Licensor in the Software, including any
+plain-text lines beginning with `Required Notice:`.
+
+### 4. Internal Distribution and Sharing
+
+If you distribute the Software or a Modified Version to anyone within
+Your Company, you must ensure that each recipient receives a copy of
+these Terms and Conditions and all notices described in Section 3.5.
+Any Modified Version you distribute must carry prominent notices
+stating that you modified the Software, including the date of each
+change.
+
+You may share your modifications privately with the Licensor. If you
+choose to share code or other material with the Licensor, the
+Licensor may use it without restriction and without any obligation to
+you.
+
+Except as permitted in this Section and in Section 2, you may not
+distribute the Software or a Modified Version to anyone else, whether
 publicly or privately.
 
-### Notices
+### 5. Patents
 
-You must retain, and not remove or obscure, all copyright notices
-and any plain-text lines beginning with `Required Notice:` in all
-copies of the Software you keep or modify.
+The Licensor grants you a license, under any patent claims the
+Licensor can license or becomes able to license, to make, have made,
+use, sell, offer for sale, import, and have imported the Software, in
+each case subject to the Limitations and conditions in these Terms
+and Conditions. This license does not cover any patent claims that
+you cause to be infringed by modifications or additions to the
+Software. If you or Your Company make any written claim that the
+Software infringes or contributes to infringement of any patent, your
+patent license for the Software granted under these Terms and
+Conditions ends immediately.
 
-### Patents
-
-We grant you a patent license covering patent claims we can license,
-or become able to license, that you would infringe by using or
-Vibecoding the Software for a Permitted Purpose. If you make any
-written claim that the Software infringes or contributes to
-infringement of any patent, your patent license under these Terms
-and Conditions ends immediately.
-
-### Fair Use
+### 6. Fair Use
 
 You may have "fair use" rights for the Software under applicable
-law. These terms do not limit them.
+law. These Terms and Conditions do not limit them.
 
-### Termination
+### 7. No Other Rights
 
-Your licenses under these Terms and Conditions end automatically if
-you breach them. If you breach unintentionally and cure the breach
-within 30 days of becoming aware of it — including by taking down
-any publication prohibited by No Public Publication — your licenses
-are reinstated.
+These Terms and Conditions do not grant you any rights beyond those
+expressly stated. These Terms and Conditions do not allow you to
+sublicense or transfer any of your licenses to anyone else, and your
+licenses are personal to you and Your Company. The Licensor retains
+all right, title, and interest in the Software and all intellectual
+property rights in it.
 
-### Trademarks
+### 8. Termination
 
-Except for identifying us as the origin of the Software, you have no
-right under these Terms and Conditions to use the specdriven.app
-name, logo, trademarks, or product names.
+If you use the Software in violation of these Terms and Conditions,
+such use is not licensed, and your licenses will automatically
+terminate. If the Licensor provides you with a notice of your
+violation, and you cease all violations of these Terms and Conditions
+no later than 30 days after you receive that notice, including by
+taking down any publication prohibited by Section 3.3, your licenses
+will be reinstated retroactively. However, if you violate these Terms
+and Conditions after such reinstatement, any additional violation
+will cause your licenses to terminate automatically and permanently.
 
-### Disclaimer
+### 9. Trademarks
+
+Except for identifying the Licensor as the origin of the Software,
+these Terms and Conditions grant you no right to use the
+specdriven.app or SpecDriven names, logos, trademarks, or product
+names.
+
+### 10. Commercial Licensing
+
+If you want to offer the Software as a hosted or managed service,
+build a competing product, redistribute it beyond Your Company, or
+publish its source, contact the Licensor at hello@specdriven.app for
+a separate commercial license.
+
+### 11. Disclaimer
 
 THE SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTIES OF ANY KIND,
 EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION WARRANTIES OF
 FITNESS FOR A PARTICULAR PURPOSE, MERCHANTABILITY, TITLE OR
 NON-INFRINGEMENT.
 
-### No Liability
+### 12. No Liability
 
-IN NO EVENT WILL WE HAVE ANY LIABILITY TO YOU ARISING OUT OF OR
-RELATED TO THE SOFTWARE, INCLUDING INDIRECT, SPECIAL, INCIDENTAL OR
-CONSEQUENTIAL DAMAGES, EVEN IF WE HAVE BEEN INFORMED OF THEIR
-POSSIBILITY IN ADVANCE.
+IN NO EVENT WILL THE LICENSOR HAVE ANY LIABILITY TO YOU ARISING OUT
+OF OR RELATED TO THE SOFTWARE OR THESE TERMS AND CONDITIONS,
+INCLUDING INDIRECT, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES,
+EVEN IF THE LICENSOR HAS BEEN INFORMED OF THEIR POSSIBILITY IN
+ADVANCE.
+
+### 13. Definitions
+
+"Licensor" means the party offering the Software under these Terms
+and Conditions: David Vydra, the maker of specdriven.app.
+
+"Software" means each version of the specdriven.app application, in
+source or binary form, that the Licensor makes available under these
+Terms and Conditions, as indicated by the Licensor's inclusion of
+these Terms and Conditions with it. The Software includes any
+configuration files, specifications, assets, and documentation the
+Licensor distributes with it.
+
+"Modify" means to copy from or adapt all or part of the Software in
+a fashion requiring copyright permission, other than making an exact
+copy. A "Modified Version" is any work that results from modifying
+the Software.
+
+"You" means the individual or entity agreeing to these Terms and
+Conditions.
+
+"Your Company" means any legal entity, sole proprietorship, or other
+kind of organization that you work for, plus all organizations that
+have control over, are under the control of, or are under common
+control with that organization. Control means ownership of
+substantially all the assets of an entity, or the power to direct its
+management and policies by vote, contract, or otherwise. Control can
+be direct or indirect.
+
+"Use" means anything you do with the Software requiring one of your
+licenses.
+
+"Hosted or managed service" means any offering in which you operate
+the Software or a Modified Version, or cause it to be operated, so
+that third parties may access its functionality, whether through a
+network, an application programming interface, a user interface, or
+any other means.
