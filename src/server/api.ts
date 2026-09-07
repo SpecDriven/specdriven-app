@@ -76,6 +76,7 @@ import {
   buildSessionPrompt,
   claudeAvailable,
   claudeDesktopAvailable,
+  codexAvailable,
   launchDesktopSession,
   piAvailable,
   sessionsDirectory,
@@ -358,6 +359,9 @@ async function stateFields(state: SpecDrivenState) {
     // (specs/agents/integration-with-pi-dev-agent.feature.md) — gates the
     // Pi entry of the session dialog's agent choice.
     canRunPi: piAvailable(),
+    // Whether the Codex CLI is on PATH, so a session can run in Codex
+    // (src/server/codexChat.ts) — gates the Codex entry of the same choice.
+    canRunCodex: codexAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
@@ -1169,6 +1173,9 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
 
 const CLI_MISSING = "Claude CLI not found — install the `claude` command";
 const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";
+const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
+/** The agents as the error message lists them: "claude, pi or codex". */
+const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS.at(-1)}`;
 
 // Code gen session (specs/agents/claude.spec.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
@@ -1225,11 +1232,12 @@ const postAgentSession = withDataDir(async (dir, req) => {
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
-  // (specs/agents/integration-with-pi-dev-agent.feature.md).
-  if (target === "pane" || target === "pi") {
-    const agent = target === "pi" ? "pi" : "claude";
-    if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
-    if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  // (specs/agents/integration-with-pi-dev-agent.feature.md), "codex" the
+  // same chat with Codex (src/server/codexChat.ts).
+  if (target === "pane" || target === "pi" || target === "codex") {
+    const agent: ChatAgent = target === "pane" ? "claude" : target;
+    const missing = missingAgentCli(agent);
+    if (missing) return missing;
     try {
       const meta = await createChatSession({
         place,
@@ -1262,13 +1270,21 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // by id. Events reach the client over a one-way NDJSON stream, the only kind
 // of push that works over both Bun.serve and Electron's app:// protocol.
 
+/** The refusal for an agent whose CLI is not on PATH, or null when it is. */
+function missingAgentCli(agent: ChatAgent): Response | null {
+  if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
+  if (agent === "codex" && !codexAvailable()) return json({ error: CODEX_MISSING }, 502);
+  if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  return null;
+}
+
 /** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
 async function agentPanePlace(dir: string, agent: ChatAgent): Promise<SessionPlace | Response> {
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
-  if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
+  const missing = missingAgentCli(agent);
+  if (missing) return missing;
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
     return json(
@@ -1294,7 +1310,7 @@ const postAgentChat = withDataDir(async (dir, req) => {
   };
   // Which agent drives the chat; absent is Claude, as it was before Pi.
   const agent = body.agent === undefined ? "claude" : normalizeChatAgent(body.agent);
-  if (agent === null) return json({ error: `agent must be ${CHAT_AGENTS.join(" or ")}` }, 400);
+  if (agent === null) return json({ error: `agent must be ${CHAT_AGENT_LIST}` }, 400);
   const place = await agentPanePlace(dir, agent);
   if (place instanceof Response) return place;
   const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Coding agent session";

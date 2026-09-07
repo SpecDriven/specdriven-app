@@ -159,6 +159,7 @@ test("the session target is only ever desktop or cli", () => {
   expect(normalizeCodeGenTarget("desktop")).toBe("desktop");
   expect(normalizeCodeGenTarget("pane")).toBe("pane");
   expect(normalizeCodeGenTarget("pi")).toBe("pi");
+  expect(normalizeCodeGenTarget("codex")).toBe("codex");
   expect(normalizeCodeGenTarget(undefined)).toBeNull();
   expect(normalizeCodeGenTarget("terminal")).toBeNull();
   // The headless `claude -p` target is gone; a settings file that still
