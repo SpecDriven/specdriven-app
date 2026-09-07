@@ -60,6 +60,7 @@ describe("resolveCodeGenTarget", () => {
     expect(readCodeGenTarget("desktop")).toBe("desktop");
     expect(readCodeGenTarget("pane")).toBe("pane");
     expect(readCodeGenTarget("pi")).toBe("pi");
+    expect(readCodeGenTarget("codex")).toBe("codex");
     expect(readCodeGenTarget("cli")).toBeNull();
     expect(readCodeGenTarget(null)).toBeNull();
     expect(readCodeGenTarget("x")).toBeNull();
@@ -77,6 +78,20 @@ describe("resolveCodeGenTarget", () => {
     expect(resolveCodeGenTarget(null, false, true, true)).toBe("pane");
     // Only where there is no Claude at all does an unchosen dialog open on Pi.
     expect(resolveCodeGenTarget(null, false, false, true)).toBe("pi");
+  });
+
+  // Codex (src/server/codexChat.ts): the same standing as Pi — remembered
+  // while its CLI is there, never the fallback while there is a Claude, and
+  // ahead of Pi where there is none.
+  test("Codex is remembered when its CLI is there, and comes before Pi as a last resort", () => {
+    expect(CODE_GEN_TARGET_LABEL.codex).toBe("Codex in the coding agent pane");
+    expect(resolveCodeGenTarget("codex", false, false, false, true)).toBe("codex");
+    expect(resolveCodeGenTarget("codex", true, true, true, true)).toBe("codex");
+    expect(resolveCodeGenTarget("codex", true, true, true, false)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, true, true, true, true)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, true, true, true)).toBe("pane");
+    expect(resolveCodeGenTarget(null, false, false, true, true)).toBe("codex");
+    expect(resolveCodeGenTarget("pi", false, false, true, true)).toBe("pi");
   });
 });
 

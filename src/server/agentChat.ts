@@ -12,7 +12,13 @@
 //   tools and has no permission protocol, so those sessions offer no
 //   permission mode and never raise a permission card.
 //
-// Either way every message the agent produces becomes an event in an
+//   Codex — `codex app-server` over JSON-RPC lines (src/server/codexChat.ts).
+//   Codex asks before a command escapes its sandbox or a file change needs
+//   consent, as requests from the server; those become the pane's permission
+//   cards, and the pane's permission modes map onto Codex's approval policy
+//   and sandbox.
+//
+// Every message the agent produces becomes an event in an
 // in-memory log with a sequence number; the browser reads the log over a
 // one-way stream and, on reconnect, asks for everything after the last
 // sequence it saw.
@@ -31,17 +37,33 @@ import type {
   SDKUserMessage,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_BIN, PANE_AGENT, PI_PANE_AGENT, sessionWorkDir } from "./agent";
+import { CLAUDE_BIN, CODEX_PANE_AGENT, PANE_AGENT, PI_PANE_AGENT, sessionWorkDir } from "./agent";
 import type { SessionPlace } from "./agent";
+import {
+  CODEX_CLIENT_INFO,
+  CODEX_TOOL,
+  CodexClient,
+  codexAnswers,
+  codexPolicy,
+  codexQuestions,
+  codexSandboxPolicy,
+  codexTextInput,
+  codexThreadInfo,
+  fileChangeLine,
+  mapCodexNotification,
+  newCodexStream,
+} from "./codexChat";
+import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
 import { writeTextFile } from "./fsx";
 import { PiClient, mapPiEvent, newPiStream, piCommands, piState } from "./piChat";
 import type { PiEvent, PiStreamContext } from "./piChat";
 import { which } from "./run";
 
 /** Which agent a pane session runs (specs/agents/claude.feature.md,
-    specs/agents/integration-with-pi-dev-agent.feature.md). */
-export type ChatAgent = "claude" | "pi";
-export const CHAT_AGENTS: readonly ChatAgent[] = ["claude", "pi"];
+    specs/agents/integration-with-pi-dev-agent.feature.md,
+    src/server/codexChat.ts). */
+export type ChatAgent = "claude" | "pi" | "codex";
+export const CHAT_AGENTS: readonly ChatAgent[] = ["claude", "pi", "codex"];
 
 export function normalizeChatAgent(value: unknown): ChatAgent | null {
   return (CHAT_AGENTS as readonly unknown[]).includes(value) ? (value as ChatAgent) : null;
@@ -89,7 +111,8 @@ export interface ChatSessionMeta {
   startedAt: string;
   endedAt?: string;
   status: ChatStatus;
-  /** The agent's own session id — Claude Code's, or pi's — once it says it. */
+  /** The agent's own session id — Claude Code's, pi's, or Codex's thread id
+      — once it says it. */
   agentSessionId?: string;
   model?: string;
   /** Pi has none of these: its sessions sit on "bypassPermissions" and
@@ -250,11 +273,14 @@ const sdkFactory: QueryFactory = async ({ prompt, options }) => {
 /** Live sessions at once — each is a Claude subprocess. */
 export const MAX_LIVE_SESSIONS = 8;
 
+/** Who settled a permission request: the user, a Stop, or the session's end. */
+type ResolvedVia = "user" | "interrupt" | "ended";
+
 interface PendingPermission {
   toolName: string;
   input: Record<string, unknown>;
   suggestions: PermissionUpdate[];
-  resolve: (result: PermissionResult) => void;
+  resolve: (result: PermissionResult, via: ResolvedVia) => void;
 }
 
 interface ChatSession {
@@ -265,6 +291,11 @@ interface ChatSession {
   query: QueryLike | null;
   /** Pi sessions only: the RPC client in place of the SDK query. */
   pi: PiClient | null;
+  /** Codex sessions only: the app-server client in place of the SDK query. */
+  codex: CodexClient | null;
+  /** Codex sessions: the server requests awaiting the pane's answer, by
+      their JSON-RPC id → the pending permission's id. */
+  codexRequests: Map<string, string>;
   abort: AbortController;
   pending: Map<string, PendingPermission>;
   /** A user message is in and its result is not yet out. */
@@ -282,6 +313,8 @@ interface ChatSession {
   stream: StreamContext;
   /** Streaming state for mapPiEvent. */
   piStream: PiStreamContext;
+  /** Streaming state for mapCodexNotification. */
+  codexStream: CodexStreamContext;
 }
 
 // The registry hangs off globalThis: `bun --hot` swaps modules but keeps
@@ -342,7 +375,7 @@ function recordOf(session: ChatSession) {
     name: m.name,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
-    agent: m.agent === "pi" ? PI_PANE_AGENT : PANE_AGENT,
+    agent: m.agent === "pi" ? PI_PANE_AGENT : m.agent === "codex" ? CODEX_PANE_AGENT : PANE_AGENT,
     dataRepo: m.dataRepo,
     ...(m.codeRepo ? { codeRepo: m.codeRepo } : {}),
     cwd: m.cwd,
@@ -411,6 +444,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     input: new InputQueue(),
     query: null,
     pi: null,
+    codex: null,
+    codexRequests: new Map(),
     abort: new AbortController(),
     pending: new Map(),
     busy: false,
@@ -422,6 +457,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     stderrTail: [],
     stream: { messageId: null },
     piStream: newPiStream(),
+    codexStream: newCodexStream(),
   };
   registry().set(id, session);
   installShutdownHook();
@@ -429,6 +465,11 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
 
   if (agent === "pi") {
     startPi(session, opts, now);
+    await saveRecord(session);
+    return { ...session.meta };
+  }
+  if (agent === "codex") {
+    startCodex(session, opts, now);
     await saveRecord(session);
     return { ...session.meta };
   }
@@ -680,6 +721,348 @@ function piExited(session: ChatSession, code: number | null, error?: Error): Pro
   return finish(session, "error", detail(`Pi exited with code ${code}.`));
 }
 
+// --- Codex (src/server/codexChat.ts) ----------------------------------------
+//
+// `codex app-server` in place of the SDK query: JSON-RPC over stdin/stdout.
+// A chat is one Codex thread; a turn is `turn/start`, a stop is
+// `turn/interrupt`, and the approvals Codex asks for on the way arrive as
+// requests from the server, which the pane's permission cards answer. Codex
+// has no permission modes but an approval policy and a sandbox; the pane's
+// modes map onto those (codexPolicy) and travel with every turn.
+
+const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
+const rec = (value: unknown): CodexParams | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as CodexParams) : null;
+
+/** Spawn Codex for this session and wire its traffic into the log. */
+function startCodex(session: ChatSession, opts: CreateChatOptions, now: Date): void {
+  session.codex = new CodexClient({
+    cwd: session.meta.cwd,
+    onNotification: (method, params) => handleCodexNotification(session, method, params),
+    onServerRequest: (id, method, params) => handleCodexRequest(session, id, method, params),
+    onStderr: (line) => {
+      session.stderrTail = [...session.stderrTail, line].slice(-5);
+    },
+    onExit: (code, error) => void codexExited(session, code, error),
+  });
+  // The prompt is the first turn, once the thread is up; it shows in the
+  // transcript straight away, as it does for the other agents, and the
+  // composer stays closed until Codex has taken it.
+  if (opts.prompt) {
+    session.turn = 1;
+    session.busy = true;
+    emit(session, { kind: "user", id: randomUUID(), text: opts.prompt }, now);
+  }
+  void codexReady(session, opts.prompt);
+}
+
+/**
+ * The handshake: `initialize`, then `thread/start` on the work dir with the
+ * pane's mode as the policy. The thread's answer says the session is ready
+ * to type into — and brings the model and Codex's own thread id.
+ */
+async function codexReady(session: ChatSession, prompt?: string): Promise<void> {
+  const client = session.codex!;
+  const failed = (why: string) => {
+    const tail = session.stderrTail.join("\n");
+    return finish(
+      session,
+      "error",
+      tail ? `Could not start Codex: ${why}\n${tail}` : `Could not start Codex: ${why}`,
+      "spawn_failed",
+    );
+  };
+  const init = await client.request("initialize", {
+    clientInfo: CODEX_CLIENT_INFO,
+    capabilities: { experimentalApi: false, requestAttestation: false },
+  });
+  if (FINAL.has(session.meta.status)) return;
+  if (!init.ok) return failed(init.error);
+  const policy = codexPolicy(session.meta.permissionMode);
+  const started = await client.request("thread/start", {
+    cwd: session.meta.cwd,
+    approvalPolicy: policy.approvalPolicy,
+    sandbox: policy.sandbox,
+  });
+  if (FINAL.has(session.meta.status)) return;
+  if (!started.ok) return failed(started.error);
+  const info = codexThreadInfo(started.result);
+  if (!info.threadId) return failed("thread/start answered without a thread id");
+  session.meta.agentSessionId = info.threadId;
+  if (info.model) session.meta.model = info.model;
+  emit(session, {
+    kind: "note",
+    level: "info",
+    code: "init",
+    text: `Codex${info.cliVersion ? ` ${info.cliVersion}` : ""} · ${info.model ?? "no model"} · ${session.meta.cwd}`,
+  });
+  // The one thing a Claude user must not assume here: the modes are Codex's
+  // approval policy and sandbox in disguise, set per turn.
+  emit(session, {
+    kind: "note",
+    level: "info",
+    code: "init",
+    text: "Permission modes map onto Codex's approval policy and sandbox; a change applies from the next turn.",
+  });
+  // Named after the session, so `codex resume` lists it by that name.
+  void client.request("thread/name/set", { threadId: info.threadId, name: session.meta.name });
+  void saveRecord(session);
+  if (session.meta.status === "starting") {
+    setStatus(session, session.busy ? "running" : "idle", {
+      agentSessionId: info.threadId,
+      ...(session.meta.model ? { model: session.meta.model } : {}),
+      permissionMode: session.meta.permissionMode,
+      commands: session.commands,
+    });
+  }
+  if (prompt) await codexTurn(session, prompt);
+}
+
+/** One turn: the text to Codex, with the pane's mode as the policy overrides. */
+async function codexTurn(session: ChatSession, text: string): Promise<void> {
+  const client = session.codex!;
+  const threadId = session.meta.agentSessionId;
+  if (!threadId || FINAL.has(session.meta.status)) return;
+  const policy = codexPolicy(session.meta.permissionMode);
+  const res = await client.request("turn/start", {
+    threadId,
+    input: codexTextInput(text),
+    approvalPolicy: policy.approvalPolicy,
+    sandboxPolicy: codexSandboxPolicy(policy.sandbox),
+  });
+  if (FINAL.has(session.meta.status)) return;
+  if (!res.ok) {
+    // The turn never started: say so, and give the composer back.
+    session.busy = false;
+    emit(session, { kind: "note", level: "error", code: "api", text: `Codex refused the turn: ${res.error}` });
+    if (session.meta.status === "running") setStatus(session, "idle");
+    return;
+  }
+  const turn = rec(res.result.turn);
+  const turnId = turn ? str(turn.id) : null;
+  if (turnId && session.codexStream.turnId === null) session.codexStream.turnId = turnId;
+}
+
+function handleCodexNotification(session: ChatSession, method: string, params: CodexParams): void {
+  if (FINAL.has(session.meta.status)) return;
+  if (method === "turn/started") {
+    session.busy = true;
+    if (session.meta.status === "idle") setStatus(session, "running");
+  }
+  if (method === "serverRequest/resolved") {
+    // Codex withdrew a question of its own (an interrupt, a dying turn): the
+    // card closes without an answer, and none is sent.
+    const key = String(params.requestId);
+    const requestId = session.codexRequests.get(key);
+    if (requestId) {
+      session.codexRequests.delete(key);
+      resolvePending(session, requestId, { behavior: "deny", message: "Cancelled" }, "interrupt");
+    }
+    return;
+  }
+  for (const body of mapCodexNotification(method, params, { turn: session.turn }, session.codexStream)) {
+    emit(session, body);
+  }
+  if (method === "turn/completed") {
+    // A card still open belongs to a turn that is over.
+    denyAllPending(session, "interrupt", "The turn ended");
+    session.busy = false;
+    if (!FINAL.has(session.meta.status)) setStatus(session, "idle");
+  }
+}
+
+/** What a Codex server request becomes in the pane, and what its answer becomes for Codex. */
+interface CodexAsk {
+  toolName: string;
+  input: Record<string, unknown>;
+  suggestions: PermissionUpdate[];
+  title?: string;
+  /** The JSON-RPC result for the pane's answer; null refuses the request. */
+  answer: (result: PermissionResult, via: ResolvedVia) => unknown | null;
+}
+
+/** "Allow always" for Codex: a rule shaped like the SDK's, so the card
+    offers it; it means "for the rest of the session". */
+function sessionRule(toolName: string, ruleContent: string): PermissionUpdate {
+  return {
+    type: "addRules",
+    rules: [{ toolName, ...(ruleContent ? { ruleContent } : {}) }],
+    behavior: "allow",
+    destination: "session",
+  };
+}
+
+const DENIED_DEFAULT = "Denied in SpecDriven";
+
+/** Raise a permission card for a Codex request, and answer Codex from the card. */
+function askCodex(session: ChatSession, rpcId: RpcId, ask: CodexAsk): void {
+  const client = session.codex!;
+  const requestId = randomUUID();
+  const key = String(rpcId);
+  session.codexRequests.set(key, requestId);
+  session.pending.set(requestId, {
+    toolName: ask.toolName,
+    input: ask.input,
+    suggestions: ask.suggestions,
+    resolve: (result, via) => {
+      // Withdrawn by Codex already (serverRequest/resolved): nothing to answer.
+      if (!session.codexRequests.delete(key)) return;
+      if (result.behavior === "deny" && via === "user") session.codexStream.denials += 1;
+      const reply = ask.answer(result, via);
+      if (reply === null) {
+        client.respondError(rpcId, result.behavior === "deny" ? result.message : "Not answered", -32000);
+      } else {
+        client.respond(rpcId, reply);
+      }
+      // A decline carries no words in Codex's protocol; the reason the user
+      // typed goes in as steering, so Codex still reads it.
+      if (result.behavior === "deny" && via === "user" && result.message !== DENIED_DEFAULT) {
+        steerCodex(session, `The user declined that, saying: ${result.message}`);
+      }
+    },
+  });
+  emit(session, {
+    kind: "permission_request",
+    requestId,
+    toolName: ask.toolName,
+    input: ask.input,
+    suggestions: ask.suggestions,
+    ...(ask.title ? { title: ask.title } : {}),
+  });
+  setStatus(session, "awaiting_input");
+}
+
+/** A word in Codex's ear mid-turn; best effort, since the turn may be past steering. */
+function steerCodex(session: ChatSession, text: string): void {
+  const threadId = session.meta.agentSessionId;
+  const turnId = session.codexStream.turnId;
+  if (!threadId || !turnId || !session.codex) return;
+  void session.codex.request("turn/steer", {
+    threadId,
+    expectedTurnId: turnId,
+    input: codexTextInput(text),
+  });
+}
+
+/** Codex asks; the pane answers (specs: "permission card"). */
+function handleCodexRequest(session: ChatSession, id: RpcId, method: string, params: CodexParams): void {
+  const client = session.codex!;
+  if (FINAL.has(session.meta.status)) {
+    client.respondError(id, "The session has ended", -32000);
+    return;
+  }
+  const reason = str(params.reason);
+  const item = session.codexStream.items.get(str(params.itemId) ?? "");
+  switch (method) {
+    case "item/commandExecution/requestApproval": {
+      const command = str(params.command) ?? (item ? str(item.command) : null) ?? "";
+      const cwd = str(params.cwd) ?? (item ? str(item.cwd) : null);
+      const amendment = Array.isArray(params.proposedExecpolicyAmendment)
+        ? params.proposedExecpolicyAmendment
+        : null;
+      askCodex(session, id, {
+        toolName: CODEX_TOOL.command,
+        input: { command, ...(cwd ? { cwd } : {}), ...(reason ? { reason } : {}) },
+        suggestions: [sessionRule(CODEX_TOOL.command, command)],
+        title: "Codex wants to run a command",
+        answer: (result, via) => {
+          if (result.behavior !== "allow") return { decision: via === "user" ? "decline" : "cancel" };
+          if (!result.updatedPermissions) return { decision: "accept" };
+          return {
+            decision: amendment
+              ? { acceptWithExecpolicyAmendment: { execpolicy_amendment: amendment } }
+              : "acceptForSession",
+          };
+        },
+      });
+      return;
+    }
+    case "item/fileChange/requestApproval": {
+      const changes = item && Array.isArray(item.changes) ? item.changes : [];
+      const files = changes.map((c) => rec(c)).filter((c): c is CodexParams => c !== null).map(fileChangeLine);
+      const grantRoot = str(params.grantRoot);
+      askCodex(session, id, {
+        toolName: CODEX_TOOL.fileChange,
+        input: {
+          file_path: files.join(", "),
+          files,
+          ...(reason ? { reason } : {}),
+          ...(grantRoot ? { grantRoot } : {}),
+        },
+        suggestions: [sessionRule(CODEX_TOOL.fileChange, files.join(", "))],
+        title: "Codex wants to change files",
+        answer: (result, via) => {
+          if (result.behavior !== "allow") return { decision: via === "user" ? "decline" : "cancel" };
+          return { decision: result.updatedPermissions ? "acceptForSession" : "accept" };
+        },
+      });
+      return;
+    }
+    case "item/tool/requestUserInput": {
+      const questions = codexQuestions(params);
+      if (questions.length === 0) {
+        client.respond(id, { answers: {} });
+        return;
+      }
+      // The pane's question card, keyed the way Claude's AskUserQuestion is.
+      askCodex(session, id, {
+        toolName: "AskUserQuestion",
+        input: { questions: questions.map((q) => q.question) },
+        suggestions: [],
+        answer: (result) =>
+          result.behavior === "allow" ? codexAnswers(questions, rec(result.updatedInput)?.answers) : null,
+      });
+      return;
+    }
+    case "item/permissions/requestApproval": {
+      const requested = rec(params.permissions) ?? {};
+      const network = rec(requested.network);
+      const fileSystem = rec(requested.fileSystem);
+      askCodex(session, id, {
+        toolName: "Permissions",
+        input: { ...(reason ? { reason } : {}), permissions: requested },
+        suggestions: [sessionRule("Permissions", reason ?? "")],
+        title: "Codex asks for more permissions",
+        answer: (result) =>
+          result.behavior === "allow"
+            ? {
+                permissions: { ...(network ? { network } : {}), ...(fileSystem ? { fileSystem } : {}) },
+                scope: result.updatedPermissions ? "session" : "turn",
+              }
+            : null,
+      });
+      return;
+    }
+    case "mcpServer/elicitation/request": {
+      // Blocks the turn until answered, and the pane has nothing to show it
+      // in — cancel it, and say so.
+      client.respond(id, { action: "cancel", content: null, _meta: null });
+      emit(session, {
+        kind: "note",
+        level: "info",
+        code: "api",
+        text: `An MCP server (${str(params.serverName) ?? "unknown"}) asked for input the pane cannot show — dismissed.`,
+      });
+      return;
+    }
+    default:
+      // Dynamic tools, auth token refreshes, attestations: never opted into.
+      client.respondError(id, `${method} is not supported by SpecDriven`);
+  }
+}
+
+/** Codex is gone: an exit code of its own, or an Error where it never started. */
+function codexExited(session: ChatSession, code: number | null, error?: Error): Promise<void> {
+  if (FINAL.has(session.meta.status)) return Promise.resolve();
+  const tail = session.stderrTail.join("\n");
+  const detail = (text: string) => (tail ? `${text}\n${tail}` : text);
+  if (error) {
+    return finish(session, "error", detail(`Could not start Codex: ${error.message}`), "spawn_failed");
+  }
+  if (code === 0 || code === null) return finish(session, "ended", "Codex exited.");
+  return finish(session, "error", detail(`Codex exited with code ${code}.`));
+}
+
 export interface StreamContext {
   /** The API message id the current stream_event deltas belong to. */
   messageId: string | null;
@@ -864,7 +1247,7 @@ function resolvePending(
   const pending = session.pending.get(requestId);
   if (!pending) return;
   session.pending.delete(requestId);
-  pending.resolve(result);
+  pending.resolve(result, via);
   emit(session, { kind: "permission_resolved", requestId, behavior: result.behavior, via });
   if (session.pending.size === 0 && session.meta.status === "awaiting_input") {
     setStatus(session, "running");
@@ -889,6 +1272,7 @@ function finish(
   setStatus(session, status);
   session.input.close();
   session.pi?.close();
+  session.codex?.close();
   return saveRecord(session);
 }
 
@@ -935,7 +1319,8 @@ export function sendChatMessage(id: string, text: string): ChatEvent {
   if (session.busy) throw new ChatError(409, "A turn is in progress — Stop it first");
   session.turn += 1;
   session.busy = true;
-  if (session.pi) session.pi.send({ type: "prompt", message: trimmed });
+  if (session.codex) void codexTurn(session, trimmed);
+  else if (session.pi) session.pi.send({ type: "prompt", message: trimmed });
   else session.input.push(userMessage(trimmed));
   const event = emit(session, { kind: "user", id: randomUUID(), text: trimmed });
   if (session.meta.status === "idle") setStatus(session, "running");
@@ -978,6 +1363,13 @@ export async function interruptChat(id: string): Promise<void> {
   }
   denyAllPending(session, "interrupt", "Interrupted by the user");
   emit(session, { kind: "note", level: "info", code: "interrupted", text: "Stopped." });
+  if (session.codex) {
+    // The turn's own `turn/completed` (interrupted) puts the session back to idle.
+    const threadId = session.meta.agentSessionId;
+    const turnId = session.codexStream.turnId;
+    if (threadId && turnId) await session.codex.request("turn/interrupt", { threadId, turnId });
+    return;
+  }
   if (session.pi) {
     // Pi answers `abort` only once it is idle again; the turn's own
     // `agent_settled` is what puts the session back to idle.
@@ -992,6 +1384,18 @@ export async function setChatPermissionMode(id: string, mode: PermissionMode): P
   if (FINAL.has(session.meta.status)) throw new ChatError(409, "The session has ended");
   if (session.meta.agent === "pi") {
     throw new ChatError(409, "Pi has no permission modes — it runs its own tools");
+  }
+  if (session.meta.agent === "codex") {
+    // The mode travels with every turn/start; a turn under way keeps the
+    // policy it started with.
+    if (session.meta.status === "starting") throw new ChatError(409, "Codex is still starting");
+    session.meta.permissionMode = mode;
+    emit(session, { kind: "mode", permissionMode: mode });
+    if (session.busy) {
+      emit(session, { kind: "note", level: "info", code: "api", text: "The new mode applies from the next turn." });
+    }
+    void saveRecord(session);
+    return;
   }
   if (session.meta.status === "starting") throw new ChatError(409, "Claude is still starting");
   await session.query!.setPermissionMode(mode);
@@ -1037,6 +1441,7 @@ function installShutdownHook(): void {
       if (FINAL.has(session.meta.status)) continue;
       session.abort.abort();
       session.pi?.close();
+      session.codex?.close();
     }
   });
 }
