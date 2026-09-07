@@ -31,8 +31,8 @@ Users that have read/write access to the repo that stores data.
 # Integration with AI coding agents
 
 "Start session" builds one prompt from the selected specs and hands it to an
-agent — Claude Code Desktop, or the app's own pane driven by Claude or by Pi
-(src/server/agent.ts). Desktop: the full prompt and a `session.json` record are
+agent — Claude Code Desktop, or the app's own pane driven by Claude, by Pi or
+by Codex (src/server/agent.ts). Desktop: the full prompt and a `session.json` record are
 written under
 `<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
 in the auto-pushed data repo — and the app opens
@@ -73,6 +73,28 @@ has no permission protocol: it runs its own tools, so those sessions raise no
 permission cards, offer no permission mode, and say so in the transcript.
 Extension dialogs, which would otherwise block pi forever, are cancelled with
 a note.
+
+Codex: the same pane, driven by OpenAI's Codex CLI (src/server/codexChat.ts),
+offered when the `codex` binary is on PATH. `codex app-server` speaks
+JSON-RPC-shaped lines on stdin/stdout: requests out (`initialize`,
+`thread/start`, `turn/start`, `turn/interrupt`, `turn/steer`), a response per
+request correlated by id, notifications in (`item/started`,
+`item/agentMessage/delta`, `item/completed`, `turn/completed`, `error`) and —
+unlike pi — requests *from* the server that block the turn until answered:
+`item/commandExecution/requestApproval`, `item/fileChange/requestApproval`,
+`item/tool/requestUserInput`. The notifications are translated into the shared
+event log (a command or file change is a tool row, an agent message a streamed
+reply, `turn/completed` the turn footer); the server requests become the same
+permission and question cards Claude raises, answered with Codex's decisions
+(`accept`, `acceptForSession` for "Allow always", `decline`, `cancel` on a
+Stop). Codex has no permission modes but an approval policy and a sandbox, so
+the pane's modes map onto those (default → on-request + workspace-write,
+acceptEdits → on-failure, plan → read-only, bypass → never + full access) and
+travel with every `turn/start`; a change applies from the next turn. The
+protocol shapes were read out of `codex app-server generate-ts` for Codex CLI
+0.141, so they are version-coupled. The record says `agent: "codex-pane"` and
+carries Codex's thread id as `agentSessionId`; the thread is named after the
+session, so `codex resume` lists it by that name.
 
 The feature spec lives in the spec repo as
 `specs/agents/coding-agent-ui.feature.md`; the spec repo is never edited from

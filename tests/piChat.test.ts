@@ -537,7 +537,7 @@ test("Start session can open the generated prompt in a pi pane session", async (
 test("an unknown agent is refused, and Pi needs its CLI", async () => {
   const bad = await api("/api/agent/chat", "POST", { name: "x", agent: "nope" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("agent must be claude or pi");
+  expect((await bad.json()).error).toContain("agent must be claude, pi or codex");
 
   setPiAvailability(() => false);
   const gone = await api("/api/agent/chat", "POST", { name: "x", agent: "pi" });
