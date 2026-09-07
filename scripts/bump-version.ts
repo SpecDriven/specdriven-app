@@ -8,9 +8,9 @@
  *   bun run bump 1.2.3     an explicit version
  *
  * package.json is the one place the version lives — it is what
- * electron-builder names the desktop artifacts after, and what the installer
- * looks for under $BASE_URL/$VERSION. This writes it, commits that one file,
- * and tags v<version>.
+ * electron-builder names the desktop artifacts after, what the release is
+ * tagged as, and what install.sh looks for under releases/download/v<version>.
+ * This writes it, commits that one file, and tags v<version>.
  *
  * Pushing is left to you, since pushing the tag is what publishes the release:
  *
