@@ -465,6 +465,28 @@ function writeRecent(list: RecentEntry[]) {
  */
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
+/**
+ * Text onto the clipboard, false when neither way works. navigator.clipboard
+ * needs a secure context and permission — absent e.g. on a plain-http LAN
+ * host — so a selection-based copy stands in for it there.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  }
+}
+
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
 // session" runs in — a new session in Claude Code Desktop, or the app's own
 // coding agent pane (specs/agents/coding-agent-ui.feature.md) with Claude,
@@ -478,6 +500,9 @@ export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
     ? value
     : null;
 }
+
+/** The session dialog's one non-agent option: copy the prompt, run nothing. */
+export const CLIPBOARD_TARGET = "clipboard";
 
 export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
   desktop: "Claude Code Desktop",
@@ -1799,6 +1824,42 @@ export function App() {
   // one agent installed, where to run. The server builds a prompt from the
   // selection and opens it in Claude Code Desktop or in the coding agent
   // pane. A failure lands in the error box.
+  // "Copy prompt to clipboard": the server builds the very prompt a session
+  // would run and hands it back; nothing is launched, so the selection stays
+  // put only when the copy fails.
+  const copySessionPrompt = async (
+    name: string,
+    files: { fileName: string; scenarios?: ScenarioPick[] }[],
+  ) => {
+    setSessionRunning(true);
+    setSessionNotice(`Building the prompt for "${name}"…`);
+    try {
+      const res = await fetch("/api/agent/session/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, files }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSessionNotice(null);
+        setSessionError(data.error ?? "Could not build the prompt");
+        return;
+      }
+      if (!(await copyText(data.prompt as string))) {
+        setSessionNotice(null);
+        setSessionError("Could not copy the prompt to the clipboard.");
+        return;
+      }
+      setSessionNotice(`Prompt for "${name}" copied to the clipboard.`);
+      setSpecSelection(new Map());
+    } catch (e) {
+      setSessionNotice(null);
+      setSessionError((e as Error).message);
+    } finally {
+      setSessionRunning(false);
+    }
+  };
+
   const startSession = async () => {
     const files = sessionFiles();
     if (files.length === 0 || sessionRunning) return;
@@ -1811,7 +1872,7 @@ export function App() {
     // Every agent the session can run in here; a choice only when there is
     // more than one.
     const repoWord = codeRepo ? "the code repo" : "the data repo";
-    const choices = [
+    const agentChoices = [
       ...(canOpenClaudeDesktop
         ? [
             {
@@ -1853,25 +1914,34 @@ export function App() {
           ]
         : []),
     ];
-    // No agent installed: nothing to run the session in, so say so instead
-    // of asking for a name.
-    if (choices.length === 0) {
-      setSessionError(
-        "No coding agent found — install Claude.app, or the `claude`, `codex` or `pi` command, to start a session",
-      );
-      return;
-    }
-    const only = choices[0]!.value as CodeGenTarget;
+    // The clipboard is always on offer, and first: it needs no agent
+    // installed, and the prompt it copies is the same text a session would
+    // run — to paste into an agent the app doesn't drive.
+    const choices = [
+      {
+        value: CLIPBOARD_TARGET,
+        label: "Copy prompt to clipboard",
+        hint: `Copies the prompt for ${repoWord} — paste it into any agent`,
+        confirmLabel: "Copy prompt",
+      },
+      ...agentChoices,
+    ];
+    // With no agent installed the clipboard is all there is, so the dialog
+    // asks for a name without a choice and says what it will do.
+    const only = (agentChoices[0]?.value ?? CLIPBOARD_TARGET) as CodeGenTarget;
     const dialog = {
       title: "Name the session",
       // With a choice of agents each option says what it runs, so the hint
       // names none of them; with only one, it names that one's agent.
-      hint: `Runs ${choices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : only === "codex" ? "Codex" : "Claude"} over ${describeSelection(files)}${where}.`,
+      hint:
+        agentChoices.length === 0
+          ? `Builds a prompt over ${describeSelection(files)}${where} to copy — no coding agent found to run it here.`
+          : `Runs ${agentChoices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : only === "codex" ? "Codex" : "Claude"} over ${describeSelection(files)}${where}, or copies the prompt.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
-      confirmLabel: "Start session",
+      confirmLabel: "Start AI Session",
     };
-    if (choices.length > 1) {
+    if (agentChoices.length > 0) {
       const picked = await promptWithChoice({
         ...dialog,
         choicesLabel: "Run in",
@@ -1880,14 +1950,18 @@ export function App() {
       });
       if (picked === null || !picked.text.trim()) return;
       sessionName = picked.text.trim();
+      if (picked.choice === CLIPBOARD_TARGET) {
+        await copySessionPrompt(sessionName, files);
+        return;
+      }
       target = readCodeGenTarget(picked.choice) ?? only;
       // Remembered, so the next dialog opens on the same choice.
       if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
     } else {
-      const name = await prompt(dialog);
+      const name = await prompt({ ...dialog, confirmLabel: "Copy prompt" });
       if (name === null || !name.trim()) return;
-      sessionName = name.trim();
-      target = only;
+      await copySessionPrompt(name.trim(), files);
+      return;
     }
     setSessionRunning(true);
     setSessionNotice(
@@ -2222,23 +2296,9 @@ export function App() {
   // window, so there the shared url is the registered specdriven:// scheme.
   const copyLink = async (path: string) => {
     const url = location.protocol === "app:" ? desktopLink(path) : location.origin + path;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // navigator.clipboard needs a secure context and permission — absent
-      // e.g. on a plain-http LAN host. Fall back to a selection-based copy.
-      const ta = document.createElement("textarea");
-      ta.value = url;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      const ok = document.execCommand("copy");
-      ta.remove();
-      if (!ok) {
-        toast.error("Could not copy the link to the clipboard.");
-        return;
-      }
+    if (!(await copyText(url))) {
+      toast.error("Could not copy the link to the clipboard.");
+      return;
     }
     setCopied(path);
     window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
@@ -5129,7 +5189,7 @@ export function App() {
                   "Session running…"
                 ) : (
                   <>
-                    <Play size={12} aria-hidden="true" /> Start session
+                    <Play size={12} aria-hidden="true" /> Start AI Session
                     {specSelection.size > 0 ? ` (${specSelection.size})` : ""}
                   </>
                 )}

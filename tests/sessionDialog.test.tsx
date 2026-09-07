@@ -11,7 +11,7 @@ import {
   readCodeGenTarget,
   resolveCodeGenTarget,
 } from "../src/frontend/App";
-import { PromptChoices, initialChoiceOf } from "../src/frontend/ModalPrompts";
+import { PromptChoices, confirmLabelOf, initialChoiceOf } from "../src/frontend/ModalPrompts";
 
 describe("defaultSessionName", () => {
   test("is Session, the local date and time, and the zone's short name", () => {
@@ -121,5 +121,24 @@ describe("PromptChoices", () => {
     expect(initialChoiceOf({ title: "t", choices, initialChoice: "nope" })).toBe("desktop");
     expect(initialChoiceOf({ title: "t", choices })).toBe("desktop");
     expect(initialChoiceOf({ title: "t" })).toBeNull();
+  });
+});
+
+// "Copy prompt to clipboard" (the dialog's top option) does something other
+// than start a session, so the confirm button says so while it is picked.
+describe("confirmLabelOf", () => {
+  const choices = [
+    { value: "clipboard", label: "Copy prompt to clipboard", confirmLabel: "Copy prompt" },
+    { value: "desktop", label: CODE_GEN_TARGET_LABEL.desktop },
+  ];
+
+  test("is the picked choice's own label, else the dialog's", () => {
+    const opts = { title: "t", confirmLabel: "Start AI Session", choices };
+    expect(confirmLabelOf(opts, "clipboard")).toBe("Copy prompt");
+    expect(confirmLabelOf(opts, "desktop")).toBe("Start AI Session");
+    expect(confirmLabelOf({ title: "t", confirmLabel: "Start AI Session" }, null)).toBe(
+      "Start AI Session",
+    );
+    expect(confirmLabelOf({ title: "t" }, null)).toBe("OK");
   });
 });
