@@ -194,6 +194,24 @@ describe("pagePath", () => {
     );
   });
 
+  // specs/app/tasks.feature.md "Support deep link just like Features": an
+  // open task or roadmap page holds the pane, so its own url is the canonical
+  // one — a feature left behind must not keep the address bar.
+  test("an open task or roadmap page is that page's url", () => {
+    expect(pagePath(null, null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
+    expect(pagePath(null, null, "roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
+    // Opening one drops the feature, and the url says so before the state
+    // catches up.
+    expect(pagePath("billing/quotes.feature.md", null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
+    // No page open leaves the feature rules untouched.
+    expect(pagePath("billing/quotes.feature.md", null, null)).toBe("/features/billing/quotes");
+  });
+
+  test("a task url resolves back to the task it was copied from", () => {
+    const fileName = "tasks/sprint-4/ship-v2.md";
+    expect(parseRoute(pagePath(null, null, fileName))).toEqual({ page: fileName });
+  });
+
   test("the shared link resolves back to the page it was copied from", () => {
     const file = "billing/quotes.feature.md";
     const scenarios = [sc("Basic Quote", 1), sc("Basic Quote", 2)];
