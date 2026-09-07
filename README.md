@@ -241,6 +241,17 @@ the release:
 git push origin main --follow-tags
 ```
 
+The tag push runs [.github/workflows/release.yml](.github/workflows/release.yml),
+which checks the tag against `package.json`, zips the tagged tree with
+`git archive` (tracked files only — no `node_modules`, `dist`, or `.env`), and
+creates a `v<version>` release on
+[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release)
+with the zip and its `SHASUMS256.txt` attached. Writing to another repository
+needs the `RELEASE_REPO_TOKEN` Actions secret: a fine-grained personal access
+token with *Contents: read and write* on `specdriven-app-release` alone. A
+release that already exists is not overwritten — re-running on the same tag
+fails, on purpose.
+
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
 build from any other commit is mislabelled.
