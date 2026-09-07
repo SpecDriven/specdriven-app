@@ -1182,17 +1182,23 @@ const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS
 // subsets — and where to run; we build one prompt from them and either open
 // it in the app's own coding agent pane or in Claude Code Desktop. A failure
 // comes back as an error for the client's error box.
-const postAgentSession = withDataDir(async (dir, req) => {
+/**
+ * What a session request resolves to — the name, the selected specs read
+ * from the repo, and where the session would run — or the refusal to send
+ * back. Shared by the session route and the prompt route below, so a copied
+ * prompt is the same text a started session gets.
+ */
+async function resolveSessionRequest(
+  dir: string,
+  body: { name?: unknown; files?: unknown },
+): Promise<{ name: string; specs: SpecInput[]; place: SessionPlace } | Response> {
   // The Settings switch is the gate, enforced here and not only in the UI:
   // switched off, nothing can hand a spec to Claude.
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
-  const target = normalizeCodeGenTarget(body.target);
-  if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
   const files = parseSessionFiles(body.files);
   if (files === null) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
@@ -1228,7 +1234,16 @@ const postAgentSession = withDataDir(async (dir, req) => {
       400,
     );
   }
-  const place: SessionPlace = codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
+  return { name, specs, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+}
+
+const postAgentSession = withDataDir(async (dir, req) => {
+  const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
+  const resolved = await resolveSessionRequest(dir, body);
+  if (resolved instanceof Response) return resolved;
+  const target = normalizeCodeGenTarget(body.target);
+  if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
+  const { name, specs, place } = resolved;
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
@@ -1260,6 +1275,18 @@ const postAgentSession = withDataDir(async (dir, req) => {
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
+});
+
+// The same prompt, for the clipboard: the session dialog's "Copy prompt to
+// clipboard" option builds the prompt without running anything, so it can be
+// pasted into an agent the app doesn't drive. Nothing is launched and no
+// session is recorded — only the text comes back.
+const postAgentSessionPrompt = withDataDir(async (dir, req) => {
+  const body = (await req.json()) as { name?: unknown; files?: unknown };
+  const resolved = await resolveSessionRequest(dir, body);
+  if (resolved instanceof Response) return resolved;
+  const { name, specs, place } = resolved;
+  return json({ name, prompt: buildSessionPrompt(name, specs, place) });
 });
 
 // ---------------------------------------------------------------------------
@@ -1702,6 +1729,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/agent/session", postAgentSession],
+  ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],
   ["POST", "/api/agent/chat", postAgentChat],
   ["GET", "/api/agent/chat", getAgentChats],
   ["GET", "/api/agent/chat/:id", getAgentChat],

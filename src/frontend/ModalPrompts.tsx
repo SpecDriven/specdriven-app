@@ -38,6 +38,9 @@ export interface PromptChoice {
   value: string;
   /** Secondary line under the label. */
   hint?: string;
+  /** Confirm-button label while this choice is picked — for an option that
+      does something other than what the dialog's own confirmLabel says. */
+  confirmLabel?: string;
 }
 
 /** What a prompt with choices resolves to: the text and the picked value. */
@@ -63,6 +66,12 @@ export function initialChoiceOf(opts: PromptOptions): string | null {
   if (choices.length === 0) return null;
   const wanted = choices.find((c) => c.value === opts.initialChoice);
   return (wanted ?? choices[0]!).value;
+}
+
+/** The confirm button's label: the picked choice's own, else the dialog's. */
+export function confirmLabelOf(opts: PromptOptions, choice: string | null): string {
+  const picked = (opts.choices ?? []).find((c) => c.value === choice);
+  return picked?.confirmLabel ?? opts.confirmLabel ?? "OK";
 }
 
 /**
@@ -239,7 +248,7 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
                   Cancel
                 </button>
                 <button type="submit" disabled={!draft.trim()}>
-                  {request.opts.confirmLabel ?? "OK"}
+                  {confirmLabelOf(request.opts, choice)}
                 </button>
               </div>
             </form>
