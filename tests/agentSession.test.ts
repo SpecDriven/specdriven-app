@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import {
   desktopOpener,
+  setCodexAvailability,
   setDesktopAvailability,
   setDesktopRunner,
   setPiAvailability,
@@ -46,6 +47,8 @@ beforeEach(async () => {
   // Pi is not on the developer's or CI's PATH; the pi session itself is
   // driven by a fake in tests/piChat.test.ts.
   setPiAvailability(() => true);
+  // Likewise Codex: its session is driven by a fake in tests/codexChat.test.ts.
+  setCodexAvailability(() => true);
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
   await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
@@ -56,6 +59,7 @@ afterEach(async () => {
   setDesktopAvailability(null);
   setDesktopRunner(null);
   setPiAvailability(null);
+  setCodexAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -82,7 +86,7 @@ const FILES = [{ fileName: "quote.feature.md" }];
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
   expect(res.status).toBe(400);
-  expect((await res.json()).error).toContain("target must be desktop, pane or pi");
+  expect((await res.json()).error).toContain("target must be desktop, pane, pi or codex");
   expect(calls).toHaveLength(0);
 });
 
@@ -196,6 +200,25 @@ test("the state reports whether a session can run in Pi", async () => {
   expect(((await again.json()) as { canRunPi: boolean }).canRunPi).toBe(false);
 });
 
+// Codex (src/server/codexChat.ts): the same choice at the route; the session
+// it opens is the pane one, driven over Codex's app-server protocol
+// (tests/codexChat.test.ts).
+test("without the codex CLI the codex target is refused before anything runs", async () => {
+  setCodexAvailability(() => false);
+  const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "codex" });
+  expect(res.status).toBe(502);
+  expect((await res.json()).error).toContain("Codex CLI not found");
+  expect(calls).toHaveLength(0);
+});
+
+test("the state reports whether a session can run in Codex", async () => {
+  const res = (await handleApi(new Request("http://localhost/api/state")))!;
+  expect(((await res.json()) as { canRunCodex: boolean }).canRunCodex).toBe(true);
+  setCodexAvailability(() => false);
+  const again = (await handleApi(new Request("http://localhost/api/state")))!;
+  expect(((await again.json()) as { canRunCodex: boolean }).canRunCodex).toBe(false);
+});
+
 test("the Run in choice round-trips through the settings file", async () => {
   const before = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await before.json()) as { codeGenTarget: unknown }).codeGenTarget).toBeNull();
@@ -205,5 +228,5 @@ test("the Run in choice round-trips through the settings file", async () => {
   expect((await readState(root)).codeGenTarget).toBe("pane");
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, pane or pi");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, pane, pi or codex");
 });

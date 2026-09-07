@@ -34,7 +34,7 @@ export type {
 };
 
 /** What the pane calls each agent. */
-export const AGENT_LABEL: Record<ChatAgent, string> = { claude: "Claude", pi: "Pi" };
+export const AGENT_LABEL: Record<ChatAgent, string> = { claude: "Claude", pi: "Pi", codex: "Codex" };
 
 // --- Transcript ------------------------------------------------------------
 
@@ -446,8 +446,10 @@ export interface AgentChatStore {
   list: ChatSessionMeta[];
   /** Whether the Claude CLI is there (from /api/state). */
   available: boolean;
-  /** Whether the Pi CLI is there — a pane session can run on either. */
+  /** Whether the Pi CLI is there — a pane session can run on any of them. */
   piAvailable: boolean;
+  /** Whether the Codex CLI is there. */
+  codexAvailable: boolean;
 }
 
 let state: AgentChatStore = {
@@ -458,6 +460,7 @@ let state: AgentChatStore = {
   list: [],
   available: false,
   piAvailable: false,
+  codexAvailable: false,
 };
 const listeners = new Set<() => void>();
 const streams = new Map<string, AbortController>();
@@ -613,9 +616,17 @@ export interface CreateSessionOptions {
 }
 
 export const agentChat = {
-  setAvailable(available: boolean, piAvailable = state.piAvailable): void {
-    if (available !== state.available || piAvailable !== state.piAvailable) {
-      set({ available, piAvailable });
+  setAvailable(
+    available: boolean,
+    piAvailable = state.piAvailable,
+    codexAvailable = state.codexAvailable,
+  ): void {
+    if (
+      available !== state.available ||
+      piAvailable !== state.piAvailable ||
+      codexAvailable !== state.codexAvailable
+    ) {
+      set({ available, piAvailable, codexAvailable });
     }
   },
   openPane(): void {

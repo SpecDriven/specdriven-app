@@ -8,12 +8,17 @@
 // Code gen sessions run too, simulated (specs/roadmap/demo.md "Demo App"):
 // setupDemo fills the pane's injection seams so the app reports one agent —
 // Claude in a pane — and drives it with the script in src/server/demoAgent.ts
-// instead of a subprocess. Claude Code Desktop and Pi report unavailable, so
+// instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
 // the session dialog offers no choice and nothing can reach a real CLI.
 
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { setClaudeAvailability, setDesktopAvailability, setPiAvailability } from "./agent";
+import {
+  setClaudeAvailability,
+  setCodexAvailability,
+  setDesktopAvailability,
+  setPiAvailability,
+} from "./agent";
 import { setQueryFactory } from "./agentChat";
 import { simulatedQuery } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
@@ -111,10 +116,11 @@ export async function setupDemo(): Promise<void> {
   setFolderChooser(null);
   // The coding agent pane, simulated: the app reports the Claude CLI present
   // (so the pane, its toggle and the session dialog are all live) and the
-  // other two agents absent, then answers every session with the script.
+  // other agents absent, then answers every session with the script.
   // Nothing probes PATH and nothing is spawned — see src/server/demoAgent.ts.
   setClaudeAvailability(() => true);
   setPiAvailability(() => false);
+  setCodexAvailability(() => false);
   setDesktopAvailability(() => false);
   setQueryFactory(simulatedQuery);
   await reseedDemo();
