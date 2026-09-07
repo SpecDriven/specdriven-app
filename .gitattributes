@@ -1,0 +1,2 @@
+# Files excluded from the release source zip (built with `git archive` in .github/workflows/release.yml).
+docs/DEVELOPMENT.md export-ignore
