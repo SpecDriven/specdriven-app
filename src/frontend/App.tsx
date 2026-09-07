@@ -1287,8 +1287,10 @@ export function App() {
 
   // Canonical url (specs/navigation.spec.md "Resolution rules"): the address
   // bar shows the page that is open — the scenario page's own url while it is
-  // open, the feature's otherwise. Opening a scenario page pushes, like a
-  // feature switch does in openFeature, so Back leaves it the way `<` does.
+  // open, the feature's otherwise, and an open roadmap page or task's own url
+  // while one holds the pane (specs/app/tasks.feature.md "Support deep link
+  // just like Features"). Opening a scenario page pushes, like a feature
+  // switch does in openFeature, so Back leaves it the way `<` does.
   // Everything else rewrites in place: a rename moving an open page's url
   // must not leave the retired url behind for Back to land on.
   useEffect(() => {
@@ -1296,7 +1298,7 @@ export function App() {
     // A tests view owns its url (openTests pushes it); with no feature
     // selected this effect would otherwise rewrite it to `/`.
     if (testsView || issuesView) return;
-    const url = pagePath(selected, paneScenario);
+    const url = pagePath(selected, paneScenario, openPageFile);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
     if (location.pathname === url) return;
@@ -1306,23 +1308,27 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, testsView, issuesView]);
+  }, [loading, needsRepo, selected, paneScenario, openPageFile, testsView, issuesView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
   useEffect(() => {
     const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
+    // An open roadmap page or task names the window the way a feature does, so
+    // a shared link previews as that page (specs/app/tasks.feature.md).
     document.title = testsView
       ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
       : issuesView
         ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
+      : openPage
+        ? `SpecDriven — ${openPage.name || openPage.fileName}`
       : !selected || !feature
         ? "SpecDriven"
         : s
           ? `SpecDriven — ${name} · ${s.name} v${s.version}`
           : `SpecDriven — ${name}`;
-  }, [selected, feature, paneScenario, testsView, testingStore, issuesView, issuesStore]);
+  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -2510,9 +2516,15 @@ export function App() {
       error?: string;
     };
     if (!res.ok || typeof data.content !== "string") {
-      // Gone — deleted, renamed, or a stale deep link.
+      // Gone — deleted, renamed, or a stale deep link. A missing page says so
+      // the way a missing feature does (specs/navigation.spec.md "link to a
+      // missing feature"); any other failure keeps the server's own message.
       if (openPageRef.current?.fileName === fileName) closePage({ save: false });
-      toast.error(data.error ?? `The ${tab.noun} "${fileName}" was not found — the link may be stale.`);
+      toast.error(
+        res.status === 404
+          ? `${tab.noun[0]!.toUpperCase()}${tab.noun.slice(1)} "${fileName}" not found — the link may be stale.`
+          : (data.error ?? `Could not open the ${tab.noun} "${fileName}"`),
+      );
       await loadPages(tab.folder);
       return;
     }
@@ -6327,6 +6339,26 @@ export function App() {
                   savedAt={savedAt}
                   dirty={openPageText !== openPageSaved.current}
                 />
+                {/* The same "Copy link" the feature name carries
+                    (specs/navigation.spec.md "share a link"), for the page's
+                    own url (specs/app/tasks.feature.md). */}
+                <Tooltip
+                  label={copied === pageLink(openPage.fileName) ? "Copied" : "Copy link"}
+                  keys="mod+shift+c"
+                >
+                  <button
+                    type="button"
+                    className="ibtn"
+                    aria-label="Copy link"
+                    onClick={() => void copyLink(pageLink(openPage.fileName))}
+                  >
+                    {copied === pageLink(openPage.fileName) ? (
+                      <Check size={15} aria-hidden="true" />
+                    ) : (
+                      <Link size={15} aria-hidden="true" />
+                    )}
+                  </button>
+                </Tooltip>
                 <span className="readme-hint">
                   {`Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
                 </span>
