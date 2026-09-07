@@ -1,26 +1,36 @@
 # Specdriven App
 
 Desktop application designed to enable the practice of evolutionary spec-driven development.
-All data --inclusing the database -- is stored in git. No other dependencies are required.
+All data -- including the database -- is stored in git on a default installation. No other dependencies are required.
+A premium version may use a server database.
 
-## Building from zip file
+## Installing
 
-We are distributing the app as a zip file to allow our customers to apply their security protocols 
-to the source code and build their own binaries. Any AI coding agent should be able
-to easily let you build and run the application.
+We distribute the app as a source zip, so customers can apply their own
+security protocols to the code — and their own supply chain to the
+dependencies — before building their own binaries. Releases live on
+[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release).
 
-Build tool:  [Bun](https://bun.sh)
-
-### Install dependencies
+The installer fetches the latest one:
 
 ```sh
-bun install
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
 ```
 
-### Run the desktop app
+It downloads `specdriven-<version>-src.zip`, verifies it against the release's
+`SHASUMS256.txt`, unpacks it to `~/.specdriven/app/specdriven-<version>` with
+`~/.specdriven/app/current` pointing at it, and stops there: nothing is built
+until you have looked. Downloading the zip from the releases page and
+unzipping it wherever you like works just as well. See "Distribution" below.
+
+Build tool: [Bun](https://bun.sh). Any AI coding agent should be able to help
+you build and run the application from here:
 
 ```sh
-bun run dev:electron
+cd ~/.specdriven/app/current
+bun install
+bun run start            # web app at http://localhost:3000
+bun run build:desktop    # desktop installer in release/ — dmg on macOS, AppImage + deb on Linux
 ```
 
 ## Install dependencies
@@ -152,10 +162,12 @@ bun run build:all   # full cross-compile matrix -> dist/specdriven-<os>-<arch>
 | `specdriven-linux-x64-baseline` | `bun-linux-x64-baseline` |
 | `specdriven-windows-x64.exe` | `bun-windows-x64` |
 
-The suffixed names double as the release asset names — [install.sh](install.sh)
-fetches exactly these and verifies them against `SHASUMS256.txt`. The baseline
-Linux build exists for CPUs without AVX2, where the default x64 build dies with
-an illegal instruction. See [scripts/build.ts](scripts/build.ts).
+The suffixed names are the asset names a binary release would use, and
+`SHASUMS256.txt` is what an installer would verify them against — but nothing
+publishes them yet; [install.sh](install.sh) installs the source zip release
+instead (see "Distribution"). The baseline Linux build exists for CPUs without
+AVX2, where the default x64 build dies with an illegal instruction. See
+[scripts/build.ts](scripts/build.ts).
 
 ## Build the desktop app
 
@@ -196,8 +208,8 @@ linked against `libz.so`, which no ordinary desktop has.
 ## Versioning
 
 `package.json`'s `version` is the one place the release version lives — it is
-what electron-builder names the desktop artifacts after, and what the installer
-looks for under `$BASE_URL/$VERSION`.
+what electron-builder names the desktop artifacts after, what the release is
+tagged as, and what the installer looks for under `releases/download/v<version>`.
 
 ```sh
 bun run bump patch    # 0.1.4 -> 0.1.5
@@ -225,11 +237,14 @@ which checks the tag against `package.json`, zips the tagged tree with
 `git archive` (tracked files only — no `node_modules`, `dist`, or `.env`), and
 creates a `v<version>` release on
 [SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release)
-with the zip and its `SHASUMS256.txt` attached. Writing to another repository
-needs the `RELEASE_REPO_TOKEN` Actions secret: a fine-grained personal access
-token with *Contents: read and write* on `specdriven-app-release` alone. A
-release that already exists is not overwritten — re-running on the same tag
-fails, on purpose.
+with the zip, its `SHASUMS256.txt`, and `install.sh` attached. Just before
+that it pushes this repository's [install.sh](install.sh) to the root of
+`specdriven-app-release` whenever the two differ — that is the copy the
+`curl | sh` line fetches, so it is never newer or older than the releases it
+installs. Writing to another repository needs the `RELEASE_REPO_TOKEN`
+Actions secret: a fine-grained personal access token with *Contents: read and
+write* on `specdriven-app-release` alone. A release that already exists is not
+overwritten — re-running on the same tag fails, on purpose.
 
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
@@ -240,18 +255,38 @@ build from any other commit is mislabelled.
 Users install with:
 
 ```sh
-curl -fsSL https://specdriven.app/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
 ```
 
-The installer detects os/arch, downloads `$BASE_URL/$VERSION/$asset`, verifies
-the checksum, installs to `~/.specdriven/bin/specdriven`, and prints PATH setup.
-It fails closed: a mismatch, a missing `SHASUMS256.txt`, or a 404 aborts without
-writing anything. Override with `SPECDRIVEN_VERSION`, `SPECDRIVEN_BASE_URL`, or
-`SPECDRIVEN_HOME`.
+[install.sh](install.sh) (POSIX sh; curl or wget; unzip, bsdtar or python3)
+follows the redirect from the releases page's `latest` to find the newest
+`v<version>`, downloads `specdriven-<version>-src.zip` and `SHASUMS256.txt`
+from that release, verifies the checksum, unpacks the zip to
+`~/.specdriven/app/specdriven-<version>`, points `~/.specdriven/app/current`
+at it, keeps the verified zip and its checksum alongside, and prints the build
+steps. It builds nothing itself — the source is shipped so it can be reviewed
+first ([specs/app/installation.feature.md](specs/app/installation.feature.md)).
 
-Asset hosting is not wired up yet — nothing uploads the build matrix, so there
-is nothing at `$BASE_URL` for the installer to fetch.
-[roadmap/deployment.md](roadmap/deployment.md) tracks what is left.
+It fails closed: a checksum mismatch, a missing or incomplete `SHASUMS256.txt`,
+a 404, or a machine with no sha256 tool aborts without writing anything, and a
+version that is already unpacked is left untouched — someone may have run
+`bun install` or built in it. Overrides: `SPECDRIVEN_VERSION` (`0.1.40` or
+`v0.1.40`; default `latest`), `SPECDRIVEN_HOME` (the same prefix the settings
+live under), and `SPECDRIVEN_RELEASES_URL` (anything serving GitHub's
+`/latest` → `/tag/v<version>` redirect and `/download/v<version>/<asset>`
+layout, which is what [tests/install.test.ts](tests/install.test.ts) stands up
+on loopback). Windows shells are sent to the releases page: `curl | sh` needs
+a Unix shell.
+
+Two things the release repository has to be for this to work: **public** —
+GitHub answers a private repository's release assets and raw files with a 404,
+not a login prompt — and carrying `install.sh` at its root, which the release
+workflow keeps in step (see "Versioning"). `install.sh` is also attached to
+every release, so
+`https://github.com/SpecDriven/specdriven-app-release/releases/latest/download/install.sh`
+serves the copy that shipped with the latest one. The compiled-binary
+distribution behind `specdriven.app` in
+[roadmap/deployment.md](roadmap/deployment.md) is still to come.
 
 ## Layout
 
