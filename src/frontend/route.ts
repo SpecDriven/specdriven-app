@@ -206,12 +206,16 @@ export function scenarioPath(
 /**
  * The url of what is on screen (specs/navigation.spec.md "URL scheme"): the
  * scenario's own url while its page is open, otherwise the feature's, and `/`
- * with no feature open.
+ * with no feature open. A roadmap page or a task takes the same pane a
+ * feature does, so while one is open its own url is what the address bar
+ * shows (specs/app/tasks.feature.md "Support deep link just like Features").
  */
 export function pagePath(
   fileName: string | null,
   scenario: Pick<Scenario, "name" | "version"> | null,
+  page: string | null = null,
 ): string {
+  if (page) return pageLink(page);
   if (!fileName) return "/";
   return scenario ? scenarioPath(fileName, scenario) : featurePath(fileName);
 }
