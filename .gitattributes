@@ -1,2 +1,6 @@
 # Files excluded from the release source zip (built with `git archive` in .github/workflows/release.yml).
 docs/DEVELOPMENT.md export-ignore
+# `specs` is a symlink to the sibling spec repo, which no release ships. Left in,
+# it unpacks as a dangling link that stops the desktop build (electron-builder
+# stats every path in the project) — and nothing in the app reads it at runtime.
+specs export-ignore

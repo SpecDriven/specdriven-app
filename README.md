@@ -19,12 +19,16 @@ curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/m
 
 It downloads `specdriven-<version>-src.zip`, verifies it against the release's
 `SHASUMS256.txt`, unpacks it to `~/.specdriven/app/specdriven-<version>` with
-`~/.specdriven/app/current` pointing at it, and stops there: nothing is built
-until you have looked. Downloading the zip from the releases page and
-unzipping it wherever you like works just as well. See "Distribution" below.
+`~/.specdriven/app/current` pointing at it, installs the dependencies, builds
+the desktop app and starts it. To read the code before any of it runs, take
+the zip from the releases page and unpack it yourself — that is the reviewing
+path, and the source is shipped for exactly that. See "Distribution" below.
 
-Build tool: [Bun](https://bun.sh). Any AI coding agent should be able to help
-you build and run the application from here:
+Build tool: [Bun](https://bun.sh). If it is missing, the installer offers to
+fetch it — with a yes it runs Bun's own installer as you, into `~/.bun`; with
+anything else it stops after unpacking and prints the steps below, which is
+also what you want after unzipping a release by hand. Any AI coding agent
+should be able to help you build and run the application from here:
 
 ```sh
 cd ~/.specdriven/app/current
@@ -263,16 +267,34 @@ follows the redirect from the releases page's `latest` to find the newest
 `v<version>`, downloads `specdriven-<version>-src.zip` and `SHASUMS256.txt`
 from that release, verifies the checksum, unpacks the zip to
 `~/.specdriven/app/specdriven-<version>`, points `~/.specdriven/app/current`
-at it, keeps the verified zip and its checksum alongside, and prints the build
-steps. It builds nothing itself — the source is shipped so it can be reviewed
-first ([specs/app/installation.feature.md](specs/app/installation.feature.md)).
+at it, keeps the verified zip and its checksum alongside, then `bun install`s
+the dependencies, runs `bun run build:desktop`, and starts what
+electron-builder leaves beside the installer — the `.app` on macOS, the
+`.AppImage` on Linux, which it makes executable first and starts only when
+there is a display to start it on
+([specs/app/installation.feature.md](specs/app/installation.feature.md)).
+Reviewing the source before it runs means taking the zip from the releases
+page instead; this script is the unattended path.
+
+Building needs Bun, so a machine without it is offered one: the
+question goes to `/dev/tty` (`curl | sh` has already spent stdin on the pipe),
+and only a `y` runs Bun's own installer — downloaded first, then run with
+bash under the invoking user, into `BUN_INSTALL` (default `~/.bun`). No sudo,
+nothing system-wide, and a refusal to run as root. With no terminal to ask at
+— a build step, a provisioning script — the question is skipped rather than
+answered for you, and `SPECDRIVEN_INSTALL_BUN=1` or `=0` settles it in
+advance. With no Bun, the run stops at the unpacked source and prints the
+build steps rather than guessing; a failed `bun install` or build is an error,
+with the verified checkout left in place.
 
 It fails closed: a checksum mismatch, a missing or incomplete `SHASUMS256.txt`,
 a 404, or a machine with no sha256 tool aborts without writing anything, and a
-version that is already unpacked is left untouched — someone may have run
-`bun install` or built in it. Overrides: `SPECDRIVEN_VERSION` (`0.1.40` or
-`v0.1.40`; default `latest`), `SPECDRIVEN_HOME` (the same prefix the settings
-live under), and `SPECDRIVEN_RELEASES_URL` (anything serving GitHub's
+version that is already unpacked is not re-extracted — someone may have edited
+or built in it — though the build then runs on it as it stands. A Bun install
+that fails is reported and left at that. Overrides: `SPECDRIVEN_VERSION`
+(`0.1.40` or `v0.1.40`; default `latest`), `SPECDRIVEN_HOME` (the same prefix
+the settings live under), `SPECDRIVEN_INSTALL_BUN`, `BUN_INSTALL`, and
+`SPECDRIVEN_RELEASES_URL` (anything serving GitHub's
 `/latest` → `/tag/v<version>` redirect and `/download/v<version>/<asset>`
 layout, which is what [tests/install.test.ts](tests/install.test.ts) stands up
 on loopback). Windows shells are sent to the releases page: `curl | sh` needs
