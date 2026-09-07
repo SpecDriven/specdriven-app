@@ -230,3 +230,39 @@ test("the Run in choice round-trips through the settings file", async () => {
   expect(bad.status).toBe(400);
   expect((await bad.json()).error).toContain("codeGenTarget must be desktop, pane, pi or codex");
 });
+
+// "Copy prompt to clipboard", the session dialog's top option: the same
+// prompt a session would run, built without launching anything.
+test("the prompt route returns the session prompt and runs nothing", async () => {
+  const res = await api("/api/agent/session/prompt", "POST", {
+    name: "implement quotes",
+    files: [{ fileName: "quote.feature.md", scenarios: [{ name: "Basic", version: 1 }] }],
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as { name: string; prompt: string };
+  expect(body.name).toBe("implement quotes");
+  expect(body.prompt).toContain("SpecDriven code gen session: implement quotes");
+  expect(body.prompt).toContain("## Spec: quote.feature.md");
+  expect(body.prompt).toContain("## Basic @v1");
+  expect(calls).toHaveLength(0);
+  // Nothing recorded either — a copied prompt is not a session.
+  await expect(stat(join(root, ".specdriven", "sessions"))).rejects.toThrow();
+});
+
+test("the prompt route refuses what a session refuses", async () => {
+  const nameless = await api("/api/agent/session/prompt", "POST", { files: FILES });
+  expect(nameless.status).toBe(400);
+  expect((await nameless.json()).error).toContain("name is required");
+
+  const missing = await api("/api/agent/session/prompt", "POST", {
+    name: "s",
+    files: [{ fileName: "nope.feature.md" }],
+  });
+  expect(missing.status).toBe(400);
+  expect((await missing.json()).error).toContain("spec not found: nope.feature.md");
+
+  await writeState({ dataRepo: data, codeGen: false }, root);
+  const off = await api("/api/agent/session/prompt", "POST", { name: "s", files: FILES });
+  expect(off.status).toBe(403);
+  expect((await off.json()).error).toContain("switched off in Settings");
+});
