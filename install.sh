@@ -8,13 +8,20 @@
 # security checks before building it. This script downloads the zip of a
 # release from https://github.com/SpecDriven/specdriven-app-release, verifies
 # it against that release's SHASUMS256.txt, unpacks it under
-# ~/.specdriven/app, and prints how to build and run it. It builds nothing
-# itself — the review comes first, on purpose.
+# ~/.specdriven/app, builds it, and starts it. Building needs Bun, so if Bun
+# is missing it offers to install that, and installs it only if you say yes;
+# without Bun it stops after unpacking and says what to run by hand.
+#
+# To read the code before any of it runs, take the zip from the releases page
+# instead and unpack it yourself — this script is the unattended path.
 #
 # Environment overrides:
 #   SPECDRIVEN_VERSION       release to install, e.g. 0.1.40   (default: latest)
 #   SPECDRIVEN_HOME          install prefix                     (default: $HOME/.specdriven)
 #   SPECDRIVEN_RELEASES_URL  where the releases are             (default: the GitHub releases page)
+#   SPECDRIVEN_INSTALL_BUN   answer the Bun question up front   (default: ask; 1 installs, 0 skips)
+#   BUN_INSTALL              where Bun would go                 (default: $HOME/.bun)
+#   SPECDRIVEN_BUN_INSTALLER_URL  Bun's installer               (default: https://bun.sh/install)
 #
 # POSIX sh on purpose: this runs on whatever /bin/sh the machine has, before
 # we know anything about it.
@@ -30,11 +37,13 @@ VERSION="${VERSION#v}"
 
 TMP_DIR=""
 UNPACK_DIR=""
+BUN_TMP=""
 # Plain `if`s, not `&&` chains: a chain that stops short returns non-zero, and
 # some shells make the EXIT trap's status the script's own.
 cleanup() {
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
   if [ -n "$UNPACK_DIR" ] && [ -d "$UNPACK_DIR" ]; then rm -rf "$UNPACK_DIR"; fi
+  if [ -n "$BUN_TMP" ] && [ -d "$BUN_TMP" ]; then rm -rf "$BUN_TMP"; fi
 }
 trap cleanup EXIT INT TERM
 
@@ -136,8 +145,8 @@ TARGET="$APP_DIR/specdriven-$VERSION"
 if [ -e "$TARGET" ]; then
   # Someone may have run `bun install` or built in there; never throw that
   # away behind their back.
-  info "SpecDriven $VERSION is already unpacked at $TARGET — leaving it as it is."
-  info "(Delete that directory first to unpack it again.)"
+  info "SpecDriven $VERSION is already unpacked at $TARGET — not unpacking over it."
+  info "(Delete that directory first to unpack it again.) Building it as it stands."
 else
   # --- download -------------------------------------------------------------------
 
@@ -189,18 +198,140 @@ else
   info "warning: $current is not a symlink; not pointing it at specdriven-$VERSION."
 fi
 
-# --- what happens next ----------------------------------------------------------
+# --- Bun, which builds it -------------------------------------------------------
 
-info ""
-info "Nothing has been built. Review the code, then build and run it:"
-info ""
-info "  cd $current"
-info "  bun install"
-info "  bun run start            # web app at http://localhost:3000"
-info "  bun run build:desktop    # desktop installer in release/"
-info ""
+BUN_INSTALLER_URL="${SPECDRIVEN_BUN_INSTALLER_URL:-https://bun.sh/install}"
+# Bun's own default, spelled out here so the question can name the directory
+# before anything is downloaded. Someone else's BUN_INSTALL still wins.
+BUN_DIR="${BUN_INSTALL:-$HOME/.bun}"
+
+# Asked only when there is someone to answer. SPECDRIVEN_INSTALL_BUN answers it
+# in advance — 1/yes installs, 0/no skips — so an unattended run never hangs on
+# a prompt nobody sees.
+wants_bun() {
+  case "${SPECDRIVEN_INSTALL_BUN:-ask}" in
+    1|y|Y|yes|Yes|YES) return 0 ;;
+    0|n|N|no|No|NO) return 1 ;;
+  esac
+  # `curl | sh` hands the script's stdin to the pipe, so the question and its
+  # answer both go to the terminal itself. No terminal, no consent: skip it.
+  [ -r /dev/tty ] || return 1
+  printf 'Bun is needed to build SpecDriven. Install it into %s now, as %s? [y/N] ' \
+    "$BUN_DIR" "$(id -un)" > /dev/tty
+  reply=""
+  read -r reply < /dev/tty || return 1
+  case "$reply" in
+    y|Y|yes|Yes|YES) return 0 ;;
+    *) info "Leaving Bun alone."; return 1 ;;
+  esac
+}
+
+# Runs Bun's own installer under this user: it unpacks into $BUN_DIR and edits
+# that user's shell rc files. No sudo, nothing system-wide, nothing as root.
+install_bun() {
+  if [ "$(id -u)" = "0" ]; then
+    info "Refusing to install Bun as root — run this as the user who will build SpecDriven."
+    return 1
+  fi
+  if ! command -v bash >/dev/null 2>&1; then
+    info "Bun's installer needs bash, which is not on this machine."
+    return 1
+  fi
+  BUN_TMP="$(mktemp -d)"
+  # Downloaded, then run: the same script either way, but it lands on disk
+  # first, so a failed download cannot be executed as half a script.
+  if ! download "$BUN_INSTALLER_URL" "$BUN_TMP/install-bun.sh"; then
+    info "Could not download Bun's installer from $BUN_INSTALLER_URL."
+    return 1
+  fi
+  info ""
+  # Braces: the ellipsis that follows would otherwise run into the name.
+  info "Installing Bun from ${BUN_INSTALLER_URL}…"
+  BUN_INSTALL="$BUN_DIR" bash "$BUN_TMP/install-bun.sh" || return 1
+  [ -x "$BUN_DIR/bin/bun" ]
+}
+
+BUN=""
 if command -v bun >/dev/null 2>&1; then
-  info "Bun is installed ($(command -v bun))."
+  BUN="$(command -v bun)"
+  info ""
+  info "Bun is installed ($BUN)."
+elif wants_bun && install_bun; then
+  BUN="$BUN_DIR/bin/bun"
+  info ""
+  info "Bun is installed ($BUN)."
+  info "Add $BUN_DIR/bin to PATH to keep it for later; this install uses it either way."
+  # `bun run build:desktop` shells out to bun and bunx by name.
+  PATH="$BUN_DIR/bin:$PATH"
+  export PATH
 else
   info "Bun is not installed; get it from https://bun.sh first."
 fi
+
+# --- build it -------------------------------------------------------------------
+
+if [ -z "$BUN" ]; then
+  info ""
+  info "Nothing has been built: Bun is what builds it. Once Bun is there:"
+  info ""
+  info "  cd $current"
+  info "  bun install"
+  info "  bun run start            # web app at http://localhost:3000"
+  info "  bun run build:desktop    # desktop app in release/"
+  exit 0
+fi
+
+info ""
+info "Installing dependencies…"
+( cd "$TARGET" && "$BUN" install ) || die "\`bun install\` failed in $TARGET"
+
+info ""
+info "Building the desktop app — this fetches Electron and takes a few minutes…"
+( cd "$TARGET" && "$BUN" run build:desktop ) || die "\`bun run build:desktop\` failed in $TARGET"
+
+# --- start it -------------------------------------------------------------------
+
+# electron-builder leaves the unpacked app beside the installer it makes; that
+# is the one to start, since the .dmg and the .AppImage are for handing on.
+started=""
+case "$(uname -s)" in
+  Darwin)
+    for app in "$TARGET"/release/mac*/*.app; do
+      if [ -d "$app" ]; then
+        info ""
+        info "Starting $app…"
+        open "$app"
+        started="yes"
+        break
+      fi
+    done
+    ;;
+  Linux)
+    for image in "$TARGET"/release/*.AppImage; do
+      if [ -f "$image" ]; then
+        chmod +x "$image"
+        if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+          info ""
+          info "Starting $image…"
+          # Detached, so the app outlives the shell that installed it.
+          ( "$image" >/dev/null 2>&1 & )
+          started="yes"
+        else
+          info ""
+          info "No display to start it on. When there is one, run $image."
+        fi
+        break
+      fi
+    done
+    ;;
+esac
+
+info ""
+if [ -n "$started" ]; then
+  info "SpecDriven $VERSION is running."
+else
+  info "SpecDriven $VERSION is built."
+fi
+info "The packaged app is in $TARGET/release; the web app runs from $current with:"
+info ""
+info "  bun run start            # http://localhost:3000"
