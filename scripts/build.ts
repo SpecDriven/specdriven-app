@@ -5,8 +5,9 @@
  *   bun run build          host platform only  -> dist/specdriven
  *   bun run build:all      full matrix         -> dist/specdriven-<os>-<arch>[-baseline]
  *
- * The suffixed names are what install.sh fetches, so they double as the
- * release asset names. See roadmap/deployment.md.
+ * The suffixed names are the asset names a binary release would use. Nothing
+ * publishes them yet — install.sh installs the source zip release instead
+ * (specs/app/installation.feature.md). See roadmap/deployment.md.
  */
 import { $ } from "bun";
 import { rm, mkdir } from "node:fs/promises";
@@ -77,7 +78,7 @@ if (!all) {
     outfiles.push(await compile(target));
   }
 
-  // install.sh verifies downloads against this file.
+  // What a binary installer would verify downloads against, in sha256sum's format.
   const sums = await $`shasum -a 256 ${outfiles}`.text();
   const normalized = sums.replace(new RegExp(`${OUT_DIR}/`, "g"), "");
   await Bun.write(`${OUT_DIR}/SHASUMS256.txt`, normalized);
