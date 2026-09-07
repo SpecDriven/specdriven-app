@@ -467,37 +467,45 @@ export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
 // session" runs in — a new session in Claude Code Desktop, or the app's own
-// coding agent pane (specs/agents/coding-agent-ui.feature.md) with Claude or
-// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md).
+// coding agent pane (specs/agents/coding-agent-ui.feature.md) with Claude,
+// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md) or with
+// Codex (src/server/codexChat.ts).
 export type { CodeGenTarget };
 
 /** The stored target as the server reports it; anything else is "not chosen". */
 export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "pane" || value === "pi" ? value : null;
+  return value === "desktop" || value === "pane" || value === "pi" || value === "codex"
+    ? value
+    : null;
 }
 
 export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
   desktop: "Claude Code Desktop",
   pane: "Coding agent pane",
   pi: "Pi in the coding agent pane",
+  codex: "Codex in the coding agent pane",
 };
 
 /** The target a session dialog opens on: the remembered choice when it is
     still usable, else desktop when Claude.app is installed, else the pane
-    when the Claude CLI is. Pi is picked, never defaulted to — an unchosen
-    dialog opens on it only where there is no Claude at all. With nothing
-    installed the answer is desktop, and the server says what is missing. */
+    when the Claude CLI is. Codex and Pi are picked, never defaulted to — an
+    unchosen dialog opens on one of them only where there is no Claude at
+    all, Codex first. With nothing installed the answer is desktop, and the
+    server says what is missing. */
 export function resolveCodeGenTarget(
   stored: string | null | undefined,
   canOpenDesktop: boolean,
   canRunPane = false,
   canRunPi = false,
+  canRunCodex = false,
 ): CodeGenTarget {
   if (stored === "desktop" && canOpenDesktop) return "desktop";
   if (stored === "pane" && canRunPane) return "pane";
   if (stored === "pi" && canRunPi) return "pi";
+  if (stored === "codex" && canRunCodex) return "codex";
   if (canOpenDesktop) return "desktop";
   if (canRunPane) return "pane";
+  if (canRunCodex) return "codex";
   return canRunPi ? "pi" : "desktop";
 }
 
@@ -829,8 +837,11 @@ export function App() {
   /** Whether the Pi CLI is on PATH, so a pane session can be driven by Pi
       (specs/agents/integration-with-pi-dev-agent.feature.md). */
   const [canRunPi, setCanRunPi] = useState(false);
-  /** The pane is offered when either agent's CLI is on PATH. */
-  const canOpenAgentPane = canRunAgentPane || canRunPi;
+  /** Whether the Codex CLI is on PATH, so a pane session can be driven by
+      Codex (src/server/codexChat.ts). */
+  const [canRunCodex, setCanRunCodex] = useState(false);
+  /** The pane is offered when any agent's CLI is on PATH. */
+  const canOpenAgentPane = canRunAgentPane || canRunPi || canRunCodex;
   // The coding agent pane's own state (src/frontend/agentChat.ts): open,
   // width, sessions. Restored once on boot — the pane, its width and the
   // last session come back the way they were left.
@@ -1097,7 +1108,12 @@ export function App() {
       setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
       setCanRunAgentPane(Boolean(state.canRunAgentPane));
       setCanRunPi(Boolean(state.canRunPi));
-      agentChat.setAvailable(Boolean(state.canRunAgentPane), Boolean(state.canRunPi));
+      setCanRunCodex(Boolean(state.canRunCodex));
+      agentChat.setAvailable(
+        Boolean(state.canRunAgentPane),
+        Boolean(state.canRunPi),
+        Boolean(state.canRunCodex),
+      );
       setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
       if (typeof state.deletePublished === "boolean") {
         setDeletePublished(state.deletePublished);
@@ -1774,6 +1790,7 @@ export function App() {
     canOpenClaudeDesktop,
     canRunAgentPane,
     canRunPi,
+    canRunCodex,
   );
 
   // Code gen session (specs/agents/claude.spec.md): with specs or single
@@ -1813,6 +1830,17 @@ export function App() {
             },
           ]
         : []),
+      // Codex (src/server/codexChat.ts): the same pane, driven over Codex's
+      // app-server protocol — offered when its CLI is on PATH.
+      ...(canRunCodex
+        ? [
+            {
+              value: "codex",
+              label: CODE_GEN_TARGET_LABEL.codex,
+              hint: `Chats with Codex in a pane here, on ${repoWord} — with permission cards`,
+            },
+          ]
+        : []),
       // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): the same
       // pane, driven over pi's RPC mode — offered when its CLI is on PATH.
       ...(canRunPi
@@ -1829,7 +1857,7 @@ export function App() {
     // of asking for a name.
     if (choices.length === 0) {
       setSessionError(
-        "No coding agent found — install Claude.app or the `claude` command to start a session",
+        "No coding agent found — install Claude.app, or the `claude`, `codex` or `pi` command, to start a session",
       );
       return;
     }
@@ -1838,7 +1866,7 @@ export function App() {
       title: "Name the session",
       // With a choice of agents each option says what it runs, so the hint
       // names none of them; with only one, it names that one's agent.
-      hint: `Runs ${choices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : "Claude"} over ${describeSelection(files)}${where}.`,
+      hint: `Runs ${choices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : only === "codex" ? "Codex" : "Claude"} over ${describeSelection(files)}${where}.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start session",
@@ -3046,7 +3074,12 @@ export function App() {
     setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
     setCanRunAgentPane(Boolean(data.canRunAgentPane));
     setCanRunPi(Boolean(data.canRunPi));
-    agentChat.setAvailable(Boolean(data.canRunAgentPane), Boolean(data.canRunPi));
+    setCanRunCodex(Boolean(data.canRunCodex));
+    agentChat.setAvailable(
+      Boolean(data.canRunAgentPane),
+      Boolean(data.canRunPi),
+      Boolean(data.canRunCodex),
+    );
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);

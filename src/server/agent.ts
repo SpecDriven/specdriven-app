@@ -1,7 +1,8 @@
 // Coding agent integration (specs/agents/claude.spec.md): a named code gen
 // session takes the selected specs and builds one prompt from them. The
-// targets: the app's own coding agent pane, driven by Claude or by Pi
-// (specs/agents/integration-with-pi-dev-agent.feature.md); or Claude Code
+// targets: the app's own coding agent pane, driven by Claude, by Pi
+// (specs/agents/integration-with-pi-dev-agent.feature.md) or by Codex
+// (src/server/codexChat.ts); or Claude Code
 // Desktop, opened on the data repo through its
 // `claude://code/new` deep link with a short bootstrap prompt that titles the
 // session and points it at the full prompt saved on disk. Node APIs only —
@@ -116,6 +117,27 @@ export function piAvailable(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Codex: OpenAI's Codex CLI. It runs in the app's own coding agent pane too,
+// driven over its app-server protocol (src/server/codexChat.ts).
+
+/** The Codex CLI binary a pane session spawns. */
+export const CODEX_BIN = "codex";
+
+// Injection seam (the Pi one above): tests run on a PATH without codex and
+// must never spawn it; null restores the probe.
+let codexCliAvailability: (() => boolean) | null = null;
+
+export function setCodexAvailability(fn: (() => boolean) | null): (() => boolean) | null {
+  const previous = codexCliAvailability;
+  codexCliAvailability = fn;
+  return previous;
+}
+
+export function codexAvailable(): boolean {
+  return codexCliAvailability ? codexCliAvailability() : which(CODEX_BIN) !== null;
+}
+
+// ---------------------------------------------------------------------------
 // Claude Code Desktop (specs/roadmap/start-session-in-claude-code-desktop.md)
 //
 // Claude.app registers `claude://`; its router's `code` host has a `/new`
@@ -135,6 +157,9 @@ export const DESKTOP_AGENT = "claude-code-desktop";
 export const PANE_AGENT = "pane";
 /** The same pane, driven by Pi over its RPC mode (src/server/piChat.ts). */
 export const PI_PANE_AGENT = "pi-pane";
+/** The same pane, driven by Codex over its app-server protocol
+    (src/server/codexChat.ts). */
+export const CODEX_PANE_AGENT = "codex-pane";
 /** Session records live in <settings dir>/sessions/<id>/ — beside the
     settings file, never inside the data repo, which is pushed to git. */
 export const SESSIONS_SUBDIR = "sessions";
@@ -256,7 +281,7 @@ export interface SessionRecord {
   name: string;
   /** ISO 8601 start time. */
   startedAt: string;
-  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT | typeof PI_PANE_AGENT;
+  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT | typeof PI_PANE_AGENT | typeof CODEX_PANE_AGENT;
   dataRepo: string;
   /** The code repo the session was opened on; absent when it ran in the
       data repo (src/server/members.ts `code-repo`). */

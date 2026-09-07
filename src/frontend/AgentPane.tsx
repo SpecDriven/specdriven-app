@@ -298,17 +298,19 @@ function EmptyState({
   dataRepo: string | null;
 }) {
   const [name, setName] = useState(() => defaultSessionName());
-  const [agent, setAgent] = useState<ChatAgent>(() => (store.available ? "claude" : "pi"));
+  const [agent, setAgent] = useState<ChatAgent>(() =>
+    store.available ? "claude" : store.codexAvailable ? "codex" : "pi",
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const workDir = codeRepo ?? dataRepo;
-  if (!store.available && !store.piAvailable) {
+  if (!store.available && !store.piAvailable && !store.codexAvailable) {
     return (
       <div className="agent-empty">
         <h3>Coding agent</h3>
         <p>
           No coding agent CLI found — install the <code>claude</code> command
-          (or <code>pi</code>, from pi.dev) and reload.
+          (or <code>codex</code>, from OpenAI, or <code>pi</code>, from pi.dev) and reload.
         </p>
       </div>
     );
@@ -316,6 +318,7 @@ function EmptyState({
   // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
   const agents: ChatAgent[] = [
     ...(store.available ? (["claude"] as ChatAgent[]) : []),
+    ...(store.codexAvailable ? (["codex"] as ChatAgent[]) : []),
     ...(store.piAvailable ? (["pi"] as ChatAgent[]) : []),
   ];
   const picked = agents.includes(agent) ? agent : agents[0]!;
@@ -349,7 +352,8 @@ function EmptyState({
         </p>
       ) : (
         <p>
-          A live {picked === "pi" ? "Pi" : "Claude Code"} session, run by SpecDriven.
+          A live {picked === "pi" ? "Pi" : picked === "codex" ? "Codex" : "Claude Code"} session,
+          run by SpecDriven.
           {workDir && (
             <>
               {" "}
@@ -376,7 +380,9 @@ function EmptyState({
                 <div className="agent-option-desc">
                   {a === "pi"
                     ? "Minimal, and runs its own tools — nothing asks for permission"
-                    : "Claude Code, with permission cards and its own commands"}
+                    : a === "codex"
+                      ? "OpenAI's Codex CLI, with permission cards for commands and file changes"
+                      : "Claude Code, with permission cards and its own commands"}
                 </div>
               </span>
             </label>
@@ -480,7 +486,7 @@ export function TranscriptRow({
     case "tool":
       return <ToolRow item={item} />;
     case "permission":
-      return <PermissionCard item={item} onAnswer={onAnswer} />;
+      return <PermissionCard item={item} agent={agent} onAnswer={onAnswer} />;
     case "question":
       return <QuestionCard item={item} onAnswer={onAnswer} />;
     case "result": {
@@ -504,6 +510,11 @@ export function TranscriptRow({
                 <>
                   Pi has no credentials for this model here: run <code>pi</code> in a terminal and{" "}
                   <code>/login</code>, then start a new session.
+                </>
+              ) : agent === "codex" ? (
+                <>
+                  The Codex CLI is not signed in on this machine: run <code>codex login</code> in a
+                  terminal, then start a new session.
                 </>
               ) : (
                 <>
@@ -573,21 +584,24 @@ function ToolRow({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) 
 
 function PermissionCard({
   item,
+  agent = "claude",
   onAnswer,
 }: {
   item: Extract<TranscriptItem, { kind: "permission" }>;
+  agent?: ChatAgent;
   onAnswer?: (answer: Answer) => void;
 }) {
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState("");
   const done = item.resolved;
+  const who = AGENT_LABEL[agent];
   const send = (a: Omit<Answer, "requestId">) => onAnswer?.({ requestId: item.requestId, ...a });
   const deny = () => send({ behavior: "deny", ...(reason.trim() ? { message: reason.trim() } : {}) });
   return (
     <div className="agent-card" role="group" aria-label={`Permission: ${item.toolName}`}>
       <div className="agent-card-title">
         <ShieldAlert size={14} aria-hidden="true" />
-        {item.title ?? `Claude wants to use ${item.toolName}`}
+        {item.title ?? `${who} wants to use ${item.toolName}`}
       </div>
       {item.summary && <div className="agent-card-summary">{item.summary}</div>}
       <details className="agent-tool">
@@ -606,7 +620,7 @@ function PermissionCard({
           <input
             type="text"
             aria-label="Why not"
-            placeholder="Why not? Optional — Claude reads it"
+            placeholder={`Why not? Optional — ${who} reads it`}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             onKeyDown={(e) => {
@@ -632,7 +646,11 @@ function PermissionCard({
           {item.suggestions.length > 0 && (
             <button
               type="button"
-              title="Also keep the rule Claude suggests, so it stops asking for this"
+              title={
+                agent === "codex"
+                  ? "Also allow this for the rest of the session, so Codex stops asking for it"
+                  : `Also keep the rule ${who} suggests, so it stops asking for this`
+              }
               onClick={() => send({ behavior: "allow", remember: true })}
             >
               Allow always
