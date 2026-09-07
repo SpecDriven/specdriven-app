@@ -6,6 +6,7 @@
   "main": "dist/electron/main.js",
   "type": "module",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE.md",
   "desktopName": "specdriven.desktop",
   "trustedDependencies": [
     "electron"
@@ -46,6 +47,7 @@
     "files": [
       "dist/**/*",
       "package.json",
+      "LICENSE.md",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "protocols": [

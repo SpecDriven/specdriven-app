@@ -313,3 +313,14 @@ scenarios never change; a new version
 supersedes them. That link is bidirectional: the test carries a `@Spec` annotation naming
 `file#scenario@version`, so tooling can flag a spec that moved without its test.
 PMs publish spec versions; developers own the tests.
+
+## License
+
+specdriven.app Community Edition is source-available under the
+[SpecDriven Source Available License 1.0](LICENSE.md) (SSAL-1.0). You may
+run it inside your own organization for any purpose, including commercial
+use, and modify it by hand or with an AI coding assistant. You may not offer
+it to third parties as a hosted or managed service, build a competing product
+with it, circumvent license-key or edition restrictions, or publish its source
+(or your modifications) on any public code hosting service. For anything
+beyond that, contact hello@specdriven.app.
