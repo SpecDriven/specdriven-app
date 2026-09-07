@@ -16,12 +16,13 @@ import {
   readdirSync,
   readlinkSync,
   rmSync,
+  readFileSync,
   symlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 const INSTALL_SH = join(import.meta.dir, "..", "install.sh");
 const VERSION = "0.1.40";
@@ -43,7 +44,7 @@ function findTool(name: string): string | null {
 /** Everything the installer shells out to, apart from the tools a test varies. */
 const BASE_TOOLS = [
   "uname", "mktemp", "rm", "mv", "ln", "mkdir", "grep", "cut", "sed", "tail",
-  "tr", "cat", "unzip", "sha256sum", "shasum", "printf",
+  "tr", "cat", "unzip", "sha256sum", "shasum", "printf", "id",
 ];
 
 /**
@@ -139,16 +140,32 @@ interface RunOptions {
   shell?: string[];
   tools?: string;
   env?: Record<string, string>;
+  /** Run under a terminal of the script's own and type this at it. */
+  tty?: string;
+  /** Run with no controlling terminal, as a cron job or a build step would. */
+  noTty?: boolean;
 }
+
+const PYTHON = findTool("python3");
+const TERMINAL_PY = join(import.meta.dir, "helpers", "terminal.py");
 
 async function runInstaller(releasesUrl: string, home: string, opts: RunOptions = {}) {
   const shell = opts.shell ?? ["/bin/sh"];
   const tools = opts.tools ?? toolbox([...BASE_TOOLS, "curl"]);
-  const proc = Bun.spawn([...shell, INSTALL_SH], {
+  const terminal = opts.tty !== undefined
+    ? [PYTHON!, TERMINAL_PY, "tty", opts.tty, "--"]
+    : opts.noTty
+      ? [PYTHON!, TERMINAL_PY, "none", "--"]
+      : [];
+  const proc = Bun.spawn([...terminal, ...shell, INSTALL_SH], {
     env: {
       HOME: home,
       PATH: [tools, process.env.PATH ?? ""].join(delimiter),
       SPECDRIVEN_RELEASES_URL: releasesUrl,
+      // The developer running the suite is never asked anything, and never
+      // has Bun installed behind their back; the tests of the question itself
+      // set this back to empty.
+      SPECDRIVEN_INSTALL_BUN: "0",
       ...opts.env,
     },
     stdout: "pipe",
@@ -232,8 +249,8 @@ describe.each(shells)("under %s", (_name, shell) => {
 
     expect(stdout).toContain("Checksum verified.");
     expect(stdout).toContain(`Unpacked to ${target}`);
-    // Nothing is built: the code is there to be reviewed first.
-    expect(stdout).toContain("Nothing has been built.");
+    // No Bun here (BASE_TOOLS has none), so the build is left to the reader.
+    expect(stdout).toContain("Nothing has been built: Bun is what builds it.");
     expect(stdout).toContain(`cd ${join(app, "current")}`);
     expect(stdout).toContain("bun install");
     expect(stdout).toContain("bun run build:desktop");
@@ -497,7 +514,319 @@ test("the next steps say whether Bun is there to run them", async () => {
   const withBun = toolbox([...BASE_TOOLS, "curl"], { bun: "#!/bin/sh\nexit 0\n" });
   let run = await runInstaller(good.url, freshHome(), { tools: withBun });
   expect(run.stdout).toContain(`Bun is installed (${join(withBun, "bun")}).`);
+  // Nothing to offer, so nothing is asked.
+  expect(run.stdout).not.toContain("Install it into");
 
   run = await runInstaller(good.url, freshHome());
   expect(run.stdout).toContain("Bun is not installed; get it from https://bun.sh first.");
+});
+
+// --- Bun, which builds it ----------------------------------------------------
+//
+// The script builds nothing, but every command it prints needs Bun. A missing
+// Bun is therefore offered — and installed only after a yes at the terminal,
+// by Bun's own installer, into the user's own home.
+
+// Bun's installer unpacks into $BUN_INSTALL and touches nothing else. This
+// stand-in does the same, and writes down who ran it: "as the user, not as
+// root" is the whole of what the offer promises.
+const BUN_INSTALLER = `#!/usr/bin/env bash
+set -eu
+mkdir -p "$BUN_INSTALL/bin"
+printf '#!/bin/sh\necho fake bun\n' > "$BUN_INSTALL/bin/bun"
+chmod +x "$BUN_INSTALL/bin/bun"
+id -un > "$BUN_INSTALL/installed-by"
+echo "bun was installed to $BUN_INSTALL"
+`;
+
+/** Stands in for https://bun.sh/install. */
+function fakeBunInstaller(body: string = BUN_INSTALLER) {
+  let hits = 0;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch() {
+      hits += 1;
+      return new Response(body);
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${server.port}/install`,
+    get hits() {
+      return hits;
+    },
+    stop: () => server.stop(true),
+  };
+}
+
+const BUN_TOOLS = [...BASE_TOOLS, "curl", "bash", "chmod"];
+
+/** A run with no Bun on PATH, pointed at the stand-in installer. */
+async function runWithoutBun(
+  installer: ReturnType<typeof fakeBunInstaller>,
+  home: string,
+  opts: RunOptions = {},
+) {
+  return runInstaller(good.url, home, {
+    tools: toolbox(BUN_TOOLS),
+    ...opts,
+    env: {
+      SPECDRIVEN_BUN_INSTALLER_URL: installer.url,
+      BUN_INSTALL: join(home, ".bun"),
+      ...opts.env,
+    },
+  });
+}
+
+const asks = { SPECDRIVEN_INSTALL_BUN: "" };
+
+test.skipIf(!PYTHON)("a yes at the terminal installs Bun, as the user and in their home", async () => {
+  const installer = fakeBunInstaller();
+  const home = freshHome();
+  const run = await runWithoutBun(installer, home, { tty: "y\n", env: asks });
+  installer.stop();
+
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain(`Install it into ${join(home, ".bun")} now, as ${userInfo().username}?`);
+  expect(run.stdout).toContain(`Bun is installed (${join(home, ".bun", "bin", "bun")}).`);
+  expect(run.stdout).toContain(`Add ${join(home, ".bun", "bin")} to PATH to keep it`);
+  // …and the Bun just installed is the one that builds, PATH or no PATH.
+  expect(run.stdout).toContain("Installing dependencies…");
+  expect(existsSync(join(home, ".bun", "bin", "bun"))).toBe(true);
+  // Bun's installer decides where Bun goes; the script only says where that is.
+  expect(readFileSync(join(home, ".bun", "installed-by"), "utf8").trim()).toBe(userInfo().username);
+  // And the SpecDriven checkout is still the point of the exercise.
+  expect(existsSync(join(home, ".specdriven", "app", `specdriven-${VERSION}`, "package.json"))).toBe(true);
+});
+
+test.skipIf(!PYTHON)("a no at the terminal leaves Bun alone", async () => {
+  const installer = fakeBunInstaller();
+  const home = freshHome();
+  const run = await runWithoutBun(installer, home, { tty: "n\n", env: asks });
+  installer.stop();
+
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain("Leaving Bun alone.");
+  expect(run.stdout).toContain("Bun is not installed; get it from https://bun.sh first.");
+  expect(existsSync(join(home, ".bun"))).toBe(false);
+  expect(installer.hits).toBe(0); // not even downloaded
+});
+
+test.skipIf(!PYTHON)("with no terminal to ask at, Bun is left to the reader", async () => {
+  const installer = fakeBunInstaller();
+  const home = freshHome();
+  // `curl | sh` in a build step: no one is there to answer, so the run must
+  // finish on its own rather than wait at a prompt nobody can see.
+  const run = await runWithoutBun(installer, home, { noTty: true, env: asks });
+  installer.stop();
+
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain("Bun is not installed; get it from https://bun.sh first.");
+  expect(existsSync(join(home, ".bun"))).toBe(false);
+  expect(installer.hits).toBe(0);
+});
+
+test("SPECDRIVEN_INSTALL_BUN=1 answers the question in advance", async () => {
+  const installer = fakeBunInstaller();
+  const home = freshHome();
+  const run = await runWithoutBun(installer, home, { env: { SPECDRIVEN_INSTALL_BUN: "1" } });
+  installer.stop();
+
+  expect(run.code).toBe(0);
+  expect(run.stdout).not.toContain("Install it into");
+  expect(run.stdout).toContain(`Bun is installed (${join(home, ".bun", "bin", "bun")}).`);
+  expect(existsSync(join(home, ".bun", "bin", "bun"))).toBe(true);
+});
+
+test("a Bun installer that fails is reported, and the checkout still stands", async () => {
+  const installer = fakeBunInstaller("#!/usr/bin/env bash\nexit 3\n");
+  const home = freshHome();
+  const run = await runWithoutBun(installer, home, { env: { SPECDRIVEN_INSTALL_BUN: "1" } });
+  installer.stop();
+
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain("Bun is not installed; get it from https://bun.sh first.");
+  expect(existsSync(join(home, ".bun", "bin", "bun"))).toBe(false);
+  expect(existsSync(join(home, ".specdriven", "app", `specdriven-${VERSION}`, "package.json"))).toBe(true);
+});
+
+// --- building it, and starting it --------------------------------------------
+//
+// The run does not stop at unpacked source: it installs the dependencies,
+// builds the desktop app and starts what electron-builder leaves beside the
+// installer. Reviewing first means taking the zip from the releases page by
+// hand, so nothing here is behind a prompt. A stand-in `bun` does the work —
+// a test does not download Electron — and records where it was run and what
+// it was asked for.
+
+function shellQuote(path: string): string {
+  return `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+/** A `bun` writing "<cwd> | <args>" to `log`, and running `onBuild` for build:desktop. */
+function fakeBun(log: string, onBuild = ""): string {
+  return `#!/bin/sh
+printf '%s | %s\n' "$(pwd)" "$*" >> ${shellQuote(log)}
+case "$*" in
+  "run build:desktop") ${onBuild || ":"} ;;
+esac
+`;
+}
+
+function logLines(log: string): string[] {
+  return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+}
+
+/** The detached app starts on its own clock; give it a moment to say so. */
+async function waits(until: () => boolean): Promise<boolean> {
+  for (let i = 0; i < 100; i++) {
+    if (until()) return true;
+    await Bun.sleep(20);
+  }
+  return false;
+}
+
+const BUILD_TOOLS = [...BASE_TOOLS, "curl", "chmod"];
+
+/**
+ * What the script starts turns on `uname -s`, so the tests say which machine
+ * they are: both branches then run on whichever one the suite is on.
+ */
+function fakeUname(os: string): string {
+  return `#!/bin/sh\necho ${os}\n`;
+}
+
+test("the run ends with the built .app open", async () => {
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const app = join(target, "release", "mac-arm64", "SpecDriven.app");
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Darwin"),
+    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents`),
+    open: `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> ${shellQuote(log)}\n`,
+  });
+
+  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools });
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+
+  // Both commands run inside the checkout, in that order.
+  expect(logLines(log)).toEqual([
+    `${target} | install`,
+    `${target} | run build:desktop`,
+    `open | ${app}`,
+  ]);
+  expect(stdout).toContain("Installing dependencies…");
+  expect(stdout).toContain("Building the desktop app");
+  expect(stdout).toContain(`Starting ${app}…`);
+  expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
+  expect(stdout).toContain(`The packaged app is in ${join(target, "release")}`);
+});
+
+test("the run ends with the AppImage made runnable and started", async () => {
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const image = join(target, "release", `SpecDriven-${VERSION}-x86_64.AppImage`);
+  // electron-builder leaves the AppImage executable; this one is not, so the
+  // chmod the script does is the reason it can run at all.
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Linux"),
+    bun: fakeBun(
+      log,
+      `mkdir -p ${shellQuote(join(target, "release"))}\n` +
+        `    printf '#!/bin/sh\\nprintf "appimage | started\\\\n" >> ${shellQuote(log)}\\n' > ${shellQuote(image)}\n` +
+        `    chmod 644 ${shellQuote(image)}`,
+    ),
+  });
+
+  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools, env: { DISPLAY: ":0" } });
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+
+  expect(stdout).toContain(`Starting ${image}…`);
+  expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
+  expect(lstatSync(image).mode & 0o111).not.toBe(0);
+  expect(await waits(() => logLines(log).includes("appimage | started"))).toBe(true);
+  expect(logLines(log).slice(0, 2)).toEqual([`${target} | install`, `${target} | run build:desktop`]);
+});
+
+test("with no display the app is built but left unstarted", async () => {
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const image = join(target, "release", `SpecDriven-${VERSION}-x86_64.AppImage`);
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Linux"),
+    bun: fakeBun(log, `mkdir -p ${shellQuote(join(target, "release"))} && : > ${shellQuote(image)}`),
+  });
+
+  // A headless machine: no DISPLAY, no WAYLAND_DISPLAY.
+  const { stdout, code } = await runInstaller(good.url, home, { tools });
+  expect(code).toBe(0);
+  expect(stdout).toContain(`No display to start it on. When there is one, run ${image}.`);
+  expect(stdout).toContain(`SpecDriven ${VERSION} is built.`);
+  expect(stdout).not.toContain("is running.");
+});
+
+test("a build that fails stops the run and says where the checkout is", async () => {
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const tools = toolbox(BUILD_TOOLS, { bun: fakeBun(log, "exit 2") });
+
+  const { stderr, code } = await runInstaller(good.url, home, { tools });
+  expect(code).toBe(1);
+  expect(stderr).toContain(`\`bun run build:desktop\` failed in ${target}`);
+  // The verified source is still there to look at or build by hand.
+  expect(existsSync(join(target, "package.json"))).toBe(true);
+});
+
+test("a failed `bun install` is reported the same way", async () => {
+  const home = freshHome();
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const tools = toolbox(BUILD_TOOLS, { bun: "#!/bin/sh\nexit 7\n" });
+
+  const { stderr, code } = await runInstaller(good.url, home, { tools });
+  expect(code).toBe(1);
+  expect(stderr).toContain(`\`bun install\` failed in ${target}`);
+});
+
+// --- what the real release zip carries ---------------------------------------
+//
+// `git archive` follows nothing: a tracked symlink is archived as a symlink,
+// and one that points outside the repo unpacks dangling. `specs` is such a
+// link (the spec repo lives beside this one), and a dangling path in the tree
+// stops `bun run build:desktop` — electron-builder stats everything under the
+// project. Those links belong in .gitattributes as `export-ignore`.
+
+const REPO_ROOT = join(import.meta.dir, "..");
+
+async function git(...args: string[]): Promise<string> {
+  const p = Bun.spawn(["git", ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" });
+  const [out, code] = [await new Response(p.stdout).text(), await p.exited];
+  if (code !== 0) throw new Error(await new Response(p.stderr).text());
+  return out;
+}
+
+test("symlinks pointing out of the repo are kept out of the release source zip", async () => {
+  // Mode 120000 is git's symlink; the path is the last tab-separated field.
+  const links = (await git("ls-files", "-s"))
+    .split("\n")
+    .filter((line) => line.startsWith("120000 "))
+    .map((line) => line.slice(line.indexOf("\t") + 1));
+
+  const escaping: string[] = [];
+  for (const path of links) {
+    const target = readlinkSync(join(REPO_ROOT, path));
+    if (!resolve(dirname(join(REPO_ROOT, path)), target).startsWith(REPO_ROOT + "/")) escaping.push(path);
+  }
+  expect(escaping).toContain("specs"); // the case that broke a build; keep the test honest
+
+  for (const path of escaping) {
+    // `git check-attr` answers "<path>: export-ignore: set|unset|unspecified".
+    const attr = await git("check-attr", "export-ignore", "--", path);
+    expect(attr.trim()).toBe(`${path}: export-ignore: set`);
+  }
 });
