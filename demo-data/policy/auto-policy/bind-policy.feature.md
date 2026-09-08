@@ -11,11 +11,7 @@ Turning an accepted quote into an in-force policy.
 - **And** the effective date is the requested start date
 - **And** ID cards and the declarations page are emailed to the named insured
 
-### Tests
-
-| Test |
-| --- |
-| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/BindAutoPolicyTest.java#L41 |
+[test: bindFromAnActiveQuote : https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/BindAutoPolicyTest.java#L41 ]
 
 ## Effective date may not be backdated @v1 [published]
 
@@ -23,11 +19,7 @@ Turning an accepted quote into an in-force policy.
 - **When** they request an effective date earlier than today
 - **Then** binding is refused with the reason "coverage cannot start in the past"
 
-### Tests
-
-| Test |
-| --- |
-| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/BindAutoPolicyTest.java#L103 |
+[test: effectiveDateMayNotBeBackdated : https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/BindAutoPolicyTest.java#L103 ]
 
 ## Uninsured motorist rejection form @v1 [published]
 

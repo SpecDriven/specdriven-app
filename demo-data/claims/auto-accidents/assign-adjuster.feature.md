@@ -14,6 +14,8 @@ Route each newly opened claim to the right adjuster.
 | $5,000 – $25,000 | field adjuster                            |
 | over $25,000     | senior field adjuster + supervisor review |
 
+[test: assignByEstimatedDamage : https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/AssignAdjusterTest.java#L36 ]
+
 ## Exception Escalation @v1 [proposed]
 
 Under these circumstances, the case must be escalated.
