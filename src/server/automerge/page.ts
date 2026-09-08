@@ -22,6 +22,7 @@ export function docToPage(doc: A.Doc<PageDoc>): MarkdownPage {
     name: doc.name,
     body: doc.body,
     ...(doc.assigned ? { assigned: doc.assigned } : {}),
+    ...(doc.done ? { done: true } : {}),
   };
 }
 
@@ -41,23 +42,29 @@ export function importPageDoc(page: MarkdownPage): A.Doc<PageDoc> {
     name: page.name,
     body: page.body,
     ...(page.assigned ? { assigned: page.assigned } : {}),
+    ...(page.done ? { done: true } : {}),
   });
 }
 
 /**
  * Drive the document toward a parsed page: heading and body as text splices,
- * so concurrent edits merge at character level, and the assignment set whole
- * — it is one member, not text to merge, and concurrent assignments resolve
- * to the same winner on every peer (reconcile.ts).
+ * so concurrent edits merge at character level, and the assignment and the
+ * done marker set whole — neither is text to merge, and concurrent changes to
+ * them resolve to the same winner on every peer (reconcile.ts).
  */
 export function reconcilePage(doc: A.Doc<PageDoc>, target: MarkdownPage): A.Doc<PageDoc> {
   const assigned = doc.assigned;
+  const done = doc.done;
   return A.change(doc, (d) => {
     if (d.name !== target.name) A.updateText(d, ["name"], target.name);
     if (d.body !== target.body) A.updateText(d, ["body"], target.body);
     if ((assigned ?? "") !== (target.assigned ?? "")) {
       if (target.assigned) d.assigned = target.assigned;
       else delete d.assigned;
+    }
+    if ((done ?? false) !== (target.done ?? false)) {
+      if (target.done) d.done = true;
+      else delete d.done;
     }
   });
 }

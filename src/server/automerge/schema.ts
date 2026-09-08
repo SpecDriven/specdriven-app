@@ -92,6 +92,12 @@ export type PageDoc = {
    * rather than a mix of two names.
    */
   assigned?: string;
+  /**
+   * Whether the page is finished — a task's Done (specs/app/tasks.feature
+   * .md). Absent until somebody ticks it off, and set whole like `assigned`,
+   * so two people finishing the same task agree rather than merge.
+   */
+  done?: boolean;
 };
 
 // Test management (specs/app/tests.feature.md): a lightweight
