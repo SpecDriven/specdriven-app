@@ -335,3 +335,18 @@ fi
 info "The packaged app is in $TARGET/release; the web app runs from $current with:"
 info ""
 info "  bun run start            # http://localhost:3000"
+
+# --- and, on a Mac, open the installer ------------------------------------------
+
+# The .dmg is the copy to hand on; opening it last mounts it in Finder so it can
+# be dragged into Applications. Linux has no equivalent, so nothing runs there.
+case "$(uname -s)" in
+  Darwin)
+    dmg="$TARGET/release/SpecDriven-$VERSION-arm64.dmg"
+    if [ -f "$dmg" ]; then
+      info ""
+      info "Opening $dmg…"
+      open "$dmg"
+    fi
+    ;;
+esac
