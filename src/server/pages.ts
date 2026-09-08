@@ -11,8 +11,9 @@
 // merge instead of conflicting — and it can be assigned to a project member,
 // written into the file as the same `**Assigned:** <name>` line a feature
 // carries (src/server/members.ts). A task is that and no more: a markdown
-// page in the tasks folder with somebody's name on it, which is why the two
-// folders share every line below and differ only in their descriptor.
+// page in the tasks folder with somebody's name on it and a Done marker to
+// tick off, which is why the two folders share every line below and differ
+// only in their descriptor.
 
 import { mkdir, readdir, stat } from "node:fs/promises";
 import {
@@ -82,6 +83,8 @@ export interface PageListing {
   name: string;
   /** The project member the page is assigned to, if any. */
   assigned?: string;
+  /** Whether the page is done — what a task's Done button sets. */
+  done?: boolean;
 }
 
 /** A page as the editor sees it: its listing, plus the markdown itself. */
@@ -276,6 +279,7 @@ function listing(fileName: string, page: MarkdownPage | null): PageListing {
     fileName,
     name: page?.name || titleFromFileName(fileName.replace(/\.md$/, "")),
     ...(page?.assigned ? { assigned: page.assigned } : {}),
+    ...(page?.done ? { done: true } : {}),
   };
 }
 

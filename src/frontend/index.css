@@ -612,6 +612,13 @@ a.page-entry.active {
   font-weight: 500;
 }
 
+/* A finished task (specs/app/tasks.feature.md) is struck through in the list,
+   so the ones still to do are the ones that read as live. */
+a.page-entry.done {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+
 .page-list .empty {
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
@@ -3232,6 +3239,12 @@ button.chip:disabled {
 
 .chip.muted {
   color: var(--text-2);
+}
+
+/* The Done chip of a finished task: ticked off, and coloured like it. */
+.chip.page-done.is-done {
+  color: var(--status-published);
+  border-color: currentColor;
 }
 
 .chip-avatar {
