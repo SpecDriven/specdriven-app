@@ -5442,8 +5442,19 @@ a.tests-title {
   font-variant-numeric: tabular-nums;
 }
 
+/* The form fills the pane below its header, so the body editor (flex: 1
+   inside it) takes the remaining height instead of collapsing to its
+   floor: a pasted stack trace scrolls inside a tall editor, not a
+   four-line one over a blank pane. */
 .issue-form {
+  flex: 1;
   gap: 0.75rem;
+}
+
+/* The description and comment editors sit in a scrolling page, so they
+   have no height to fill — give them room for a paragraph or two. */
+.issue-view .md-editor {
+  min-height: 14rem;
 }
 
 .issue-title-input {
