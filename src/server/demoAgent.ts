@@ -369,7 +369,7 @@ class SimulatedQuery implements QueryLike {
     );
     if (this.cancelled) return 0;
     yield* this.say(
-      `Done. ${file} covers every scenario in ${specTitle(spec)}; the Given/When/Then rules became one case each, and the tables in the spec are the fixtures. Next I'd add the tests the spec's Tests table links to.`,
+      `Done. ${file} covers every scenario in ${specTitle(spec)}; the Given/When/Then rules became one case each, and the tables in the spec are the fixtures. Next I'd add the tests its Automated tests lists name.`,
     );
     return 0;
   }
