@@ -25,6 +25,8 @@ import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
   Check,
+  CheckCircle2,
+  Circle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -254,12 +256,29 @@ interface PageTab {
   noun: string;
   /** What the tab says when the folder holds nothing yet. */
   empty: string;
+  /** Whether its pages can be ticked off — a task is done or it is not
+      (specs/app/tasks.feature.md); a roadmap page is neither. */
+  done: boolean;
   icon: typeof MapIcon;
 }
 
 const PAGE_TABS: PageTab[] = [
-  { folder: "roadmap", title: "Roadmap", noun: "page", empty: "No roadmap pages yet", icon: MapIcon },
-  { folder: "tasks", title: "Tasks", noun: "task", empty: "No tasks yet", icon: ListTodo },
+  {
+    folder: "roadmap",
+    title: "Roadmap",
+    noun: "page",
+    empty: "No roadmap pages yet",
+    done: false,
+    icon: MapIcon,
+  },
+  {
+    folder: "tasks",
+    title: "Tasks",
+    noun: "task",
+    empty: "No tasks yet",
+    done: true,
+    icon: ListTodo,
+  },
 ];
 
 /** The tab a page's file name belongs to — its folder is the first segment. */
@@ -583,6 +602,14 @@ interface TreeFilter {
 }
 
 /** Pages grouped by the subfolder under their own folder, top level first. */
+/** A page row's tooltip: its name, and whatever else the row only hints at. */
+function pageRowTitle(page: PageListing): string {
+  const parts = [page.name];
+  if (page.done) parts.push("done");
+  if (page.assigned) parts.push(`assigned to ${page.assigned}`);
+  return parts.join(" — ");
+}
+
 function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
   const groups = new Map<string, PageListing[]>();
   for (const page of pages) {
@@ -925,6 +952,7 @@ export function App() {
   const openPageSession = useRef(0);
   /** Whether an assignment change on the open page is in flight. */
   const [pageAssignedSaving, setPageAssignedSaving] = useState(false);
+  const [pageDoneSaving, setPageDoneSaving] = useState(false);
   /** The open page's file name — what effects watch, since the listing object
       is replaced on every save and would restart their timers. */
   const openPageFile = openPage?.fileName ?? null;
@@ -2645,6 +2673,7 @@ export function App() {
     fileName: page.fileName,
     name: page.name,
     ...(page.assigned ? { assigned: page.assigned } : {}),
+    ...(page.done ? { done: true } : {}),
   });
 
   /**
@@ -2732,21 +2761,16 @@ export function App() {
   };
 
   /**
-   * Assign the open page to a project member, or to nobody — just like a
-   * feature (src/server/members.ts), and the whole of what makes a task a
-   * task. The name lands on the page's `**Assigned:**` line, saved on the
-   * spot; the cron pushes it.
+   * Write the open page's markdown back through its document — the path the
+   * "Assigned" dropdown and the Done button share. What comes back replaces
+   * what the editor holds, so the metadata line the server wrote shows
+   * without a reload, and the sidebar reloads so the list agrees. Returns
+   * whether it landed; the caller says what changed.
    */
-  const savePageAssigned = async (name: string) => {
+  const savePageMeta = async (next: string, whatFailed: string): Promise<boolean> => {
     const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    const assigned = name.trim();
-    if ((page.assigned ?? "") === assigned) return;
-    const { assigned: _previous, ...rest } = parsePage(content);
-    const next = serializePage(assigned ? { ...rest, assigned } : rest);
+    if (!page) return false;
     const tab = pageTabOf(page.fileName);
-    setPageAssignedSaving(true);
     try {
       const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
         method: "PUT",
@@ -2757,25 +2781,73 @@ export function App() {
         content?: string;
         error?: string;
       };
-      if (res.ok && typeof data.content === "string") {
-        openPageSession.current += 1;
-        openPageSaved.current = data.content;
-        openPageTextRef.current = data.content;
-        setOpenPageText(data.content);
-        setOpenPage(pageListingOf(data));
-        toast.success(
-          assigned ? `Assigned to ${assigned} — saved locally.` : "Assignment cleared — saved locally.",
-          { action: { label: "Undo", run: () => void savePageAssigned(_previous ?? "") } },
-        );
-        markSaved();
-        void loadPages(tab.folder);
-      } else {
-        toast.error(data.error ?? "Could not save the assignment");
+      if (!res.ok || typeof data.content !== "string") {
+        toast.error(data.error ?? `Could not save the ${whatFailed}`);
+        return false;
       }
+      openPageSession.current += 1;
+      openPageSaved.current = data.content;
+      openPageTextRef.current = data.content;
+      setOpenPageText(data.content);
+      setOpenPage(pageListingOf(data));
+      markSaved();
+      void loadPages(tab.folder);
+      return true;
     } catch {
-      toast.error("Could not save the assignment — is the server running?");
+      toast.error(`Could not save the ${whatFailed} — is the server running?`);
+      return false;
+    }
+  };
+
+  /**
+   * Assign the open page to a project member, or to nobody — just like a
+   * feature (src/server/members.ts). The name lands on the page's
+   * `**Assigned:**` line, saved on the spot; the cron pushes it.
+   */
+  const savePageAssigned = async (name: string) => {
+    const page = openPage;
+    const content = openPageText;
+    if (!page || content === null) return;
+    const assigned = name.trim();
+    if ((page.assigned ?? "") === assigned) return;
+    const { assigned: previous, ...rest } = parsePage(content);
+    const next = serializePage(assigned ? { ...rest, assigned } : rest);
+    setPageAssignedSaving(true);
+    try {
+      if (await savePageMeta(next, "assignment")) {
+        toast.success(
+          assigned
+            ? `Assigned to ${assigned} — saved locally.`
+            : "Assignment cleared — saved locally.",
+          { action: { label: "Undo", run: () => void savePageAssigned(previous ?? "") } },
+        );
+      }
     } finally {
       setPageAssignedSaving(false);
+    }
+  };
+
+  /**
+   * Tick the open task off, or reopen it (specs/app/tasks.feature.md): the
+   * page's `**Status:** Done` line, written the same way the assignment is,
+   * so the sidebar strikes the task through on the next listing.
+   */
+  const savePageDone = async (done: boolean) => {
+    const page = openPage;
+    const content = openPageText;
+    if (!page || content === null) return;
+    if ((page.done ?? false) === done) return;
+    const { done: _was, ...rest } = parsePage(content);
+    const next = serializePage(done ? { ...rest, done: true } : rest);
+    setPageDoneSaving(true);
+    try {
+      if (await savePageMeta(next, "status")) {
+        toast.success(done ? "Marked done — saved locally." : "Reopened — saved locally.", {
+          action: { label: "Undo", run: () => void savePageDone(!done) },
+        });
+      }
+    } finally {
+      setPageDoneSaving(false);
     }
   };
 
@@ -5359,10 +5431,8 @@ export function App() {
                     <div key={page.fileName} className={`page-row${dir ? " nested" : ""}`}>
                       <a
                         href={pageLink(page.fileName)}
-                        className={`page-entry${page.fileName === openPage?.fileName ? " active" : ""}`}
-                        title={
-                          page.assigned ? `${page.name} — assigned to ${page.assigned}` : page.name
-                        }
+                        className={`page-entry${page.fileName === openPage?.fileName ? " active" : ""}${page.done ? " done" : ""}`}
+                        title={pageRowTitle(page)}
                         aria-current={page.fileName === openPage?.fileName ? "page" : undefined}
                         onClick={(e) =>
                           spaClick(e, () => void showPage(page.fileName, { push: true }))
@@ -6457,8 +6527,28 @@ export function App() {
                 </span>
               </div>
             </header>
-            {assignments && (
+            {(assignments || pageTabOf(openPage.fileName).done) && (
               <div className="props">
+                {/* The Done button (specs/app/tasks.feature.md): a task is
+                    finished or it is not, and the chip says which. Tasks only
+                    — a roadmap page is never ticked off. */}
+                {pageTabOf(openPage.fileName).done && (
+                  <button
+                    type="button"
+                    className={`chip page-done${openPage.done ? " is-done" : " muted"}`}
+                    aria-pressed={openPage.done === true}
+                    disabled={pageDoneSaving}
+                    onClick={() => void savePageDone(!openPage.done)}
+                  >
+                    {openPage.done ? (
+                      <CheckCircle2 size={14} aria-hidden="true" />
+                    ) : (
+                      <Circle size={14} aria-hidden="true" />
+                    )}
+                    {openPage.done ? "Done" : "Mark done"}
+                  </button>
+                )}
+                {assignments && (
                 <span className="chip-anchor page-assignee-anchor">
                   <button
                     type="button"
@@ -6505,6 +6595,7 @@ export function App() {
                     ]}
                   />
                 </span>
+                )}
               </div>
             )}
             <MarkdownEditor

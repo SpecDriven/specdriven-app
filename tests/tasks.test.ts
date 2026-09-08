@@ -26,6 +26,7 @@ import {
   readPage,
   savePage,
 } from "../src/server/pages";
+import { parsePage, serializePage } from "../src/server/parser";
 import { normalizeTasks } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
 
@@ -113,6 +114,64 @@ test("a task is created, saved and assigned through its document", async () => {
   expect(saved.assigned).toBe("Ada Lovelace");
   expect((await readPage(clones.a, TASKS, fileName))?.content).toBe(saved.content);
   expect((await loadPageDoc(clones.a, fileName))?.doc.assigned).toBe("Ada Lovelace");
+  expect(await listPages(clones.a, TASKS)).toEqual([
+    { fileName, name: "Ship v2", assigned: "Ada Lovelace" },
+  ]);
+});
+
+// The Done marker (specs/app/tasks.feature.md) is a metadata line like the
+// assignment, either order, and only "Done" is one — anything else a person
+// wrote on a `**Status:**` line stays in the body where they put it.
+test("a page parses its Done marker in either order", () => {
+  const after = parsePage("# Ship v2\n\n**Assigned:** Ada\n\n**Status:** Done\n\nCut it.\n");
+  expect(after).toEqual({ name: "Ship v2", assigned: "Ada", done: true, body: "Cut it." });
+  expect(serializePage(after)).toBe(
+    "# Ship v2\n\n**Assigned:** Ada\n\n**Status:** Done\n\nCut it.\n",
+  );
+  const before = parsePage("# Ship v2\n\n**Status:** done\n\n**Assigned:** Ada\n\nCut it.\n");
+  expect(before).toEqual({ name: "Ship v2", assigned: "Ada", done: true, body: "Cut it." });
+});
+
+test("a page with another status keeps it as body", () => {
+  const page = parsePage("# Ship v2\n\n**Status:** Blocked\n\nWaiting on legal.\n");
+  expect(page).toEqual({
+    name: "Ship v2",
+    body: "**Status:** Blocked\n\nWaiting on legal.",
+  });
+  expect(serializePage(page)).toBe("# Ship v2\n\n**Status:** Blocked\n\nWaiting on legal.\n");
+});
+
+// "Tasks that are Done should be shown with a strikethrough": the list needs
+// to know, so a done task carries a `**Status:** Done` line the listing reads
+// back — and reopening it takes the line away again.
+test("a task is marked done and reopened through its document", async () => {
+  const clones = await twoClones(root);
+  const fileName = await createPage(clones.a, TASKS, "Ship v2");
+
+  const done = await savePage(
+    clones.a,
+    TASKS,
+    fileName,
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\n**Status:** Done\n\nCut the build.\n",
+  );
+  expect(done.done).toBe(true);
+  expect(done.content).toBe(
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\n**Status:** Done\n\nCut the build.\n",
+  );
+  expect((await loadPageDoc(clones.a, fileName))?.doc.done).toBe(true);
+  expect(await listPages(clones.a, TASKS)).toEqual([
+    { fileName, name: "Ship v2", assigned: "Ada Lovelace", done: true },
+  ]);
+
+  const reopened = await savePage(
+    clones.a,
+    TASKS,
+    fileName,
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\nCut the build.\n",
+  );
+  expect(reopened.done).toBeUndefined();
+  expect(reopened.content).not.toContain("Status:");
+  expect((await loadPageDoc(clones.a, fileName))?.doc.done).toBeUndefined();
   expect(await listPages(clones.a, TASKS)).toEqual([
     { fileName, name: "Ship v2", assigned: "Ada Lovelace" },
   ]);
