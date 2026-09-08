@@ -10,11 +10,7 @@ coverage-sensitive: sudden-and-accidental is covered, gradual is not.
 - **Then** a claim is opened as "sudden and accidental water damage"
 - **And** an emergency mitigation vendor is offered within 24 hours
 
-### Tests
-
-| Test |
-| --- |
-| https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/RecordWaterDamageClaimTest.java#L32 |
+[test: burstPipeIsCovered : https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/claims/RecordWaterDamageClaimTest.java#L32 ]
 
 ## Gradual leak is denied @v1 [proposed]
 
