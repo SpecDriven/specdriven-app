@@ -53,6 +53,20 @@ import {
 import { getCurrentUser } from "./user";
 import { getAppRoot } from "./paths";
 import {
+  HumanSessionError,
+  activeHumanSession,
+  appendInterval,
+  closeInterval,
+  endSession as endHumanSession,
+  newHumanSession,
+  normalizeIntervalKind,
+  normalizeIntervalOutcome,
+  normalizePomodoro,
+  readHumanSession,
+  writeHumanSession,
+} from "./humanSession";
+import type { HumanSession, PageRef, SpecRef } from "./humanSession";
+import {
   listFeatures,
   listFolders,
   readFeatureForEditor,
@@ -79,6 +93,7 @@ import {
   codexAvailable,
   launchDesktopSession,
   piAvailable,
+  SESSION_TITLE_MAX,
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
@@ -1290,6 +1305,141 @@ const postAgentSessionPrompt = withDataDir(async (dir, req) => {
 });
 
 // ---------------------------------------------------------------------------
+// Human coding sessions (roadmap/support-for-human-code-sessions.md): a
+// Pomodoro-timed session the user runs themself, recorded beside the AI
+// session records (src/server/humanSession.ts). None of this needs the data
+// repo — a person can time their work with nothing configured — so nothing
+// here goes through withDataDir or waits on the app-start pull.
+
+/** A human session's transition, or the status its refusal carries. */
+function humanSessionError(e: unknown): Response {
+  if (e instanceof HumanSessionError) return json({ error: e.message }, e.status);
+  return json({ error: (e as Error).message }, 500);
+}
+
+/** The record by id, or the 404 to answer with. */
+async function loadHumanSession(id: string): Promise<HumanSession | Response> {
+  const record = await readHumanSession(await sessionsDirectory(getAppRoot()), id);
+  return record ?? json({ error: "session not found" }, 404);
+}
+
+/** Spec refs off the request, in the AI record's shape; junk entries are dropped. */
+function specRefsOf(value: unknown): SpecRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    typeof entry?.fileName === "string" && entry.fileName
+      ? [{ fileName: entry.fileName as string, partial: entry.partial === true }]
+      : [],
+  );
+}
+
+function pageRefsOf(value: unknown): PageRef[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) =>
+    typeof entry?.folder === "string" && pageFolderNamed(entry.folder) && typeof entry?.file === "string" && entry.file
+      ? [{ folder: entry.folder as string, file: entry.file as string }]
+      : [],
+  );
+}
+
+/** The open session, or null — what the client resumes on boot. */
+const getHumanSessionActive: Handler = async () =>
+  json({ session: await activeHumanSession(await sessionsDirectory(getAppRoot())) });
+
+const getHumanSession: Handler = async (_req, params) => {
+  const record = await loadHumanSession(params.id ?? "");
+  return record instanceof Response ? record : json(record);
+};
+
+/**
+ * Start a session: a name, the Pomodoro settings it will keep, and what it
+ * is about. One at a time — the bar shows a single timer — so a second one
+ * is refused until the first is ended.
+ */
+const postHumanSession: Handler = async (req) => {
+  const body = (await req.json().catch(() => null)) as {
+    name?: unknown;
+    pomodoro?: unknown;
+    specs?: unknown;
+    pages?: unknown;
+  } | null;
+  const name = typeof body?.name === "string" ? body.name.trim() : "";
+  if (!name) return json({ error: "name is required" }, 400);
+  if (name.length > SESSION_TITLE_MAX) return json({ error: `name is longer than ${SESSION_TITLE_MAX} characters` }, 400);
+  if (body?.pomodoro !== undefined) {
+    const given = body.pomodoro;
+    const normalized = normalizePomodoro(given);
+    const raw = typeof given === "object" && given !== null ? (given as Record<string, unknown>) : null;
+    const bad = raw
+      ? (Object.keys(normalized) as (keyof typeof normalized)[]).find(
+          (key) => raw[key] !== undefined && raw[key] !== normalized[key],
+        )
+      : "pomodoro";
+    if (bad) return json({ error: `pomodoro.${bad} must be a whole number of minutes in range` }, 400);
+  }
+  const sessionsDir = await sessionsDirectory(getAppRoot());
+  const active = await activeHumanSession(sessionsDir);
+  if (active) return json({ error: "A Pomodoro session is already running — end it first", id: active.id }, 409);
+  const state = await readState(getAppRoot());
+  const user = await getCurrentUser();
+  const record = newHumanSession({
+    name,
+    user: user.login ?? user.username,
+    ...(state.dataRepo ? { dataRepo: state.dataRepo } : {}),
+    specs: specRefsOf(body?.specs),
+    pages: pageRefsOf(body?.pages),
+    pomodoro: normalizePomodoro(body?.pomodoro),
+  });
+  return json(await writeHumanSession(sessionsDir, record), 201);
+};
+
+/** Begin an interval of the given kind; refused while one runs. */
+const postHumanSessionInterval: Handler = async (req, params) => {
+  const record = await loadHumanSession(params.id ?? "");
+  if (record instanceof Response) return record;
+  const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
+  const kind = normalizeIntervalKind(body?.kind);
+  if (!kind) return json({ error: "kind must be work, shortBreak or longBreak" }, 400);
+  try {
+    const next = appendInterval(record, kind, new Date());
+    return json(await writeHumanSession(await sessionsDirectory(getAppRoot()), next));
+  } catch (e) {
+    return humanSessionError(e);
+  }
+};
+
+/**
+ * End the running interval: completed when the timer ran out (the client
+ * sends the planned end, so a late tick does not stretch it), abandoned
+ * when voided or skipped.
+ */
+const patchHumanSessionInterval: Handler = async (req, params) => {
+  const record = await loadHumanSession(params.id ?? "");
+  if (record instanceof Response) return record;
+  const body = (await req.json().catch(() => null)) as { outcome?: unknown; endedAt?: unknown } | null;
+  const outcome = normalizeIntervalOutcome(body?.outcome);
+  if (!outcome) return json({ error: "outcome must be completed or abandoned" }, 400);
+  if (body?.endedAt !== undefined && typeof body.endedAt !== "string") {
+    return json({ error: "endedAt must be an ISO 8601 string" }, 400);
+  }
+  try {
+    const next = closeInterval(record, outcome, new Date(), body?.endedAt as string | undefined);
+    return json(await writeHumanSession(await sessionsDirectory(getAppRoot()), next));
+  } catch (e) {
+    return humanSessionError(e);
+  }
+};
+
+/** End the session; a running interval is abandoned. Ending twice is fine. */
+const postHumanSessionEnd: Handler = async (_req, params) => {
+  const record = await loadHumanSession(params.id ?? "");
+  if (record instanceof Response) return record;
+  const ended = endHumanSession(record, new Date());
+  if (ended === record) return json(record);
+  return json(await writeHumanSession(await sessionsDirectory(getAppRoot()), ended));
+};
+
+// ---------------------------------------------------------------------------
 // Coding agent pane (specs/agents/coding-agent-ui.feature.md): a live Claude
 // Code chat the app drives itself (src/server/agentChat.ts). Creating one
 // needs the data repo — for the code repo its project-settings.json names —
@@ -1739,6 +1889,13 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/agent/chat/:id/interrupt", postAgentChatInterrupt],
   ["PUT", "/api/agent/chat/:id/mode", putAgentChatMode],
   ["DELETE", "/api/agent/chat/:id", deleteAgentChat],
+  // "/active" before "/:id": the table is first-match.
+  ["GET", "/api/session/human/active", getHumanSessionActive],
+  ["POST", "/api/session/human", postHumanSession],
+  ["GET", "/api/session/human/:id", getHumanSession],
+  ["POST", "/api/session/human/:id/interval", postHumanSessionInterval],
+  ["PATCH", "/api/session/human/:id/interval", patchHumanSessionInterval],
+  ["POST", "/api/session/human/:id/end", postHumanSessionEnd],
 ];
 
 export interface ApiMatch {

@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://specdriven.dev/schemas/human-session-1.schema.json",
+  "title": "Human coding session",
+  "description": "A Pomodoro-timed coding session a person runs themself, stored locally at <settings dir>/sessions/<id>/session.json and never committed to git. Timestamps are ISO 8601; *Minutes are settings, *Ms are measured durations. A session without endedAt is open (crash-only software); an interval without endedAt is running.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "name",
+    "startedAt",
+    "updatedAt",
+    "specs",
+    "pages",
+    "pomodoro",
+    "intervals",
+    "totals"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "human" },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Also the name of the folder the record sits in."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "user": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Who ran the session — the signed-in login or the OS account."
+    },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Absent while the session is open."
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The last write; a stale value means the app died mid-session."
+    },
+    "dataRepo": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The data repo configured at the time; absent when none was."
+    },
+    "codeRepo": { "type": "string", "minLength": 1 },
+    "specs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/specRef" },
+      "description": "The specs the session is about, as the AI session record lists them."
+    },
+    "pages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pageRef" },
+      "description": "The roadmap pages or tasks the session is about."
+    },
+    "pomodoro": { "$ref": "#/$defs/pomodoro" },
+    "intervals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/interval" },
+      "description": "Append-only, in order; at most the last one is open."
+    },
+    "totals": { "$ref": "#/$defs/totals" },
+    "notes": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "specRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileName", "partial"],
+      "properties": {
+        "fileName": { "type": "string", "minLength": 1 },
+        "partial": {
+          "type": "boolean",
+          "description": "True when only some of the feature's scenarios were selected."
+        }
+      }
+    },
+    "pageRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["folder", "file"],
+      "properties": {
+        "folder": { "type": "string", "enum": ["roadmap", "tasks"] },
+        "file": { "type": "string", "minLength": 1 }
+      }
+    },
+    "pomodoro": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workMinutes", "shortBreakMinutes", "longBreakMinutes", "longBreakEvery"],
+      "description": "The settings in force for this session, snapshotted when it started.",
+      "properties": {
+        "workMinutes": { "type": "integer", "minimum": 1, "maximum": 180 },
+        "shortBreakMinutes": { "type": "integer", "minimum": 1, "maximum": 180 },
+        "longBreakMinutes": { "type": "integer", "minimum": 1, "maximum": 180 },
+        "longBreakEvery": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Completed pomodoros between long breaks."
+        }
+      }
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "startedAt"],
+      "dependentRequired": { "endedAt": ["outcome"], "outcome": ["endedAt"] },
+      "properties": {
+        "kind": { "type": "string", "enum": ["work", "shortBreak", "longBreak"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Absent while the interval is running."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["completed", "abandoned"],
+          "description": "completed: the timer ran out. abandoned: a voided pomodoro or a skipped break."
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workMs", "breakMs", "completedPomodoros"],
+      "description": "A projection of intervals, recomputed on every write; abandoned time still counts as time spent.",
+      "properties": {
+        "workMs": { "type": "integer", "minimum": 0 },
+        "breakMs": { "type": "integer", "minimum": 0 },
+        "completedPomodoros": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
