@@ -355,17 +355,57 @@ export function parseAssignedLine(line: string): string | null {
 }
 
 /**
- * Lift a leading `**Assigned:**` line off a text — the assignment on its own,
- * without the ticket link splitFeatureMeta also looks for. What a markdown
- * page carries (parsePage): it has an assignment but no ticket.
+ * A task is finished or it is not (specs/app/tasks.feature.md), and that is
+ * written as one more line under the heading — `**Status:** Done` — beside
+ * the assignment, in either order. Only "Done" is ever written: a task still
+ * to do carries no line at all, so nothing is added to a page until somebody
+ * ticks it off, and a hand-written `**Status:** Blocked` is left where it is
+ * as ordinary content rather than being swallowed and lost.
  */
-export function splitAssigned(text: string): { text: string; assigned?: string } {
-  const lines = text.split("\n");
-  const at = lines.findIndex((line) => line.trim() !== "");
-  if (at === -1) return { text };
-  const assigned = parseAssignedLine(lines[at]!);
-  if (!assigned) return { text };
-  return { text: lines.slice(at + 1).join("\n").trim(), assigned };
+const DONE_RE = /^\s{0,3}\*\*Status:\*\*\s*done\s*$/i;
+
+/** The markdown line a finished page is marked with. */
+export function formatDone(): string {
+  return "**Status:** Done";
+}
+
+/** Whether a line of markdown is the done marker. */
+export function parseDoneLine(line: string): boolean {
+  return DONE_RE.test(line);
+}
+
+/**
+ * Lift a page's metadata lines — its assignment and its done marker — off the
+ * top of a text, without the ticket link splitFeatureMeta also looks for.
+ * What a markdown page carries (parsePage): either line may come first, and
+ * anything else ends the metadata.
+ */
+export function splitPageMeta(text: string): {
+  text: string;
+  assigned?: string;
+  done?: boolean;
+} {
+  let rest = text;
+  let assigned: string | undefined;
+  let done = false;
+  // At most one line of each kind, so two passes settle it whichever order
+  // they were written in (splitFeatureMeta).
+  for (let pass = 0; pass < 2; pass++) {
+    const lines = rest.split("\n");
+    const at = lines.findIndex((line) => line.trim() !== "");
+    if (at === -1) break;
+    const line = lines[at]!;
+    const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
+    if (nextAssigned) assigned = nextAssigned;
+    else if (!done && parseDoneLine(line)) done = true;
+    else break;
+    rest = lines.slice(at + 1).join("\n").trim();
+  }
+  return {
+    text: rest,
+    ...(assigned ? { assigned } : {}),
+    ...(done ? { done } : {}),
+  };
 }
 
 /**
@@ -696,25 +736,28 @@ export function markProposed(text: string): string {
 // are the data repo's other kind of markdown: regular files in the special
 // `roadmap/` and `tasks/` folders, with no scenarios in them. Like a feature,
 // a page may carry the project member it is assigned to on an `**Assigned:**`
-// line under its heading — which is all a task needs to be a task; everything
-// else is free markdown, kept as written.
+// line under its heading — which, with the `**Status:** Done` line a finished
+// task is ticked off with, is all a task needs to be a task; everything else
+// is free markdown, kept as written.
 
-/** A markdown page: its heading, who it is assigned to, and its markdown. */
+/** A markdown page: its heading, its state, and its markdown. */
 export interface MarkdownPage {
   /** The `# <name>` heading, or "" for a file that opens without one. */
   name: string;
-  /** Everything below the heading and the assignment line. */
+  /** Everything below the heading and the metadata lines. */
   body: string;
   /** Name of the project member the document is assigned to, if any. */
   assigned?: string;
+  /** Whether the page is finished — a task's Done (tasks.feature.md). */
+  done?: boolean;
 }
 
 const PAGE_HEADING_RE = /^#\s+(.+?)\s*$/;
 
 /**
- * Read a markdown page. A leading `# <name>` heading is the name; a
- * `**Assigned:** <name>` line right under it is the assignment. A file that
- * starts with neither is all body — a plain markdown file must survive the
+ * Read a markdown page. A leading `# <name>` heading is the name; the
+ * `**Assigned:** <name>` and `**Status:** Done` lines right under it are its
+ * metadata. A file that starts with none of them is all body — a plain markdown file must survive the
  * round trip unchanged apart from its surrounding blank lines.
  */
 export function parsePage(text: string): MarkdownPage {
@@ -722,11 +765,12 @@ export function parsePage(text: string): MarkdownPage {
   const at = lines.findIndex((line) => line.trim() !== "");
   const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
   const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
-  const { text: body, assigned } = splitAssigned(rest);
+  const { text: body, assigned, done } = splitPageMeta(rest);
   return {
     name: heading ? heading[1]! : "",
     body,
     ...(assigned ? { assigned } : {}),
+    ...(done ? { done: true } : {}),
   };
 }
 
@@ -735,6 +779,7 @@ export function serializePage(doc: MarkdownPage): string {
   const parts: string[] = [];
   if (doc.name) parts.push(`# ${doc.name}`);
   if (doc.assigned) parts.push(formatAssigned(doc.assigned));
+  if (doc.done) parts.push(formatDone());
   if (doc.body) parts.push(doc.body);
   return parts.length === 0 ? "" : parts.join("\n\n") + "\n";
 }
