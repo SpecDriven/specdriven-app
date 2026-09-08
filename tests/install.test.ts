@@ -701,9 +701,10 @@ test("the run ends with the built .app open", async () => {
   const log = join(home, "bun.log");
   const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
   const app = join(target, "release", "mac-arm64", "SpecDriven.app");
+  const dmg = join(target, "release", `SpecDriven-${VERSION}-arm64.dmg`);
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Darwin"),
-    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents`),
+    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
     open: `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> ${shellQuote(log)}\n`,
   });
 
@@ -711,17 +712,20 @@ test("the run ends with the built .app open", async () => {
   expect(stderr).toBe("");
   expect(code).toBe(0);
 
-  // Both commands run inside the checkout, in that order.
+  // Both commands run inside the checkout, in that order; the .app is started
+  // and the .dmg opened last, once everything else has been said.
   expect(logLines(log)).toEqual([
     `${target} | install`,
     `${target} | run build:desktop`,
     `open | ${app}`,
+    `open | ${dmg}`,
   ]);
   expect(stdout).toContain("Installing dependencies…");
   expect(stdout).toContain("Building the desktop app");
   expect(stdout).toContain(`Starting ${app}…`);
   expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
   expect(stdout).toContain(`The packaged app is in ${join(target, "release")}`);
+  expect(stdout.trim().split("\n").at(-1)).toBe(`Opening ${dmg}…`);
 });
 
 test("the run ends with the AppImage made runnable and started", async () => {
