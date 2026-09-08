@@ -94,12 +94,17 @@ drop it by hand, untick the boxes, or turn Code generation off and on again.
 
 ## 4. Starting a session
 
-With something selected, press **Start AI Session (n)** in the sidebar. The
-same command is in the command palette (`⌘K`) and in a feature page's
-**More actions** (⋯) menu. While a session is being opened the button reads
-`Session running…`.
+With something selected, press **Start session… (n)** in the sidebar. The
+same command is in the command palette (`⌘K`) as **Start AI Session** and
+in a feature page's **More actions** (⋯) menu. While a session is being
+opened the button reads `Session running…`.
 
-The **Name the session** dialog asks for two things:
+The dialog has two tabs, **AI session** and **Pomodoro**; the second times
+your own work and is covered in [Pomodoro sessions](human-sessions.md). The
+AI tab is off, with the reason shown, while nothing is selected or code
+generation is switched off.
+
+The **Name the session** tab asks for two things:
 
 - **A name.** It is prefilled with a timestamp, `Session 2026-09-08 15:30:30
   PDT`, and you can replace it with something meaningful, `implement billing
@@ -270,6 +275,9 @@ and never inside the data folder, which is pushed to git.
 The record also carries the agent's own session id, so a past pane session
 can be resumed from the agent's CLI. Codex threads are named after the
 session, so `codex resume` lists them by name.
+
+[Pomodoro sessions](human-sessions.md#5-session-records) share this folder;
+their records say `"kind": "human"`.
 
 ## 9. Demo mode
 
