@@ -728,6 +728,30 @@ test("the run ends with the built .app open", async () => {
   expect(stdout.trim().split("\n").at(-1)).toBe(`Opening ${dmg}…`);
 });
 
+test("the messages survive a single-byte locale", async () => {
+  // In a Latin-1 locale the bytes of "…" count as letters, so "$app…" is read
+  // as a variable named app-plus-junk and `set -u` stops the run there. Every
+  // variable an ellipsis follows is braced; this keeps it that way.
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const app = join(target, "release", "mac-arm64", "SpecDriven.app");
+  const dmg = join(target, "release", `SpecDriven-${VERSION}-arm64.dmg`);
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Darwin"),
+    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
+    open: `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> ${shellQuote(log)}\n`,
+  });
+
+  const { stderr, code } = await runInstaller(good.url, home, {
+    tools,
+    env: { LC_ALL: "en_US.ISO8859-1", LANG: "en_US.ISO8859-1" },
+  });
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(logLines(log).slice(-2)).toEqual([`open | ${app}`, `open | ${dmg}`]);
+});
+
 test("the run ends with the AppImage made runnable and started", async () => {
   const home = freshHome();
   const log = join(home, "bun.log");
