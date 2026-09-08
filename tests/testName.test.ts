@@ -83,6 +83,8 @@ describe("what a line declares", () => {
     expect(declaredTest("  it('adds', async () => {", "javascript")).toBe("adds");
     expect(declaredTest("  test.only(`with ${x} inside`, () => {", "javascript")).toBe("with ${x} inside");
     expect(declaredTest('  test.each(rows)("row %s", (r) => {', "javascript")).toBe("row %s");
+    expect(declaredTest('test.skipIf(!PYTHON)("a yes at the terminal installs Bun", async () => {', "javascript")).toBe("a yes at the terminal installs Bun");
+    expect(declaredTest('  it.concurrent.skipIf(offline)("fetches", () => {', "javascript")).toBe("fetches");
     expect(declaredTest('Deno.test("deno style", () => {', "javascript")).toBe("deno style");
     expect(declaredTest("export async function testQuote() {", "javascript")).toBe("testQuote");
     expect(declaredTest("  async quotesAHomeownersPolicy(): Promise<void> {", "javascript")).toBe("quotesAHomeownersPolicy");
