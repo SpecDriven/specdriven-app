@@ -33,6 +33,7 @@ import {
   Ellipsis,
   Pencil,
   Play,
+  Timer,
   Plus,
   RefreshCw,
   Search,
@@ -72,6 +73,12 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, useVimMode } from "./vimPref";
 import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
+import type { PromptOptions } from "./ModalPrompts";
+import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
+import type { StartTab } from "./StartSessionDialog";
+import { pomodoro, readPrefs, titlePrefix, usePomodoro } from "./pomodoro";
+import { PomodoroBar } from "./PomodoroBar";
+import { preview as previewSound } from "./sounds";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
@@ -746,6 +753,18 @@ export function App() {
   // ("all") or a set of scenario keys.
   const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
   const [sessionRunning, setSessionRunning] = useState(false);
+  // The Start session dialog (src/frontend/StartSessionDialog.tsx): which
+  // tab it opens on, or null while closed. The AI tab is the old session
+  // dialog; the Pomodoro tab starts a human session
+  // (roadmap/support-for-human-code-sessions.md).
+  const [startDialog, setStartDialog] = useState<StartTab | null>(null);
+  // The Pomodoro session (src/frontend/pomodoro.ts): its store keeps the
+  // clock; App reads it for the window title and the bar. Restored once on
+  // boot, so a session survives a reload.
+  const pom = usePomodoro();
+  useEffect(() => {
+    void pomodoro.restore();
+  }, []);
   /** Outcome line under the Start session button (started/finished). */
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   /** A failed session's message, shown in an error box until dismissed. */
@@ -1067,7 +1086,7 @@ export function App() {
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
-  const { modal, modalOpen, prompt, promptWithChoice, confirm } = useModalPrompts();
+  const { modal, modalOpen, prompt, confirm } = useModalPrompts();
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -1381,12 +1400,13 @@ export function App() {
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
+  const clock = titlePrefix(pom.session, pom.now);
   useEffect(() => {
     const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
     // An open roadmap page or task names the window the way a feature does, so
     // a shared link previews as that page (specs/app/tasks.feature.md).
-    document.title = testsView
+    const base = testsView
       ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
       : issuesView
         ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
@@ -1397,7 +1417,11 @@ export function App() {
         : s
           ? `SpecDriven — ${name} · ${s.name} v${s.version}`
           : `SpecDriven — ${name}`;
-  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore]);
+    // A running pomodoro puts its clock first, so the tab shows the time
+    // left while the person works elsewhere. This effect is the title's
+    // only writer.
+    document.title = clock ? `${clock} · ${base}` : base;
+  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1888,15 +1912,20 @@ export function App() {
     }
   };
 
-  const startSession = async () => {
+  // The AI session's dialog, built from the selection at the time: the
+  // Start session dialog renders it on its AI tab, and runAiSession acts on
+  // what was picked. Kept apart from the running so the dialog can hold a
+  // second tab.
+  const aiSessionDialog = (): {
+    files: ReturnType<typeof sessionFiles>;
+    only: CodeGenTarget;
+    dialog: PromptOptions;
+  } => {
     const files = sessionFiles();
-    if (files.length === 0 || sessionRunning) return;
     // With a code repo named in project-settings.json the session runs
     // there, and the dialog says so — the folder is the session's whole
     // context, so it must not come as a surprise.
     const where = codeRepo ? ` in ${codeRepo}` : "";
-    let sessionName: string;
-    let target: CodeGenTarget;
     // Every agent the session can run in here; a choice only when there is
     // more than one.
     const repoWord = codeRepo ? "the code repo" : "the data repo";
@@ -1969,28 +1998,27 @@ export function App() {
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start AI Session",
     };
-    if (agentChoices.length > 0) {
-      const picked = await promptWithChoice({
-        ...dialog,
-        choicesLabel: "Run in",
-        choices,
-        initialChoice: sessionTarget,
-      });
-      if (picked === null || !picked.text.trim()) return;
-      sessionName = picked.text.trim();
-      if (picked.choice === CLIPBOARD_TARGET) {
-        await copySessionPrompt(sessionName, files);
-        return;
-      }
-      target = readCodeGenTarget(picked.choice) ?? only;
-      // Remembered, so the next dialog opens on the same choice.
-      if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
-    } else {
-      const name = await prompt({ ...dialog, confirmLabel: "Copy prompt" });
-      if (name === null || !name.trim()) return;
-      await copySessionPrompt(name.trim(), files);
+    // With no agent installed the dialog asks for a name without a choice
+    // and says what it will do; the hint only makes sense over a selection.
+    const opts: PromptOptions =
+      agentChoices.length > 0
+        ? { ...dialog, choicesLabel: "Run in", choices, initialChoice: sessionTarget }
+        : { ...dialog, confirmLabel: "Copy prompt" };
+    if (files.length === 0) delete opts.hint;
+    return { files, only, dialog: opts };
+  };
+
+  /** The AI tab was confirmed: copy the prompt, or run the session where it was told to. */
+  const runAiSession = async (sessionName: string, choice: string | null) => {
+    const { files, only } = aiSessionDialog();
+    if (files.length === 0 || sessionRunning) return;
+    if (choice === null || choice === CLIPBOARD_TARGET) {
+      await copySessionPrompt(sessionName, files);
       return;
     }
+    const target = readCodeGenTarget(choice) ?? only;
+    // Remembered, so the next dialog opens on the same choice.
+    if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
     setSessionRunning(true);
     setSessionNotice(
       target === "desktop"
@@ -2024,6 +2052,19 @@ export function App() {
       setSessionError((e as Error).message);
     } finally {
       setSessionRunning(false);
+    }
+  };
+
+  /** Open the Start session dialog on the AI tab — every old entry point lands here. */
+  const startSession = () => setStartDialog("ai");
+
+  const startPomodoro = async (name: string, prefs: ReturnType<typeof readPrefs>) => {
+    setStartDialog(null);
+    try {
+      await pomodoro.start(name, prefs);
+      toast.success(`Pomodoro "${name}" started`);
+    } catch (e) {
+      toast.error((e as Error).message);
     }
   };
 
@@ -4059,6 +4100,7 @@ export function App() {
     settingsOpen ||
     userInfoOpen ||
     modalOpen ||
+    startDialog !== null ||
     conflict !== null ||
     featureLinkOpen ||
     sessionError !== null ||
@@ -4141,6 +4183,7 @@ export function App() {
   // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
   const closeTopmost = (e: KeyboardEvent): void | false => {
     if (sessionError !== null) return setSessionError(null);
+    if (startDialog !== null) return setStartDialog(null);
     if (conflict) {
       if (resolving) return false;
       dismissConflict();
@@ -4292,6 +4335,14 @@ export function App() {
         if (onFeaturePage) newScenario();
         else void createFeature();
       },
+    },
+    {
+      id: "pomodoro",
+      keys: "p",
+      label: "Start a Pomodoro session",
+      group: "Create",
+      when: () => !quiet && editing === null,
+      run: () => setStartDialog("pomodoro"),
     },
     {
       id: "next",
@@ -4450,8 +4501,11 @@ export function App() {
         ]
       : []),
     ...(codeGen && specSelection.size > 0 && !sessionRunning
-      ? [action("session", "Start AI Session", <Play size={14} />, () => void startSession())]
+      ? [action("session", "Start AI Session", <Play size={14} />, () => startSession())]
       : []),
+    ...(pom.session
+      ? [action("pomodoro-end", "End Pomodoro session", <Timer size={14} />, () => void pomodoro.endSession())]
+      : [shortcutAction("pomodoro", <Timer size={14} />)]),
     ...(!demo
       ? [
           action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
@@ -4961,6 +5015,7 @@ export function App() {
             </Tooltip>
           )}
           <div className="rail-bottom">
+            <PomodoroBar compact onExpand={toggleSidebar} />
             {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
                 <button
@@ -5245,34 +5300,34 @@ export function App() {
         {/* Code gen session (specs/agents/claude.spec.md): check whole specs
             here or single scenarios on their cards, then Start session asks
             for a name and where to run. The Settings switch takes it all away. */}
-        {codeGen && (
-          <>
-            <div className="sidebar-actions">
-              <button
-                onClick={() => void startSession()}
-                disabled={sessionRunning || specSelection.size === 0}
-                title={
-                  specSelection.size === 0
-                    ? "Select a spec here, or single scenarios on their cards"
-                    : `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
-                }
-              >
-                {sessionRunning ? (
-                  "Session running…"
-                ) : (
-                  <>
-                    <Play size={12} aria-hidden="true" /> Start AI Session
-                    {specSelection.size > 0 ? ` (${specSelection.size})` : ""}
-                  </>
-                )}
-              </button>
-            </div>
-            {/* What a session would run over, so a scenario checked on a card
-                two clicks away is still visible from here. */}
-            {selectionLabel && !sessionRunning && (
-              <p className="session-notice">Selected: {selectionLabel}</p>
+        {/* One button for both kinds of session
+            (roadmap/support-for-human-code-sessions.md): the dialog opens
+            on the AI tab, whose gating is the old button's, with the
+            Pomodoro tab always there. */}
+        <div className="sidebar-actions">
+          <button
+            onClick={() => startSession()}
+            disabled={sessionRunning}
+            title={
+              codeGen && specSelection.size > 0
+                ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}, or a Pomodoro`
+                : "Start an AI session or a Pomodoro"
+            }
+          >
+            {sessionRunning ? (
+              "Session running…"
+            ) : (
+              <>
+                <Play size={12} aria-hidden="true" /> Start session…
+                {codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}
+              </>
             )}
-          </>
+          </button>
+        </div>
+        {/* What a session would run over, so a scenario checked on a card
+            two clicks away is still visible from here. */}
+        {codeGen && selectionLabel && !sessionRunning && (
+          <p className="session-notice">Selected: {selectionLabel}</p>
         )}
         {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
         {loadError && <p className="error">{loadError}</p>}
@@ -5505,6 +5560,7 @@ export function App() {
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
+          <PomodoroBar />
           <Menu
             open={userMenuOpen}
             onClose={() => setUserMenuOpen(false)}
@@ -7429,6 +7485,31 @@ export function App() {
       )}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
       {modal}
+      {startDialog !== null && (
+        <StartSessionDialog
+          initialTab={startDialog}
+          ai={{
+            dialog: aiSessionDialog().dialog,
+            state: aiTabState({ codeGen, specCount: specSelection.size, sessionRunning }),
+            onConfirm: (name, choice) => {
+              setStartDialog(null);
+              void runAiSession(name, choice);
+            },
+          }}
+          pomodoro={{
+            prefs: readPrefs(),
+            running: pom.session !== null,
+            initialName: defaultSessionName(),
+            onConfirm: (name, prefs) => void startPomodoro(name, prefs),
+            onPreview: previewSound,
+            onEnd: () => {
+              setStartDialog(null);
+              void pomodoro.endSession();
+            },
+          }}
+          onClose={() => setStartDialog(null)}
+        />
+      )}
       <Toaster />
     </main>
   );
