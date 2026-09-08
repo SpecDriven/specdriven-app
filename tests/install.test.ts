@@ -860,3 +860,15 @@ test("symlinks pointing out of the repo are kept out of the release source zip",
     expect(attr.trim()).toBe(`${path}: export-ignore: set`);
   }
 });
+
+// The zip also carries no `.git`. electron-builder's deb target wants a
+// project homepage and, given none in package.json, reads one off the git
+// remote — so a build from a checkout passed while the same source unpacked
+// from the release zip failed with "Please specify project homepage"
+// (issue #83). The homepage has to travel in package.json.
+test("the deb target's homepage travels in package.json, not in .git", async () => {
+  const { homepage } = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
+  expect(typeof homepage).toBe("string");
+  expect(() => new URL(homepage)).not.toThrow();
+  expect(new URL(homepage).protocol).toBe("https:");
+});
