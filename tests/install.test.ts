@@ -696,12 +696,14 @@ function fakeUname(os: string): string {
   return `#!/bin/sh\necho ${os}\n`;
 }
 
-test("the run ends with the built .app open", async () => {
+test("the run ends with the .dmg opened, and nothing started", async () => {
   const home = freshHome();
   const log = join(home, "bun.log");
   const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
   const app = join(target, "release", "mac-arm64", "SpecDriven.app");
   const dmg = join(target, "release", `SpecDriven-${VERSION}-arm64.dmg`);
+  // electron-builder leaves the unpacked .app beside the .dmg; the script is
+  // to leave it alone.
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Darwin"),
     bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
@@ -712,18 +714,18 @@ test("the run ends with the built .app open", async () => {
   expect(stderr).toBe("");
   expect(code).toBe(0);
 
-  // Both commands run inside the checkout, in that order; the .app is started
-  // and the .dmg opened last, once everything else has been said.
+  // Both commands run inside the checkout, in that order; the .dmg is opened
+  // last, once everything else has been said, and the .app is not.
   expect(logLines(log)).toEqual([
     `${target} | install`,
     `${target} | run build:desktop`,
-    `open | ${app}`,
     `open | ${dmg}`,
   ]);
   expect(stdout).toContain("Installing dependencies…");
   expect(stdout).toContain("Building the desktop app");
-  expect(stdout).toContain(`Starting ${app}…`);
-  expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
+  expect(stdout).not.toContain("Starting ");
+  expect(stdout).toContain(`SpecDriven ${VERSION} is built.`);
+  expect(stdout).not.toContain("is running.");
   expect(stdout).toContain(`The packaged app is in ${join(target, "release")}`);
   expect(stdout.trim().split("\n").at(-1)).toBe(`Opening ${dmg}…`);
 });
@@ -749,7 +751,7 @@ test("the messages survive a single-byte locale", async () => {
   });
   expect(stderr).toBe("");
   expect(code).toBe(0);
-  expect(logLines(log).slice(-2)).toEqual([`open | ${app}`, `open | ${dmg}`]);
+  expect(logLines(log).at(-1)).toBe(`open | ${dmg}`);
 });
 
 test("the run ends with the AppImage made runnable and started", async () => {

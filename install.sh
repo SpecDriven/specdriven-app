@@ -8,7 +8,8 @@
 # security checks before building it. This script downloads the zip of a
 # release from https://github.com/SpecDriven/specdriven-app-release, verifies
 # it against that release's SHASUMS256.txt, unpacks it under
-# ~/.specdriven/app, builds it, and starts it. Building needs Bun, so if Bun
+# ~/.specdriven/app, builds it, and starts it (on macOS, opens the .dmg).
+# Building needs Bun, so if Bun
 # is missing it offers to install that, and installs it only if you say yes;
 # without Bun it stops after unpacking and says what to run by hand.
 #
@@ -291,21 +292,11 @@ info "Building the desktop app — this fetches Electron and takes a few minutes
 
 # --- start it -------------------------------------------------------------------
 
-# electron-builder leaves the unpacked app beside the installer it makes; that
-# is the one to start, since the .dmg and the .AppImage are for handing on.
+# On Linux the AppImage is the app, so it is started here. On macOS nothing is
+# started: the .dmg is opened at the very end instead, for dragging the app
+# into Applications.
 started=""
 case "$(uname -s)" in
-  Darwin)
-    for app in "$TARGET"/release/mac*/*.app; do
-      if [ -d "$app" ]; then
-        info ""
-        info "Starting ${app}…"
-        open "$app"
-        started="yes"
-        break
-      fi
-    done
-    ;;
   Linux)
     for image in "$TARGET"/release/*.AppImage; do
       if [ -f "$image" ]; then
