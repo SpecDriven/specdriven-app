@@ -79,7 +79,9 @@ The user guides live in [docs/user-guide](docs/user-guide):
 draft → proposed → published lifecycle, saving, syncing and links to tests;
 [AI sessions](docs/user-guide/ai-sessions.md) covers handing selected specs to
 Claude Code Desktop, or to Claude, Codex or Pi in the app's own coding agent
-pane. Implementers should read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+pane; [Pomodoro sessions](docs/user-guide/human-sessions.md) covers timing
+your own work with the Pomodoro timer. Implementers should read
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Demo mode
 
