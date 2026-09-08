@@ -299,7 +299,7 @@ case "$(uname -s)" in
     for app in "$TARGET"/release/mac*/*.app; do
       if [ -d "$app" ]; then
         info ""
-        info "Starting $app…"
+        info "Starting ${app}…"
         open "$app"
         started="yes"
         break
@@ -312,7 +312,7 @@ case "$(uname -s)" in
         chmod +x "$image"
         if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
           info ""
-          info "Starting $image…"
+          info "Starting ${image}…"
           # Detached, so the app outlives the shell that installed it.
           ( "$image" >/dev/null 2>&1 & )
           started="yes"
@@ -345,7 +345,7 @@ case "$(uname -s)" in
     dmg="$TARGET/release/SpecDriven-$VERSION-arm64.dmg"
     if [ -f "$dmg" ]; then
       info ""
-      info "Opening $dmg…"
+      info "Opening ${dmg}…"
       open "$dmg"
     fi
     ;;
