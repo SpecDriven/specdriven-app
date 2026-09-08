@@ -13,7 +13,7 @@ grammar wins.
 
 ## Contents
 
-1. [What a spec is](#1-what-a-spec-is)
+1. [What is a spec](#1-what-a-spec-is)
 2. [The Specs tab](#2-the-specs-tab)
 3. [A feature page](#3-a-feature-page)
 4. [Scenario cards](#4-scenario-cards)
@@ -25,7 +25,7 @@ grammar wins.
 10. [Keyboard shortcuts](#10-keyboard-shortcuts)
 11. [Glossary](#11-glossary)
 
-## 1. What a spec is
+## 1. What is a spec
 
 Everything the app shows lives in one **data folder**: an ordinary git
 repository of markdown files. The app commits and pushes what you write and
