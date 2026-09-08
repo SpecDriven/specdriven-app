@@ -3883,11 +3883,11 @@ export function App() {
                 if (el) el.indeterminate = entry !== undefined && entry !== "all";
               }}
               onChange={() => toggleSpecSelected(f.fileName)}
-              aria-label={`Select ${f.name} for a code gen session`}
+              aria-label={`Select ${f.name} for an AI session`}
               title={
                 entry !== undefined && entry !== "all"
                   ? "Some scenarios of this spec are selected"
-                  : `Select all of ${f.name} for a code gen session`
+                  : `Select all of ${f.name} for an AI session`
               }
             />
           )}
@@ -4450,7 +4450,7 @@ export function App() {
         ]
       : []),
     ...(codeGen && specSelection.size > 0 && !sessionRunning
-      ? [action("session", "Start code-gen session", <Play size={14} />, () => void startSession())]
+      ? [action("session", "Start AI Session", <Play size={14} />, () => void startSession())]
       : []),
     ...(!demo
       ? [
@@ -5254,7 +5254,7 @@ export function App() {
                 title={
                   specSelection.size === 0
                     ? "Select a spec here, or single scenarios on their cards"
-                    : `Start a code gen session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
+                    : `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
                 }
               >
                 {sessionRunning ? (
@@ -6044,7 +6044,7 @@ export function App() {
                         ? [
                             {
                               id: "session",
-                              label: "Start code-gen session",
+                              label: "Start AI Session",
                               icon: <Play size={13} />,
                               disabled: sessionRunning || specSelection.size === 0,
                               onSelect: () => void startSession(),
@@ -6304,8 +6304,8 @@ export function App() {
                           onChange={() =>
                             toggleScenarioSelected(selected, feature.scenarios, scenarioKey(s))
                           }
-                          aria-label={`Select scenario ${s.name} for a code gen session`}
-                          title="Include this scenario in a code gen session"
+                          aria-label={`Select scenario ${s.name} for an AI session`}
+                          title="Include this scenario in an AI session"
                         />
                       )}
                       {/* The title is the scenario's permalink
