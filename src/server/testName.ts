@@ -77,7 +77,9 @@ const JS_KEYWORDS = /^(?:if|for|while|switch|catch|function|return|await|typeof|
  * - Java: a method — modifiers, then `void` or a capitalised type, then the name.
  * - Kotlin: `fun name(` or `fun \`a name with spaces\`(`.
  * - JavaScript/TypeScript: a `test(…)` / `it(…)` call's title (the test's
- *   name in those frameworks), else a `function name(` declaration or a
+ *   name in those frameworks) — through any chain of modifiers, with or
+ *   without their own arguments: `test.only(…)`, `test.each(rows)(…)`,
+ *   `test.skipIf(cond)(…)` — else a `function name(` declaration or a
  *   class method `name(…) {`.
  * - Python: `def name(`.
  * - Go: `func Name(` or `func (r) Name(`.
@@ -98,7 +100,7 @@ export function declaredTest(line: string, language: TestLanguage): string | nul
     }
     case "javascript": {
       const call = line.match(
-        /^\s*(?:test|it|Deno\.test)(?:\.(?:only|skip|todo|concurrent|serial|failing|each))*\s*(?:\([^()]*\))?\s*\(\s*(['"`])((?:\\.|(?!\1).)*)\1/,
+        /^\s*(?:test|it|Deno\.test)(?:\.\w+\s*(?:\([^()]*\))?)*\s*\(\s*(['"`])((?:\\.|(?!\1).)*)\1/,
       );
       if (call) return call[2]!.trim() || null;
       const fn = line.match(/^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/);
