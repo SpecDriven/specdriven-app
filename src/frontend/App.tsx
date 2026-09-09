@@ -617,6 +617,46 @@ function pageRowTitle(page: PageListing): string {
   return parts.join(" — ");
 }
 
+/**
+ * Whether two listings agree on the fields the sidebar and the pane header
+ * show. Autosave uses this so a tick that only tidied whitespace does not
+ * replace the listing — and so a Done marker the tick did not carry cannot
+ * be mistaken for "nothing changed" and left stale on the row.
+ */
+export function pageListingMetaEqual(a: PageListing, b: PageListing): boolean {
+  return (
+    a.name === b.name &&
+    (a.assigned ?? "") === (b.assigned ?? "") &&
+    Boolean(a.done) === Boolean(b.done)
+  );
+}
+
+/**
+ * One-at-a-time async work, in the order it was queued. The page editor's
+ * autosave and the Done / Assigned writes share a queue so a late tick cannot
+ * overwrite a marker that landed, and so navigating away waits for the write
+ * that is already on its way (createPromiseQueue).
+ */
+export function createPromiseQueue(): {
+  run<T>(fn: () => Promise<T>): Promise<T>;
+  idle(): Promise<void>;
+} {
+  let tail: Promise<void> = Promise.resolve();
+  return {
+    run<T>(fn: () => Promise<T>): Promise<T> {
+      const run = tail.then(fn, fn);
+      tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+    idle() {
+      return tail;
+    },
+  };
+}
+
 function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
   const groups = new Map<string, PageListing[]>();
   for (const page of pages) {
@@ -966,7 +1006,21 @@ export function App() {
   const openPageTextRef = useRef<string | null>(null);
   openPageTextRef.current = openPageText;
   const openPageSaved = useRef<string | null>(null);
-  const openPageInFlight = useRef(false);
+  /**
+   * Page writes go through one queue so an autosave tick and a Done /
+   * Assigned PUT cannot land out of order — last-write-wins on the file
+   * would drop the marker, or worse, write the previous page's buffer into
+   * the next one after a quick navigation. `pageMetaSaving` is the Done /
+   * Assigned path in particular: an autosave that captured the buffer
+   * before the marker was applied skips rather than overwriting it.
+   */
+  const pageSaveQueue = useRef(createPromiseQueue());
+  /**
+   * Nested count of Done / Assigned writes that have been queued and not
+   * yet finished. Autosave skips while this is > 0 so a snapshot taken
+   * before the marker cannot overwrite it.
+   */
+  const pageMetaSaving = useRef(0);
   /** Bumped per page load, so a save landing after a move stamps nothing. */
   const openPageSession = useRef(0);
   /** Whether an assignment change on the open page is in flight. */
@@ -1508,6 +1562,7 @@ export function App() {
     // .md): its last save goes out there, then the pane empties so no later
     // tick writes what it held into the new folder.
     await pageTick.current();
+    await pageSaveQueue.current.idle();
     closePage({ save: false });
     try {
       const res = await fetch("/api/state", {
@@ -2725,6 +2780,10 @@ export function App() {
   const closePage = ({ save = true }: { save?: boolean } = {}) => {
     if (openPageRef.current === null) return;
     if (save) void pageTick.current();
+    // Invalidate in-flight UI applies: a Done / Assigned PUT that returns
+    // after this page has left must not put its buffer back into the pane
+    // (and then autosave it into whatever replaced it).
+    openPageSession.current += 1;
     openPageRef.current = null;
     openPageTextRef.current = null;
     setOpenPage(null);
@@ -2734,47 +2793,54 @@ export function App() {
 
   /** One autosave tick of the open page — autosaveReadme's twin. */
   const autosavePage = async () => {
+    // A Done / Assigned write is already queued: wait for it rather than
+    // racing, and do not enqueue a snapshot that predates the marker.
+    if (pageMetaSaving.current > 0) {
+      await pageSaveQueue.current.idle();
+      return;
+    }
     const content = openPageTextRef.current;
     const page = openPageRef.current;
-    if (content === null || page === null || content === openPageSaved.current) return;
-    if (openPageInFlight.current) return; // the previous tick is still saving
-    openPageInFlight.current = true;
     const session = openPageSession.current;
-    setSaving(true);
-    try {
-      const res = await fetch(
-        `/api/${pageTabOf(page.fileName).folder}/${encodeURIComponent(page.fileName)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
-        },
-      );
-      const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
-      if (res.ok) {
-        if (session === openPageSession.current) {
-          // What went out is what counts as saved: the file holds the
-          // document's projection, which can be tidier than the buffer, and
-          // taking that back would have every tick save the same text again.
-          openPageSaved.current = content;
-          markSaved();
-          // Only when the heading or the assignment actually moved: a new
-          // listing object on every tick would restart the timers watching it.
-          setOpenPage((open) =>
-            open === null || (open.name === data.name && (open.assigned ?? "") === (data.assigned ?? ""))
-              ? open
-              : pageListingOf(data),
-          );
+    if (content === null || page === null || content === openPageSaved.current) return;
+    await pageSaveQueue.current.run(async () => {
+      if (pageMetaSaving.current > 0) return;
+      if (content === openPageSaved.current) return;
+      setSaving(true);
+      try {
+        const res = await fetch(
+          `/api/${pageTabOf(page.fileName).folder}/${encodeURIComponent(page.fileName)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content }),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
+        if (res.ok) {
+          if (session === openPageSession.current) {
+            // What went out is what counts as saved: the file holds the
+            // document's projection, which can be tidier than the buffer, and
+            // taking that back would have every tick save the same text again.
+            openPageSaved.current = content;
+            markSaved();
+            // Only when the heading, assignment, or Done marker actually
+            // moved: a new listing object on every tick would restart the
+            // timers watching it.
+            const listing = pageListingOf(data);
+            setOpenPage((open) =>
+              open === null || pageListingMetaEqual(open, listing) ? open : listing,
+            );
+          }
+        } else {
+          toast.error(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
         }
-      } else {
-        toast.error(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
+      } catch (e) {
+        toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
+      } finally {
+        setSaving(false);
       }
-    } catch (e) {
-      toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
-    } finally {
-      openPageInFlight.current = false;
-      setSaving(false);
-    }
+    });
   };
   const pageTick = useRef(autosavePage);
   useEffect(() => {
@@ -2812,31 +2878,41 @@ export function App() {
     const page = openPage;
     if (!page) return false;
     const tab = pageTabOf(page.fileName);
+    const session = openPageSession.current;
+    pageMetaSaving.current += 1;
     try {
-      const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: next }),
+      return await pageSaveQueue.current.run(async () => {
+        try {
+          const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: next }),
+          });
+          const data = (await res.json().catch(() => ({}))) as PageListing & {
+            content?: string;
+            error?: string;
+          };
+          if (!res.ok || typeof data.content !== "string") {
+            toast.error(data.error ?? `Could not save the ${whatFailed}`);
+            return false;
+          }
+          // The write landed on the file it was aimed at. Reload the sidebar
+          // so a Done marker shows even when the pane has moved on.
+          void loadPages(tab.folder);
+          if (session !== openPageSession.current) return true;
+          openPageSaved.current = data.content;
+          openPageTextRef.current = data.content;
+          setOpenPageText(data.content);
+          setOpenPage(pageListingOf(data));
+          markSaved();
+          return true;
+        } catch {
+          toast.error(`Could not save the ${whatFailed} — is the server running?`);
+          return false;
+        }
       });
-      const data = (await res.json().catch(() => ({}))) as PageListing & {
-        content?: string;
-        error?: string;
-      };
-      if (!res.ok || typeof data.content !== "string") {
-        toast.error(data.error ?? `Could not save the ${whatFailed}`);
-        return false;
-      }
-      openPageSession.current += 1;
-      openPageSaved.current = data.content;
-      openPageTextRef.current = data.content;
-      setOpenPageText(data.content);
-      setOpenPage(pageListingOf(data));
-      markSaved();
-      void loadPages(tab.folder);
-      return true;
-    } catch {
-      toast.error(`Could not save the ${whatFailed} — is the server running?`);
-      return false;
+    } finally {
+      pageMetaSaving.current -= 1;
     }
   };
 
