@@ -118,11 +118,12 @@ test("the coding agent pane is on and is the only target on offer", async () => 
   expect(state.canRunPi).toBe(false);
 });
 
-// The roadmap folder is opt-in (specs/app/roadmap.feature.md), so the demo has
-// to turn it on itself or the dataset's pages have nowhere to show.
-test("the roadmap folder is on, and the dataset's pages are listed", async () => {
+// The roadmap folder is opt-in (specs/app/roadmap.feature.md) and the demo
+// leaves it that way: it opens on Specs, with no Roadmap tab, and a visitor
+// who wants the dataset's pages turns the tab on in Settings.
+test("the roadmap folder is off, though the dataset's pages are there", async () => {
   const state = await bootState();
-  expect(state.roadmap).toBe(true);
+  expect(state.roadmap).toBe(false);
 
   const { pages } = await (await api("/api/roadmap")).json();
   expect(pages).toEqual([
