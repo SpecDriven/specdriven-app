@@ -55,16 +55,15 @@ function demoSource(): string {
  * settings write racing a reseed can never unset them: the bundled git
  * engine (no gh/git binaries probed), no sync cron, and code gen sessions on
  * and pinned to the pane, which here means the simulation (demoAgent.ts).
- * The roadmap folder is opt-in everywhere else (specs/app/roadmap.feature.md)
- * but on here, so the demo dataset's roadmap pages are visible without a trip
- * through Settings; a visitor is still free to toggle it off.
+ * The roadmap folder stays opt-in here as everywhere else (specs/app/roadmap
+ * .feature.md): the demo opens on Specs, and a visitor who wants the demo
+ * dataset's roadmap pages turns the tab on in Settings.
  */
 const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   gitEngine: "js",
   reloadFrequencySeconds: 0,
   codeGen: true,
   codeGenTarget: "pane",
-  roadmap: true,
 };
 
 /** How long in-flight requests may keep using a replaced generation dir. */
