@@ -75,7 +75,7 @@ test("the configured data folder's README.md is served to the home editor", asyn
 
 test("a data folder without a README opens on an empty editor", async () => {
   const data = join(root, "data");
-  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await Bun.write(join(data, "specs/seed.feature.md"), "# Seed\n");
   await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
 
   const res = await getReadme();
@@ -91,7 +91,7 @@ test("without a data folder there is no README to open", async () => {
 
 test("an autosave writes the README locally, creating it when missing", async () => {
   const data = join(root, "data");
-  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await Bun.write(join(data, "specs/seed.feature.md"), "# Seed\n");
   await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
 
   const created = await putReadme({ content: "# Fresh\n" });
@@ -108,7 +108,7 @@ test("an autosave writes the README locally, creating it when missing", async ()
 
 test("a save without content is refused", async () => {
   const data = join(root, "data");
-  await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+  await Bun.write(join(data, "specs/seed.feature.md"), "# Seed\n");
   await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
 
   expect((await putReadme({})).status).toBe(400);

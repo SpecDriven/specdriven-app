@@ -303,7 +303,7 @@ beforeEach(async () => {
   });
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
-  await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
@@ -423,7 +423,7 @@ test("a turn goes to pi as a prompt command and its reply streams into the log",
       role: "assistant",
       content: [
         { type: "text", text: "Reading it" },
-        { type: "toolCall", id: "call_1", name: "read", arguments: { path: "quote.feature.md" } },
+        { type: "toolCall", id: "call_1", name: "read", arguments: { path: "specs/quote.feature.md" } },
       ],
       usage: { cost: { total: 0.01 } },
       stopReason: "toolUse",
@@ -514,7 +514,7 @@ test("Start session can open the generated prompt in a pi pane session", async (
   await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
   const res = await api("/api/agent/session", "POST", {
     name: "implement quotes",
-    files: [{ fileName: "quote.feature.md" }],
+    files: [{ fileName: "specs/quote.feature.md" }],
     target: "pi",
   });
   expect(res.status).toBe(200);
@@ -526,7 +526,7 @@ test("Start session can open the generated prompt in a pi pane session", async (
   expect(pi.options.args).toEqual(["--mode", "rpc", "--name", "implement quotes"]);
   const prompt = pi.sent("prompt")!;
   expect(prompt.message).toContain("SpecDriven code gen session: implement quotes");
-  expect(prompt.message).toContain("## Spec: quote.feature.md");
+  expect(prompt.message).toContain("## Spec: specs/quote.feature.md");
   expect(prompt.message).toContain("edit the code, not the specifications");
 
   const snap = await until(() => snapshot(body.id), (s) => s.events.some((e) => e.kind === "user"));

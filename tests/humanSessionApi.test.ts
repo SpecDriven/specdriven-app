@@ -53,14 +53,14 @@ describe("POST /api/session/human", () => {
   test("creates the record beside the settings file, with no data repo configured", async () => {
     const { res, record } = await start("focus on quotes", {
       pomodoro: { workMinutes: 50, longBreakEvery: 2 },
-      specs: [{ fileName: "quote.feature.md", partial: true }, { nope: 1 }],
+      specs: [{ fileName: "specs/quote.feature.md", partial: true }, { nope: 1 }],
       pages: [{ folder: "roadmap", file: "a.md" }, { folder: "notes", file: "b.md" }],
     });
     expect(res.status).toBe(201);
     expect(record.kind).toBe("human");
     expect(record.schemaVersion).toBe(1);
     expect(record.pomodoro).toEqual({ workMinutes: 50, shortBreakMinutes: 5, longBreakMinutes: 15, longBreakEvery: 2 });
-    expect(record.specs).toEqual([{ fileName: "quote.feature.md", partial: true }]);
+    expect(record.specs).toEqual([{ fileName: "specs/quote.feature.md", partial: true }]);
     expect(record.pages).toEqual([{ folder: "roadmap", file: "a.md" }]);
     expect(typeof record.user).toBe("string");
     expect(record.dataRepo).toBeUndefined();
