@@ -5,7 +5,7 @@
 // document, and written back by the projection.
 
 import { test, expect, beforeEach, afterEach, describe } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -242,21 +242,22 @@ describe("the document", () => {
 // (the dropdown sends the whole feature back), so the line lands in the file
 // and in the document that projects it.
 test("saving an assignment writes the line and the document keeps it", async () => {
-  await writeFile(join(root, "bind.feature.md"), "# Bind Policy\n\nThe description.\n");
+  await mkdir(join(root, "specs"), { recursive: true });
+  await writeFile(join(root, "specs/bind.feature.md"), "# Bind Policy\n\nThe description.\n");
   const saved = await saveFeature(
     root,
-    "bind.feature.md",
+    "specs/bind.feature.md",
     `# Bind Policy\n\n${formatAssigned(DANA)}\n\nThe description.\n`,
   );
   expect(saved.parsed.assigned).toBe(DANA);
-  expect(await readFeature(root, "bind.feature.md")).toContain(formatAssigned(DANA));
-  const loaded = await loadFeatureDoc(root, "bind.feature.md");
+  expect(await readFeature(root, "specs/bind.feature.md")).toContain(formatAssigned(DANA));
+  const loaded = await loadFeatureDoc(root, "specs/bind.feature.md");
   expect(loaded?.doc.assigned).toBe(DANA);
 
-  const view = await readFeatureView(root, "bind.feature.md");
+  const view = await readFeatureView(root, "specs/bind.feature.md");
   expect(view?.parsed.assigned).toBe(DANA);
 
-  const cleared = await saveFeature(root, "bind.feature.md", "# Bind Policy\n\nThe description.\n");
+  const cleared = await saveFeature(root, "specs/bind.feature.md", "# Bind Policy\n\nThe description.\n");
   expect(cleared.parsed.assigned).toBeUndefined();
-  expect(await readFeature(root, "bind.feature.md")).not.toContain("Assigned");
+  expect(await readFeature(root, "specs/bind.feature.md")).not.toContain("Assigned");
 });

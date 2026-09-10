@@ -110,7 +110,7 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       await git(data, "config", "user.email", "test@example.com");
       await git(data, "config", "user.name", "Test");
       await git(data, "checkout", "-B", "main");
-      await Bun.write(join(data, "seed.feature.md"), "# Seed\n");
+      await Bun.write(join(data, "specs/seed.feature.md"), "# Seed\n");
       await git(data, "add", ".");
       await git(data, "commit", "-m", "seed");
       await git(data, "push", "origin", "HEAD:main");
@@ -119,7 +119,7 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
 
       // an auto-saved (uncommitted) scenario is waiting in the working tree
       await Bun.write(
-        join(data, "seed.feature.md"),
+        join(data, "specs/seed.feature.md"),
         "# Seed\n\n## One @v1 [proposed]\n\nbody\n",
       );
 

@@ -44,7 +44,7 @@ describe("parseDesktopLink", () => {
   });
 
   test("a link built by the app round-trips back to its route", () => {
-    const file = "billing/quotes.feature.md";
+    const file = "specs/billing/quotes.feature.md";
     const scenario = { name: "ESC key closes the dialog", version: 2 };
     const link = desktopLink(scenarioPath(file, scenario));
     expect(link).toBe("specdriven://features/billing/quotes/scenarios/esc-key-closes-the-dialog/v2");

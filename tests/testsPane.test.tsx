@@ -30,12 +30,12 @@ const T2 = "2026-09-03T10:00:00.000Z";
 
 const caseA: TestCase = {
   id: "a", title: "Quote totals", body: "Check the total", priority: "high",
-  refs: [{ fileName: "billing/quotes.feature.md", scenario: { name: "Basic Quote", version: 2 } }],
+  refs: [{ fileName: "specs/billing/quotes.feature.md", scenario: { name: "Basic Quote", version: 2 } }],
   createdAt: T0, updatedAt: T0,
 };
 const caseB: TestCase = {
   id: "b", title: "Renewal notice", body: "", priority: "low",
-  refs: [{ fileName: "billing/renewals.feature.md" }],
+  refs: [{ fileName: "specs/billing/renewals.feature.md" }],
   createdAt: T1, updatedAt: T1,
 };
 const plan: TestPlan = {
@@ -53,7 +53,7 @@ const run2: TestPlanExecution = {
 };
 const store = { ...EMPTY_TESTING, loaded: true, cases: [caseA, caseB], plans: [plan], executions: [run2, run1] };
 const features: FeatureListing[] = [
-  { fileName: "billing/quotes.feature.md", name: "Quotes", scenarios: [{ name: "Basic Quote", version: 2, status: "published" }] },
+  { fileName: "specs/billing/quotes.feature.md", name: "Quotes", scenarios: [{ name: "Basic Quote", version: 2, status: "published" }] },
 ];
 
 describe("roll-ups", () => {

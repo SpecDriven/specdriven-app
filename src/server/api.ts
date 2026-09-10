@@ -132,7 +132,6 @@ import {
   ensureModelsFolder,
   exportModel,
   generateSliceFeature,
-  isModelsFolderPath,
   listModels,
   readModel,
   saveModel,
@@ -146,7 +145,6 @@ import {
   createPage,
   deletePage,
   ensurePageFolder,
-  isPageFolderPath,
   listPages,
   pageFolderNamed,
   readPage,
@@ -863,13 +861,10 @@ const getFeatures = withDataDir(async (dir) => {
   const settings = await readProjectSettings(dir);
   return json({
     features: await listFeatures(dir),
-    // The roadmap and tasks folders are not feature folders (specs/app/roadmap
-    // .feature.md, specs/app/tasks.feature.md): they hold markdown pages,
-    // listed on their own tabs, so neither shows as an empty folder among the
-    // feature ones.
-    folders: (await listFolders(dir)).filter(
-      (folder) => !isPageFolderPath(folder) && !isModelsFolderPath(folder),
-    ),
+    // Only the spec tree is walked, so the reserved top-level folders —
+    // `roadmap/`, `tasks/`, `models/`, each listed on its own tab — are out of
+    // range by construction rather than subtracted here.
+    folders: await listFolders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
     // GitHub issue tracking (specs/app/github-issues.feature.md): the

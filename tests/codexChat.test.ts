@@ -482,7 +482,7 @@ beforeEach(async () => {
   });
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
-  await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
@@ -907,7 +907,7 @@ test("Start session can open the generated prompt in a codex pane session", asyn
   await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
   const res = await api("/api/agent/session", "POST", {
     name: "implement quotes",
-    files: [{ fileName: "quote.feature.md" }],
+    files: [{ fileName: "specs/quote.feature.md" }],
     target: "codex",
   });
   expect(res.status).toBe(200);
@@ -920,7 +920,7 @@ test("Start session can open the generated prompt in a codex pane session", asyn
   expect(codex.sent("thread/name/set")!.params).toMatchObject({ name: "implement quotes" });
   const input = (codex.sent("turn/start")!.params as { input: { text: string }[] }).input[0]!.text;
   expect(input).toContain("SpecDriven code gen session: implement quotes");
-  expect(input).toContain("## Spec: quote.feature.md");
+  expect(input).toContain("## Spec: specs/quote.feature.md");
   expect(input).toContain("edit the code, not the specifications");
   expect(snap.meta.agent).toBe("codex");
   expect(snap.events.some((e) => e.kind === "user")).toBe(true);

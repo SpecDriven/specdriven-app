@@ -28,7 +28,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-const FILE = "policy/quote-policy.feature.md";
+const FILE = "specs/policy/quote-policy.feature.md";
 
 function sampleDoc() {
   return newFeatureDoc({

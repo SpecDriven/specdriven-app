@@ -94,7 +94,7 @@ beforeEach(async () => {
   });
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
-  await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
@@ -579,7 +579,7 @@ test("a code repo named in project-settings.json is where the chat works", async
 test("Start session can open the generated prompt in the pane", async () => {
   const res = await api("/api/agent/session", "POST", {
     name: "implement quotes",
-    files: [{ fileName: "quote.feature.md" }],
+    files: [{ fileName: "specs/quote.feature.md" }],
     target: "pane",
   });
   expect(res.status).toBe(200);
@@ -588,12 +588,12 @@ test("Start session can open the generated prompt in the pane", async () => {
   const fake = fakes.at(-1)!;
   const first = await fake.input(1);
   expect(first.message.content).toContain("SpecDriven code gen session: implement quotes");
-  expect(first.message.content).toContain("## Spec: quote.feature.md");
+  expect(first.message.content).toContain("## Spec: specs/quote.feature.md");
   expect(first.message.content).toContain("## Basic @v1");
   const snap = await snapshot(body.id);
   expect(snap.meta.name).toBe("implement quotes");
   expect(snap.events.find((e) => e.kind === "user")).toMatchObject({
-    text: expect.stringContaining("## Spec: quote.feature.md"),
+    text: expect.stringContaining("## Spec: specs/quote.feature.md"),
   });
   // The prompt is already in flight, so the session is running once ready,
   // and init lands on it.

@@ -49,9 +49,9 @@ test("slugify produces kebab-case file stems", () => {
 // Scenario: create new feature — new file is created in the local filesystem.
 test("createFeature writes a new .feature.md file and lists it", async () => {
   const fileName = await createFeature(root, "Quote Policy");
-  expect(fileName).toBe("quote-policy.feature.md");
+  expect(fileName).toBe("specs/quote-policy.feature.md");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "quote-policy.feature.md", name: "Quote Policy", scenarios: [] },
+    { fileName: "specs/quote-policy.feature.md", name: "Quote Policy", scenarios: [] },
   ]);
   expect(await readFeature(root, fileName)).toBe("# Quote Policy\n");
 });
@@ -60,11 +60,11 @@ test("createFeature writes a new .feature.md file and lists it", async () => {
 // names — the name comes from the `# <name>` heading, with the file stem as
 // the fallback for files without one.
 test("listFeatures returns display names, falling back to the stem", async () => {
-  await Bun.write(join(root, "quote-policy.feature.md"), "# Quote & Policy!\n");
-  await Bun.write(join(root, "no-heading.feature.md"), "just text\n");
+  await Bun.write(join(root, "specs/quote-policy.feature.md"), "# Quote & Policy!\n");
+  await Bun.write(join(root, "specs/no-heading.feature.md"), "just text\n");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "no-heading.feature.md", name: "No Heading", scenarios: [] },
-    { fileName: "quote-policy.feature.md", name: "Quote & Policy!", scenarios: [] },
+    { fileName: "specs/no-heading.feature.md", name: "No Heading", scenarios: [] },
+    { fileName: "specs/quote-policy.feature.md", name: "Quote & Policy!", scenarios: [] },
   ]);
 });
 
@@ -73,12 +73,12 @@ test("listFeatures returns display names, falling back to the stem", async () =>
 // can offer them for selection.
 test("listFeatures carries each file's scenario names and versions", async () => {
   await Bun.write(
-    join(root, "quotes.feature.md"),
+    join(root, "specs/quotes.feature.md"),
     "# Quotes\n\n## Basic @v1 [published]\n\nbody\n\n## Renewal @v2\n\nbody\n",
   );
   expect(await listFeatures(root)).toEqual([
     {
-      fileName: "quotes.feature.md",
+      fileName: "specs/quotes.feature.md",
       name: "Quotes",
       scenarios: [
         { name: "Basic", version: 1, status: "published" },
@@ -101,12 +101,12 @@ test("path traversal and non-.feature.md file names are rejected", async () => {
 
 test("renameFeature works in a plain directory (no git repo)", async () => {
   await createFeature(root, "Quote");
-  const result = await renameFeature(root, "quote.feature.md", "Policy");
-  expect(result.fileName).toBe("quote.feature.md");
+  const result = await renameFeature(root, "specs/quote.feature.md", "Policy");
+  expect(result.fileName).toBe("specs/quote.feature.md");
   expect(result.name).toBe("Policy");
-  expect(await readFeature(root, "quote.feature.md")).toBe("# Policy\n");
+  expect(await readFeature(root, "specs/quote.feature.md")).toBe("# Policy\n");
   expect(await listFeatures(root)).toEqual([
-    { fileName: "quote.feature.md", name: "Policy", scenarios: [] },
+    { fileName: "specs/quote.feature.md", name: "Policy", scenarios: [] },
   ]);
 });
 
@@ -114,29 +114,29 @@ test("renameFeature works in a plain directory (no git repo)", async () => {
 // `# <name>` heading gains one.
 test("renameFeature only touches the heading, adding one when missing", async () => {
   await Bun.write(
-    join(root, "one.feature.md"),
+    join(root, "specs/one.feature.md"),
     "# One\n\nsome description\n\n## First @v1 [published]\n\nbody\n",
   );
-  await renameFeature(root, "one.feature.md", "Uno");
-  expect(await readFeature(root, "one.feature.md")).toBe(
+  await renameFeature(root, "specs/one.feature.md", "Uno");
+  expect(await readFeature(root, "specs/one.feature.md")).toBe(
     "# Uno\n\nsome description\n\n## First @v1 [published]\n\nbody\n",
   );
-  await Bun.write(join(root, "bare.feature.md"), "just text\n");
-  await renameFeature(root, "bare.feature.md", "Named Now");
-  expect(await readFeature(root, "bare.feature.md")).toBe("# Named Now\n\njust text\n");
+  await Bun.write(join(root, "specs/bare.feature.md"), "just text\n");
+  await renameFeature(root, "specs/bare.feature.md", "Named Now");
+  expect(await readFeature(root, "specs/bare.feature.md")).toBe("# Named Now\n\njust text\n");
 });
 
 test("renameFeature refuses missing files and empty names", async () => {
   await createFeature(root, "One");
-  expect(renameFeature(root, "ghost.feature.md", "Spirit")).rejects.toThrow("not found");
-  expect(renameFeature(root, "one.feature.md", "   ")).rejects.toThrow("required");
+  expect(renameFeature(root, "specs/ghost.feature.md", "Spirit")).rejects.toThrow("not found");
+  expect(renameFeature(root, "specs/one.feature.md", "   ")).rejects.toThrow("required");
   expect(renameFeature(root, "../evil.feature.md", "Fine")).rejects.toThrow(
     "Invalid feature file name",
   );
   // renaming to the current name is a no-op, not an error
-  const same = await renameFeature(root, "one.feature.md", "One");
+  const same = await renameFeature(root, "specs/one.feature.md", "One");
   expect(same).toEqual({
-    fileName: "one.feature.md",
+    fileName: "specs/one.feature.md",
     name: "One",
     message: "feature name unchanged",
   });
@@ -145,32 +145,32 @@ test("renameFeature refuses missing files and empty names", async () => {
 // The stem is slugified like a created file's; folder and extension are kept.
 test("renameFeatureFile keeps the folder, slugifies the stem, and validates", async () => {
   await createFeature(root, "billing/Quote");
-  const result = await renameFeatureFile(root, "billing/quote.feature.md", "Better Quote!");
-  expect(result.fileName).toBe("billing/better-quote.feature.md");
-  expect(await readFeature(root, "billing/better-quote.feature.md")).toBe("# Quote\n");
-  expect(renameFeatureFile(root, "billing/better-quote.feature.md", "  ")).rejects.toThrow(
+  const result = await renameFeatureFile(root, "specs/billing/quote.feature.md", "Better Quote!");
+  expect(result.fileName).toBe("specs/billing/better-quote.feature.md");
+  expect(await readFeature(root, "specs/billing/better-quote.feature.md")).toBe("# Quote\n");
+  expect(renameFeatureFile(root, "specs/billing/better-quote.feature.md", "  ")).rejects.toThrow(
     "File name is required",
   );
-  expect(renameFeatureFile(root, "ghost.feature.md", "spirit")).rejects.toThrow("not found");
+  expect(renameFeatureFile(root, "specs/ghost.feature.md", "spirit")).rejects.toThrow("not found");
   // renaming to the current stem is a no-op, not an error
-  const same = await renameFeatureFile(root, "billing/better-quote.feature.md", "Better Quote");
+  const same = await renameFeatureFile(root, "specs/billing/better-quote.feature.md", "Better Quote");
   expect(same).toEqual({
-    fileName: "billing/better-quote.feature.md",
+    fileName: "specs/billing/better-quote.feature.md",
     message: "file name unchanged",
   });
   // renaming onto an existing file is refused
   await createFeature(root, "billing/Other");
-  expect(renameFeatureFile(root, "billing/other.feature.md", "Better Quote")).rejects.toThrow(
+  expect(renameFeatureFile(root, "specs/billing/other.feature.md", "Better Quote")).rejects.toThrow(
     "already exists",
   );
 });
 
 test("deleteFeature works in a plain directory and validates", async () => {
   await createFeature(root, "Quote");
-  const result = await deleteFeature(root, "quote.feature.md");
+  const result = await deleteFeature(root, "specs/quote.feature.md");
   expect(result.message).toBe("deleted locally (not a git repository)");
   expect(await listFeatures(root)).toEqual([]);
-  expect(deleteFeature(root, "quote.feature.md")).rejects.toThrow("not found");
+  expect(deleteFeature(root, "specs/quote.feature.md")).rejects.toThrow("not found");
   expect(deleteFeature(root, "../evil.feature.md")).rejects.toThrow("Invalid feature file name");
 });
 
@@ -178,13 +178,13 @@ test("saveFeature keeps published scenarios immutable", async () => {
   await createFeature(root, "Quote");
   await publishFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nold body\n",
   );
   expect(
     saveFeature(
       root,
-      "quote.feature.md",
+      "specs/quote.feature.md",
       "# Quote\n\n## Basic @v1 [published]\n\nnew body\n",
     ),
   ).rejects.toThrow("immutable");
@@ -193,14 +193,14 @@ test("saveFeature keeps published scenarios immutable", async () => {
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
   const result = await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeature(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeature(root, "specs/quote.feature.md"))!,
   );
   expect(result.status).toBe("published");
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Basic @v1 [published]");
   expect(text).not.toContain("[proposed]");
 });
@@ -211,17 +211,17 @@ test("publishFeature with a scenario target publishes only that scenario", async
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\none\n\n## Extra @v1\n\ntwo\n",
   );
   const result = await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeature(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeature(root, "specs/quote.feature.md"))!,
     { name: "Basic", version: 1 },
   );
   expect(result.status).toBe("published");
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Basic @v1 [published]");
   expect(text).toContain("## Extra @v1 [proposed]");
 });
@@ -234,16 +234,16 @@ test("saveFeature keeps a [draft] scenario out of the file but not out of the ed
   await createFeature(root, "Quote");
   const result = await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Basic @v1 [proposed]");
   expect(text).not.toContain("Idea");
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
   expect(result.content).toContain("## Idea @v1 [draft]");
-  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
 
 // Why draft deletion needs a route of its own: markdown cannot say a draft
@@ -252,10 +252,10 @@ test("saving a feature without its draft leaves the draft in place", async () =>
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
-  const result = await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  const result = await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
   expect(result.content).toContain("## Idea @v1 [draft]");
 });
 
@@ -265,18 +265,18 @@ test("deleteDraftScenario removes the draft from the document", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
-  const result = await deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 1 });
+  const result = await deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 1 });
   expect(result.status).toBe("saved");
   expect(result.content).not.toContain("Idea");
   expect(result.content).toContain("## Basic @v1 [proposed]");
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Basic"]);
-  expect(await readFeatureForEditor(root, "quote.feature.md")).not.toContain("Idea");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).not.toContain("Idea");
   // The scenario the file does hold is untouched.
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
 });
 
 // The delete is version-specific: two drafts under one name are two scenarios.
@@ -284,10 +284,10 @@ test("deleteDraftScenario deletes only the targeted version", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Idea @v1 [draft]\n\nold\n\n## Idea @v2 [draft]\n\nnew\n",
   );
-  const result = await deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 1 });
+  const result = await deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 1 });
   expect(result.content).not.toContain("## Idea @v1");
   expect(result.content).toContain("## Idea @v2 [draft]");
 });
@@ -296,20 +296,20 @@ test("deleteDraftScenario deletes only the targeted version", async () => {
 // feature without it, and a published one cannot be deleted at all.
 test("deleteDraftScenario refuses a scenario that is not a draft", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
   expect(
-    deleteDraftScenario(root, "quote.feature.md", { name: "Basic", version: 1 }),
+    deleteDraftScenario(root, "specs/quote.feature.md", { name: "Basic", version: 1 }),
   ).rejects.toThrow(/not found/);
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
 });
 
 test("deleteDraftScenario reports an unknown scenario rather than deleting nothing quietly", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
   expect(
-    deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 7 }),
+    deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 7 }),
   ).rejects.toThrow(/not found/);
-  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
 
 // Publish All leaves drafts alone: they stay drafts, out of the file.
@@ -317,19 +317,19 @@ test("publishFeature leaves drafts unpublished and out of the file", async () =>
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
   const result = await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeatureForEditor(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeatureForEditor(root, "specs/quote.feature.md"))!,
   );
   expect(result.status).toBe("published");
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Basic @v1 [published]");
   expect(text).not.toContain("Idea");
-  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
 
 // Publishing a draft from its own card is an explicit action on that
@@ -338,17 +338,17 @@ test("a draft publishes when targeted individually", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Idea @v1 [draft]\n\nwip\n",
   );
   const result = await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeatureForEditor(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeatureForEditor(root, "specs/quote.feature.md"))!,
     { name: "Idea", version: 1 },
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Idea @v1 [published]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Idea @v1 [published]");
 });
 
 // Same scenario name, different versions: only the targeted version flips.
@@ -356,16 +356,16 @@ test("publishFeature with a scenario target is version-specific", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nold\n\n## Basic @v2\n\nnew\n",
   );
   await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeature(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeature(root, "specs/quote.feature.md"))!,
     { name: "Basic", version: 2 },
   );
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Basic @v1 [proposed]");
   expect(text).toContain("## Basic @v2 [published]");
 });
@@ -384,29 +384,29 @@ describe("content is validated before it is written to the data repo", () => {
 
   beforeEach(async () => {
     await createFeature(root, "Quote");
-    await publishFeature(root, "quote.feature.md", GOOD);
+    await publishFeature(root, "specs/quote.feature.md", GOOD);
   });
 
   for (const [why, content] of Object.entries(BROKEN)) {
     test(`saveFeature refuses content where ${why}`, async () => {
-      expect(saveFeature(root, "quote.feature.md", content)).rejects.toThrow(
-        "Refusing to write quote.feature.md",
+      expect(saveFeature(root, "specs/quote.feature.md", content)).rejects.toThrow(
+        "Refusing to write specs/quote.feature.md",
       );
-      expect(await readFeature(root, "quote.feature.md")).toBe(GOOD);
+      expect(await readFeature(root, "specs/quote.feature.md")).toBe(GOOD);
     });
 
     test(`publishFeature refuses content where ${why}`, async () => {
-      expect(publishFeature(root, "quote.feature.md", content)).rejects.toThrow(
-        "Refusing to write quote.feature.md",
+      expect(publishFeature(root, "specs/quote.feature.md", content)).rejects.toThrow(
+        "Refusing to write specs/quote.feature.md",
       );
-      expect(await readFeature(root, "quote.feature.md")).toBe(GOOD);
+      expect(await readFeature(root, "specs/quote.feature.md")).toBe(GOOD);
     });
   }
 
   // The bug this guards against: a feature whose name was lost round-tripped
   // through parse → serialize, prepending one more nameless `# ` per save.
   test("a save cannot append a second feature heading", async () => {
-    expect(saveFeature(root, "quote.feature.md", `# \n\n${GOOD}`)).rejects.toThrow(
+    expect(saveFeature(root, "specs/quote.feature.md", `# \n\n${GOOD}`)).rejects.toThrow(
       "Refusing to write",
     );
   });
@@ -415,7 +415,7 @@ describe("content is validated before it is written to the data repo", () => {
 test("publishFeature rejects a scenario target that is not in the content", async () => {
   await createFeature(root, "Quote");
   expect(
-    publishFeature(root, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n", {
+    publishFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n", {
       name: "Missing",
       version: 3,
     }),
@@ -424,11 +424,11 @@ test("publishFeature rejects a scenario target that is not in the content", asyn
 
 test("saving into a plain directory (no standalone git repo) still works", async () => {
   await createFeature(root, "Standalone");
-  const result = await publishFeature(root, "standalone.feature.md", "# Standalone\nedited\n");
+  const result = await publishFeature(root, "specs/standalone.feature.md", "# Standalone\nedited\n");
   expect(result.status).toBe("published");
   // The file holds the doc's canonical projection: parse-equal to the input,
   // normalized formatting (blank line after the heading, trailing newline).
-  expect(await readFeature(root, "standalone.feature.md")).toBe("# Standalone\n\nedited\n");
+  expect(await readFeature(root, "specs/standalone.feature.md")).toBe("# Standalone\n\nedited\n");
 });
 
 // specs/ui.spec.md: "If a scenario is already published, then it is immutable."
@@ -436,10 +436,10 @@ test("published scenarios are immutable, but new versions may be added", async (
   await createFeature(root, "Quote");
   await publishFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nold body\n",
   );
-  expect(await readFeature(root, "quote.feature.md")).toContain(
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain(
     "## Basic @v1 [published]",
   );
 
@@ -447,21 +447,21 @@ test("published scenarios are immutable, but new versions may be added", async (
   expect(
     publishFeature(
       root,
-      "quote.feature.md",
+      "specs/quote.feature.md",
       "# Quote\n\n## Basic @v1 [published]\n\nnew body\n",
     ),
   ).rejects.toThrow("immutable");
   // dropping a published scenario is rejected
-  expect(publishFeature(root, "quote.feature.md", "# Quote\n")).rejects.toThrow("immutable");
+  expect(publishFeature(root, "specs/quote.feature.md", "# Quote\n")).rejects.toThrow("immutable");
 
   // adding a new version alongside the published one is fine
   const result = await publishFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1 [published]\n\nold body\n\n## Basic @v2\n\nnew body\n",
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v2 [published]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v2 [published]");
 });
 
 // Every push/pull flow runs on all three git engines
@@ -480,17 +480,17 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     // pushed; the other clone sees the new name on pull, at the same file.
     test("renameFeature rewrites the heading, commits and pushes", async () => {
       const { a, b } = await twoClones(root);
-      const result = await renameFeature(a, "seed.feature.md", "Sprout Policy");
+      const result = await renameFeature(a, "specs/seed.feature.md", "Sprout Policy");
       expect(result).toEqual({
-        fileName: "seed.feature.md",
+        fileName: "specs/seed.feature.md",
         name: "Sprout Policy",
         message: "committed and pushed",
       });
-      expect(await readFeature(a, "seed.feature.md")).toBe("# Sprout Policy\n");
+      expect(await readFeature(a, "specs/seed.feature.md")).toBe("# Sprout Policy\n");
       const log = await git(a, "log", "-1", "--pretty=%s");
       expect(log.stdout.toString()).toContain("Rename feature: Seed -> Sprout Policy");
       await git(b, "pull");
-      expect(await readFeature(b, "seed.feature.md")).toBe("# Sprout Policy\n");
+      expect(await readFeature(b, "specs/seed.feature.md")).toBe("# Sprout Policy\n");
     });
 
     // specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
@@ -498,33 +498,33 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     // the file under its new name on pull.
     test("renameFeatureFile renames via git mv, commits and pushes", async () => {
       const { a, b } = await twoClones(root);
-      const result = await renameFeatureFile(a, "seed.feature.md", "Sprout");
+      const result = await renameFeatureFile(a, "specs/seed.feature.md", "Sprout");
       expect(result).toEqual({
-        fileName: "sprout.feature.md",
+        fileName: "specs/sprout.feature.md",
         message: "renamed, committed and pushed",
       });
-      expect(await readFeature(a, "seed.feature.md")).toBeNull();
-      expect(await readFeature(a, "sprout.feature.md")).toBe("# Seed\n");
+      expect(await readFeature(a, "specs/seed.feature.md")).toBeNull();
+      expect(await readFeature(a, "specs/sprout.feature.md")).toBe("# Seed\n");
       const log = await git(a, "log", "-1", "--pretty=%s");
       expect(log.stdout.toString()).toContain(
-        "Rename file: seed.feature.md -> sprout.feature.md",
+        "Rename file: specs/seed.feature.md -> specs/sprout.feature.md",
       );
       await git(b, "pull");
-      expect(await readFeature(b, "sprout.feature.md")).toBe("# Seed\n");
-      expect(await readFeature(b, "seed.feature.md")).toBeNull();
+      expect(await readFeature(b, "specs/sprout.feature.md")).toBe("# Seed\n");
+      expect(await readFeature(b, "specs/seed.feature.md")).toBeNull();
     });
 
     // specs/ui.spec.md "Feature entry menu" (Delete): a `git rm`, committed and
     // pushed — the other clone loses the file on pull.
     test("deleteFeature removes the file, commits and pushes", async () => {
       const { a, b } = await twoClones(root);
-      const result = await deleteFeature(a, "seed.feature.md");
+      const result = await deleteFeature(a, "specs/seed.feature.md");
       expect(result.message).toBe("deleted, committed and pushed");
-      expect(await readFeature(a, "seed.feature.md")).toBeNull();
+      expect(await readFeature(a, "specs/seed.feature.md")).toBeNull();
       const log = await git(a, "log", "-1", "--pretty=%s");
-      expect(log.stdout.toString()).toContain("Delete feature: seed.feature.md");
+      expect(log.stdout.toString()).toContain("Delete feature: specs/seed.feature.md");
       await git(b, "pull");
-      expect(await readFeature(b, "seed.feature.md")).toBeNull();
+      expect(await readFeature(b, "specs/seed.feature.md")).toBeNull();
     });
 
     // Scenario: Scenario is automatically saved locally and pushed to GitHub —
@@ -534,15 +534,15 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const { a } = await twoClones(root);
       const result = await saveFeature(
         a,
-        "seed.feature.md",
+        "specs/seed.feature.md",
         "# Seed\n\n## One @v1\n\nbody\n",
       );
       expect(result.status).toBe("saved");
       expect(result.content).toContain("## One @v1 [proposed]");
-      expect(await readFeature(a, "seed.feature.md")).toContain("## One @v1 [proposed]");
+      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## One @v1 [proposed]");
       // not committed: the working tree is dirty until the reload cron syncs
       const status = await git(a, "status", "--porcelain");
-      expect(status.stdout.toString()).toContain("seed.feature.md");
+      expect(status.stdout.toString()).toContain("specs/seed.feature.md");
     });
 
     // An individual publish is committed and pushed like a whole-feature publish.
@@ -550,14 +550,14 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const { a, b } = await twoClones(root);
       const result = await publishFeature(
         a,
-        "seed.feature.md",
+        "specs/seed.feature.md",
         "# Seed\n\n## One @v1\n\nbody\n\n## Two @v1\n\nbody\n",
         { name: "One", version: 1 },
       );
       expect(result.status).toBe("published");
       expect(result.message).toBe("committed and pushed");
       await git(b, "pull");
-      const text = await readFeature(b, "seed.feature.md");
+      const text = await readFeature(b, "specs/seed.feature.md");
       expect(text).toContain("## One @v1 [published]");
       expect(text).not.toContain("## Two @v1 [published]");
     });
@@ -566,62 +566,62 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     test("publishFeature pulls cleanly and saves when there is no conflict", async () => {
       const { a, b } = await twoClones(root);
       // b adds an unrelated file and pushes
-      await Bun.write(join(b, "other.feature.md"), "# Other\n");
+      await Bun.write(join(b, "specs/other.feature.md"), "# Other\n");
       await git(b, "add", ".");
       await git(b, "commit", "-m", "other");
       await git(b, "push");
       // a saves seed.feature.md — the pull merges b's change in first
       const result = await publishFeature(
         a,
-        "seed.feature.md",
+        "specs/seed.feature.md",
         "# Seed\n\n## One @v1\n\nbody\n",
       );
       expect(result.status).toBe("published");
-      expect(await readFeature(a, "other.feature.md")).toBe("# Other\n");
-      expect(await readFeature(a, "seed.feature.md")).toContain("## One @v1 [published]");
+      expect(await readFeature(a, "specs/other.feature.md")).toBe("# Other\n");
+      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## One @v1 [published]");
     });
 
     // crud-feature.spec.md "Publish feature with successful merge": after saving,
     // do a git commit and push — the other clone must see the change on pull.
     test("publishFeature commits and pushes to origin", async () => {
       const { a, b } = await twoClones(root);
-      const result = await publishFeature(a, "seed.feature.md", "# Seed v2\n");
+      const result = await publishFeature(a, "specs/seed.feature.md", "# Seed v2\n");
       expect(result.status).toBe("published");
       expect(result.message).toBe("committed and pushed");
       await git(b, "pull");
-      expect(await readFeature(b, "seed.feature.md")).toBe("# Seed v2\n");
+      expect(await readFeature(b, "specs/seed.feature.md")).toBe("# Seed v2\n");
     });
 
     // Scenario: Publish feature with merge conflict — surface both sides, then resolve.
     test("conflicting saves surface theirs and can be resolved", async () => {
       const { a, b } = await twoClones(root);
       // b edits seed.feature.md and pushes
-      await Bun.write(join(b, "seed.feature.md"), "# Seed (theirs)\n");
+      await Bun.write(join(b, "specs/seed.feature.md"), "# Seed (theirs)\n");
       await git(b, "add", ".");
       await git(b, "commit", "-m", "theirs");
       await git(b, "push");
       // a has committed a different edit locally, then tries to save
-      await Bun.write(join(a, "seed.feature.md"), "# Seed (local)\n");
+      await Bun.write(join(a, "specs/seed.feature.md"), "# Seed (local)\n");
       await git(a, "add", ".");
       await git(a, "commit", "-m", "local");
 
       const ours = "# Seed (ours)\n";
-      const result = await publishFeature(a, "seed.feature.md", ours);
+      const result = await publishFeature(a, "specs/seed.feature.md", ours);
       expect(result.status).toBe("conflict");
       expect(result.theirs).toBe("# Seed (theirs)\n");
       expect(result.ours).toBe(ours);
 
       // accept theirs
-      const resolved = await resolveFeatureConflict(a, "seed.feature.md", result.theirs!);
+      const resolved = await resolveFeatureConflict(a, "specs/seed.feature.md", result.theirs!);
       expect(resolved.status).toBe("published");
-      expect(await readFeature(a, "seed.feature.md")).toBe("# Seed (theirs)\n");
+      expect(await readFeature(a, "specs/seed.feature.md")).toBe("# Seed (theirs)\n");
       // crud-feature.spec.md "Publish feature with merge conflict": the resolution
       // is committed and pushed — origin has the merge.
       expect(resolved.message).toContain("committed and pushed");
       await git(b, "pull");
-      expect(await readFeature(b, "seed.feature.md")).toBe("# Seed (theirs)\n");
+      expect(await readFeature(b, "specs/seed.feature.md")).toBe("# Seed (theirs)\n");
       // merge is complete: repo is clean enough to save again
-      const again = await publishFeature(a, "seed.feature.md", "# Seed final\n");
+      const again = await publishFeature(a, "specs/seed.feature.md", "# Seed final\n");
       expect(again.status).toBe("published");
     });
 
@@ -640,7 +640,7 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       });
       try {
         await git(a, "remote", "set-url", "origin", `http://127.0.0.1:${wall.port}/origin.git`);
-        await expect(publishFeature(a, "seed.feature.md", "# Seed v2\n")).rejects.toThrow(
+        await expect(publishFeature(a, "specs/seed.feature.md", "# Seed v2\n")).rejects.toThrow(
           "Publish failed — git pull:",
         );
       } finally {
@@ -652,23 +652,23 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     // on, not a plain commit that abandons one side's history.
     test("conflict resolution creates a merge commit both clones converge on", async () => {
       const { a, b } = await twoClones(root);
-      await Bun.write(join(b, "seed.feature.md"), "# Seed (theirs)\n");
+      await Bun.write(join(b, "specs/seed.feature.md"), "# Seed (theirs)\n");
       await git(b, "add", ".");
       await git(b, "commit", "-m", "theirs");
       await git(b, "push");
-      await Bun.write(join(a, "seed.feature.md"), "# Seed (local)\n");
+      await Bun.write(join(a, "specs/seed.feature.md"), "# Seed (local)\n");
       await git(a, "add", ".");
       await git(a, "commit", "-m", "local");
 
-      const result = await publishFeature(a, "seed.feature.md", "# Seed (ours)\n");
+      const result = await publishFeature(a, "specs/seed.feature.md", "# Seed (ours)\n");
       expect(result.status).toBe("conflict");
-      const resolved = await resolveFeatureConflict(a, "seed.feature.md", "# Seed (manual)\n");
+      const resolved = await resolveFeatureConflict(a, "specs/seed.feature.md", "# Seed (manual)\n");
       expect(resolved.status).toBe("published");
 
       const parents = await git(a, "log", "-1", "--pretty=%P");
       expect(parents.stdout.toString().trim().split(/\s+/)).toHaveLength(2);
       await git(b, "pull");
-      expect(await readFeature(b, "seed.feature.md")).toBe("# Seed (manual)\n");
+      expect(await readFeature(b, "specs/seed.feature.md")).toBe("# Seed (manual)\n");
     });
   });
 }
