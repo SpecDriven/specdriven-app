@@ -68,6 +68,8 @@ import { Popover } from "./Popover";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { createPromiseQueue } from "./promiseQueue";
+export { createPromiseQueue };
 
 // Event Models (roadmap/support-event-modeling.md): the canvas and its
 // sidebar list ship in their own chunk — React Flow only reaches someone
@@ -645,32 +647,6 @@ export function pageListingMetaEqual(a: PageListing, b: PageListing): boolean {
   );
 }
 
-/**
- * One-at-a-time async work, in the order it was queued. The page editor's
- * autosave and the Done / Assigned writes share a queue so a late tick cannot
- * overwrite a marker that landed, and so navigating away waits for the write
- * that is already on its way (createPromiseQueue).
- */
-export function createPromiseQueue(): {
-  run<T>(fn: () => Promise<T>): Promise<T>;
-  idle(): Promise<void>;
-} {
-  let tail: Promise<void> = Promise.resolve();
-  return {
-    run<T>(fn: () => Promise<T>): Promise<T> {
-      const run = tail.then(fn, fn);
-      tail = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      return run;
-    },
-    idle() {
-      return tail;
-    },
-  };
-}
-
 function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
   const groups = new Map<string, PageListing[]>();
   for (const page of pages) {
@@ -1040,6 +1016,15 @@ export function App() {
    * before the marker was applied skips rather than overwriting it.
    */
   const pageSaveQueue = useRef(createPromiseQueue());
+  /**
+   * The open canvas's pending PUT. Repo switch waits on this, then closes
+   * the pane, so an unmount flush cannot write the old model into the new
+   * folder (src/frontend/eventModel/ModelsPane.tsx).
+   */
+  const modelSaveFlush = useRef<() => Promise<void>>(async () => {});
+  const bindModelSave = useCallback((handle: { flush: () => Promise<void> } | null) => {
+    modelSaveFlush.current = handle?.flush ?? (async () => {});
+  }, []);
   /**
    * Nested count of Done / Assigned writes that have been queued and not
    * yet finished. Autosave skips while this is > 0 so a snapshot taken
@@ -1605,6 +1590,11 @@ export function App() {
     await pageTick.current();
     await pageSaveQueue.current.idle();
     closePage({ save: false });
+    // An open model belongs to the old folder too: its last save goes out
+    // there, then the pane unmounts so no later tick writes what it held
+    // into the new folder.
+    await modelSaveFlush.current();
+    setOpenModel(null);
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -1625,9 +1615,10 @@ export function App() {
         // Nor are the old folder's test plans; the module reloads below.
         testing.reset();
         setTestsView(null);
-        // Nor its models: the store empties and refills below.
+        // Nor its models: the store empties and refills below. The canvas
+        // already closed before the switch, so its unmount save aimed at
+        // this folder, not the new one.
         models.reset();
-        setOpenModel(null);
         // And the old folder's issues: the effect below reloads them for
         // whichever GitHub repo the new folder's code repo is.
         setIssuesView(null);
@@ -6818,6 +6809,7 @@ export function App() {
               onCopyLink={(path) => void copyLink(path)}
               copied={copied}
               onClosed={goHome}
+              onSaveHandle={bindModelSave}
             />
           </Suspense>
         ) : issuesView && issuesOn ? (

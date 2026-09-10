@@ -61,6 +61,7 @@ import type { ModelListing, ModelView } from "../../server/models";
 import { Breadcrumbs, type Crumb } from "../Breadcrumbs";
 import { Menu } from "../Menu";
 import type { ConfirmOptions, PromptOptions } from "../ModalPrompts";
+import { createPromiseQueue } from "../promiseQueue";
 import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
 import { modelLink } from "../route";
@@ -157,6 +158,11 @@ export interface ModelsPaneProps {
   copied: string | null;
   /** The model is gone (deleted, or a stale link): leave the pane. */
   onClosed: () => void;
+  /**
+   * The canvas's pending save: the app waits on this before switching data
+   * repo so an unmount flush cannot write the old model into the new folder.
+   */
+  onSaveHandle?: (handle: { flush: () => Promise<void> } | null) => void;
 }
 
 export function ModelsPane(props: ModelsPaneProps) {
@@ -182,6 +188,7 @@ function ModelCanvas({
   onCopyLink,
   copied,
   onClosed,
+  onSaveHandle,
 }: ModelsPaneProps) {
   const [file, setFile] = useState<ModelFile | null>(null);
   const fileRef = useRef<ModelFile | null>(null);
@@ -201,6 +208,15 @@ function ModelCanvas({
 
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  /**
+   * PUTs go through one queue so a slow autosave cannot last-write-wins a
+   * later edit, a generate-feature link, or the unmount flush — the same
+   * reason the page editor shares createPromiseQueue.
+   */
+  const saveQueue = useRef(createPromiseQueue());
+  /** Bumped per load and on a successful save, so a GET that started
+      earlier cannot apply a snapshot that predates the PUT. */
+  const loadGen = useRef(0);
 
   /** Nodes and edges from the file, keeping what is selected selected. */
   const derive = useCallback(
@@ -231,8 +247,10 @@ function ModelCanvas({
 
   // Load, and re-read on the reload tick while nothing is unsaved.
   const load = useCallback(async (): Promise<void> => {
+    const gen = ++loadGen.current;
     const res = await fetch(`/api/models/${encodeURIComponent(fileName)}`);
     const data = (await res.json().catch(() => ({}))) as ModelView & { error?: string };
+    if (gen !== loadGen.current) return;
     if (!res.ok || !data.file) {
       if (res.status === 404) {
         toast.error(`Model "${fileName}" not found — the link may be stale.`);
@@ -247,6 +265,7 @@ function ModelCanvas({
     if (current && savedRef.current && current !== savedRef.current) return; // unsaved edits
     if (current && serializeModelFile(current) === serializeModelFile(data.file)) return;
     savedRef.current = data.file;
+    fileRef.current = data.file;
     setFile(data.file);
     setDirty(false);
   }, [fileName, onClosed]);
@@ -255,41 +274,55 @@ function ModelCanvas({
     void load();
   }, [load, reloadKey]);
 
-  /** One save: the file as it is now; the server's normalized copy is adopted
-      unless more was typed while the request was out. */
+  /** One save: the file as it is when this job runs (not when it was
+      queued); the server's normalized copy is adopted unless more was
+      typed while the request was out. */
   const save = useCallback(async (): Promise<void> => {
-    const sent = fileRef.current;
-    if (!sent || sent === savedRef.current) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/models/${encodeURIComponent(fileName)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ file: sent }),
-      });
-      const data = (await res.json().catch(() => ({}))) as ModelView & { error?: string };
-      if (!res.ok || !data.file) {
-        toast.error(data.error ?? "Could not save the model");
-        return;
-      }
-      if (fileRef.current === sent) {
+    await saveQueue.current.run(async () => {
+      const sent = fileRef.current;
+      if (!sent || sent === savedRef.current) return;
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/models/${encodeURIComponent(fileName)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file: sent }),
+        });
+        const data = (await res.json().catch(() => ({}))) as ModelView & { error?: string };
+        if (!res.ok || !data.file) {
+          toast.error(data.error ?? "Could not save the model");
+          return;
+        }
+        // A GET that started before this PUT must not apply its snapshot.
+        loadGen.current += 1;
         savedRef.current = data.file;
-        setFile(data.file);
-        setDirty(false);
-      } else {
-        savedRef.current = data.file;
+        if (fileRef.current === sent) {
+          // Keep the ref in lockstep so an unmount flush that runs before
+          // React re-renders sees the file as already saved.
+          fileRef.current = data.file;
+          setFile(data.file);
+          setDirty(false);
+        }
+        setSavedAt(Date.now());
+        void models.load();
+      } catch (e) {
+        toast.error((e as Error).message);
+      } finally {
+        setSaving(false);
       }
-      setSavedAt(Date.now());
-      void models.load();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+    });
   }, [fileName]);
 
   const saveRef = useRef(save);
   saveRef.current = save;
+  const flush = useCallback(async (): Promise<void> => {
+    await saveRef.current();
+    await saveQueue.current.idle();
+  }, []);
+  useEffect(() => {
+    onSaveHandle?.({ flush });
+    return () => onSaveHandle?.(null);
+  }, [flush, onSaveHandle]);
   useEffect(() => {
     if (!file || file === savedRef.current) return;
     const id = window.setTimeout(() => void saveRef.current(), SAVE_DELAY_MS);
