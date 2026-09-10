@@ -5,7 +5,10 @@ import type { MouseEvent, ReactNode } from "react";
  * The page header's trail (specs/ui/ui.feature.md "Design system"): data
  * folder › folder › … › the page. Every segment but the last is a link or a
  * button; the last is whatever the page makes of it — a name that renames
- * on click, the scenario editor's name field — passed as `tail`.
+ * on click — passed as `tail`. Without a `tail` the trail ends on its last
+ * item: the scenario editor's line stops at the feature, the way back, and
+ * keeps the scenario's name for the heading above the editor
+ * (specs/editor/spec-editor.feature.md "Adding Scanarios").
  */
 export interface Crumb {
   label: ReactNode;
@@ -15,7 +18,7 @@ export interface Crumb {
   title?: string;
 }
 
-export function Breadcrumbs({ items, tail }: { items: Crumb[]; tail: ReactNode }) {
+export function Breadcrumbs({ items, tail }: { items: Crumb[]; tail?: ReactNode }) {
   return (
     <nav className="crumbs" aria-label="Breadcrumb">
       <ol>
@@ -32,12 +35,16 @@ export function Breadcrumbs({ items, tail }: { items: Crumb[]; tail: ReactNode }
             ) : (
               <span className="crumb plain">{c.label}</span>
             )}
-            <ChevronRight size={12} className="crumb-sep" aria-hidden="true" />
+            {(tail !== undefined || i < items.length - 1) && (
+              <ChevronRight size={12} className="crumb-sep" aria-hidden="true" />
+            )}
           </li>
         ))}
-        <li className="crumb-tail" aria-current="page">
-          {tail}
-        </li>
+        {tail !== undefined && (
+          <li className="crumb-tail" aria-current="page">
+            {tail}
+          </li>
+        )}
       </ol>
     </nav>
   );
