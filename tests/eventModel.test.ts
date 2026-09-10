@@ -153,11 +153,11 @@ describe("serialize", () => {
         elements: { "cart-ui": { lane: "ui", column: 0 }, gone: { lane: "ui", column: 1 }, "item-added": { lane: "ui", column: 0 } },
         slices: { "add-item": { width: 2 }, nope: { width: 3 } },
       },
-      links: { "show-cart": { feature: "cart/show.feature.md" }, nope: { feature: "x" } },
+      links: { "show-cart": { feature: "specs/cart/show.feature.md" }, nope: { feature: "x" } },
     });
     expect(Object.keys(file.layout.elements)).toEqual(["cart-ui"]);
     expect(file.layout.slices).toEqual({ "add-item": { width: 2 } });
-    expect(file.links).toEqual({ "show-cart": { feature: "cart/show.feature.md" } });
+    expect(file.links).toEqual({ "show-cart": { feature: "specs/cart/show.feature.md" } });
     // The missing lane kinds were added back.
     expect(file.layout.lanes).toHaveLength(3);
   });

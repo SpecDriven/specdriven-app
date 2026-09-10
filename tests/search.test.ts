@@ -56,12 +56,12 @@ Pricing specs for the quoting engine.
 
 // Scenario: a body match is found with a snippet
 test("a body-only word returns scenario hits with a snippet", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   const results = await searchSpecs(root, "premium");
   expect(results.length).toBe(2); // each version is its own row
   for (const r of results) {
     expect(r.kind).toBe("scenario");
-    expect(r.fileName).toBe("quotes.feature.md");
+    expect(r.fileName).toBe("specs/quotes.feature.md");
     expect(r.featureName).toBe("Quotes");
     expect(r.scenario!.name).toBe("Basic quote");
     expect(r.snippet.toLowerCase()).toContain("premium");
@@ -71,7 +71,7 @@ test("a body-only word returns scenario hits with a snippet", async () => {
 });
 
 test("a feature-name match returns a feature hit", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   const results = await searchSpecs(root, "quotes");
   const feature = results.find((r) => r.kind === "feature");
   expect(feature).toBeDefined();
@@ -82,7 +82,7 @@ test("a feature-name match returns a feature hit", async () => {
 // Scenario: name matches rank above body matches
 test("a scenario named for the term outranks a body-only mention", async () => {
   await Bun.write(
-    join(root, "rules.feature.md"),
+    join(root, "specs/rules.feature.md"),
     `# Rules
 
 ## Premium rules @v1
@@ -101,7 +101,7 @@ test("a scenario named for the term outranks a body-only mention", async () => {
 
 // Scenario: prefix and fuzzy matches hit
 test("prefix and typo queries find the word, terms carry the expansion", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   for (const q of ["prem", "premum"]) {
     const results = await searchSpecs(root, q);
     expect(results.length).toBeGreaterThan(0);
@@ -111,21 +111,21 @@ test("prefix and typo queries find the word, terms carry the expansion", async (
 
 test("features in nested folders are found with folder-relative paths", async () => {
   await mkdir(join(root, "billing"), { recursive: true });
-  await Bun.write(join(root, "billing/quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/billing/quotes.feature.md"), QUOTES);
   const results = await searchSpecs(root, "premium");
   expect(results.length).toBe(2);
-  expect(results[0]!.fileName).toBe("billing/quotes.feature.md");
+  expect(results[0]!.fileName).toBe("specs/billing/quotes.feature.md");
 });
 
 test("the tests table is not indexed", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   // "github" appears only in the ### Tests table, which the parser strips.
   expect(await searchSpecs(root, "github")).toEqual([]);
 });
 
 // Scenario: the index follows external file changes
 test("an overwritten file is reindexed", async () => {
-  const file = join(root, "a.feature.md");
+  const file = join(root, "specs/a.feature.md");
   await Bun.write(file, "# A\n\n## S @v1\n\nthe old banana paragraph\n");
   expect((await searchSpecs(root, "banana")).length).toBe(1);
   await Bun.write(file, "# A\n\n## S @v1\n\na brand new cucumber sentence instead\n");
@@ -134,24 +134,27 @@ test("an overwritten file is reindexed", async () => {
 });
 
 test("a deleted file drops out of the results", async () => {
-  await Bun.write(join(root, "a.feature.md"), "# A\n\n## S @v1\n\nshared target word\n");
-  await Bun.write(join(root, "b.feature.md"), "# B\n\n## S @v1\n\nshared target word\n");
+  await Bun.write(join(root, "specs/a.feature.md"), "# A\n\n## S @v1\n\nshared target word\n");
+  await Bun.write(join(root, "specs/b.feature.md"), "# B\n\n## S @v1\n\nshared target word\n");
   expect((await searchSpecs(root, "target")).length).toBe(2);
-  await rm(join(root, "a.feature.md"));
+  await rm(join(root, "specs/a.feature.md"));
   const results = await searchSpecs(root, "target");
   expect(results.length).toBe(1);
-  expect(results[0]!.fileName).toBe("b.feature.md");
+  expect(results[0]!.fileName).toBe("specs/b.feature.md");
 });
 
 test("an empty or whitespace query returns no results", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   expect(await searchSpecs(root, "")).toEqual([]);
   expect(await searchSpecs(root, "   ")).toEqual([]);
 });
 
 test("the limit caps the result list", async () => {
   for (const stem of ["a", "b", "c"]) {
-    await Bun.write(join(root, `${stem}.feature.md`), `# ${stem}\n\n## S @v1\n\ncommon word\n`);
+    await Bun.write(
+      join(root, `specs/${stem}.feature.md`),
+      `# ${stem}\n\n## S @v1\n\ncommon word\n`,
+    );
   }
   expect((await searchSpecs(root, "common")).length).toBe(3);
   expect((await searchSpecs(root, "common", 2)).length).toBe(2);
@@ -220,7 +223,7 @@ test("the roadmap scope finds a page by its heading, and names a headless page b
 test("the two scopes do not see each other's files", async () => {
   await mkdir(join(root, "roadmap"), { recursive: true });
   await Bun.write(join(root, "roadmap/pricing.md"), PRICING);
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   // "annual" is only in the roadmap page, "rider" only in the spec.
   expect(await searchSpecs(root, "annual")).toEqual([]);
   expect(await searchRoadmap(root, "rider")).toEqual([]);
@@ -242,7 +245,7 @@ test("the roadmap index follows page edits and deletions", async () => {
 });
 
 test("without a roadmap folder the roadmap scope is simply empty", async () => {
-  await Bun.write(join(root, "quotes.feature.md"), QUOTES);
+  await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   expect(await searchRoadmap(root, "premium")).toEqual([]);
 });
 

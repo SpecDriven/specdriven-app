@@ -14,13 +14,16 @@
 //   /issues/new                                     the new-issue form
 //   /issues/<number>                                one issue
 //
-// <feature> is the file path minus `.feature.md` and may span several
-// segments when the feature lives in a folder (`billing/quotes`); <scenario>
-// is slugify(scenario name). The first `scenarios` segment with something
-// after it splits feature from scenario — so a folder literally named
-// `scenarios` is not addressable by deep link. Segments after the scenario
-// version are ignored, and a path that doesn't start with a known shape is
-// home.
+// <feature> is the file path *within the spec tree* minus `.feature.md`, and
+// may span several segments when the feature lives in a folder
+// (`billing/quotes` for `specs/billing/quotes.feature.md`); <scenario> is
+// slugify(scenario name). Features are stored under `specs/` but addressed
+// without it, so links minted before that move still resolve; the prefix is
+// added by `parseRoute` and stripped by `featurePath`, and nothing between
+// them needs to know. The first `scenarios` segment with something after it
+// splits feature from scenario — so a folder literally named `scenarios` is
+// not addressable by deep link. Segments after the scenario version are
+// ignored, and a path that doesn't start with a known shape is home.
 
 import { slugify } from "../server/parser";
 import type { Scenario } from "../server/parser";
@@ -130,7 +133,13 @@ export function parseRoute(pathname: string): Route {
   // Accept a stem that already carries the `.feature.md` (or legacy
   // `.feature`) suffix — hand-edited links shouldn't double it up.
   const stem = parts.join("/").replace(/\.feature(\.md)?$/, "");
-  const route: Route = { feature: `${stem}.feature.md` };
+  // Urls address a feature by its path *within* the spec tree, so the storage
+  // prefix goes back on here. A hand-typed `/features/specs/...` is tolerated
+  // rather than doubled.
+  const within = stem === SPECS_FOLDER || stem.startsWith(`${SPECS_FOLDER}/`)
+    ? stem.slice(SPECS_FOLDER.length + 1)
+    : stem;
+  const route: Route = { feature: `${SPECS_FOLDER}/${within}.feature.md` };
   if (segs[split] !== "scenarios" || !segs[split + 1]) return route;
   route.scenario = { slug: segs[split + 1]! };
   const version = segs[split + 2]?.match(VERSION_SEG);
@@ -165,6 +174,13 @@ export const PAGE_FOLDERS = ["roadmap", "tasks"];
 
 /** The Event Models' folder, shared with the server (src/server/models.ts). */
 export const MODELS_FOLDER = "models";
+
+/**
+ * The spec tree's folder, shared with the server (src/server/walk.ts). Urls
+ * never carry it — see `featurePath` — so it appears only where a route is
+ * converted to or from a repo-relative file name.
+ */
+export const SPECS_FOLDER = "specs";
 
 /** `models/shop/cart.model.json` -> `/models/shop/cart`. */
 export function modelLink(fileName: string): string {
@@ -214,8 +230,13 @@ export function issuesPath(view: IssuesRoute): string {
 
 export function featurePath(fileName: string): string {
   const stem = fileName.replace(/\.feature\.md$/, "");
+  // The spec tree's prefix is storage, not address: urls name a feature by its
+  // path within `specs/`, so links minted before the move still resolve.
+  const within = stem.startsWith(`${SPECS_FOLDER}/`)
+    ? stem.slice(SPECS_FOLDER.length + 1)
+    : stem;
   // Folder segments keep their `/`s; anything a url can't carry is escaped.
-  return `/features/${stem.split("/").map(encodeURIComponent).join("/")}`;
+  return `/features/${within.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function scenarioPath(

@@ -55,14 +55,14 @@ const PRISTINE_MODEL = JSON.stringify({
     ],
   },
   layout: { lanes: [], slices: {}, elements: {} },
-  links: { "slice-quote": { feature: "billing/quote.feature.md" } },
+  links: { "slice-quote": { feature: "specs/billing/quote.feature.md" } },
 });
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-demo-"));
   source = await mkdtemp(join(tmpdir(), "specdriven-demo-src-"));
   await Bun.write(join(source, "README.md"), PRISTINE_README);
-  await Bun.write(join(source, "billing", "quote.feature.md"), PRISTINE_FEATURE);
+  await Bun.write(join(source, "specs", "billing", "quote.feature.md"), PRISTINE_FEATURE);
   await Bun.write(join(source, "roadmap", "usage-based-auto.md"), PRISTINE_PAGE);
   await Bun.write(join(source, "models", "quote.model.json"), PRISTINE_MODEL);
   process.env.SPECDRIVEN_ROOT = root;
@@ -172,7 +172,7 @@ test("the Models tab is on and lists the dataset's Event Model, linked to its fe
       fileName: "models/quote.model.json",
       name: "Quote",
       slices: 1,
-      links: [{ sliceId: "slice-quote", slice: "Quote", feature: "billing/quote.feature.md" }],
+      links: [{ sliceId: "slice-quote", slice: "Quote", feature: "specs/billing/quote.feature.md" }],
     },
   ]);
 });
@@ -249,16 +249,16 @@ test("concurrent page loads serialize into consistent generations", async () => 
 
 test("publishing a feature succeeds locally and stays inside the working copy", async () => {
   const state = await bootState();
-  const res = await api(`/api/features/${encodeURIComponent("billing/quote.feature.md")}`, {
+  const res = await api(`/api/features/${encodeURIComponent("specs/billing/quote.feature.md")}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: PRISTINE_FEATURE + "\nmore\n" }),
   });
   expect(res.status).toBe(200);
-  expect(await readFile(join(source, "billing", "quote.feature.md"), "utf8")).toBe(
+  expect(await readFile(join(source, "specs", "billing", "quote.feature.md"), "utf8")).toBe(
     PRISTINE_FEATURE,
   );
-  expect(await readFile(join(state.dataRepo, "billing", "quote.feature.md"), "utf8")).toContain(
+  expect(await readFile(join(state.dataRepo, "specs", "billing", "quote.feature.md"), "utf8")).toContain(
     "more",
   );
 });
