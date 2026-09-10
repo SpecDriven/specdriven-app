@@ -1,5 +1,5 @@
 import { test, expect, afterEach, describe } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { trace } from "@opentelemetry/api";
@@ -67,7 +67,7 @@ describe("withSpan", () => {
     await withSpan("parent", { kind: "tick" }, async () => {
       await new Promise((r) => setTimeout(r, 1));
       await withSpan("child", {}, async (span) => {
-        span.setAttribute("file", "a.feature.md");
+        span.setAttribute("file", "specs/a.feature.md");
       });
     });
     // Only this test's trace: a span from work another test left running
@@ -80,7 +80,7 @@ describe("withSpan", () => {
     const child = finished.find((s) => s.name === "child")!;
     expect(child.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
     expect(parent.attributes["kind"]).toBe("tick");
-    expect(child.attributes["file"]).toBe("a.feature.md");
+    expect(child.attributes["file"]).toBe("specs/a.feature.md");
   });
 
   test("records the exception, marks the span errored, and rethrows", async () => {
@@ -132,14 +132,14 @@ describe("getLogger", () => {
     let traceId = "";
     await withSpan("tick", {}, async (span) => {
       traceId = span.spanContext().traceId;
-      getLogger("netsync").info("absorbed remote operations", { file: "a.feature.md" });
+      getLogger("netsync").info("absorbed remote operations", { file: "specs/a.feature.md" });
     });
     const records = logRecords.getFinishedLogRecords();
     expect(records).toHaveLength(1);
     const record = records[0]!;
     expect(record.body).toBe("absorbed remote operations");
     expect(record.severityText).toBe("INFO");
-    expect(record.attributes["file"]).toBe("a.feature.md");
+    expect(record.attributes["file"]).toBe("specs/a.feature.md");
     expect(record.spanContext?.traceId).toBe(traceId);
     expect(record.resource.attributes["service.name"]).toBe("specdriven");
   });
@@ -309,14 +309,15 @@ describe("sync instrumentation", () => {
   test("importDrift traces the drift pass and the document import under it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "specdriven-otel-drift-"));
     try {
-      await writeFile(join(dir, "a.feature.md"), "# A\n\n## S @v1\n\nbody\n");
+      await mkdir(join(dir, "specs"), { recursive: true });
+      await writeFile(join(dir, "specs/a.feature.md"), "# A\n\n## S @v1\n\nbody\n");
       const { spans } = startInMemory();
       await importDrift(dir);
       const finished = spans.getFinishedSpans();
       const drift = finished.find((s) => s.name === "sync.import_drift")!;
       const create = finished.find((s) => s.name === "automerge.create_doc")!;
       expect(drift.attributes["sync.imported"]).toBe(1);
-      expect(create.attributes["specdriven.file"]).toBe("a.feature.md");
+      expect(create.attributes["specdriven.file"]).toBe("specs/a.feature.md");
       expect(create.parentSpanContext?.spanId).toBe(drift.spanContext().spanId);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -327,7 +328,7 @@ describe("sync instrumentation", () => {
     const root = await mkdtemp(join(tmpdir(), "specdriven-otel-tick-"));
     try {
       const { a } = await twoClones(root, {
-        "seed.feature.md": "# Seed\n\n## Story @v1 [proposed]\n\n- line\n",
+        "specs/seed.feature.md": "# Seed\n\n## Story @v1 [proposed]\n\n- line\n",
       });
       const { spans } = startInMemory();
       await syncDataDir(a);

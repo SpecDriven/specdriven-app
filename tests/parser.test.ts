@@ -30,9 +30,9 @@ Quotes for potential customers.
 // specs/ui.spec.md "Main page": show the feature name, not the file name —
 // files without a `# <name>` heading fall back to a stem-derived name.
 test("titleFromFileName derives a display name from the file stem", () => {
-  expect(titleFromFileName("quote-policy.feature.md")).toBe("Quote Policy");
+  expect(titleFromFileName("specs/quote-policy.feature.md")).toBe("Quote Policy");
   expect(titleFromFileName("legacy.feature")).toBe("Legacy");
-  expect(titleFromFileName("a.feature.md")).toBe("A");
+  expect(titleFromFileName("specs/a.feature.md")).toBe("A");
 });
 
 // specs/crud-feature.spec.md "Feature file format": a feature file opens with

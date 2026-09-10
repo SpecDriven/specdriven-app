@@ -51,7 +51,7 @@ beforeEach(async () => {
   setCodexAvailability(() => true);
   await writeState({ dataRepo: data }, root);
   await createFeature(data, "Quote");
-  await saveFeature(data, "quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
+  await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
@@ -81,7 +81,7 @@ function api(path: string, method: string, body: unknown): Promise<Response> {
   ) as Promise<Response>;
 }
 
-const FILES = [{ fileName: "quote.feature.md" }];
+const FILES = [{ fileName: "specs/quote.feature.md" }];
 
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
@@ -102,7 +102,7 @@ test("a desktop session saves the prompt beside the settings and opens Claude.ap
   expect(body.promptPath).toBe(join(root, ".specdriven", "sessions", body.id, "prompt.md"));
   const prompt = await readFile(body.promptPath, "utf8");
   expect(prompt).toContain("SpecDriven code gen session: implement quotes");
-  expect(prompt).toContain("## Spec: quote.feature.md");
+  expect(prompt).toContain("## Spec: specs/quote.feature.md");
   expect(prompt).toContain("## Basic @v1");
   const record = JSON.parse(
     await readFile(join(root, ".specdriven", "sessions", body.id, "session.json"), "utf8"),
@@ -236,13 +236,13 @@ test("the Run in choice round-trips through the settings file", async () => {
 test("the prompt route returns the session prompt and runs nothing", async () => {
   const res = await api("/api/agent/session/prompt", "POST", {
     name: "implement quotes",
-    files: [{ fileName: "quote.feature.md", scenarios: [{ name: "Basic", version: 1 }] }],
+    files: [{ fileName: "specs/quote.feature.md", scenarios: [{ name: "Basic", version: 1 }] }],
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { name: string; prompt: string };
   expect(body.name).toBe("implement quotes");
   expect(body.prompt).toContain("SpecDriven code gen session: implement quotes");
-  expect(body.prompt).toContain("## Spec: quote.feature.md");
+  expect(body.prompt).toContain("## Spec: specs/quote.feature.md");
   expect(body.prompt).toContain("## Basic @v1");
   expect(calls).toHaveLength(0);
   // Nothing recorded either — a copied prompt is not a session.
@@ -256,10 +256,10 @@ test("the prompt route refuses what a session refuses", async () => {
 
   const missing = await api("/api/agent/session/prompt", "POST", {
     name: "s",
-    files: [{ fileName: "nope.feature.md" }],
+    files: [{ fileName: "specs/nope.feature.md" }],
   });
   expect(missing.status).toBe(400);
-  expect((await missing.json()).error).toContain("spec not found: nope.feature.md");
+  expect((await missing.json()).error).toContain("spec not found: specs/nope.feature.md");
 
   await writeState({ dataRepo: data, codeGen: false }, root);
   const off = await api("/api/agent/session/prompt", "POST", { name: "s", files: FILES });

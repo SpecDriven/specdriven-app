@@ -14,6 +14,8 @@ import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { ROADMAP, TASKS, ensurePageFolder, importPageDrift, type PageFolder } from "./pages";
 import { ensureModelsFolder, importModelDrift } from "./models";
+import { ensureSpecsFolder } from "./features";
+import { migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo, normalizeModels, normalizeRoadmap, normalizeTasks } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 
@@ -80,6 +82,14 @@ export async function syncDataDir(
     // Drift must not be read while conflict markers may sit in the files.
     const merging = await mergeInProgress(dir);
     if (!merging) {
+      // The spec tree's folder, before anything reads it. Unlike the folders
+      // below it is not opt-in: `specs/` is where features live.
+      await ensureSpecsFolder(dir);
+      // A repo written before the spec tree had its own folder is moved into
+      // it once, here — features, their documents and the model links that
+      // name them — so the drift pass below sees the migrated tree.
+      const migrated = await migrateToSpecsFolder(dir);
+      if (migrated > 0) parts.push(`moved ${migrated} feature(s) under specs/`);
       const drifted = await importDrift(dir);
       if (drifted) parts.push(drifted);
       // Scenario "Create roadmap folder if necessary", and its twin for the

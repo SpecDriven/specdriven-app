@@ -31,7 +31,7 @@ export interface TwoClones {
  */
 export async function twoClones(
   root: string,
-  seedFiles: Record<string, string> = { "seed.feature.md": "# Seed\n" },
+  seedFiles: Record<string, string> = { "specs/seed.feature.md": "# Seed\n" },
 ): Promise<TwoClones> {
   const originDir = join(root, "origin.git");
   await $`git init --bare -b main ${originDir}`.quiet();

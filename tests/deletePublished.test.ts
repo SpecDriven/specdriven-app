@@ -53,20 +53,20 @@ async function publishedQuote(): Promise<void> {
   await createFeature(data, "Quote");
   await saveFeature(
     data,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Extra @v1\n\nmore\n",
   );
   await publishFeature(
     data,
-    "quote.feature.md",
-    (await readFeature(data, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeature(data, "specs/quote.feature.md"))!,
     { name: "Basic", version: 1 },
   );
 }
 
 async function deleteViaApi(scenario: { name: string; version: number }): Promise<Response> {
   return (await handleApi(
-    new Request("http://localhost/api/features/quote.feature.md/delete-published", {
+    new Request("http://localhost/api/features/specs%2Fquote.feature.md/delete-published", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scenario }),
@@ -116,7 +116,7 @@ test("with the setting off, the delete route refuses", async () => {
   const res = await deleteViaApi({ name: "Basic", version: 1 });
   expect(res.status).toBe(403);
   expect((await res.json()).error).toContain("switched off");
-  expect(await readFeature(data, "quote.feature.md")).toContain("## Basic @v1 [published]");
+  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## Basic @v1 [published]");
 });
 
 // "If confirmed, the spec is deleted." — the published scenario leaves the
@@ -128,11 +128,11 @@ test("with the setting on, a confirmed delete removes the published spec", async
   expect(res.status).toBe(200);
   const body = (await res.json()) as { content: string };
   expect(body.content).not.toContain("Basic");
-  expect(await readFeature(data, "quote.feature.md")).not.toContain("Basic");
-  expect(await readFeatureForEditor(data, "quote.feature.md")).toContain(
+  expect(await readFeature(data, "specs/quote.feature.md")).not.toContain("Basic");
+  expect(await readFeatureForEditor(data, "specs/quote.feature.md")).toContain(
     "## Extra @v1 [proposed]",
   );
-  const loaded = await loadFeatureDoc(data, "quote.feature.md");
+  const loaded = await loadFeatureDoc(data, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Extra"]);
 });
 
@@ -141,10 +141,10 @@ test("with the setting on, a confirmed delete removes the published spec", async
 test("only a published scenario can be deleted through the published route", async () => {
   await publishedQuote();
   await expect(
-    deletePublishedScenario(data, "quote.feature.md", { name: "Extra", version: 1 }),
+    deletePublishedScenario(data, "specs/quote.feature.md", { name: "Extra", version: 1 }),
   ).rejects.toThrow('Published scenario "Extra" @v1 not found');
   await expect(
-    deletePublishedScenario(data, "quote.feature.md", { name: "Nope", version: 1 }),
+    deletePublishedScenario(data, "specs/quote.feature.md", { name: "Nope", version: 1 }),
   ).rejects.toThrow("not found");
 });
 
@@ -154,10 +154,10 @@ test("deleting one published scenario leaves other published scenarios intact", 
   await publishedQuote();
   await publishFeature(
     data,
-    "quote.feature.md",
-    (await readFeature(data, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeature(data, "specs/quote.feature.md"))!,
     { name: "Extra", version: 1 },
   );
-  await deletePublishedScenario(data, "quote.feature.md", { name: "Basic", version: 1 });
-  expect(await readFeature(data, "quote.feature.md")).toContain("## Extra @v1 [published]");
+  await deletePublishedScenario(data, "specs/quote.feature.md", { name: "Basic", version: 1 });
+  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## Extra @v1 [published]");
 });
