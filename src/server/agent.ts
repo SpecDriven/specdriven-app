@@ -44,6 +44,22 @@ export interface SpecInput {
 }
 
 /**
+ * An Event Model bundled into the session (roadmap/support-event-modeling.md):
+ * the map the specs belong to, so the agent sees the slices, their cards
+ * and arrows alongside the scenarios — the model open on the Models tab
+ * when the session started, or one whose slice links a selected spec.
+ */
+export interface ModelInput {
+  /** Repo-relative file, e.g. `models/cart.model.json`. */
+  fileName: string;
+  name: string;
+  /** The slices in model order, each with the spec holding its scenarios. */
+  slices: { title: string; feature?: string }[];
+  /** The schema's half of the model — Event Modeling JSON — as text. */
+  json: string;
+}
+
+/**
  * Where a session runs (src/server/members.ts `code-repo`): the code repo
  * when the data repo's project-settings.json names one, else the data repo
  * itself. The prompt tells Claude where the specs are when they are not in
@@ -66,19 +82,21 @@ export type Runner = (cmd: string, args: string[], options?: RunOptions) => Prom
 
 /**
  * The generated prompt: the session name, the instruction, then every
- * selected spec verbatim under a heading that names its file.
+ * selected spec verbatim under a heading that names its file — and after
+ * the specs, every Event Model that goes with them, as its slices' map and
+ * its JSON.
  */
 export function buildSessionPrompt(
   name: string,
   specs: SpecInput[],
   place?: SessionPlace,
+  models: ModelInput[] = [],
 ): string {
-  const lines = [
-    `SpecDriven code gen session: ${name}`,
-    "",
-    `Implement the following ${specs.length === 1 ? "specification" : "specifications"}.`,
-    "Work in the current directory and exit when done.",
-  ];
+  const what =
+    specs.length > 0
+      ? `Implement the following ${specs.length === 1 ? "specification" : "specifications"}.`
+      : `Implement the following Event ${models.length === 1 ? "Model" : "Models"}.`;
+  const lines = [`SpecDriven code gen session: ${name}`, "", what, "Work in the current directory and exit when done."];
   // With a code repo, the session runs away from the specs; say where they
   // are, and that the code — not the specs — is what to change.
   if (place?.codeRepo) {
@@ -90,7 +108,30 @@ export function buildSessionPrompt(
     const heading = `## Spec: ${spec.fileName}${spec.partial ? " (selected scenarios only)" : ""}`;
     lines.push("", heading, "", spec.content.trimEnd());
   }
+  for (const model of models) {
+    lines.push("", `## Event Model: ${model.fileName}`, "", ...modelSection(model, specs.length > 0));
+  }
   return lines.join("\n") + "\n";
+}
+
+/**
+ * How a model reads in the prompt: what it is, which spec holds each
+ * slice's scenarios, then the JSON. The map comes first so an agent can
+ * place every spec in it before reading the cards.
+ */
+function modelSection(model: ModelInput, withSpecs: boolean): string[] {
+  const lines = [
+    `The Event Model "${model.name}"${withSpecs ? " the specifications above belong to" : ""}: ` +
+      "a timeline of screens, commands, events and read models in swimlanes, cut into vertical " +
+      "slices (eventmodeling.org), as Event Modeling JSON. Its slices, and the specification that " +
+      "holds each one's scenarios:",
+  ];
+  for (const slice of model.slices) {
+    lines.push(`- ${slice.title}${slice.feature ? ` → ${slice.feature}` : " — no specification yet"}`);
+  }
+  if (model.slices.length === 0) lines.push("- (no slices yet)");
+  lines.push("", "```json", model.json.trimEnd(), "```");
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +347,8 @@ export interface DesktopLaunchOptions {
   id?: string;
   /** Default: now. */
   now?: Date;
+  /** The Event Models bundled after the specs (buildSessionPrompt). */
+  models?: ModelInput[];
 }
 
 /**
@@ -326,7 +369,7 @@ export async function launchDesktopSession(
   const runner = options.runner ?? desktopRunner ?? run;
   const sessionDir = join(options.sessionsDir, id);
   const promptPath = join(sessionDir, "prompt.md");
-  await writeTextFile(promptPath, buildSessionPrompt(name, specs, where));
+  await writeTextFile(promptPath, buildSessionPrompt(name, specs, where, options.models ?? []));
   const record: SessionRecord = {
     id,
     name,
