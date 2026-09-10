@@ -5,7 +5,7 @@
 // examples; a lane's title and stream. Every edit is a mutation of the file
 // (mutations.ts) handed back up, so the canvas redraws and autosave runs.
 
-import { ArrowLeft, ArrowRight, ExternalLink, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, FilePlus2, Plus, Trash2, X } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   FIELD_TYPES,
@@ -55,6 +55,8 @@ export interface InspectorProps {
   /** After a removal: nothing is selected any more. */
   onDeselect: () => void;
   onOpenFeature: (fileName: string) => void;
+  /** Scaffold the slice's feature file from its Given / When / Then (ModelsPane). */
+  onGenerateFeature: (sliceId: string) => void;
   prompt: Prompt;
   confirm: Confirm;
 }
@@ -270,6 +272,7 @@ function SlicePanel({
   onChange,
   onDeselect,
   onOpenFeature,
+  onGenerateFeature,
   prompt,
   confirm,
 }: InspectorProps & { slice: Slice }) {
@@ -381,6 +384,20 @@ function SlicePanel({
           )}
         </span>
       </Row>
+      {/* No feature yet: scaffold one from the slice — a scenario per
+          Given / When / Then below (src/server/eventModel/feature.ts). */}
+      {!feature && (
+        <div className="em-row">
+          <button type="button" className="secondary em-generate" onClick={() => onGenerateFeature(slice.id)}>
+            <FilePlus2 size={13} aria-hidden="true" /> Generate feature file
+            {slice.specifications.length > 0 && (
+              <span className="em-generate-count">
+                {slice.specifications.length} scenario{slice.specifications.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
       <section className="em-section">
         <div className="em-section-head">
           <span>Given / When / Then</span>

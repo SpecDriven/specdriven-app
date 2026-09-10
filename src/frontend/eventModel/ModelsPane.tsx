@@ -31,6 +31,7 @@ import {
   FileJson,
   LayoutGrid,
   Link,
+  Play,
   Plus,
   Trash2,
   Upload,
@@ -64,6 +65,7 @@ import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
 import { modelLink } from "../route";
 import { Inspector } from "./Inspector";
+import { SliceActionsContext, type SliceActions } from "./context";
 import { dropTarget } from "./geometry";
 import {
   edgeEnds,
@@ -87,6 +89,7 @@ import {
   removeElement,
   setAssigned,
   setName,
+  setSliceLink,
   typeLabel,
 } from "./mutations";
 import { nodeTypes } from "./nodes";
@@ -143,6 +146,13 @@ export interface ModelsPaneProps {
   prompt: Prompt;
   confirm: Confirm;
   onOpenFeature: (fileName: string) => void;
+  /**
+   * A slice scaffolded its feature file: the app re-reads the listing and
+   * opens the new feature.
+   */
+  onFeatureCreated: (fileName: string) => void | Promise<void>;
+  /** Start a code gen session over this model; absent while code gen is off. */
+  onStartSession?: () => void;
   onCopyLink: (path: string) => void;
   copied: string | null;
   /** The model is gone (deleted, or a stale link): leave the pane. */
@@ -167,6 +177,8 @@ function ModelCanvas({
   prompt,
   confirm,
   onOpenFeature,
+  onFeatureCreated,
+  onStartSession,
   onCopyLink,
   copied,
   onClosed,
@@ -352,6 +364,51 @@ function ModelCanvas({
     apply(addLane(fileRef.current, "EVENTS", name, name));
   };
 
+  /**
+   * The bridge to the specs: scaffold the slice's feature file on the
+   * server — one scenario per Given / When / Then — from the model as
+   * saved, so what is drawn goes out first. The link comes back into the
+   * file here too, so the next autosave carries it rather than undoing it.
+   */
+  const generateFeature = async (sliceId: string) => {
+    const slice = fileRef.current?.model.slices.find((s) => s.id === sliceId);
+    if (!slice) return;
+    const count = slice.specifications.length;
+    const name = await prompt({
+      title: "New feature file from the slice",
+      hint:
+        (count === 0
+          ? "The slice has no Given / When / Then yet, so the feature starts with its heading alone. "
+          : `One scenario per Given / When / Then — ${count} of them. `) +
+        "Use folder/name to create inside a folder.",
+      initial: slice.title,
+      placeholder: "billing/Basic Quote",
+      confirmLabel: "Create feature",
+    });
+    if (!name) return;
+    await saveRef.current();
+    try {
+      const res = await fetch(
+        `/api/models/${encodeURIComponent(fileName)}/slices/${encodeURIComponent(sliceId)}/feature`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) },
+      );
+      const data = (await res.json().catch(() => ({}))) as { fileName?: string; scenarios?: number; error?: string };
+      if (!res.ok || !data.fileName) {
+        toast.error(data.error ?? "Could not create the feature");
+        return;
+      }
+      if (fileRef.current) apply(setSliceLink(fileRef.current, sliceId, data.fileName));
+      toast.success(
+        `Created ${data.fileName}${data.scenarios ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : ""}.`,
+      );
+      await onFeatureCreated(data.fileName);
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  };
+
+  const sliceActions = useMemo<SliceActions>(() => ({ openFeature: onOpenFeature }), [onOpenFeature]);
+
   const rename = async () => {
     if (!fileRef.current) return;
     const name = await prompt({
@@ -514,6 +571,19 @@ function ModelCanvas({
               containerSelector=".em-menu-anchor"
               items={[
                 { id: "rename", label: "Rename", onSelect: () => void rename() },
+                // A code gen session over the model (specs/agents/claude.spec.md):
+                // the prompt carries the model's JSON and the specs its
+                // slices link (src/server/agent.ts buildSessionPrompt).
+                ...(onStartSession
+                  ? [
+                      {
+                        id: "session",
+                        label: "Start AI session over this model",
+                        icon: <Play size={13} />,
+                        onSelect: () => onStartSession(),
+                      },
+                    ]
+                  : []),
                 {
                   id: "arrange",
                   label: "Arrange all cards",
@@ -600,6 +670,7 @@ function ModelCanvas({
       </div>
       <div className="em-body">
         <div className="em-canvas">
+          <SliceActionsContext.Provider value={sliceActions}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -626,6 +697,7 @@ function ModelCanvas({
             <Controls showInteractive={false} />
             <MiniMap pannable zoomable nodeStrokeWidth={2} />
           </ReactFlow>
+          </SliceActionsContext.Provider>
           {file.model.slices.length === 0 && (
             <div className="em-empty">
               <Workflow size={28} aria-hidden="true" />
@@ -641,6 +713,7 @@ function ModelCanvas({
             onChange={(next) => apply(next)}
             onDeselect={() => setSelection(null)}
             onOpenFeature={onOpenFeature}
+            onGenerateFeature={(sliceId) => void generateFeature(sliceId)}
             prompt={prompt}
             confirm={confirm}
           />
