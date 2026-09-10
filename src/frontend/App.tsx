@@ -82,6 +82,7 @@ import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
+import { applyExcalidrawPref, useExcalidrawEnabled } from "./excalidrawPref";
 import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
@@ -1222,6 +1223,9 @@ export function App() {
   // Vim mode (specs/ui.spec.md "Settings"): device-local like the theme;
   // every open Markdown editor follows the switch (src/frontend/vimPref.ts).
   const vimMode = useVimMode();
+  // Excalidraw support (specs/editor/excalidraw-support.feature.md): device-
+  // local too; every Markdown editor's toolbar follows the switch.
+  const excalidrawOn = useExcalidrawEnabled();
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
   // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
@@ -7287,6 +7291,28 @@ export function App() {
                 </span>
               </label>
               )}
+              {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
+                  a diagram button in every Markdown editor's toolbar, remembered
+                  on this device. Opt-in and harmless, so the demo keeps it. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Excalidraw diagrams
+                  <span className="settings-row-hint">
+                    Adds a diagram button to every Markdown editor&apos;s toolbar: draw in
+                    Excalidraw and the drawing is embedded as an SVG image in the data repo.
+                    Remembered on this device.
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={excalidrawOn}
+                    onChange={(e) => applyExcalidrawPref(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
             </section>
             {/* Demo mode has nothing to sync with: the whole autosync/live
                 sync group hides — the server refuses the changes anyway. */}
