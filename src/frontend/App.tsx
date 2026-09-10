@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -59,6 +59,7 @@ import {
   X,
   ArrowDown,
   Bot,
+  Workflow,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
@@ -67,6 +68,16 @@ import { Popover } from "./Popover";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
+
+// Event Models (roadmap/support-event-modeling.md): the canvas and its
+// sidebar list ship in their own chunk — React Flow only reaches someone
+// who opens the Models tab.
+const ModelsPane = lazy(() =>
+  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsPane })),
+);
+const ModelsSidebar = lazy(() =>
+  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsSidebar })),
+);
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -85,6 +96,7 @@ import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
 import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
 import { IssuesPane, IssuesSidebar } from "./IssuesPane";
 import { issues, issuesKey, issuesTitle, searchIssues, useIssues } from "./issues";
+import { models, modelTitle, useModels } from "./eventModel/models";
 import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
@@ -117,6 +129,7 @@ import {
   type TestsRoute,
   issuesPath,
   type IssuesRoute,
+  modelLink,
 } from "./route";
 import {
   addTestLink,
@@ -300,13 +313,14 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
   return <Icon size={size} aria-hidden="true" />;
 }
 
-type SidebarTab = "specs" | PageTab["folder"] | "tests" | "issues";
+type SidebarTab = "specs" | PageTab["folder"] | "tests" | "issues" | "models";
 
 function readSidebarTab(): SidebarTab {
   try {
     const stored = localStorage.getItem("sd-sidebar-tab");
     if (stored === "tests") return "tests";
     if (stored === "issues") return "issues";
+    if (stored === "models") return "models";
     return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
   } catch {
     return "specs";
@@ -997,6 +1011,17 @@ export function App() {
   const [issuesSetting, setIssuesSetting] = useState(false);
   /** Whether there is an Issues tab: the switch on and a GitHub code repo. */
   const issuesOn = issuesSetting && issuesRepo !== null;
+  // Event Models (roadmap/support-event-modeling.md): the Settings switch,
+  // and which model's canvas has the pane — null when none. The listing
+  // lives in its own store (src/frontend/eventModel/models.ts); the open
+  // model's file lives in the pane.
+  const [modelsOn, setModelsOn] = useState(false);
+  const [openModel, setOpenModel] = useState<string | null>(null);
+  const openModelRef = useRef<string | null>(null);
+  openModelRef.current = openModel;
+  /** Bumped on each reload tick so an open canvas re-reads its file. */
+  const [modelsReloadKey, setModelsReloadKey] = useState(0);
+  const modelsStore = useModels();
   const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
   const [taskPages, setTaskPages] = useState<PageListing[]>([]);
   const [openPage, setOpenPage] = useState<PageListing | null>(null);
@@ -1039,7 +1064,8 @@ export function App() {
   const shownTab: SidebarTab =
     shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
     (sidebarTab === "tests" && testingOn) ||
-    (sidebarTab === "issues" && issuesOn)
+    (sidebarTab === "issues" && issuesOn) ||
+    (sidebarTab === "models" && modelsOn)
       ? sidebarTab
       : "specs";
   /** The pages of one special folder, as the sidebar and palette list them. */
@@ -1068,6 +1094,7 @@ export function App() {
   const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
   const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
   const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
+  const [settingsModelsDraft, setSettingsModelsDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -1256,6 +1283,9 @@ export function App() {
       if (typeof state.testing === "boolean") {
         setTestingOn(state.testing);
       }
+      if (typeof state.models === "boolean") {
+        setModelsOn(state.models);
+      }
       if (typeof state.issues === "boolean") {
         setIssuesSetting(state.issues);
       }
@@ -1280,6 +1310,7 @@ export function App() {
           // So do the test plans, when the module is on — before the deep
           // link below, which may name one of them.
           state.testing === true ? testing.load() : Promise.resolve(),
+          state.models === true ? models.load() : Promise.resolve(),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
@@ -1314,6 +1345,12 @@ export function App() {
       // The test management module too — unless one of its editors holds an
       // unsaved draft (the store checks).
       if (testingOn) void testing.refresh();
+      // The models too: the list, and the open canvas — which re-reads only
+      // while nothing on it is unsaved (src/frontend/eventModel/ModelsPane.tsx).
+      if (modelsOn) {
+        void models.load();
+        setModelsReloadKey((k) => k + 1);
+      }
       // The issues too — only while one of the module's views is open, so
       // an idle app does not spend GitHub's rate limit on every tick.
       if (issuesViewRef.current) void issues.refresh();
@@ -1330,6 +1367,7 @@ export function App() {
     roadmap,
     tasks,
     testingOn,
+    modelsOn,
     openPageFile,
     loadFeatures,
     loadReadme,
@@ -1440,7 +1478,7 @@ export function App() {
     // A tests view owns its url (openTests pushes it); with no feature
     // selected this effect would otherwise rewrite it to `/`.
     if (testsView || issuesView) return;
-    const url = pagePath(selected, paneScenario, openPageFile);
+    const url = pagePath(selected, paneScenario, openPageFile, openModel);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
     if (location.pathname === url) return;
@@ -1450,7 +1488,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, openPageFile, testsView, issuesView]);
+  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, testsView, issuesView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1464,6 +1502,8 @@ export function App() {
       ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
       : issuesView
         ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
+      : openModel
+        ? `SpecDriven — ${modelTitle(openModel, modelsStore)}`
       : openPage
         ? `SpecDriven — ${openPage.name || openPage.fileName}`
       : !selected || !feature
@@ -1475,7 +1515,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore, clock]);
+  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore, openModel, modelsStore, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1505,6 +1545,7 @@ export function App() {
           loadReadme(),
           loadShownPages(state),
           state.testing === true ? testing.load() : Promise.resolve(),
+          state.models === true ? models.load() : Promise.resolve(),
         ]);
         await openFromLocation(entryPath);
       } else {
@@ -1584,6 +1625,9 @@ export function App() {
         // Nor are the old folder's test plans; the module reloads below.
         testing.reset();
         setTestsView(null);
+        // Nor its models: the store empties and refills below.
+        models.reset();
+        setOpenModel(null);
         // And the old folder's issues: the effect below reloads them for
         // whichever GitHub repo the new folder's code repo is.
         setIssuesView(null);
@@ -1598,6 +1642,7 @@ export function App() {
           loadReadme(),
           loadShownPages(state),
           state.testing === true ? testing.load() : Promise.resolve(),
+          state.models === true ? models.load() : Promise.resolve(),
         ]);
       } else {
         toast.error(state.error ?? "Could not use this directory");
@@ -1627,6 +1672,7 @@ export function App() {
       closePage();
       setTestsView(null);
       setIssuesView(null);
+      setOpenModel(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -1697,6 +1743,7 @@ export function App() {
     closePage();
     setTestsView(null);
     setIssuesView(null);
+    setOpenModel(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1719,6 +1766,7 @@ export function App() {
     setSelectedFolder(null);
     selectSidebarTab("tests");
     setIssuesView(null);
+    setOpenModel(null);
     setTestsView(view);
     if (opts.push && location.pathname !== testsPath(view)) {
       history.pushState(null, "", testsPath(view));
@@ -1739,9 +1787,31 @@ export function App() {
     setSelectedFolder(null);
     selectSidebarTab("issues");
     setTestsView(null);
+    setOpenModel(null);
     setIssuesView(view);
     if (opts.push && location.pathname !== issuesPath(view)) {
       history.pushState(null, "", issuesPath(view));
+    }
+  };
+
+  /**
+   * Open an Event Model's canvas (roadmap/support-event-modeling.md) —
+   * openTests's twin: the pane is the canvas's alone, and the sidebar turns
+   * to the Models tab. The model owns its url from here on.
+   */
+  const openModelPane = (fileName: string, opts: { push?: boolean } = {}) => {
+    editorRef.current.close();
+    closePage();
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+    setSelectedFolder(null);
+    selectSidebarTab("models");
+    setTestsView(null);
+    setIssuesView(null);
+    setOpenModel(fileName);
+    if (opts.push && location.pathname !== modelLink(fileName)) {
+      history.pushState(null, "", modelLink(fileName));
     }
   };
 
@@ -1768,6 +1838,8 @@ export function App() {
       openIssues(route.issues);
     } else if (route.page) {
       await showPage(route.page);
+    } else if (route.model) {
+      openModelPane(route.model);
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
@@ -1780,6 +1852,7 @@ export function App() {
       closePage();
       setTestsView(null);
       setIssuesView(null);
+      setOpenModel(null);
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -2754,6 +2827,7 @@ export function App() {
     setSelectedFolder(null);
     setTestsView(null);
     setIssuesView(null);
+    setOpenModel(null);
     openPageSession.current += 1;
     openPageSaved.current = data.content;
     openPageTextRef.current = data.content;
@@ -3166,6 +3240,7 @@ export function App() {
     setSettingsTasksDraft(tasks);
     setSettingsTestingDraft(testingOn);
     setSettingsIssuesDraft(issuesSetting);
+    setSettingsModelsDraft(modelsOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -3336,6 +3411,7 @@ export function App() {
     setTasks(data.tasks === true);
     setTestingOn(data.testing === true);
     setIssuesSetting(data.issues === true);
+    setModelsOn(data.models === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -3480,6 +3556,24 @@ export function App() {
     else setRoadmapPages([]);
     const open = openPageRef.current;
     if (open && pageTabOf(open.fileName).folder === tab.folder) goHome();
+  };
+
+  // Event Models (roadmap/support-event-modeling.md): switched on, the
+  // server creates the models folder if the data repo has none and the
+  // Models tab lists its models; off, the tab goes and an open canvas
+  // leaves the pane. The files stay where they are.
+  const toggleModels = async (on: boolean) => {
+    setSettingsModelsDraft(on);
+    if (!(await patchSettings({ models: on }))) {
+      setSettingsModelsDraft(!on);
+      return;
+    }
+    if (on) {
+      await models.load();
+      return;
+    }
+    models.reset();
+    if (openModelRef.current) goHome();
   };
 
   // Test management (specs/app/tests.feature.md): switched on, the
@@ -4357,6 +4451,17 @@ export function App() {
       run: () => openIssues({ kind: "list" }, { push: true }),
     },
     {
+      id: "go-models",
+      keys: "g m",
+      label: "Go to the models",
+      group: "Navigate",
+      when: () => !quiet && modelsOn && modelsStore.models.length > 0,
+      run: () => {
+        const first = modelsStore.models[0];
+        if (first) openModelPane(first.fileName, { push: true });
+      },
+    },
+    {
       id: "settings",
       keys: ["mod+,", "g s"],
       label: "Settings",
@@ -4603,6 +4708,7 @@ export function App() {
         ]
       : []),
     shortcutAction("go-issues", <Bug size={14} />),
+    shortcutAction("go-models", <Workflow size={14} />),
     ...(issuesOn
       ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
       : []),
@@ -4677,6 +4783,22 @@ export function App() {
     );
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
+    // The Models tab searched the models: one hit per model, by its name and
+    // what is on its canvas (src/server/search.ts).
+    if (shownTab === "models") {
+      return (data.results ?? []).map(
+        (r): PaletteItem => ({
+          id: `models:${r.fileName}`,
+          group: "Models",
+          label: r.featureName,
+          text: r.featureName,
+          sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
+          icon: <Workflow size={14} />,
+          href: modelLink(r.fileName),
+          run: () => openModelPane(r.fileName, { push: true }),
+        }),
+      );
+    }
     // A page tab searched its own folder, so every hit belongs to that tab.
     const pageTab = shownPageTabs.find((tab) => tab.folder === shownTab);
     if (pageTab) {
@@ -5033,7 +5155,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !testsView && !issuesView ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !testsView && !issuesView && !openModel ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -5075,6 +5197,20 @@ export function App() {
                 onClick={(e) => spaClick(e, () => openTests({ kind: "plans" }, { push: true }))}
               >
                 <FlaskConical size={16} aria-hidden="true" />
+              </a>
+            </Tooltip>
+          )}
+          {modelsOn && modelsStore.models.length > 0 && (
+            <Tooltip label="Models" keys="g m">
+              <a
+                href={modelLink(modelsStore.models[0]!.fileName)}
+                className={`rail-link${openModel ? " active" : ""}`}
+                aria-label="Models"
+                onClick={(e) =>
+                  spaClick(e, () => openModelPane(modelsStore.models[0]!.fileName, { push: true }))
+                }
+              >
+                <Workflow size={16} aria-hidden="true" />
               </a>
             </Tooltip>
           )}
@@ -5297,7 +5433,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {(shownPageTabs.length > 0 || testingOn || issuesOn) && (
+        {(shownPageTabs.length > 0 || testingOn || issuesOn || modelsOn) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -5324,6 +5460,21 @@ export function App() {
                 <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
             ))}
+            {/* Event Models (roadmap/support-event-modeling.md): the
+                canvases, listed. */}
+            {modelsOn && (
+              <button
+                type="button"
+                role="tab"
+                id="side-tab-models"
+                aria-selected={shownTab === "models"}
+                aria-controls="side-panel-models"
+                className={shownTab === "models" ? "active" : ""}
+                onClick={() => selectSidebarTab("models")}
+              >
+                <Workflow size={14} aria-hidden="true" /> Models
+              </button>
+            )}
             {/* GitHub issues (specs/app/github-issues.feature.md): to the
                 right of Tasks, for the GitHub repo the code repo pushes to. */}
             {issuesOn && (
@@ -5633,6 +5784,21 @@ export function App() {
         {shownTab === "issues" && issuesOn && (
           <IssuesSidebar view={issuesView} prompt={prompt} confirm={confirm} onNavigate={openIssues} />
         )}
+        {/* The Models tab (roadmap/support-event-modeling.md): the Event
+            Models, with New, Import and their ⋯ menus
+            (src/frontend/eventModel/ModelsPane.tsx). */}
+        {shownTab === "models" && modelsOn && (
+          <Suspense fallback={null}>
+            <ModelsSidebar
+              active={openModel}
+              prompt={prompt}
+              confirm={confirm}
+              onNavigate={openModelPane}
+              onCopyLink={(path) => void copyLink(path)}
+              onClosed={() => goHome()}
+            />
+          </Suspense>
+        )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
@@ -5728,6 +5894,7 @@ export function App() {
           key={
             selected ??
             openPage?.fileName ??
+            openModel ??
             (testsView ? testsKey(testsView) : issuesView ? issuesKey(issuesView) : "home")
           }
         >
@@ -6584,6 +6751,28 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
+        ) : openModel && modelsOn ? (
+          /* An Event Model's canvas (roadmap/support-event-modeling.md)
+             takes the whole pane (src/frontend/eventModel/ModelsPane.tsx);
+             App only knows which model is open. Keyed by the file, so
+             switching models starts the pane afresh. */
+          <Suspense fallback={<PageSkeleton cards={1} />}>
+            <ModelsPane
+              key={openModel}
+              fileName={openModel}
+              features={features}
+              members={members}
+              assignments={assignments}
+              repoCrumb={repoCrumb}
+              reloadKey={modelsReloadKey}
+              prompt={prompt}
+              confirm={confirm}
+              onOpenFeature={(f) => void openFeature(f, { push: true })}
+              onCopyLink={(path) => void copyLink(path)}
+              copied={copied}
+              onClosed={goHome}
+            />
+          </Suspense>
         ) : issuesView && issuesOn ? (
           /* GitHub issues (specs/app/github-issues.feature.md): the list,
              the form and one issue take the whole pane (src/frontend/IssuesPane.tsx). */
@@ -7303,6 +7492,28 @@ export function App() {
                     role="switch"
                     checked={settingsTasksDraft}
                     onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* Event Models (roadmap/support-event-modeling.md): opt-in
+                  — the data folder's models folder, one JSON file per
+                  model, drawn on a canvas on their own tab. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Event Models
+                  <span className="settings-row-hint">
+                    {settingsModelsDraft
+                      ? "The data folder's models folder — Event Models on a canvas, one JSON file each, on their own sidebar tab. It is created if it isn't there yet."
+                      : "The models folder is not shown; nothing in it is touched."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsModelsDraft}
+                    onChange={(e) => void toggleModels(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>

@@ -12,12 +12,23 @@ import { walk } from "./walk";
 import { readTextFile } from "./fsx";
 import { parseFeature, parsePage, titleFromFileName } from "./parser";
 import { PAGE_FOLDERS, pageFiles, pageFolderNamed, type PageFolder } from "./pages";
+import { MODELS_FOLDER, modelFiles } from "./models";
+import { modelTextError, parseModelFile } from "./eventModel/serialize";
+import { allElements } from "./eventModel/types";
 
-/** What a search runs over: the spec files, or a special folder's pages. */
-export type SearchScope = "specs" | (typeof PAGE_FOLDERS)[number]["folder"];
+/**
+ * What a search runs over: the spec files, a special folder's pages, or the
+ * Event Models (roadmap/support-event-modeling.md) — what the Models tab
+ * searches.
+ */
+export type SearchScope = "specs" | (typeof PAGE_FOLDERS)[number]["folder"] | typeof MODELS_FOLDER;
 
 export function isSearchScope(value: unknown): value is SearchScope {
-  return value === "specs" || (typeof value === "string" && pageFolderNamed(value) !== null);
+  return (
+    value === "specs" ||
+    value === MODELS_FOLDER ||
+    (typeof value === "string" && pageFolderNamed(value) !== null)
+  );
 }
 
 interface SearchDoc {
@@ -26,7 +37,7 @@ interface SearchDoc {
   name: string;
   /** Indexed: feature description, scenario body (tests table excluded) or page body. */
   text: string;
-  kind: "feature" | "scenario" | "page";
+  kind: "feature" | "scenario" | "page" | "model";
   fileName: string;
   featureName: string;
   scenarioName?: string;
@@ -34,7 +45,7 @@ interface SearchDoc {
 }
 
 export interface SearchResultItem {
-  kind: "feature" | "scenario" | "page";
+  kind: "feature" | "scenario" | "page" | "model";
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
   /** The feature's display name — for a page hit, the page's. */
@@ -135,18 +146,59 @@ async function buildPageIndex(
   return index;
 }
 
+/**
+ * One document per model: its name, and as text the titles of its slices,
+ * elements and specifications — what someone remembers of a model.
+ */
+async function buildModelIndex(
+  dataDir: string,
+  files: string[],
+): Promise<MiniSearch<SearchDoc>> {
+  const docs: SearchDoc[] = [];
+  for (const fileName of files) {
+    const content = await readTextFile(`${dataDir}/${fileName}`);
+    if (content === null || modelTextError(content) !== null) continue;
+    const file = parseModelFile(content);
+    const name = file.name || titleFromFileName(fileName.replace(/\.model\.json$/, ""));
+    const words: string[] = [];
+    for (const slice of file.model.slices) {
+      words.push(slice.title);
+      for (const spec of slice.specifications) words.push(spec.title);
+    }
+    for (const { element } of allElements(file.model)) {
+      words.push(element.title);
+      if (element.description) words.push(element.description);
+    }
+    docs.push({
+      id: `M:${fileName}`,
+      kind: "model",
+      name,
+      text: words.join(" · "),
+      fileName,
+      featureName: name,
+    });
+  }
+  const index = newIndex();
+  index.addAll(docs);
+  return index;
+}
+
 async function getIndex(dataDir: string, scope: SearchScope): Promise<MiniSearch<SearchDoc>> {
-  const folder = scope === "specs" ? null : pageFolderNamed(scope);
+  const folder = scope === "specs" || scope === MODELS_FOLDER ? null : pageFolderNamed(scope);
   const files = folder
     ? await pageFiles(dataDir, folder.folder)
-    : (await walk(dataDir)).files.sort();
+    : scope === MODELS_FOLDER
+      ? await modelFiles(dataDir, MODELS_FOLDER)
+      : (await walk(dataDir)).files.sort();
   const fp = await fingerprint(dataDir, files);
   const key = `${scope}:${dataDir}`;
   const cached = cache.get(key);
   if (cached && cached.fingerprint === fp) return cached.index;
   const index = folder
     ? await buildPageIndex(dataDir, files)
-    : await buildSpecsIndex(dataDir, files);
+    : scope === MODELS_FOLDER
+      ? await buildModelIndex(dataDir, files)
+      : await buildSpecsIndex(dataDir, files);
   cache.set(key, { fingerprint: fp, index });
   return index;
 }
@@ -192,6 +244,15 @@ export async function searchSpecs(
   limit = 20,
 ): Promise<SearchResultItem[]> {
   return search(dataDir, "specs", query, limit);
+}
+
+/** The same search over the Event Models: one hit per model. */
+export async function searchModels(
+  dataDir: string,
+  query: string,
+  limit = 20,
+): Promise<SearchResultItem[]> {
+  return search(dataDir, MODELS_FOLDER, query, limit);
 }
 
 /** The same search over a special folder's pages: one hit per page. */
