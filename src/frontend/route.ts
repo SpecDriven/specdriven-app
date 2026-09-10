@@ -3,6 +3,7 @@
 //   /                                               home
 //   /roadmap/<page>                                 roadmap page
 //   /tasks/<task>                                   task
+//   /models/<model>                                 an Event Model's canvas
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
@@ -41,6 +42,12 @@ export interface Route {
    * The folder it opens with is what says which of the two it is.
    */
   page?: string;
+  /**
+   * An Event Model (roadmap/support-event-modeling.md) as its file name,
+   * repo-relative and with the `.model.json` suffix restored:
+   * `models/cart.model.json`.
+   */
+  model?: string;
   /** A view of the test management module (specs/app/tests.feature.md). */
   tests?: TestsRoute;
   /** A view of the GitHub issues module (specs/app/github-issues.feature.md). */
@@ -103,6 +110,12 @@ export function parseRoute(pathname: string): Route {
     const path = segs.slice(1).join("/").replace(/\.md$/, "");
     return { page: `${segs[0]}/${path}.md` };
   }
+  // An Event Model is a plain path under its folder the same way; a link
+  // may carry the `.model.json` suffix already.
+  if (segs[0] === MODELS_FOLDER && segs[1]) {
+    const path = segs.slice(1).join("/").replace(/\.model\.json$/, "");
+    return { model: `${MODELS_FOLDER}/${path}.model.json` };
+  }
   if (segs[0] !== "features" || !segs[1]) return {};
   // The feature path runs up to the first `scenarios` segment that has a slug
   // after it (folders make feature paths multi-segment).
@@ -149,6 +162,15 @@ export function repoDisplayName(repo: string): string {
 
 /** The special folders' names, shared with the server (src/server/pages.ts). */
 export const PAGE_FOLDERS = ["roadmap", "tasks"];
+
+/** The Event Models' folder, shared with the server (src/server/models.ts). */
+export const MODELS_FOLDER = "models";
+
+/** `models/shop/cart.model.json` -> `/models/shop/cart`. */
+export function modelLink(fileName: string): string {
+  const stem = fileName.slice(MODELS_FOLDER.length + 1).replace(/\.model\.json$/, "");
+  return `/${MODELS_FOLDER}/${stem.split("/").map(encodeURIComponent).join("/")}`;
+}
 
 /** The folder a page's file name lives in — `roadmap` or `tasks`. */
 export function pageFolderOf(fileName: string): string {
@@ -214,7 +236,9 @@ export function pagePath(
   fileName: string | null,
   scenario: Pick<Scenario, "name" | "version"> | null,
   page: string | null = null,
+  model: string | null = null,
 ): string {
+  if (model) return modelLink(model);
   if (page) return pageLink(page);
   if (!fileName) return "/";
   return scenario ? scenarioPath(fileName, scenario) : featurePath(fileName);

@@ -37,6 +37,10 @@ const server = Bun.serve({
     "/roadmap/*": index,
     "/tasks": index,
     "/tasks/*": index,
+    // Event Models (roadmap/support-event-modeling.md): each model's url
+    // serves the shell too.
+    "/models": index,
+    "/models/*": index,
     // The test management module (specs/app/tests.feature.md): its
     // plans, cases and runs address the same way.
     "/tests": index,

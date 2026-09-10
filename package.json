@@ -143,6 +143,7 @@
     "@opentelemetry/sdk-trace-base": "^2.10.0",
     "@replit/codemirror-vim": "^6.4.0",
     "@tanstack/react-table": "^8.21.3",
+    "@xyflow/react": "^12.11.6",
     "just-git": "^1.8.0",
     "lucide-react": "^1.39.0",
     "minisearch": "^7.2.0",

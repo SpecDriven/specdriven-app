@@ -101,6 +101,13 @@ export interface SpecDrivenState {
    */
   tasks?: boolean;
   /**
+   * Show the data repo's `models` folder — Event Models on their own Models
+   * tab and canvas (roadmap/support-event-modeling.md); absent means OFF.
+   * On, the folder is created if the repo has none; off, the folder and its
+   * models are simply not shown.
+   */
+  models?: boolean;
+  /**
    * Show the test management module (specs/app/tests.feature.md) —
    * test cases, plans and executions on their own sidebar tab and pane;
    * absent means OFF. On, the tab appears and the module's document is
@@ -269,6 +276,12 @@ export function normalizeRoadmap(value: unknown): boolean {
 /** Effective tasks setting: OFF unless explicitly turned on — the tasks
     folder is opt-in like the roadmap's (specs/app/tasks.feature.md). */
 export function normalizeTasks(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective models setting: OFF unless explicitly turned on — the models
+    folder is opt-in like the roadmap's (roadmap/support-event-modeling.md). */
+export function normalizeModels(value: unknown): boolean {
   return value === true;
 }
 
