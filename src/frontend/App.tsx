@@ -757,6 +757,70 @@ interface Listing {
   issuesRepo: GitHubRepo | null;
 }
 
+/** How many times a feature-list load tries before it reports an error, and
+    the step it backs off by (1×, 2×, …). Short enough that a real outage
+    still surfaces quickly, long enough to outlast a demo-mode reseed
+    swapping the data directory (src/server/demo.ts reseedDemo). */
+export const LOAD_RETRIES = 3;
+export const LOAD_RETRY_MS = 300;
+
+/**
+ * Fetch the feature listing, retrying the failures that a later try can
+ * still turn into an answer.
+ *
+ * A failed load leaves the sidebar empty, and the cron refresh that would
+ * otherwise cover for it is off whenever reloadFrequencySeconds is 0 — demo
+ * mode always, and any folder with sync turned off. That makes the boot load
+ * the only one, so a single blip would read "No feature files yet" for the
+ * rest of the session. Retried here instead: a reseed swapping the data
+ * directory mid-flight, or a fetch that threw before it reached the server.
+ * A 409 (no data repo yet) is a settled answer rather than a blip, so it
+ * stops early and reports.
+ */
+export async function fetchListing(
+  fetchImpl: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<{ listing: Listing } | { error: string; attempts: number }> {
+  let lastError = "Could not load features";
+  let attempts = 0;
+  for (let attempt = 0; attempt < LOAD_RETRIES; attempt += 1) {
+    if (attempt > 0) await sleep(LOAD_RETRY_MS * attempt);
+    attempts += 1;
+    let res: Response;
+    let data: { features?: FeatureListing[]; error?: string; [k: string]: unknown };
+    try {
+      res = await fetchImpl("/api/features");
+      data = (await res.json()) as typeof data;
+    } catch (e) {
+      // Network-level failure: nothing was read, so this is always worth
+      // another go.
+      lastError = (e as Error).message;
+      continue;
+    }
+    if (res.ok) {
+      return {
+        listing: {
+          features: (data.features as FeatureListing[]) ?? [],
+          folders: (data.folders as string[]) ?? [],
+          members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
+          codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
+          issuesRepo:
+            data.issuesRepo &&
+            typeof data.issuesRepo === "object" &&
+            typeof (data.issuesRepo as GitHubRepo).owner === "string"
+              ? (data.issuesRepo as GitHubRepo)
+              : null,
+        },
+      };
+    }
+    lastError = data.error ?? "Could not load features";
+    // "No data repo configured" is the app's steady state before a folder is
+    // picked — retrying cannot change it.
+    if (res.status === 409) break;
+  }
+  return { error: lastError, attempts };
+}
+
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
   // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
@@ -1171,29 +1235,19 @@ export function App() {
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
-    const res = await fetch("/api/features");
-    const data = await res.json();
-    if (res.ok) {
-      const listing: Listing = {
-        features: data.features,
-        folders: data.folders ?? [],
-        members: Array.isArray(data.members) ? data.members : [],
-        codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
-        issuesRepo:
-          data.issuesRepo && typeof data.issuesRepo === "object" && typeof data.issuesRepo.owner === "string"
-            ? (data.issuesRepo as GitHubRepo)
-            : null,
-      };
-      setFeatures(listing.features);
-      setFolders(listing.folders);
-      setMembers(listing.members);
-      setCodeRepo(listing.codeRepo);
-      setIssuesRepo(listing.issuesRepo);
-      setLoadError(null);
-      return listing;
+    const result = await fetchListing();
+    if ("error" in result) {
+      setLoadError(result.error);
+      return null;
     }
-    setLoadError(data.error ?? "Could not load features");
-    return null;
+    const { listing } = result;
+    setFeatures(listing.features);
+    setFolders(listing.folders);
+    setMembers(listing.members);
+    setCodeRepo(listing.codeRepo);
+    setIssuesRepo(listing.issuesRepo);
+    setLoadError(null);
+    return listing;
   }, []);
 
   /** One special folder's pages, for its sidebar tab. */
@@ -5599,7 +5653,17 @@ export function App() {
           <p className="session-notice">Selected: {selectionLabel}</p>
         )}
         {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
-        {loadError && <p className="error">{loadError}</p>}
+        {/* A load that failed every retry offers the manual one: without it
+            the sidebar would sit empty until the next page load, and with
+            the cron refresh off (reloadFrequencySeconds 0) nothing else asks. */}
+        {loadError && (
+          <p className="error">
+            {loadError}{" "}
+            <button type="button" className="link" onClick={() => void loadFeatures()}>
+              Try again
+            </button>
+          </p>
+        )}
         {/* The Features section head carries the filter: by status, by
             assignee. Active filters show as chips that clear on click. */}
         <div className="section-head">
