@@ -567,7 +567,7 @@ function ModelCanvas({
               open={menuOpen}
               onClose={() => setMenuOpen(false)}
               label="Model actions"
-              className="chip-menu"
+              className="chip-menu chip-menu-end"
               containerSelector=".em-menu-anchor"
               items={[
                 { id: "rename", label: "Rename", onSelect: () => void rename() },
@@ -648,7 +648,7 @@ function ModelCanvas({
               open={assigneeOpen}
               onClose={() => setAssigneeOpen(false)}
               label="Assigned member"
-              className="chip-menu"
+              className="chip-menu chip-menu-end"
               containerSelector=".em-assignee-anchor"
               items={[
                 {
