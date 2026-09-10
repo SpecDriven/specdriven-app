@@ -267,7 +267,7 @@ test("reconciling removes, reorders and rewrites what the target says", () => {
   target.model.slices.push(slice("show-cart", { sliceType: "STATE_VIEW" }));
   target.model.slices.reverse();
   target.model.slices[1]!.screens = [];
-  target.links["show-cart"] = { feature: "cart/show.feature.md" };
+  target.links["show-cart"] = { feature: "specs/cart/show.feature.md" };
   delete target.layout.elements["cart-ui"];
   const next = docToModel(reconcileModel(base, target));
   expect(next).toEqual(target);

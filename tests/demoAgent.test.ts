@@ -39,7 +39,7 @@ const realHome = process.env.SPECDRIVEN_HOME;
 const realDemo = process.env.DEMO_MODE;
 const realDemoData = process.env.DEMO_DATA_DIR;
 
-const SPEC = "billing/collect-premium.feature.md";
+const SPEC = "specs/billing/collect-premium.feature.md";
 const SPEC_TEXT = "# Collect Premium\n\n## Failed autopay @v1 [published]\n\n- **Given** a charge\n";
 
 beforeEach(async () => {
@@ -143,15 +143,15 @@ test("readBrief pulls the name and the specs out of the generated prompt", () =>
     "",
     "Implement the following specifications.",
     "",
-    "## Spec: policy/quote.feature.md",
+    "## Spec: specs/policy/quote.feature.md",
     "",
     "body",
     "",
-    "## Spec: billing/collect.feature.md (selected scenarios only)",
+    "## Spec: specs/billing/collect.feature.md (selected scenarios only)",
   ].join("\n");
   expect(readBrief(prompt)).toEqual({
     name: "quote motorcycles",
-    specs: ["policy/quote.feature.md", "billing/collect.feature.md"],
+    specs: ["specs/policy/quote.feature.md", "specs/billing/collect.feature.md"],
   });
   // A message typed into the composer matches neither pattern.
   expect(readBrief("what does this do?")).toEqual({ name: "this change", specs: [] });

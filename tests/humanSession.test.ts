@@ -40,7 +40,7 @@ function fullRecord(): HumanSession {
     user: "david",
     dataRepo: "/repos/specs",
     codeRepo: "/repos/code",
-    specs: [{ fileName: "billing/quotes.feature.md", partial: true }],
+    specs: [{ fileName: "specs/billing/quotes.feature.md", partial: true }],
     pages: [{ folder: "roadmap", file: "support-for-human-code-sessions.md" }],
     id: ID,
     now: T0,

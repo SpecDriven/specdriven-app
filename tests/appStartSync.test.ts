@@ -63,18 +63,18 @@ test("the data repo is pulled on app start, before the first read", async () => 
   const { a, b } = await twoClones(root);
   // The cron reload is off, so only the app-start pull can bring this in.
   await writeState({ dataRepo: b, reloadFrequencySeconds: 0 }, root);
-  await pushFeature(a, "quote.feature.md", "# Quote Policy\n");
+  await pushFeature(a, "specs/quote.feature.md", "# Quote Policy\n");
 
   await applyStartupState();
 
-  expect(await listFeatureFiles()).toContain("quote.feature.md");
+  expect(await listFeatureFiles()).toContain("specs/quote.feature.md");
 });
 
 test("picking a data folder pulls it before the client reads it", async () => {
   const { a, b } = await twoClones(root);
   await writeState({ reloadFrequencySeconds: 0 }, root);
   await applyStartupState();
-  await pushFeature(a, "claim.feature.md", "# Claim\n");
+  await pushFeature(a, "specs/claim.feature.md", "# Claim\n");
 
   const res = await handleApi(
     new Request("http://localhost/api/state", {
@@ -86,13 +86,13 @@ test("picking a data folder pulls it before the client reads it", async () => {
   expect(res!.status).toBe(200);
 
   // Pulled by the time the switch is confirmed — the client reads next.
-  expect(await Bun.file(join(b, "claim.feature.md")).exists()).toBe(true);
-  expect(await listFeatureFiles()).toContain("claim.feature.md");
+  expect(await Bun.file(join(b, "specs/claim.feature.md")).exists()).toBe(true);
+  expect(await listFeatureFiles()).toContain("specs/claim.feature.md");
 });
 
 test("a data folder that is not a git repo is still selectable", async () => {
   const data = join(root, "plain");
-  await Bun.write(join(data, "note.feature.md"), "# Note\n");
+  await Bun.write(join(data, "specs/note.feature.md"), "# Note\n");
   await applyStartupState();
 
   const res = await handleApi(
@@ -103,5 +103,5 @@ test("a data folder that is not a git repo is still selectable", async () => {
     }),
   );
   expect(res!.status).toBe(200);
-  expect(await listFeatureFiles()).toContain("note.feature.md");
+  expect(await listFeatureFiles()).toContain("specs/note.feature.md");
 });

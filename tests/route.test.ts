@@ -87,22 +87,37 @@ describe("parseRoute", () => {
   });
 
   test("feature url restores the file suffix", () => {
-    expect(parseRoute("/features/navigation")).toEqual({ feature: "navigation.feature.md" });
-    expect(parseRoute("/features/navigation/")).toEqual({ feature: "navigation.feature.md" });
+    expect(parseRoute("/features/navigation")).toEqual({ feature: "specs/navigation.feature.md" });
+    expect(parseRoute("/features/navigation/")).toEqual({ feature: "specs/navigation.feature.md" });
   });
 
   test("a stem already carrying a suffix is not doubled", () => {
-    expect(parseRoute("/features/navigation.feature.md").feature).toBe("navigation.feature.md");
-    expect(parseRoute("/features/quote.feature").feature).toBe("quote.feature.md");
+    expect(parseRoute("/features/navigation.feature.md").feature).toBe("specs/navigation.feature.md");
+    expect(parseRoute("/features/quote.feature").feature).toBe("specs/quote.feature.md");
+  });
+
+  // Features moved under `specs/` without their urls changing, so a link
+  // minted before the move must still land on the file at its new path.
+  test("a url without the specs prefix still resolves", () => {
+    expect(parseRoute("/features/billing/quotes").feature).toBe("specs/billing/quotes.feature.md");
+  });
+
+  test("a hand-typed specs prefix is not doubled", () => {
+    expect(parseRoute("/features/specs/billing/quotes").feature).toBe(
+      "specs/billing/quotes.feature.md",
+    );
+    expect(parseRoute("/features/specs/quotes.feature.md").feature).toBe(
+      "specs/quotes.feature.md",
+    );
   });
 
   test("scenario url, with and without a version", () => {
     expect(parseRoute("/features/nav/scenarios/esc-key")).toEqual({
-      feature: "nav.feature.md",
+      feature: "specs/nav.feature.md",
       scenario: { slug: "esc-key" },
     });
     expect(parseRoute("/features/nav/scenarios/esc-key/v2")).toEqual({
-      feature: "nav.feature.md",
+      feature: "specs/nav.feature.md",
       scenario: { slug: "esc-key", version: 2 },
     });
   });
@@ -114,62 +129,62 @@ describe("parseRoute", () => {
 
   test("folder paths: every segment up to /scenarios belongs to the feature", () => {
     expect(parseRoute("/features/billing/quotes")).toEqual({
-      feature: "billing/quotes.feature.md",
+      feature: "specs/billing/quotes.feature.md",
     });
     expect(parseRoute("/features/billing/sub/deep/scenarios/esc-key/v2")).toEqual({
-      feature: "billing/sub/deep.feature.md",
+      feature: "specs/billing/sub/deep.feature.md",
       scenario: { slug: "esc-key", version: 2 },
     });
     // a top-level feature file that happens to be named scenarios
-    expect(parseRoute("/features/scenarios")).toEqual({ feature: "scenarios.feature.md" });
+    expect(parseRoute("/features/scenarios")).toEqual({ feature: "specs/scenarios.feature.md" });
   });
 
   test("mangled tails: a bare trailing /scenarios is dropped; version tails are ignored", () => {
-    expect(parseRoute("/features/nav/scenarios")).toEqual({ feature: "nav.feature.md" });
+    expect(parseRoute("/features/nav/scenarios")).toEqual({ feature: "specs/nav.feature.md" });
     expect(parseRoute("/features/billing/nav/scenarios")).toEqual({
-      feature: "billing/nav.feature.md",
+      feature: "specs/billing/nav.feature.md",
     });
     expect(parseRoute("/features/nav/scenarios/esc-key/v2/extra")).toEqual({
-      feature: "nav.feature.md",
+      feature: "specs/nav.feature.md",
       scenario: { slug: "esc-key", version: 2 },
     });
   });
 
   test("segments are url-decoded; malformed escapes survive as-is", () => {
-    expect(parseRoute("/features/a%20b").feature).toBe("a b.feature.md");
-    expect(parseRoute("/features/100%").feature).toBe("100%.feature.md");
+    expect(parseRoute("/features/a%20b").feature).toBe("specs/a b.feature.md");
+    expect(parseRoute("/features/100%").feature).toBe("specs/100%.feature.md");
   });
 });
 
 describe("paths", () => {
   test("featurePath strips the suffix and keeps folder segments", () => {
-    expect(featurePath("navigation.feature.md")).toBe("/features/navigation");
-    expect(featurePath("billing/sub/quotes.feature.md")).toBe("/features/billing/sub/quotes");
+    expect(featurePath("specs/navigation.feature.md")).toBe("/features/navigation");
+    expect(featurePath("specs/billing/sub/quotes.feature.md")).toBe("/features/billing/sub/quotes");
   });
 
   test("folder paths round-trip through parseRoute", () => {
-    const path = scenarioPath("billing/quotes.feature.md", sc("Basic Quote!", 3));
+    const path = scenarioPath("specs/billing/quotes.feature.md", sc("Basic Quote!", 3));
     expect(path).toBe("/features/billing/quotes/scenarios/basic-quote/v3");
     expect(parseRoute(path)).toEqual({
-      feature: "billing/quotes.feature.md",
+      feature: "specs/billing/quotes.feature.md",
       scenario: { slug: "basic-quote", version: 3 },
     });
     // segments a url can't carry are escaped and decoded back
-    expect(parseRoute(featurePath("odd folder/a b.feature.md"))).toEqual({
-      feature: "odd folder/a b.feature.md",
+    expect(parseRoute(featurePath("specs/odd folder/a b.feature.md"))).toEqual({
+      feature: "specs/odd folder/a b.feature.md",
     });
   });
 
   test("scenarioPath is the canonical versioned permalink", () => {
-    expect(scenarioPath("navigation.feature.md", sc("ESC key closes the dialog", 2))).toBe(
+    expect(scenarioPath("specs/navigation.feature.md", sc("ESC key closes the dialog", 2))).toBe(
       "/features/navigation/scenarios/esc-key-closes-the-dialog/v2",
     );
   });
 
   test("paths round-trip through parseRoute", () => {
-    const path = scenarioPath("quote-policy.feature.md", sc("Basic Quote!", 3));
+    const path = scenarioPath("specs/quote-policy.feature.md", sc("Basic Quote!", 3));
     expect(parseRoute(path)).toEqual({
-      feature: "quote-policy.feature.md",
+      feature: "specs/quote-policy.feature.md",
       scenario: { slug: "basic-quote", version: 3 },
     });
   });
@@ -185,11 +200,11 @@ describe("pagePath", () => {
   });
 
   test("a feature page with no scenario page open is the feature url", () => {
-    expect(pagePath("billing/quotes.feature.md", null)).toBe("/features/billing/quotes");
+    expect(pagePath("specs/billing/quotes.feature.md", null)).toBe("/features/billing/quotes");
   });
 
   test("an open scenario page is that scenario's permalink", () => {
-    expect(pagePath("billing/quotes.feature.md", sc("Basic Quote", 2))).toBe(
+    expect(pagePath("specs/billing/quotes.feature.md", sc("Basic Quote", 2))).toBe(
       "/features/billing/quotes/scenarios/basic-quote/v2",
     );
   });
@@ -202,9 +217,9 @@ describe("pagePath", () => {
     expect(pagePath(null, null, "roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
     // Opening one drops the feature, and the url says so before the state
     // catches up.
-    expect(pagePath("billing/quotes.feature.md", null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
+    expect(pagePath("specs/billing/quotes.feature.md", null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
     // No page open leaves the feature rules untouched.
-    expect(pagePath("billing/quotes.feature.md", null, null)).toBe("/features/billing/quotes");
+    expect(pagePath("specs/billing/quotes.feature.md", null, null)).toBe("/features/billing/quotes");
   });
 
   test("a task url resolves back to the task it was copied from", () => {
@@ -213,7 +228,7 @@ describe("pagePath", () => {
   });
 
   test("the shared link resolves back to the page it was copied from", () => {
-    const file = "billing/quotes.feature.md";
+    const file = "specs/billing/quotes.feature.md";
     const scenarios = [sc("Basic Quote", 1), sc("Basic Quote", 2)];
     // "Copy link" on the card shares exactly the page url ...
     const copied = pagePath(file, scenarios[1]!);
