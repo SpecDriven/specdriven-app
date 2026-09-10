@@ -21,7 +21,7 @@ import type {
 } from "../server/automerge/schema";
 import type { TestingView } from "../server/testing";
 import { toast } from "./Toasts";
-import { featurePath, scenarioPath, testsPath, type TestsRoute } from "./route";
+import { SPECS_FOLDER, featurePath, scenarioPath, testsPath, type TestsRoute } from "./route";
 
 export type {
   CasePriority,
@@ -386,7 +386,11 @@ export function refHref(ref: SpecRef): string {
 /** "Quotes › Basic Quote v2" — the feature's display name when it is listed. */
 export function refLabel(ref: SpecRef, features: FeatureListing[]): string {
   const feature = features.find((f) => f.fileName === ref.fileName);
-  const name = feature?.name || ref.fileName.replace(/\.feature\.md$/, "");
+  // The path fallback is shown to a person, so it reads as the feature's place
+  // in the spec tree — without the `specs/` the tree is stored under.
+  const name =
+    feature?.name ||
+    ref.fileName.replace(/\.feature\.md$/, "").replace(new RegExp(`^${SPECS_FOLDER}/`), "");
   return ref.scenario ? `${name} › ${ref.scenario.name} v${ref.scenario.version}` : name;
 }
 

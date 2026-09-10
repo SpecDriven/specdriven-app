@@ -118,7 +118,7 @@ async function seededOrigin(at = "origin.git"): Promise<string> {
   await git(seed, "config", "user.email", "test@example.com");
   await git(seed, "config", "user.name", "Test");
   await git(seed, "checkout", "-B", "main");
-  await Bun.write(join(seed, "seed.feature.md"), "# Seed\n");
+  await Bun.write(join(seed, "specs/seed.feature.md"), "# Seed\n");
   await git(seed, "add", ".");
   await git(seed, "commit", "-m", "seed");
   await git(seed, "push", "origin", "main");
@@ -130,10 +130,10 @@ test("ensureClone clones on first use and reuses an existing clone", async () =>
   const origin = await seededOrigin();
   const dir = join(root, "clone");
   await ensureClone(origin, dir);
-  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
   // second call is a no-op on the pre-existing clone
   await ensureClone(origin, dir);
-  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
 });
 
 test("ensureClone surfaces clone failures (no access / no such repo)", async () => {
@@ -153,7 +153,7 @@ test("resolveDataRepo clones a repo url on the system-git engine", async () => {
     expect(currentEngine()).toBe("cli"); // no gh on the tests' PATH
     const dir = await resolveDataRepo("https://github.com/test/origin", root);
     expect(dir).toBe(join(root, "repos", "origin"));
-    expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+    expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
     // reuse without re-cloning
     expect(await resolveDataRepo("https://github.com/test/origin", root)).toBe(dir);
   } finally {
@@ -170,6 +170,6 @@ test("resolveDataRepo clones through gh on the GitHub CLI engine", async () => {
   process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
   const dir = await resolveDataRepo("https://github.com/test/origin", root);
   expect(dir).toBe(join(root, "repos", "origin"));
-  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
   expect(fakeGh.calls()).toContain("repo clone");
 });

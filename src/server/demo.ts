@@ -59,9 +59,10 @@ function demoSource(): string {
  * .feature.md): the demo opens on Specs, and a visitor who wants the demo
  * dataset's roadmap pages turns the tab on in Settings. The Models tab is
  * on, though: the dataset ships an Event Model of the water damage claim
- * (demo-data/models/claims/home-claims/) whose slices link that feature, so
- * the feature's page offers the canvas and the canvas offers the spec — an
- * example worth nothing behind a setting a visitor would not know to flip.
+ * (demo-data/models/claims/home-claims/) whose slices link that feature
+ * (demo-data/specs/claims/home-claims/), so the feature's page offers the
+ * canvas and the canvas offers the spec — an example worth nothing behind a
+ * setting a visitor would not know to flip.
  */
 const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   gitEngine: "js",

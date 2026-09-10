@@ -109,7 +109,7 @@ test("the gh engine clones GitHub repos with `gh repo clone`", async () => {
   await git(seed, "config", "user.email", "t@example.com");
   await git(seed, "config", "user.name", "T");
   await git(seed, "checkout", "-B", "main");
-  await Bun.write(join(seed, "seed.feature.md"), "# Seed\n");
+  await Bun.write(join(seed, "specs/seed.feature.md"), "# Seed\n");
   await git(seed, "add", ".");
   await git(seed, "commit", "-m", "seed");
   await git(seed, "push", "origin", "HEAD:main");
@@ -117,7 +117,7 @@ test("the gh engine clones GitHub repos with `gh repo clone`", async () => {
   const stub = withGh({ origin });
   const dir = join(root, "clone");
   await clone("https://github.com/octo/data-insurance", dir);
-  expect(await Bun.file(join(dir, "seed.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
   expect(stub.calls()).toContain("repo clone");
 });
 
@@ -142,10 +142,10 @@ test("commits on the gh engine are authored by the gh account", async () => {
   await $`git init -b main ${repo}`.quiet();
   await git(repo, "config", "user.email", "repo@example.com");
   await git(repo, "config", "user.name", "Repo Config");
-  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
 
   withGh();
-  const res = await commitAndPush(repo, "one.feature.md", "Add one");
+  const res = await commitAndPush(repo, "specs/one.feature.md", "Add one");
   expect(res.pushed).toBe(false); // no upstream on a local-only repo
   const author = await git(repo, "log", "-1", "--format=%an <%ae>");
   expect(author.stdout.toString().trim()).toBe(
@@ -160,10 +160,10 @@ test("with gh signed out the repo's own git identity still authors commits", asy
   await $`git init -b main ${repo}`.quiet();
   await git(repo, "config", "user.email", "repo@example.com");
   await git(repo, "config", "user.name", "Repo Config");
-  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
 
   withGh({ signedIn: false });
-  await commitAndPush(repo, "one.feature.md", "Add one");
+  await commitAndPush(repo, "specs/one.feature.md", "Add one");
   const author = await git(repo, "log", "-1", "--format=%an <%ae>");
   expect(author.stdout.toString().trim()).toBe("Repo Config <repo@example.com>");
 });
@@ -210,10 +210,10 @@ test("the bundled engine clones, commits and pushes with no git on PATH", async 
   setGitEngine("js");
 
   await clone(`${server.url}/origin.git`, noGit);
-  expect(await Bun.file(join(noGit, "seed.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(noGit, "specs/seed.feature.md")).exists()).toBe(true);
 
-  await Bun.write(join(noGit, "added.feature.md"), "# Added\n");
-  const res = await commitAndPush(noGit, "added.feature.md", "Add one");
+  await Bun.write(join(noGit, "specs/added.feature.md"), "# Added\n");
+  const res = await commitAndPush(noGit, "specs/added.feature.md", "Add one");
   expect(res).toEqual({ pushed: true, message: "committed and pushed" });
 
   // The other clone, and the real git binary, see what the engine pushed.
@@ -221,7 +221,7 @@ test("the bundled engine clones, commits and pushes with no git on PATH", async 
   const log = await git(originDir, "log", "-1", "--pretty=%s");
   expect(log.stdout.toString().trim()).toBe("Add one");
   await git(a, "pull");
-  expect(await Bun.file(join(a, "added.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(a, "specs/added.feature.md")).exists()).toBe(true);
   stopServers();
 });
 
@@ -232,10 +232,10 @@ test("with no sign-in the bundled engine leaves the repo's git identity alone", 
   await $`git init -b main ${repo}`.quiet();
   await git(repo, "config", "user.email", "repo@example.com");
   await git(repo, "config", "user.name", "Repo Config");
-  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
 
   setGitEngine("js");
-  const res = await commitAndPush(repo, "one.feature.md", "Add one");
+  const res = await commitAndPush(repo, "specs/one.feature.md", "Add one");
   expect(res.pushed).toBe(false); // no upstream on a local-only repo
   const author = await git(repo, "log", "-1", "--format=%an <%ae>");
   expect(author.stdout.toString().trim()).toBe("Repo Config <repo@example.com>");
@@ -247,7 +247,7 @@ test("with no sign-in the bundled engine leaves the repo's git identity alone", 
 test("the bundled engine falls back to the global git identity", async () => {
   const repo = join(root, "local");
   await $`git init -b main ${repo}`.quiet(); // no user.* in this repo's config
-  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
   const globalConfig = join(root, "gitconfig");
   await Bun.write(
     globalConfig,
@@ -257,7 +257,7 @@ test("the bundled engine falls back to the global git identity", async () => {
   process.env.GIT_CONFIG_GLOBAL = globalConfig;
 
   setGitEngine("js");
-  await commitAndPush(repo, "one.feature.md", "Add one");
+  await commitAndPush(repo, "specs/one.feature.md", "Add one");
   process.env.GIT_CONFIG_GLOBAL = before;
 
   const author = await git(repo, "log", "-1", "--format=%an <%ae>");
@@ -269,12 +269,12 @@ test("the bundled engine falls back to the global git identity", async () => {
 test("the bundled engine still commits with no git identity configured at all", async () => {
   const repo = join(root, "local");
   await $`git init -b main ${repo}`.quiet();
-  await Bun.write(join(repo, "one.feature.md"), "# One\n");
+  await Bun.write(join(repo, "specs/one.feature.md"), "# One\n");
   const before = process.env.GIT_CONFIG_GLOBAL;
   process.env.GIT_CONFIG_GLOBAL = join(root, "no-such-gitconfig");
 
   setGitEngine("js");
-  await commitAndPush(repo, "one.feature.md", "Add one");
+  await commitAndPush(repo, "specs/one.feature.md", "Add one");
   process.env.GIT_CONFIG_GLOBAL = before;
 
   const author = await git(repo, "log", "-1", "--format=%an");
@@ -287,23 +287,23 @@ test("a merge conflict raised by the bundled engine is a real git conflict", asy
   const { a, b } = await twoClones(root);
   setGitEngine("js");
 
-  await Bun.write(join(b, "seed.feature.md"), "# Seed\n\nfrom b\n");
+  await Bun.write(join(b, "specs/seed.feature.md"), "# Seed\n\nfrom b\n");
   await git(b, "add", ".");
   await git(b, "commit", "-m", "b edit");
   await git(b, "push");
 
-  await Bun.write(join(a, "seed.feature.md"), "# Seed\n\nfrom a\n");
-  await commitAndPush(a, "seed.feature.md", "a edit");
+  await Bun.write(join(a, "specs/seed.feature.md"), "# Seed\n\nfrom a\n");
+  await commitAndPush(a, "specs/seed.feature.md", "a edit");
 
   const res = await pull(a);
   expect(res.ok).toBe(false);
-  expect(res.conflictedFiles).toEqual(["seed.feature.md"]);
+  expect(res.conflictedFiles).toEqual(["specs/seed.feature.md"]);
   // The real binary sees the same unmerged state the app reported.
   const status = await git(a, "status", "--porcelain");
-  expect(status.stdout.toString()).toContain("UU seed.feature.md");
-  expect(await theirsVersion(a, "seed.feature.md")).toBe("# Seed\n\nfrom b\n");
+  expect(status.stdout.toString()).toContain("UU specs/seed.feature.md");
+  expect(await theirsVersion(a, "specs/seed.feature.md")).toBe("# Seed\n\nfrom b\n");
 
-  const resolved = await resolveConflict(a, "seed.feature.md", "# Seed\n\nmerged\n");
+  const resolved = await resolveConflict(a, "specs/seed.feature.md", "# Seed\n\nmerged\n");
   expect(resolved.pushed).toBe(true);
   expect((await git(a, "status", "--porcelain")).stdout.toString().trim()).toBe("");
   stopServers();

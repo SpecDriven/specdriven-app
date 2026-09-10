@@ -59,7 +59,7 @@ async function bridge(dataDir: string, url: string): Promise<NetSync> {
 }
 
 const SEED = "# Seed\n\n## Story @v1 [proposed]\n\n- line one\n- line two\n";
-const FILE = "seed.feature.md";
+const FILE = "specs/seed.feature.md";
 
 /**
  * Two data directories holding the same document lineage — what two git

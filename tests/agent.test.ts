@@ -25,8 +25,8 @@ import type { Runner, SpecInput } from "../src/server/agent";
 import type { RunOptions, RunResult } from "../src/server/run";
 
 const SPECS: SpecInput[] = [
-  { fileName: "billing/quotes.feature.md", content: "# Quotes\n\n## Basic quote @v1\n" },
-  { fileName: "search.feature.md", content: "# Search\n\nRanked hits.\n" },
+  { fileName: "specs/billing/quotes.feature.md", content: "# Quotes\n\n## Basic quote @v1\n" },
+  { fileName: "specs/search.feature.md", content: "# Search\n\nRanked hits.\n" },
 ];
 
 function fakeRunner(result: Partial<RunResult>) {
@@ -69,8 +69,8 @@ describe("buildSessionPrompt", () => {
   // doesn't take the excerpt for the whole file.
   test("a partial spec's heading marks it as selected scenarios only", () => {
     const prompt = buildSessionPrompt("s", [{ ...SPECS[0]!, partial: true }, SPECS[1]!]);
-    expect(prompt).toContain("## Spec: billing/quotes.feature.md (selected scenarios only)");
-    expect(prompt).toContain("## Spec: search.feature.md\n");
+    expect(prompt).toContain("## Spec: specs/billing/quotes.feature.md (selected scenarios only)");
+    expect(prompt).toContain("## Spec: specs/search.feature.md\n");
   });
 });
 
@@ -189,8 +189,8 @@ describe("launchDesktopSession", () => {
         agent: DESKTOP_AGENT,
         dataRepo: "/data",
         specs: [
-          { fileName: "billing/quotes.feature.md", partial: false },
-          { fileName: "search.feature.md", partial: false },
+          { fileName: "specs/billing/quotes.feature.md", partial: false },
+          { fileName: "specs/search.feature.md", partial: false },
         ],
       });
       expect(calls).toHaveLength(1);
@@ -233,7 +233,7 @@ describe("launchDesktopSession", () => {
         id: ID,
       });
       const record = JSON.parse(await readFile(join(sessionsDir, ID, "session.json"), "utf8"));
-      expect(record.specs).toEqual([{ fileName: "billing/quotes.feature.md", partial: true }]);
+      expect(record.specs).toEqual([{ fileName: "specs/billing/quotes.feature.md", partial: true }]);
       expect(typeof record.startedAt).toBe("string");
     }));
 

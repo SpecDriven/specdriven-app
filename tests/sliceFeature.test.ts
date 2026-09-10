@@ -211,19 +211,19 @@ describe("generateSliceFeature", () => {
     const modelFile = await createModel(root, "Shopping cart");
     await saveModel(root, modelFile, cartFile());
     const made = await generateSliceFeature(root, modelFile, "add-item");
-    expect(made.fileName).toBe("add-item-to-cart.feature.md");
+    expect(made.fileName).toBe("specs/add-item-to-cart.feature.md");
     expect(made.scenarios).toBe(3);
-    expect(made.model.file.links["add-item"]).toEqual({ feature: "add-item-to-cart.feature.md" });
+    expect(made.model.file.links["add-item"]).toEqual({ feature: "specs/add-item-to-cart.feature.md" });
     const text = (await readFeature(root, made.fileName))!;
     expect(text).toStartWith("# Add item to cart\n\nScenarios of the slice “Add item to cart”");
     expect(text).toContain("## adds the item @v1 [proposed]");
     // The link is in the model's file and its listing.
     expect((await readModel(root, modelFile))!.file.links["add-item"]?.feature).toBe(made.fileName);
     expect((await listModels(root))[0]!.links).toEqual([
-      { sliceId: "add-item", slice: "Add item to cart", feature: "add-item-to-cart.feature.md" },
+      { sliceId: "add-item", slice: "Add item to cart", feature: "specs/add-item-to-cart.feature.md" },
     ]);
     await expect(generateSliceFeature(root, modelFile, "add-item")).rejects.toThrow(
-      "already has a feature file: add-item-to-cart.feature.md",
+      "already has a feature file: specs/add-item-to-cart.feature.md",
     );
   });
 
@@ -231,7 +231,7 @@ describe("generateSliceFeature", () => {
     const modelFile = await createModel(root, "Shopping cart");
     await saveModel(root, modelFile, cartFile());
     const made = await generateSliceFeature(root, modelFile, "checkout", "billing/Check out");
-    expect(made.fileName).toBe("billing/check-out.feature.md");
+    expect(made.fileName).toBe("specs/billing/check-out.feature.md");
     expect(made.scenarios).toBe(0);
     expect(await readFeature(root, made.fileName)).toBe(
       "# Check out\n\nScenarios of the slice “Checkout” in the Event Model “Shopping cart” (models/cart.model.json).\n".replace(
@@ -254,29 +254,29 @@ describe("a session bundles the model", () => {
     // Named: its JSON, and its linked spec for the session to take on.
     const named = await sessionModels(root, [modelFile], []);
     expect(named.models.map((m) => m.fileName)).toEqual([modelFile]);
-    expect(named.features).toEqual(["add-item-to-cart.feature.md"]);
+    expect(named.features).toEqual(["specs/add-item-to-cart.feature.md"]);
     expect(named.models[0]!.slices).toEqual([
-      { title: "Add item to cart", feature: "add-item-to-cart.feature.md" },
+      { title: "Add item to cart", feature: "specs/add-item-to-cart.feature.md" },
       { title: "Checkout" },
     ]);
     expect(JSON.parse(named.models[0]!.json).slices).toHaveLength(2);
     // A selected spec brings the model whose slice links it — unless told not to.
-    const linked = await sessionModels(root, [], ["add-item-to-cart.feature.md"]);
+    const linked = await sessionModels(root, [], ["specs/add-item-to-cart.feature.md"]);
     expect(linked.models.map((m) => m.fileName)).toEqual([modelFile]);
     expect(linked.features).toEqual([]);
-    const off = await sessionModels(root, [], ["add-item-to-cart.feature.md"], { linkedToSpecs: false });
+    const off = await sessionModels(root, [], ["specs/add-item-to-cart.feature.md"], { linkedToSpecs: false });
     expect(off.models).toEqual([]);
-    expect((await sessionModels(root, [], ["other.feature.md"])).models).toEqual([]);
+    expect((await sessionModels(root, [], ["specs/other.feature.md"])).models).toEqual([]);
     await expect(sessionModels(root, ["models/none.model.json"], [])).rejects.toThrow("model not found");
   });
 
   test("buildSessionPrompt: the model's map and JSON after the specs", () => {
     const view = { fileName: "models/cart.model.json", name: "Shopping cart", slices: 2, links: [], file: cartFile() };
     const model = modelInput(view);
-    const specs = [{ fileName: "add-item-to-cart.feature.md", content: "# Add item to cart\n" }];
+    const specs = [{ fileName: "specs/add-item-to-cart.feature.md", content: "# Add item to cart\n" }];
     const prompt = buildSessionPrompt("s", specs, undefined, [model]);
     expect(prompt).toContain("Implement the following specification.");
-    expect(prompt.indexOf("## Spec: add-item-to-cart.feature.md")).toBeLessThan(
+    expect(prompt.indexOf("## Spec: specs/add-item-to-cart.feature.md")).toBeLessThan(
       prompt.indexOf("## Event Model: models/cart.model.json"),
     );
     expect(prompt).toContain('The Event Model "Shopping cart" the specifications above belong to');
@@ -311,11 +311,11 @@ describe("a session bundles the model", () => {
     const fromModel = await api({ name: "s", models: [modelFile] });
     expect(fromModel.status).toBe(200);
     const one = (await fromModel.json()).prompt as string;
-    expect(one).toContain("## Spec: add-item-to-cart.feature.md");
+    expect(one).toContain("## Spec: specs/add-item-to-cart.feature.md");
     expect(one).toContain("## Event Model: models/shopping-cart.model.json");
-    expect(one).toContain("- Add item to cart → add-item-to-cart.feature.md");
+    expect(one).toContain("- Add item to cart → specs/add-item-to-cart.feature.md");
     // From the spec: the model whose slice links it comes along.
-    const fromSpec = await api({ name: "s", files: [{ fileName: "add-item-to-cart.feature.md" }] });
+    const fromSpec = await api({ name: "s", files: [{ fileName: "specs/add-item-to-cart.feature.md" }] });
     expect(fromSpec.status).toBe(200);
     expect((await fromSpec.json()).prompt).toContain("## Event Model: models/shopping-cart.model.json");
     // Neither: refused as before; a malformed list, or a model that is not there, too.

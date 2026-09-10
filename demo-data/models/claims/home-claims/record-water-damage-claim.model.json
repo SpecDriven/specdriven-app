@@ -2036,19 +2036,19 @@
   },
   "links": {
     "slice-complete-coverage-review": {
-      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+      "feature": "specs/claims/home-claims/record-water-damage-claim.feature.md"
     },
     "slice-offer-emergency-mitigation": {
-      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+      "feature": "specs/claims/home-claims/record-water-damage-claim.feature.md"
     },
     "slice-refer-to-flood-policy": {
-      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+      "feature": "specs/claims/home-claims/record-water-damage-claim.feature.md"
     },
     "slice-report-water-damage": {
-      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+      "feature": "specs/claims/home-claims/record-water-damage-claim.feature.md"
     },
     "slice-send-denial-letter": {
-      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+      "feature": "specs/claims/home-claims/record-water-damage-claim.feature.md"
     }
   }
 }

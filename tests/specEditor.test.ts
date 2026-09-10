@@ -34,10 +34,10 @@ afterEach(async () => {
 // the .feature.md, and the editor keeps seeing it.
 test("a new draft is persisted in the Automerge document, out of the file", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
-  expect(await readFeature(root, "quote.feature.md")).not.toContain("Idea");
-  expect(await readFeatureForEditor(root, "quote.feature.md")).toContain("## Idea @v1 [draft]");
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
+  expect(await readFeature(root, "specs/quote.feature.md")).not.toContain("Idea");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded).not.toBeNull();
   expect(loaded!.doc.specs.map((s) => [s.name, s.status])).toEqual([["Idea", "draft"]]);
 });
@@ -48,27 +48,27 @@ test("Delete removes the draft spec", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
-  const result = await deleteDraftScenario(root, "quote.feature.md", { name: "Idea", version: 1 });
+  const result = await deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 1 });
   expect(result.content).not.toContain("Idea");
-  expect(await readFeatureForEditor(root, "quote.feature.md")).not.toContain("Idea");
+  expect(await readFeatureForEditor(root, "specs/quote.feature.md")).not.toContain("Idea");
   // The scenario beside it is untouched.
-  expect(await readFeature(root, "quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
 });
 
 // "Propose" — the explicit action that moves the draft into the .feature.md
 // as [proposed].
 test("Propose lands the draft in the feature file as [proposed]", async () => {
   await createFeature(root, "Quote");
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
   // The dialog's Propose saves the same scenario with the proposed status.
-  await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1\n\nwip\n");
-  const text = await readFeature(root, "quote.feature.md");
+  await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1\n\nwip\n");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Idea @v1 [proposed]");
   // The draft entry did not survive alongside its proposed self.
-  const editor = await readFeatureForEditor(root, "quote.feature.md");
+  const editor = await readFeatureForEditor(root, "specs/quote.feature.md");
   expect(editor).not.toContain("[draft]");
 });
 
@@ -78,17 +78,17 @@ test("Publish promotes a draft scenario straight to [published]", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
   const result = await publishFeature(
     root,
-    "quote.feature.md",
-    (await readFeatureForEditor(root, "quote.feature.md"))!,
+    "specs/quote.feature.md",
+    (await readFeatureForEditor(root, "specs/quote.feature.md"))!,
     { name: "Idea", version: 1 },
   );
   expect(result.status).toBe("published");
-  const text = await readFeature(root, "quote.feature.md");
+  const text = await readFeature(root, "specs/quote.feature.md");
   expect(text).toContain("## Idea @v1 [published]");
   // Only the targeted scenario was published.
   expect(text).toContain("## Basic @v1 [proposed]");
@@ -101,11 +101,11 @@ test("the editor view carries each scenario's document id; the markdown carries 
   await createFeature(root, "Quote");
   await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
-  const view = (await readFeatureView(root, "quote.feature.md"))!;
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  const view = (await readFeatureView(root, "specs/quote.feature.md"))!;
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   const ids = Object.fromEntries(loaded!.doc.specs.map((s) => [s.name, s.id]));
   expect(view.parsed.scenarios.map((s) => [s.name, s.id])).toEqual([
     ["Basic", ids["Basic"]],
@@ -113,7 +113,7 @@ test("the editor view carries each scenario's document id; the markdown carries 
   ]);
   for (const id of Object.values(ids)) {
     expect(view.content).not.toContain(id);
-    expect(await readFeature(root, "quote.feature.md")).not.toContain(id);
+    expect(await readFeature(root, "specs/quote.feature.md")).not.toContain(id);
   }
 });
 
@@ -127,26 +127,26 @@ test("Publish of a renamed draft publishes that draft, not a second spec beside 
   await createFeature(root, "Quote");
   const tick = await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Scenario goes under the highlighted folder @v1 [draft]\n\nWhen adding\n",
   );
   const draft = tick.parsed.scenarios.find((s) => s.status === "draft")!;
   expect(draft.id).toBeString();
   const result = await publishFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Spec goes under the highlighted folder @v1\n\nWhen adding a spec, it goes under the highlighted folder.\n",
     { id: draft.id, name: "Spec goes under the highlighted folder", version: 1 },
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "quote.feature.md")).toContain(
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain(
     "## Spec goes under the highlighted folder @v1 [published]",
   );
   // Nothing left under the old title — in the editor's view or the document.
-  const editor = await readFeatureForEditor(root, "quote.feature.md");
+  const editor = await readFeatureForEditor(root, "specs/quote.feature.md");
   expect(editor).not.toContain("Scenario goes under");
   expect(editor).not.toContain("[draft]");
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Spec goes under the highlighted folder", "published", draft.id!],
   ]);
@@ -157,11 +157,11 @@ test("Publish of a renamed draft publishes that draft, not a second spec beside 
 // new name, with the entry's identity intact.
 test("an autosave after a retyped title rewrites the draft instead of filing a second one", async () => {
   await createFeature(root, "Quote");
-  const first = await saveFeature(root, "quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
+  const first = await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
   const id = first.parsed.scenarios[0]!.id!;
   const result = await saveFeature(
     root,
-    "quote.feature.md",
+    "specs/quote.feature.md",
     "# Quote\n\n## Better Idea @v1 [draft]\n\nwip, continued\n",
     { id, name: "Better Idea", version: 1 },
   );
@@ -170,7 +170,7 @@ test("an autosave after a retyped title rewrites the draft instead of filing a s
   expect(result.parsed.scenarios.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Better Idea", "draft", id],
   ]);
-  const loaded = await loadFeatureDoc(root, "quote.feature.md");
+  const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Better Idea", "draft", id],
   ]);

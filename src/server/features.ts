@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
-import { isFeatureFile, walk } from "./walk";
+import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
@@ -13,7 +13,7 @@ import {
   saveFeatureDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
-import { withSpan } from "./telemetry";
+import { getLogger, withSpan } from "./telemetry";
 import {
   pull,
   theirsVersion,
@@ -48,7 +48,24 @@ export interface PublishResult {
   message: string;
 }
 
-export { walk };
+export { walk, SPECS_FOLDER, isSpecsFolderPath };
+
+const log = getLogger("features");
+
+/**
+ * The spec tree's folder exists, created here when it does not — the same
+ * shape as ensurePageFolder / ensureModelsFolder, but unconditional: `specs/`
+ * is where features live, not an opt-in tab. Git does not track empty
+ * directories, so a fresh one holds nothing to commit until a feature lands in
+ * it. Returns whether this call created it.
+ */
+export async function ensureSpecsFolder(dataDir: string): Promise<boolean> {
+  const path = `${dataDir}/${SPECS_FOLDER}`;
+  if (await isDirectory(path)) return false;
+  await mkdir(path, { recursive: true });
+  log.info("created the specs folder", { "specdriven.dir": dataDir });
+  return true;
+}
 
 export interface FeatureListing {
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
@@ -230,40 +247,45 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
 /**
  * Scenario "create new feature": creates a new feature file in the local
  * filesystem. A `/` in the name places the feature in a folder
- * (specs/folders.spec.md): `billing/Basic Quote` creates
- * `billing/basic-quote.feature.md`, creating the folders as needed. The
+ * (specs/ui/folders.feature.md): `billing/Basic Quote` creates
+ * `specs/billing/basic-quote.feature.md`, creating the folders as needed. The
  * file holds the heading alone unless `text` brings the whole feature — a
  * slice's scaffold (src/server/eventModel/feature.ts), whose heading is
  * the name.
+ *
+ * The name is relative to the spec tree: a leading `specs/` is accepted (the
+ * client lists folders with it) but never doubled.
  */
 export async function createFeature(dataDir: string, name: string, text?: string): Promise<string> {
   const segments = name.split("/").map((s) => s.trim());
   const featureName = segments.pop() ?? "";
   if (!featureName) throw new Error("Feature name is required");
-  const folder = segments.map(slugify).filter(Boolean).join("/");
-  const fileName = folder
-    ? `${folder}/${slugify(featureName)}.feature.md`
-    : `${slugify(featureName)}.feature.md`;
+  const within = segments.map(slugify).filter(Boolean);
+  if (within[0] === SPECS_FOLDER) within.shift();
+  const folder = [SPECS_FOLDER, ...within].join("/");
+  const fileName = `${folder}/${slugify(featureName)}.feature.md`;
   const path = `${dataDir}/${safe(fileName)}`;
   if (await fileExists(path)) {
     throw new Error(`Feature file already exists: ${fileName}`);
   }
-  if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
+  await mkdir(`${dataDir}/${folder}`, { recursive: true });
   await writeFeatureFile(dataDir, safe(fileName), text ?? `# ${featureName}\n`);
   await commitAndPush(dataDir, await featurePaths(dataDir, fileName), `Create feature: ${featureName}`);
   return fileName;
 }
 
 /**
- * specs/folders.spec.md: create a folder for feature files. Nested
- * paths (`billing/sub`) are allowed; each segment is slugified like a file
- * stem. Git does not track empty directories, so the folder exists locally
+ * specs/ui/folders.feature.md: create a folder for feature files, under the
+ * spec tree. Nested paths (`billing/sub`) are allowed; each segment is
+ * slugified like a file stem, and a leading `specs/` is accepted rather than
+ * doubled. Git does not track empty directories, so the folder exists locally
  * until a feature lands in it — nothing to commit here.
  */
 export async function createFolder(dataDir: string, path: string): Promise<string> {
-  const folder = path.split("/").map(slugify).filter(Boolean).join("/");
-  if (!folder) throw new Error("Folder name is required");
-  safeFolder(folder);
+  const segments = path.split("/").map(slugify).filter(Boolean);
+  if (segments[0] === SPECS_FOLDER) segments.shift();
+  if (segments.length === 0) throw new Error("Folder name is required");
+  const folder = safeFolder([SPECS_FOLDER, ...segments].join("/"));
   const full = `${dataDir}/${folder}`;
   if (await exists(full)) throw new Error(`Folder already exists: ${folder}`);
   await mkdir(full, { recursive: true });
@@ -271,14 +293,15 @@ export async function createFolder(dataDir: string, path: string): Promise<strin
 }
 
 /**
- * specs/folders.spec.md: only an empty folder can be deleted — one with
+ * specs/ui/folders.feature.md: only an empty folder can be deleted — one with
  * no files anywhere beneath it (macOS `.DS_Store` junk doesn't count). This
  * keeps folder deletion non-destructive: features must be moved out first.
  * Empty directories are untracked by git, so removal is a local fs operation.
+ * The spec tree's own root is not a folder anyone may delete.
  */
 export async function deleteFolder(dataDir: string, path: string): Promise<void> {
   const folder = safeFolder(path);
-  if (!folder) throw new Error("Folder name is required");
+  if (folder === SPECS_FOLDER) throw new Error("Folder name is required");
   const full = `${dataDir}/${folder}`;
   let s: Awaited<ReturnType<typeof stat>>;
   try {
@@ -298,9 +321,10 @@ export async function deleteFolder(dataDir: string, path: string): Promise<void>
 }
 
 /**
- * specs/folders.spec.md: drag-moving a feature into a folder is a
+ * specs/ui/folders.feature.md: drag-moving a feature into a folder is a
  * `git mv` into that directory, committed and pushed like a rename. The
- * target folder must already exist; the file name itself is unchanged.
+ * target folder must already exist; the file name itself is unchanged. An
+ * empty target means the top of the spec tree — `specs/` itself.
  */
 export async function moveFeature(
   dataDir: string,
@@ -309,11 +333,11 @@ export async function moveFeature(
 ): Promise<{ fileName: string; message: string }> {
   const from = safe(fileName);
   const folder = safeFolder(toFolder);
-  if (folder && !(await isDirectory(`${dataDir}/${folder}`))) {
+  if (!(await isDirectory(`${dataDir}/${folder}`))) {
     throw new Error(`Folder not found: ${folder}`);
   }
   const base = from.split("/").pop()!;
-  const to = folder ? `${folder}/${base}` : base;
+  const to = `${folder}/${base}`;
   if (to === from) return { fileName: from, message: "already there" };
   if (!(await fileExists(`${dataDir}/${from}`))) {
     throw new Error(`Feature file not found: ${from}`);
@@ -730,22 +754,36 @@ function badSegment(segment: string): boolean {
   return !segment || segment.startsWith(".") || segment.includes("\\");
 }
 
-/** A feature file path: `/`-separated safe segments ending in `.feature.md`. */
+/**
+ * A feature file path: `/`-separated safe segments ending in `.feature.md`,
+ * under `specs/`. Requiring the prefix here is what keeps a feature from ever
+ * being written outside the spec tree — every mutation funnels through this.
+ */
 function safe(fileName: string): string {
   const segments = fileName.split("/");
-  if (segments.some(badSegment) || !isFeatureFile(segments[segments.length - 1]!)) {
+  if (
+    segments.some(badSegment) ||
+    !isFeatureFile(segments[segments.length - 1]!) ||
+    !isSpecsFolderPath(fileName) ||
+    segments.length < 2
+  ) {
     throw new Error(`Invalid feature file name: ${fileName}`);
   }
   return fileName;
 }
 
-/** A folder path relative to the data repo; empty means the top level. */
+/**
+ * A folder path within the spec tree, returned repo-relative. The prefix is
+ * optional on the way in — `billing` and `specs/billing` are the same folder,
+ * and an empty path is the top of the tree, `specs/` itself — so a caller that
+ * thinks in tree-relative terms and one echoing back a listed path both work.
+ */
 function safeFolder(path: string): string {
-  const folder = path.replace(/^\/+|\/+$/g, "");
-  if (folder && folder.split("/").some(badSegment)) {
-    throw new Error(`Invalid folder path: ${path}`);
-  }
-  return folder;
+  const trimmed = path.replace(/^\/+|\/+$/g, "");
+  if (!trimmed) return SPECS_FOLDER;
+  const segments = trimmed.split("/");
+  if (segments.some(badSegment)) throw new Error(`Invalid folder path: ${path}`);
+  return isSpecsFolderPath(trimmed) ? trimmed : `${SPECS_FOLDER}/${trimmed}`;
 }
 
 async function exists(path: string): Promise<boolean> {

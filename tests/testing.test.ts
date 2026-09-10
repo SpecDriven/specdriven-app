@@ -52,27 +52,27 @@ test("reading an unused repo returns empty lists and writes nothing", async () =
 test("spec references are validated and de-duplicated", () => {
   expect(parseSpecRefs("nope")).toBeNull();
   expect(parseSpecRefs([{ fileName: "" }])).toBeNull();
-  expect(parseSpecRefs([{ fileName: "a.feature.md", scenario: { name: "X" } }])).toBeNull();
-  expect(parseSpecRefs([{ fileName: "a.feature.md", scenario: { name: "X", version: 0 } }])).toBeNull();
+  expect(parseSpecRefs([{ fileName: "specs/a.feature.md", scenario: { name: "X" } }])).toBeNull();
+  expect(parseSpecRefs([{ fileName: "specs/a.feature.md", scenario: { name: "X", version: 0 } }])).toBeNull();
   expect(
     parseSpecRefs([
-      { fileName: "a.feature.md" },
-      { fileName: "a.feature.md", scenario: { name: "Basic", version: 2 } },
-      { fileName: "a.feature.md" },
+      { fileName: "specs/a.feature.md" },
+      { fileName: "specs/a.feature.md", scenario: { name: "Basic", version: 2 } },
+      { fileName: "specs/a.feature.md" },
     ]),
   ).toEqual([
-    { fileName: "a.feature.md" },
-    { fileName: "a.feature.md", scenario: { name: "Basic", version: 2 } },
+    { fileName: "specs/a.feature.md" },
+    { fileName: "specs/a.feature.md", scenario: { name: "Basic", version: 2 } },
   ]);
-  expect(refKey({ fileName: "a.feature.md", scenario: { name: "Basic", version: 2 } })).toBe(
-    "a.feature.md#Basic@v2",
+  expect(refKey({ fileName: "specs/a.feature.md", scenario: { name: "Basic", version: 2 } })).toBe(
+    "specs/a.feature.md#Basic@v2",
   );
 });
 
 test("a test case is created, edited and deleted through the document", async () => {
   const c = await createCase(root, {
     title: " Quote totals ",
-    refs: [{ fileName: "billing/quotes.feature.md", scenario: { name: "Basic Quote", version: 1 } }],
+    refs: [{ fileName: "specs/billing/quotes.feature.md", scenario: { name: "Basic Quote", version: 1 } }],
   });
   expect(c.title).toBe("Quote totals");
   expect(c.priority).toBe("medium");
