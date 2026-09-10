@@ -9,6 +9,7 @@ import {
   Link,
   List,
   ListOrdered,
+  PencilRuler,
   Quote,
 } from "lucide-react";
 import { Tooltip } from "./Tooltip";
@@ -23,12 +24,18 @@ import {
 import type { Edit } from "./markdown";
 import { markNodes, markText } from "./highlight";
 import { useVimMode } from "./vimPref";
+import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
 
 // CodeMirror and the vim extension are only mounted once a Vim tab is shown.
 // Loaded lazily so a bundler that splits can keep them out of the main bundle
 // (Bun's dev bundle inlines them; a server render shows the fallback).
 const VimEditor = lazy(() => import("./VimEditor").then((m) => ({ default: m.VimEditor })));
+// Excalidraw (specs/editor/excalidraw-support.feature.md) the same way: the
+// pane, and the library with it, load the first time a diagram is drawn.
+const ExcalidrawPane = lazy(() =>
+  import("./excalidraw/ExcalidrawPane").then((m) => ({ default: m.ExcalidrawPane })),
+);
 
 /** POST the image to the data repo; resolves to the url for `![...](url)`. */
 async function uploadImage(file: File): Promise<string> {
@@ -85,6 +92,11 @@ export function MarkdownEditor({
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // Excalidraw (specs/editor/excalidraw-support.feature.md): with the Settings
+  // switch on, a toolbar button opens the pane over this editor; its export
+  // comes back as a file and goes through the image upload like a paste.
+  const excalidrawOn = useExcalidrawEnabled();
+  const [diagramOpen, setDiagramOpen] = useState(false);
 
   // Search-term marks (specs/search.feature.md). A textarea cannot carry
   // markup, so a mirror of its text sits behind it — same font, padding and
@@ -222,7 +234,22 @@ export function MarkdownEditor({
     { icon: <ListOrdered size={size} />, title: "Numbered list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, (i) => `${i + 1}. `, /^\d+[.)] /)) },
     { icon: <Link size={size} />, title: "Link", keys: "⌘K", run: () => apply(insertLink) },
     { icon: <Image size={size} />, title: "Image (or paste one)", run: () => fileRef.current?.click() },
+    ...(excalidrawOn
+      ? [{ icon: <PencilRuler size={size} />, title: "Excalidraw diagram", run: () => setDiagramOpen(true) }]
+      : []),
   ];
+
+  // The pane closing gives focus back to the text — once React has taken the
+  // pane down, so nothing of it (its own focus trap, the discard dialog's)
+  // moves focus after this; on Insert, apply() then lands the caret after
+  // the embedded link once the upload finishes.
+  const closeDiagram = () => setDiagramOpen(false);
+  const diagramWasOpen = useRef(false);
+  useEffect(() => {
+    if (diagramWasOpen.current && !diagramOpen) surface()?.focus();
+    diagramWasOpen.current = diagramOpen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [diagramOpen]);
 
   const preview = tab === "preview" ? renderMarkdown(value) : null;
 
@@ -286,6 +313,23 @@ export function MarkdownEditor({
             e.target.value = ""; // allow re-picking the same file
           }}
         />
+      )}
+      {diagramOpen && !readOnly && (
+        <Suspense
+          fallback={
+            <div className="dialog-backdrop">
+              <div className="dialog">Loading Excalidraw…</div>
+            </div>
+          }
+        >
+          <ExcalidrawPane
+            onCancel={closeDiagram}
+            onInsert={(file) => {
+              closeDiagram();
+              void addImages([file]);
+            }}
+          />
+        </Suspense>
       )}
       {tab === "write" ? (
         <div className={`md-write${marks ? " highlighted" : ""}`}>
