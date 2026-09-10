@@ -861,6 +861,35 @@ test("symlinks pointing out of the repo are kept out of the release source zip",
   }
 });
 
+// The demo dataset rides in the same zip — and in the GitHub archive the demo
+// container is built from, which honors export-ignore too. An unanchored
+// `specs export-ignore` matches at every depth, so it once stripped
+// `demo-data/specs/` (the demo's feature files, and their Automerge docs) and
+// the deployed demo opened with "No feature files yet". The pattern has to be
+// anchored to the root, and nothing under demo-data/ may carry the attribute.
+test("the demo dataset ships whole in the release source zip", async () => {
+  const tracked = (await git("ls-files", "--", "demo-data")).split("\n").filter(Boolean);
+  expect(tracked.some((p) => p.startsWith("demo-data/specs/"))).toBe(true); // keep the test honest
+
+  // `git archive` prunes a whole directory whose own path carries the
+  // attribute, while the files inside answer "unspecified" — attributes do
+  // not propagate — so every ancestor directory is asked as well.
+  const paths = new Set<string>();
+  for (const file of tracked) {
+    const parts = file.split("/");
+    for (let i = 1; i <= parts.length; i += 1) paths.add(parts.slice(0, i).join("/"));
+  }
+  const p = Bun.spawn(["git", "check-attr", "export-ignore", "--stdin"], {
+    cwd: REPO_ROOT, stdin: "pipe", stdout: "pipe", stderr: "pipe",
+  });
+  p.stdin.write([...paths].join("\n") + "\n");
+  p.stdin.end();
+  const out = await new Response(p.stdout).text();
+  expect(await p.exited).toBe(0);
+  const ignored = out.split("\n").filter((line) => line.endsWith(": export-ignore: set"));
+  expect(ignored).toEqual([]);
+});
+
 // The zip also carries no `.git`. electron-builder's deb target wants a
 // project homepage and, given none in package.json, reads one off the git
 // remote — so a build from a checkout passed while the same source unpacked
