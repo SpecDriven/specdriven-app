@@ -67,8 +67,10 @@ function toolbox(names: string[], fakes: Record<string, string> = {}): string {
   return dir;
 }
 
-/** `git archive --format=zip --prefix=specdriven-<version>/`, as the workflow does. */
-async function sourceZip(version: string): Promise<Uint8Array> {
+/** `git archive --format=zip --prefix=specdriven-<version>/`, as the workflow does.
+    The buffer is spelled out because `Response` takes an ArrayBuffer-backed
+    view, not the `ArrayBufferLike` default that also admits SharedArrayBuffer. */
+async function sourceZip(version: string): Promise<Uint8Array<ArrayBuffer>> {
   const repo = mkdtempSync(join(tmpdir(), "specdriven-src-"));
   writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "specdriven", version }) + "\n");
   writeFileSync(join(repo, "README.md"), `# SpecDriven ${version}\n`);
@@ -102,7 +104,7 @@ function shasums(entries: Record<string, Uint8Array>): string {
 
 interface Release {
   /** Asset name -> bytes, served under /download/v<version>/. */
-  assets: Record<string, Uint8Array | string>;
+  assets: Record<string, Uint8Array<ArrayBuffer> | string>;
 }
 
 /** Stands in for github.com/<owner>/<repo>/releases. */
@@ -191,8 +193,8 @@ function freshHome(): string {
 
 // --- the releases on offer ---------------------------------------------------
 
-let latestZip: Uint8Array;
-let olderZip: Uint8Array;
+let latestZip: Uint8Array<ArrayBuffer>;
+let olderZip: Uint8Array<ArrayBuffer>;
 let good: ReturnType<typeof fakeReleases>;
 
 beforeAll(async () => {
