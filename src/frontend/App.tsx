@@ -4382,12 +4382,25 @@ export function App() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [compact, selected, openPage?.fileName, editing !== null]);
-  const newScenario = () =>
+  // specs/editor/spec-editor.feature.md "Adding Scanarios": a small dialog
+  // asks for the scenario's name first; the editor pane opens with it. A
+  // new scenario starts as a draft: autosave (specs/editor-autosave.feature.md)
+  // writes the editor out every few seconds, and a draft stays in the
+  // document. Proposing it — into the .feature.md — takes the editor's
+  // Propose button, an explicit act.
+  const newScenario = async () => {
+    const name = await prompt({
+      title: "New scenario",
+      placeholder: "Scenario name",
+      confirmLabel: "Create",
+    });
+    if (!name?.trim()) return;
     setEditing({
       index: null,
       isNew: true,
-      scenario: { name: "", version: 1, status: "draft", body: "", tests: [] },
+      scenario: { name: name.trim(), version: 1, status: "draft", body: "", tests: [] },
     });
+  };
   // specs/ui.spec.md "Select scenarios via up and down keys": the highlight
   // walks the cards; Enter opens the highlighted one in the editor pane.
   const moveScenarioSelection = (e: KeyboardEvent, delta: 1 | -1) => {
@@ -4590,7 +4603,7 @@ export function App() {
       group: "Create",
       when: () => !quiet && editing === null,
       run: () => {
-        if (onFeaturePage) newScenario();
+        if (onFeaturePage) void newScenario();
         else void createFeature();
       },
     },
@@ -6018,11 +6031,11 @@ export function App() {
           <div className="scenario-pane">
             <div className="editor-bar scenario-pane-bar page-header">
               <div className="scenario-pane-title">
-                {/* The trail is the way back: the feature crumb, like ESC,
-                    leaves the scenario in its autosaved state and lands on
-                    its card. The last crumb is the scenario name itself
-                    (specs/ui.spec.md "Scenario editor") — editable unless
-                    published. */}
+                {/* The top line is the trail alone — the data folder, the
+                    feature's folders and the feature (specs/editor/
+                    spec-editor.feature.md "Adding Scanarios"). The feature
+                    crumb is the way back: like ESC, it leaves the scenario in
+                    its autosaved state and lands on its card. */}
                 <Breadcrumbs
                   items={[
                     repoCrumb,
@@ -6037,44 +6050,7 @@ export function App() {
                       },
                     },
                   ]}
-                  tail={
-                    editingPublished ? (
-                      <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
-                    ) : (
-                      <input
-                        className="scenario-pane-name"
-                        // While this field has the caret autosave stands down,
-                        // so the name is saved once, whole
-                        // (specs/editor-autosave.feature.md).
-                        ref={nameFieldRef}
-                        value={editing.scenario.name}
-                        placeholder="Scenario name"
-                        aria-label="Scenario name"
-                        autoFocus
-                        spellCheck={false}
-                        onChange={(e) =>
-                          setEditing({
-                            ...editing,
-                            scenario: { ...editing.scenario, name: e.target.value },
-                          })
-                        }
-                      />
-                    )
-                  }
                 />
-                {/* The version is assigned by the app, never typed: a new
-                    scenario takes the next version for its name
-                    (specs/ui.spec.md). The status rides along as a badge: a
-                    scenario starts as a draft — persisted by autosave, kept
-                    out of the .feature.md — until Propose or Publish advances
-                    it (specs/editor/spec-editor.feature.md). */}
-                <p className="version-field">
-                  Version <span className="version">v{draftVersion}</span>
-                  <span className="status-field">
-                    <StatusIcon status={editing.scenario.status} size={14} />
-                    {editing.scenario.status}
-                  </span>
-                </p>
               </div>
               <div className="editor-actions scenario-pane-actions">
                 <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
@@ -6119,6 +6095,44 @@ export function App() {
                     autosave writes them locally like any other edit, and Sync
                     pushes them. So its bar carries no save action at all. */}
               </div>
+            </div>
+            {/* The scenario's name sits above the editor's top left corner
+                (specs/editor/spec-editor.feature.md "Adding Scanarios") —
+                editable until published (specs/ui.spec.md "Scenario editor"),
+                a read-only heading after. The version is assigned by the app,
+                never typed: a new scenario takes the next version for its name
+                (specs/ui.spec.md). The status rides along as a badge: a
+                scenario starts as a draft — persisted by autosave, kept out of
+                the .feature.md — until Propose or Publish advances it. */}
+            <div className="scenario-pane-head">
+              {editingPublished ? (
+                <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
+              ) : (
+                <input
+                  className="scenario-pane-name"
+                  // While this field has the caret autosave stands down, so
+                  // the name is saved once, whole
+                  // (specs/editor-autosave.feature.md).
+                  ref={nameFieldRef}
+                  value={editing.scenario.name}
+                  placeholder="Scenario name"
+                  aria-label="Scenario name"
+                  spellCheck={false}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      scenario: { ...editing.scenario, name: e.target.value },
+                    })
+                  }
+                />
+              )}
+              <p className="version-field">
+                Version <span className="version">v{draftVersion}</span>
+                <span className="status-field">
+                  <StatusIcon status={editing.scenario.status} size={14} />
+                  {editing.scenario.status}
+                </span>
+              </p>
             </div>
             <div className="scenario-pane-body">
               <div className="body-field">
@@ -6836,27 +6850,7 @@ export function App() {
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
             </div>
             <div>
-              <button
-                className="add-spec"
-                onClick={() =>
-                  setEditing({
-                    index: null,
-                    isNew: true,
-                    scenario: {
-                      name: "",
-                      version: 1,
-                      // A new scenario starts as a draft: autosave
-                      // (specs/editor-autosave.feature.md) writes the editor
-                      // out every few seconds, and a draft stays in the
-                      // document. Proposing it — into the .feature.md — takes
-                      // the editor's Propose button, an explicit act.
-                      status: "draft",
-                      body: "",
-                      tests: [],
-                    },
-                  })
-                }
-              >
+              <button className="add-spec" onClick={() => void newScenario()}>
                 + Add Scenario
               </button>
             </div>

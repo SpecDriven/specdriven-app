@@ -1285,20 +1285,33 @@ button.link:disabled {
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* The title IS the scenario name (specs/ui.spec.md "Scenario editor"):
-   a heading once published, an underlined field until then. */
+/* The scenario's name, above the editor's top left corner
+   (specs/editor/spec-editor.feature.md "Adding Scanarios") with the version
+   and status beside it: a heading once published, an underlined field until
+   then (specs/ui.spec.md "Scenario editor"). The bar above keeps the trail
+   alone. */
+.scenario-pane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
 .scenario-pane-heading {
   margin: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.012em;
 }
 
 .scenario-pane input.scenario-pane-name {
-  flex: 1 1 12rem;
+  flex: 0 1 22rem;
   min-width: 8rem;
-  max-width: 36rem;
   font-size: 1rem;
   font-weight: 600;
   letter-spacing: -0.012em;
@@ -3212,11 +3225,6 @@ a.crumb:hover,
   font-weight: 600;
 }
 
-.crumbs .scenario-pane-heading {
-  font-size: 0.9375rem;
-  font-weight: 600;
-}
-
 .crumbs .rename-form {
   flex: 1;
 }
@@ -4038,10 +4046,14 @@ aside header .collapse-btn {
     flex-wrap: wrap;
   }
 
-  /* The scenario editor's bar: the trail and name on one line, the actions
-     right-aligned on the next, so the name field never runs under them. */
+  /* The scenario editor's bar: the trail on one line, the actions
+     right-aligned on the next, so the trail never runs under them. */
   .scenario-pane-title {
     flex-basis: 100%;
+  }
+
+  .scenario-pane-head {
+    flex-wrap: wrap;
   }
 
   .scenario-pane-actions {
