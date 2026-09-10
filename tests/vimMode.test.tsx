@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
-import { applyVimPref, readVimPref } from "../src/frontend/vimPref";
+import { applyVimPref, readVimPref, setVimDemoMode } from "../src/frontend/vimPref";
 
 // The preference lives in localStorage, which bun's test runtime lacks.
 function fakeStorage(): Storage {
@@ -33,6 +33,8 @@ beforeEach(() => {
 afterEach(() => {
   if (saved === undefined) delete g.localStorage;
   else g.localStorage = saved;
+  // Demo mode is module state; leaving it on would pin Vim off for the rest.
+  setVimDemoMode(false);
 });
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -50,6 +52,17 @@ describe("the Vim mode preference", () => {
     applyVimPref(false);
     expect(readVimPref()).toBe(false);
     expect(g.localStorage!.getItem("sd-vim")).toBeNull();
+  });
+
+  test("reads off in demo mode, whatever the device remembers", () => {
+    applyVimPref(true);
+    expect(readVimPref()).toBe(true);
+    setVimDemoMode(true);
+    expect(readVimPref()).toBe(false);
+    // The visitor's own choice is untouched: it is back when they leave.
+    expect(g.localStorage!.getItem("sd-vim")).toBe("on");
+    setVimDemoMode(false);
+    expect(readVimPref()).toBe(true);
   });
 
   test("survives a storage that throws", () => {
@@ -84,6 +97,15 @@ describe("the Markdown editor's Vim tab", () => {
     expect(markup).toContain('aria-label="Bold"');
     // CodeMirror is built in the browser; on the server the tab is its shell.
     expect(markup).toContain("md-vim");
+  });
+
+  test("stays away in demo mode, even with the switch remembered on", () => {
+    applyVimPref(true);
+    setVimDemoMode(true);
+    const markup = html(<MarkdownEditor value="Given a policy" onChange={() => {}} />);
+    expect(tabs(markup)).toEqual(["Write", "Preview"]);
+    expect(selectedTab(markup)).toBe("Write");
+    expect(markup).not.toContain("md-vim");
   });
 
   test("never shows for a read-only body", () => {

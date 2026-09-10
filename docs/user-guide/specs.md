@@ -304,7 +304,7 @@ Open Settings with `⌘,` or `g s`.
 | Setting | Effect |
 | --- | --- |
 | **Appearance** | System, Light or Dark. `⌘⇧L` cycles it. |
-| **Vim mode** | Adds a Vim tab to every markdown editor. Remembered per device. |
+| **Vim mode** | Adds a Vim tab to every markdown editor. Remembered per device. Hidden in the public demo, which keeps it off. |
 | **Autosync** and **Autosync frequency (seconds)** | Whether and how often the data folder is pulled and pushed on its own. |
 | **Autosave interval (seconds)** | How often open editors are written to disk. Minimum 3. |
 | **Scenario preview lines** | How many body lines a scenario card shows. |
