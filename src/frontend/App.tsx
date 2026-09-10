@@ -1970,9 +1970,20 @@ export function App() {
     return files;
   };
 
+  /**
+   * The Event Model a session bundles (roadmap/support-event-modeling.md):
+   * the one open on the Models tab — its JSON goes into the prompt after
+   * the specs, and the specs its slices link come along whole. A model
+   * alone is a session too (src/server/api.ts resolveSessionRequest).
+   */
+  const sessionModels = (): string[] => (openModel && modelsOn ? [openModel] : []);
+
   /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
       dialog both say what a session would run over. */
-  const describeSelection = (files: { scenarios?: ScenarioPick[] }[]): string => {
+  const describeSelection = (
+    files: { scenarios?: ScenarioPick[] }[],
+    modelFiles: string[] = sessionModels(),
+  ): string => {
     const whole = files.filter((f) => !f.scenarios).length;
     const partial = files.length - whole;
     const scenarios = files.reduce((n, f) => n + (f.scenarios?.length ?? 0), 0);
@@ -1984,10 +1995,12 @@ export function App() {
           `${partial} spec${partial === 1 ? "" : "s"}`,
       );
     }
+    for (const model of modelFiles) parts.push(`the model “${modelTitle(model, modelsStore)}”`);
     return parts.join(" and ");
   };
 
   const selectionLabel = describeSelection(sessionFiles());
+  const sessionCount = specSelection.size + sessionModels().length;
 
   /** The target the next session dialog opens on. */
   const sessionTarget = resolveCodeGenTarget(
@@ -2010,6 +2023,7 @@ export function App() {
   const copySessionPrompt = async (
     name: string,
     files: { fileName: string; scenarios?: ScenarioPick[] }[],
+    models: string[],
   ) => {
     setSessionRunning(true);
     setSessionNotice(`Building the prompt for "${name}"…`);
@@ -2017,7 +2031,7 @@ export function App() {
       const res = await fetch("/api/agent/session/prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, files }),
+        body: JSON.stringify({ name, files, models }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -2046,10 +2060,12 @@ export function App() {
   // second tab.
   const aiSessionDialog = (): {
     files: ReturnType<typeof sessionFiles>;
+    models: string[];
     only: CodeGenTarget;
     dialog: PromptOptions;
   } => {
     const files = sessionFiles();
+    const models = sessionModels();
     // With a code repo named in project-settings.json the session runs
     // there, and the dialog says so — the folder is the session's whole
     // context, so it must not come as a surprise.
@@ -2132,16 +2148,16 @@ export function App() {
       agentChoices.length > 0
         ? { ...dialog, choicesLabel: "Run in", choices, initialChoice: sessionTarget }
         : { ...dialog, confirmLabel: "Copy prompt" };
-    if (files.length === 0) delete opts.hint;
-    return { files, only, dialog: opts };
+    if (files.length === 0 && models.length === 0) delete opts.hint;
+    return { files, models, only, dialog: opts };
   };
 
   /** The AI tab was confirmed: copy the prompt, or run the session where it was told to. */
   const runAiSession = async (sessionName: string, choice: string | null) => {
-    const { files, only } = aiSessionDialog();
-    if (files.length === 0 || sessionRunning) return;
+    const { files, models, only } = aiSessionDialog();
+    if ((files.length === 0 && models.length === 0) || sessionRunning) return;
     if (choice === null || choice === CLIPBOARD_TARGET) {
-      await copySessionPrompt(sessionName, files);
+      await copySessionPrompt(sessionName, files, models);
       return;
     }
     const target = readCodeGenTarget(choice) ?? only;
@@ -2157,7 +2173,7 @@ export function App() {
       const res = await fetch("/api/agent/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: sessionName, files, target }),
+        body: JSON.stringify({ name: sessionName, files, models, target }),
       });
       const data = await res.json();
       if (res.ok && target === "desktop") {
@@ -4938,6 +4954,32 @@ export function App() {
     });
   };
 
+  // The way back to the model (roadmap/support-event-modeling.md): a
+  // feature holding a slice's scenarios carries a crumb naming the Event
+  // Model — and the slice, in the tooltip — that opens its canvas. One per
+  // model linking the feature; none while the Models tab is off.
+  const modelCrumbs = (fileName: string): Crumb[] => {
+    if (!modelsOn) return [];
+    const crumbs: Crumb[] = [];
+    for (const model of modelsStore.models) {
+      const links = model.links.filter((l) => l.feature === fileName);
+      if (links.length === 0) continue;
+      const slices = links.map((l) => `“${l.slice || "Untitled slice"}”`).join(", ");
+      crumbs.push({
+        label: (
+          <span className="crumb-model">
+            <Workflow size={12} aria-hidden="true" />
+            {model.name}
+          </span>
+        ),
+        href: modelLink(model.fileName),
+        title: `Open the Event Model “${model.name}” — slice ${slices}`,
+        onClick: (e) => spaClick(e, () => openModelPane(model.fileName, { push: true })),
+      });
+    }
+    return crumbs;
+  };
+
   // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
   // matches by having a scenario in the chosen status, and by its assignee.
   const matchesFilter = (f: FeatureListing) =>
@@ -5536,7 +5578,7 @@ export function App() {
             onClick={() => startSession()}
             disabled={sessionRunning}
             title={
-              codeGen && specSelection.size > 0
+              codeGen && sessionCount > 0
                 ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}, or a Pomodoro`
                 : "Start an AI session or a Pomodoro"
             }
@@ -6204,7 +6246,7 @@ export function App() {
                   Clicking the name edits it — committed and pushed on the
                   server; the file name never changes. */}
               <Breadcrumbs
-                items={[repoCrumb, ...folderCrumbs(selected)]}
+                items={[repoCrumb, ...folderCrumbs(selected), ...modelCrumbs(selected)]}
                 tail={
                   renameDraft === null ? (
                     <Tooltip label="Rename feature">
@@ -6768,6 +6810,11 @@ export function App() {
               prompt={prompt}
               confirm={confirm}
               onOpenFeature={(f) => void openFeature(f, { push: true })}
+              onFeatureCreated={async (f) => {
+                await loadFeatures();
+                await openFeature(f, { push: true });
+              }}
+              onStartSession={codeGen ? startSession : undefined}
               onCopyLink={(path) => void copyLink(path)}
               copied={copied}
               onClosed={goHome}
@@ -7777,7 +7824,7 @@ export function App() {
           initialTab={startDialog}
           ai={{
             dialog: aiSessionDialog().dialog,
-            state: aiTabState({ codeGen, specCount: specSelection.size, sessionRunning }),
+            state: aiTabState({ codeGen, specCount: sessionCount, sessionRunning }),
             onConfirm: (name, choice) => {
               setStartDialog(null);
               void runAiSession(name, choice);

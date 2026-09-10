@@ -24,15 +24,19 @@ import {
   removeModelDoc,
   saveModelDoc,
 } from "./automerge/store";
+import type { ModelInput } from "./agent";
+import { featureFromSlice } from "./eventModel/feature";
 import { autoLayout } from "./eventModel/layout";
 import {
   modelTextError,
   normalizeModelFile,
   parseModelFile,
+  serializeExport,
   serializeModelFile,
 } from "./eventModel/serialize";
 import { emptyModelFile, type EventModel, type ModelFile } from "./eventModel/types";
 import { schemaProblems } from "./eventModel/validate";
+import { createFeature } from "./features";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
 import { commitAndPush, removeAndPush } from "./git";
 import { slugify, titleFromFileName } from "./parser";
@@ -53,6 +57,15 @@ export function isModelFile(fileName: string): boolean {
   return fileName.endsWith(MODEL_SUFFIX);
 }
 
+/** A slice and the feature file holding its scenarios — the bridge, from the model's side. */
+export interface SliceLink {
+  sliceId: string;
+  /** The slice's title, for a crumb that names it. */
+  slice: string;
+  /** The feature's repo-relative file name. */
+  feature: string;
+}
+
 /** What the sidebar lists for one model. */
 export interface ModelListing {
   /** Path relative to the data repo root, e.g. `models/cart.model.json`. */
@@ -61,6 +74,11 @@ export interface ModelListing {
   assigned?: string;
   /** How many slices the model has — the sidebar's hint of its size. */
   slices: number;
+  /**
+   * Every slice linked to a feature file, in model order — how a feature's
+   * page finds the model it belongs to and offers the way back.
+   */
+  links: SliceLink[];
 }
 
 /** A model as the canvas holds it: its listing, plus the file itself. */
@@ -178,6 +196,95 @@ export function importedFile(name: string, raw: unknown): ModelFile {
   return file;
 }
 
+/**
+ * Scaffold a slice's feature file (src/server/eventModel/feature.ts): one
+ * scenario per Given / When / Then, created and committed like any new
+ * feature, and linked from the slice — so the band shows "spec" and the
+ * feature's page shows the model. `name` is the feature's, with a `/` for
+ * a folder; the slice's title when not given. A slice already linked keeps
+ * its feature: the canvas offers to open it instead.
+ */
+export async function generateSliceFeature(
+  dataDir: string,
+  fileName: string,
+  sliceId: string,
+  name?: string,
+): Promise<{ fileName: string; scenarios: number; model: ModelView }> {
+  const file = safe(fileName);
+  const view = await readModel(dataDir, file);
+  if (view === null) throw new Error(`${capitalize(LABEL)} not found: ${file}`);
+  const slice = view.file.model.slices.find((s) => s.id === sliceId);
+  if (!slice) throw new Error(`Slice not found: ${sliceId}`);
+  const linked = view.file.links[sliceId]?.feature;
+  if (linked) throw new Error(`The slice already has a feature file: ${linked}`);
+  const wanted = (name ?? "").trim() || slice.title.trim() || "Slice";
+  const heading = wanted.split("/").pop()!.trim();
+  const generated = featureFromSlice(view.file, file, sliceId, heading)!;
+  const featureFile = await createFeature(dataDir, wanted, generated.text);
+  const next: ModelFile = { ...view.file, links: { ...view.file.links, [sliceId]: { feature: featureFile } } };
+  const model = await saveModel(dataDir, file, next);
+  log.info("scaffolded a feature from a slice", {
+    "specdriven.file": file,
+    "specdriven.feature": featureFile,
+  });
+  return { fileName: featureFile, scenarios: slice.specifications.length, model };
+}
+
+/**
+ * The models a code gen session bundles (src/server/agent.ts
+ * buildSessionPrompt): the ones asked for by file name, plus — with the
+ * setting on — every model whose slice links one of the session's specs.
+ * A model asked for by name that is not there is an error; the specs its
+ * slices link come back too, for the session to take on when it ran from
+ * the model alone.
+ */
+export async function sessionModels(
+  dataDir: string,
+  wanted: string[],
+  specFiles: string[],
+  { linkedToSpecs = true }: { linkedToSpecs?: boolean } = {},
+): Promise<{ models: ModelInput[]; features: string[] }> {
+  const views = new Map<string, ModelView>();
+  for (const fileName of wanted) {
+    if (views.has(fileName)) continue;
+    const view = await readModel(dataDir, fileName);
+    if (view === null) throw new Error(`model not found: ${fileName}`);
+    views.set(fileName, view);
+  }
+  if (linkedToSpecs && specFiles.length > 0) {
+    for (const listed of await listModels(dataDir)) {
+      if (views.has(listed.fileName)) continue;
+      if (!listed.links.some((l) => specFiles.includes(l.feature))) continue;
+      const view = await readModel(dataDir, listed.fileName);
+      if (view !== null) views.set(listed.fileName, view);
+    }
+  }
+  const models: ModelInput[] = [];
+  const features: string[] = [];
+  for (const view of views.values()) {
+    models.push(modelInput(view));
+    for (const link of view.links) {
+      if (!features.includes(link.feature) && !specFiles.includes(link.feature)) {
+        features.push(link.feature);
+      }
+    }
+  }
+  return { models, features };
+}
+
+/** A model as the session prompt takes it. */
+export function modelInput(view: ModelView): ModelInput {
+  return {
+    fileName: view.fileName,
+    name: view.name,
+    slices: view.file.model.slices.map((slice) => {
+      const feature = view.file.links[slice.id]?.feature;
+      return { title: slice.title || "Untitled slice", ...(feature ? { feature } : {}) };
+    }),
+    json: serializeExport(view.file.model),
+  };
+}
+
 /** The schema's half of a model, as other tools take it. */
 export async function exportModel(dataDir: string, fileName: string): Promise<EventModel | null> {
   const view = await readModel(dataDir, fileName);
@@ -290,7 +397,18 @@ function listing(fileName: string, file: ModelFile): ModelListing {
     name: file.name || fallbackName(fileName),
     ...(file.assigned ? { assigned: file.assigned } : {}),
     slices: file.model.slices.length,
+    links: sliceLinks(file),
   };
+}
+
+/** The slices linked to a feature file, in model order. */
+export function sliceLinks(file: ModelFile): SliceLink[] {
+  const out: SliceLink[] = [];
+  for (const slice of file.model.slices) {
+    const feature = file.links[slice.id]?.feature;
+    if (feature) out.push({ sliceId: slice.id, slice: slice.title, feature });
+  }
+  return out;
 }
 
 /** A display name from the file's stem, for a file whose name is empty. */

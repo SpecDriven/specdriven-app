@@ -136,8 +136,8 @@ test("listModels names the models, nested ones included, skipping what is not on
   await writeFile(join(root, MODELS_FOLDER, "broken.model.json"), "{ nope");
   await writeFile(join(root, MODELS_FOLDER, "notes.md"), "# Notes\n");
   expect(await listModels(root)).toEqual([
-    { fileName: "models/cart.model.json", name: "Cart", assigned: "Ada", slices: 1 },
-    { fileName: "models/shop/no-name.model.json", name: "No Name", slices: 0 },
+    { fileName: "models/cart.model.json", name: "Cart", assigned: "Ada", slices: 1, links: [] },
+    { fileName: "models/shop/no-name.model.json", name: "No Name", slices: 0, links: [] },
   ]);
 });
 
