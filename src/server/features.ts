@@ -231,9 +231,12 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
  * Scenario "create new feature": creates a new feature file in the local
  * filesystem. A `/` in the name places the feature in a folder
  * (specs/folders.spec.md): `billing/Basic Quote` creates
- * `billing/basic-quote.feature.md`, creating the folders as needed.
+ * `billing/basic-quote.feature.md`, creating the folders as needed. The
+ * file holds the heading alone unless `text` brings the whole feature — a
+ * slice's scaffold (src/server/eventModel/feature.ts), whose heading is
+ * the name.
  */
-export async function createFeature(dataDir: string, name: string): Promise<string> {
+export async function createFeature(dataDir: string, name: string, text?: string): Promise<string> {
   const segments = name.split("/").map((s) => s.trim());
   const featureName = segments.pop() ?? "";
   if (!featureName) throw new Error("Feature name is required");
@@ -246,7 +249,7 @@ export async function createFeature(dataDir: string, name: string): Promise<stri
     throw new Error(`Feature file already exists: ${fileName}`);
   }
   if (folder) await mkdir(`${dataDir}/${folder}`, { recursive: true });
-  await writeFeatureFile(dataDir, safe(fileName), `# ${featureName}\n`);
+  await writeFeatureFile(dataDir, safe(fileName), text ?? `# ${featureName}\n`);
   await commitAndPush(dataDir, await featurePaths(dataDir, fileName), `Create feature: ${featureName}`);
   return fileName;
 }

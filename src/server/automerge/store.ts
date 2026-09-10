@@ -26,10 +26,12 @@ import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
 import {
+  MODEL_SCHEMA_VERSION,
   PAGE_SCHEMA_VERSION,
   SCHEMA_VERSION,
   TESTING_SCHEMA_VERSION,
   type FeatureDoc,
+  type ModelDoc,
   type PageDoc,
   type SpecEntry,
   type SpecType,
@@ -149,9 +151,11 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
  * file's repo-relative name, so the folder in that path is what tells one
  * kind of page from the other. `testing` holds the test management module's
  * one document (specs/app/tests.feature.md), which has no markdown
- * side at all — the chunks are the only copy.
+ * side at all — the chunks are the only copy. `models` holds the Event
+ * Model documents (roadmap/support-event-modeling.md), one per
+ * `models/<slug>.model.json`, projected to canonical JSON.
  */
-export type DocKind = "features" | "docs" | "testing";
+export type DocKind = "features" | "docs" | "testing" | "models";
 
 /** The test management module's single document, under `testing/`. */
 export const TESTING_DOC_NAME = "project";
@@ -175,6 +179,11 @@ export function pageDocDirRel(fileName: string): string {
   return dirRel("docs", fileName);
 }
 
+/** Repo-relative path of a model's doc directory, for git pathspecs. */
+export function modelDocDirRel(fileName: string): string {
+  return dirRel("models", fileName);
+}
+
 export function docDir(dataDir: string, fileName: string): string {
   return join(dataDir, docDirRel(fileName));
 }
@@ -196,6 +205,11 @@ export async function hasFeatureDoc(dataDir: string, fileName: string): Promise<
 /** True when the page has a doc directory with at least one chunk. */
 export async function hasPageDoc(dataDir: string, fileName: string): Promise<boolean> {
   return hasDoc(dataDir, "docs", fileName);
+}
+
+/** True when the model has a doc directory with at least one chunk. */
+export async function hasModelDoc(dataDir: string, fileName: string): Promise<boolean> {
+  return hasDoc(dataDir, "models", fileName);
 }
 
 /** True once the data repo holds the test management document. */
@@ -290,6 +304,14 @@ export async function loadPageDoc(
   return loadDoc<PageDoc>(dataDir, "docs", fileName);
 }
 
+/** Load a model's document (roadmap/support-event-modeling.md). */
+export async function loadModelDoc(
+  dataDir: string,
+  fileName: string,
+): Promise<LoadedDoc<ModelDoc> | null> {
+  return loadDoc<ModelDoc>(dataDir, "models", fileName);
+}
+
 /**
  * Load the test management document, or null when the repo has none yet
  * (the module was never used here). Schema v1 has nothing to migrate; the
@@ -337,6 +359,14 @@ export async function createPageDoc(
   doc: A.Doc<PageDoc>,
 ): Promise<LoadedDoc<PageDoc>> {
   return createDoc(dataDir, "docs", fileName, doc);
+}
+
+export async function createModelDoc(
+  dataDir: string,
+  fileName: string,
+  doc: A.Doc<ModelDoc>,
+): Promise<LoadedDoc<ModelDoc>> {
+  return createDoc(dataDir, "models", fileName, doc);
 }
 
 export async function createTestingDoc(
@@ -394,6 +424,15 @@ export async function savePageDoc(
   return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
 }
 
+export async function saveModelDoc(
+  dataDir: string,
+  fileName: string,
+  doc: A.Doc<ModelDoc>,
+  sinceHeads: A.Heads,
+): Promise<void> {
+  return saveDoc(dataDir, "models", fileName, doc, sinceHeads);
+}
+
 export async function saveTestingDoc(
   dataDir: string,
   doc: A.Doc<TestingDoc>,
@@ -449,6 +488,12 @@ export async function removePageDoc(dataDir: string, fileName: string): Promise<
   log.debug(`removed document for ${fileName}`);
 }
 
+/** Remove a model's document directory (the model was deleted). */
+export async function removeModelDoc(dataDir: string, fileName: string): Promise<void> {
+  await rm(kindDir(dataDir, "models", fileName), { recursive: true, force: true });
+  log.debug(`removed document for ${fileName}`);
+}
+
 /**
  * Every file (by repo-relative name) of this kind that has a document
  * directory with at least one chunk — the doc-side counterpart of walk().
@@ -492,6 +537,11 @@ export async function listPageDocs(dataDir: string, folder: string): Promise<str
   return docs.filter((fileName) => fileName.startsWith(`${folder}/`));
 }
 
+/** Every model that has a document — the doc side of models.ts listing. */
+export async function listModelDocs(dataDir: string): Promise<string[]> {
+  return listDocs(dataDir, "models", ".model.json");
+}
+
 /** Mint an empty feature document with a fresh identity. */
 export function newFeatureDoc(init: Omit<FeatureDoc, "schemaVersion" | "id">): A.Doc<FeatureDoc> {
   return A.from<FeatureDoc>({
@@ -505,6 +555,15 @@ export function newFeatureDoc(init: Omit<FeatureDoc, "schemaVersion" | "id">): A
 export function newPageDoc(init: Omit<PageDoc, "schemaVersion" | "id">): A.Doc<PageDoc> {
   return A.from<PageDoc>({
     schemaVersion: PAGE_SCHEMA_VERSION,
+    id: randomUUID(),
+    ...init,
+  });
+}
+
+/** Mint a model document with a fresh identity. */
+export function newModelDoc(init: Omit<ModelDoc, "schemaVersion" | "id">): A.Doc<ModelDoc> {
+  return A.from<ModelDoc>({
+    schemaVersion: MODEL_SCHEMA_VERSION,
     id: randomUUID(),
     ...init,
   });
