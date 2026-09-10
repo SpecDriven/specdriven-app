@@ -16,6 +16,7 @@ import {
   normalizeProjectManagement,
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
+  normalizeModels,
   normalizeRoadmap,
   normalizeTasks,
   normalizeTesting,
@@ -122,8 +123,23 @@ import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
-import { isSearchScope, searchPages, searchSpecs } from "./search";
+import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
+import {
+  MODELS_FOLDER,
+  createModel,
+  deleteModel,
+  ensureModelsFolder,
+  exportModel,
+  generateSliceFeature,
+  isModelsFolderPath,
+  listModels,
+  readModel,
+  saveModel,
+  sessionModels,
+} from "./models";
+import type { ModelInput } from "./agent";
+import { serializeExport } from "./eventModel/serialize";
 import {
   ROADMAP,
   TASKS,
@@ -381,6 +397,7 @@ async function stateFields(state: SpecDrivenState) {
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
+    models: normalizeModels(state.models),
     testing: normalizeTesting(state.testing),
     issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -437,6 +454,7 @@ const putState: Handler = async (req) => {
     assignments?: boolean;
     roadmap?: boolean;
     tasks?: boolean;
+    models?: boolean;
     testing?: boolean;
     issues?: boolean;
     syncServerUrl?: string | null;
@@ -457,6 +475,7 @@ const putState: Handler = async (req) => {
     body.assignments === undefined &&
     body.roadmap === undefined &&
     body.tasks === undefined &&
+    body.models === undefined &&
     body.testing === undefined &&
     body.issues === undefined &&
     body.syncServerUrl === undefined
@@ -464,7 +483,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, testing, issues or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, models, testing, issues or syncServerUrl is required",
       },
       400,
     );
@@ -655,6 +674,18 @@ const putState: Handler = async (req) => {
     if (body.tasks) state.tasks = true;
     else delete state.tasks;
   }
+  // The models folder (roadmap/support-event-modeling.md): the roadmap
+  // switch's third twin — opt-in, an absent key when off, and the folder
+  // made below when it goes on.
+  let modelsTurnedOn = false;
+  if (body.models !== undefined) {
+    if (typeof body.models !== "boolean") {
+      return json({ error: "models must be a boolean" }, 400);
+    }
+    if (body.models && !normalizeModels(state.models)) modelsTurnedOn = true;
+    if (body.models) state.models = true;
+    else delete state.models;
+  }
   // Test management (specs/app/tests.feature.md): opt-in — an absent
   // key when off. Nothing to make on the spot: the module's document is
   // minted on its first write.
@@ -695,13 +726,16 @@ const putState: Handler = async (req) => {
   // Scenario "Create roadmap folder if necessary": the switch is what asks
   // for the folder, so it is made on the spot rather than on the next tick.
   // A repo we cannot reach is left to that tick; the switch still stands.
-  if (turnedOn.length > 0 && !needsDataRepo(state)) {
+  if ((turnedOn.length > 0 || modelsTurnedOn) && !needsDataRepo(state)) {
     try {
       const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
       for (const kind of turnedOn) {
         if (await ensurePageFolder(dir, kind)) {
           reloadLog.info(`created the ${kind.folder} folder`);
         }
+      }
+      if (modelsTurnedOn && (await ensureModelsFolder(dir))) {
+        reloadLog.info(`created the ${MODELS_FOLDER} folder`);
       }
     } catch (e) {
       reloadLog.error((e as Error).message, errorAttributes(e));
@@ -730,6 +764,7 @@ const putState: Handler = async (req) => {
       syncDataDir(dir, {
         roadmap: normalizeRoadmap(state.roadmap),
         tasks: normalizeTasks(state.tasks),
+        models: normalizeModels(state.models),
       }),
     );
   }
@@ -832,7 +867,9 @@ const getFeatures = withDataDir(async (dir) => {
     // .feature.md, specs/app/tasks.feature.md): they hold markdown pages,
     // listed on their own tabs, so neither shows as an empty folder among the
     // feature ones.
-    folders: (await listFolders(dir)).filter((folder) => !isPageFolderPath(folder)),
+    folders: (await listFolders(dir)).filter(
+      (folder) => !isPageFolderPath(folder) && !isModelsFolderPath(folder),
+    ),
     members: settings.members,
     codeRepo: settings.codeRepo,
     // GitHub issue tracking (specs/app/github-issues.feature.md): the
@@ -896,6 +933,86 @@ const deletePageRoute = (kind: PageFolder) =>
     }
   });
 
+// Event Models (roadmap/support-event-modeling.md): the JSON files in the
+// data repo's `models` folder, each drawn on the Models tab's canvas. The
+// same shape as the page routes: list, create, read, save, delete — plus an
+// export of the schema's half for other tools, and an import of one.
+const listModelsRoute = withDataDir(async (dir) => json({ models: await listModels(dir) }));
+
+const createModelRoute = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => null)) as { name?: unknown; model?: unknown } | null;
+  if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
+  try {
+    return json({ fileName: await createModel(dir, body.name, body.model) }, 201);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+const readModelRoute = withDataDir(async (dir, _req, params) => {
+  try {
+    const model = await readModel(dir, params.file ?? "");
+    return model === null ? json({ error: "Model not found" }, 404) : json(model);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// The canvas's autosave: a local write through the model's document — the
+// reload cron commits and pushes it, like a saved scenario.
+const saveModelRoute = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => null)) as { file?: unknown } | null;
+  if (body?.file === null || typeof body?.file !== "object") {
+    return json({ error: "file is required" }, 400);
+  }
+  try {
+    return json(await saveModel(dir, params.file ?? "", body.file));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+const deleteModelRoute = withDataDir(async (dir, _req, params) => {
+  try {
+    return json(await deleteModel(dir, params.file ?? ""));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// The bridge to the specs (src/server/eventModel/feature.ts): a slice
+// scaffolds its feature file — one scenario per Given / When / Then — and
+// is linked to it. The body may name the feature (with a `/` for a folder);
+// the slice's title otherwise. The canvas opens the new feature.
+const generateSliceFeatureRoute = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+  const name = typeof body?.name === "string" ? body.name : undefined;
+  try {
+    return json(await generateSliceFeature(dir, params.file ?? "", params.slice ?? "", name), 201);
+  } catch (e) {
+    const message = (e as Error).message;
+    return json({ error: message }, /not found/i.test(message) ? 404 : 400);
+  }
+});
+
+// The schema's half alone, as a download — what eventmodelers.ai and the
+// other tools that speak the published schema take.
+const exportModelRoute = withDataDir(async (dir, _req, params) => {
+  try {
+    const model = await exportModel(dir, params.file ?? "");
+    if (model === null) return json({ error: "Model not found" }, 404);
+    const stem = (params.file ?? "").split("/").pop()!.replace(/\.model\.json$/, "");
+    return new Response(serializeExport(model), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${stem}.eventmodel.json"`,
+      },
+    });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
@@ -927,10 +1044,14 @@ const getSearch = withDataDir(async (dir, req) => {
     Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 50) : 20;
   const scope = url.searchParams.get("scope") ?? "specs";
   if (!isSearchScope(scope)) return json({ error: `unknown search scope: ${scope}` }, 400);
-  const kind = scope === "specs" ? null : pageFolderNamed(scope);
+  // `scope=models` searches the Event Models (roadmap/support-event-modeling
+  // .md) — what the Models tab's palette searches.
+  const kind = scope === "specs" || scope === MODELS_FOLDER ? null : pageFolderNamed(scope);
   const results = kind
     ? await searchPages(dir, kind, q, limit)
-    : await searchSpecs(dir, q, limit);
+    : scope === MODELS_FOLDER
+      ? await searchModels(dir, q, limit)
+      : await searchSpecs(dir, q, limit);
   return json({ query: q, scope, results });
 });
 
@@ -1199,24 +1320,49 @@ const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS
 // comes back as an error for the client's error box.
 /**
  * What a session request resolves to — the name, the selected specs read
- * from the repo, and where the session would run — or the refusal to send
- * back. Shared by the session route and the prompt route below, so a copied
- * prompt is the same text a started session gets.
+ * from the repo, the Event Models that go with them, and where the session
+ * would run — or the refusal to send back. Shared by the session route and
+ * the prompt route below, so a copied prompt is the same text a started
+ * session gets.
+ *
+ * The models (roadmap/support-event-modeling.md): the ones the client
+ * names — the model open when the session started, whose linked specs
+ * then come along whole — plus, with the Models setting on, any whose
+ * slice links a selected spec. A session may run from a model alone.
  */
 async function resolveSessionRequest(
   dir: string,
-  body: { name?: unknown; files?: unknown },
-): Promise<{ name: string; specs: SpecInput[]; place: SessionPlace } | Response> {
+  body: { name?: unknown; files?: unknown; models?: unknown },
+): Promise<
+  { name: string; specs: SpecInput[]; place: SessionPlace; models: ModelInput[] } | Response
+> {
   // The Settings switch is the gate, enforced here and not only in the UI:
   // switched off, nothing can hand a spec to Claude.
-  if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
+  const state = await readState(getAppRoot());
+  if (!normalizeCodeGen(state.codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
-  const files = parseSessionFiles(body.files);
-  if (files === null) {
+  const wantedModels = parseSessionModels(body.models);
+  if (wantedModels === null) return json({ error: "models must be a list of model files" }, 400);
+  const files = parseSessionFiles(body.files) ?? [];
+  if (files.length === 0 && wantedModels.length === 0) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
+  }
+  let models: ModelInput[] = [];
+  try {
+    const bundled = await sessionModels(
+      dir,
+      wantedModels,
+      files.map((f) => f.fileName),
+      { linkedToSpecs: normalizeModels(state.models) },
+    );
+    models = bundled.models;
+    // A model's own specs join the session whole, unless already picked.
+    for (const fileName of bundled.features) files.push({ fileName });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
   }
   const specs: SpecInput[] = [];
   for (const { fileName, scenarios } of files) {
@@ -1249,16 +1395,28 @@ async function resolveSessionRequest(
       400,
     );
   }
-  return { name, specs, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+  return { name, specs, models, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+}
+
+/** The model files a session request names: none when absent, null when malformed. */
+function parseSessionModels(value: unknown): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return null;
+  return [...new Set(value as string[])];
 }
 
 const postAgentSession = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
+  const body = (await req.json()) as {
+    name?: string;
+    files?: unknown;
+    models?: unknown;
+    target?: unknown;
+  };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
   const target = normalizeCodeGenTarget(body.target);
   if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
-  const { name, specs, place } = resolved;
+  const { name, specs, place, models } = resolved;
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
@@ -1273,7 +1431,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
         place,
         name,
         agent,
-        prompt: buildSessionPrompt(name, specs, place),
+        prompt: buildSessionPrompt(name, specs, place, models),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
       return json({ name, id: meta.id, target });
@@ -1286,7 +1444,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   }
   try {
     const sessionsDir = await sessionsDirectory(getAppRoot());
-    return json(await launchDesktopSession(place, name, specs, { sessionsDir }));
+    return json(await launchDesktopSession(place, name, specs, { sessionsDir, models }));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
@@ -1297,11 +1455,11 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // pasted into an agent the app doesn't drive. Nothing is launched and no
 // session is recorded — only the text comes back.
 const postAgentSessionPrompt = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: unknown; files?: unknown };
+  const body = (await req.json()) as { name?: unknown; files?: unknown; models?: unknown };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
-  const { name, specs, place } = resolved;
-  return json({ name, prompt: buildSessionPrompt(name, specs, place) });
+  const { name, specs, place, models } = resolved;
+  return json({ name, prompt: buildSessionPrompt(name, specs, place, models) });
 });
 
 // ---------------------------------------------------------------------------
@@ -1846,6 +2004,13 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
   ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
   ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
+  ["GET", "/api/models", listModelsRoute],
+  ["POST", "/api/models", createModelRoute],
+  ["GET", "/api/models/:file", readModelRoute],
+  ["PUT", "/api/models/:file", saveModelRoute],
+  ["DELETE", "/api/models/:file", deleteModelRoute],
+  ["GET", "/api/models/:file/export", exportModelRoute],
+  ["POST", "/api/models/:file/slices/:slice/feature", generateSliceFeatureRoute],
   ["GET", "/api/tasks", listPagesRoute(TASKS)],
   ["POST", "/api/tasks", createPageRoute(TASKS)],
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
