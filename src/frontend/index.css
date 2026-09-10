@@ -2847,6 +2847,36 @@ kbd {
   background: var(--danger-bg);
 }
 
+/* A menu that opens from an editor bar (the Event Model header's ⋯): the
+   bar's filled-button rule (`.editor-bar button`) outranks `.menu-item`, so
+   restore the menu look at a higher specificity. */
+.editor-bar .menu-item {
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-weight: 400;
+}
+
+.editor-bar .menu-item:hover:not(:disabled),
+.editor-bar .menu-item:focus-visible {
+  background: var(--hover);
+}
+
+.editor-bar .menu-item:disabled {
+  color: var(--text-3);
+}
+
+.editor-bar .menu-item.danger {
+  color: var(--danger-fg);
+}
+
+.editor-bar .menu-item.danger:hover:not(:disabled),
+.editor-bar .menu-item.danger:focus-visible {
+  background: var(--danger-bg);
+}
+
 .menu-check {
   display: inline-flex;
   width: 0.9rem;
@@ -3271,6 +3301,13 @@ button.chip:disabled {
 .chip-popover {
   top: calc(100% + 0.25rem);
   left: 0;
+}
+
+/* A menu whose trigger sits at the right edge of the page (the Event Model
+   header's ⋯, its assignee chip): grow leftwards so it stays on screen. */
+.chip-menu.chip-menu-end {
+  left: auto;
+  right: 0;
 }
 
 .popover {
