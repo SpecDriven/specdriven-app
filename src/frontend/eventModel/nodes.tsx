@@ -7,7 +7,8 @@
 // inspector.
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { memo } from "react";
+import { memo, useContext } from "react";
+import { SliceActionsContext } from "./context";
 import { typeLabel } from "./mutations";
 import type { ElementNode, LaneNode, SliceNode } from "./flow";
 
@@ -52,13 +53,30 @@ function ElementNodeView({ data, selected }: NodeProps<ElementNode>) {
 
 function SliceNodeView({ data, selected }: NodeProps<SliceNode>) {
   const { slice, index, feature } = data;
+  const { openFeature } = useContext(SliceActionsContext);
   return (
     <div className={`em-slice${selected ? " selected" : ""}`}>
       <div className="em-slice-head">
         <span className="em-slice-index">{index + 1}</span>
         <span className="em-slice-title">{slice.title || "Untitled slice"}</span>
         <span className="em-slice-kind">{SLICE_TYPE_LABEL[slice.sliceType]}</span>
-        {feature && <span className="em-slice-link" title={feature}>spec</span>}
+        {/* The bridge to the specs: the band's "spec" opens the feature file
+            holding the slice's scenarios. `nodrag` keeps React Flow from
+            taking the press as the start of a drag. */}
+        {feature && (
+          <button
+            type="button"
+            className="em-slice-link nodrag"
+            title={`Open ${feature}`}
+            aria-label={`Open the feature ${feature}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              openFeature(feature);
+            }}
+          >
+            spec
+          </button>
+        )}
         {slice.specifications.length > 0 && (
           <span className="em-slice-specs" title={`${slice.specifications.length} Given/When/Then`}>
             {slice.specifications.length} GWT

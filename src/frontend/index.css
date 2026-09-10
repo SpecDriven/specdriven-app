@@ -6143,6 +6143,40 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   padding: 0 0.3rem;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
+  background: none;
+  font: inherit;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.em-slice-link:hover,
+.em-slice-link:focus-visible {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/* The inspector's "Generate feature file", with the scenario count as a tag. */
+.em-generate {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: flex-start;
+}
+
+.em-generate-count {
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--code-bg);
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+/* A feature's crumb naming the Event Model it belongs to. */
+.crumb-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .em-card {

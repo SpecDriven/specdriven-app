@@ -131,11 +131,14 @@ import {
   deleteModel,
   ensureModelsFolder,
   exportModel,
+  generateSliceFeature,
   isModelsFolderPath,
   listModels,
   readModel,
   saveModel,
+  sessionModels,
 } from "./models";
+import type { ModelInput } from "./agent";
 import { serializeExport } from "./eventModel/serialize";
 import {
   ROADMAP,
@@ -977,6 +980,21 @@ const deleteModelRoute = withDataDir(async (dir, _req, params) => {
   }
 });
 
+// The bridge to the specs (src/server/eventModel/feature.ts): a slice
+// scaffolds its feature file — one scenario per Given / When / Then — and
+// is linked to it. The body may name the feature (with a `/` for a folder);
+// the slice's title otherwise. The canvas opens the new feature.
+const generateSliceFeatureRoute = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+  const name = typeof body?.name === "string" ? body.name : undefined;
+  try {
+    return json(await generateSliceFeature(dir, params.file ?? "", params.slice ?? "", name), 201);
+  } catch (e) {
+    const message = (e as Error).message;
+    return json({ error: message }, /not found/i.test(message) ? 404 : 400);
+  }
+});
+
 // The schema's half alone, as a download — what eventmodelers.ai and the
 // other tools that speak the published schema take.
 const exportModelRoute = withDataDir(async (dir, _req, params) => {
@@ -1302,24 +1320,49 @@ const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS
 // comes back as an error for the client's error box.
 /**
  * What a session request resolves to — the name, the selected specs read
- * from the repo, and where the session would run — or the refusal to send
- * back. Shared by the session route and the prompt route below, so a copied
- * prompt is the same text a started session gets.
+ * from the repo, the Event Models that go with them, and where the session
+ * would run — or the refusal to send back. Shared by the session route and
+ * the prompt route below, so a copied prompt is the same text a started
+ * session gets.
+ *
+ * The models (roadmap/support-event-modeling.md): the ones the client
+ * names — the model open when the session started, whose linked specs
+ * then come along whole — plus, with the Models setting on, any whose
+ * slice links a selected spec. A session may run from a model alone.
  */
 async function resolveSessionRequest(
   dir: string,
-  body: { name?: unknown; files?: unknown },
-): Promise<{ name: string; specs: SpecInput[]; place: SessionPlace } | Response> {
+  body: { name?: unknown; files?: unknown; models?: unknown },
+): Promise<
+  { name: string; specs: SpecInput[]; place: SessionPlace; models: ModelInput[] } | Response
+> {
   // The Settings switch is the gate, enforced here and not only in the UI:
   // switched off, nothing can hand a spec to Claude.
-  if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
+  const state = await readState(getAppRoot());
+  if (!normalizeCodeGen(state.codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
-  const files = parseSessionFiles(body.files);
-  if (files === null) {
+  const wantedModels = parseSessionModels(body.models);
+  if (wantedModels === null) return json({ error: "models must be a list of model files" }, 400);
+  const files = parseSessionFiles(body.files) ?? [];
+  if (files.length === 0 && wantedModels.length === 0) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
+  }
+  let models: ModelInput[] = [];
+  try {
+    const bundled = await sessionModels(
+      dir,
+      wantedModels,
+      files.map((f) => f.fileName),
+      { linkedToSpecs: normalizeModels(state.models) },
+    );
+    models = bundled.models;
+    // A model's own specs join the session whole, unless already picked.
+    for (const fileName of bundled.features) files.push({ fileName });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
   }
   const specs: SpecInput[] = [];
   for (const { fileName, scenarios } of files) {
@@ -1352,16 +1395,28 @@ async function resolveSessionRequest(
       400,
     );
   }
-  return { name, specs, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+  return { name, specs, models, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+}
+
+/** The model files a session request names: none when absent, null when malformed. */
+function parseSessionModels(value: unknown): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return null;
+  return [...new Set(value as string[])];
 }
 
 const postAgentSession = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: string; files?: unknown; target?: unknown };
+  const body = (await req.json()) as {
+    name?: string;
+    files?: unknown;
+    models?: unknown;
+    target?: unknown;
+  };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
   const target = normalizeCodeGenTarget(body.target);
   if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
-  const { name, specs, place } = resolved;
+  const { name, specs, place, models } = resolved;
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
@@ -1376,7 +1431,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
         place,
         name,
         agent,
-        prompt: buildSessionPrompt(name, specs, place),
+        prompt: buildSessionPrompt(name, specs, place, models),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
       return json({ name, id: meta.id, target });
@@ -1389,7 +1444,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   }
   try {
     const sessionsDir = await sessionsDirectory(getAppRoot());
-    return json(await launchDesktopSession(place, name, specs, { sessionsDir }));
+    return json(await launchDesktopSession(place, name, specs, { sessionsDir, models }));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
@@ -1400,11 +1455,11 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // pasted into an agent the app doesn't drive. Nothing is launched and no
 // session is recorded — only the text comes back.
 const postAgentSessionPrompt = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: unknown; files?: unknown };
+  const body = (await req.json()) as { name?: unknown; files?: unknown; models?: unknown };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
-  const { name, specs, place } = resolved;
-  return json({ name, prompt: buildSessionPrompt(name, specs, place) });
+  const { name, specs, place, models } = resolved;
+  return json({ name, prompt: buildSessionPrompt(name, specs, place, models) });
 });
 
 // ---------------------------------------------------------------------------
@@ -1955,6 +2010,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/models/:file", saveModelRoute],
   ["DELETE", "/api/models/:file", deleteModelRoute],
   ["GET", "/api/models/:file/export", exportModelRoute],
+  ["POST", "/api/models/:file/slices/:slice/feature", generateSliceFeatureRoute],
   ["GET", "/api/tasks", listPagesRoute(TASKS)],
   ["POST", "/api/tasks", createPageRoute(TASKS)],
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
