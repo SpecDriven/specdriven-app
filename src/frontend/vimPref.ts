@@ -9,7 +9,22 @@ const KEY = "sd-vim";
 /** Fired on window when the preference changes, so open editors follow. */
 const EVENT = "sd-vim-change";
 
+// Demo mode (src/server/demo.ts): Vim mode is off and stays off. The demo is
+// a public sandbox anyone lands on, and modal editing is a trap for a visitor
+// who did not ask for it — including one whose browser still carries "on"
+// from a visit of their own. The stored choice is left alone, so their own
+// setting is back the moment they open their own app.
+let demoOff = false;
+
+/** Told by App.tsx once /api/state reports demo mode. */
+export function setVimDemoMode(on: boolean): void {
+  if (demoOff === on) return;
+  demoOff = on;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENT));
+}
+
 export function readVimPref(): boolean {
+  if (demoOff) return false;
   try {
     return localStorage.getItem(KEY) === "on";
   } catch {
