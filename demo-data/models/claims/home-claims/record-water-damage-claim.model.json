@@ -1,0 +1,2054 @@
+{
+  "format": "specdriven-event-model/1",
+  "name": "Record Water Damage Claim",
+  "model": {
+    "slices": [
+      {
+        "id": "slice-report-water-damage",
+        "title": "Report water damage",
+        "sliceType": "STATE_CHANGE",
+        "status": "Created",
+        "index": 0,
+        "context": "Claims",
+        "screens": [
+          {
+            "id": "report-a-home-claim",
+            "title": "Report a home claim",
+            "type": "SCREEN",
+            "fields": [
+              {
+                "name": "policyNumber",
+                "type": "String",
+                "example": "HO3-2026-004512"
+              },
+              {
+                "name": "dateOfLoss",
+                "type": "Date",
+                "example": "2026-09-09"
+              },
+              {
+                "name": "description",
+                "type": "String",
+                "example": "A pipe burst yesterday and flooded the kitchen"
+              },
+              {
+                "name": "causeOfLoss",
+                "type": "String",
+                "example": "burst pipe"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "report-water-damage",
+                "title": "Report Water Damage",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "The insured's first notice of loss form for a home claim, reached from the policy page online or filled in by the hotline agent.",
+            "slice": "slice-report-water-damage"
+          }
+        ],
+        "processors": [],
+        "commands": [
+          {
+            "id": "report-water-damage",
+            "title": "Report Water Damage",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "policyId",
+                "type": "UUID",
+                "example": "9d8e7f60-1234-4abc-8def-0123456789ab"
+              },
+              {
+                "name": "dateOfLoss",
+                "type": "Date",
+                "example": "2026-09-09"
+              },
+              {
+                "name": "description",
+                "type": "String",
+                "example": "A pipe burst yesterday and flooded the kitchen"
+              },
+              {
+                "name": "causeOfLoss",
+                "type": "String",
+                "example": "burst pipe"
+              },
+              {
+                "name": "reportedVia",
+                "type": "String",
+                "example": "Online"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "report-a-home-claim",
+                "title": "Report a home claim",
+                "type": "INBOUND",
+                "elementType": "SCREEN"
+              },
+              {
+                "id": "water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "apiEndpoint": "POST /odata/v4/claims/reportWaterDamage",
+            "createsAggregate": true,
+            "description": "Rejected unless the policy is an in-force homeowners (HO-3) policy on the date of loss. A sudden cause of loss — burst pipe, appliance failure, overflow — opens the claim as sudden and accidental water damage; the coverage review can still overturn that.",
+            "slice": "slice-report-water-damage"
+          }
+        ],
+        "readmodels": [],
+        "events": [
+          {
+            "id": "water-damage-claim-opened",
+            "title": "Water Damage Claim Opened",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "policyId",
+                "type": "UUID",
+                "example": "9d8e7f60-1234-4abc-8def-0123456789ab"
+              },
+              {
+                "name": "policyNumber",
+                "type": "String",
+                "example": "HO3-2026-004512"
+              },
+              {
+                "name": "dateOfLoss",
+                "type": "Date",
+                "example": "2026-09-09"
+              },
+              {
+                "name": "reportedOn",
+                "type": "Date",
+                "example": "2026-09-10"
+              },
+              {
+                "name": "causeOfLoss",
+                "type": "String",
+                "example": "burst pipe"
+              },
+              {
+                "name": "description",
+                "type": "String",
+                "example": "A pipe burst yesterday and flooded the kitchen"
+              },
+              {
+                "name": "coverageClassification",
+                "type": "String",
+                "example": "sudden and accidental water damage"
+              },
+              {
+                "name": "status",
+                "type": "String",
+                "example": "Open — awaiting adjuster"
+              },
+              {
+                "name": "reportedVia",
+                "type": "String",
+                "example": "Online"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "report-water-damage",
+                "title": "Report Water Damage",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "claims-awaiting-mitigation-offer",
+                "title": "Claims awaiting mitigation offer",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "claim-coverage-review",
+                "title": "Claim coverage review",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-report-water-damage"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-burst-pipe-is-covered",
+            "title": "Burst pipe is covered",
+            "given": [
+              {
+                "id": "step-4-ho-3-policy-in-force",
+                "title": "HO-3 policy in force",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "effectiveFrom": "2026-01-01",
+                    "effectiveTo": "2026-12-31",
+                    "formType": "HO-3",
+                    "policyNumber": "HO3-2026-004512"
+                  }
+                ]
+              }
+            ],
+            "when": [
+              {
+                "id": "step-5-report-water-damage",
+                "title": "Report Water Damage",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "causeOfLoss": "burst pipe",
+                    "dateOfLoss": "2026-09-09",
+                    "description": "A pipe burst yesterday and flooded the kitchen",
+                    "policyNumber": "HO3-2026-004512"
+                  }
+                ],
+                "linkedId": "report-water-damage"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-6-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "status": "Open — awaiting adjuster",
+                    "coverageClassification": "sudden and accidental water damage"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              }
+            ],
+            "comments": [
+              {
+                "description": "The mitigation vendor offer that follows within 24 hours is the automation slice “Offer emergency mitigation”."
+              }
+            ],
+            "linkedId": "slice-report-water-damage"
+          }
+        ],
+        "actors": [
+          {
+            "name": "Insured (homeowner)",
+            "authRequired": true
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-offer-emergency-mitigation",
+        "title": "Offer emergency mitigation",
+        "sliceType": "AUTOMATION",
+        "status": "Created",
+        "index": 1,
+        "context": "Claims",
+        "screens": [],
+        "processors": [
+          {
+            "id": "mitigation-vendor-dispatcher",
+            "title": "Mitigation vendor dispatcher",
+            "type": "AUTOMATION",
+            "fields": [],
+            "dependencies": [
+              {
+                "id": "claims-awaiting-mitigation-offer",
+                "title": "Claims awaiting mitigation offer",
+                "type": "INBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "offer-mitigation-vendor",
+                "title": "Offer Mitigation Vendor",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "Runs on every open water damage claim without an offer: picks an emergency mitigation vendor serving the loss location and offers it to the insured, well inside 24 hours of the claim being opened.",
+            "slice": "slice-offer-emergency-mitigation"
+          }
+        ],
+        "commands": [
+          {
+            "id": "offer-mitigation-vendor",
+            "title": "Offer Mitigation Vendor",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "vendorName",
+                "type": "String",
+                "example": "DryFast Restoration"
+              },
+              {
+                "name": "vendorPhone",
+                "type": "String",
+                "example": "+1 555 0142"
+              },
+              {
+                "name": "contactBy",
+                "type": "DateTime",
+                "example": "2026-09-11T09:15:00Z"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "mitigation-vendor-dispatcher",
+                "title": "Mitigation vendor dispatcher",
+                "type": "INBOUND",
+                "elementType": "AUTOMATION"
+              },
+              {
+                "id": "mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "description": "Records the offer on the claim and notifies the insured.",
+            "slice": "slice-offer-emergency-mitigation"
+          }
+        ],
+        "readmodels": [
+          {
+            "id": "claims-awaiting-mitigation-offer",
+            "title": "Claims awaiting mitigation offer",
+            "type": "READMODEL",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "policyNumber",
+                "type": "String",
+                "example": "HO3-2026-004512"
+              },
+              {
+                "name": "lossLocation",
+                "type": "String",
+                "example": "12 Elm St, Springfield"
+              },
+              {
+                "name": "openedAt",
+                "type": "DateTime",
+                "example": "2026-09-10T09:15:00Z"
+              },
+              {
+                "name": "offerDueBy",
+                "type": "DateTime",
+                "example": "2026-09-11T09:15:00Z"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "mitigation-vendor-dispatcher",
+                "title": "Mitigation vendor dispatcher",
+                "type": "OUTBOUND",
+                "elementType": "AUTOMATION"
+              }
+            ],
+            "description": "Todo list for the dispatcher: open water damage claims that have no mitigation vendor offered yet, each with the 24-hour deadline counted from when the claim was opened.",
+            "listElement": true,
+            "slice": "slice-offer-emergency-mitigation"
+          }
+        ],
+        "events": [
+          {
+            "id": "mitigation-vendor-offered",
+            "title": "Mitigation Vendor Offered",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "vendorName",
+                "type": "String",
+                "example": "DryFast Restoration"
+              },
+              {
+                "name": "vendorPhone",
+                "type": "String",
+                "example": "+1 555 0142"
+              },
+              {
+                "name": "offeredAt",
+                "type": "DateTime",
+                "example": "2026-09-10T09:16:00Z"
+              },
+              {
+                "name": "contactBy",
+                "type": "DateTime",
+                "example": "2026-09-11T09:15:00Z"
+              },
+              {
+                "name": "insuredEmail",
+                "type": "String",
+                "example": "jordan.smith@example.com",
+                "pii": true
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "claims-awaiting-mitigation-offer",
+                "title": "Claims awaiting mitigation offer",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "offer-mitigation-vendor",
+                "title": "Offer Mitigation Vendor",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-offer-emergency-mitigation"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-vendor-offered-within-24-hours-of-opening",
+            "title": "Vendor offered within 24 hours of opening",
+            "given": [
+              {
+                "id": "step-13-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "claimNumber": "CLM-2026-000481",
+                    "coverageClassification": "sudden and accidental water damage",
+                    "openedAt": "2026-09-10T09:15:00Z"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-14-offer-mitigation-vendor",
+                "title": "Offer Mitigation Vendor",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "vendorName": "DryFast Restoration"
+                  }
+                ],
+                "linkedId": "offer-mitigation-vendor"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-15-mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "contactBy": "2026-09-11T09:15:00Z",
+                    "offeredAt": "2026-09-10T09:16:00Z",
+                    "vendorName": "DryFast Restoration"
+                  }
+                ],
+                "linkedId": "mitigation-vendor-offered"
+              }
+            ],
+            "comments": [
+              {
+                "description": "The insured is emailed the vendor's name and told to expect contact within 24 hours."
+              }
+            ],
+            "linkedId": "slice-offer-emergency-mitigation"
+          },
+          {
+            "id": "spec-a-claim-already-offered-a-vendor-is-left-alone",
+            "title": "A claim already offered a vendor is left alone",
+            "given": [
+              {
+                "id": "step-17-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "claimNumber": "CLM-2026-000481"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              },
+              {
+                "id": "step-18-mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "vendorName": "DryFast Restoration"
+                  }
+                ],
+                "linkedId": "mitigation-vendor-offered"
+              }
+            ],
+            "when": [],
+            "then": [
+              {
+                "id": "step-19-claims-awaiting-mitigation-offer",
+                "title": "Claims awaiting mitigation offer",
+                "type": "SPEC_READMODEL",
+                "expectEmptyList": true,
+                "linkedId": "claims-awaiting-mitigation-offer"
+              }
+            ],
+            "linkedId": "slice-offer-emergency-mitigation"
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-record-inspection-findings",
+        "title": "Record inspection findings",
+        "sliceType": "STATE_CHANGE",
+        "status": "Created",
+        "index": 2,
+        "context": "Claims",
+        "screens": [
+          {
+            "id": "inspection-report",
+            "title": "Inspection report",
+            "type": "SCREEN",
+            "fields": [
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "inspectedOn",
+                "type": "Date",
+                "example": "2026-09-17"
+              },
+              {
+                "name": "waterSource",
+                "type": "String",
+                "example": "slow leak"
+              },
+              {
+                "name": "findings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "record-inspection-findings",
+                "title": "Record Inspection Findings",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "The adjuster's or field inspector's write-up of the site visit.",
+            "slice": "slice-record-inspection-findings"
+          }
+        ],
+        "processors": [],
+        "commands": [
+          {
+            "id": "record-inspection-findings",
+            "title": "Record Inspection Findings",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "inspectedOn",
+                "type": "Date",
+                "example": "2026-09-17"
+              },
+              {
+                "name": "waterSource",
+                "type": "String",
+                "example": "slow leak"
+              },
+              {
+                "name": "durationOfLeak",
+                "type": "String",
+                "example": "several months"
+              },
+              {
+                "name": "findings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "inspection-report",
+                "title": "Inspection report",
+                "type": "INBOUND",
+                "elementType": "SCREEN"
+              },
+              {
+                "id": "inspection-findings-recorded",
+                "title": "Inspection Findings Recorded",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-record-inspection-findings"
+          }
+        ],
+        "readmodels": [],
+        "events": [
+          {
+            "id": "inspection-findings-recorded",
+            "title": "Inspection Findings Recorded",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "inspectedOn",
+                "type": "Date",
+                "example": "2026-09-17"
+              },
+              {
+                "name": "waterSource",
+                "type": "String",
+                "example": "slow leak"
+              },
+              {
+                "name": "durationOfLeak",
+                "type": "String",
+                "example": "several months"
+              },
+              {
+                "name": "findings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "record-inspection-findings",
+                "title": "Record Inspection Findings",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "claim-coverage-review",
+                "title": "Claim coverage review",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-record-inspection-findings"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-inspection-finds-a-slow-leak",
+            "title": "Inspection finds a slow leak",
+            "given": [
+              {
+                "id": "step-25-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "claimNumber": "CLM-2026-000481"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-26-record-inspection-findings",
+                "title": "Record Inspection Findings",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "durationOfLeak": "several months",
+                    "waterSource": "slow leak"
+                  }
+                ],
+                "linkedId": "record-inspection-findings"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-27-inspection-findings-recorded",
+                "title": "Inspection Findings Recorded",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "durationOfLeak": "several months",
+                    "waterSource": "slow leak"
+                  }
+                ],
+                "linkedId": "inspection-findings-recorded"
+              }
+            ],
+            "linkedId": "slice-record-inspection-findings"
+          }
+        ],
+        "actors": [
+          {
+            "name": "Claims adjuster",
+            "authRequired": true
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-complete-coverage-review",
+        "title": "Complete coverage review",
+        "sliceType": "STATE_CHANGE",
+        "status": "Created",
+        "index": 3,
+        "context": "Claims",
+        "screens": [
+          {
+            "id": "coverage-review",
+            "title": "Coverage review",
+            "type": "SCREEN",
+            "fields": [
+              {
+                "name": "decision",
+                "type": "String",
+                "example": "Denied"
+              },
+              {
+                "name": "exclusion",
+                "type": "String",
+                "example": "maintenance exclusion"
+              },
+              {
+                "name": "policyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "claim-coverage-review",
+                "title": "Claim coverage review",
+                "type": "INBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "complete-coverage-review",
+                "title": "Complete Coverage Review",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "Where the adjuster records the coverage decision and the exclusion it rests on.",
+            "slice": "slice-complete-coverage-review"
+          }
+        ],
+        "processors": [],
+        "commands": [
+          {
+            "id": "complete-coverage-review",
+            "title": "Complete Coverage Review",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "decision",
+                "type": "String",
+                "example": "Denied"
+              },
+              {
+                "name": "exclusion",
+                "type": "String",
+                "example": "maintenance exclusion"
+              },
+              {
+                "name": "policyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              },
+              {
+                "name": "inspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "coverage-review",
+                "title": "Coverage review",
+                "type": "INBOUND",
+                "elementType": "SCREEN"
+              },
+              {
+                "id": "water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "description": "Sudden-and-accidental water damage is covered. Gradual damage is denied under the maintenance exclusion; water that entered from rising surface water is denied under the homeowners flood exclusion.",
+            "slice": "slice-complete-coverage-review"
+          }
+        ],
+        "readmodels": [
+          {
+            "id": "claim-coverage-review",
+            "title": "Claim coverage review",
+            "type": "READMODEL",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "policyNumber",
+                "type": "String",
+                "example": "HO3-2026-004512"
+              },
+              {
+                "name": "causeOfLoss",
+                "type": "String",
+                "example": "burst pipe"
+              },
+              {
+                "name": "coverageClassification",
+                "type": "String",
+                "example": "sudden and accidental water damage"
+              },
+              {
+                "name": "inspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              },
+              {
+                "name": "waterSource",
+                "type": "String",
+                "example": "slow leak"
+              },
+              {
+                "name": "hasFloodPolicy",
+                "type": "Boolean",
+                "example": "true"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "inspection-findings-recorded",
+                "title": "Inspection Findings Recorded",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "coverage-review",
+                "title": "Coverage review",
+                "type": "OUTBOUND",
+                "elementType": "SCREEN"
+              }
+            ],
+            "description": "Everything the adjuster needs on one page: what the insured reported, what the inspection found, and the policy's water damage and flood exclusions.",
+            "slice": "slice-complete-coverage-review"
+          }
+        ],
+        "events": [
+          {
+            "id": "water-damage-claim-denied",
+            "title": "Water Damage Claim Denied",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "exclusion",
+                "type": "String",
+                "example": "maintenance exclusion"
+              },
+              {
+                "name": "policyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              },
+              {
+                "name": "inspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              },
+              {
+                "name": "deniedOn",
+                "type": "Date",
+                "example": "2026-09-18"
+              },
+              {
+                "name": "deniedBy",
+                "type": "String",
+                "example": "adjuster-4711"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "complete-coverage-review",
+                "title": "Complete Coverage Review",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "denials-awaiting-letter",
+                "title": "Denials awaiting letter",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "flood-denials-awaiting-referral",
+                "title": "Flood denials awaiting referral",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-complete-coverage-review"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-gradual-leak-is-denied",
+            "title": "Gradual leak is denied",
+            "given": [
+              {
+                "id": "step-34-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "causeOfLoss": "leak under kitchen sink",
+                    "claimNumber": "CLM-2026-000481"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              },
+              {
+                "id": "step-35-inspection-findings-recorded",
+                "title": "Inspection Findings Recorded",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "durationOfLeak": "several months",
+                    "waterSource": "slow leak"
+                  }
+                ],
+                "linkedId": "inspection-findings-recorded"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-36-complete-coverage-review",
+                "title": "Complete Coverage Review",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "decision": "Denied",
+                    "exclusion": "maintenance exclusion"
+                  }
+                ],
+                "linkedId": "complete-coverage-review"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-37-water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "exclusion": "maintenance exclusion",
+                    "inspectionFindings": "Staining and rot under the sink; leak had run for several months",
+                    "policyLanguage": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+                  }
+                ],
+                "linkedId": "water-damage-claim-denied"
+              }
+            ],
+            "comments": [
+              {
+                "description": "The denial letter that cites the policy language and the inspection findings is the automation slice “Send denial letter”."
+              }
+            ],
+            "linkedId": "slice-complete-coverage-review"
+          },
+          {
+            "id": "spec-surface-flood-is-referred-to-the-flood-policy",
+            "title": "Surface flood is referred to the flood policy",
+            "given": [
+              {
+                "id": "step-39-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "causeOfLoss": "water entered from the street during a storm",
+                    "claimNumber": "CLM-2026-000482"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              },
+              {
+                "id": "step-40-inspection-findings-recorded",
+                "title": "Inspection Findings Recorded",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "waterSource": "rising surface water"
+                  }
+                ],
+                "linkedId": "inspection-findings-recorded"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-41-complete-coverage-review",
+                "title": "Complete Coverage Review",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "decision": "Denied",
+                    "exclusion": "homeowners flood exclusion"
+                  }
+                ],
+                "linkedId": "complete-coverage-review"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-42-water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "exclusion": "homeowners flood exclusion",
+                    "policyLanguage": "Section I – Exclusions, 1.c: flood, surface water, waves, tidal water, overflow of a body of water"
+                  }
+                ],
+                "linkedId": "water-damage-claim-denied"
+              }
+            ],
+            "comments": [
+              {
+                "description": "The referral to the insured's separate flood policy is the automation slice “Refer to flood policy”."
+              }
+            ],
+            "linkedId": "slice-complete-coverage-review"
+          }
+        ],
+        "actors": [
+          {
+            "name": "Claims adjuster",
+            "authRequired": true
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-send-denial-letter",
+        "title": "Send denial letter",
+        "sliceType": "AUTOMATION",
+        "status": "Created",
+        "index": 4,
+        "context": "Claims",
+        "screens": [],
+        "processors": [
+          {
+            "id": "denial-letter-writer",
+            "title": "Denial letter writer",
+            "type": "AUTOMATION",
+            "fields": [],
+            "dependencies": [
+              {
+                "id": "denials-awaiting-letter",
+                "title": "Denials awaiting letter",
+                "type": "INBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "send-denial-letter",
+                "title": "Send Denial Letter",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "Composes the denial letter from the read model — the exclusion, the policy language it rests on, and the inspection findings — and sends it to the insured.",
+            "slice": "slice-send-denial-letter"
+          }
+        ],
+        "commands": [
+          {
+            "id": "send-denial-letter",
+            "title": "Send Denial Letter",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "insuredEmail",
+                "type": "String",
+                "example": "jordan.smith@example.com",
+                "pii": true
+              },
+              {
+                "name": "citedPolicyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              },
+              {
+                "name": "citedInspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "denial-letter-writer",
+                "title": "Denial letter writer",
+                "type": "INBOUND",
+                "elementType": "AUTOMATION"
+              },
+              {
+                "id": "denial-letter-sent",
+                "title": "Denial Letter Sent",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-send-denial-letter"
+          }
+        ],
+        "readmodels": [
+          {
+            "id": "denials-awaiting-letter",
+            "title": "Denials awaiting letter",
+            "type": "READMODEL",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "insuredName",
+                "type": "String",
+                "example": "Jordan Smith",
+                "pii": true
+              },
+              {
+                "name": "insuredEmail",
+                "type": "String",
+                "example": "jordan.smith@example.com",
+                "pii": true
+              },
+              {
+                "name": "exclusion",
+                "type": "String",
+                "example": "maintenance exclusion"
+              },
+              {
+                "name": "policyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              },
+              {
+                "name": "inspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "denial-letter-sent",
+                "title": "Denial Letter Sent",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "denial-letter-writer",
+                "title": "Denial letter writer",
+                "type": "OUTBOUND",
+                "elementType": "AUTOMATION"
+              }
+            ],
+            "description": "Todo list: denied claims whose denial letter has not gone out.",
+            "listElement": true,
+            "slice": "slice-send-denial-letter"
+          }
+        ],
+        "events": [
+          {
+            "id": "denial-letter-sent",
+            "title": "Denial Letter Sent",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "sentAt",
+                "type": "DateTime",
+                "example": "2026-09-18T15:02:00Z"
+              },
+              {
+                "name": "sentTo",
+                "type": "String",
+                "example": "jordan.smith@example.com",
+                "pii": true
+              },
+              {
+                "name": "citedPolicyLanguage",
+                "type": "String",
+                "example": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+              },
+              {
+                "name": "citedInspectionFindings",
+                "type": "String",
+                "example": "Staining and rot under the sink; leak had run for several months"
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "denials-awaiting-letter",
+                "title": "Denials awaiting letter",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "send-denial-letter",
+                "title": "Send Denial Letter",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-send-denial-letter"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-denial-letter-cites-the-policy-language-and-the-inspection-findings",
+            "title": "Denial letter cites the policy language and the inspection findings",
+            "given": [
+              {
+                "id": "step-49-water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "exclusion": "maintenance exclusion",
+                    "inspectionFindings": "Staining and rot under the sink; leak had run for several months",
+                    "policyLanguage": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+                  }
+                ],
+                "linkedId": "water-damage-claim-denied"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-50-send-denial-letter",
+                "title": "Send Denial Letter",
+                "type": "SPEC_COMMAND",
+                "linkedId": "send-denial-letter"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-51-denial-letter-sent",
+                "title": "Denial Letter Sent",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "citedInspectionFindings": "Staining and rot under the sink; leak had run for several months",
+                    "citedPolicyLanguage": "Section I – Exclusions, 2.e: continuous or repeated seepage or leakage over a period of weeks, months or years"
+                  }
+                ],
+                "linkedId": "denial-letter-sent"
+              }
+            ],
+            "linkedId": "slice-send-denial-letter"
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-refer-to-flood-policy",
+        "title": "Refer to flood policy",
+        "sliceType": "AUTOMATION",
+        "status": "Created",
+        "index": 5,
+        "context": "Claims",
+        "screens": [],
+        "processors": [
+          {
+            "id": "flood-policy-referrer",
+            "title": "Flood policy referrer",
+            "type": "AUTOMATION",
+            "fields": [],
+            "dependencies": [
+              {
+                "id": "flood-denials-awaiting-referral",
+                "title": "Flood denials awaiting referral",
+                "type": "INBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "refer-to-flood-policy",
+                "title": "Refer To Flood Policy",
+                "type": "OUTBOUND",
+                "elementType": "COMMAND"
+              }
+            ],
+            "description": "For every flood-excluded denial, points the insured at their separate flood policy — or, when none is on file, tells them to check with their flood carrier.",
+            "slice": "slice-refer-to-flood-policy"
+          }
+        ],
+        "commands": [
+          {
+            "id": "refer-to-flood-policy",
+            "title": "Refer To Flood Policy",
+            "type": "COMMAND",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "floodPolicyNumber",
+                "type": "String",
+                "example": "NFIP-77-120034",
+                "optional": true
+              },
+              {
+                "name": "floodCarrier",
+                "type": "String",
+                "example": "NFIP",
+                "optional": true
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "flood-policy-referrer",
+                "title": "Flood policy referrer",
+                "type": "INBOUND",
+                "elementType": "AUTOMATION"
+              },
+              {
+                "id": "insured-referred-to-flood-policy",
+                "title": "Insured Referred To Flood Policy",
+                "type": "OUTBOUND",
+                "elementType": "EVENT"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-refer-to-flood-policy"
+          }
+        ],
+        "readmodels": [
+          {
+            "id": "flood-denials-awaiting-referral",
+            "title": "Flood denials awaiting referral",
+            "type": "READMODEL",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "insuredEmail",
+                "type": "String",
+                "example": "jordan.smith@example.com",
+                "pii": true
+              },
+              {
+                "name": "floodPolicyNumber",
+                "type": "String",
+                "example": "NFIP-77-120034",
+                "optional": true
+              },
+              {
+                "name": "floodCarrier",
+                "type": "String",
+                "example": "NFIP",
+                "optional": true
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "insured-referred-to-flood-policy",
+                "title": "Insured Referred To Flood Policy",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "flood-policy-referrer",
+                "title": "Flood policy referrer",
+                "type": "OUTBOUND",
+                "elementType": "AUTOMATION"
+              }
+            ],
+            "description": "Todo list: claims denied under the flood exclusion that have not been referred yet, with the insured's separate flood policy when the policy records know of one.",
+            "listElement": true,
+            "slice": "slice-refer-to-flood-policy"
+          }
+        ],
+        "events": [
+          {
+            "id": "insured-referred-to-flood-policy",
+            "title": "Insured Referred To Flood Policy",
+            "type": "EVENT",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "referredAt",
+                "type": "DateTime",
+                "example": "2026-09-18T15:05:00Z"
+              },
+              {
+                "name": "floodPolicyNumber",
+                "type": "String",
+                "example": "NFIP-77-120034",
+                "optional": true
+              },
+              {
+                "name": "floodCarrier",
+                "type": "String",
+                "example": "NFIP",
+                "optional": true
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "flood-denials-awaiting-referral",
+                "title": "Flood denials awaiting referral",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              },
+              {
+                "id": "refer-to-flood-policy",
+                "title": "Refer To Flood Policy",
+                "type": "INBOUND",
+                "elementType": "COMMAND"
+              },
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "OUTBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "aggregate": "Claim",
+            "slice": "slice-refer-to-flood-policy"
+          }
+        ],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-flood-denial-refers-the-insured-to-their-flood-policy",
+            "title": "Flood denial refers the insured to their flood policy",
+            "given": [
+              {
+                "id": "step-58-water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "exclusion": "homeowners flood exclusion"
+                  }
+                ],
+                "linkedId": "water-damage-claim-denied"
+              }
+            ],
+            "when": [
+              {
+                "id": "step-59-refer-to-flood-policy",
+                "title": "Refer To Flood Policy",
+                "type": "SPEC_COMMAND",
+                "examples": [
+                  {
+                    "floodPolicyNumber": "NFIP-77-120034"
+                  }
+                ],
+                "linkedId": "refer-to-flood-policy"
+              }
+            ],
+            "then": [
+              {
+                "id": "step-60-insured-referred-to-flood-policy",
+                "title": "Insured Referred To Flood Policy",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "floodCarrier": "NFIP",
+                    "floodPolicyNumber": "NFIP-77-120034"
+                  }
+                ],
+                "linkedId": "insured-referred-to-flood-policy"
+              }
+            ],
+            "linkedId": "slice-refer-to-flood-policy"
+          },
+          {
+            "id": "spec-maintenance-denial-is-not-referred",
+            "title": "Maintenance denial is not referred",
+            "given": [
+              {
+                "id": "step-62-water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "exclusion": "maintenance exclusion"
+                  }
+                ],
+                "linkedId": "water-damage-claim-denied"
+              }
+            ],
+            "when": [],
+            "then": [
+              {
+                "id": "step-63-flood-denials-awaiting-referral",
+                "title": "Flood denials awaiting referral",
+                "type": "SPEC_READMODEL",
+                "expectEmptyList": true,
+                "linkedId": "flood-denials-awaiting-referral"
+              }
+            ],
+            "linkedId": "slice-refer-to-flood-policy"
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      },
+      {
+        "id": "slice-view-claim",
+        "title": "View claim",
+        "sliceType": "STATE_VIEW",
+        "status": "Created",
+        "index": 6,
+        "context": "Claims",
+        "screens": [
+          {
+            "id": "claim-details",
+            "title": "Claim details",
+            "type": "SCREEN",
+            "fields": [],
+            "dependencies": [
+              {
+                "id": "claim-summary",
+                "title": "Claim summary",
+                "type": "INBOUND",
+                "elementType": "READMODEL"
+              }
+            ],
+            "description": "The claim page in the insured's portal and the adjuster's desk.",
+            "slice": "slice-view-claim"
+          }
+        ],
+        "processors": [],
+        "commands": [],
+        "readmodels": [
+          {
+            "id": "claim-summary",
+            "title": "Claim summary",
+            "type": "READMODEL",
+            "fields": [
+              {
+                "name": "claimId",
+                "type": "UUID",
+                "example": "3f2c1a8e-6b4d-4e5f-9a10-2b3c4d5e6f70",
+                "idAttribute": true
+              },
+              {
+                "name": "claimNumber",
+                "type": "String",
+                "example": "CLM-2026-000481"
+              },
+              {
+                "name": "policyNumber",
+                "type": "String",
+                "example": "HO3-2026-004512"
+              },
+              {
+                "name": "status",
+                "type": "String",
+                "example": "Open — awaiting adjuster"
+              },
+              {
+                "name": "coverageClassification",
+                "type": "String",
+                "example": "sudden and accidental water damage"
+              },
+              {
+                "name": "mitigationVendorName",
+                "type": "String",
+                "example": "DryFast Restoration",
+                "optional": true
+              },
+              {
+                "name": "mitigationContactBy",
+                "type": "DateTime",
+                "example": "2026-09-11T09:15:00Z",
+                "optional": true
+              },
+              {
+                "name": "denialExclusion",
+                "type": "String",
+                "example": "",
+                "optional": true
+              },
+              {
+                "name": "floodPolicyReferral",
+                "type": "String",
+                "example": "",
+                "optional": true
+              }
+            ],
+            "dependencies": [
+              {
+                "id": "water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "water-damage-claim-denied",
+                "title": "Water Damage Claim Denied",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "denial-letter-sent",
+                "title": "Denial Letter Sent",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "insured-referred-to-flood-policy",
+                "title": "Insured Referred To Flood Policy",
+                "type": "INBOUND",
+                "elementType": "EVENT"
+              },
+              {
+                "id": "claim-details",
+                "title": "Claim details",
+                "type": "OUTBOUND",
+                "elementType": "SCREEN"
+              }
+            ],
+            "description": "The claim as the insured and the adjuster both see it, kept current from every claim event.",
+            "slice": "slice-view-claim"
+          }
+        ],
+        "events": [],
+        "tables": [],
+        "specifications": [
+          {
+            "id": "spec-summary-shows-the-mitigation-offer",
+            "title": "Summary shows the mitigation offer",
+            "given": [
+              {
+                "id": "step-68-water-damage-claim-opened",
+                "title": "Water Damage Claim Opened",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "status": "Open — awaiting adjuster",
+                    "claimNumber": "CLM-2026-000481"
+                  }
+                ],
+                "linkedId": "water-damage-claim-opened"
+              },
+              {
+                "id": "step-69-mitigation-vendor-offered",
+                "title": "Mitigation Vendor Offered",
+                "type": "SPEC_EVENT",
+                "examples": [
+                  {
+                    "contactBy": "2026-09-11T09:15:00Z",
+                    "vendorName": "DryFast Restoration"
+                  }
+                ],
+                "linkedId": "mitigation-vendor-offered"
+              }
+            ],
+            "when": [],
+            "then": [
+              {
+                "id": "step-70-claim-summary",
+                "title": "Claim summary",
+                "type": "SPEC_READMODEL",
+                "examples": [
+                  {
+                    "status": "Open — awaiting adjuster",
+                    "claimNumber": "CLM-2026-000481",
+                    "mitigationContactBy": "2026-09-11T09:15:00Z",
+                    "mitigationVendorName": "DryFast Restoration"
+                  }
+                ],
+                "linkedId": "claim-summary"
+              }
+            ],
+            "linkedId": "slice-view-claim"
+          }
+        ],
+        "actors": [
+          {
+            "name": "Insured (homeowner)",
+            "authRequired": true
+          },
+          {
+            "name": "Claims adjuster",
+            "authRequired": true
+          }
+        ],
+        "aggregates": [
+          "Claim"
+        ]
+      }
+    ]
+  },
+  "layout": {
+    "slices": {
+      "slice-complete-coverage-review": {
+        "width": 2
+      },
+      "slice-offer-emergency-mitigation": {
+        "width": 2
+      },
+      "slice-record-inspection-findings": {
+        "width": 1
+      },
+      "slice-refer-to-flood-policy": {
+        "width": 2
+      },
+      "slice-report-water-damage": {
+        "width": 1
+      },
+      "slice-send-denial-letter": {
+        "width": 2
+      },
+      "slice-view-claim": {
+        "width": 1
+      }
+    },
+    "lanes": [
+      {
+        "id": "ui",
+        "title": "Screens / Automations",
+        "kind": "SCREEN_AUTOMATION"
+      },
+      {
+        "id": "cmd",
+        "title": "Commands / Read models",
+        "kind": "COMMAND_READMODEL"
+      },
+      {
+        "id": "events",
+        "title": "Events",
+        "kind": "EVENTS"
+      }
+    ],
+    "elements": {
+      "claim-coverage-review": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "claim-details": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "claim-summary": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "claims-awaiting-mitigation-offer": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "complete-coverage-review": {
+        "column": 1,
+        "lane": "cmd"
+      },
+      "coverage-review": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "denial-letter-sent": {
+        "column": 1,
+        "lane": "events"
+      },
+      "denial-letter-writer": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "denials-awaiting-letter": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "flood-denials-awaiting-referral": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "flood-policy-referrer": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "inspection-findings-recorded": {
+        "column": 0,
+        "lane": "events"
+      },
+      "inspection-report": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "insured-referred-to-flood-policy": {
+        "column": 1,
+        "lane": "events"
+      },
+      "mitigation-vendor-dispatcher": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "mitigation-vendor-offered": {
+        "column": 1,
+        "lane": "events"
+      },
+      "offer-mitigation-vendor": {
+        "column": 1,
+        "lane": "cmd"
+      },
+      "record-inspection-findings": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "refer-to-flood-policy": {
+        "column": 1,
+        "lane": "cmd"
+      },
+      "report-a-home-claim": {
+        "column": 0,
+        "lane": "ui"
+      },
+      "report-water-damage": {
+        "column": 0,
+        "lane": "cmd"
+      },
+      "send-denial-letter": {
+        "column": 1,
+        "lane": "cmd"
+      },
+      "water-damage-claim-denied": {
+        "column": 1,
+        "lane": "events"
+      },
+      "water-damage-claim-opened": {
+        "column": 0,
+        "lane": "events"
+      }
+    }
+  },
+  "links": {
+    "slice-complete-coverage-review": {
+      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+    },
+    "slice-offer-emergency-mitigation": {
+      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+    },
+    "slice-refer-to-flood-policy": {
+      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+    },
+    "slice-report-water-damage": {
+      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+    },
+    "slice-send-denial-letter": {
+      "feature": "claims/home-claims/record-water-damage-claim.feature.md"
+    }
+  }
+}
