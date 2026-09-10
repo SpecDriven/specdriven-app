@@ -81,7 +81,7 @@ const ModelsSidebar = lazy(() =>
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
-import { applyVimPref, useVimMode } from "./vimPref";
+import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
 import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
@@ -1346,6 +1346,9 @@ export function App() {
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
       setDemo(Boolean(state.demo));
+      // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
+      // when this lands drops its Vim tab, and the Settings row hides.
+      setVimDemoMode(Boolean(state.demo));
       setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -7260,7 +7263,10 @@ export function App() {
                 </select>
               </label>
               {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
-                  on this device like the theme (src/frontend/VimEditor.tsx). */}
+                  on this device like the theme (src/frontend/VimEditor.tsx).
+                  Hidden in the demo, which pins it off — modal editing is a
+                  trap for a visitor who did not ask for it. */}
+              {!demo && (
               <label className="settings-row">
                 <span className="settings-row-label">
                   Vim mode
@@ -7280,6 +7286,7 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              )}
             </section>
             {/* Demo mode has nothing to sync with: the whole autosync/live
                 sync group hides — the server refuses the changes anyway. */}
