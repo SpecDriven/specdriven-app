@@ -59,6 +59,12 @@ interface MarkdownEditorProps {
    * source and in the preview, and the first one is scrolled into view.
    */
   highlight?: string[];
+  /**
+   * The tab the editor opens on. Write by default (Vim, with Vim mode on);
+   * "preview" for text the user is more likely to read than rewrite — the
+   * feature description opens rendered, and Write is a click away.
+   */
+  initialTab?: "write" | "preview";
 }
 
 type Tab = "write" | "vim" | "preview";
@@ -75,9 +81,12 @@ export function MarkdownEditor({
   readOnly = false,
   placeholder,
   highlight,
+  initialTab,
 }: MarkdownEditorProps) {
   const vimOn = useVimMode();
-  const [tab, setTab] = useState<Tab>(readOnly ? "preview" : vimOn ? "vim" : "write");
+  const [tab, setTab] = useState<Tab>(
+    readOnly || initialTab === "preview" ? "preview" : vimOn ? "vim" : "write",
+  );
   // The Settings switch flipping while an editor is open moves it over; a
   // read-only body has nothing to edit, so it never shows the Vim tab.
   useEffect(() => {

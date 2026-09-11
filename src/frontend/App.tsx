@@ -262,6 +262,45 @@ function storeSidebarWidth(w: number): void {
   }
 }
 
+// Description editor height (specs/editor/feature-editor.feature.md): the
+// editor opens a third of the window tall and is dragged taller or shorter by
+// the strip along its lower boundary. Device-local, like the sidebar width.
+const DESC_MIN = 120;
+
+export function clampDescHeight(h: number, windowHeight: number): number {
+  // The scenario list below keeps at least a quarter of the window, so the
+  // editor can never swallow the page it belongs to.
+  const max = Math.max(DESC_MIN, Math.round(windowHeight * 0.75));
+  return Math.min(Math.max(Math.round(h), DESC_MIN), max);
+}
+
+function readDescHeight(): number | null {
+  try {
+    const h = Number(localStorage.getItem("sd-desc-height"));
+    // Nothing stored, or junk: the CSS default stands until a first drag.
+    return Number.isFinite(h) && h >= DESC_MIN ? Math.round(h) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeDescHeight(h: number): void {
+  try {
+    localStorage.setItem("sd-desc-height", String(h));
+  } catch {
+    // Storage unavailable (private mode): the height just won't stick.
+  }
+}
+
+/** Double-click on the strip: back to the CSS default, and it stays there. */
+function clearDescHeight(): void {
+  try {
+    localStorage.removeItem("sd-desc-height");
+  } catch {
+    // Storage unavailable: nothing was stored to clear.
+  }
+}
+
 // The sidebar's tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
 // .md): Specs, the feature tree, and one tab per special folder the settings
 // show — Roadmap and Tasks, each a list of markdown pages. They all share the
@@ -1202,6 +1241,14 @@ export function App() {
   selectedRef.current = selected;
   const descSaved = useRef<string | null>(null);
   const descInFlight = useRef(false);
+  // The editor's height, dragged by the strip along its lower boundary. null
+  // until a first drag or a stored height: then the CSS third-of-the-window
+  // default stands, and follows the window.
+  const [descHeight, setDescHeight] = useState<number | null>(readDescHeight);
+  /** True while that strip is being dragged; holds the drag's starting point. */
+  const descDrag = useRef<{ y: number; height: number } | null>(null);
+  const [resizingDesc, setResizingDesc] = useState(false);
+  const descPaneRef = useRef<HTMLDivElement | null>(null);
   // Git engine (specs/git-operations.spec.md): the GitHub CLI (the default
   // wherever gh is installed), plain system git, or the bundled JavaScript
   // one — which is always available, so it needs no availability flag.
@@ -6654,16 +6701,83 @@ export function App() {
               /* specs/editor/feature-editor.feature.md "Edit feature
                  descrition": the description pane becomes the editor, sized
                  like the rendered pane so the scenario list stays in view. */
-              <div className="feature-desc-editor">
+              <div
+                className={`feature-desc-editor${resizingDesc ? " resizing" : ""}`}
+                ref={descPaneRef}
+                style={
+                  descHeight === null ? undefined : ({ "--desc-h": `${descHeight}px` } as CSSProperties)
+                }
+              >
                 <MarkdownEditor
                   value={descEdit.text}
                   onChange={(text) => setDescEdit({ file: descEdit.file, text })}
                   placeholder="Describe this feature — any markdown. Saved automatically."
+                  // Opens rendered — a description is read far more often
+                  // than rewritten. A blank one has nothing to render, so a
+                  // new feature's editor opens ready to type into instead.
+                  initialTab={descSaved.current ? "preview" : "write"}
                 />
                 <span className="readme-hint">
                   Saved automatically every {autosaveSeconds} seconds; the next sync pushes it.
                   Done shows it rendered.
                 </span>
+                {/* The editor's lower boundary is a grab strip: drag it to give
+                    the description more or less room, double-click to restore
+                    the default third of the window. Sized like the sidebar
+                    divider, and nudged by the arrow keys when focused. */}
+                <div
+                  className="desc-resizer"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Resize the description editor"
+                  aria-valuemin={DESC_MIN}
+                  aria-valuenow={descHeight ?? undefined}
+                  tabIndex={0}
+                  onPointerDown={(e) => {
+                    const pane = descPaneRef.current;
+                    if (!pane) return;
+                    e.preventDefault();
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    // From wherever the pane stands now, so the first drag off
+                    // the CSS default doesn't jump.
+                    descDrag.current = { y: e.clientY, height: pane.getBoundingClientRect().height };
+                    setResizingDesc(true);
+                  }}
+                  onPointerMove={(e) => {
+                    const start = descDrag.current;
+                    if (!start) return;
+                    setDescHeight(
+                      clampDescHeight(start.height + (e.clientY - start.y), window.innerHeight),
+                    );
+                  }}
+                  onPointerUp={(e) => {
+                    const start = descDrag.current;
+                    if (!start) return;
+                    descDrag.current = null;
+                    setResizingDesc(false);
+                    storeDescHeight(
+                      clampDescHeight(start.height + (e.clientY - start.y), window.innerHeight),
+                    );
+                  }}
+                  onLostPointerCapture={() => {
+                    descDrag.current = null;
+                    setResizingDesc(false);
+                  }}
+                  onDoubleClick={() => {
+                    setDescHeight(null);
+                    clearDescHeight();
+                  }}
+                  onKeyDown={(e) => {
+                    const delta = e.key === "ArrowDown" ? 16 : e.key === "ArrowUp" ? -16 : 0;
+                    if (delta === 0) return;
+                    e.preventDefault();
+                    const from = descHeight ?? descPaneRef.current?.getBoundingClientRect().height;
+                    if (from === undefined) return;
+                    const h = clampDescHeight(from + delta, window.innerHeight);
+                    setDescHeight(h);
+                    storeDescHeight(h);
+                  }}
+                />
               </div>
             ) : (
               feature.description && (
