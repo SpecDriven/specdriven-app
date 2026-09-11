@@ -212,6 +212,23 @@ first launch needs Gatekeeper approval on macOS, and the `.deb` is installed
 with `sudo apt install ./specdriven_<version>_amd64.deb` (the AppImage just
 needs `chmod +x`).
 
+To check that a build actually starts — and starts again — run the restart
+crash test:
+
+```sh
+bun run test:desktop                # build, package the unpacked app, launch it 3 times
+bun run test:desktop --no-build     # the same against what release/ already holds
+bun run test:desktop --unpackaged   # skip electron-builder: node_modules' electron on dist/
+```
+
+Each launch runs on a throwaway profile, waits for the window to render,
+holds a few seconds, then asks the app to quit (SIGTERM, which Electron
+treats as `app.quit()`); a launch fails on a crash, an uncaught exception in
+the main process, a window that never renders, or a quit that hangs. Logs, a screenshot per launch and
+`summary.json` land in `dist/crash-test/`. Headless Linux gets an Xvfb of its
+own. The details, and how to read a failure, are in
+[.claude/skills/electron-crash-test/SKILL.md](.claude/skills/electron-crash-test/SKILL.md).
+
 Two Linux settings are load-bearing and easy to lose, both verified by
 installing the artifacts in bare Debian and Ubuntu containers:
 `deb.depends` adds `libasound2t64 | libasound2` (Electron loads ALSA;
