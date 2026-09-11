@@ -73,7 +73,12 @@ export function selectPlatforms(args: string[], osPlatform: string): Platform[] 
   return selected;
 }
 
-async function build(platforms: Platform[]): Promise<void> {
+/**
+ * The first two steps — the renderer bundle and the main-process bundle —
+ * which is all a local launch needs (scripts/crash-test-desktop.ts runs them
+ * without the installers).
+ */
+export async function bundleDesktop(): Promise<void> {
   console.log("Building renderer…");
   await rm("dist/renderer", { recursive: true, force: true });
   await $`bun build src/index.html --outdir dist/renderer --production`.quiet();
@@ -84,6 +89,10 @@ async function build(platforms: Platform[]): Promise<void> {
   // runs the developer's own `claude` (src/server/agentChat.ts).
   const sdkBinaries = "@anthropic-ai/claude-agent-sdk-*";
   await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
+}
+
+async function build(platforms: Platform[]): Promise<void> {
+  await bundleDesktop();
 
   console.log(`Packaging with electron-builder (${platforms.join(", ")})…`);
   await $`bunx electron-builder ${platforms.map((p) => `--${p}`)}`;
