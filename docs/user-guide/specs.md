@@ -196,8 +196,12 @@ Below, in one scrolling column:
 - **Body**: a markdown editor with **Write** and **Preview** tabs. `⌘B`,
   `⌘I` and `⌘K` insert bold, italic and a link. Paste an image or pick one
   with the image button; it is stored under the data folder's `.images/` and
-  referenced from the body. Images are limited to 10 MB. With **Vim mode**
-  on, a **Vim** tab appears as well.
+  referenced from the body. Images are limited to 10 MB. A pasted screenshot
+  shows at its full pixel size: in **Preview**, drag the handle at an image's
+  bottom-right corner to size it (the arrow keys nudge it once the handle has
+  focus), and double-click the handle for the natural size. The width is
+  kept in the body as `<img src="…" alt="…" width="…">`, which any markdown
+  viewer honours. With **Vim mode** on, a **Vim** tab appears as well.
 - **Scenario table**: a grid over the last markdown table in the body. Add
   and remove columns and rows here rather than editing the table by hand;
   writing `{name}` in the body creates a column of that name. **+ Add
