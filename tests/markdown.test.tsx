@@ -1,15 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  imageRefs,
   insertImage,
   insertLink,
   renderMarkdown,
+  setImageWidth,
   toggleHeading,
   toggleInline,
   toggleLinePrefix,
 } from "../src/frontend/markdown";
 
-const html = (src: string) => renderToStaticMarkup(<>{renderMarkdown(src)}</>);
+// React's server renderer hoists a preload <link> for every image in the
+// markup; only the content is under test here.
+const html = (src: string) =>
+  renderToStaticMarkup(<>{renderMarkdown(src)}</>).replace(/<link rel="preload"[^>]*\/>/g, "");
 
 describe("renderMarkdown", () => {
   test("headings", () => {
@@ -85,6 +90,151 @@ describe("renderMarkdown", () => {
     expect(out).toContain("<table>");
     expect(out).toContain("<th>a</th>");
     expect(out).toContain("<td>2</td>");
+  });
+
+  // specs/images.spec.md: `![alt](url)` is what a paste inserts; the sized
+  // form the Preview tab's handle writes is the one HTML tag rendered.
+  describe("images", () => {
+    test("markdown image", () => {
+      expect(html("![shot](/api/images/shot-1a2b3c4d.png)")).toBe(
+        '<p><img src="/api/images/shot-1a2b3c4d.png" alt="shot"/></p>',
+      );
+    });
+
+    test("an <img> tag renders with its src, alt, width and height", () => {
+      expect(html('<img src="/x.png" alt="shot" width="320">')).toBe(
+        '<p><img src="/x.png" alt="shot" width="320"/></p>',
+      );
+      expect(html("see <img src='/x.png' width=50% height=\"20\" /> here")).toBe(
+        '<p>see <img src="/x.png" alt="" width="50%" height="20"/> here</p>',
+      );
+      expect(html('<img SRC="/x.png" ALT="a &amp; b">')).toBe('<p><img src="/x.png" alt="a &amp; b"/></p>');
+    });
+
+    test("anything else on the tag is dropped; a bad size is no size", () => {
+      expect(html('<img src="/x.png" onerror="alert(1)" style="x" class="y" width="wide">')).toBe(
+        '<p><img src="/x.png" alt=""/></p>',
+      );
+      // A hand-typed "px" is read the way browsers read it.
+      expect(html('<img src="/x.png" width="320px">')).toBe('<p><img src="/x.png" alt="" width="320"/></p>');
+    });
+
+    test("an unsafe or missing src leaves the tag as text", () => {
+      for (const src of ['<img src="javascript:alert(1)">', '<img src="data:x">', '<img alt="no src">', "<img>"]) {
+        const out = html(src);
+        expect(out).not.toContain("<img");
+        expect(out).toContain("&lt;img");
+      }
+      const md = html("![x](javascript:alert(1))");
+      expect(md).not.toContain("<img");
+    });
+
+    test("other html stays escaped", () => {
+      const out = html('<image src="/x.png"><script>x</script>');
+      expect(out).not.toContain("<image");
+      expect(out).not.toContain("<script");
+      expect(out).toContain("&lt;script&gt;");
+    });
+  });
+});
+
+// specs/images.spec.md: the preview finds every image and where it sits in
+// the source, in the order it shows them — through quotes, tables and
+// formatting, but not inside code, which the preview does not render.
+describe("imageRefs", () => {
+  test("places each image in the source", () => {
+    const text = "Given ![shot](/api/images/shot-1a2b3c4d.png) here";
+    const refs = imageRefs(text);
+    expect(refs).toHaveLength(1);
+    const r = refs[0]!;
+    expect(text.slice(r.start, r.end)).toBe("![shot](/api/images/shot-1a2b3c4d.png)");
+    expect(r).toMatchObject({ src: "/api/images/shot-1a2b3c4d.png", alt: "shot", width: null, height: null });
+  });
+
+  test("follows the preview's order and skips code", () => {
+    const text = [
+      "```",
+      "![in code](/nope.png)",
+      "```",
+      "> quoted ![one](/1.png)",
+      "| a | b |",
+      "| --- | --- |",
+      '| ![two](/2.png) | <img src="/3.png" alt="three" width="120"> |',
+      "`![inline code](/nope.png)` and **bold ![four](/4.png)**",
+      "- [ ] task ![five](/5.png)",
+    ].join("\n");
+    const refs = imageRefs(text);
+    expect(refs.map((r) => r.alt)).toEqual(["one", "two", "three", "four", "five"]);
+    expect(refs.map((r) => text.slice(r.start, r.end))).toEqual([
+      "![one](/1.png)",
+      "![two](/2.png)",
+      '<img src="/3.png" alt="three" width="120">',
+      "![four](/4.png)",
+      "![five](/5.png)",
+    ]);
+    expect(refs[2]!.width).toBe("120");
+  });
+
+  test("reads the tag's attributes back, entities decoded", () => {
+    const [r] = imageRefs('<img alt="say &quot;hi&quot; &amp; bye" src="/x.png" height="40">');
+    expect(r).toMatchObject({ src: "/x.png", alt: 'say "hi" & bye', width: null, height: "40" });
+  });
+
+  test("an image whose url is refused is not one", () => {
+    expect(imageRefs("![x](javascript:alert(1)) ![y](/y.png)").map((r) => r.alt)).toEqual(["y"]);
+  });
+});
+
+// specs/images.spec.md: the Preview tab's handle writes the width into the
+// source as an <img> tag; the natural size puts the markdown form back.
+describe("setImageWidth", () => {
+  test("turns the markdown form into a sized tag", () => {
+    expect(setImageWidth("a ![shot](/x.png) b", 0, 320)).toBe('a <img src="/x.png" alt="shot" width="320"> b');
+  });
+
+  test("targets the nth image only", () => {
+    expect(setImageWidth("![a](/1.png) ![b](/2.png)", 1, 200)).toBe(
+      '![a](/1.png) <img src="/2.png" alt="b" width="200">',
+    );
+  });
+
+  test("re-sizes a tag, dropping a height so the proportions hold", () => {
+    expect(setImageWidth('<img src="/x.png" alt="s" width="320" height="200">', 0, 100.4)).toBe(
+      '<img src="/x.png" alt="s" width="100">',
+    );
+  });
+
+  test("the natural size is the markdown form again", () => {
+    expect(setImageWidth('<img src="/x.png" alt="shot" width="320">', 0, null)).toBe("![shot](/x.png)");
+    expect(setImageWidth("![shot](/x.png)", 0, null)).toBe("![shot](/x.png)");
+  });
+
+  test("an alt or url the markdown form cannot carry keeps the tag", () => {
+    expect(setImageWidth('<img src="/x.png" alt="a]b" width="1">', 0, null)).toBe('<img src="/x.png" alt="a]b">');
+    expect(setImageWidth('<img src="/x(1).png" alt="a" width="1">', 0, null)).toBe('<img src="/x(1).png" alt="a">');
+  });
+
+  test("quotes in the alt survive the round trip", () => {
+    const sized = setImageWidth('![say "hi"](/x.png)', 0, 50);
+    expect(sized).toBe('<img src="/x.png" alt="say &quot;hi&quot;" width="50">');
+    expect(html(sized)).toBe('<p><img src="/x.png" alt="say &quot;hi&quot;" width="50"/></p>');
+    expect(setImageWidth(sized, 0, null)).toBe('![say "hi"](/x.png)');
+  });
+
+  test("a width is whole pixels, at least one", () => {
+    expect(setImageWidth("![a](/x.png)", 0, 0)).toContain('width="1"');
+    expect(setImageWidth("![a](/x.png)", 0, 99.5)).toContain('width="100"');
+  });
+
+  test("leaves the text alone when there is no such image, or no such width", () => {
+    expect(setImageWidth("no images", 0, 100)).toBe("no images");
+    expect(setImageWidth("![a](/x.png)", 1, 100)).toBe("![a](/x.png)");
+    expect(setImageWidth("![a](/x.png)", 0, NaN)).toBe("![a](/x.png)");
+    expect(setImageWidth("![a](/x.png)", 0, Infinity)).toBe("![a](/x.png)");
+  });
+
+  test("reads CRLF as the preview does", () => {
+    expect(setImageWidth("x\r\n![a](/1.png)", 0, 10)).toBe('x\n<img src="/1.png" alt="a" width="10">');
   });
 });
 
