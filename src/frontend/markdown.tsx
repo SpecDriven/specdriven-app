@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MarkdownImage } from "./MarkdownImage";
 import { TEST_REF_RE, renderTestInEditor } from "./testref";
 
 // Markdown support for the scenario edit dialog (specs/ui.spec.md "Scenario
@@ -8,6 +9,15 @@ import { TEST_REF_RE, renderTestInEditor } from "./testref";
 // Beyond standard markdown the preview knows one house token: `[test:<url>]`
 // or `[test:<name>:<url>]` (specs/external-links/test-traceability.feature.md),
 // shown as a link named after the test — see ./testref.
+//
+// Images (specs/images.spec.md) have two spellings: `![alt](url)`, what a
+// paste inserts, and `<img src="…" alt="…" width="…">` — the one HTML tag the
+// preview renders, because it is how markdown everywhere sizes an image, and
+// it is what the Preview tab's resize handle writes (setImageWidth). Only
+// src, alt, width and height are read off the tag; anything else is dropped.
+// The renderer also notes where each image sits in the source (imageRefs),
+// so the handle on the nth image on screen edits the nth reference in the
+// text — whatever code blocks, quotes or tables lie between.
 
 /** Only these destinations are allowed for links/images in the preview. */
 function safeUrl(url: string): string | null {
@@ -22,14 +32,111 @@ const INLINE = new RegExp(
     "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
     "~~(?<strike>.+?)~~",
     "!\\[(?<alt>[^\\]]*)\\]\\((?<src>[^)]+)\\)",
+    "<img\\s+(?<tag>[^<>]*)>",
     TEST_REF_RE.source.replace("(?<url>", "(?<test>").replace("(?<name>", "(?<testname>"),
     "\\[(?<text>[^\\]]+)\\]\\((?<href>[^)]+)\\)",
   ].join("|"),
 );
 
-function parseInline(input: string, keyBase: string): ReactNode[] {
+// ---- The <img> tag: its attributes, read and written ----
+
+/** `name="value"`, `name='value'` or `name=value`, as attributes are written. */
+const ATTR = /([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))/g;
+
+const ENTITIES: Record<string, string> = {
+  quot: '"',
+  apos: "'",
+  "#39": "'",
+  lt: "<",
+  gt: ">",
+  amp: "&",
+};
+
+function decodeAttr(value: string): string {
+  return value.replace(/&(quot|apos|#39|lt|gt|amp);/g, (_, e: string) => ENTITIES[e]!);
+}
+
+function encodeAttr(value: string): string {
+  return value.replace(/[&"<>]/g, (c) => `&${{ "&": "amp", '"': "quot", "<": "lt", ">": "gt" }[c]};`);
+}
+
+interface ImageAttrs {
+  src?: string;
+  alt?: string;
+  width?: string;
+  height?: string;
+}
+
+/** The attributes the preview honours, off the inside of an `<img …>` tag. */
+function imageTagAttrs(tag: string): ImageAttrs {
+  const a: Record<string, string> = {};
+  for (const m of tag.matchAll(ATTR)) a[m[1]!.toLowerCase()] = decodeAttr(m[2] ?? m[3] ?? m[4] ?? "");
+  return { src: a.src, alt: a.alt, width: a.width, height: a.height };
+}
+
+/**
+ * A width or height as the attribute takes it: whole pixels (a "px" someone
+ * typed by hand is forgiven, as browsers forgive it) or a percentage.
+ */
+function dimension(value: string | undefined): string | null {
+  const m = value?.trim().match(/^(\d+)(px|%)?$/);
+  return m ? `${m[1]}${m[2] === "%" ? "%" : ""}` : null;
+}
+
+// ---- Rendering ----
+
+/** An image reference in the source, as the preview found it (imageRefs). */
+export interface ImageRef {
+  /** Offsets of the whole `![…](…)` or `<img …>` in the (LF-normalised) source. */
+  start: number;
+  end: number;
+  src: string;
+  alt: string;
+  /** The width and height as written (`"320"`, `"50%"`) — null when not set. */
+  width: string | null;
+  height: string | null;
+}
+
+/** What one render accumulates: its images, in the order they appear. */
+interface Ctx {
+  images: ImageRef[];
+}
+
+/** A run of source text and the offset of its first character in the source. */
+interface Span {
+  text: string;
+  at: number;
+}
+
+function image(ctx: Ctx, key: string, snippet: string, at: number, a: ImageAttrs): ReactNode {
+  const src = a.src === undefined ? null : safeUrl(a.src);
+  if (!src) return snippet;
+  const ref: ImageRef = {
+    start: at,
+    end: at + snippet.length,
+    src,
+    alt: a.alt ?? "",
+    width: dimension(a.width),
+    height: dimension(a.height),
+  };
+  const index = ctx.images.push(ref) - 1;
+  return (
+    <MarkdownImage
+      key={key}
+      index={index}
+      src={src}
+      alt={ref.alt}
+      width={ref.width ?? undefined}
+      height={ref.height ?? undefined}
+    />
+  );
+}
+
+/** Inline markdown in `input`, which starts at offset `at` of the source. */
+function parseInline(input: string, keyBase: string, at: number, ctx: Ctx): ReactNode[] {
   const out: ReactNode[] = [];
   let rest = input;
+  let pos = at; // where `rest` starts in the source
   let k = 0;
   while (rest.length > 0) {
     const m = INLINE.exec(rest);
@@ -40,19 +147,21 @@ function parseInline(input: string, keyBase: string): ReactNode[] {
     if (m.index > 0) out.push(rest.slice(0, m.index));
     const g = m.groups!;
     const key = `${keyBase}.${k++}`;
+    const start = pos + m.index;
     if (g.code !== undefined) {
       out.push(<code key={key}>{g.code}</code>);
     } else if (g.bold !== undefined) {
-      out.push(<strong key={key}>{parseInline(g.bold, key)}</strong>);
+      out.push(<strong key={key}>{parseInline(g.bold, key, start + g.bmark!.length, ctx)}</strong>);
     } else if (g.star !== undefined) {
-      out.push(<em key={key}>{parseInline(g.star, key)}</em>);
+      out.push(<em key={key}>{parseInline(g.star, key, start + 1, ctx)}</em>);
     } else if (g.under !== undefined) {
-      out.push(<em key={key}>{parseInline(g.under, key)}</em>);
+      out.push(<em key={key}>{parseInline(g.under, key, start + 1, ctx)}</em>);
     } else if (g.strike !== undefined) {
-      out.push(<del key={key}>{parseInline(g.strike, key)}</del>);
+      out.push(<del key={key}>{parseInline(g.strike, key, start + 2, ctx)}</del>);
     } else if (g.src !== undefined) {
-      const src = safeUrl(g.src);
-      out.push(src ? <img key={key} src={src} alt={g.alt ?? ""} /> : m[0]);
+      out.push(image(ctx, key, m[0], start, { src: g.src, alt: g.alt ?? "" }));
+    } else if (g.tag !== undefined) {
+      out.push(image(ctx, key, m[0], start, imageTagAttrs(g.tag)));
     } else if (g.test !== undefined) {
       const { label, href, title } = renderTestInEditor.render(g.test, g.testname);
       out.push(
@@ -69,14 +178,15 @@ function parseInline(input: string, keyBase: string): ReactNode[] {
       out.push(
         href ? (
           <a key={key} href={href} target="_blank" rel="noreferrer">
-            {parseInline(g.text!, key)}
+            {parseInline(g.text!, key, start + 1, ctx)}
           </a>
         ) : (
-          <span key={key}>{parseInline(g.text!, key)}</span>
+          <span key={key}>{parseInline(g.text!, key, start + 1, ctx)}</span>
         ),
       );
     }
     rest = rest.slice(m.index + m[0].length);
+    pos = start + m[0].length;
   }
   return out;
 }
@@ -87,33 +197,63 @@ const TASK_ITEM = /^\[([ xX])\]\s+(.*)$/;
 const HR = /^ {0,3}(-{3,}|\*{3,}|_{3,})\s*$/;
 const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
-function tableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((c) => c.trim());
+/** The rest of a line after a prefix the block syntax owns (`## `, `- `, `> `). */
+function tail(line: Span, text: string): Span {
+  return { text, at: line.at + line.text.length - text.length };
+}
+
+/** A table row's cells, trimmed, each placed in the source. */
+function tableCells(line: Span): Span[] {
+  let text = line.text;
+  let at = line.at + (text.length - text.trimStart().length);
+  text = text.trim();
+  if (text.startsWith("|")) {
+    text = text.slice(1);
+    at += 1;
+  }
+  if (text.endsWith("|")) text = text.slice(0, -1);
+  const cells: Span[] = [];
+  let pos = 0;
+  for (const raw of text.split("|")) {
+    cells.push({ text: raw.trim(), at: at + pos + (raw.length - raw.trimStart().length) });
+    pos += raw.length + 1;
+  }
+  return cells;
+}
+
+/** The source as lines, CRLF read as LF, each with its offset. */
+function spans(src: string): Span[] {
+  const out: Span[] = [];
+  let at = 0;
+  for (const text of src.replaceAll("\r\n", "\n").split("\n")) {
+    out.push({ text, at });
+    at += text.length + 1;
+  }
+  return out;
 }
 
 /** Render markdown as React elements. Returns null for blank input. */
 export function renderMarkdown(src: string): ReactNode {
-  const lines = src.replaceAll("\r\n", "\n").split("\n");
+  return renderBlocks(spans(src), { images: [] });
+}
+
+function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
   const out: ReactNode[] = [];
   let i = 0;
   let k = 0;
   const key = () => `b${k++}`;
+  const inline = (s: Span, kk: string) => parseInline(s.text, kk, s.at, ctx);
 
   while (i < lines.length) {
     const line = lines[i]!;
-    if (line.trim() === "") {
+    if (line.text.trim() === "") {
       i++;
       continue;
     }
-    if (/^```/.test(line)) {
+    if (/^```/.test(line.text)) {
       const buf: string[] = [];
       i++;
-      while (i < lines.length && !/^```\s*$/.test(lines[i]!)) buf.push(lines[i++]!);
+      while (i < lines.length && !/^```\s*$/.test(lines[i]!.text)) buf.push(lines[i++]!.text);
       i++; // closing fence (or end of input)
       out.push(
         <pre key={key()}>
@@ -122,40 +262,43 @@ export function renderMarkdown(src: string): ReactNode {
       );
       continue;
     }
-    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    const h = line.text.match(/^(#{1,6})\s+(.*)$/);
     if (h) {
       const Tag = `h${h[1]!.length}` as "h1";
       const kk = key();
-      out.push(<Tag key={kk}>{parseInline(h[2]!, kk)}</Tag>);
+      out.push(<Tag key={kk}>{inline(tail(line, h[2]!), kk)}</Tag>);
       i++;
       continue;
     }
-    if (HR.test(line)) {
+    if (HR.test(line.text)) {
       out.push(<hr key={key()} />);
       i++;
       continue;
     }
-    if (/^\s*>/.test(line)) {
-      const buf: string[] = [];
-      while (i < lines.length && /^\s*>/.test(lines[i]!)) buf.push(lines[i++]!.replace(/^\s*> ?/, ""));
-      out.push(<blockquote key={key()}>{renderMarkdown(buf.join("\n"))}</blockquote>);
+    if (/^\s*>/.test(line.text)) {
+      const buf: Span[] = [];
+      while (i < lines.length && /^\s*>/.test(lines[i]!.text)) {
+        const l = lines[i++]!;
+        buf.push(tail(l, l.text.replace(/^\s*> ?/, "")));
+      }
+      out.push(<blockquote key={key()}>{renderBlocks(buf, ctx)}</blockquote>);
       continue;
     }
-    if (UL_ITEM.test(line) && !HR.test(line)) {
+    if (UL_ITEM.test(line.text) && !HR.test(line.text)) {
       const items: ReactNode[] = [];
-      while (i < lines.length && UL_ITEM.test(lines[i]!) && !HR.test(lines[i]!)) {
-        const content = lines[i]!.match(UL_ITEM)![1]!;
-        const task = content.match(TASK_ITEM);
+      while (i < lines.length && UL_ITEM.test(lines[i]!.text) && !HR.test(lines[i]!.text)) {
+        const content = tail(lines[i]!, lines[i]!.text.match(UL_ITEM)![1]!);
+        const task = content.text.match(TASK_ITEM);
         const kk = key();
         items.push(
           <li key={kk} className={task ? "task" : undefined}>
             {task ? (
               <>
                 <input type="checkbox" checked={task[1] !== " "} readOnly disabled />{" "}
-                {parseInline(task[2]!, kk)}
+                {inline(tail(content, task[2]!), kk)}
               </>
             ) : (
-              parseInline(content, kk)
+              inline(content, kk)
             )}
           </li>,
         );
@@ -164,29 +307,29 @@ export function renderMarkdown(src: string): ReactNode {
       out.push(<ul key={key()}>{items}</ul>);
       continue;
     }
-    if (OL_ITEM.test(line)) {
+    if (OL_ITEM.test(line.text)) {
       const items: ReactNode[] = [];
-      while (i < lines.length && OL_ITEM.test(lines[i]!)) {
+      while (i < lines.length && OL_ITEM.test(lines[i]!.text)) {
         const kk = key();
-        items.push(<li key={kk}>{parseInline(lines[i]!.match(OL_ITEM)![1]!, kk)}</li>);
+        items.push(<li key={kk}>{inline(tail(lines[i]!, lines[i]!.text.match(OL_ITEM)![1]!), kk)}</li>);
         i++;
       }
       out.push(<ol key={key()}>{items}</ol>);
       continue;
     }
-    if (line.includes("|") && i + 1 < lines.length && TABLE_DIVIDER.test(lines[i + 1]!)) {
-      const headers = tableRow(line);
+    if (line.text.includes("|") && i + 1 < lines.length && TABLE_DIVIDER.test(lines[i + 1]!.text)) {
+      const headers = tableCells(line);
       i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i]!.includes("|") && lines[i]!.trim() !== "")
-        rows.push(tableRow(lines[i++]!));
+      const rows: Span[][] = [];
+      while (i < lines.length && lines[i]!.text.includes("|") && lines[i]!.text.trim() !== "")
+        rows.push(tableCells(lines[i++]!));
       const kk = key();
       out.push(
         <table key={kk}>
           <thead>
             <tr>
               {headers.map((c, j) => (
-                <th key={j}>{parseInline(c, `${kk}h${j}`)}</th>
+                <th key={j}>{inline(c, `${kk}h${j}`)}</th>
               ))}
             </tr>
           </thead>
@@ -194,7 +337,7 @@ export function renderMarkdown(src: string): ReactNode {
             {rows.map((r, ri) => (
               <tr key={ri}>
                 {r.map((c, ci) => (
-                  <td key={ci}>{parseInline(c, `${kk}r${ri}c${ci}`)}</td>
+                  <td key={ci}>{inline(c, `${kk}r${ri}c${ci}`)}</td>
                 ))}
               </tr>
             ))}
@@ -205,11 +348,11 @@ export function renderMarkdown(src: string): ReactNode {
     }
     // Paragraph: consecutive plain lines, soft breaks kept as <br> (scenario
     // steps are usually one per line without blank lines between them).
-    const buf: string[] = [];
+    const buf: Span[] = [];
     while (
       i < lines.length &&
-      lines[i]!.trim() !== "" &&
-      !/^(#{1,6}\s|```|\s*>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(lines[i]!)
+      lines[i]!.text.trim() !== "" &&
+      !/^(#{1,6}\s|```|\s*>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(lines[i]!.text)
     )
       buf.push(lines[i++]!);
     if (buf.length === 0) buf.push(lines[i++]!);
@@ -217,12 +360,46 @@ export function renderMarkdown(src: string): ReactNode {
     out.push(
       <p key={kk}>
         {buf.flatMap((l, j) =>
-          j === 0 ? [parseInline(l, `${kk}l${j}`)] : [<br key={`${kk}br${j}`} />, parseInline(l, `${kk}l${j}`)],
+          j === 0 ? [inline(l, `${kk}l${j}`)] : [<br key={`${kk}br${j}`} />, inline(l, `${kk}l${j}`)],
         )}
       </p>,
     );
   }
   return out.length > 0 ? out : null;
+}
+
+// ---- Image sizing (specs/images.spec.md) ----
+
+/**
+ * The images in `src` in the order the preview shows them, each with where
+ * it sits in the source (CRLF read as LF, as the preview reads it). Found by
+ * the renderer itself, so the nth image on screen is always refs[n].
+ */
+export function imageRefs(src: string): ImageRef[] {
+  const ctx: Ctx = { images: [] };
+  renderBlocks(spans(src), ctx);
+  return ctx.images;
+}
+
+/**
+ * The source with its nth image (imageRefs order) set to `width` pixels,
+ * spelled `<img src="…" alt="…" width="…">` — or, with null, back at its
+ * natural size: plain `![alt](src)` again, unless the alt or url cannot be
+ * written that way. A height the tag carried goes, so the image keeps its
+ * proportions. Unchanged when there is no such image.
+ */
+export function setImageWidth(src: string, index: number, width: number | null): string {
+  if (width !== null && !Number.isFinite(width)) return src;
+  const text = src.replaceAll("\r\n", "\n");
+  const ref = imageRefs(text)[index];
+  if (!ref) return src;
+  const w = width === null ? null : Math.max(1, Math.round(width));
+  const plain = !ref.alt.includes("]") && !ref.src.includes(")");
+  const md =
+    w === null && plain
+      ? `![${ref.alt}](${ref.src})`
+      : `<img src="${encodeAttr(ref.src)}" alt="${encodeAttr(ref.alt)}"${w === null ? "" : ` width="${w}"`}>`;
+  return text.slice(0, ref.start) + md + text.slice(ref.end);
 }
 
 // ---- Toolbar text edits (pure, so they are unit-testable) ----
