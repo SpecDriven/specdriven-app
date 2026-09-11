@@ -885,19 +885,84 @@ button {
 
 /* The description pane while it is being edited (specs/editor/feature-
    editor.feature.md): the editor takes the pane's third of the screen and
-   scrolls inside it, so the scenario list below keeps its room. */
+   scrolls inside it, so the scenario list below keeps its room. Dragging the
+   strip on its lower boundary sets --desc-h and the pane follows. */
 .feature-desc-editor {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  height: 33vh;
+  height: var(--desc-h, 33vh);
   min-height: 0;
+}
+
+.feature-desc-editor.resizing {
+  cursor: row-resize;
+  user-select: none;
 }
 
 .feature-desc-editor .readme-hint {
   color: var(--text-3);
   font-size: 0.75rem;
+  /* room under the hint for the grab strip on the boundary, so a pane dragged
+     down to its minimum never has the strip drawn across the words */
+  padding-bottom: 0.45rem;
+}
+
+/* The grab strip on the editor's lower boundary: a full-width rule with a
+   grip pill at its middle, always drawn so the boundary reads as something
+   to take hold of — a sheet handle. Hover, focus and drag light it up.
+   Outside the flow, so grabbing it never shifts the pane. */
+.desc-resizer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 12px;
+  cursor: row-resize;
+  z-index: 5;
+}
+
+/* the rule along the boundary */
+.desc-resizer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-3);
+  opacity: 0.55;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+/* the grip at its middle */
+.desc-resizer::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 3px;
+  width: 44px;
+  height: 6px;
+  margin-left: -22px;
+  border-radius: 3px;
+  background: var(--text-3);
+  transition: background 0.15s ease;
+}
+
+.desc-resizer:hover::before,
+.desc-resizer:focus-visible::before,
+.feature-desc-editor.resizing .desc-resizer::before {
+  background: var(--accent);
+  opacity: 0.7;
+}
+
+.desc-resizer:hover::after,
+.desc-resizer:focus-visible::after,
+.feature-desc-editor.resizing .desc-resizer::after {
+  background: var(--accent);
 }
 
 .scenarios {
