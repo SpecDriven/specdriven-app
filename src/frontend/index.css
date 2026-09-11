@@ -1875,6 +1875,91 @@ button.link:disabled {
 
 .md-preview img {
   max-width: 100%;
+  /* A width set on the image (specs/images.spec.md) keeps its proportions,
+     also when the pane is narrower than it and max-width steps in. */
+  height: auto;
+}
+
+/* Image sizing (specs/images.spec.md, src/frontend/MarkdownImage.tsx): in an
+   editable Preview each image sits in a wrapper the size of the image, with
+   a handle at its bottom-right corner and a badge naming the width. Both
+   appear on hover, while dragging, and while the handle has focus. */
+.md-img {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.md-img img {
+  display: block;
+}
+
+.md-img.resizing img {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.md-img-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface-2);
+  box-shadow: var(--shadow-md);
+  cursor: nwse-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.md-img:hover .md-img-handle,
+.md-img.resizing .md-img-handle,
+.md-img-handle:focus-visible {
+  opacity: 1;
+}
+
+.md-img-handle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.md-img-size {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  padding: 0.05em 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.md-img:hover .md-img-size,
+.md-img.resizing .md-img-size,
+.md-img:focus-within .md-img-size {
+  opacity: 1;
+}
+
+/* A finger cannot hover: on a touch screen the handle is always there. */
+@media (pointer: coarse) {
+  .md-img-handle {
+    opacity: 1;
+    width: 16px;
+    height: 16px;
+    right: -7px;
+    bottom: -7px;
+  }
 }
 
 .md-preview hr {

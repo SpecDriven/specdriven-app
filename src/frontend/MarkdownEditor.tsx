@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import {
   Bold,
@@ -17,12 +17,15 @@ import {
   insertImage,
   insertLink,
   renderMarkdown,
+  setImageWidth,
   toggleHeading,
   toggleInline,
   toggleLinePrefix,
 } from "./markdown";
 import type { Edit } from "./markdown";
 import { markNodes, markText } from "./highlight";
+import { ImageSizingContext } from "./MarkdownImage";
+import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
 import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
@@ -206,6 +209,24 @@ export function MarkdownEditor({
     }
   };
 
+  // Image sizing (src/frontend/MarkdownImage.tsx): the handle on an image in
+  // the Preview tab writes its width into the source, through onChange like
+  // any other edit. One sizing object for the editor's life, reading the
+  // latest text and callback through a ref. A double-click on an image
+  // already at its natural size changes nothing, and says nothing.
+  const latest = useRef({ value, onChange });
+  latest.current = { value, onChange };
+  const sizing = useMemo<ImageSizing>(
+    () => ({
+      resize: (index, width) => {
+        const { value: text, onChange: change } = latest.current;
+        const next = setImageWidth(text, index, width);
+        if (next !== text) change(next);
+      },
+    }),
+    [],
+  );
+
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
       f.type.startsWith("image/"),
@@ -381,10 +402,11 @@ export function MarkdownEditor({
         <div ref={previewRef} className="md-preview">
           {preview === null ? (
             <p className="md-empty">Nothing to preview.</p>
-          ) : marks ? (
-            markNodes(preview, marks)
           ) : (
-            preview
+            // A published (read-only) body keeps its images as they are.
+            <ImageSizingContext.Provider value={readOnly ? null : sizing}>
+              {marks ? markNodes(preview, marks) : preview}
+            </ImageSizingContext.Provider>
           )}
         </div>
       )}
