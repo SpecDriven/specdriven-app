@@ -151,8 +151,8 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree } from "./tree";
-import type { FolderNode } from "./tree";
+import { buildTree, scenarioRows } from "./tree";
+import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import type { ScenarioRef } from "./route";
 
@@ -877,6 +877,14 @@ export function App() {
   const [folders, setFolders] = useState<string[]>([]);
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  /**
+   * Feature files whose scenario outline is expanded in the sidebar
+   * (specs/navigation.feature.md "Scenario navigation"). Folders default to
+   * open because a repo has few of them; scenario outlines are many, so they
+   * default to closed and this tracks the ones opened — the mirror image of
+   * `collapsed`. Kept for the session, like the folder state.
+   */
+  const [outlined, setOutlined] = useState<Set<string>>(new Set());
   /** Sidebar width in px (specs/ui.spec.md "Sidebar resize"). */
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
   /** True while the sidebar divider is being dragged. */
@@ -1525,6 +1533,18 @@ export function App() {
       setSearchTerms(paneRequest.terms);
     }
   }, [paneRequest, feature]);
+
+  // Reveal the open scenario in the tree (specs/navigation.feature.md
+  // "Scenario navigation"): a pane opened from a link, a card or the palette
+  // expands its feature's outline, so the row that is highlighted is one that
+  // can be seen — the same courtesy a new feature gets in a collapsed folder.
+  useEffect(() => {
+    if (!selected || paneScenario === null) return;
+    setOutlined((prev) => {
+      if (prev.has(selected)) return prev;
+      return new Set(prev).add(selected);
+    });
+  }, [selected, paneScenario !== null]);
 
   // The marks belong to the pane the hit opened: closing it takes them along,
   // so the scenario reopened from its card shows plain text. Not while a pane
@@ -4180,6 +4200,15 @@ export function App() {
       return next;
     });
 
+  /** Open or close a feature's scenario outline (specs/navigation.feature.md). */
+  const toggleOutline = (file: string) =>
+    setOutlined((prev) => {
+      const next = new Set(prev);
+      if (next.has(file)) next.delete(file);
+      else next.add(file);
+      return next;
+    });
+
   /**
    * Open a search hit exactly like its deep link (specs/search.spec.md): a
    * scenario hit opens that scenario's page — or, with ⌘⏎ in the palette,
@@ -4200,9 +4229,32 @@ export function App() {
   const resultHref = (r: SearchResultItem) =>
     r.scenario ? scenarioPath(r.fileName, r.scenario) : featurePath(r.fileName);
 
+  /**
+   * A scenario in the sidebar tree (specs/navigation.feature.md "Scenario
+   * navigation"): opens that scenario's page, from the feature page or
+   * straight from another scenario's pane — the whole point, switching
+   * scenarios without going back to the feature view. The same path a deep
+   * link takes, so an open pane autosaves on the way out
+   * (specs/editor/spec-editor.feature.md "Spec editor pane").
+   */
+  const openScenarioRow = (file: string, s: ScenarioRow) => {
+    setSelectedFolder(null);
+    void openFeature(file, {
+      push: true,
+      scenario: { slug: slugify(s.name), version: s.version },
+      pane: true,
+    });
+  };
+
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => {
     const entry = specSelection.get(f.fileName);
+    // The feature's scenarios, listed under it when the outline is expanded
+    // (specs/navigation.feature.md "Scenario navigation"). The open feature
+    // reads from its live state, so a save shows here before the listing's
+    // next refresh.
+    const rows = scenarioRows(f, selected, feature);
+    const expanded = rows.length > 0 && outlined.has(f.fileName);
     return (
       <div key={f.fileName}>
         <div className={`tree-row${matchesFilter(f) ? "" : " dim"}`}>
@@ -4228,6 +4280,33 @@ export function App() {
               }
             />
           )}
+          {/* The outline twisty (specs/navigation.feature.md "Scenario
+              navigation"): expands the feature's scenarios under it. Not a
+              treeitem of its own — the feature link keeps that role, so the
+              tree's ↑/↓ walk is unchanged. A feature with no scenarios keeps
+              the same-width spacer so every label stays on one line. */}
+          {rows.length > 0 ? (
+            <button
+              type="button"
+              className="scenario-toggle"
+              style={{ marginLeft: codeGen ? undefined : `${depth * 0.9}rem` }}
+              aria-expanded={expanded}
+              aria-label={`Scenarios of ${f.name}`}
+              onClick={() => toggleOutline(f.fileName)}
+            >
+              {expanded ? (
+                <ChevronDown size={12} aria-hidden="true" />
+              ) : (
+                <ChevronRight size={12} aria-hidden="true" />
+              )}
+            </button>
+          ) : (
+            <span
+              className="scenario-toggle spacer"
+              style={{ marginLeft: codeGen ? undefined : `${depth * 0.9}rem` }}
+              aria-hidden="true"
+            />
+          )}
           {/* A real link (specs/navigation.spec.md "share a link"): plain clicks
           navigate in-app, right-click → Copy Link works. The label is the
           feature name, not the file name (specs/ui.spec.md "Main page"). */}
@@ -4238,8 +4317,8 @@ export function App() {
         aria-level={depth + 1}
         aria-current={f.fileName === selected ? "page" : undefined}
         data-file={f.fileName}
-        /* The checkbox carries the depth indent; without it the link does. */
-        style={{ paddingLeft: codeGen ? "0.4rem" : `${0.6 + depth * 0.9}rem` }}
+        /* The checkbox and the twisty carry the depth indent before it. */
+        style={{ paddingLeft: "0.2rem" }}
         draggable
         onDragStart={(e) => {
           e.dataTransfer.setData("text/plain", f.fileName);
@@ -4311,6 +4390,43 @@ export function App() {
         />
       </span>
         </div>
+        {/* The expanded outline (specs/navigation.feature.md "Scenario
+            navigation"): each scenario is a real link to its own page, so
+            right-click → Copy Link and cmd-click work like every other
+            sidebar entry. A plain click opens that scenario's editor pane —
+            the point of the scenario, switching without going back to the
+            feature view. */}
+        {expanded && (
+          <div role="group">
+            {rows.map((s) => {
+              const here =
+                f.fileName === selected &&
+                paneScenario !== null &&
+                paneScenario.name === s.name &&
+                paneScenario.version === s.version;
+              return (
+                <a
+                  key={`${s.name}-v${s.version}`}
+                  href={scenarioPath(f.fileName, s)}
+                  className={`tree-scenario${here ? " active" : ""}`}
+                  role="treeitem"
+                  aria-level={depth + 2}
+                  aria-current={here ? "page" : undefined}
+                  /* Line up just past the feature's twisty: the codegen
+                     checkbox, when on, already carries the depth indent for
+                     the whole row, so it is not added twice. */
+                  style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
+                  title={`${s.name} v${s.version}`}
+                  onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
+                >
+                  <StatusIcon status={s.status} size={12} />
+                  <span className="tree-scenario-name">{s.name}</span>
+                  <span className="version">v{s.version}</span>
+                </a>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -5140,7 +5256,15 @@ export function App() {
         move(rows.length - 1);
         return;
       case "ArrowRight":
-        if (folderPath === undefined) return;
+        // A feature row opens its scenario outline the way a folder opens its
+        // subtree (specs/navigation.feature.md "Scenario navigation").
+        if (folderPath === undefined) {
+          const file = t.dataset.file;
+          if (file === undefined || outlined.has(file)) return;
+          e.preventDefault();
+          toggleOutline(file);
+          return;
+        }
         e.preventDefault();
         if (collapsed.has(folderPath)) toggleFolder(folderPath);
         else move(i + 1);
@@ -5149,6 +5273,11 @@ export function App() {
         e.preventDefault();
         if (folderPath !== undefined && !collapsed.has(folderPath)) {
           toggleFolder(folderPath);
+          return;
+        }
+        const file = t.dataset.file;
+        if (file !== undefined && outlined.has(file)) {
+          toggleOutline(file);
           return;
         }
         t.closest("[role=group]")
