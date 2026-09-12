@@ -94,7 +94,8 @@ import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
-import { PomodoroBar } from "./PomodoroBar";
+import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
+import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
@@ -1277,6 +1278,10 @@ export function App() {
   // Excalidraw support (specs/editor/excalidraw-support.feature.md): device-
   // local too; every Markdown editor's toolbar follows the switch.
   const excalidrawOn = useExcalidrawEnabled();
+  // The Pomodoro (specs/app/pomodoro.feature.md): off until asked for, and
+  // device-local like the rest (src/frontend/pomodoroPref.ts). Off means the
+  // bar, the `p` key and the palette's entries are all gone.
+  const pomodoroOn = usePomodoroEnabled();
   /** Path whose "Copy link" action just ran — its label shows "Copied". */
   const [copied, setCopied] = useState<string | null>(null);
   // Current user (specs/user-info-settings.spec.md): shown in the sidebar's
@@ -4802,7 +4807,7 @@ export function App() {
       keys: "p",
       label: "Start a pomodoro",
       group: "Create",
-      when: () => !quiet && editing === null && pom.timer === null,
+      when: () => pomodoroOn && !quiet && editing === null && pom.timer === null,
       run: () => startPomodoro(),
     },
     {
@@ -4964,10 +4969,18 @@ export function App() {
     ...(codeGen && specSelection.size > 0 && !sessionRunning
       ? [action("session", "Start AI Session", <Play size={14} />, () => startSession())]
       : []),
-    ...(pom.timer
-      ? [action("pomodoro-stop", "Stop Pomodoro", <Timer size={14} />, () => pomodoro.stop())]
-      : [shortcutAction("pomodoro", <Timer size={14} />)]),
-    action("pomodoro-settings", "Pomodoro settings…", <Timer size={14} />, () => setPomodoroSettings(true)),
+    // Off in Settings: the Pomodoro is not part of this app, so the palette
+    // does not offer it either (src/frontend/pomodoroPref.ts).
+    ...(pomodoroOn
+      ? [
+          ...(pom.timer
+            ? [action("pomodoro-stop", "Stop Pomodoro", <Timer size={14} />, () => pomodoro.stop())]
+            : [shortcutAction("pomodoro", <Timer size={14} />)]),
+          action("pomodoro-settings", "Pomodoro settings…", <Timer size={14} />, () =>
+            setPomodoroSettings(true),
+          ),
+        ]
+      : []),
     ...(!demo
       ? [
           action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
@@ -5595,14 +5608,11 @@ export function App() {
         }}
       >
         <header>
-          <h1>
-            <Logo size={28} />
-          </h1>
-          {/* The data repo name sits beside the mark rather than under it, so
-              the header costs a single row of vertical space. It is the home
-              link (specs/app-startup.feature.md "The data folder name links
-              to the README"): a real `/` anchor, so a plain click opens the
-              README editor and right-click → Copy Link works. */}
+          {/* The data repo name leads the header, which costs a single row of
+              vertical space. It is the home link (specs/app-startup.feature.md
+              "The data folder name links to the README"): a real `/` anchor,
+              so a plain click opens the README editor and right-click → Copy
+              Link works. */}
           <div className="repo-row">
             {dataRepo && (
               <a
@@ -5707,6 +5717,10 @@ export function App() {
               </button>
             )}
           </div>
+          {/* The Pomodoro (specs/app/pomodoro.feature.md): its icon lives here,
+              left of the coding agent's Bot, and opens the bar beneath the
+              header. Nothing renders while the Settings switch is off. */}
+          <PomodoroToggle />
           {codeGen && canOpenAgentPane && (
             <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
               <button
@@ -5753,6 +5767,11 @@ export function App() {
             <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
           </button>
         </div>
+        {/* The Pomodoro bar (specs/app/pomodoro.feature.md): the pane the
+            header's timer icon opens, right under the icon that opens it.
+            Renders nothing while the Settings switch is off or the bar is
+            closed (src/frontend/pomodoroPref.ts). */}
+        <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
         {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
             .md): Specs is the feature tree, and each special folder the
             Settings switches show adds its own list beside it. The bar only
@@ -6135,7 +6154,6 @@ export function App() {
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
-          <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
           <Menu
             open={userMenuOpen}
             onClose={() => setUserMenuOpen(false)}
@@ -7579,6 +7597,33 @@ export function App() {
                     role="switch"
                     checked={excalidrawOn}
                     onChange={(e) => applyExcalidrawPref(e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* The Pomodoro (specs/app/pomodoro.feature.md): off by default —
+                  a timer nobody asked for is a row of sidebar taken from the
+                  work. Turning it on opens the bar, so the switch shows what
+                  it just switched on (src/frontend/pomodoroPref.ts). */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Pomodoro timer
+                  <span className="settings-row-hint">
+                    Times your own work in pomodoros: a timer icon in the sidebar header
+                    that opens the bar beneath it, the <kbd>p</kbd> key, and the command
+                    palette. Close the bar and the icon keeps the clock. Remembered on
+                    this device.
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={pomodoroOn}
+                    onChange={(e) => {
+                      applyPomodoroEnabled(e.target.checked);
+                      if (e.target.checked) applyPomodoroShown(true);
+                    }}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
