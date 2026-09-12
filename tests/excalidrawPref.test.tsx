@@ -11,6 +11,7 @@ import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import {
   applyExcalidrawPref,
   readExcalidrawPref,
+  setExcalidrawDemoMode,
 } from "../src/frontend/excalidrawPref";
 
 // The preference lives in localStorage, which bun's test runtime lacks.
@@ -39,6 +40,8 @@ beforeEach(() => {
 afterEach(() => {
   if (saved === undefined) delete g.localStorage;
   else g.localStorage = saved;
+  // The demo default is module state: leave it off for the next test.
+  setExcalidrawDemoMode(false);
 });
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -50,9 +53,11 @@ describe("the Excalidraw preference", () => {
     applyExcalidrawPref(true);
     expect(readExcalidrawPref()).toBe(true);
     expect(g.localStorage!.getItem("sd-excalidraw")).toBe("on");
+    // Off is stored, not erased: the demo reads an absent key as "on", so a
+    // visitor's "off" has to be a decision it can tell from silence.
     applyExcalidrawPref(false);
     expect(readExcalidrawPref()).toBe(false);
-    expect(g.localStorage!.getItem("sd-excalidraw")).toBeNull();
+    expect(g.localStorage!.getItem("sd-excalidraw")).toBe("off");
   });
 
   test("reads off when storage is unavailable", () => {
@@ -63,6 +68,47 @@ describe("the Excalidraw preference", () => {
       },
     };
     expect(readExcalidrawPref()).toBe(false);
+  });
+
+  // Demo mode (src/server/demo.ts) only moves the default: drawing is what a
+  // visitor came to see, so the button is there before they find Settings.
+  describe("in the demo", () => {
+    test("is on for a device that has never chosen", () => {
+      setExcalidrawDemoMode(true);
+      expect(readExcalidrawPref()).toBe(true);
+    });
+
+    test("still lets a visitor turn it off, and stays off", () => {
+      setExcalidrawDemoMode(true);
+      applyExcalidrawPref(false);
+      expect(readExcalidrawPref()).toBe(false);
+    });
+
+    test("keeps an on choice made outside the demo", () => {
+      applyExcalidrawPref(true);
+      setExcalidrawDemoMode(true);
+      expect(readExcalidrawPref()).toBe(true);
+    });
+
+    test("goes back to off once the demo default is dropped", () => {
+      setExcalidrawDemoMode(true);
+      setExcalidrawDemoMode(false);
+      expect(readExcalidrawPref()).toBe(false);
+    });
+
+    test("is still on when storage is unavailable", () => {
+      // A private window cannot remember a choice, so there is no choice to
+      // read and the default stands. Only the preference is unrememberable;
+      // a diagram still saves to the data repo like any other.
+      g.localStorage = {
+        ...fakeStorage(),
+        getItem: () => {
+          throw new Error("private mode");
+        },
+      };
+      setExcalidrawDemoMode(true);
+      expect(readExcalidrawPref()).toBe(true);
+    });
   });
 });
 
