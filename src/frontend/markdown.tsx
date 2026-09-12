@@ -382,6 +382,30 @@ export function imageRefs(src: string): ImageRef[] {
 }
 
 /**
+ * The image `offset` falls in, and its index in imageRefs order — for the
+ * toolbar acting on the reference under the caret (specs/editor/excalidraw-
+ * support.feature.md "Edit Excalidraw diagram"). An offset anywhere in the
+ * `![…](…)` or `<img …>` counts, its two ends included, so a caret just
+ * before or just after the link still finds it; where two references touch,
+ * the first one wins. Null when the offset is in ordinary text.
+ *
+ * Takes refs rather than the source: parsing is the expensive half and the
+ * images only move when the text does, while the caret moves on every key.
+ */
+export function imageAtOffset(
+  refs: ImageRef[],
+  offset: number,
+): { index: number; ref: ImageRef } | null {
+  const index = refs.findIndex((r) => offset >= r.start && offset <= r.end);
+  return index === -1 ? null : { index, ref: refs[index]! };
+}
+
+/** imageAtOffset against a source parsed on the spot (CRLF read as LF). */
+export function imageAt(src: string, offset: number): { index: number; ref: ImageRef } | null {
+  return imageAtOffset(imageRefs(src.replaceAll("\r\n", "\n")), offset);
+}
+
+/**
  * The source with its nth image (imageRefs order) set to `width` pixels,
  * spelled `<img src="…" alt="…" width="…">` — or, with null, back at its
  * natural size: plain `![alt](src)` again, unless the alt or url cannot be
@@ -399,6 +423,28 @@ export function setImageWidth(src: string, index: number, width: number | null):
     w === null && plain
       ? `![${ref.alt}](${ref.src})`
       : `<img src="${encodeAttr(ref.src)}" alt="${encodeAttr(ref.alt)}"${w === null ? "" : ` width="${w}"`}>`;
+  return text.slice(0, ref.start) + md + text.slice(ref.end);
+}
+
+/**
+ * The source with its nth image (imageRefs order) pointed at `src`, under
+ * `alt` — how a re-saved Excalidraw diagram takes the place of the one it was
+ * opened from (specs/editor/excalidraw-support.feature.md "Edit Excalidraw
+ * diagram"). A width or height the reference carried stays, so a diagram
+ * sized in the preview keeps that size; the tag spelling is kept where one
+ * is needed and plain `![alt](src)` used where it is not. Unchanged when
+ * there is no such image.
+ */
+export function setImageSrc(src: string, index: number, url: string, alt: string): string {
+  const text = src.replaceAll("\r\n", "\n");
+  const ref = imageRefs(text)[index];
+  if (!ref) return src;
+  const plain = ref.width === null && ref.height === null && !alt.includes("]") && !url.includes(")");
+  const md = plain
+    ? `![${alt}](${url})`
+    : `<img src="${encodeAttr(url)}" alt="${encodeAttr(alt)}"${
+        ref.width === null ? "" : ` width="${ref.width}"`
+      }${ref.height === null ? "" : ` height="${ref.height}"`}>`;
   return text.slice(0, ref.start) + md + text.slice(ref.end);
 }
 

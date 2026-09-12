@@ -43,6 +43,11 @@ interface VimEditorProps {
   onPasteFiles?: (files: File[]) => void;
   /** The formatting shortcuts (⌘B, ⌘I, ⌘K): the same handler the textarea uses. */
   onShortcut?: (e: ReactKeyboardEvent<HTMLElement> | KeyboardEvent) => void;
+  /**
+   * The caret moved — the textarea's onSelect, for a toolbar that acts on
+   * what is under it (src/frontend/MarkdownEditor.tsx, the diagram button).
+   */
+  onCaretMove?: (offset: number) => void;
 }
 
 // Markdown syntax, in the app's own colours (index.css): headings and links
@@ -106,14 +111,14 @@ function minimalChange(from: string, to: string) {
 }
 
 export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEditor(
-  { value, onChange, placeholder, highlight, onPasteFiles, onShortcut },
+  { value, onChange, placeholder, highlight, onPasteFiles, onShortcut, onCaretMove },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The callbacks change every render; the extensions read the latest ones.
-  const latest = useRef({ onChange, onPasteFiles, onShortcut });
-  latest.current = { onChange, onPasteFiles, onShortcut };
+  const latest = useRef({ onChange, onPasteFiles, onShortcut, onCaretMove });
+  latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove };
   const terms = highlight && highlight.length > 0 ? highlight : null;
   const termsKey = terms?.join(" ") ?? "";
 
@@ -166,6 +171,8 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) latest.current.onChange(u.state.doc.toString());
+            if (u.docChanged || u.selectionSet)
+              latest.current.onCaretMove?.(u.state.selection.main.head);
           }),
           EditorView.domEventHandlers({
             paste: (e) => {

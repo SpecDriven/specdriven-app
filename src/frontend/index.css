@@ -1927,6 +1927,51 @@ button.link:disabled {
   outline-offset: 1px;
 }
 
+/* An Excalidraw diagram (specs/editor/excalidraw-support.feature.md "Edit
+   Excalidraw diagram") reopens in the pane from a button in its top-right
+   corner, on the same hover as the width badge and the resize handle. */
+.md-img-edit {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--text-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 120ms ease, color 120ms ease;
+}
+
+.md-img:hover .md-img-edit,
+.md-img-edit:focus-visible {
+  opacity: 1;
+}
+
+.md-img-edit:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.md-img-edit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* A finger cannot hover, as for the resize handle. */
+@media (pointer: coarse) {
+  .md-img-edit {
+    opacity: 1;
+  }
+}
+
 .md-img-size {
   position: absolute;
   right: 0.35rem;
@@ -2679,6 +2724,13 @@ button.table-add:hover {
 .excalidraw-error {
   font-size: 0.75rem;
   color: var(--danger-fg);
+}
+
+/* While the diagram already in the text is being read back into the canvas
+   (specs/editor/excalidraw-support.feature.md "Edit Excalidraw diagram"). */
+.excalidraw-status {
+  font-size: 0.75rem;
+  color: var(--text-2);
 }
 
 .excalidraw-actions {
