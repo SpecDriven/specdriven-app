@@ -37,6 +37,10 @@ const server = Bun.serve({
     "/roadmap/*": index,
     "/tasks": index,
     "/tasks/*": index,
+    // The engineering notebook's entries address the same way
+    // (specs/app/engineering-notebook.feature.md).
+    "/notebook": index,
+    "/notebook/*": index,
     // Event Models (roadmap/support-event-modeling.md): each model's url
     // serves the shell too.
     "/models": index,
