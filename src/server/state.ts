@@ -101,6 +101,15 @@ export interface SpecDrivenState {
    */
   tasks?: boolean;
   /**
+   * Show the data repo's `notebook` folder — the engineering notebook's
+   * dated entries on their own sidebar tab
+   * (specs/app/engineering-notebook.feature.md). Absent means ON: this is the
+   * one module that ships switched on, stored as `false` when a user turns it
+   * off. Nothing is created by the switch — the folder appears with the first
+   * entry — so a default-on module never touches a data repo by itself.
+   */
+  notebook?: boolean;
+  /**
    * Show the data repo's `models` folder — Event Models on their own Models
    * tab and canvas (roadmap/support-event-modeling.md); absent means OFF.
    * On, the folder is created if the repo has none; off, the folder and its
@@ -277,6 +286,14 @@ export function normalizeRoadmap(value: unknown): boolean {
     folder is opt-in like the roadmap's (specs/app/tasks.feature.md). */
 export function normalizeTasks(value: unknown): boolean {
   return value === true;
+}
+
+/** Effective engineering notebook setting: ON unless explicitly turned off —
+    the one module that ships on (specs/app/engineering-notebook.feature.md).
+    It is safe to default on because the switch creates nothing: the notebook
+    folder appears with the first entry, not when the app starts. */
+export function normalizeNotebook(value: unknown): boolean {
+  return value !== false;
 }
 
 /** Effective models setting: OFF unless explicitly turned on — the models

@@ -30,6 +30,22 @@ describe("pageListingMetaEqual", () => {
     expect(pageListingMetaEqual(listing(), listing({ name: "Ship v3" }))).toBe(false);
     expect(pageListingMetaEqual(listing({ assigned: "Ada" }), listing())).toBe(false);
   });
+
+  // A notebook entry's own fields (specs/app/engineering-notebook.feature.md):
+  // an autosave that changed the kind must not read as "nothing changed" and
+  // leave a stale chip on the row and in the header.
+  test("notices a notebook entry's kind, author, date or supersession", () => {
+    const entry = listing({ fileName: "notebook/2026-09-12-x.md", author: "ada", date: "2026-09-12" });
+    expect(pageListingMetaEqual(entry, { ...entry })).toBe(true);
+    expect(pageListingMetaEqual(entry, { ...entry, kind: "Decision" })).toBe(false);
+    expect(pageListingMetaEqual(entry, { ...entry, author: "grace" })).toBe(false);
+    expect(pageListingMetaEqual(entry, { ...entry, date: "2026-09-13" })).toBe(false);
+    const link = { title: "Earlier", url: "/notebook/2026-09-01-earlier" };
+    expect(pageListingMetaEqual(entry, { ...entry, supersedes: link })).toBe(false);
+    expect(
+      pageListingMetaEqual({ ...entry, supersedes: link }, { ...entry, supersedes: { ...link } }),
+    ).toBe(true);
+  });
 });
 
 describe("createPromiseQueue", () => {

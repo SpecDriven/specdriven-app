@@ -4015,6 +4015,84 @@ aside header .collapse-btn {
   margin-right: 0.15rem;
 }
 
+/* ---- Notebook entries (specs/app/engineering-notebook.feature.md) ----
+   A dated row rather than a one-line name: the title, then a second line
+   with the kind chip, who signed it and the day. */
+.page-row.entry-row {
+  align-items: flex-start;
+}
+
+.page-row.entry-row > a.page-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  white-space: normal;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.entry-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-day {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The kind: an observation is quiet, a decision carries the accent — the
+   notebook's decisions are what a reader comes back for. */
+.entry-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.entry-kind-decision {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* An entry a later decision replaced: still listed, still readable, but no
+   longer the one to act on. */
+.page-row.superseded > a.page-entry {
+  opacity: 0.55;
+}
+
+.chip.entry-kind-decision {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent-soft);
+}
+
+.chip.entry-superseded-chip {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.chip.entry-superseded-chip:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
 .page-row:hover .tree-menu-btn,
 .page-row:focus-within .tree-menu-btn {
   opacity: 1;

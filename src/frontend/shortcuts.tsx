@@ -28,6 +28,13 @@ export interface Shortcut {
   inFields?: boolean;
   /** Only while this holds — evaluated on each key press. */
   when?: () => boolean;
+  /**
+   * Whether the command palette offers this shortcut as a command, when that
+   * differs from `when`. `when` keeps a key from firing behind a dialog, and
+   * the palette is a dialog — so a command listed there must not disappear
+   * the moment it opens. Defaults to `when`.
+   */
+  palette?: () => boolean;
   /** The action. Return false to leave the key to the browser. */
   run: (e: KeyboardEvent) => void | false;
   /** Listed in the cheat sheet but handled elsewhere (a field's own keys). */

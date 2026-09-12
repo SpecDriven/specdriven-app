@@ -25,8 +25,10 @@ import {
   stageVersion,
   theirsVersion,
 } from "../git";
-import { featureTextError, parseFeature } from "../parser";
-import { threeWayFeature } from "./merge";
+import { featureTextError, parseFeature, parsePage, type MarkdownPage } from "../parser";
+import { isPageFile, isPageFolderPath } from "../pages";
+import { threeWayFeature, threeWayPage } from "./merge";
+import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature } from "./project";
 import { importFeatureDoc, reconcile } from "./reconcile";
 import {
@@ -34,8 +36,11 @@ import {
   docDirRel,
   listFeatureDocs,
   loadFeatureDoc,
+  loadPageDoc,
+  pageDocDirRel,
   removeFeatureDoc,
   saveFeatureDoc,
+  savePageDoc,
 } from "./store";
 import { errorAttributes, getLogger, withSpan } from "../telemetry";
 import { walk } from "../walk";
@@ -92,9 +97,13 @@ export async function autoResolveMergeConflicts(
   );
 }
 
-/** True when the other side of the merge added chunk files for this feature. */
-async function theirsBroughtChunks(dataDir: string, fileName: string): Promise<boolean> {
-  const changed = await diffNames(dataDir, "HEAD", "MERGE_HEAD", docDirRel(fileName));
+/**
+ * True when the other side of the merge added chunk files for this document.
+ * `docDir` is where that document's chunks live — a feature's or a page's,
+ * which are different trees, so the caller passes the right one.
+ */
+async function theirsBroughtChunks(dataDir: string, docDir: string): Promise<boolean> {
+  const changed = await diffNames(dataDir, "HEAD", "MERGE_HEAD", docDir);
   for (const path of changed) {
     if (!path.endsWith(".bin")) continue;
     // The diff lists differences in both directions; a chunk of theirs is one
@@ -138,6 +147,14 @@ async function autoResolveOne(
     await resolveConflict(dataDir, path, `${loaded.doc.id}\n`);
     return null;
   }
+  // A markdown page — a roadmap page, a task, a notebook entry
+  // (specs/app/engineering-notebook.feature.md "Entries are shared through
+  // git"): the same decision tree as a feature's below, minus the scenarios.
+  // Its document holds both sides' operations when the other peer runs this
+  // version; markdown that arrived without operations folds in three-way.
+  if (isPageFolderPath(path) && isPageFile(path)) {
+    return autoResolvePage(dataDir, path);
+  }
   if (!path.endsWith(".feature.md") || path.startsWith(DOC_DIR_PREFIX)) {
     return "not a feature file";
   }
@@ -148,7 +165,7 @@ async function autoResolveOne(
   const baseText = await stageVersion(dataDir, path, 1);
   const base = baseText === null ? EMPTY : parseFeature(baseText);
   const lineageRace = conflictedSet.has(`${docDirRel(path)}/docid`);
-  const opsArrived = await theirsBroughtChunks(dataDir, path);
+  const opsArrived = await theirsBroughtChunks(dataDir, docDirRel(path));
 
   let doc = loaded.doc;
   try {
@@ -170,6 +187,36 @@ async function autoResolveOne(
   }
   await saveFeatureDoc(dataDir, path, doc, loaded.heads);
   await resolveConflict(dataDir, path, projectFeature(doc), [docDirRel(path)]);
+  return null;
+}
+
+/**
+ * Resolve a conflicted markdown page; null on success, else why it was left.
+ * A page has no scenarios and one projection form, so there is no lineage
+ * race to unpick: the merged document is the resolution when the other peer
+ * sent operations, and a three-way merge of the markdown when it did not.
+ * The page merge cannot conflict — every field either merges as text or
+ * resolves to one side — so this only bails when there is no document to
+ * merge into.
+ */
+async function autoResolvePage(dataDir: string, path: string): Promise<string | null> {
+  const loaded = await loadPageDoc(dataDir, path);
+  if (loaded === null) return "no document behind it";
+  const theirsText = (await stageVersion(dataDir, path, 3)) ?? (await theirsVersion(dataDir, path));
+  if (theirsText === null) return "deleted on one side";
+  const baseText = await stageVersion(dataDir, path, 1);
+  const base: MarkdownPage = baseText === null ? { name: "", body: "" } : parsePage(baseText);
+
+  let doc = loaded.doc;
+  try {
+    if (!(await theirsBroughtChunks(dataDir, pageDocDirRel(path)))) {
+      doc = reconcilePage(doc, threeWayPage(base, docToPage(doc), parsePage(theirsText)));
+    }
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  await savePageDoc(dataDir, path, doc, loaded.heads);
+  await resolveConflict(dataDir, path, projectPage(doc), [pageDocDirRel(path)]);
   return null;
 }
 
