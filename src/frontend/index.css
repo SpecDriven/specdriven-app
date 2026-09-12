@@ -6144,6 +6144,44 @@ a.tests-title {
   font-size: 0.75rem;
 }
 
+/* No timer running: the bar is one wide button that starts a pomodoro, with
+   the ⋯ for the settings tucked in the corner the way the running bar has it. */
+.pomodoro-bar.idle {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.35rem;
+  background: transparent;
+  border-style: dashed;
+}
+
+.pomodoro-start {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pomodoro-start:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.pomodoro-start-mins {
+  margin-left: auto;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .pomodoro-head {
   display: flex;
   align-items: center;
@@ -6283,6 +6321,12 @@ aside.rail .rail-btn.pomodoro-chip {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--accent-strong);
+}
+
+/* Idle: the plain rail icon, since there is no time to show yet. */
+aside.rail .rail-btn.pomodoro-chip.idle {
+  padding: 0;
+  color: inherit;
 }
 
 aside.rail .rail-btn.pomodoro-chip.break {

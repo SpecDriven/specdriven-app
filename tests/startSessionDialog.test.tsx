@@ -1,28 +1,15 @@
 // The Start session dialog (src/frontend/StartSessionDialog.tsx): one dialog
-// for an AI session or a Pomodoro. The AI tab keeps the old dialog's words
-// and gating (specs/launch-ai-agent-session.feature.md); the Pomodoro tab
-// is open to anyone, whatever is selected and whether or not code
-// generation is on. Static markup only — bun test has no DOM.
+// for one thing, an AI session, with the old dialog's words and gating
+// (specs/launch-ai-agent-session.feature.md). Timing your own work is the
+// Pomodoro, which has no dialog to start it (tests/pomodoroSettings.test.tsx).
+// Static markup only — bun test has no DOM.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  AiSessionFields,
-  PomodoroFields,
-  StartSessionDialog,
-  StartSessionTabs,
-  aiTabState,
-  formOf,
-  parsePomodoroForm,
-} from "../src/frontend/StartSessionDialog";
-import { DEFAULT_PREFS } from "../src/frontend/pomodoro";
+import { AiSessionFields, StartSessionDialog, aiTabState } from "../src/frontend/StartSessionDialog";
 import type { PromptOptions } from "../src/frontend/ModalPrompts";
 
 const noop = () => undefined;
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
-const tabs = (markup: string) =>
-  [...markup.matchAll(/<button[^>]*role="tab"[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g)].map((m) => m[1]);
-const selected = (markup: string) =>
-  markup.match(/<button[^>]*aria-selected="true"[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/)?.[1];
 const submit = (markup: string) => markup.match(/<button type="submit"([^>]*)>([^<]*)<\/button>/);
 
 const aiDialog: PromptOptions = {
@@ -39,16 +26,6 @@ const aiDialog: PromptOptions = {
   ],
   initialChoice: "pane",
 };
-
-describe("StartSessionTabs", () => {
-  test("is a tablist of the two kinds with the current one selected", () => {
-    const markup = html(<StartSessionTabs tab="pomodoro" onChange={noop} />);
-    expect(markup).toContain('role="tablist"');
-    expect(tabs(markup)).toEqual(["AI session", "Pomodoro"]);
-    expect(selected(markup)).toBe("Pomodoro");
-    expect(selected(html(<StartSessionTabs tab="ai" onChange={noop} />))).toBe("AI session");
-  });
-});
 
 describe("aiTabState", () => {
   test("is the old button's gating, each reason in words", () => {
@@ -99,63 +76,13 @@ describe("AiSessionFields", () => {
   });
 });
 
-describe("PomodoroFields", () => {
-  const props = { prefs: DEFAULT_PREFS, running: false, initialName: "Session 2026-09-08 09:15:00 PDT", onConfirm: noop, onPreview: noop, onEnd: noop, onCancel: noop };
-
-  test("offers the name, the four lengths, the sounds with a preview, the tick, and Start Pomodoro", () => {
-    const markup = html(<PomodoroFields {...props} />);
-    expect(markup).toContain("<h3>Start a Pomodoro</h3>");
-    expect(markup).toContain('value="Session 2026-09-08 09:15:00 PDT"');
-    const numbers = [...markup.matchAll(/<input type="number"[^>]*aria-label="([^"]*)"[^>]*value="(\d+)"/g)].map((m) => [m[1], m[2]]);
-    expect(numbers).toEqual([
-      ["Focus minutes", "25"],
-      ["Short break minutes", "5"],
-      ["Long break minutes", "15"],
-      ["Pomodoros between long breaks", "4"],
-    ]);
-    expect([...markup.matchAll(/<option value="([^"]*)"/g)].map((m) => m[1])).toEqual(["bell", "chime", "ding", "woodblock", "none"]);
-    expect(markup).toMatch(/<option value="bell"[^>]*selected=""/);
-    expect(markup).toContain('aria-label="Preview sound"');
-    expect(markup).toContain('role="switch"');
-    expect(submit(markup)![2]).toBe("Start Pomodoro");
-    expect(submit(markup)![1]).not.toContain("disabled");
-  });
-
-  test("shows the stored preferences, and no preview for silence", () => {
-    const markup = html(<PomodoroFields {...props} prefs={{ ...DEFAULT_PREFS, workMinutes: 50, sound: "none", tick: true }} />);
-    expect(markup).toMatch(/aria-label="Focus minutes"[^>]*value="50"/);
-    expect(markup).toMatch(/<option value="none"[^>]*selected=""/);
-    expect(markup).toMatch(/<button[^>]*aria-label="Preview sound"[^>]*disabled=""/);
-    expect(markup).toMatch(/role="switch"[^>]*checked=""/);
-  });
-
-  test("with a session running, offers to end it instead", () => {
-    const markup = html(<PomodoroFields {...props} running />);
-    expect(markup).toContain("A Pomodoro session is running");
-    expect(markup).toContain("End session");
-    expect(markup).not.toContain("Start Pomodoro");
-    expect(markup).not.toContain('type="number"');
-  });
-
-  test("the form's text becomes clamped preferences", () => {
-    const form = { ...formOf(DEFAULT_PREFS), workMinutes: "999", shortBreakMinutes: "", longBreakEvery: "0", sound: "siren" as never, tick: true };
-    expect(parsePomodoroForm(form, DEFAULT_PREFS)).toEqual({ ...DEFAULT_PREFS, workMinutes: 180, shortBreakMinutes: 5, longBreakEvery: 1, tick: true });
-    expect(formOf({ ...DEFAULT_PREFS, longBreakMinutes: 20 }).longBreakMinutes).toBe("20");
-  });
-});
-
 describe("StartSessionDialog", () => {
-  test("opens on the asked-for tab and names itself after it", () => {
+  test("is the AI session's dialog alone — no tabs, no Pomodoro", () => {
     const ai = { dialog: aiDialog, state: aiTabState({ codeGen: true, specCount: 0, sessionRunning: false }), onConfirm: noop };
-    const pomodoro = { prefs: DEFAULT_PREFS, running: false, initialName: "s", onConfirm: noop, onPreview: noop, onEnd: noop };
-    const onAi = html(<StartSessionDialog initialTab="ai" ai={ai} pomodoro={pomodoro} onClose={noop} />);
-    expect(onAi).toContain('aria-label="Name the session"');
-    expect(selected(onAi)).toBe("AI session");
-    expect(onAi).toContain("Select a spec in the sidebar");
-    const onPomodoro = html(<StartSessionDialog initialTab="pomodoro" ai={ai} pomodoro={pomodoro} onClose={noop} />);
-    expect(onPomodoro).toContain('aria-label="Start a Pomodoro"');
-    expect(selected(onPomodoro)).toBe("Pomodoro");
-    // Nothing selected and still startable.
-    expect(submit(onPomodoro)![1]).not.toContain("disabled");
+    const markup = html(<StartSessionDialog ai={ai} onClose={noop} />);
+    expect(markup).toContain('aria-label="Name the session"');
+    expect(markup).toContain("Select a spec in the sidebar");
+    expect(markup).not.toContain('role="tablist"');
+    expect(markup).not.toContain("Pomodoro");
   });
 });
