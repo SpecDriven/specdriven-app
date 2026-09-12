@@ -1238,7 +1238,15 @@ export function App() {
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const descSaved = useRef<string | null>(null);
-  const descInFlight = useRef(false);
+  /**
+   * Description PUTs go through one queue, so a flush (leaving the feature, or
+   * switching data folder) waits for a tick already on its way and then writes
+   * what the editor still holds — the same reason the page editor and the
+   * model canvas have queues of their own. A boolean in-flight flag would make
+   * that flush a no-op instead, dropping whatever was typed since the tick
+   * started.
+   */
+  const descSaveQueue = useRef(createPromiseQueue());
   // The editor's height, dragged by the strip along its lower boundary. null
   // until a first drag or a stored height: then the CSS third-of-the-window
   // default stands, and follows the window.
@@ -1734,6 +1742,14 @@ export function App() {
     // the old model into the new folder.
     await modelSaveFlush.current();
     setOpenModel(null);
+    // A feature description belongs to the folder it was typed in too. Its
+    // own cleanup tick would only run once the selection empties below —
+    // after the switch — and the server resolves the data folder per request,
+    // so that late PUT would write these words into the folder that comes
+    // next. Land it here, awaited, and empty the editor so no later tick can.
+    await descTick.current();
+    await descSaveQueue.current.idle();
+    setDescEdit(null);
     try {
       const res = await fetch("/api/state", {
         method: "PUT",
@@ -3294,41 +3310,51 @@ export function App() {
    * unchanged and the reload cron commits and pushes it.
    */
   const autosaveDescription = async () => {
+    // `selected` and `feature` come from the closure, not from refs, and that
+    // is what makes leaving a feature safe: React runs an effect's cleanup
+    // before the effect bodies of the same commit, and the assignment that
+    // refreshes `descTick` below has no dep array — so the cleanup tick still
+    // holds the render in which this feature was the selected one. Reading
+    // refs here would see the file the user moved *to* and drop the edit.
     const edit = descEditRef.current;
     if (!edit || !feature || edit.file !== selected) return;
     if (edit.text === descSaved.current) return;
-    if (descInFlight.current) return; // the previous tick is still saving
-    descInFlight.current = true;
-    setSaving(true);
     const next: Feature = { ...feature, description: edit.text.trim() };
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        content?: string;
-        parsed?: Feature;
-        error?: string;
-      };
-      if (res.ok && typeof data.content === "string") {
-        // The editor may have closed, or moved to another feature, while the
-        // save was away: then its result belongs to nothing on screen.
-        if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
-        if (selectedRef.current === edit.file) {
-          setFeature(featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file));
-          markSaved();
+    const content = serializeFeature(next);
+    await descSaveQueue.current.run(async () => {
+      // A tick queued ahead of this one may already have landed these words.
+      if (edit.text === descSaved.current) return;
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, save: true }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          content?: string;
+          parsed?: Feature;
+          error?: string;
+        };
+        if (res.ok && typeof data.content === "string") {
+          // The editor may have closed, or moved to another feature, while the
+          // save was away: then its result belongs to nothing on screen.
+          if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
+          if (selectedRef.current === edit.file) {
+            setFeature(
+              featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file),
+            );
+            markSaved();
+          }
+        } else {
+          toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
         }
-      } else {
-        toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
+      } catch (e) {
+        toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
+      } finally {
+        setSaving(false);
       }
-    } catch (e) {
-      toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
-    } finally {
-      descInFlight.current = false;
-      setSaving(false);
-    }
+    });
   };
   const descTick = useRef(autosaveDescription);
   useEffect(() => {
