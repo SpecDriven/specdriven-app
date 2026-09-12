@@ -26,7 +26,7 @@ import {
 } from "../src/server/git";
 import { FAKE_GH_ACCOUNT, installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
-import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { git, seededOrigin, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
 let gh: FakeGh | null = null;
@@ -102,18 +102,7 @@ test("gh installed but signed out has no account", async () => {
 
 // Scenario: clone a GitHub repo through the GitHub CLI.
 test("the gh engine clones GitHub repos with `gh repo clone`", async () => {
-  const origin = join(root, "origin.git");
-  await $`git init --bare -b main ${origin}`.quiet();
-  const seed = join(root, "seed");
-  await $`git clone ${origin} ${seed}`.quiet().nothrow();
-  await git(seed, "config", "user.email", "t@example.com");
-  await git(seed, "config", "user.name", "T");
-  await git(seed, "checkout", "-B", "main");
-  await Bun.write(join(seed, "specs/seed.feature.md"), "# Seed\n");
-  await git(seed, "add", ".");
-  await git(seed, "commit", "-m", "seed");
-  await git(seed, "push", "origin", "HEAD:main");
-
+  const origin = await seededOrigin(root);
   const stub = withGh({ origin });
   const dir = join(root, "clone");
   await clone("https://github.com/octo/data-insurance", dir);
@@ -203,13 +192,13 @@ test("choosing system git without a git binary is a clear error", async () => {
 // built with the real binary, then PATH is emptied — everything after this
 // point is the app's own git.
 test("the bundled engine clones, commits and pushes with no git on PATH", async () => {
-  const { a, originDir, server } = await twoClones(root);
+  const { a, originDir } = await twoClones(root);
   const noGit = join(root, "no-git-clone");
   process.env.PATH = "/nonexistent";
   expect(cliGitAvailable()).toBe(false);
   setGitEngine("js");
 
-  await clone(`${server.url}/origin.git`, noGit);
+  await clone(originDir, noGit);
   expect(await Bun.file(join(noGit, "specs/seed.feature.md")).exists()).toBe(true);
 
   await Bun.write(join(noGit, "specs/added.feature.md"), "# Added\n");

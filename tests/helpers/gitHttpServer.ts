@@ -1,11 +1,14 @@
-// Minimal git smart-HTTP server for tests: fixtures serve their bare origin
-// repos over a loopback port, so pushes and pulls exercise the transport a
-// real remote uses instead of a local path. Test-only — the server side
-// shells out to git, which dev machines and CI have.
+// Minimal git smart-HTTP server for tests. Only one test needs it: the one
+// that points SPECDRIVEN_GITHUB_URL at a stand-in GitHub and checks that a
+// `https://github.com/<owner>/<repo>` data repo url is rewritten and cloned
+// (repo.test.ts). That path is about the url, so it needs a real http remote;
+// everywhere else the fixtures use a local-path origin, which is ~400 ms per
+// fixture cheaper and which all three engines support (helpers/fixtures.ts).
 //
-// It resolves that binary once, at import, and spawns it by absolute path:
-// this is the *remote*, and a test that empties PATH to prove the app works
-// without a local git must not take the server down with it.
+// Test-only — the server side shells out to git, which dev machines and CI
+// have. It resolves that binary once, at import, and spawns it by absolute
+// path: this is the *remote*, and a test that empties PATH to prove the app
+// works without a local git must not take the server down with it.
 
 import { join, normalize } from "node:path";
 import { gunzipSync } from "node:zlib";
