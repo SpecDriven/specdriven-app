@@ -21,8 +21,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # Locally the git push/pull tests run on the system-git engine only;
+      # CI runs the full cli/gh/js matrix (tests/helpers/engines.ts).
       - name: Run tests
         run: bun test
+        env:
+          SPECDRIVEN_ALL_ENGINES: "1"
 
   audit:
     runs-on: ubuntu-latest

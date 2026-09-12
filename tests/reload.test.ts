@@ -10,12 +10,11 @@ import {
   createReloadScheduler,
 } from "../src/server/reload";
 import { setGitEngine } from "../src/server/git";
-import type { GitEngine } from "../src/server/git";
 import { writeState } from "../src/server/state";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
-import { git, stopServers } from "./helpers/fixtures";
-import { serveRepos } from "./helpers/gitHttpServer";
+import { gitEngines } from "./helpers/engines";
+import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let dir: string;
 let home: string;
@@ -89,9 +88,10 @@ test("setting the scheduler to 0 stops it", async () => {
   expect(runs).toBe(0);
 });
 
-// The reload tick (pull + commit/push) runs on all three git engines
-// (specs/git-operations.spec.md), against a smart-HTTP-served origin.
-for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
+// The reload tick (pull + commit/push) runs against a local-path origin on
+// the system-git engine, and on all three under SPECDRIVEN_ALL_ENGINES=1
+// (helpers/engines.ts).
+for (const engine of gitEngines()) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
       if (engine === "gh") fakeGh = installFakeGh();
@@ -102,20 +102,8 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     // GitHub": on the reload tick, after the git pull, saved scenarios are
     // committed and pushed.
     test("reload commits and pushes locally saved scenarios after the pull", async () => {
-      const origin = join(dir, "origin.git");
-      await $`git init --bare -b main ${origin}`.quiet();
-      const server = serveRepos(dir);
-      const data = join(dir, "data");
-      await $`git clone ${server.url}/origin.git ${data}`.quiet().nothrow();
-      await git(data, "config", "user.email", "test@example.com");
-      await git(data, "config", "user.name", "Test");
-      await git(data, "checkout", "-B", "main");
-      await Bun.write(join(data, "specs/seed.feature.md"), "# Seed\n");
-      await git(data, "add", ".");
-      await git(data, "commit", "-m", "seed");
-      await git(data, "push", "origin", "HEAD:main");
-      await git(data, "branch", "--set-upstream-to=origin/main");
-      await writeState({ dataRepo: "data" }, dir);
+      const { a: data, originDir } = await twoClones(dir);
+      await writeState({ dataRepo: "a" }, dir);
 
       // an auto-saved (uncommitted) scenario is waiting in the working tree
       await Bun.write(
@@ -123,16 +111,12 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
         "# Seed\n\n## One @v1 [proposed]\n\nbody\n",
       );
 
-      try {
-        const message = await reloadData(dir);
-        expect(message).toContain("saved scenarios committed and pushed");
-        const status = await $`git -C ${data} status --porcelain`.quiet();
-        expect(status.stdout.toString().trim()).toBe("");
-        const originLog = await $`git -C ${origin} log --oneline -1`.quiet();
-        expect(originLog.stdout.toString()).toContain("Auto-save scenarios");
-      } finally {
-        server.stop();
-      }
+      const message = await reloadData(dir);
+      expect(message).toContain("saved scenarios committed and pushed");
+      const status = await $`git -C ${data} status --porcelain`.quiet();
+      expect(status.stdout.toString().trim()).toBe("");
+      const originLog = await $`git -C ${originDir} log --oneline -1`.quiet();
+      expect(originLog.stdout.toString()).toContain("Auto-save scenarios");
     });
 
     test("reload with a clean tree has nothing to sync", async () => {
