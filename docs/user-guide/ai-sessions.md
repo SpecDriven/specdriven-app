@@ -99,10 +99,10 @@ same command is in the command palette (`⌘K`) as **Start AI Session** and
 in a feature page's **More actions** (⋯) menu. While a session is being
 opened the button reads `Session running…`.
 
-The dialog has two tabs, **AI session** and **Pomodoro**; the second times
-your own work and is covered in [Pomodoro sessions](human-sessions.md). The
-AI tab is off, with the reason shown, while nothing is selected or code
-generation is switched off.
+The dialog is about AI sessions alone. Timing your own work is the
+[Pomodoro](pomodoro.md), a feature of the app with its own button at the foot
+of the sidebar. The dialog is off, with the reason shown, while nothing is
+selected or code generation is switched off.
 
 The **Name the session** tab asks for two things:
 
@@ -276,8 +276,8 @@ The record also carries the agent's own session id, so a past pane session
 can be resumed from the agent's CLI. Codex threads are named after the
 session, so `codex resume` lists them by name.
 
-[Pomodoro sessions](human-sessions.md#5-session-records) share this folder;
-their records say `"kind": "human"`.
+The [Pomodoro](pomodoro.md) keeps no record of its own: its timer lives in
+memory for as long as the app is open.
 
 ## 9. Demo mode
 
