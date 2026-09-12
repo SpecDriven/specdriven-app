@@ -467,6 +467,28 @@ export function withScenario(feature: Feature, at: number | null, s: Scenario): 
 }
 
 /**
+ * What a description-editor flush must write, if anything. The editor is
+ * keyed by file, and the feature on screen is the one those words belong
+ * in — once `selected` has already moved on, a tick that still keys off it
+ * would drop the edit (or, worse, stamp it onto the feature that replaced
+ * it). Capture this before leaving the feature; after that it is too late.
+ */
+export function descriptionSavePayload(
+  edit: { file: string; text: string } | null,
+  selected: string | null,
+  feature: Feature | null,
+  saved: string | null,
+): { file: string; text: string; content: string } | null {
+  if (!edit || !feature || edit.file !== selected) return null;
+  if (edit.text === saved) return null;
+  return {
+    file: edit.file,
+    text: edit.text,
+    content: serializeFeature({ ...feature, description: edit.text.trim() }),
+  };
+}
+
+/**
  * Whether a click on a scenario card landed on one of its controls — a
  * button, a checkbox, the ticket link, a test link — rather than on the card
  * itself. The title link counts as the card: clicking it highlights, and
@@ -1229,8 +1251,22 @@ export function App() {
   descEditRef.current = descEdit;
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const featureRef = useRef(feature);
+  featureRef.current = feature;
   const descSaved = useRef<string | null>(null);
-  const descInFlight = useRef(false);
+  /**
+   * Description PUTs go through one queue so a flush (leave the feature,
+   * switch repo) waits for a tick already on its way, then writes what the
+   * editor still holds — the same reason the README / page / model flushes
+   * await their own writes. A boolean in-flight flag would make the flush
+   * a no-op and drop the words typed since that tick started.
+   */
+  const descSaveQueue = useRef(createPromiseQueue());
+  /** Fold the description editor's unsaved text into a feature this file is about to write. */
+  const withHeldDescription = (f: Feature, file: string): Feature => {
+    const edit = descEditRef.current;
+    return edit && edit.file === file ? { ...f, description: edit.text.trim() } : f;
+  };
   // The editor's height, dragged by the strip along its lower boundary. null
   // until a first drag or a stored height: then the CSS third-of-the-window
   // default stands, and follows the window.
@@ -1701,6 +1737,13 @@ export function App() {
     readmeText.current = null;
     setReadme(null);
     await editorRef.current.close();
+    // The description editor belongs to this folder too: its last save
+    // lands here, awaited, so it cannot reach the folder that comes next
+    // (the cleanup tick would otherwise run after the switch, keyed off
+    // the emptied selection, and drop the edit — or write it into the
+    // new folder if that guard were lifted).
+    await descTick.current();
+    await descSaveQueue.current.idle();
     // An open page belongs to the old folder too (specs/app/roadmap.feature
     // .md): its last save goes out there, then the pane empties so no later
     // tick writes what it held into the new folder.
@@ -1776,6 +1819,10 @@ export function App() {
       // it belongs to with a synchronous setFeature, which the feature opened
       // here must land on top of, not under. And not before the fetch, or
       // the old feature page would show for the duration of the request.
+      // The description editor's last save goes out now, while `selected`
+      // still names this file — after setSelected the cleanup tick keys
+      // off the new feature and would drop the edit.
+      if (file !== selected) await descTick.current();
       editorRef.current.close();
       // Opening a feature leaves the open page, saving what its editor still
       // holds — the same courtesy the README editor gets.
@@ -1849,6 +1896,7 @@ export function App() {
    * pane").
    */
   const goHome = () => {
+    void descTick.current();
     editorRef.current.close();
     closePage();
     setTestsView(null);
@@ -1868,6 +1916,7 @@ export function App() {
    * sidebar turns to the Tests tab. The view owns its url from here on.
    */
   const openTests = (view: TestsRoute, opts: { push?: boolean } = {}) => {
+    void descTick.current();
     editorRef.current.close();
     closePage();
     setSelected(null);
@@ -1889,6 +1938,7 @@ export function App() {
    * sidebar turns to the Issues tab.
    */
   const openIssues = (view: IssuesRoute, opts: { push?: boolean } = {}) => {
+    void descTick.current();
     editorRef.current.close();
     closePage();
     setSelected(null);
@@ -1910,6 +1960,7 @@ export function App() {
    * to the Models tab. The model owns its url from here on.
    */
   const openModelPane = (fileName: string, opts: { push?: boolean } = {}) => {
+    void descTick.current();
     editorRef.current.close();
     closePage();
     setSelected(null);
@@ -1958,6 +2009,7 @@ export function App() {
     } else {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
+      void descTick.current();
       editorRef.current.close();
       closePage();
       setTestsView(null);
@@ -2520,7 +2572,7 @@ export function App() {
   // The target carries the scenario's document id, so one going out under a
   // new name or version is published as itself, not as a second scenario.
   const publish = async (scenario?: ScenarioTarget, over?: Feature) => {
-    const content = over ?? feature;
+    const content = over ?? (feature && selected ? withHeldDescription(feature, selected) : feature);
     if (!selected || !content) return;
     setPublishing(scenario ? scenarioKey(scenario) : "all");
     try {
@@ -2674,7 +2726,10 @@ export function App() {
     const s = { ...editing.scenario, status: status ?? editing.scenario.status, version: draftVersion, tests };
     // Where this scenario sits in the feature: the entry the editor opened
     // on, or the one a previous autosave placed — never appended twice.
-    const next = withScenario(feature, editing.index, s);
+    // A description the editor still holds rides along: this PUT is the
+    // whole feature, and leaving the description out would write the last
+    // saved one back over words that have not landed yet.
+    const next = withScenario(withHeldDescription(feature, selected), editing.index, s);
     setFeature(next);
     if (close) setEditing(null);
     const session = editorSession.current;
@@ -2797,7 +2852,7 @@ export function App() {
     const tests = pendingTests();
     if (tests === null) return;
     const s = { ...editing.scenario, version: draftVersion, tests };
-    const next = withScenario(feature, editing.index, s);
+    const next = withScenario(withHeldDescription(feature, selected), editing.index, s);
     setFeature(next);
     setEditing(null);
     // Back on the feature page, the published scenario's card is the one to
@@ -2939,6 +2994,7 @@ export function App() {
       await loadPages(tab.folder);
       return;
     }
+    void descTick.current();
     editorRef.current.close();
     // The page's row lives on its own tab, so a deep link or the palette
     // turns the sidebar there; a refresh of the open page leaves it alone.
@@ -3272,43 +3328,54 @@ export function App() {
    * counts, a failed one is reported and retried by the next tick. The save
    * goes through the ordinary feature save, so the scenarios ride along
    * unchanged and the reload cron commits and pushes it.
+   *
+   * The payload is captured up front (descriptionSavePayload): leaving the
+   * feature — another spec, home, a page, the Tests / Issues / Models tabs,
+   * or a data-folder switch — must call this *before* `selected` moves, or
+   * the tick keys off the new file and drops the edit. A repo switch
+   * awaits the PUT so it cannot land in the folder that comes next.
    */
   const autosaveDescription = async () => {
-    const edit = descEditRef.current;
-    if (!edit || !feature || edit.file !== selected) return;
-    if (edit.text === descSaved.current) return;
-    if (descInFlight.current) return; // the previous tick is still saving
-    descInFlight.current = true;
-    setSaving(true);
-    const next: Feature = { ...feature, description: edit.text.trim() };
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        content?: string;
-        parsed?: Feature;
-        error?: string;
-      };
-      if (res.ok && typeof data.content === "string") {
-        // The editor may have closed, or moved to another feature, while the
-        // save was away: then its result belongs to nothing on screen.
-        if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
-        if (selectedRef.current === edit.file) {
-          setFeature(featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file));
-          markSaved();
+    const payload = descriptionSavePayload(
+      descEditRef.current,
+      selectedRef.current,
+      featureRef.current,
+      descSaved.current,
+    );
+    if (!payload) return;
+    await descSaveQueue.current.run(async () => {
+      if (payload.text === descSaved.current) return;
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/features/${encodeURIComponent(payload.file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: payload.content, save: true }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          content?: string;
+          parsed?: Feature;
+          error?: string;
+        };
+        if (res.ok && typeof data.content === "string") {
+          // The editor may have closed, or moved to another feature, while the
+          // save was away: then its result belongs to nothing on screen.
+          if (descEditRef.current?.file === payload.file) descSaved.current = payload.text;
+          if (selectedRef.current === payload.file) {
+            setFeature(
+              featureFromResponse({ content: data.content, parsed: data.parsed }, payload.file),
+            );
+            markSaved();
+          }
+        } else {
+          toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
         }
-      } else {
-        toast.error(`Description not saved: ${data.error ?? res.statusText} — will retry.`);
+      } catch (e) {
+        toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
+      } finally {
+        setSaving(false);
       }
-    } catch (e) {
-      toast.error(`Description not saved: ${(e as Error).message} — will retry.`);
-    } finally {
-      descInFlight.current = false;
-      setSaving(false);
-    }
+    });
   };
   const descTick = useRef(autosaveDescription);
   useEffect(() => {
@@ -3773,7 +3840,7 @@ export function App() {
       setFeatureLinkError(resolved.error);
       return;
     }
-    const { link: _previous, ...rest } = feature;
+    const { link: _previous, ...rest } = withHeldDescription(feature, selected);
     const next: Feature = resolved.link ? { ...rest, link: resolved.link } : rest;
     setFeatureLinkSaving(true);
     try {
@@ -3825,7 +3892,7 @@ export function App() {
     if (!feature || !selected) return;
     const assigned = name.trim();
     if ((feature.assigned ?? "") === assigned) return;
-    const { assigned: _previous, ...rest } = feature;
+    const { assigned: _previous, ...rest } = withHeldDescription(feature, selected);
     const next: Feature = assigned ? { ...rest, assigned } : rest;
     setAssignedSaving(true);
     try {
