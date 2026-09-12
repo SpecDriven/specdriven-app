@@ -580,6 +580,78 @@ aside header h1 {
   font-weight: 500;
 }
 
+/* The outline twisty (specs/navigation.feature.md "Scenario navigation"):
+   expands a feature's scenarios under it. A feature with no scenarios gets
+   the same box as a spacer, so every feature label starts at one column. */
+.scenario-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  height: 0.8rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: var(--radius-sm);
+}
+
+.scenario-toggle:hover:not(.spacer) {
+  color: var(--text-1);
+}
+
+/* One scenario under its feature: the status glyph, the name, the version.
+   A real link to the scenario's own page, so Copy Link and cmd-click work
+   like every other sidebar entry. */
+.tree a.tree-scenario {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  text-decoration: none;
+  padding: 0.28rem 0.35rem 0.28rem 0.6rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+/* Long scenario names truncate rather than widening the sidebar; the version
+   stays visible at the end of the row. */
+.tree a.tree-scenario .tree-scenario-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree a.tree-scenario .version {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+/* `.status-icon` carries a `vertical-align` for inline use; in this flex row
+   `align-items` does the centring, so it is reset. */
+.tree a.tree-scenario .status-icon {
+  vertical-align: baseline;
+}
+
+.tree a.tree-scenario:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+/* The scenario whose page is open — the same accent fill the open feature
+   gets, so the tree agrees with the address bar and the window title. */
+.tree a.tree-scenario.active {
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
 /* The page tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature.md):
    the Roadmap's and the Tasks' page list under its
    "New page" button, scrolling on its own like the feature tree. */
