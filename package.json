@@ -1,6 +1,6 @@
 {
   "name": "specdriven",
-  "version": "0.1.69",
+  "version": "0.1.70",
   "description": "Enterprise spec-driven development workspace",
   "homepage": "https://github.com/SpecDriven/specdriven-app-release",
   "module": "src/index.ts",

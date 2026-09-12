@@ -2,7 +2,7 @@
 // phase, and the one action each phase offers. Static markup only.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PomodoroBarView } from "../src/frontend/PomodoroBar";
+import { PomodoroBarView, PomodoroIdleView } from "../src/frontend/PomodoroBar";
 import type { PomodoroBarViewProps } from "../src/frontend/PomodoroBar";
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -55,11 +55,12 @@ describe("PomodoroBarView", () => {
     expect(work).toContain("Between pomodoros");
   });
 
-  test("flashes when told to, and the menu offers to end the session", () => {
+  test("flashes when told to, and the menu offers the settings and to stop", () => {
     const markup = html(<PomodoroBarView {...base} flash menuOpen />);
     expect(markup).toContain('class="pomodoro-bar flash"');
-    expect(markup).toContain("End session");
-    expect(html(<PomodoroBarView {...base} />)).not.toContain("End session");
+    expect(markup).toContain("Stop Pomodoro");
+    expect(markup).toContain("Pomodoro settings…");
+    expect(html(<PomodoroBarView {...base} />)).not.toContain("Stop Pomodoro");
   });
 
   test("the rail chip is the clock alone, and a timer icon between intervals", () => {
@@ -70,5 +71,33 @@ describe("PomodoroBarView", () => {
     const between = html(<PomodoroBarView {...base} compact phase={null} />);
     expect(between).toContain('aria-label="Pomodoro: between intervals"');
     expect(between).toContain("<svg");
+  });
+});
+
+describe("PomodoroIdleView", () => {
+  test("with no timer running, one button starts a pomodoro — no name, no dialog", () => {
+    const markup = html(<PomodoroIdleView workMinutes={25} />);
+    expect(markup).toContain('class="pomodoro-bar idle"');
+    expect(markup).toContain("Start a pomodoro");
+    expect(markup).toContain(">25m<");
+    expect(markup).toContain('title="Start a pomodoro — 25 minutes of focus"');
+    // Nothing to fill in, and nothing to stop.
+    expect(markup).not.toContain("<input");
+    expect(markup).not.toContain("Stop Pomodoro");
+  });
+
+  test("the length shown follows the preferences, and the menu holds the settings", () => {
+    expect(html(<PomodoroIdleView workMinutes={50} />)).toContain(">50m<");
+    const open = html(<PomodoroIdleView workMinutes={25} menuOpen />);
+    expect(open).toContain("Pomodoro settings…");
+    expect(open).not.toContain("Stop Pomodoro");
+  });
+
+  test("the rail's idle chip is a timer icon that starts one", () => {
+    const chip = html(<PomodoroIdleView workMinutes={25} compact />);
+    expect(chip).toContain("pomodoro-chip idle");
+    expect(chip).toContain('aria-label="Start a pomodoro — 25 minutes of focus"');
+    expect(chip).toContain("<svg");
+    expect(chip).not.toContain("pomodoro-actions");
   });
 });
