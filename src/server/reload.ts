@@ -12,7 +12,14 @@
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
-import { ROADMAP, TASKS, ensurePageFolder, importPageDrift, type PageFolder } from "./pages";
+import {
+  NOTEBOOK,
+  ROADMAP,
+  TASKS,
+  ensurePageFolder,
+  importPageDrift,
+  type PageFolder,
+} from "./pages";
 import { ensureModelsFolder, importModelDrift } from "./models";
 import { ensureSpecsFolder } from "./features";
 import { migrateToSpecsFolder } from "./migrate";
@@ -41,6 +48,10 @@ export async function reloadData(rootDir: string): Promise<string> {
     return "data repo not configured; skipped reload";
   }
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
+  // The notebook takes no option: its entries are pulled, absorbed and pushed
+  // whichever way its switch is set (specs/app/engineering-notebook.feature
+  // .md "Entries are shared through git") — the switch hides the tab, it does
+  // not stop the sync.
   return syncDataDir(dir, {
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
@@ -105,6 +116,16 @@ export async function syncDataDir(
         const drift = await importPageDrift(dir, kind);
         if (drift) parts.push(drift);
       }
+      // The engineering notebook (specs/app/engineering-notebook.feature.md):
+      // its entries drift like any page, but the folder is never made here.
+      // The switch is on by default, and a default-on module that created a
+      // folder would write to every data repo the app opens; the notebook
+      // folder appears with the first entry instead. The pass costs nothing
+      // when there is no folder to walk, and it runs whether the switch is on
+      // or off — turning the tab off must not strip a teammate's entries of
+      // their documents.
+      const notebookDrift = await importPageDrift(dir, NOTEBOOK);
+      if (notebookDrift) parts.push(notebookDrift);
       // The models folder (roadmap/support-event-modeling.md): the same,
       // for the Event Models' JSON files and their documents.
       if (models) {

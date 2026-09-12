@@ -49,6 +49,9 @@ import {
   Bug,
   Map as MapIcon,
   Menu as MenuIcon,
+  NotebookPen,
+  Eye,
+  Gavel,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -61,6 +64,13 @@ import {
   Bot,
   Workflow,
 } from "lucide-react";
+import {
+  EntryKindChip,
+  dayOf,
+  entryGroups,
+  entryKindOf,
+  type EntryKind,
+} from "./notebook";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
 import { Menu } from "./Menu";
@@ -313,10 +323,10 @@ function clearDescHeight(): void {
 // open is meant to stay open, not to reset on every reload.
 interface PageTab {
   /** The data repo's folder — the tab's id, and its `/api/<folder>` routes. */
-  folder: "roadmap" | "tasks";
+  folder: "roadmap" | "tasks" | "notebook";
   /** The tab's label, the breadcrumb above one of its pages, and the palette
       group its pages fall under. */
-  title: "Roadmap" | "Tasks";
+  title: "Roadmap" | "Tasks" | "Notebook";
   /** What one of its pages is called, in buttons and messages. */
   noun: string;
   /** What the tab says when the folder holds nothing yet. */
@@ -324,6 +334,13 @@ interface PageTab {
   /** Whether its pages can be ticked off — a task is done or it is not
       (specs/app/tasks.feature.md); a roadmap page is neither. */
   done: boolean;
+  /**
+   * Whether its pages are dated entries, listed newest first and grouped by
+   * month, each signed and chipped with its kind — the engineering notebook
+   * (specs/app/engineering-notebook.feature.md). The other tabs list their
+   * pages by subfolder, in name order.
+   */
+  dated?: boolean;
   icon: typeof MapIcon;
 }
 
@@ -344,7 +361,19 @@ const PAGE_TABS: PageTab[] = [
     done: true,
     icon: ListTodo,
   },
+  {
+    folder: "notebook",
+    title: "Notebook",
+    noun: "entry",
+    empty:
+      "No entries yet. The notebook is a shared, dated log of what you notice about the way you work and what you decide to do about it.",
+    done: false,
+    dated: true,
+    icon: NotebookPen,
+  },
 ];
+
+
 
 /** The tab a page's file name belongs to — its folder is the first segment. */
 function pageTabOf(fileName: string): PageTab {
@@ -673,6 +702,10 @@ function pageRowTitle(page: PageListing): string {
   const parts = [page.name];
   if (page.done) parts.push("done");
   if (page.assigned) parts.push(`assigned to ${page.assigned}`);
+  // A notebook entry is signed and dated rather than assigned
+  // (specs/app/engineering-notebook.feature.md).
+  if (page.author) parts.push(`by ${page.author}`);
+  if (page.date) parts.push(page.date);
   return parts.join(" — ");
 }
 
@@ -686,7 +719,15 @@ export function pageListingMetaEqual(a: PageListing, b: PageListing): boolean {
   return (
     a.name === b.name &&
     (a.assigned ?? "") === (b.assigned ?? "") &&
-    Boolean(a.done) === Boolean(b.done)
+    Boolean(a.done) === Boolean(b.done) &&
+    // A notebook entry's fields count too: a kind edited in the markdown must
+    // not read as "nothing changed" and leave a stale chip on the row
+    // (specs/app/engineering-notebook.feature.md).
+    (a.author ?? "") === (b.author ?? "") &&
+    (a.date ?? "") === (b.date ?? "") &&
+    (a.kind ?? "") === (b.kind ?? "") &&
+    (a.supersedes?.url ?? "") === (b.supersedes?.url ?? "") &&
+    (a.supersedes?.title ?? "") === (b.supersedes?.title ?? "")
   );
 }
 
@@ -702,6 +743,7 @@ function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }
     .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
     .map(([dir, list]) => ({ dir, pages: list }));
 }
+
 
 /** Placeholder for a page while its content is on the way. */
 function PageSkeleton({ cards }: { cards: number }) {
@@ -1083,6 +1125,11 @@ export function App() {
   // read by a tick between renders — the same shape the README editor uses.
   const [roadmap, setRoadmap] = useState(false);
   const [tasks, setTasks] = useState(false);
+  // The engineering notebook (specs/app/engineering-notebook.feature.md): the
+  // one module that starts on, so the tab is there from the first paint
+  // rather than appearing once the boot fetch lands. The server has the last
+  // word either way.
+  const [notebook, setNotebook] = useState(true);
   // Test management (specs/app/tests.feature.md): the Settings
   // switch, and which of the module's views has the pane — null when none.
   // The module's data lives in its own store (src/frontend/testing.ts).
@@ -1115,6 +1162,11 @@ export function App() {
   const modelsStore = useModels();
   const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
   const [taskPages, setTaskPages] = useState<PageListing[]>([]);
+  /** The notebook's entries, newest first as the server lists them, and for
+      each superseded entry the one that replaced it
+      (specs/app/engineering-notebook.feature.md). */
+  const [notebookPages, setNotebookPages] = useState<PageListing[]>([]);
+  const [supersededBy, setSupersededBy] = useState<Record<string, PageListing>>({});
   const [openPage, setOpenPage] = useState<PageListing | null>(null);
   const openPageRef = useRef<PageListing | null>(null);
   openPageRef.current = openPage;
@@ -1152,6 +1204,10 @@ export function App() {
   /** Whether an assignment change on the open page is in flight. */
   const [pageAssignedSaving, setPageAssignedSaving] = useState(false);
   const [pageDoneSaving, setPageDoneSaving] = useState(false);
+  /** A notebook entry's kind or supersession is on its way to the server. */
+  const [entryKindSaving, setEntryKindSaving] = useState(false);
+  const [entryKindMenuOpen, setEntryKindMenuOpen] = useState(false);
+  const [entrySupersedesMenuOpen, setEntrySupersedesMenuOpen] = useState(false);
   /** The open page's file name — what effects watch, since the listing object
       is replaced on every save and would restart their timers. */
   const openPageFile = openPage?.fileName ?? null;
@@ -1159,7 +1215,7 @@ export function App() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
   /** The page tabs on offer: one per folder its Settings switch shows. */
   const shownPageTabs = PAGE_TABS.filter((tab) =>
-    tab.folder === "tasks" ? tasks : roadmap,
+    tab.folder === "tasks" ? tasks : tab.folder === "notebook" ? notebook : roadmap,
   );
   /** The tab on screen: a page tab only while its switch still shows it. */
   const shownTab: SidebarTab =
@@ -1171,7 +1227,7 @@ export function App() {
       : "specs";
   /** The pages of one special folder, as the sidebar and palette list them. */
   const pagesIn = (folder: PageTab["folder"]): PageListing[] =>
-    folder === "tasks" ? taskPages : roadmapPages;
+    folder === "tasks" ? taskPages : folder === "notebook" ? notebookPages : roadmapPages;
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -1193,6 +1249,7 @@ export function App() {
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
   const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
+  const [settingsNotebookDraft, setSettingsNotebookDraft] = useState(true);
   const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
   const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
   const [settingsModelsDraft, setSettingsModelsDraft] = useState(false);
@@ -1291,7 +1348,7 @@ export function App() {
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
-  const { modal, modalOpen, prompt, confirm } = useModalPrompts();
+  const { modal, modalOpen, prompt, promptWithChoice, confirm } = useModalPrompts();
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -1314,15 +1371,21 @@ export function App() {
   const loadPages = useCallback(async (folder: PageTab["folder"]): Promise<void> => {
     const res = await fetch(`/api/${folder}`);
     if (!res.ok) return;
-    const data = (await res.json()) as { pages?: PageListing[] };
+    const data = (await res.json()) as {
+      pages?: PageListing[];
+      supersededBy?: Record<string, PageListing>;
+    };
     const pages = Array.isArray(data.pages) ? data.pages : [];
     if (folder === "tasks") setTaskPages(pages);
-    else setRoadmapPages(pages);
+    else if (folder === "notebook") {
+      setNotebookPages(pages);
+      setSupersededBy(data.supersededBy ?? {});
+    } else setRoadmapPages(pages);
   }, []);
 
   /** The pages of whichever folders a settings payload says are shown. */
   const loadShownPages = useCallback(
-    async (shown: { roadmap?: unknown; tasks?: unknown }): Promise<void> => {
+    async (shown: { roadmap?: unknown; tasks?: unknown; notebook?: unknown }): Promise<void> => {
       await Promise.all(
         PAGE_TABS.filter((tab) => shown[tab.folder] === true).map((tab) => loadPages(tab.folder)),
       );
@@ -1394,6 +1457,9 @@ export function App() {
       if (typeof state.tasks === "boolean") {
         setTasks(state.tasks);
       }
+      if (typeof state.notebook === "boolean") {
+        setNotebook(state.notebook);
+      }
       if (typeof state.testing === "boolean") {
         setTestingOn(state.testing);
       }
@@ -1458,7 +1524,9 @@ export function App() {
       // The special folders follow the same rule: each shown list refreshes,
       // and the open page only while its editor has nothing unsaved in it.
       for (const tab of PAGE_TABS) {
-        if (tab.folder === "tasks" ? tasks : roadmap) void loadPages(tab.folder);
+        if (tab.folder === "tasks" ? tasks : tab.folder === "notebook" ? notebook : roadmap) {
+          void loadPages(tab.folder);
+        }
       }
       if (openPageFile && openPageTextRef.current === openPageSaved.current) {
         void showPage(openPageFile);
@@ -1770,6 +1838,8 @@ export function App() {
         // refill below for whichever folders the settings show.
         setRoadmapPages([]);
         setTaskPages([]);
+        setNotebookPages([]);
+        setSupersededBy({});
         // Nor are the old folder's test plans; the module reloads below.
         testing.reset();
         setTestsView(null);
@@ -3008,6 +3078,13 @@ export function App() {
     name: page.name,
     ...(page.assigned ? { assigned: page.assigned } : {}),
     ...(page.done ? { done: true } : {}),
+    // A notebook entry's own fields, or the header would show the kind chip
+    // of an entry it is not looking at
+    // (specs/app/engineering-notebook.feature.md).
+    ...(page.author ? { author: page.author } : {}),
+    ...(page.date ? { date: page.date } : {}),
+    ...(page.kind ? { kind: page.kind } : {}),
+    ...(page.supersedes ? { supersedes: page.supersedes } : {}),
   });
 
   /**
@@ -3103,6 +3180,24 @@ export function App() {
     const assigned = openPage?.assigned;
     if (!assigned || members.some((m) => m.name === assigned)) return members;
     return [...members, { name: assigned }];
+  };
+
+  /**
+   * The decisions the open entry may say it supersedes
+   * (specs/app/engineering-notebook.feature.md): the earlier ones — an entry
+   * cannot supersede itself, and replacing something written later would read
+   * backwards. Same-day decisions count as earlier, since the date is all the
+   * order there is.
+   */
+  const supersedableEntries = (): PageListing[] => {
+    const open = openPage;
+    if (!open) return [];
+    return notebookPages.filter(
+      (entry) =>
+        entry.fileName !== open.fileName &&
+        entry.kind === "Decision" &&
+        (entry.date ?? "") <= (open.date ?? ""),
+    );
   };
 
   /**
@@ -3206,20 +3301,97 @@ export function App() {
     }
   };
 
+  /**
+   * An entry's kind chip (specs/app/engineering-notebook.feature.md): the
+   * header changes it, never a hand edit of the metadata line. Saved through
+   * the page's document like the Done marker, so the editor's text and the
+   * sidebar row follow.
+   */
+  const saveEntryKind = async (kind: "Observation" | "Decision") => {
+    const page = openPage;
+    const content = openPageText;
+    if (!page || content === null) return;
+    if (entryKindOf(page) === kind) return;
+    setEntryKindSaving(true);
+    try {
+      const next = serializePage({ ...parsePage(content), kind });
+      if (await savePageMeta(next, "kind")) {
+        toast.success(`Now a${kind === "Observation" ? "n observation" : " decision"} — saved locally.`);
+      }
+    } finally {
+      setEntryKindSaving(false);
+    }
+  };
+
+  /**
+   * "Supersedes…": point this decision at the one it replaces, or unpick it.
+   * The earlier entry is never touched — the badge on it is derived from this
+   * link, so removing the link removes the badge.
+   */
+  const saveEntrySupersedes = async (earlier: PageListing | null) => {
+    const page = openPage;
+    const content = openPageText;
+    if (!page || content === null) return;
+    setEntryKindSaving(true);
+    try {
+      const { supersedes: _was, ...rest } = parsePage(content);
+      const next = serializePage(
+        earlier
+          ? { ...rest, supersedes: { title: earlier.name, url: pageLink(earlier.fileName) } }
+          : rest,
+      );
+      if (await savePageMeta(next, "supersedes link")) {
+        toast.success(
+          earlier ? `Supersedes ${earlier.name} — saved locally.` : "Supersedes cleared — saved locally.",
+        );
+      }
+    } finally {
+      setEntryKindSaving(false);
+    }
+  };
+
   /** "+ New page" / "+ New task": a markdown file in the tab's folder,
       opened right away. */
   const newPage = async (tab: PageTab) => {
-    const input = await prompt({
-      title: `New ${tab.noun}`,
-      hint: `Use folder/name to create inside a subfolder of ${tab.folder}.`,
-      placeholder: tab.folder === "tasks" ? "Ship v2" : "Pricing",
-      confirmLabel: `Create ${tab.noun}`,
+    // A notebook entry is an observation or a decision
+    // (specs/app/engineering-notebook.feature.md), so its dialog asks which
+    // before it asks anything else; the folder is flat, so it says nothing
+    // about subfolders. Every other page tab keeps the plain name prompt.
+    const result = await promptWithChoice({
+      title: tab.dated ? "New entry" : `New ${tab.noun}`,
+      hint: tab.dated
+        ? "Today's date goes in front of the file name, so the notebook reads in order."
+        : `Use folder/name to create inside a subfolder of ${tab.folder}.`,
+      placeholder: tab.dated
+        ? "A spec change lands before the code"
+        : tab.folder === "tasks"
+          ? "Ship v2"
+          : "Pricing",
+      confirmLabel: tab.dated ? "Create entry" : `Create ${tab.noun}`,
+      ...(tab.dated
+        ? {
+            choicesLabel: "Kind",
+            choices: [
+              {
+                label: "Observation",
+                value: "Observation",
+                hint: "Something you noticed about the way you work.",
+              },
+              {
+                label: "Decision",
+                value: "Decision",
+                hint: "Something you have decided to do about it.",
+              },
+            ],
+          }
+        : {}),
     });
+    const input = result?.text;
     if (!input) return;
     const res = await fetch(`/api/${tab.folder}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input }),
+      body: JSON.stringify({ name: input, ...(result?.choice ? { kind: result.choice } : {}) }),
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {
@@ -3412,6 +3584,7 @@ export function App() {
     setSettingsAssignmentsDraft(assignments);
     setSettingsRoadmapDraft(roadmap);
     setSettingsTasksDraft(tasks);
+    setSettingsNotebookDraft(notebook);
     setSettingsTestingDraft(testingOn);
     setSettingsIssuesDraft(issuesSetting);
     setSettingsModelsDraft(modelsOn);
@@ -3583,6 +3756,9 @@ export function App() {
     setAssignments(data.assignments === true);
     setRoadmap(data.roadmap === true);
     setTasks(data.tasks === true);
+    // The notebook's default is on, so an absent key means on — the opposite
+    // of every other module's switch.
+    setNotebook(data.notebook !== false);
     setTestingOn(data.testing === true);
     setIssuesSetting(data.issues === true);
     setModelsOn(data.models === true);
@@ -3716,7 +3892,12 @@ export function App() {
   // shown — a page of it that is open leaves the pane, and the files stay
   // where they are.
   const togglePageFolder = async (tab: PageTab, on: boolean) => {
-    const setDraft = tab.folder === "tasks" ? setSettingsTasksDraft : setSettingsRoadmapDraft;
+    const setDraft =
+      tab.folder === "tasks"
+        ? setSettingsTasksDraft
+        : tab.folder === "notebook"
+          ? setSettingsNotebookDraft
+          : setSettingsRoadmapDraft;
     setDraft(on);
     if (!(await patchSettings({ [tab.folder]: on }))) {
       setDraft(!on);
@@ -3727,7 +3908,10 @@ export function App() {
       return;
     }
     if (tab.folder === "tasks") setTaskPages([]);
-    else setRoadmapPages([]);
+    else if (tab.folder === "notebook") {
+      setNotebookPages([]);
+      setSupersededBy({});
+    } else setRoadmapPages([]);
     const open = openPageRef.current;
     if (open && pageTabOf(open.fileName).folder === tab.folder) goHome();
   };
@@ -4558,6 +4742,16 @@ export function App() {
     filterMenuOpen ||
     pageMenu !== null;
   const quiet = dialogOpen || menuOpen;
+  /**
+   * `quiet` with the palette itself discounted. A shortcut's `when` keeps its
+   * key from firing behind a dialog — the palette included — but the palette
+   * *lists* those same shortcuts as commands (shortcutAction), and a command
+   * that hides the moment the palette opens can never be picked. Visibility
+   * asks this instead, so "New feature" and "New notebook entry" are
+   * offered there (specs/app/engineering-notebook.feature.md "Search and the
+   * command palette").
+   */
+  const quietBehindPalette = quiet && palette === null;
   const onFeaturePage = selected !== null && feature !== null && editing === null;
   // On a small screen "[" and the sidebar buttons work the drawer instead of
   // the rail; the rail preference is left alone for the next big window.
@@ -4719,6 +4913,34 @@ export function App() {
         if (page) void showPage(page.fileName, { push: true });
       },
     },
+    // The engineering notebook (specs/app/engineering-notebook.feature.md):
+    // the newest entry, and the command that writes a new one.
+    {
+      id: "go-notebook",
+      keys: "g n",
+      label: "Go to the notebook",
+      group: "Navigate",
+      when: () => !quiet && notebook && notebookPages.length > 0,
+      run: () => {
+        const page = notebookPages[0];
+        if (page) void showPage(page.fileName, { push: true });
+      },
+    },
+    {
+      id: "new-notebook-entry",
+      // A palette command with no key of its own: `c` already writes a
+      // feature or a scenario, and an entry is written far less often.
+      keys: [],
+      hidden: true,
+      label: "New notebook entry",
+      group: "Create",
+      when: () => !quiet && notebook,
+      palette: () => !quietBehindPalette && notebook,
+      run: () => {
+        const tab = PAGE_TABS.find((t) => t.folder === "notebook");
+        if (tab) void newPage(tab);
+      },
+    },
     {
       id: "go-tests",
       keys: "g e",
@@ -4797,6 +5019,7 @@ export function App() {
       label: onFeaturePage ? "New scenario" : "New feature",
       group: "Create",
       when: () => !quiet && editing === null,
+      palette: () => !quietBehindPalette && editing === null,
       run: () => {
         if (onFeaturePage) void newScenario();
         else void createFeature();
@@ -4915,7 +5138,7 @@ export function App() {
   // specs/app/tasks.feature.md).
   const shortcutAction = (id: string, icon: ReactNode): PaletteItem | null => {
     const s = shortcuts.find((x) => x.id === id);
-    if (!s || (s.when && !s.when())) return null;
+    if (!s || (s.palette ? !s.palette() : s.when && !s.when())) return null;
     return {
       id: `action:${id}`,
       group: "Actions",
@@ -4947,6 +5170,9 @@ export function App() {
   const paletteActions: PaletteItem[] = [
     shortcutAction("create", <Plus size={14} />),
     action("new-folder", "New folder", <FolderInput size={14} />, () => void createFolder()),
+    // "New notebook entry" (specs/app/engineering-notebook.feature.md): a
+    // palette command, since the tab's own button is a tab away.
+    shortcutAction("new-notebook-entry", <NotebookPen size={14} />),
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
     ...(selected && feature
@@ -5508,7 +5734,9 @@ export function App() {
               <Tooltip
                 key={tab.folder}
                 label={tab.title}
-                keys={tab.folder === "tasks" ? "g t" : "g r"}
+                keys={
+                  tab.folder === "tasks" ? "g t" : tab.folder === "notebook" ? "g n" : "g r"
+                }
               >
                 <a
                   href={pageLink(first.fileName)}
@@ -6056,23 +6284,41 @@ export function App() {
               <button onClick={() => void newPage(tab)}>+ New {tab.noun}</button>
             </div>
             <div className="page-rows">
-            {/* Pages grouped by their subfolder under the folder, each with a
+            {/* Pages grouped by their subfolder under the folder — the
+                notebook's entries by the month they were written in instead
+                (specs/app/engineering-notebook.feature.md) — each with a
                 ⋯ menu: Rename, Copy link, Delete. */}
-            {pageGroups(pagesIn(tab.folder)).map(({ dir, pages }) => (
+            {(tab.dated ? entryGroups : pageGroups)(pagesIn(tab.folder)).map(({ dir, pages }) => (
                 <div key={dir || "."}>
                   {dir && <div className="page-group">{dir}</div>}
                   {pages.map((page) => (
-                    <div key={page.fileName} className={`page-row${dir ? " nested" : ""}`}>
+                    <div
+                      key={page.fileName}
+                      className={`page-row${dir && !tab.dated ? " nested" : ""}${tab.dated ? " entry-row" : ""}${tab.dated && supersededBy[page.fileName] ? " superseded" : ""}`}
+                    >
                       <a
                         href={pageLink(page.fileName)}
                         className={`page-entry${page.fileName === openPage?.fileName ? " active" : ""}${page.done ? " done" : ""}`}
-                        title={pageRowTitle(page)}
+                        title={
+                          tab.dated && supersededBy[page.fileName]
+                            ? `${pageRowTitle(page)} — superseded by ${supersededBy[page.fileName]!.name}`
+                            : pageRowTitle(page)
+                        }
                         aria-current={page.fileName === openPage?.fileName ? "page" : undefined}
                         onClick={(e) =>
                           spaClick(e, () => void showPage(page.fileName, { push: true }))
                         }
                       >
                         {page.name}
+                        {/* An entry's row carries what makes it an entry: its
+                            kind, who signed it and the day. */}
+                        {tab.dated && (
+                          <span className="entry-meta">
+                            <EntryKindChip kind={entryKindOf(page)} />
+                            {page.author && <span className="entry-author">{page.author}</span>}
+                            {page.date && <span className="entry-day">{dayOf(page.date)}</span>}
+                          </span>
+                        )}
                       </a>
                       <span className="tree-row-menu">
                         <Tooltip label="More actions">
@@ -7253,8 +7499,123 @@ export function App() {
                 </span>
               </div>
             </header>
-            {(assignments || pageTabOf(openPage.fileName).done) && (
+            {(assignments ||
+              pageTabOf(openPage.fileName).done ||
+              pageTabOf(openPage.fileName).dated) && (
               <div className="props">
+                {/* A notebook entry's header
+                    (specs/app/engineering-notebook.feature.md): the kind chip
+                    that changes it, the decision it supersedes, and the
+                    author and date the app set — shown, never edited. */}
+                {pageTabOf(openPage.fileName).dated && (
+                  <>
+                    <span className="chip-anchor entry-kind-anchor">
+                      <button
+                        type="button"
+                        className={`chip entry-kind-chip entry-kind-${entryKindOf(openPage).toLowerCase()}`}
+                        aria-haspopup="menu"
+                        aria-expanded={entryKindMenuOpen}
+                        aria-label={`Kind: ${entryKindOf(openPage)}`}
+                        disabled={entryKindSaving}
+                        onClick={() => setEntryKindMenuOpen((o) => !o)}
+                      >
+                        {entryKindOf(openPage) === "Decision" ? (
+                          <Gavel size={14} aria-hidden="true" />
+                        ) : (
+                          <Eye size={14} aria-hidden="true" />
+                        )}
+                        {entryKindOf(openPage)}
+                      </button>
+                      <Menu
+                        open={entryKindMenuOpen}
+                        onClose={() => setEntryKindMenuOpen(false)}
+                        label="Entry kind"
+                        className="chip-menu"
+                        containerSelector=".entry-kind-anchor"
+                        items={(["Observation", "Decision"] as const).map((kind) => ({
+                          id: kind,
+                          label: kind,
+                          checked: entryKindOf(openPage) === kind,
+                          icon:
+                            kind === "Decision" ? <Gavel size={13} /> : <Eye size={13} />,
+                          onSelect: () => void saveEntryKind(kind),
+                        }))}
+                      />
+                    </span>
+                    {/* "Supersedes…": a decision may replace an earlier one.
+                        Only decisions offer it — an observation replaces
+                        nothing. */}
+                    {entryKindOf(openPage) === "Decision" && (
+                      <span className="chip-anchor entry-supersedes-anchor">
+                        <button
+                          type="button"
+                          className={`chip${openPage.supersedes ? "" : " muted"}`}
+                          aria-haspopup="menu"
+                          aria-expanded={entrySupersedesMenuOpen}
+                          aria-label={`Supersedes: ${openPage.supersedes?.title ?? "nothing"}`}
+                          disabled={entryKindSaving}
+                          onClick={() => setEntrySupersedesMenuOpen((o) => !o)}
+                        >
+                          <ArrowDown size={14} aria-hidden="true" />
+                          {openPage.supersedes
+                            ? `Supersedes ${openPage.supersedes.title}`
+                            : "Supersedes…"}
+                        </button>
+                        <Menu
+                          open={entrySupersedesMenuOpen}
+                          onClose={() => setEntrySupersedesMenuOpen(false)}
+                          label="Supersedes"
+                          className="chip-menu"
+                          containerSelector=".entry-supersedes-anchor"
+                          items={[
+                            {
+                              id: "",
+                              label: "Nothing",
+                              checked: !openPage.supersedes,
+                              onSelect: () => void saveEntrySupersedes(null),
+                            },
+                            ...supersedableEntries().map((entry) => ({
+                              id: entry.fileName,
+                              label: entry.name,
+                              checked: openPage.supersedes?.url === pageLink(entry.fileName),
+                              icon: <Gavel size={13} />,
+                              onSelect: () => void saveEntrySupersedes(entry),
+                            })),
+                          ]}
+                        />
+                      </span>
+                    )}
+                    {/* Who signed it and when — set by the app at creation. */}
+                    {openPage.author && (
+                      <span className="chip muted entry-author-chip">
+                        <span className="avatar chip-avatar" aria-hidden="true">
+                          {initialsOf(openPage.author)}
+                        </span>
+                        {openPage.author}
+                      </span>
+                    )}
+                    {openPage.date && (
+                      <span className="chip muted entry-date-chip">{openPage.date}</span>
+                    )}
+                    {/* The badge an entry wears once a later decision replaced
+                        it — derived from that entry's link, not stored here. */}
+                    {supersededBy[openPage.fileName] && (
+                      <a
+                        className="chip entry-superseded-chip"
+                        href={pageLink(supersededBy[openPage.fileName]!.fileName)}
+                        onClick={(e) =>
+                          spaClick(e, () =>
+                            void showPage(supersededBy[openPage.fileName]!.fileName, {
+                              push: true,
+                            }),
+                          )
+                        }
+                      >
+                        Superseded by {supersededBy[openPage.fileName]!.name}
+                      </a>
+                    )}
+                  </>
+                )}
                 {/* The Done button (specs/app/tasks.feature.md): a task is
                     finished or it is not, and the chip says which. Tasks only
                     — a roadmap page is never ticked off. */}
@@ -7274,7 +7635,7 @@ export function App() {
                     {openPage.done ? "Done" : "Mark done"}
                   </button>
                 )}
-                {assignments && (
+                {assignments && !pageTabOf(openPage.fileName).dated && (
                 <span className="chip-anchor page-assignee-anchor">
                   <button
                     type="button"
@@ -7951,6 +8312,30 @@ export function App() {
                     role="switch"
                     checked={settingsTasksDraft}
                     onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* The engineering notebook
+                  (specs/app/engineering-notebook.feature.md): on unless
+                  turned off — the folder is made by the first entry, not by
+                  the switch, so a default-on module writes to nobody's repo
+                  on its own. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Engineering notebook
+                  <span className="settings-row-hint">
+                    {settingsNotebookDraft
+                      ? "A shared, dated log of observations and decisions about your process, kept in the data repo's notebook folder."
+                      : "The Notebook tab is not shown; the entries already written stay in the data folder."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsNotebookDraft}
+                    onChange={(e) => void togglePageFolder(PAGE_TABS[2]!, e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>

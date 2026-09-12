@@ -80,7 +80,9 @@ draft → proposed → published lifecycle, saving, syncing and links to tests;
 [AI sessions](docs/user-guide/ai-sessions.md) covers handing selected specs to
 Claude Code Desktop, or to Claude, Codex or Pi in the app's own coding agent
 pane; [Pomodoro](docs/user-guide/pomodoro.md) covers timing
-your own work with the Pomodoro timer. Implementers should read
+your own work with the Pomodoro timer; [Engineering
+notebook](docs/user-guide/engineering-notebook.md) covers the shared, dated
+log of observations and decisions about your process. Implementers should read
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Demo mode

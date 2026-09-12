@@ -20,12 +20,20 @@ export type PaletteGroup =
   | "Scenarios"
   | "Roadmap"
   | "Tasks"
+  | "Notebook"
   | "Tests"
   | "Issues"
   | "Models";
 
 /** What the query searches, after the sidebar tab the palette opened from. */
-export type PaletteScope = "specs" | "roadmap" | "tasks" | "tests" | "issues" | "models";
+export type PaletteScope =
+  | "specs"
+  | "roadmap"
+  | "tasks"
+  | "notebook"
+  | "tests"
+  | "issues"
+  | "models";
 
 export interface PaletteItem {
   id: string;
@@ -47,6 +55,7 @@ const GROUP_ORDER: PaletteGroup[] = [
   "Scenarios",
   "Roadmap",
   "Tasks",
+  "Notebook",
   "Tests",
   "Issues",
   "Models",

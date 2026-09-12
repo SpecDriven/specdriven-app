@@ -55,6 +55,28 @@ describe("matchApi", () => {
     expect(matchApi("PUT", "/api/roadmap/roadmap%2Fpricing.md")).not.toBeNull();
   });
 
+  // The engineering notebook (specs/app/engineering-notebook.feature.md): the
+  // page routes over its folder, plus the two metadata writes its header
+  // offers. The `/kind` and `/supersedes` routes must win over `/:file`,
+  // which the first-match table gives them by sitting above it.
+  test("notebook routes match by method", () => {
+    expect(matchApi("GET", "/api/notebook")).not.toBeNull();
+    expect(matchApi("POST", "/api/notebook")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/notebook")).toBeNull();
+    const entry = matchApi("GET", "/api/notebook/notebook%2F2026-09-12-spec-first.md");
+    expect(entry).not.toBeNull();
+    expect(entry!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    expect(matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/notebook/notebook%2F2026-09-12-spec-first.md")).not.toBeNull();
+    const kind = matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/kind");
+    expect(kind).not.toBeNull();
+    expect(kind!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    expect(
+      matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/supersedes"),
+    ).not.toBeNull();
+    expect(matchApi("GET", "/api/notebook/notebook%2Fx.md/kind")).toBeNull();
+  });
+
   // Test management (specs/app/tests.feature.md): one read of the
   // whole module, and a write per entity.
   // GitHub issues (specs/app/github-issues.feature.md): list and create,
