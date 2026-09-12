@@ -93,10 +93,8 @@ import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
-import type { StartTab } from "./StartSessionDialog";
-import { pomodoro, readPrefs, titlePrefix, usePomodoro } from "./pomodoro";
+import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
 import { PomodoroBar } from "./PomodoroBar";
-import { preview as previewSound } from "./sounds";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
@@ -899,18 +897,18 @@ export function App() {
   // ("all") or a set of scenario keys.
   const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
   const [sessionRunning, setSessionRunning] = useState(false);
-  // The Start session dialog (src/frontend/StartSessionDialog.tsx): which
-  // tab it opens on, or null while closed. The AI tab is the old session
-  // dialog; the Pomodoro tab starts a human session
-  // (roadmap/support-for-human-code-sessions.md).
-  const [startDialog, setStartDialog] = useState<StartTab | null>(null);
-  // The Pomodoro session (src/frontend/pomodoro.ts): its store keeps the
-  // clock; App reads it for the window title and the bar. Restored once on
-  // boot, so a session survives a reload.
+  /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
+  const [startDialog, setStartDialog] = useState(false);
+  // The Pomodoro (src/frontend/pomodoro.ts): a feature of the app, not a kind
+  // of session — its store keeps the clock, and App reads it for the window
+  // title and the bar. The preferences are read once on boot; there is no
+  // timer to pick up, since it lives only as long as the app is open.
   const pom = usePomodoro();
   useEffect(() => {
-    void pomodoro.restore();
+    pomodoro.load();
   }, []);
+  /** The Pomodoro settings dialog, opened from the bar's ⋯ or the palette. */
+  const [pomodoroSettings, setPomodoroSettings] = useState(false);
   /** Outcome line under the Start session button (started/finished). */
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   /** A failed session's message, shown in an error box until dismissed. */
@@ -1614,7 +1612,7 @@ export function App() {
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
-  const clock = titlePrefix(pom.session, pom.now);
+  const clock = titlePrefix(pom.timer, pom.now);
   useEffect(() => {
     const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
@@ -2329,17 +2327,16 @@ export function App() {
     }
   };
 
-  /** Open the Start session dialog on the AI tab — every old entry point lands here. */
-  const startSession = () => setStartDialog("ai");
+  /** Open the Start session dialog — every entry point lands here. */
+  const startSession = () => setStartDialog(true);
 
-  const startPomodoro = async (name: string, prefs: ReturnType<typeof readPrefs>) => {
-    setStartDialog(null);
-    try {
-      await pomodoro.start(name, prefs);
-      toast.success(`Pomodoro "${name}" started`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
+  /**
+   * Start a pomodoro: one click, no dialog and no name. Called straight from
+   * the click or the key, which is also what unlocks the sound.
+   */
+  const startPomodoro = () => {
+    pomodoro.start();
+    toast.success("Pomodoro started");
   };
 
   // Folders (specs/folders.spec.md): plain directories in the data repo.
@@ -4512,7 +4509,8 @@ export function App() {
     settingsOpen ||
     userInfoOpen ||
     modalOpen ||
-    startDialog !== null ||
+    startDialog ||
+    pomodoroSettings ||
     conflict !== null ||
     featureLinkOpen ||
     sessionError !== null ||
@@ -4608,7 +4606,8 @@ export function App() {
   // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
   const closeTopmost = (e: KeyboardEvent): void | false => {
     if (sessionError !== null) return setSessionError(null);
-    if (startDialog !== null) return setStartDialog(null);
+    if (startDialog) return setStartDialog(false);
+    if (pomodoroSettings) return setPomodoroSettings(false);
     if (conflict) {
       if (resolving) return false;
       dismissConflict();
@@ -4775,10 +4774,10 @@ export function App() {
     {
       id: "pomodoro",
       keys: "p",
-      label: "Start a Pomodoro session",
+      label: "Start a pomodoro",
       group: "Create",
-      when: () => !quiet && editing === null,
-      run: () => setStartDialog("pomodoro"),
+      when: () => !quiet && editing === null && pom.timer === null,
+      run: () => startPomodoro(),
     },
     {
       id: "next",
@@ -4939,9 +4938,10 @@ export function App() {
     ...(codeGen && specSelection.size > 0 && !sessionRunning
       ? [action("session", "Start AI Session", <Play size={14} />, () => startSession())]
       : []),
-    ...(pom.session
-      ? [action("pomodoro-end", "End Pomodoro session", <Timer size={14} />, () => void pomodoro.endSession())]
+    ...(pom.timer
+      ? [action("pomodoro-stop", "Stop Pomodoro", <Timer size={14} />, () => pomodoro.stop())]
       : [shortcutAction("pomodoro", <Timer size={14} />)]),
+    action("pomodoro-settings", "Pomodoro settings…", <Timer size={14} />, () => setPomodoroSettings(true)),
     ...(!demo
       ? [
           action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
@@ -5521,7 +5521,12 @@ export function App() {
             </Tooltip>
           )}
           <div className="rail-bottom">
-            <PomodoroBar compact onExpand={toggleSidebar} />
+            <PomodoroBar
+              compact
+              onExpand={toggleSidebar}
+              settingsOpen={pomodoroSettings}
+              onSettingsOpen={setPomodoroSettings}
+            />
             {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
                 <button
@@ -5820,19 +5825,17 @@ export function App() {
         </div>
         {/* Code gen session (specs/agents/claude.spec.md): check whole specs
             here or single scenarios on their cards, then Start session asks
-            for a name and where to run. The Settings switch takes it all away. */}
-        {/* One button for both kinds of session
-            (roadmap/support-for-human-code-sessions.md): the dialog opens
-            on the AI tab, whose gating is the old button's, with the
-            Pomodoro tab always there. */}
+            for a name and where to run. The Settings switch takes it all
+            away. Timing your own work is the Pomodoro at the foot of the
+            sidebar (specs/app/pomodoro.feature.md), not a kind of session. */}
         <div className="sidebar-actions">
           <button
             onClick={() => startSession()}
             disabled={sessionRunning}
             title={
               codeGen && sessionCount > 0
-                ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}, or a Pomodoro`
-                : "Start an AI session or a Pomodoro"
+                ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
+                : "Start an AI session"
             }
           >
             {sessionRunning ? (
@@ -6106,7 +6109,7 @@ export function App() {
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
-          <PomodoroBar />
+          <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
           <Menu
             open={userMenuOpen}
             onClose={() => setUserMenuOpen(false)}
@@ -8157,29 +8160,17 @@ export function App() {
       )}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
       {modal}
-      {startDialog !== null && (
+      {startDialog && (
         <StartSessionDialog
-          initialTab={startDialog}
           ai={{
             dialog: aiSessionDialog().dialog,
             state: aiTabState({ codeGen, specCount: sessionCount, sessionRunning }),
             onConfirm: (name, choice) => {
-              setStartDialog(null);
+              setStartDialog(false);
               void runAiSession(name, choice);
             },
           }}
-          pomodoro={{
-            prefs: readPrefs(),
-            running: pom.session !== null,
-            initialName: defaultSessionName(),
-            onConfirm: (name, prefs) => void startPomodoro(name, prefs),
-            onPreview: previewSound,
-            onEnd: () => {
-              setStartDialog(null);
-              void pomodoro.endSession();
-            },
-          }}
-          onClose={() => setStartDialog(null)}
+          onClose={() => setStartDialog(false)}
         />
       )}
       <Toaster />
