@@ -6129,14 +6129,15 @@ a.tests-title {
   color: var(--text-3);
 }
 
-/* The Pomodoro bar at the foot of the sidebar: phase, clock, progress,
-   the cycle's dots, and the one action the moment allows. */
+/* The Pomodoro bar, under the sidebar header where its icon opens it: phase,
+   clock, progress, the cycle's dots, and the one action the moment allows.
+   The aside's own flex gap spaces it, so it carries no margin of its own. */
 .pomodoro-bar {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  margin-bottom: 0.4rem;
+  flex: none;
   padding: 0.5rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -6286,11 +6287,48 @@ a.tests-title {
   opacity: 0.6;
 }
 
+/* The bar sits near the top of the sidebar now, so its ⋯ menu drops down
+   rather than popping up the way it did at the foot. */
 .pomodoro-menu {
   position: absolute;
-  bottom: calc(100% + 0.35rem);
+  top: calc(100% + 0.35rem);
   right: 0;
   min-width: 10rem;
+}
+
+/* Fold the bar away. Sits left of the ⋯ in the running bar's head and at the
+   end of the idle bar; quiet until the bar is hovered, like the ⋯. */
+.pomodoro-hide-btn {
+  flex: none;
+}
+
+/* The header's icon, left of the coding agent's Bot: the whole feature when
+   the bar is closed, carrying the clock while a pomodoro runs so closing the
+   bar never hides the timer. An .ibtn, so it sits in the header's icon row;
+   the clock makes it wider than a square when there is one. */
+.pomodoro-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: auto;
+  flex-shrink: 0;
+}
+
+/* A pomodoro is running: the clock, in the same tabular mono as the rail chip. */
+.pomodoro-toggle-clock {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-strong);
+}
+
+.pomodoro-toggle.break .pomodoro-toggle-clock {
+  color: var(--status-published);
+}
+
+.pomodoro-toggle.flash {
+  animation: pomodoro-flash 600ms ease-out 3;
 }
 
 /* An interval just ended: the bar pulses on the accent tint three times. */
@@ -6306,7 +6344,8 @@ a.tests-title {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pomodoro-bar.flash {
+  .pomodoro-bar.flash,
+  .pomodoro-toggle.flash {
     animation: none;
     border-color: var(--accent);
   }
