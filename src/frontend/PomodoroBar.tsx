@@ -10,12 +10,19 @@
 // not of a session. The ⋯ menu holds the settings, which apply to the next
 // interval, never the running one.
 //
-// PomodoroBarView and PomodoroIdleView are pure over what they show, so bun
-// test can render them (tests/pomodoroBar.test.tsx); PomodoroBar binds them
-// to the store.
+// The bar is a lot of a narrow sidebar, so it is a pane you open rather than
+// furniture: PomodoroToggleView is one small icon in the sidebar's header,
+// left of the coding agent's Bot, and the bar opens directly beneath it
+// (src/frontend/pomodoroPref.ts). The icon carries the clock while a pomodoro
+// runs, so closing the bar never loses sight of the timer. Whether the
+// Pomodoro is here at all is the Settings switch, off by default.
+//
+// PomodoroBarView, PomodoroIdleView and PomodoroToggleView are pure over what
+// they show, so bun test can render them (tests/pomodoroBar.test.tsx);
+// PomodoroBar and PomodoroToggle bind them to the store.
 
 import { useState } from "react";
-import { Coffee, MoreHorizontal, Play, Settings2, Square, Timer } from "lucide-react";
+import { ChevronDown, Coffee, MoreHorizontal, Play, Settings2, Square, Timer } from "lucide-react";
 import { Menu } from "./Menu";
 import { Tooltip } from "./Tooltip";
 import {
@@ -32,6 +39,7 @@ import {
 } from "./pomodoro";
 import type { PomodoroPrefs } from "./pomodoro";
 import { PomodoroSettingsDialog } from "./PomodoroSettings";
+import { applyPomodoroShown, usePomodoroEnabled, usePomodoroShown } from "./pomodoroPref";
 import { cycleDots, nextIntervalKind, openInterval } from "./pomodoroRules";
 import type { IntervalKind } from "./pomodoroRules";
 
@@ -56,6 +64,8 @@ export interface PomodoroBarViewProps {
   onStartNext?: () => void;
   onStop?: () => void;
   onSettings?: () => void;
+  /** Close the bar; the timer keeps running behind the header's icon. */
+  onHide?: () => void;
   /** The chip's click: bring the sidebar back. */
   onExpand?: () => void;
 }
@@ -121,6 +131,17 @@ export function PomodoroBarView(p: PomodoroBarViewProps) {
         >
           <MoreHorizontal size={14} aria-hidden="true" />
         </button>
+        {/* Close the bar without stopping the timer: the header's icon
+            carries the clock (src/frontend/pomodoroPref.ts). */}
+        <button
+          type="button"
+          className="ibtn pomodoro-hide-btn"
+          aria-label="Hide the Pomodoro bar"
+          title="Hide the bar — the timer keeps running"
+          onClick={p.onHide}
+        >
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
       </div>
       <time className="pomodoro-clock" aria-live="off">
         {p.phase ? clock : "--:--"}
@@ -167,6 +188,8 @@ export interface PomodoroIdleViewProps {
   onMenu?: (open: boolean) => void;
   onStart?: () => void;
   onSettings?: () => void;
+  /** Close the bar. */
+  onHide?: () => void;
 }
 
 /** With no timer running: one click starts a pomodoro. */
@@ -213,13 +236,87 @@ export function PomodoroIdleView(p: PomodoroIdleViewProps) {
       >
         <MoreHorizontal size={14} aria-hidden="true" />
       </button>
+      <button
+        type="button"
+        className="ibtn pomodoro-hide-btn"
+        aria-label="Hide the Pomodoro bar"
+        title="Hide the bar"
+        onClick={p.onHide}
+      >
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
     </div>
+  );
+}
+
+export interface PomodoroToggleViewProps {
+  /** The running interval's kind, or null when no interval is open. */
+  phase?: IntervalKind | null;
+  /** Left in the running interval — shown on the icon so nothing is lost. */
+  remainingMs?: number;
+  flash?: boolean;
+  /** True while the bar is out: the icon then closes it again. */
+  shown?: boolean;
+  onToggle?: () => void;
+}
+
+/**
+ * The Pomodoro in the sidebar's header, left of the coding agent's Bot: one
+ * small icon that opens and closes the bar beneath it. A running pomodoro
+ * shows its clock beside the timer, so a closed bar costs the detail and
+ * never the timer.
+ */
+export function PomodoroToggleView(p: PomodoroToggleViewProps) {
+  const phase = p.phase ?? null;
+  const onBreak = phase === "shortBreak" || phase === "longBreak";
+  const clock = phase ? formatClock(p.remainingMs ?? 0) : null;
+  const what = p.shown ? "Hide" : "Show";
+  const label = phase
+    ? `${what} the Pomodoro — ${INTERVAL_LABEL[phase]}, ${clock} left`
+    : `${what} the Pomodoro`;
+  const className =
+    `ibtn pomodoro-toggle${p.shown ? " active" : ""}` +
+    `${onBreak ? " break" : ""}${p.flash ? " flash" : ""}`;
+  return (
+    <Tooltip label={label}>
+      <button
+        type="button"
+        className={className}
+        aria-label={label}
+        aria-pressed={p.shown === true}
+        onClick={p.onToggle}
+      >
+        {onBreak ? <Coffee size={15} aria-hidden="true" /> : <Timer size={15} aria-hidden="true" />}
+        {clock && <span className="pomodoro-toggle-clock">{clock}</span>}
+      </button>
+    </Tooltip>
+  );
+}
+
+/** The header's toggle over the store, for the sidebar header in App.tsx. */
+export function PomodoroToggle() {
+  const store = usePomodoro();
+  const enabled = usePomodoroEnabled();
+  const shown = usePomodoroShown();
+  if (!enabled) return null;
+  const running = store.timer ? openInterval(store.timer) : null;
+  return (
+    <PomodoroToggleView
+      phase={running?.kind ?? null}
+      remainingMs={store.timer ? remainingMs(store.timer, store.now) : 0}
+      flash={store.now < store.flashUntil}
+      shown={shown}
+      onToggle={() => applyPomodoroShown(!shown)}
+    />
   );
 }
 
 /**
  * The bar over the store: the running timer, or the invitation to start one.
  * `settingsOpen` is lifted so App can open the settings from the palette too.
+ *
+ * Nothing renders while the Settings switch is off, and only the icon renders
+ * while the bar is folded away (src/frontend/pomodoroPref.ts).
  */
 export function PomodoroBar({
   compact,
@@ -233,11 +330,17 @@ export function PomodoroBar({
   onSettingsOpen?: (open: boolean) => void;
 }) {
   const store = usePomodoro();
+  const enabled = usePomodoroEnabled();
+  const shown = usePomodoroShown();
   const [menuOpen, setMenuOpen] = useState(false);
   const [ownSettings, setOwnSettings] = useState(false);
   const open = settingsOpen ?? ownSettings;
   const setOpen = onSettingsOpen ?? setOwnSettings;
   const timer = store.timer;
+  // Off in Settings: the Pomodoro is not part of this app. The settings
+  // dialog still opens if something asks for it — the palette hides its entry
+  // too, but a dialog already open must not vanish mid-edit.
+  if (!enabled && !open) return null;
   const settings = open ? (
     <PomodoroSettingsDialog
       prefs={store.prefs}
@@ -249,6 +352,11 @@ export function PomodoroBar({
       onClose={() => setOpen(false)}
     />
   ) : null;
+  if (!enabled) return settings;
+  // Closed: the header's own icon (PomodoroToggle) is the whole feature, and
+  // the sidebar gets its rows back. The rail is already icons, so a collapsed
+  // sidebar keeps its chip either way.
+  if (!shown && !compact) return settings;
   if (!timer) {
     return (
       <>
@@ -262,6 +370,7 @@ export function PomodoroBar({
             setMenuOpen(false);
             setOpen(true);
           }}
+          onHide={() => applyPomodoroShown(false)}
         />
         {settings}
       </>
@@ -292,6 +401,7 @@ export function PomodoroBar({
           setMenuOpen(false);
           setOpen(true);
         }}
+        onHide={() => applyPomodoroShown(false)}
         onExpand={onExpand}
       />
       {settings}
