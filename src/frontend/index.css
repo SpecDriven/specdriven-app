@@ -274,6 +274,17 @@ aside header {
   user-select: none;
 }
 
+/* A drag region swallows the clicks of anything inside it, so every control
+   in the header has to opt back out. Covering them all here — rather than
+   one `no-drag` per button — keeps the next icon added to the header
+   clickable instead of dead (specs/app/desktop-app.feature.md "Window"). */
+:root[data-desktop="darwin"] aside header button,
+:root[data-desktop="darwin"] aside header a,
+:root[data-desktop="darwin"] aside header input,
+:root[data-desktop="darwin"] aside header select {
+  -webkit-app-region: no-drag;
+}
+
 /* Window edge drag strips (specs/desktop-app.spec.md "Window"): with the
    title bar hidden, thin strips along the four borders let the window be
    moved by grabbing any edge, not just the sidebar header. They cover only
