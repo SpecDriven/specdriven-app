@@ -3,6 +3,7 @@
 // built from the flat /api/features listing.
 
 import type { FeatureListing } from "../server/features";
+import type { Scenario, ScenarioStatus } from "../server/parser";
 import { SPECS_FOLDER } from "./route";
 
 export interface FolderNode {
@@ -52,4 +53,31 @@ export function buildTree(folders: string[], features: FeatureListing[]): Folder
     node.features.sort((a, b) => a.name.localeCompare(b.name));
   }
   return root;
+}
+
+/** One scenario row under a feature in the sidebar tree. */
+export interface ScenarioRow {
+  name: string;
+  version: number;
+  status: ScenarioStatus;
+}
+
+/**
+ * The scenarios a feature's tree row expands to (specs/navigation.feature.md
+ * "Scenario navigation").
+ *
+ * The listing carries every feature's scenarios already, so the tree needs no
+ * fetch of its own. But the listing is only refreshed on start and on the
+ * reload cron — a save into the open feature (a rename, a new version, a new
+ * draft) lands in the open `Feature` first. So the feature that is open reads
+ * from that live state, and every other feature from the listing.
+ */
+export function scenarioRows(
+  listing: FeatureListing,
+  openFile: string | null,
+  open: { scenarios: readonly Scenario[] } | null,
+): ScenarioRow[] {
+  const source =
+    open && listing.fileName === openFile ? open.scenarios : listing.scenarios;
+  return source.map(({ name, version, status }) => ({ name, version, status }));
 }
