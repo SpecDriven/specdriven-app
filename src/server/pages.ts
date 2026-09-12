@@ -33,7 +33,15 @@ import {
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
 import { commitAndPush, removeAndPush } from "./git";
-import { parsePage, slugify, titleFromFileName, type MarkdownPage } from "./parser";
+import {
+  parsePage,
+  serializePage,
+  slugify,
+  titleFromFileName,
+  type EntryKind,
+  type MarkdownPage,
+  type Supersedes,
+} from "./parser";
 import { getLogger, withSpan } from "./telemetry";
 
 const log = getLogger("pages");
@@ -44,10 +52,19 @@ export interface PageFolder {
   folder: string;
   /** What one page is called in messages — "roadmap page", "task". */
   label: string;
+  /**
+   * Whether the folder is flat: a `/` in a new page's name nests it in a
+   * subfolder unless this says otherwise. The notebook is flat and
+   * chronological (specs/app/engineering-notebook.feature.md); existing
+   * nested files are still listed and still open, since the markdown is the
+   * interchange format and a hand-made subfolder must not disappear.
+   */
+  flat?: boolean;
 }
 
 export const ROADMAP_FOLDER = "roadmap";
 export const TASKS_FOLDER = "tasks";
+export const NOTEBOOK_FOLDER = "notebook";
 
 /** The roadmap folder: markdown pages, one sidebar tab (roadmap.feature.md). */
 export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page" };
@@ -55,8 +72,20 @@ export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap pag
 /** The tasks folder: the same pages, called tasks (tasks.feature.md). */
 export const TASKS: PageFolder = { folder: TASKS_FOLDER, label: "task" };
 
+/**
+ * The notebook folder: the same pages again, called entries and kept flat
+ * (specs/app/engineering-notebook.feature.md). What makes an entry an entry
+ * — its date-prefixed file name, its author and its kind — lives in
+ * notebook.ts; everything a page already does it does here.
+ */
+export const NOTEBOOK: PageFolder = {
+  folder: NOTEBOOK_FOLDER,
+  label: "notebook entry",
+  flat: true,
+};
+
 /** Every special folder, in sidebar order. */
-export const PAGE_FOLDERS: PageFolder[] = [ROADMAP, TASKS];
+export const PAGE_FOLDERS: PageFolder[] = [ROADMAP, TASKS, NOTEBOOK];
 
 /** The folder a name stands for, or null — how a route picks its descriptor. */
 export function pageFolderNamed(folder: string): PageFolder | null {
@@ -85,6 +114,16 @@ export interface PageListing {
   assigned?: string;
   /** Whether the page is done — what a task's Done button sets. */
   done?: boolean;
+  /** A notebook entry's author (specs/app/engineering-notebook.feature.md). */
+  author?: string;
+  /** A notebook entry's day, `yyyy-mm-dd` — from the file name when the
+      entry carries no `**Date:**` line. */
+  date?: string;
+  /** Whether a notebook entry is an observation or a decision; an entry
+      that says neither reads as an observation. */
+  kind?: EntryKind;
+  /** The earlier decision this entry replaces, if any. */
+  supersedes?: Supersedes;
 }
 
 /** A page as the editor sees it: its listing, plus the markdown itself. */
@@ -146,27 +185,49 @@ export async function savePage(
   return { ...listing(file, parsePage(projection)), content: projection };
 }
 
+/** What a caller may say about the page it is creating. */
+export interface CreatePageOptions {
+  /**
+   * Put in front of the slug in the file name, with a `-` between: the
+   * notebook's `yyyy-mm-dd` (specs/app/engineering-notebook.feature.md), so
+   * the folder reads in order and the list sorts without opening a file.
+   */
+  prefix?: string;
+  /** The page's metadata and starting body — its heading is the name. */
+  page?: Omit<MarkdownPage, "name" | "body"> & { body?: string };
+}
+
 /**
  * Create a page: `<folder>/<slug>.md` holding its heading, committed and
- * pushed like a new feature. A `/` in the name nests it in a subfolder.
+ * pushed like a new feature. A `/` in the name nests it in a subfolder,
+ * unless the folder is flat.
  */
 export async function createPage(
   dataDir: string,
   kind: PageFolder,
   name: string,
+  options: CreatePageOptions = {},
 ): Promise<string> {
-  const segments = name.split("/").map((s) => s.trim());
+  // A flat folder takes the name whole: a `/` in it is part of the title,
+  // not a subfolder to make (specs/app/engineering-notebook.feature.md).
+  const segments = kind.flat ? [name.trim()] : name.split("/").map((s) => s.trim());
   const pageName = segments.pop() ?? "";
   if (!pageName) throw new Error(`${capitalize(kind.label)} name is required`);
-  const stem = slugify(pageName);
-  if (!stem) throw new Error(`${capitalize(kind.label)} name is required`);
+  const slug = slugify(pageName);
+  if (!slug) throw new Error(`${capitalize(kind.label)} name is required`);
+  const stem = options.prefix ? `${options.prefix}-${slug}` : slug;
   const folder = [kind.folder, ...segments.map(slugify).filter(Boolean)].join("/");
   const fileName = safe(kind, `${folder}/${stem}.md`);
   if (await fileExists(`${dataDir}/${fileName}`)) {
     throw new Error(`${capitalize(kind.label)} already exists: ${fileName}`);
   }
   await mkdir(`${dataDir}/${folder}`, { recursive: true });
-  const projection = await absorb(dataDir, fileName, `# ${pageName}\n`);
+  const { body = "", ...meta } = options.page ?? {};
+  const projection = await absorb(
+    dataDir,
+    fileName,
+    serializePage({ name: pageName, body, ...meta }),
+  );
   await writeTextFile(`${dataDir}/${fileName}`, projection);
   await commitAndPush(
     dataDir,
@@ -277,10 +338,33 @@ async function pagePaths(dataDir: string, fileName: string): Promise<string[]> {
 function listing(fileName: string, page: MarkdownPage | null): PageListing {
   return {
     fileName,
-    name: page?.name || titleFromFileName(fileName.replace(/\.md$/, "")),
+    name: page?.name || titleFromFileName(entryStem(fileName)),
     ...(page?.assigned ? { assigned: page.assigned } : {}),
     ...(page?.done ? { done: true } : {}),
+    ...(page?.author ? { author: page.author } : {}),
+    ...(entryDate(fileName, page) ? { date: entryDate(fileName, page)! } : {}),
+    ...(page?.kind ? { kind: page.kind } : {}),
+    ...(page?.supersedes ? { supersedes: page.supersedes } : {}),
   };
+}
+
+/** `2026-09-12-spec-first.md` -> `2026-09-12-spec-first`, folder stripped. */
+function entryStem(fileName: string): string {
+  return fileName.replace(/\.md$/, "");
+}
+
+/**
+ * A notebook entry's day: what the file says, else the `yyyy-mm-dd` its name
+ * begins with — an entry dropped into the folder by hand takes its date from
+ * the file name (specs/app/engineering-notebook.feature.md). Only entries
+ * have one, so a roadmap page named `2026-plan.md` is not given a date it
+ * never claimed.
+ */
+function entryDate(fileName: string, page: MarkdownPage | null): string | null {
+  if (page?.date) return page.date;
+  if (!fileName.startsWith(`${NOTEBOOK_FOLDER}/`)) return null;
+  const base = fileName.slice(fileName.lastIndexOf("/") + 1);
+  return base.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
 }
 
 /** Markdown files under the folder, repo-relative and sorted. */

@@ -375,28 +375,136 @@ export function parseDoneLine(line: string): boolean {
 }
 
 /**
- * Lift a page's metadata lines — its assignment and its done marker — off the
- * top of a text, without the ticket link splitFeatureMeta also looks for.
- * What a markdown page carries (parsePage): either line may come first, and
- * anything else ends the metadata.
+ * An engineering notebook entry is an observation or a decision
+ * (specs/app/engineering-notebook.feature.md). The kind is written as one
+ * more metadata line under the heading, beside the author and the date; a
+ * word that is neither reads as an observation, so a hand-written
+ * `**Kind:** Note` degrades rather than being lost.
+ */
+export type EntryKind = "Observation" | "Decision";
+
+const KIND_RE = /^\s{0,3}\*\*Kind:\*\*\s*(observation|decision)\s*$/i;
+
+/** The markdown line an entry's kind is written as. */
+export function formatKind(kind: EntryKind): string {
+  return `**Kind:** ${kind}`;
+}
+
+/** The kind a line of markdown declares, or null when it is not one. */
+export function parseKindLine(line: string): EntryKind | null {
+  const m = line.match(KIND_RE);
+  if (!m) return null;
+  return m[1]!.toLowerCase() === "decision" ? "Decision" : "Observation";
+}
+
+/**
+ * Who wrote a notebook entry: the identity that authors the app's commits to
+ * the data repo (specs/user-info-settings.feature.md), written once when the
+ * entry is created and shown rather than edited.
+ */
+const AUTHOR_RE = /^\s{0,3}\*\*Author:\*\*\s*(.+?)\s*$/i;
+
+/** The markdown line an entry's author is written as. */
+export function formatAuthor(author: string): string {
+  return `**Author:** ${author}`;
+}
+
+/** The author a line of markdown names, or null when it is not one. */
+export function parseAuthorLine(line: string): string | null {
+  const m = line.match(AUTHOR_RE);
+  if (!m) return null;
+  return m[1]!.trim() || null;
+}
+
+/**
+ * The day an entry was written, `yyyy-mm-dd`. It is also the prefix of the
+ * entry's file name, so the folder reads in order on GitHub; the line is what
+ * survives a rename of the file.
+ */
+const DATE_RE = /^\s{0,3}\*\*Date:\*\*\s*(\d{4}-\d{2}-\d{2})\s*$/i;
+
+/** The markdown line an entry's date is written as. */
+export function formatEntryDate(date: string): string {
+  return `**Date:** ${date}`;
+}
+
+/** The date a line of markdown carries, or null when it is not one. */
+export function parseEntryDateLine(line: string): string | null {
+  return line.match(DATE_RE)?.[1] ?? null;
+}
+
+/**
+ * A decision that replaces an earlier one, written as a markdown link to the
+ * entry it supersedes: `**Supersedes:** [<title>](/notebook/<entry>)`. The
+ * link's target is the earlier entry's file name without its folder and
+ * suffix, which is what the deep link carries; the text is its title at the
+ * time, kept as written so the sentence still reads after a rename.
+ */
+const SUPERSEDES_RE = /^\s{0,3}\*\*Supersedes:\*\*\s*\[(.+?)\]\(([^)\s]+)\)\s*$/i;
+
+/** What one entry says about the entry it replaces. */
+export interface Supersedes {
+  /** The earlier entry's title, as it read when the link was made. */
+  title: string;
+  /** The earlier entry's url — `/notebook/<entry>`. */
+  url: string;
+}
+
+/** The markdown line a supersession is written as. */
+export function formatSupersedes(link: Supersedes): string {
+  return `**Supersedes:** [${link.title}](${link.url})`;
+}
+
+/** The supersession a line of markdown declares, or null when it is not one. */
+export function parseSupersedesLine(line: string): Supersedes | null {
+  const m = line.match(SUPERSEDES_RE);
+  if (!m) return null;
+  const title = m[1]!.trim();
+  const url = m[2]!.trim();
+  return title && url ? { title, url } : null;
+}
+
+/**
+ * Lift a page's metadata lines off the top of a text, without the ticket link
+ * splitFeatureMeta also looks for. What a markdown page carries (parsePage):
+ * the assignment and the done marker every page may have, and the author,
+ * date, kind and supersession a notebook entry adds
+ * (specs/app/engineering-notebook.feature.md). They may come in any order,
+ * and anything else ends the metadata.
  */
 export function splitPageMeta(text: string): {
   text: string;
   assigned?: string;
   done?: boolean;
+  author?: string;
+  date?: string;
+  kind?: EntryKind;
+  supersedes?: Supersedes;
 } {
   let rest = text;
   let assigned: string | undefined;
   let done = false;
-  // At most one line of each kind, so two passes settle it whichever order
-  // they were written in (splitFeatureMeta).
-  for (let pass = 0; pass < 2; pass++) {
+  let author: string | undefined;
+  let date: string | undefined;
+  let kind: EntryKind | undefined;
+  let supersedes: Supersedes | undefined;
+  // At most one line of each kind, so a pass per possible line settles them
+  // whichever order they were written in (splitFeatureMeta).
+  for (let pass = 0; pass < 6; pass++) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
+    const nextAuthor = author === undefined ? parseAuthorLine(line) : null;
+    const nextDate = date === undefined ? parseEntryDateLine(line) : null;
+    const nextKind = kind === undefined ? parseKindLine(line) : null;
+    const nextSupersedes = supersedes === undefined ? parseSupersedesLine(line) : null;
     if (nextAssigned) assigned = nextAssigned;
+    else if (nextAuthor) author = nextAuthor;
+    else if (nextDate) date = nextDate;
+    else if (nextKind) kind = nextKind;
+    else if (nextSupersedes) supersedes = nextSupersedes;
     else if (!done && parseDoneLine(line)) done = true;
     else break;
     rest = lines.slice(at + 1).join("\n").trim();
@@ -405,6 +513,10 @@ export function splitPageMeta(text: string): {
     text: rest,
     ...(assigned ? { assigned } : {}),
     ...(done ? { done } : {}),
+    ...(author ? { author } : {}),
+    ...(date ? { date } : {}),
+    ...(kind ? { kind } : {}),
+    ...(supersedes ? { supersedes } : {}),
   };
 }
 
@@ -750,6 +862,18 @@ export interface MarkdownPage {
   assigned?: string;
   /** Whether the page is finished — a task's Done (tasks.feature.md). */
   done?: boolean;
+  /**
+   * Who wrote a notebook entry
+   * (specs/app/engineering-notebook.feature.md). Absent on a roadmap page or
+   * a task, and on an entry dropped into the folder by hand.
+   */
+  author?: string;
+  /** The day a notebook entry was written, `yyyy-mm-dd`. */
+  date?: string;
+  /** Whether a notebook entry is an observation or a decision. */
+  kind?: EntryKind;
+  /** The earlier decision a notebook entry replaces, if any. */
+  supersedes?: Supersedes;
 }
 
 const PAGE_HEADING_RE = /^#\s+(.+?)\s*$/;
@@ -765,20 +889,33 @@ export function parsePage(text: string): MarkdownPage {
   const at = lines.findIndex((line) => line.trim() !== "");
   const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
   const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
-  const { text: body, assigned, done } = splitPageMeta(rest);
+  const { text: body, assigned, done, author, date, kind, supersedes } = splitPageMeta(rest);
   return {
     name: heading ? heading[1]! : "",
     body,
     ...(assigned ? { assigned } : {}),
     ...(done ? { done: true } : {}),
+    ...(author ? { author } : {}),
+    ...(date ? { date } : {}),
+    ...(kind ? { kind } : {}),
+    ...(supersedes ? { supersedes } : {}),
   };
 }
 
-/** The markdown a page is written as — the shape parsePage reads. */
+/**
+ * The markdown a page is written as — the shape parsePage reads. A notebook
+ * entry's lines come in a fixed order — author, date, kind, then the
+ * supersession under it (specs/app/engineering-notebook.feature.md) — so the
+ * projection is deterministic however the file was written by hand.
+ */
 export function serializePage(doc: MarkdownPage): string {
   const parts: string[] = [];
   if (doc.name) parts.push(`# ${doc.name}`);
   if (doc.assigned) parts.push(formatAssigned(doc.assigned));
+  if (doc.author) parts.push(formatAuthor(doc.author));
+  if (doc.date) parts.push(formatEntryDate(doc.date));
+  if (doc.kind) parts.push(formatKind(doc.kind));
+  if (doc.supersedes) parts.push(formatSupersedes(doc.supersedes));
   if (doc.done) parts.push(formatDone());
   if (doc.body) parts.push(doc.body);
   return parts.length === 0 ? "" : parts.join("\n\n") + "\n";

@@ -7,7 +7,7 @@
 // handles (parser.ts `Scenario.id`) and hands them back on a save, so a
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
-import type { ExternalLink, ScenarioStatus } from "../parser";
+import type { EntryKind, ExternalLink, ScenarioStatus } from "../parser";
 import type { EventModel, Layout, Links } from "../eventModel/types";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
@@ -99,6 +99,23 @@ export type PageDoc = {
    * so two people finishing the same task agree rather than merge.
    */
   done?: boolean;
+  /**
+   * A notebook entry's author, the day it was written and whether it is an
+   * observation or a decision
+   * (specs/app/engineering-notebook.feature.md). Absent on a roadmap page or
+   * a task. Each is set whole like `assigned` — none of them is text to
+   * merge — and the author and date are written once at creation, so only
+   * the kind is ever changed after the fact.
+   */
+  author?: string;
+  date?: string;
+  kind?: EntryKind;
+  /**
+   * The earlier decision this entry replaces. Set whole: two people pointing
+   * one entry at different predecessors resolve to one link rather than a
+   * mix of two.
+   */
+  supersedes?: { title: string; url: string };
 };
 
 // Event Model documents (roadmap/support-event-modeling.md): the

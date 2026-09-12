@@ -170,7 +170,10 @@ export function repoDisplayName(repo: string): string {
 }
 
 /** The special folders' names, shared with the server (src/server/pages.ts). */
-export const PAGE_FOLDERS = ["roadmap", "tasks"];
+export const PAGE_FOLDERS = ["roadmap", "tasks", "notebook"];
+
+/** The engineering notebook's folder (specs/app/engineering-notebook.feature.md). */
+export const NOTEBOOK_FOLDER = "notebook";
 
 /** The Event Models' folder, shared with the server (src/server/models.ts). */
 export const MODELS_FOLDER = "models";
@@ -188,7 +191,7 @@ export function modelLink(fileName: string): string {
   return `/${MODELS_FOLDER}/${stem.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** The folder a page's file name lives in — `roadmap` or `tasks`. */
+/** The folder a page's file name lives in — `roadmap`, `tasks` or `notebook`. */
 export function pageFolderOf(fileName: string): string {
   return fileName.split("/")[0] ?? "";
 }

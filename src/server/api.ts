@@ -17,6 +17,7 @@ import {
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
   normalizeModels,
+  normalizeNotebook,
   normalizeRoadmap,
   normalizeTasks,
   normalizeTesting,
@@ -126,6 +127,7 @@ import {
 import type { ModelInput } from "./agent";
 import { serializeExport } from "./eventModel/serialize";
 import {
+  NOTEBOOK,
   ROADMAP,
   TASKS,
   createPage,
@@ -137,6 +139,14 @@ import {
   savePage,
   type PageFolder,
 } from "./pages";
+import {
+  byNewest,
+  createEntry,
+  entryFileOf,
+  setEntryKind,
+  setSupersedes,
+  supersededBy,
+} from "./notebook";
 import {
   NotFoundError,
   createCase,
@@ -381,6 +391,9 @@ async function stateFields(state: SpecDrivenState) {
     assignments: normalizeAssignments(state.assignments),
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
+    // The engineering notebook (specs/app/engineering-notebook.feature.md):
+    // the one module that is on unless turned off.
+    notebook: normalizeNotebook(state.notebook),
     models: normalizeModels(state.models),
     testing: normalizeTesting(state.testing),
     issues: normalizeIssues(state.issues),
@@ -437,6 +450,7 @@ const putState: Handler = async (req) => {
     deletePublished?: boolean;
     assignments?: boolean;
     roadmap?: boolean;
+    notebook?: boolean;
     tasks?: boolean;
     models?: boolean;
     testing?: boolean;
@@ -458,6 +472,7 @@ const putState: Handler = async (req) => {
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.roadmap === undefined &&
+    body.notebook === undefined &&
     body.tasks === undefined &&
     body.models === undefined &&
     body.testing === undefined &&
@@ -467,7 +482,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, models, testing, issues or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
       },
       400,
     );
@@ -657,6 +672,18 @@ const putState: Handler = async (req) => {
     if (body.tasks && !normalizeTasks(state.tasks)) turnedOn.push(TASKS);
     if (body.tasks) state.tasks = true;
     else delete state.tasks;
+  }
+  // The engineering notebook (specs/app/engineering-notebook.feature.md):
+  // the switches' odd one out — ON unless explicitly turned off, so it is the
+  // `false` that is stored and the absent key that means on. Nothing is
+  // created here: the folder appears with the first entry, which is what lets
+  // a module ship on without writing to anybody's repo.
+  if (body.notebook !== undefined) {
+    if (typeof body.notebook !== "boolean") {
+      return json({ error: "notebook must be a boolean" }, 400);
+    }
+    if (body.notebook) delete state.notebook;
+    else state.notebook = false;
   }
   // The models folder (roadmap/support-event-modeling.md): the roadmap
   // switch's third twin — opt-in, an absent key when off, and the folder
@@ -913,6 +940,87 @@ const deletePageRoute = (kind: PageFolder) =>
       return json({ error: (e as Error).message }, 400);
     }
   });
+
+// The engineering notebook (specs/app/engineering-notebook.feature.md): the
+// dated markdown entries in the data repo's `notebook` folder. Reading,
+// saving and deleting one is what any page does, so those routes are the
+// factories above with the notebook's descriptor — wrapped in the switch,
+// which unlike the other modules' is on unless it has been turned off. Only
+// what makes an entry an entry is handled here: creating one with today's
+// date and an author, and the two metadata edits the header offers.
+const withNotebook = (handler: Handler): Handler =>
+  async (req, params) => {
+    if (!normalizeNotebook((await readState(getAppRoot())).notebook)) {
+      return json({ error: "The engineering notebook is switched off in Settings" }, 404);
+    }
+    return handler(req, params);
+  };
+
+const listEntriesRoute = withNotebook(
+  withDataDir(async (dir) => {
+    // Newest first, and each superseded entry told which entry replaced it —
+    // derived on every read, so a link removed by hand takes its badge with
+    // it on the next sync.
+    const entries = byNewest(await listPages(dir, NOTEBOOK));
+    return json({ pages: entries, supersededBy: supersededBy(entries) });
+  }),
+);
+
+const createEntryRoute = withNotebook(
+  withDataDir(async (dir, req) => {
+    const body = (await req.json().catch(() => null)) as {
+      name?: unknown;
+      kind?: unknown;
+    } | null;
+    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
+    if (body.kind !== undefined && body.kind !== "Observation" && body.kind !== "Decision") {
+      return json({ error: "kind must be Observation or Decision" }, 400);
+    }
+    try {
+      const kind = body.kind ?? "Observation";
+      return json({ fileName: await createEntry(dir, body.name, kind) }, 201);
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }),
+);
+
+// The kind chip in an entry's header, and the "Supersedes…" picker beside it.
+// Both are local writes through the document, like any page save.
+const putEntryKindRoute = withNotebook(
+  withDataDir(async (dir, req, params) => {
+    const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
+    if (body?.kind !== "Observation" && body?.kind !== "Decision") {
+      return json({ error: "kind must be Observation or Decision" }, 400);
+    }
+    try {
+      return json(await setEntryKind(dir, params.file ?? "", body.kind));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }),
+);
+
+const putEntrySupersedesRoute = withNotebook(
+  withDataDir(async (dir, req, params) => {
+    const body = (await req.json().catch(() => null)) as {
+      title?: unknown;
+      url?: unknown;
+    } | null;
+    // A null body — or one with no url — unpicks the link.
+    const url = typeof body?.url === "string" ? body.url.trim() : "";
+    try {
+      if (!url) return json(await setSupersedes(dir, params.file ?? "", null));
+      if (typeof body?.title !== "string" || !body.title.trim()) {
+        return json({ error: "title is required" }, 400);
+      }
+      if (entryFileOf(url) === null) return json({ error: "url must name an entry" }, 400);
+      return json(await setSupersedes(dir, params.file ?? "", { title: body.title.trim(), url }));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }),
+);
 
 // Event Models (roadmap/support-event-modeling.md): the JSON files in the
 // data repo's `models` folder, each drawn on the Models tab's canvas. The
@@ -1862,6 +1970,13 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
   ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
   ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
+  ["GET", "/api/notebook", listEntriesRoute],
+  ["POST", "/api/notebook", createEntryRoute],
+  ["PUT", "/api/notebook/:file/kind", putEntryKindRoute],
+  ["PUT", "/api/notebook/:file/supersedes", putEntrySupersedesRoute],
+  ["GET", "/api/notebook/:file", withNotebook(readPageRoute(NOTEBOOK))],
+  ["PUT", "/api/notebook/:file", withNotebook(savePageRoute(NOTEBOOK))],
+  ["DELETE", "/api/notebook/:file", withNotebook(deletePageRoute(NOTEBOOK))],
   ["GET", "/api/tests", getTesting],
   ["POST", "/api/tests/cases", postTestCase],
   ["PUT", "/api/tests/cases/:id", putTestCase],
