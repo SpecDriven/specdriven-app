@@ -11,12 +11,49 @@
 // by a dep-less effect, plus the `descOpen` cleanup — because the bug lives in
 // the order React runs those, not in any one function. A test that only
 // asserts "a PUT went out" passes on the broken code: what matters is *when*.
-import { beforeAll, describe, expect, test } from "bun:test";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
+// React needs a DOM to run effects at all, so this file borrows one — but bun
+// runs every test file in one process, and happy-dom's global registrar
+// replaces `fetch` and `Response` along with the document. The git tests talk
+// to a real http remote through those, so leaving them swapped out fails most
+// of the suite. Take only the handful of globals React touches, and give the
+// originals back afterwards.
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Window } from "happy-dom";
+
+const DOM_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "HTMLElement",
+  "Element",
+  "Node",
+  "Event",
+  "MutationObserver",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+  "IS_REACT_ACT_ENVIRONMENT",
+] as const;
+
+const saved = new Map<string, PropertyDescriptor | undefined>();
+let happyWindow: Window | undefined;
 
 beforeAll(() => {
-  if (!globalThis.document) GlobalRegistrator.register();
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  happyWindow = new Window({ url: "http://localhost/" });
+  const w = happyWindow as unknown as Record<string, unknown>;
+  for (const key of DOM_GLOBALS) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    const value = key === "IS_REACT_ACT_ENVIRONMENT" ? true : (w[key] ?? w.window);
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  }
+});
+
+afterAll(async () => {
+  for (const [key, descriptor] of saved) {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else delete (globalThis as unknown as Record<string, unknown>)[key];
+  }
+  saved.clear();
+  await happyWindow?.happyDOM.close();
 });
 
 import React, { act, useEffect, useRef, useState } from "react";
