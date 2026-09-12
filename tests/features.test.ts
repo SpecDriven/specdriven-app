@@ -21,9 +21,9 @@ import {
 import { projectFeature } from "../src/server/automerge/project";
 import { loadFeatureDoc } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
-import type { GitEngine } from "../src/server/git";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
+import { gitEngines } from "./helpers/engines";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
@@ -464,11 +464,11 @@ test("published scenarios are immutable, but new versions may be added", async (
   expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v2 [published]");
 });
 
-// Every push/pull flow runs on all three git engines
-// (specs/git-operations.spec.md): plain system git, the GitHub CLI (a stub gh
-// on PATH) and the bundled JavaScript one, against the same smart-HTTP-served
-// origin.
-for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
+// Every push/pull flow runs against a local-path origin on the system-git
+// engine, and on all three — plain system git, the GitHub CLI (a stub gh on
+// PATH) and the bundled JavaScript one — under SPECDRIVEN_ALL_ENGINES=1
+// (helpers/engines.ts).
+for (const engine of gitEngines()) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
       if (engine === "gh") fakeGh = installFakeGh();

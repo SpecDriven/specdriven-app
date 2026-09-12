@@ -2,7 +2,6 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { $ } from "bun";
 import {
   parseGitHubUrl,
   looksLikeRepoUrl,
@@ -14,7 +13,7 @@ import {
 import { currentEngine, setGitEngine } from "../src/server/git";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
-import { git, stopServers } from "./helpers/fixtures";
+import { seededOrigin, stopServers } from "./helpers/fixtures";
 import { serveRepos } from "./helpers/gitHttpServer";
 
 let root: string;
@@ -110,24 +109,10 @@ test("url-shaped input that is not a GitHub repo url is rejected, not treated as
 });
 
 /** A local origin with one commit, standing in for a GitHub remote. */
-async function seededOrigin(at = "origin.git"): Promise<string> {
-  const origin = join(root, at);
-  await $`git init --bare -b main ${origin}`.quiet();
-  const seed = join(root, "seed");
-  await $`git clone ${origin} ${seed}`.quiet().nothrow();
-  await git(seed, "config", "user.email", "test@example.com");
-  await git(seed, "config", "user.name", "Test");
-  await git(seed, "checkout", "-B", "main");
-  await Bun.write(join(seed, "specs/seed.feature.md"), "# Seed\n");
-  await git(seed, "add", ".");
-  await git(seed, "commit", "-m", "seed");
-  await git(seed, "push", "origin", "main");
-  await rm(seed, { recursive: true, force: true });
-  return origin;
-}
+const localOrigin = (at?: string) => seededOrigin(root, at);
 
 test("ensureClone clones on first use and reuses an existing clone", async () => {
-  const origin = await seededOrigin();
+  const origin = await localOrigin();
   const dir = join(root, "clone");
   await ensureClone(origin, dir);
   expect(await Bun.file(join(dir, "specs/seed.feature.md")).exists()).toBe(true);
@@ -145,7 +130,7 @@ test("ensureClone surfaces clone failures (no access / no such repo)", async () 
 // specs/git-operations.spec.md: a data repo url is cloned over smart-HTTP by
 // the system-git engine, and the clone is where the configured repo resolves.
 test("resolveDataRepo clones a repo url on the system-git engine", async () => {
-  await seededOrigin("test/origin.git");
+  await localOrigin("test/origin.git");
   const server = serveRepos(root);
   process.env.SPECDRIVEN_GITHUB_URL = server.url;
   process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
@@ -164,7 +149,7 @@ test("resolveDataRepo clones a repo url on the system-git engine", async () => {
 // specs/git-operations.spec.md: on the GitHub CLI engine the clone that backs
 // a configured data repo is `gh repo clone`, so it carries gh's credentials.
 test("resolveDataRepo clones through gh on the GitHub CLI engine", async () => {
-  const origin = await seededOrigin();
+  const origin = await localOrigin();
   fakeGh = installFakeGh({ origin });
   setGitEngine("gh");
   process.env.SPECDRIVEN_REPOS_DIR = join(root, "repos");
