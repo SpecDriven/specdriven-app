@@ -3,7 +3,13 @@
 // embedded link the same shape as an excalidraw.com export pasted in by hand —
 // `![<name>.excalidraw](/api/images/<name>-excalidraw-<hash>.svg)`.
 import { describe, expect, test } from "bun:test";
-import { diagramFileName, svgFile } from "../src/frontend/excalidraw/diagram";
+import {
+  diagramFileName,
+  diagramName,
+  isDiagram,
+  svgFile,
+} from "../src/frontend/excalidraw/diagram";
+import { setImageSrc } from "../src/frontend/markdown";
 import { storeImage } from "../src/server/images";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,5 +50,71 @@ describe("the exported diagram through the image pipeline", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+// specs/editor/excalidraw-support.feature.md "Edit Excalidraw diagram": an
+// image in the text is one the pane can reopen when either mark is there —
+// the alt an insert left, or the stored file's own name.
+describe("recognising a diagram in the text", () => {
+  test("takes the alt an inserted or pasted export carries", () => {
+    expect(isDiagram("order-flow.excalidraw", "/api/images/anything.svg")).toBe(true);
+    expect(diagramName("order-flow.excalidraw", "/api/images/anything.svg")).toBe("order-flow");
+  });
+
+  test("takes the stored file's name when the alt was retyped", () => {
+    const src = "/api/images/order-flow-excalidraw-1a2b3c4d.svg";
+    expect(isDiagram("The order flow", src)).toBe(true);
+    expect(diagramName("The order flow", src)).toBe("order-flow");
+  });
+
+  test("reads through a query or fragment on the url", () => {
+    expect(isDiagram("", "/api/images/flow-excalidraw-1a2b3c4d.svg?v=2")).toBe(true);
+    expect(diagramName("", "/api/images/flow-excalidraw-1a2b3c4d.svg#top")).toBe("flow");
+  });
+
+  test("leaves ordinary images alone", () => {
+    expect(isDiagram("shot", "/api/images/shot-1a2b3c4d.png")).toBe(false);
+    // An excalidraw-looking name without the hash storeImage gives is not one.
+    expect(isDiagram("shot", "/api/images/my-excalidraw-notes.svg")).toBe(false);
+    expect(isDiagram("excalidraw", "/api/images/shot-1a2b3c4d.png")).toBe(false);
+  });
+
+  test("falls back to 'diagram' when the link says nothing", () => {
+    expect(diagramName(".excalidraw", "/api/images/x-1a2b3c4d.svg")).toBe("diagram");
+    expect(diagramName("", "/x.svg")).toBe("diagram");
+  });
+});
+
+// The saved diagram replaces the one it was opened from, in place, keeping
+// the size that image was given.
+describe("saving over the diagram in the text", () => {
+  const OLD = "/api/images/flow-excalidraw-11111111.svg";
+  const NEW = "/api/images/flow-excalidraw-22222222.svg";
+
+  test("repoints the nth image, leaving the rest of the text alone", () => {
+    const body = `Before\n\n![flow.excalidraw](${OLD})\n\nAfter`;
+    expect(setImageSrc(body, 0, NEW, "flow.excalidraw")).toBe(
+      `Before\n\n![flow.excalidraw](${NEW})\n\nAfter`,
+    );
+  });
+
+  test("repoints only that one when the text holds several", () => {
+    const body = `![a.excalidraw](${OLD}) ![shot](/api/images/shot-1a2b3c4d.png) ![b.excalidraw](${OLD})`;
+    expect(setImageSrc(body, 2, NEW, "b.excalidraw")).toBe(
+      `![a.excalidraw](${OLD}) ![shot](/api/images/shot-1a2b3c4d.png) ![b.excalidraw](${NEW})`,
+    );
+  });
+
+  test("keeps a width the image was given, as the tag it was written in", () => {
+    const body = `<img src="${OLD}" alt="flow.excalidraw" width="320">`;
+    expect(setImageSrc(body, 0, NEW, "flow.excalidraw")).toBe(
+      `<img src="${NEW}" alt="flow.excalidraw" width="320">`,
+    );
+  });
+
+  test("changes nothing when that image is no longer there", () => {
+    const body = "Nothing to see";
+    expect(setImageSrc(body, 0, NEW, "flow.excalidraw")).toBe(body);
   });
 });

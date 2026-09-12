@@ -1,5 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
+import { PencilRuler } from "lucide-react";
+import { isDiagram } from "./excalidraw/diagram";
 
 // Image sizing (specs/images.spec.md). A pasted screenshot lands at its pixel
 // size — on a HiDPI display twice as big as it looked on screen — so in an
@@ -16,6 +18,12 @@ import type { KeyboardEvent, PointerEvent } from "react";
 export interface ImageSizing {
   /** `width` in pixels, or null for the natural size. */
   resize(index: number, width: number | null): void;
+  /**
+   * Reopen the nth image in Excalidraw (specs/editor/excalidraw-support
+   * .feature.md "Edit Excalidraw diagram"). Absent when Excalidraw support is
+   * off, so no diagram shows the control; only diagrams ever show it.
+   */
+  editDiagram?(index: number): void;
 }
 
 /** Put around an editable preview by the editor; absent, images are plain. */
@@ -154,6 +162,10 @@ function ResizableImage({
   };
 
   const shown = drag ?? measured?.width;
+  // An Excalidraw diagram in an editable preview also carries a button that
+  // reopens it in the pane (specs/editor/excalidraw-support.feature.md "Edit
+  // Excalidraw diagram"), shown alongside the width badge on the same hover.
+  const editDiagram = sizing.editDiagram && isDiagram(alt, src) ? sizing.editDiagram : null;
   return (
     <span className={`md-img${drag !== null ? " resizing" : ""}`} onPointerEnter={measure}>
       <img
@@ -181,6 +193,17 @@ function ResizableImage({
         onDoubleClick={() => sizing.resize(index, null)}
         onFocus={measure}
       />
+      {editDiagram && (
+        <button
+          type="button"
+          className="md-img-edit"
+          aria-label={alt ? `Edit diagram "${alt}"` : "Edit diagram"}
+          title="Edit this diagram in Excalidraw"
+          onClick={() => editDiagram(index)}
+        >
+          <PencilRuler size={13} aria-hidden="true" />
+        </button>
+      )}
       {shown !== undefined && (
         <span className="md-img-size" aria-hidden="true">
           {shown} px
