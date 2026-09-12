@@ -117,3 +117,36 @@ describe("a diagram already in the text", () => {
     expect(markup).not.toContain('aria-label="Edit diagram &quot;shot&quot;"');
   });
 });
+
+// The toolbar's one diagram button does whichever the caret asks for. The
+// caret moving is a DOM interaction; what the button becomes is decided by
+// imageAt + isDiagram, covered in tests/excalidrawDiagram.test.ts. Here: the
+// caret as the editor opens, at the start of the body.
+describe("the toolbar's diagram button", () => {
+  const write = (value: string) => html(<MarkdownEditor value={value} onChange={() => {}} />);
+
+  test("draws a new diagram with the caret in ordinary text", () => {
+    applyExcalidrawPref(true);
+    const markup = write("Given a policy\n");
+    expect(markup).toContain(BUTTON);
+    expect(markup).not.toContain("Edit diagram");
+  });
+
+  test("edits the diagram the caret is in, naming it", () => {
+    applyExcalidrawPref(true);
+    const markup = write("![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)\n");
+    expect(markup).toContain('aria-label="Edit diagram &quot;flow&quot;"');
+    expect(markup).not.toContain(BUTTON);
+  });
+
+  test("draws a new one when the caret is in an ordinary image", () => {
+    applyExcalidrawPref(true);
+    expect(write("![shot](/api/images/shot-1a2b3c4d.png)\n")).toContain(BUTTON);
+  });
+
+  test("is absent altogether while the switch is off", () => {
+    const markup = write("![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)\n");
+    expect(markup).not.toContain(BUTTON);
+    expect(markup).not.toContain("Edit diagram");
+  });
+});

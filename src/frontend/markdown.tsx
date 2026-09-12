@@ -382,6 +382,30 @@ export function imageRefs(src: string): ImageRef[] {
 }
 
 /**
+ * The image `offset` falls in, and its index in imageRefs order — for the
+ * toolbar acting on the reference under the caret (specs/editor/excalidraw-
+ * support.feature.md "Edit Excalidraw diagram"). An offset anywhere in the
+ * `![…](…)` or `<img …>` counts, its two ends included, so a caret just
+ * before or just after the link still finds it; where two references touch,
+ * the first one wins. Null when the offset is in ordinary text.
+ *
+ * Takes refs rather than the source: parsing is the expensive half and the
+ * images only move when the text does, while the caret moves on every key.
+ */
+export function imageAtOffset(
+  refs: ImageRef[],
+  offset: number,
+): { index: number; ref: ImageRef } | null {
+  const index = refs.findIndex((r) => offset >= r.start && offset <= r.end);
+  return index === -1 ? null : { index, ref: refs[index]! };
+}
+
+/** imageAtOffset against a source parsed on the spot (CRLF read as LF). */
+export function imageAt(src: string, offset: number): { index: number; ref: ImageRef } | null {
+  return imageAtOffset(imageRefs(src.replaceAll("\r\n", "\n")), offset);
+}
+
+/**
  * The source with its nth image (imageRefs order) set to `width` pixels,
  * spelled `<img src="…" alt="…" width="…">` — or, with null, back at its
  * natural size: plain `![alt](src)` again, unless the alt or url cannot be

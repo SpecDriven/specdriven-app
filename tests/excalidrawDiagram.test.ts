@@ -9,7 +9,7 @@ import {
   isDiagram,
   svgFile,
 } from "../src/frontend/excalidraw/diagram";
-import { setImageSrc } from "../src/frontend/markdown";
+import { imageAt, imageAtOffset, imageRefs, setImageSrc } from "../src/frontend/markdown";
 import { storeImage } from "../src/server/images";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -83,6 +83,57 @@ describe("recognising a diagram in the text", () => {
   test("falls back to 'diagram' when the link says nothing", () => {
     expect(diagramName(".excalidraw", "/api/images/x-1a2b3c4d.svg")).toBe("diagram");
     expect(diagramName("", "/x.svg")).toBe("diagram");
+  });
+});
+
+// The toolbar's diagram button acts on the link the caret is in, so what
+// counts as "in" one matters.
+describe("the image under the caret", () => {
+  const LINK = "![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)";
+  const BODY = `ab\n\n${LINK}\n\ncd`;
+  const START = BODY.indexOf("!");
+  const END = START + LINK.length;
+
+  test("is found from anywhere inside the link, both ends included", () => {
+    for (const at of [START, START + 1, START + 20, END - 1, END]) {
+      const hit = imageAt(BODY, at);
+      expect(hit?.index).toBe(0);
+      expect(hit?.ref.src).toBe("/api/images/flow-excalidraw-1a2b3c4d.svg");
+    }
+  });
+
+  test("is nothing when the caret is in ordinary text", () => {
+    expect(imageAt(BODY, 0)).toBeNull();
+    expect(imageAt(BODY, START - 1)).toBeNull();
+    expect(imageAt(BODY, END + 1)).toBeNull();
+    expect(imageAt(BODY, BODY.length)).toBeNull();
+  });
+
+  test("gives the index the rest of the editing works in", () => {
+    const two = `${LINK} ${LINK}`;
+    expect(imageAt(two, 1)?.index).toBe(0);
+    expect(imageAt(two, LINK.length + 2)?.index).toBe(1);
+  });
+
+  test("finds an <img> tag the same way", () => {
+    const tag = '<img src="/api/images/flow-excalidraw-1a2b3c4d.svg" alt="flow.excalidraw">';
+    expect(imageAt(tag, 5)?.ref.alt).toBe("flow.excalidraw");
+    expect(imageAt(`x ${tag}`, 0)).toBeNull();
+  });
+
+  test("reads a CRLF source at the offsets the editor works in", () => {
+    // The editor's own offsets are LF, as imageRefs and setImageSrc are.
+    const crlf = `ab\r\n\r\n${LINK}`;
+    expect(imageAt(crlf, "ab\n\n".length + 1)?.index).toBe(0);
+  });
+
+  // The editor parses once per edit and looks up on every caret move; the
+  // two halves must agree.
+  test("is the same answer whether the refs are parsed here or passed in", () => {
+    const refs = imageRefs(BODY);
+    for (const at of [0, START, START + 9, END, END + 3, BODY.length]) {
+      expect(imageAtOffset(refs, at)).toEqual(imageAt(BODY, at));
+    }
   });
 });
 
