@@ -402,6 +402,28 @@ export function setImageWidth(src: string, index: number, width: number | null):
   return text.slice(0, ref.start) + md + text.slice(ref.end);
 }
 
+/**
+ * The source with its nth image (imageRefs order) pointed at `src`, under
+ * `alt` — how a re-saved Excalidraw diagram takes the place of the one it was
+ * opened from (specs/editor/excalidraw-support.feature.md "Edit Excalidraw
+ * diagram"). A width or height the reference carried stays, so a diagram
+ * sized in the preview keeps that size; the tag spelling is kept where one
+ * is needed and plain `![alt](src)` used where it is not. Unchanged when
+ * there is no such image.
+ */
+export function setImageSrc(src: string, index: number, url: string, alt: string): string {
+  const text = src.replaceAll("\r\n", "\n");
+  const ref = imageRefs(text)[index];
+  if (!ref) return src;
+  const plain = ref.width === null && ref.height === null && !alt.includes("]") && !url.includes(")");
+  const md = plain
+    ? `![${alt}](${url})`
+    : `<img src="${encodeAttr(url)}" alt="${encodeAttr(alt)}"${
+        ref.width === null ? "" : ` width="${ref.width}"`
+      }${ref.height === null ? "" : ` height="${ref.height}"`}>`;
+  return text.slice(0, ref.start) + md + text.slice(ref.end);
+}
+
 // ---- Toolbar text edits (pure, so they are unit-testable) ----
 
 export interface Edit {

@@ -2,6 +2,9 @@
 // Excalidraw support is a device-local switch in Settings. On, every editable
 // Markdown editor's toolbar shows the diagram button that opens the pane;
 // off, the editor is as it was. A read-only body has nothing to draw into.
+//
+// "Edit Excalidraw diagram": the same switch puts a button on each diagram
+// already in the text, in the editable Preview, that reopens it in the pane.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
@@ -79,5 +82,38 @@ describe("the editor toolbar", () => {
   test("never offers it on a read-only body", () => {
     applyExcalidrawPref(true);
     expect(html(<MarkdownEditor value="x" onChange={() => {}} readOnly />)).not.toContain(BUTTON);
+  });
+});
+
+describe("a diagram already in the text", () => {
+  const DIAGRAM = "![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)";
+  const SHOT = "![shot](/api/images/shot-1a2b3c4d.png)";
+  const EDIT = 'aria-label="Edit diagram &quot;flow.excalidraw&quot;"';
+  const preview = (value: string) =>
+    html(<MarkdownEditor value={value} onChange={() => {}} initialTab="preview" />);
+
+  test("carries an edit button in the editable preview once the switch is on", () => {
+    applyExcalidrawPref(true);
+    const markup = preview(DIAGRAM);
+    expect(markup).toContain(EDIT);
+    expect(markup).toContain('class="md-img-edit"');
+  });
+
+  test("carries none while the switch is off", () => {
+    expect(preview(DIAGRAM)).not.toContain("md-img-edit");
+  });
+
+  test("carries none on a published (read-only) body", () => {
+    applyExcalidrawPref(true);
+    expect(html(<MarkdownEditor value={DIAGRAM} onChange={() => {}} readOnly />)).not.toContain(
+      "md-img-edit",
+    );
+  });
+
+  test("is the only image offered it — an ordinary one is just an image", () => {
+    applyExcalidrawPref(true);
+    const markup = preview(`${SHOT}\n\n${DIAGRAM}`);
+    expect(markup).toContain(EDIT);
+    expect(markup).not.toContain('aria-label="Edit diagram &quot;shot&quot;"');
   });
 });
