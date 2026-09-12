@@ -84,7 +84,11 @@ import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
-import { applyExcalidrawPref, useExcalidrawEnabled } from "./excalidrawPref";
+import {
+  applyExcalidrawPref,
+  setExcalidrawDemoMode,
+  useExcalidrawEnabled,
+} from "./excalidrawPref";
 import { markText } from "./highlight";
 import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
@@ -1386,6 +1390,10 @@ export function App() {
       // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
       // when this lands drops its Vim tab, and the Settings row hides.
       setVimDemoMode(Boolean(state.demo));
+      // Excalidraw goes the other way (src/frontend/excalidrawPref.ts): the
+      // demo defaults it on so a visitor finds the diagram button without
+      // first finding Settings. Turning it off there still sticks.
+      setExcalidrawDemoMode(Boolean(state.demo));
       setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -7396,7 +7404,8 @@ export function App() {
               )}
               {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
                   a diagram button in every Markdown editor's toolbar, remembered
-                  on this device. Opt-in and harmless, so the demo keeps it. */}
+                  on this device. The demo keeps the row and starts it on
+                  (src/frontend/excalidrawPref.ts). */}
               <label className="settings-row">
                 <span className="settings-row-label">
                   Excalidraw diagrams
