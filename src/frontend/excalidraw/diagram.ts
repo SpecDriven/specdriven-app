@@ -55,3 +55,29 @@ export function diagramName(alt: string, src: string): string {
   const byFile = src.split(/[?#]/)[0]!.match(FILE)?.[1];
   return byFile || "diagram";
 }
+
+// ---- Importing an Excalidraw file ("Import Excalidraw file") ----
+
+/** `<stem>.excalidraw`, the file excalidraw.com and the desktop app save. */
+const EXCALIDRAW_FILE = /^(.*)\.excalidraw$/i;
+
+/**
+ * Whether a picked or dropped file is an Excalidraw scene file — one the pane
+ * can load — going by its name: browsers give `.excalidraw` no MIME type, so
+ * the extension is all there is to go on. The contents are only known once
+ * the pane reads it; it says so then (src/frontend/excalidraw/ExcalidrawPane
+ * .tsx).
+ */
+export function isExcalidrawFile(name: string): boolean {
+  return EXCALIDRAW_FILE.test(name);
+}
+
+/**
+ * The name an imported file's diagram takes: the file's stem, so a diagram
+ * imported from `TheBigPicture.excalidraw` is inserted as `TheBigPicture`,
+ * and its link keeps the name the file had. A name with no stem is "diagram".
+ */
+export function importedName(fileName: string): string {
+  const stem = fileName.split(/[/\\]/).pop()!.match(EXCALIDRAW_FILE)?.[1] ?? "";
+  return stem.trim() || "diagram";
+}
