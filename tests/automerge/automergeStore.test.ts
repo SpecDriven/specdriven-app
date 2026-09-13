@@ -1,4 +1,4 @@
-// The chunked Automerge store under `.specdriven/automerge/features/`:
+// The chunked Automerge store under `.specdriven/automerge/specs/`:
 // content-addressed write-once chunks so concurrent peers union-merge in git,
 // deterministic merge of divergent copies, foreign-lineage chunks skipped,
 // and compaction folding change files into a snapshot.

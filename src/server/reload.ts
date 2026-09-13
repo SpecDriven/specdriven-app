@@ -22,7 +22,7 @@ import {
 } from "./pages";
 import { ensureModelsFolder, importModelDrift } from "./models";
 import { ensureSpecsFolder } from "./features";
-import { migrateToSpecsFolder } from "./migrate";
+import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo, normalizeModels, normalizeRoadmap, normalizeTasks } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 
@@ -101,6 +101,12 @@ export async function syncDataDir(
       // name them — so the drift pass below sees the migrated tree.
       const migrated = await migrateToSpecsFolder(dir);
       if (migrated > 0) parts.push(`moved ${migrated} feature(s) under specs/`);
+      // Documents an older app version filed under the store's per-kind
+      // roots are lifted into the mirrored layout, after the step above has
+      // put their features under specs/ and before the drift passes look
+      // for them.
+      const lifted = await migrateAutomergeLayout(dir);
+      if (lifted > 0) parts.push(`moved ${lifted} document(s) to the mirrored automerge layout`);
       const drifted = await importDrift(dir);
       if (drifted) parts.push(drifted);
       // Scenario "Create roadmap folder if necessary", and its twin for the
