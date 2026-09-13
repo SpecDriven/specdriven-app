@@ -3058,6 +3058,19 @@ export function App() {
       await loadPages(tab.folder);
       return;
     }
+    // An open page belongs to the file it was typed in. Switching entries
+    // (or roadmap pages / tasks) used to overwrite the buffer here, and the
+    // editor's unmount tick never ran — `pageEditorOpen` stays true across
+    // the swap — so anything typed since the last autosave was dropped. Land
+    // it now, awaited, while the refs still name the old file: the same
+    // courtesy closePage gives when leaving for a feature, and that
+    // switchRepo already gives a page before a folder change. After the
+    // fetch so keystrokes during the GET still ride along; skipped when
+    // this *is* the open page (the cron refresh).
+    if (openPageRef.current && openPageRef.current.fileName !== fileName) {
+      await pageTick.current();
+      await pageSaveQueue.current.idle();
+    }
     editorRef.current.close();
     // The page's row lives on its own tab, so a deep link or the palette
     // turns the sidebar there; a refresh of the open page leaves it alone.
