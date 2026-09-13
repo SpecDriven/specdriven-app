@@ -32,8 +32,10 @@ import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature } from "./project";
 import { importFeatureDoc, reconcile } from "./reconcile";
 import {
+  AUTOMERGE_ROOT,
   createFeatureDoc,
   docDirRel,
+  featureFileOfDocidPath,
   listFeatureDocs,
   loadFeatureDoc,
   loadPageDoc,
@@ -46,8 +48,6 @@ import { errorAttributes, getLogger, withSpan } from "../telemetry";
 import { walk } from "../walk";
 
 const log = getLogger("sync");
-
-const DOC_DIR_PREFIX = ".specdriven/automerge/features/";
 
 const EMPTY = { name: "", description: "", scenarios: [] };
 
@@ -136,12 +136,13 @@ async function autoResolveOne(
   path: string,
   conflictedSet: Set<string>,
 ): Promise<string | null> {
-  if (path.startsWith(DOC_DIR_PREFIX) && path.endsWith("/docid")) {
+  const docidOf = featureFileOfDocidPath(path);
+  if (docidOf !== null) {
     // Two peers imported the same feature concurrently and minted different
     // identities. The chunks of both lineages merged in this same pull, and
     // Automerge already picked the winning lineage deterministically — the
     // docid file just records that winner's identity.
-    const fileName = path.slice(DOC_DIR_PREFIX.length, -"/docid".length);
+    const fileName = docidOf;
     const loaded = await loadFeatureDoc(dataDir, fileName);
     if (loaded === null) return "document did not load";
     await resolveConflict(dataDir, path, `${loaded.doc.id}\n`);
@@ -155,7 +156,7 @@ async function autoResolveOne(
   if (isPageFolderPath(path) && isPageFile(path)) {
     return autoResolvePage(dataDir, path);
   }
-  if (!path.endsWith(".feature.md") || path.startsWith(DOC_DIR_PREFIX)) {
+  if (!path.endsWith(".feature.md") || path.startsWith(`${AUTOMERGE_ROOT}/`)) {
     return "not a feature file";
   }
   const loaded = await loadFeatureDoc(dataDir, path);

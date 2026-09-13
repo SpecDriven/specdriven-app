@@ -321,7 +321,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   ): Promise<SyncResult> {
     const moves = [{ from: fromPath, to: toPath }, ...extraMoves];
     // A doc directory can move into a folder that has never held one — its
-    // destination parent (e.g. `.specdriven/automerge/features/billing/`)
+    // destination parent (e.g. `.specdriven/automerge/specs/billing/`)
     // must exist before the rename, for git mv and plain rename alike.
     for (const m of moves) await mkdir(dirname(`${repoDir}/${m.to}`), { recursive: true });
     if (!(await isRepoRoot(repoDir))) {

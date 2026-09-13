@@ -1,9 +1,17 @@
 // Chunked Automerge storage inside the data repo, synced by git alongside the
 // markdown projections. One directory per document under
-// `.specdriven/automerge/<kind>/<fileName>/` — `features` for the
-// `.feature.md` documents, `docs` for the special folders' plain markdown
-// pages — the roadmap's and the tasks' (specs/app/roadmap.feature.md,
-// specs/app/tasks.feature.md):
+// `.specdriven/automerge/`, in a tree that mirrors the data repo's own
+// top-level folders (specs/datastore/automerge-store.feature.md "Storage
+// layout"):
+//
+//   specs/<path>.feature.md/          the `.feature.md` documents
+//   roadmap/<name>.md/                the special folders' plain markdown
+//   tasks/<name>.md/                  pages (specs/app/roadmap.feature.md,
+//   notebook/<name>.md/               tasks.feature.md, engineering-notebook)
+//   event-models/<path>.model.json/   the Event Model documents
+//   test-management/project/          the test management module's one doc
+//
+// and inside each of those directories:
 //
 //   docid                  stable document identity, shared via git
 //   snapshot-<hash>.bin    full document (Automerge.save)
@@ -144,44 +152,89 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
 }
 
 /**
- * The kinds of document the store holds, each under its own directory:
- * `features` for the `.feature.md` documents, `docs` for the plain markdown
- * pages of the special folders — the roadmap's (specs/app/roadmap.feature.md)
- * and the tasks' (specs/app/tasks.feature.md). Inside either, the path is the
- * file's repo-relative name, so the folder in that path is what tells one
- * kind of page from the other. `testing` holds the test management module's
- * one document (specs/app/tests.feature.md), which has no markdown
- * side at all — the chunks are the only copy. `models` holds the Event
+ * The kinds of document the store holds: `features` for the `.feature.md`
+ * documents, `docs` for the plain markdown pages of the special folders —
+ * the roadmap's (specs/app/roadmap.feature.md), the tasks'
+ * (specs/app/tasks.feature.md) and the notebook's — `models` for the Event
  * Model documents (roadmap/support-event-modeling.md), one per
- * `models/<slug>.model.json`, projected to canonical JSON.
+ * `models/<slug>.model.json`, projected to canonical JSON, and `testing` for
+ * the test management module's one document (specs/app/tests.feature.md),
+ * which has no markdown side at all — the chunks are the only copy. The kind
+ * says which schema a document follows; where it lives on disk follows from
+ * its file name alone (docDirRel and friends below).
  */
 export type DocKind = "features" | "docs" | "testing" | "models";
 
-/** The test management module's single document, under `testing/`. */
-export const TESTING_DOC_NAME = "project";
+/** The store's root, relative to the data repo. */
+export const AUTOMERGE_ROOT = ".specdriven/automerge";
 
-function dirRel(kind: DocKind, fileName: string): string {
-  return `.specdriven/automerge/${kind}/${fileName}`;
+/**
+ * A document's directory is its source file's repo-relative path with the
+ * first folder mapped through this table, so the store mirrors the data
+ * repo's own top level: `specs/`, `roadmap/`, `tasks/` and `notebook/` keep
+ * their names and `models/` reads as `event-models/`. A source folder the
+ * table does not know keeps its name too (a hand-made page folder, say).
+ */
+const DOC_FOLDERS: Record<string, string> = {
+  specs: "specs",
+  roadmap: "roadmap",
+  tasks: "tasks",
+  notebook: "notebook",
+  models: "event-models",
+};
+
+/** The old, per-kind roots (`features/`, `docs/`, ...) that migrate.ts lifts. */
+export const LEGACY_KIND_ROOTS: readonly DocKind[] = ["features", "docs", "models", "testing"];
+
+/** The store's folder for a source folder of the data repo. */
+export function storeFolderFor(sourceFolder: string): string {
+  return DOC_FOLDERS[sourceFolder] ?? sourceFolder;
+}
+
+/** A repo-relative file name split at its first `/`; no folder for a bare name. */
+function splitFolder(fileName: string): { folder: string; rest: string } {
+  const i = fileName.indexOf("/");
+  return i < 0 ? { folder: "", rest: fileName } : { folder: fileName.slice(0, i), rest: fileName.slice(i + 1) };
+}
+
+/** The test management module's single document, under `test-management/`. */
+export const TESTING_DOC_NAME = "project";
+const TESTING_FOLDER = "test-management";
+
+function dirRel(fileName: string): string {
+  const { folder, rest } = splitFolder(fileName);
+  return folder ? `${AUTOMERGE_ROOT}/${storeFolderFor(folder)}/${rest}` : `${AUTOMERGE_ROOT}/${rest}`;
 }
 
 /** Repo-relative path of the testing document's directory, for git pathspecs. */
 export function testingDocDirRel(): string {
-  return dirRel("testing", TESTING_DOC_NAME);
+  return `${AUTOMERGE_ROOT}/${TESTING_FOLDER}/${TESTING_DOC_NAME}`;
 }
 
 /** Repo-relative path of a feature's doc directory, for git pathspecs. */
 export function docDirRel(fileName: string): string {
-  return dirRel("features", fileName);
+  return dirRel(fileName);
 }
 
 /** Repo-relative path of a page's doc directory, for git pathspecs. */
 export function pageDocDirRel(fileName: string): string {
-  return dirRel("docs", fileName);
+  return dirRel(fileName);
 }
 
 /** Repo-relative path of a model's doc directory, for git pathspecs. */
 export function modelDocDirRel(fileName: string): string {
-  return dirRel("models", fileName);
+  return dirRel(fileName);
+}
+
+/**
+ * The feature whose `docid` file sits at this repo-relative path, or null
+ * when the path is not one — the drift pass recognises a lineage race by it.
+ */
+export function featureFileOfDocidPath(path: string): string | null {
+  const prefix = `${AUTOMERGE_ROOT}/${storeFolderFor("specs")}/`;
+  const suffix = ".feature.md/docid";
+  if (!path.startsWith(prefix) || !path.endsWith(suffix)) return null;
+  return `specs/${path.slice(prefix.length, -"/docid".length)}`;
 }
 
 export function docDir(dataDir: string, fileName: string): string {
@@ -189,7 +242,7 @@ export function docDir(dataDir: string, fileName: string): string {
 }
 
 function kindDir(dataDir: string, kind: DocKind, fileName: string): string {
-  return join(dataDir, dirRel(kind, fileName));
+  return join(dataDir, kind === "testing" ? testingDocDirRel() : dirRel(fileName));
 }
 
 async function hasDoc(dataDir: string, kind: DocKind, fileName: string): Promise<boolean> {
@@ -495,11 +548,14 @@ export async function removeModelDoc(dataDir: string, fileName: string): Promise
 }
 
 /**
- * Every file (by repo-relative name) of this kind that has a document
- * directory with at least one chunk — the doc-side counterpart of walk().
+ * Every file (by repo-relative name) under one source folder that has a
+ * document directory with at least one chunk — the doc-side counterpart of
+ * walk(). The walk runs over the store's mirror of the folder and the names
+ * come back with the source folder in front, the form the rest of the
+ * server speaks.
  */
-async function listDocs(dataDir: string, kind: DocKind, suffix: string): Promise<string[]> {
-  const rootDir = join(dataDir, ".specdriven", "automerge", kind);
+async function listDocs(dataDir: string, kind: DocKind, folder: string, suffix: string): Promise<string[]> {
+  const rootDir = join(dataDir, AUTOMERGE_ROOT, storeFolderFor(folder));
   const found: string[] = [];
   const visit = async (rel: string): Promise<void> => {
     let entries: import("node:fs").Dirent[];
@@ -512,7 +568,7 @@ async function listDocs(dataDir: string, kind: DocKind, suffix: string): Promise
       if (!entry.isDirectory()) continue;
       const path = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.name.endsWith(suffix)) {
-        if (await hasDoc(dataDir, kind, path)) found.push(path);
+        if (await hasDoc(dataDir, kind, `${folder}/${path}`)) found.push(`${folder}/${path}`);
       } else {
         await visit(path);
       }
@@ -524,7 +580,7 @@ async function listDocs(dataDir: string, kind: DocKind, suffix: string): Promise
 
 /** Every feature that has a document — the doc side of features.ts walk(). */
 export async function listFeatureDocs(dataDir: string): Promise<string[]> {
-  return listDocs(dataDir, "features", ".feature.md");
+  return listDocs(dataDir, "features", "specs", ".feature.md");
 }
 
 /**
@@ -533,13 +589,12 @@ export async function listFeatureDocs(dataDir: string): Promise<string[]> {
  * the other way round (specs/app/roadmap.feature.md, tasks.feature.md).
  */
 export async function listPageDocs(dataDir: string, folder: string): Promise<string[]> {
-  const docs = await listDocs(dataDir, "docs", ".md");
-  return docs.filter((fileName) => fileName.startsWith(`${folder}/`));
+  return listDocs(dataDir, "docs", folder, ".md");
 }
 
 /** Every model that has a document — the doc side of models.ts listing. */
 export async function listModelDocs(dataDir: string): Promise<string[]> {
-  return listDocs(dataDir, "models", ".model.json");
+  return listDocs(dataDir, "models", "models", ".model.json");
 }
 
 /** Mint an empty feature document with a fresh identity. */
