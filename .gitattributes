@@ -5,7 +5,7 @@ docs/DEVELOPMENT.md export-ignore
 # stats every path in the project) — and nothing in the app reads it at runtime.
 # Anchored to the root: an unanchored `specs` matches at every depth, and would
 # strip `demo-data/specs/` (the demo's feature files, and their Automerge docs
-# under `demo-data/.specdriven/automerge/features/specs/`) from the release zip
+# under `demo-data/.specdriven/automerge/specs/`) from the release zip
 # and from the GitHub archive the demo container is built from — the demo then
 # opens with "No feature files yet".
 /specs export-ignore
