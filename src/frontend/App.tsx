@@ -154,7 +154,9 @@ import {
   testDraftOf,
   testLinkHint,
   testLinkProblem,
+  testLinkTarget,
   testLinkUrl,
+  openTestInIdea,
   type TestDraft,
   resolvePendingTests,
   testLinkLabel,
@@ -1071,6 +1073,12 @@ export function App() {
   // Test links (specs/traceability.spec.md): the table of automated-test
   // links at the end of each scenario card is optional; default ON.
   const [showTestLinks, setShowTestLinks] = useState(true);
+  // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
+  // test in idea"): a click on one runs `idea --line` on the file in the
+  // code repo instead of opening GitHub; default OFF.
+  const [openTestsInIdea, setOpenTestsInIdea] = useState(false);
+  /** Whether `idea` is on the server's PATH, so the setting can work. */
+  const [canOpenInIdea, setCanOpenInIdea] = useState(false);
   // External links (specs/external-links/project-management-jira-linear-etc.
   // feature.md): whether ticket links are written into the .feature.md files.
   const [publishExternalLinks, setPublishExternalLinks] = useState(true);
@@ -1240,6 +1248,7 @@ export function App() {
     String(DEFAULT_AUTOSAVE_SECONDS),
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
+  const [settingsOpenInIdeaDraft, setSettingsOpenInIdeaDraft] = useState(false);
   const [settingsProjectManagementDraft, setSettingsProjectManagementDraft] = useState(true);
   /** The tool name being typed/picked in Settings; saved when it is usable. */
   const [settingsToolDraft, setSettingsToolDraft] = useState(DEFAULT_PROJECT_MANAGEMENT_TOOL);
@@ -1423,6 +1432,8 @@ export function App() {
       if (typeof state.showTestLinks === "boolean") {
         setShowTestLinks(state.showTestLinks);
       }
+      setOpenTestsInIdea(state.openTestsInIdea === true);
+      setCanOpenInIdea(Boolean(state.canOpenInIdea));
       if (typeof state.publishExternalLinks === "boolean") {
         setPublishExternalLinks(state.publishExternalLinks);
       }
@@ -3576,6 +3587,7 @@ export function App() {
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
     );
     setSettingsTestLinksDraft(showTestLinks);
+    setSettingsOpenInIdeaDraft(openTestsInIdea);
     setSettingsProjectManagementDraft(projectManagement);
     setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
@@ -3733,6 +3745,8 @@ export function App() {
     setPreviewLines(data.scenarioPreviewLines);
     setAutosaveSeconds(data.autosaveIntervalSeconds);
     setShowTestLinks(data.showTestLinks !== false);
+    setOpenTestsInIdea(data.openTestsInIdea === true);
+    setCanOpenInIdea(Boolean(data.canOpenInIdea));
     setPublishExternalLinks(data.publishExternalLinks !== false);
     setProjectManagement(data.projectManagement !== false);
     if (typeof data.projectManagementTool === "string") {
@@ -3836,6 +3850,34 @@ export function App() {
     setSettingsTestLinksDraft(on);
     if (!(await patchSettings({ showTestLinks: on }))) setSettingsTestLinksDraft(!on);
   };
+
+  const toggleOpenInIdea = async (on: boolean) => {
+    setSettingsOpenInIdeaDraft(on);
+    if (!(await patchSettings({ openTestsInIdea: on }))) setSettingsOpenInIdeaDraft(!on);
+  };
+
+  // With the setting on, a click on any test link — the card's table, the
+  // editor pane's list, an inline [test:…] reference in a preview — goes to
+  // IDEA instead of the browser. One listener for all of them, on the
+  // document, since the preview's links are rendered without a handler.
+  // When the IDE can't take it (no `idea` on PATH, no code repo, file not
+  // there) the reason is toasted and the link opens on GitHub after all.
+  useEffect(() => {
+    if (!openTestsInIdea) return;
+    const onClick = (e: globalThis.MouseEvent) => {
+      const a = testLinkTarget(e);
+      if (!a) return;
+      e.preventDefault();
+      const url = a.href;
+      void openTestInIdea(url).then((error) => {
+        if (!error) return;
+        toast.error(error);
+        window.open(url, "_blank", "noreferrer");
+      });
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [openTestsInIdea]);
 
   // Project management (specs/external-links/project-management-jira-linear-
   // etc.feature.md): the switch decides whether the app tracks tickets at
@@ -4215,7 +4257,13 @@ export function App() {
           {tests.map((t) => (
             <tr key={t}>
               <td>
-                <a href={testLinkUrl(t)} target="_blank" rel="noreferrer" title={testLinkUrl(t)}>
+                <a
+                  href={testLinkUrl(t)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={testLinkUrl(t)}
+                  data-test-link=""
+                >
                   {testLinkLabel(t)}
                 </a>
               </td>
@@ -6726,6 +6774,7 @@ export function App() {
                                 target="_blank"
                                 rel="noreferrer"
                                 title={testLinkUrl(t)}
+                                data-test-link=""
                               >
                                 {testLinkLabel(t)}
                               </a>
@@ -8132,6 +8181,36 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
+              {/* specs/traceability.feature.md "Open test in idea": a click on
+                  a test link runs `idea --line <n> <file>` on the file in the
+                  code repo instead of opening GitHub; default OFF. */}
+              {settingsTestLinksDraft && (
+                <label className="settings-row">
+                  <span className="settings-row-label">
+                    Open test links in IntelliJ IDEA
+                    <span className="settings-row-hint">
+                      {canOpenInIdea
+                        ? "A click on a test link opens the file at its line in IntelliJ IDEA, from the project's code repo, instead of on GitHub."
+                        : "Needs idea on PATH. On a Mac: "}
+                      {!canOpenInIdea && (
+                        <code>
+                          ln -s &quot;/Applications/IntelliJ IDEA.app/Contents/MacOS/idea&quot;
+                          /usr/local/bin/idea
+                        </code>
+                      )}
+                    </span>
+                  </span>
+                  <span className="switch">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      checked={settingsOpenInIdeaDraft}
+                      onChange={(e) => void toggleOpenInIdea(e.target.checked)}
+                    />
+                    <span className="switch-track" aria-hidden="true" />
+                  </span>
+                </label>
+              )}
               {/* Project management (specs/external-links/project-management-
                   jira-linear-etc.feature.md): the master switch for tickets;
                   default ON. Off, no feature or scenario shows or asks for
