@@ -2,7 +2,7 @@
 // cases, plans that group them, and executions that record one result per
 // case of a plan. Everything lives in one Automerge document per data repo
 // (src/server/automerge/schema.ts TestingDoc) with no markdown side: the
-// chunks under `.specdriven/automerge/testing/project/` are the only copy,
+// chunks under `.specdriven/automerge/test-management/project/` are the only copy,
 // committed and pushed by the sync tick like any other saved change. Every
 // mutation below goes through one door — load (or mint) the document, apply
 // one A.change, save the delta — so two people working the same plan merge at
