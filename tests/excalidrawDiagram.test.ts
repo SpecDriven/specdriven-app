@@ -6,7 +6,9 @@ import { describe, expect, test } from "bun:test";
 import {
   diagramFileName,
   diagramName,
+  importedName,
   isDiagram,
+  isExcalidrawFile,
   svgFile,
 } from "../src/frontend/excalidraw/diagram";
 import { imageAt, imageAtOffset, imageRefs, setImageSrc } from "../src/frontend/markdown";
@@ -167,5 +169,45 @@ describe("saving over the diagram in the text", () => {
   test("changes nothing when that image is no longer there", () => {
     const body = "Nothing to see";
     expect(setImageSrc(body, 0, NEW, "flow.excalidraw")).toBe(body);
+  });
+});
+
+// specs/editor/excalidraw-support.feature.md "Import Excalidraw file": a file
+// picked in the editor or the pane is a scene file by its name alone —
+// browsers give `.excalidraw` no MIME type — and the diagram it becomes
+// takes the file's stem as its name.
+describe("recognising a .excalidraw file", () => {
+  test("by its extension, whatever the case", () => {
+    expect(isExcalidrawFile("TheBigPicture.excalidraw")).toBe(true);
+    expect(isExcalidrawFile("flow.EXCALIDRAW")).toBe(true);
+    expect(isExcalidrawFile("order.flow.excalidraw")).toBe(true);
+  });
+
+  test("not an export, a library, or a name merely mentioning it", () => {
+    expect(isExcalidrawFile("flow.excalidraw.svg")).toBe(false);
+    expect(isExcalidrawFile("flow.excalidraw.png")).toBe(false);
+    expect(isExcalidrawFile("shapes.excalidrawlib")).toBe(false);
+    expect(isExcalidrawFile("excalidraw.json")).toBe(false);
+    expect(isExcalidrawFile("excalidraw")).toBe(false);
+  });
+});
+
+describe("importedName", () => {
+  test("is the file's stem, as the diagram's name", () => {
+    expect(importedName("TheBigPicture.excalidraw")).toBe("TheBigPicture");
+    expect(importedName("order.flow.excalidraw")).toBe("order.flow");
+    expect(importedName("/Users/me/specs/Claims Flow.excalidraw")).toBe("Claims Flow");
+  });
+
+  test("falls back to 'diagram' when the file has no stem", () => {
+    expect(importedName(".excalidraw")).toBe("diagram");
+    expect(importedName("  .excalidraw")).toBe("diagram");
+    expect(importedName("notes.txt")).toBe("diagram");
+  });
+
+  test("slugs into the same link shape as a drawn diagram", () => {
+    expect(diagramFileName(importedName("TheBigPicture.excalidraw"))).toBe(
+      "thebigpicture.excalidraw.svg",
+    );
   });
 });

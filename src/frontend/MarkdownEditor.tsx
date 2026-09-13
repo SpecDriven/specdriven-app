@@ -26,7 +26,7 @@ import {
   toggleLinePrefix,
 } from "./markdown";
 import type { Edit } from "./markdown";
-import { diagramName, isDiagram } from "./excalidraw/diagram";
+import { diagramName, isDiagram, isExcalidrawFile } from "./excalidraw/diagram";
 import type { ExcalidrawEdit } from "./excalidraw/ExcalidrawPane";
 import { markNodes, markText } from "./highlight";
 import { ImageSizingContext } from "./MarkdownImage";
@@ -115,9 +115,13 @@ export function MarkdownEditor({
   // A diagram already in the text opens the same pane ("Edit Excalidraw
   // diagram") — from its button in the Preview tab, or from the toolbar with
   // the caret in its link — and its export replaces that image instead.
+  // A `.excalidraw` file picked with the image button opens it too ("Import
+  // Excalidraw file"), loaded with that file, to insert like a new drawing.
   const excalidrawOn = useExcalidrawEnabled();
   const [diagram, setDiagram] = useState<
-    { mode: "new" } | { mode: "edit"; index: number; edit: ExcalidrawEdit } | null
+    | { mode: "new"; file?: File }
+    | { mode: "edit"; index: number; edit: ExcalidrawEdit }
+    | null
   >(null);
   // Where the caret is in the source, so the toolbar's diagram button knows
   // whether it is over a diagram's link. Only followed while the switch is
@@ -302,6 +306,23 @@ export function MarkdownEditor({
     [excalidrawOn],
   );
 
+  // What the image button's picker brought: with Excalidraw on, a `.excalidraw`
+  // file among them opens the pane on it (one drawing at a time — the pane
+  // holds one); the rest upload as images. Off the switch the picker never
+  // offers such files, and one picked anyway is not an image, so it is
+  // passed over as any other file would be.
+  const addPicked = (files: File[]) => {
+    const scenes = excalidrawOn ? files.filter((f) => isExcalidrawFile(f.name)) : [];
+    const scene = scenes[0];
+    if (scene) {
+      setUploadError(
+        scenes.length > 1 ? `Importing ${scene.name}; one .excalidraw file at a time` : null,
+      );
+      setDiagram({ mode: "new", file: scene });
+    }
+    void addImages(files.filter((f) => f !== scene));
+  };
+
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
       f.type.startsWith("image/"),
@@ -338,7 +359,11 @@ export function MarkdownEditor({
     { icon: <List size={size} />, title: "Bullet list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "- ", /^[-*+] /)) },
     { icon: <ListOrdered size={size} />, title: "Numbered list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, (i) => `${i + 1}. `, /^\d+[.)] /)) },
     { icon: <Link size={size} />, title: "Link", keys: "⌘K", run: () => apply(insertLink) },
-    { icon: <Image size={size} />, title: "Image (or paste one)", run: () => fileRef.current?.click() },
+    {
+      icon: <Image size={size} />,
+      title: excalidrawOn ? "Image or .excalidraw file (or paste an image)" : "Image (or paste one)",
+      run: () => fileRef.current?.click(),
+    },
     // One diagram button, doing whichever the caret asks for: with it inside
     // a diagram's link, that diagram; anywhere else, a new one. The tooltip
     // names which, so the button never surprises.
@@ -425,11 +450,11 @@ export function MarkdownEditor({
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept={excalidrawOn ? "image/*,.excalidraw" : "image/*"}
           multiple
           hidden
           onChange={(e) => {
-            void addImages(Array.from(e.target.files ?? []));
+            addPicked(Array.from(e.target.files ?? []));
             e.target.value = ""; // allow re-picking the same file
           }}
         />
@@ -444,6 +469,7 @@ export function MarkdownEditor({
         >
           <ExcalidrawPane
             edit={diagram.mode === "edit" ? diagram.edit : undefined}
+            importFile={diagram.mode === "new" ? diagram.file : undefined}
             onCancel={closeDiagram}
             onInsert={(file) => {
               const target = diagram.mode === "edit" ? diagram.index : null;

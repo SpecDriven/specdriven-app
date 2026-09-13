@@ -9,7 +9,7 @@ import { Excalidraw, exportToSvg, getSceneVersion, loadFromBlob } from "@excalid
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useFocusTrap } from "../useFocusTrap";
 import { useModalPrompts } from "../ModalPrompts";
-import { svgFile } from "./diagram";
+import { importedName, isExcalidrawFile, svgFile } from "./diagram";
 
 // The Excalidraw pane (specs/editor/excalidraw-support.feature.md "Create new
 // Excalidraw diagram"): a full-window overlay over the Markdown editor that
@@ -22,6 +22,12 @@ import { svgFile } from "./diagram";
 // the drawing from it, and Save exports the edited scene the same way — the
 // editor then points that image at the new export (src/frontend/
 // MarkdownEditor.tsx), so the diagram shown in the text is the edited one.
+//
+// A drawing made elsewhere comes in the same way ("Import Excalidraw file"):
+// the pane's Import button, or a `.excalidraw` file picked in the editor,
+// reads the scene file excalidraw.com and the desktop app save and puts it on
+// the canvas — under the file's own name — for Insert to export like any
+// other drawing.
 //
 // This module is the only one importing the library, and the editor loads it
 // lazily: the ~2 MB of Excalidraw stays out of the main bundle until a
@@ -71,6 +77,11 @@ function useDarkTheme(): boolean {
   return dark;
 }
 
+/** The import that was not one: a file of that name holding no scene. */
+function notAScene(file: File): string {
+  return `${file.name} holds no Excalidraw drawing`;
+}
+
 /** The diagram already in the text that the pane was opened on, to edit. */
 export interface ExcalidrawEdit {
   /** Where its SVG is served from — the url of the `![…](…)` in the source. */
@@ -85,17 +96,33 @@ interface ExcalidrawPaneProps {
   onCancel: () => void;
   /** Absent, the pane starts blank and draws a new diagram. */
   edit?: ExcalidrawEdit;
+  /**
+   * A `.excalidraw` file picked in the editor, loaded into the canvas as the
+   * pane opens — a new diagram under the file's name, ready to insert.
+   */
+  importFile?: File;
 }
 
-export function ExcalidrawPane({ onInsert, onCancel, edit }: ExcalidrawPaneProps) {
+/** What is being read into the canvas, while it is: the status shown. */
+function importing(file: File): string {
+  return `Importing ${file.name}…`;
+}
+
+export function ExcalidrawPane({ onInsert, onCancel, edit, importFile }: ExcalidrawPaneProps) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
-  const [name, setName] = useState(edit?.name ?? "diagram");
+  const [name, setName] = useState(
+    edit?.name ?? (importFile ? importedName(importFile.name) : "diagram"),
+  );
   const [hasElements, setHasElements] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Editing starts on the diagram in the text: until its scene is in the
-  // canvas there is nothing to save, and nothing to lose by cancelling.
-  const [loading, setLoading] = useState(edit !== undefined);
+  // Editing starts on the diagram in the text, an import on the file: until
+  // its scene is in the canvas there is nothing to save, and nothing to lose
+  // by cancelling. The status names which is being read.
+  const [loading, setLoading] = useState<string | null>(
+    edit ? "Opening diagram…" : importFile ? importing(importFile) : null,
+  );
+  const importRef = useRef<HTMLInputElement>(null);
   // Whether anything has been drawn since — for a new diagram, anything at
   // all; for one being edited, anything after the scene it opened with. The
   // load itself reaches onChange, so it is discounted: `base` is the scene
@@ -111,38 +138,92 @@ export function ExcalidrawPane({ onInsert, onCancel, edit }: ExcalidrawPaneProps
   // .tsx), rendered inside the pane so it stacks over it.
   const { modal, confirm } = useModalPrompts();
 
+  // A scene read from a file — the SVG an insert left in the text, or a
+  // `.excalidraw` file — put on the canvas in place of whatever was there,
+  // and brought into view.
+  const showScene = async (blob: Blob, canvas: ExcalidrawImperativeAPI) => {
+    const scene = await loadFromBlob(blob, null, null);
+    canvas.updateScene({ elements: scene.elements });
+    canvas.addFiles(Object.values(scene.files ?? {}));
+    canvas.scrollToContent(scene.elements, { fitToContent: true });
+    return scene;
+  };
+
   // Editing an existing diagram: read the SVG the link points at and restore
   // the scene Insert embedded in it. An SVG without one — a screenshot whose
   // name happens to look like an export, an export made elsewhere with the
   // scene stripped — has no drawing to edit, and says so rather than opening
   // an empty canvas that would silently replace it on Save.
+  //
+  // Opening on a picked `.excalidraw` file: the same, from the file. What
+  // is on the canvas then is not yet in the text, so unlike an edit it
+  // counts as work Cancel would lose.
   useEffect(() => {
-    if (!edit || !api) return;
+    if (!api || (!edit && !importFile)) return;
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(edit.url);
-        if (!res.ok) throw new Error(`could not read the diagram (${res.status})`);
-        const scene = await loadFromBlob(await res.blob(), null, null);
+        if (edit) {
+          const res = await fetch(edit.url);
+          if (!res.ok) throw new Error(`could not read the diagram (${res.status})`);
+          const blob = await res.blob();
+          if (cancelled) return;
+          const scene = await showScene(blob, api);
+          // The scene as it came out of the text: onChange fires for this
+          // too, and everything from here on is the user's own editing.
+          base.current = getSceneVersion(scene.elements);
+          setChanged(false);
+        } else if (importFile) {
+          await showScene(importFile, api);
+        }
         if (cancelled) return;
-        api.updateScene({ elements: scene.elements });
-        api.addFiles(Object.values(scene.files ?? {}));
-        api.scrollToContent(scene.elements, { fitToContent: true });
-        // The scene as it came out of the text: onChange fires for this too,
-        // and everything from here on is the user's own editing.
-        base.current = getSceneVersion(scene.elements);
-        setChanged(false);
-        setLoading(false);
+        setLoading(null);
       } catch (e) {
         if (cancelled) return;
-        setError((e as Error).message || "this image has no Excalidraw drawing in it");
-        setLoading(false);
+        setError(
+          edit
+            ? (e as Error).message || "this image has no Excalidraw drawing in it"
+            : notAScene(importFile!),
+        );
+        setLoading(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [edit, api]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit, importFile, api]);
+
+  // Import (specs/editor/excalidraw-support.feature.md "Import Excalidraw
+  // file"): a `.excalidraw` file picked from the pane replaces the drawing
+  // on the canvas — after asking, when there is one to replace — and, for a
+  // new diagram, names it after the file. An edited diagram keeps its name:
+  // that is what ties it to the image in the text that Save replaces.
+  const importScene = async (file: File) => {
+    if (!api) return;
+    setError(null);
+    if (!isExcalidrawFile(file.name)) {
+      setError(`${file.name} is not a .excalidraw file`);
+      return;
+    }
+    if (hasElements) {
+      const ok = await confirm({
+        title: "Replace drawing",
+        body: `The drawing on the canvas will be replaced by the one in ${file.name}.`,
+        confirmLabel: "Replace",
+      });
+      if (!ok) return;
+    }
+    setLoading(importing(file));
+    try {
+      await showScene(file, api);
+      if (!edit) setName(importedName(file.name));
+    } catch {
+      setError(notAScene(file));
+    } finally {
+      setLoading(null);
+    }
+  };
 
   const cancel = async () => {
     if (changed) {
@@ -231,15 +312,35 @@ export function ExcalidrawPane({ onInsert, onCancel, edit }: ExcalidrawPaneProps
               spellCheck={false}
             />
           </label>
-          {loading && <span className="excalidraw-status">Opening diagram…</span>}
+          {loading && <span className="excalidraw-status">{loading}</span>}
           {error && <span className="excalidraw-error">{error}</span>}
           <div className="dialog-actions excalidraw-actions">
+            <input
+              ref={importRef}
+              type="file"
+              accept=".excalidraw"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void importScene(file);
+                e.target.value = ""; // allow re-picking the same file
+              }}
+            />
+            <button
+              type="button"
+              className="secondary"
+              title="Load a .excalidraw file onto the canvas"
+              disabled={!api || exporting || loading !== null}
+              onClick={() => importRef.current?.click()}
+            >
+              Import…
+            </button>
             <button type="button" className="secondary" onClick={() => void cancel()}>
               Cancel
             </button>
             <button
               type="button"
-              disabled={!api || !hasElements || exporting || loading}
+              disabled={!api || !hasElements || exporting || loading !== null}
               onClick={() => void insert()}
             >
               {commitLabel}

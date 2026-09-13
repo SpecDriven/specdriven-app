@@ -196,3 +196,21 @@ describe("the toolbar's diagram button", () => {
     expect(markup).not.toContain("Edit diagram");
   });
 });
+
+// "Import Excalidraw file": with the switch on, the image picker takes
+// `.excalidraw` files too — one picked opens the pane on it. Off, the picker
+// is the plain image picker it was.
+describe("the image picker", () => {
+  const accept = (markup: string) => markup.match(/type="file"[^>]*accept="([^"]*)"/)?.[1];
+
+  test("offers .excalidraw files once the switch is on", () => {
+    applyExcalidrawPref(true);
+    expect(accept(html(<MarkdownEditor value="" onChange={() => {}} />))).toBe(
+      "image/*,.excalidraw",
+    );
+  });
+
+  test("takes only images while it is off", () => {
+    expect(accept(html(<MarkdownEditor value="" onChange={() => {}} />))).toBe("image/*");
+  });
+});
