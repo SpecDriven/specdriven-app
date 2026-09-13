@@ -129,3 +129,45 @@ export function resolvePendingTests(
   }
   return { tests: next };
 }
+
+/**
+ * Open a test link in IntelliJ IDEA through the server
+ * (specs/traceability.feature.md "Open test in idea"): null when the IDE
+ * took the file, else the reason it didn't, worded for a toast.
+ */
+export async function openTestInIdea(url: string): Promise<string | null> {
+  try {
+    const res = await fetch("/api/tests/open-in-idea", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    if (res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    return data.error ?? `Could not open in IntelliJ IDEA (${res.status})`;
+  } catch (e) {
+    return `Could not open in IntelliJ IDEA: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/**
+ * The anchor a click on a test link lands on, or null for any other click:
+ * the scenario card's table and the editor pane's list mark theirs with
+ * `data-test-link`, the markdown preview's inline `[test:…]` references
+ * carry the `test-ref` class. A modified click (⌘, ctrl, shift, middle
+ * button) is left to the browser, as it means "in a new tab/window".
+ */
+export function testLinkTarget(e: {
+  target: EventTarget | null;
+  button?: number;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
+}): HTMLAnchorElement | null {
+  if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return null;
+  const el = e.target;
+  if (!(el instanceof Element)) return null;
+  const a = el.closest("a[data-test-link], a.test-ref");
+  return a instanceof HTMLAnchorElement && a.href ? a : null;
+}
