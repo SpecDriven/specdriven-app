@@ -23,6 +23,7 @@ import {
   normalizeTesting,
   normalizeIssues,
   normalizeScenarioPreviewLines,
+  normalizeOpenTestsInIdea,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
   recentDataRepos,
@@ -174,6 +175,7 @@ import {
   type IssueState,
 } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
+import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -367,6 +369,10 @@ async function stateFields(state: SpecDrivenState) {
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
     showTestLinks: normalizeShowTestLinks(state.showTestLinks),
+    // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
+    // test in idea"), and whether `idea` is on PATH so that can work.
+    openTestsInIdea: normalizeOpenTestsInIdea(state.openTestsInIdea),
+    canOpenInIdea: ideaAvailable(),
     projectManagement: normalizeProjectManagement(state.projectManagement),
     projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
@@ -442,6 +448,7 @@ const putState: Handler = async (req) => {
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
     showTestLinks?: boolean;
+    openTestsInIdea?: boolean;
     projectManagement?: boolean;
     projectManagementTool?: string;
     publishExternalLinks?: boolean;
@@ -464,6 +471,7 @@ const putState: Handler = async (req) => {
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
     body.showTestLinks === undefined &&
+    body.openTestsInIdea === undefined &&
     body.projectManagement === undefined &&
     body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
@@ -482,7 +490,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
+          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
       },
       400,
     );
@@ -573,6 +581,15 @@ const putState: Handler = async (req) => {
     }
     if (body.showTestLinks) delete state.showTestLinks;
     else state.showTestLinks = false;
+  }
+  // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
+  // test in idea"): default OFF — the default is stored as an absent key.
+  if (body.openTestsInIdea !== undefined) {
+    if (typeof body.openTestsInIdea !== "boolean") {
+      return json({ error: "openTestsInIdea must be a boolean" }, 400);
+    }
+    if (body.openTestsInIdea) state.openTestsInIdea = true;
+    else delete state.openTestsInIdea;
   }
   // Project management (specs/external-links/project-management-jira-linear-
   // etc.feature.md): whether tickets are tracked at all, and which tool they
@@ -1914,6 +1931,45 @@ const getTestName: Handler = async (req) => {
   return json(await resolveTestName(url));
 };
 
+/**
+ * Open a test link in IntelliJ IDEA (specs/traceability.feature.md "Open
+ * test in idea"): the url's file under the project's code repo, at the
+ * url's line, through `idea --line <n> <file>` (src/server/idea.ts). Each
+ * way that can't work is its own answer, worded for the toast the client
+ * shows: the setting off, no `idea` on PATH (with the symlink to make),
+ * no code repo named, or the file not in it.
+ */
+const postOpenTestInIdea = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => ({}))) as { url?: unknown };
+  const url = typeof body.url === "string" ? body.url : "";
+  if (!parseTestUrl(url)) {
+    return json({ error: "url must be a GitHub file url with a #L<line> anchor" }, 400);
+  }
+  if (isDemoMode()) return json({ error: "Test links open in the browser in demo mode" }, 403);
+  const state = await readState(getAppRoot());
+  if (!normalizeOpenTestsInIdea(state.openTestsInIdea)) {
+    return json({ error: '"Open test links in IntelliJ IDEA" is off in Settings' }, 409);
+  }
+  if (!ideaAvailable()) {
+    return json({ error: `idea not found on PATH — on a Mac: ${IDEA_SYMLINK_HINT}` }, 502);
+  }
+  const { codeRepo } = await readProjectSettings(dir);
+  if (codeRepo === null) {
+    return json({ error: `No code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` }, 400);
+  }
+  if (!(await directoryExists(codeRepo))) {
+    return json({ error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` }, 400);
+  }
+  const test = await localTestFile(codeRepo, url);
+  if (!test) return json({ error: `Not in the code repo ${codeRepo}: ${url}` }, 404);
+  try {
+    await openInIdea(test.file, test.line);
+  } catch (e) {
+    return json({ error: `Could not start idea: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
+  return json(test);
+});
+
 const getIssues = withIssues(async (repo, req) => {
   const wanted = new URL(req.url).searchParams.get("state");
   const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
@@ -1989,6 +2045,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
   ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/test-name", getTestName],
+  ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
   ["GET", "/api/issues", getIssues],
   ["POST", "/api/issues", postIssue],
   ["GET", "/api/issues/:number", getIssueRoute],

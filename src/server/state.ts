@@ -38,6 +38,13 @@ export interface SpecDrivenState {
       (specs/traceability.spec.md); absent means ON. */
   showTestLinks?: boolean;
   /**
+   * Open test links in IntelliJ IDEA instead of the browser
+   * (specs/traceability.feature.md "Open test in idea"); absent means OFF.
+   * On, a click on a test link runs `idea --line <n> <file>` on the file
+   * under the project's code repo (src/server/idea.ts).
+   */
+  openTestsInIdea?: boolean;
+  /**
    * Track tickets at all
    * (specs/external-links/project-management-jira-linear-etc.feature.md);
    * absent means ON. Off takes the ticket fields out of the feature and spec
@@ -223,6 +230,12 @@ export function normalizeAutosaveSeconds(value: unknown): number {
     (specs/traceability.spec.md "default is ON"). */
 export function normalizeShowTestLinks(value: unknown): boolean {
   return value !== false;
+}
+
+/** Effective "open test links in IntelliJ IDEA" setting: OFF unless
+    explicitly turned on (specs/traceability.feature.md "Open test in idea"). */
+export function normalizeOpenTestsInIdea(value: unknown): boolean {
+  return value === true;
 }
 
 /** Effective code gen setting: ON unless explicitly turned off
