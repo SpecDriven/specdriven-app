@@ -168,3 +168,77 @@ test("other settings changes leave the list alone", async () => {
   expect(res.status).toBe(200);
   expect((await res.json()).recentDataRepos).toEqual([a]);
 });
+
+// Manage specification folders (specs/app/spec-folders.feature.md): a
+// folder can be taken off the list. Only the list entry goes — nothing on
+// disk is touched — and the open folder stays on it.
+
+test("forgetting a folder takes it off the list and says whether it was there", async () => {
+  const { forgetDataRepo } = await import("../src/server/state");
+  const state = { dataRepo: "/c", recentDataRepos: ["/a", "/b", "/c"] };
+  expect(forgetDataRepo(state, "/b")).toBe(true);
+  expect(state.recentDataRepos).toEqual(["/a", "/c"]);
+  expect(forgetDataRepo(state, " /a ")).toBe(true);
+  expect(state.recentDataRepos).toEqual(["/c"]);
+  expect(forgetDataRepo(state, "/never")).toBe(false);
+  expect(state.recentDataRepos).toEqual(["/c"]);
+});
+
+test("PUT /api/state forgetDataRepo removes a folder from the list and persists it, the folder itself untouched", async () => {
+  const a = await dataFolder("a");
+  const b = await dataFolder("b");
+  await applyStartupState();
+  await pickFolder(b);
+  expect((await pickFolder(a)).recentDataRepos).toEqual([a, b]);
+
+  const res = (await handleApi(
+    new Request("http://localhost/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ forgetDataRepo: b }),
+    }),
+  ))!;
+  expect(res.status).toBe(200);
+  expect((await res.json()).recentDataRepos).toEqual([a]);
+  expect((await readState(root)).recentDataRepos).toEqual([a]);
+  expect((await getState()).recentDataRepos).toEqual([a]);
+  // The folder is still on disk, with its feature in it (moved under specs/
+  // when the folder was opened, as every data folder's features are).
+  expect(await Bun.file(join(b, "specs", "b.feature.md")).exists()).toBe(true);
+  // And forgetting it again is a quiet no-op.
+  const again = (await handleApi(
+    new Request("http://localhost/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ forgetDataRepo: b }),
+    }),
+  ))!;
+  expect(again.status).toBe(200);
+  expect((await again.json()).recentDataRepos).toEqual([a]);
+});
+
+test("the open folder cannot be removed from the list — switch away first", async () => {
+  const a = await dataFolder("a");
+  await applyStartupState();
+  await pickFolder(a);
+
+  const res = (await handleApi(
+    new Request("http://localhost/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ forgetDataRepo: a }),
+    }),
+  ))!;
+  expect(res.status).toBe(409);
+  expect((await res.json()).error).toContain("switch to another folder first");
+  expect((await getState()).recentDataRepos).toEqual([a]);
+
+  const blank = (await handleApi(
+    new Request("http://localhost/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ forgetDataRepo: "  " }),
+    }),
+  ))!;
+  expect(blank.status).toBe(400);
+});
