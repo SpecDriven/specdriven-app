@@ -14,7 +14,13 @@ import {
   sortScenarios,
   titleFromFileName,
 } from "../server/parser";
-import type { Feature, Scenario, ScenarioPick, ScenarioTarget } from "../server/parser";
+import type {
+  Feature,
+  PullRequestLink,
+  Scenario,
+  ScenarioPick,
+  ScenarioTarget,
+} from "../server/parser";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
@@ -40,6 +46,7 @@ import {
   ExternalLink,
   FileText,
   FolderInput,
+  GitPullRequest,
   Home,
   Keyboard,
   Link,
@@ -122,6 +129,7 @@ import {
   useAgentChat,
 } from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
+import { PullRequestField, PullRequestList } from "./PullRequestField";
 import {
   EMPTY_LINK_DRAFT,
   externalLinkLabel,
@@ -1297,6 +1305,9 @@ export function App() {
   const [featureLinkDraft, setFeatureLinkDraft] = useState<LinkDraft | null>(null);
   const [featureLinkError, setFeatureLinkError] = useState<string | null>(null);
   const [featureLinkSaving, setFeatureLinkSaving] = useState(false);
+  /** The feature's "Pull requests" popover
+      (specs/external-links/related-pull-requests.feature.md). */
+  const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
   // The feature description editor (specs/editor/feature-editor.feature.md):
   // the free markdown above the first scenario, edited in place and autosaved
   // at the scenario editor's interval like the home README. Keyed by file so
@@ -4114,6 +4125,43 @@ export function App() {
   };
 
   /**
+   * Save the pull requests linked to the feature (`target` null) or to one
+   * scenario (specs/external-links/related-pull-requests.feature.md): a
+   * document-only write through its own route — the links never ride in
+   * the markdown a save sends — answered with the editor's view, which the
+   * page and an open editor pane follow. Nothing to autosave: every add and
+   * remove is saved on the spot.
+   */
+  const savePullRequests = async (target: ScenarioTarget | null, prs: PullRequestLink[]) => {
+    if (!selected) return;
+    const file = selected;
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}/pull-requests`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: target, prs }),
+      });
+      const data = await res.json();
+      if (selectedRef.current !== file) return;
+      if (res.ok) {
+        setFeature(featureFromResponse(data, file));
+        if (target) {
+          setEditing((prev) =>
+            prev === null || prev.scenario.id !== target.id
+              ? prev
+              : { ...prev, scenario: { ...prev.scenario, prs } },
+          );
+        }
+        markSaved();
+      } else {
+        toast.error(data.error ?? "Could not save the pull requests");
+      }
+    } catch {
+      toast.error("Could not save the pull requests — is the server running?");
+    }
+  };
+
+  /**
    * The project members the "Assigned" dropdown offers: the data repo's
    * project-settings.json (src/server/members.ts), plus whoever the feature
    * is assigned to when that name is no longer on the list — a member who
@@ -4814,6 +4862,7 @@ export function App() {
     pomodoroSettings ||
     conflict !== null ||
     featureLinkOpen ||
+    featurePrsOpen ||
     sessionError !== null ||
     sheetOpen ||
     palette !== null;
@@ -4927,6 +4976,7 @@ export function App() {
     if (settingsOpen) return setSettingsOpen(false);
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
+    if (featurePrsOpen) return setFeaturePrsOpen(false);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
     if (compact && pane.open) return agentChat.closePane();
@@ -6892,6 +6942,21 @@ export function App() {
                   {testsError && <p className="error">{testsError}</p>}
                 </div>
               )}
+              {/* specs/external-links/related-pull-requests.feature.md: the
+                  pull requests implementing this scenario. Saved to the
+                  document on every add and remove, never to the markdown —
+                  so it needs the scenario to be in the document, which the
+                  first autosave of a new one sees to. Editable on a
+                  published scenario too. */}
+              <div className="prs-field-wrap">
+                <span className="field-label">Pull requests</span>
+                <PullRequestField
+                  prs={editing.scenario.prs ?? []}
+                  disabled={editing.scenario.id === undefined}
+                  disabledHint="Pull requests can be linked once the scenario has been saved."
+                  onChange={(prs) => savePullRequests(scenarioTarget(editing.scenario), prs)}
+                />
+              </div>
             </div>
           </div>
         ) : selected && feature ? (
@@ -7220,6 +7285,42 @@ export function App() {
                   </Popover>
                 </span>
               )}
+              {/* specs/external-links/related-pull-requests.feature.md "Link
+                  a pull request to a feature": the chip counts the feature's
+                  pull requests; the popover lists them and takes another. */}
+              <span className="chip-anchor pr-anchor">
+                <button
+                  type="button"
+                  className={`chip${feature.prs?.length ? "" : " muted"}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={featurePrsOpen}
+                  onClick={() => setFeaturePrsOpen((open) => !open)}
+                >
+                  <GitPullRequest size={14} aria-hidden="true" />
+                  {feature.prs?.length
+                    ? `${feature.prs.length} PR${feature.prs.length === 1 ? "" : "s"}`
+                    : "Link PR"}
+                </button>
+                <Popover
+                  open={featurePrsOpen}
+                  onClose={() => setFeaturePrsOpen(false)}
+                  label="Pull requests for this feature"
+                  className="chip-popover pr-popover"
+                  containerSelector=".pr-anchor"
+                >
+                  <p className="hint">The pull requests implementing this feature.</p>
+                  <PullRequestField
+                    prs={feature.prs ?? []}
+                    autoFocus
+                    onChange={(prs) => savePullRequests(null, prs)}
+                  />
+                  <div className="dialog-actions">
+                    <button type="button" className="secondary" onClick={() => setFeaturePrsOpen(false)}>
+                      Close
+                    </button>
+                  </div>
+                </Popover>
+              </span>
             </div>
             {descOpen && descEdit ? (
               /* specs/editor/feature-editor.feature.md "Edit feature
@@ -7475,6 +7576,14 @@ export function App() {
                       as a table at the end of the scenario. Optional — the
                       Settings toggle hides it (default ON). */}
                   {showTestLinks && testsTable(s.tests)}
+                  {/* specs/external-links/related-pull-requests.feature.md
+                      "The scenario card lists its pull requests". */}
+                  {s.prs && s.prs.length > 0 && (
+                    <div className="scenario-prs">
+                      <span className="scenario-prs-head">Pull requests</span>
+                      <PullRequestList prs={s.prs} />
+                    </div>
+                  )}
                 </article>
                 ),
               )}
