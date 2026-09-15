@@ -73,7 +73,7 @@ import {
 } from "./notebook";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
-import { Menu } from "./Menu";
+import { Menu, type MenuItem } from "./Menu";
 import { Popover } from "./Popover";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
@@ -165,6 +165,7 @@ import {
 import { buildTree, scenarioRows } from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
+import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import type { ScenarioRef } from "./route";
 
 interface Conflict {
@@ -894,6 +895,13 @@ export function App() {
   const [needsRepo, setNeedsRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [settingRepo, setSettingRepo] = useState(false);
+  // Switch spec folder (specs/app/spec-folders.feature.md): while a switch
+  // runs, a modal covers the app with the folder being opened and the step
+  // it is on; null between switches.
+  const [switching, setSwitching] = useState<{ folder: string; step: SwitchStep } | null>(null);
+  // Manage specification folders (specs/app/spec-folders.feature.md): the
+  // dialog listing the folders the app knows, from the recent folders menu.
+  const [foldersOpen, setFoldersOpen] = useState(false);
   // Whether the runtime offers a native folder chooser (specs/app-start.spec.md).
   const [canChooseFolder, setCanChooseFolder] = useState(false);
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
@@ -1665,6 +1673,8 @@ export function App() {
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const settingsTrapRef = useFocusTrap(settingsOpen);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
+  const foldersTrapRef = useFocusTrap(foldersOpen);
+  const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
   const sessionErrorTrapRef = useFocusTrap(sessionError !== null);
 
@@ -1803,6 +1813,10 @@ export function App() {
   const switchRepo = async (next: string) => {
     if (!next || next === dataRepo) return;
     setSettingRepo(true);
+    // The switch is modal (specs/app/spec-folders.feature.md "Switch spec
+    // folder"): the dialog names the folder and the step, and everything
+    // else waits until it comes down in the finally below.
+    setSwitching({ folder: next, step: "saving" });
     // A README edit belongs to the repo it was typed in: land it there before
     // the switch, and empty the editor so no tick writes it into the new one.
     // The same for an open scenario editor: its last save lands in this repo
@@ -1833,6 +1847,7 @@ export function App() {
     await descSaveQueue.current.idle();
     setDescEdit(null);
     try {
+      setSwitching({ folder: next, step: "opening" });
       const res = await fetch("/api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -1840,6 +1855,7 @@ export function App() {
       });
       const state = await res.json();
       if (res.ok) {
+        setSwitching({ folder: next, step: "loading" });
         setDataRepo(state.dataRepo);
         setRecentRepos(state.recentDataRepos ?? []);
         setSelected(null);
@@ -1877,6 +1893,26 @@ export function App() {
       } else {
         toast.error(state.error ?? "Could not use this directory");
       }
+    } finally {
+      setSwitching(null);
+      setSettingRepo(false);
+    }
+  };
+
+  // Manage specification folders (specs/app/spec-folders.feature.md): take a
+  // folder off the list. The server keeps the open folder on it, so the
+  // dialog never offers to remove that one.
+  const forgetRepo = async (repo: string) => {
+    setSettingRepo(true);
+    try {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forgetDataRepo: repo }),
+      });
+      const state = await res.json();
+      if (res.ok) setRecentRepos(state.recentDataRepos ?? []);
+      else toast.error(state.error ?? "Could not remove this folder");
     } finally {
       setSettingRepo(false);
     }
@@ -4771,6 +4807,8 @@ export function App() {
   const dialogOpen =
     settingsOpen ||
     userInfoOpen ||
+    foldersOpen ||
+    switching !== null ||
     modalOpen ||
     startDialog ||
     pomodoroSettings ||
@@ -5938,23 +5976,36 @@ export function App() {
                   label="Recent data folders"
                   className="repo-recent-menu"
                   containerSelector=".repo-recent"
-                  items={recentRepos.map((repo) => {
-                    const current = repo === dataRepo;
-                    return {
-                      id: repo,
-                      label: repoDisplayName(repo),
-                      title: repo,
-                      checked: current,
-                      onSelect: () => {
-                        if (current) {
-                          goHome();
-                          void loadReadme();
-                        } else {
-                          void switchRepo(repo);
-                        }
+                  items={[
+                    ...recentRepos.map(
+                      (repo): MenuItem => {
+                        const current = repo === dataRepo;
+                        return {
+                          id: repo,
+                          label: repoDisplayName(repo),
+                          title: repo,
+                          checked: current,
+                          onSelect: () => {
+                            if (current) {
+                              goHome();
+                              void loadReadme();
+                            } else {
+                              void switchRepo(repo);
+                            }
+                          },
+                        };
                       },
-                    };
-                  })}
+                    ),
+                    // Manage specification folders
+                    // (specs/app/spec-folders.feature.md): the list as a
+                    // dialog, where folders can be opened, removed or added.
+                    {
+                      id: "manage-folders",
+                      label: "Manage folders…",
+                      icon: <FolderInput size={13} />,
+                      onSelect: () => setFoldersOpen(true),
+                    },
+                  ]}
                 />
               </div>
             )}
@@ -8662,6 +8713,27 @@ export function App() {
           </div>
         </div>
       )}
+      {/* Manage specification folders (specs/app/spec-folders.feature.md):
+          open, remove or add spec folders. Opening one closes this and runs
+          the same switch the recent menu does. */}
+      {foldersOpen && (
+        <SpecFoldersDialog
+          folders={recentRepos}
+          current={dataRepo}
+          busy={settingRepo}
+          trapRef={foldersTrapRef}
+          onClose={() => setFoldersOpen(false)}
+          onOpen={(folder) => {
+            setFoldersOpen(false);
+            void switchRepo(folder);
+          }}
+          onRemove={(folder) => void forgetRepo(folder)}
+          onAdd={() => {
+            setFoldersOpen(false);
+            void changeRepo();
+          }}
+        />
+      )}
       {/* Error box (specs/agents/claude.spec.md): what the coding agent said
           when it exited with an error code. */}
       {sessionError && (
@@ -8695,6 +8767,11 @@ export function App() {
       )}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}
       {modal}
+      {/* Switch spec folder (specs/app/spec-folders.feature.md): above all
+          of it — while a switch runs, nothing else in the app is reachable. */}
+      {switching && (
+        <FolderSwitchDialog folder={switching.folder} step={switching.step} trapRef={switchTrapRef} />
+      )}
       {startDialog && (
         <StartSessionDialog
           ai={{

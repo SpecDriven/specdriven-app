@@ -26,6 +26,7 @@ import {
   normalizeOpenTestsInIdea,
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
+  forgetDataRepo,
   recentDataRepos,
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
@@ -443,6 +444,7 @@ const getState: Handler = async (req) => {
 const putState: Handler = async (req) => {
   const body = (await req.json()) as {
     dataRepo?: string;
+    forgetDataRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
     autosaveIntervalSeconds?: number;
@@ -466,6 +468,7 @@ const putState: Handler = async (req) => {
   };
   if (
     body.dataRepo === undefined &&
+    body.forgetDataRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
     body.autosaveIntervalSeconds === undefined &&
@@ -490,7 +493,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
       },
       400,
     );
@@ -501,6 +504,7 @@ const putState: Handler = async (req) => {
   if (
     isDemoMode() &&
     (body.dataRepo !== undefined ||
+      body.forgetDataRepo !== undefined ||
       body.gitEngine !== undefined ||
       body.syncServerUrl !== undefined)
   ) {
@@ -544,6 +548,19 @@ const putState: Handler = async (req) => {
     // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
     // to the front, the oldest past ten falls off.
     rememberDataRepo(state, dataRepo);
+  }
+  // Manage specification folders (specs/app/spec-folders.feature.md): take
+  // a folder off the list. Only the list entry goes — nothing on disk is
+  // touched — and the folder that is open stays: switch away from it first.
+  if (body.forgetDataRepo !== undefined) {
+    if (typeof body.forgetDataRepo !== "string" || !body.forgetDataRepo.trim()) {
+      return json({ error: "forgetDataRepo must be a folder path or url" }, 400);
+    }
+    const target = body.forgetDataRepo.trim();
+    if (target === state.dataRepo?.trim()) {
+      return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
+    }
+    forgetDataRepo(state, target);
   }
   if (body.reloadFrequencySeconds !== undefined) {
     const n = body.reloadFrequencySeconds;
