@@ -7,7 +7,7 @@
 // handles (parser.ts `Scenario.id`) and hands them back on a save, so a
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
-import type { EntryKind, ExternalLink, ScenarioStatus } from "../parser";
+import type { EntryKind, ExternalLink, PullRequestLink, ScenarioStatus } from "../parser";
 import type { EventModel, Layout, Links } from "../eventModel/types";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
@@ -45,6 +45,14 @@ export type SpecEntry = {
    * key — older documents simply lack it, no migration needed.
    */
   link?: ExternalLink;
+  /**
+   * The pull requests implementing this spec
+   * (specs/external-links/related-pull-requests.feature.md). Document-only:
+   * the projection never writes them, so nothing markdown-driven can drop
+   * them. A list, not a set-whole value, so two peers linking different
+   * pull requests concurrently end with both. Optional key, no migration.
+   */
+  prs?: PullRequestLink[];
 };
 
 export type FeatureDoc = {
@@ -57,6 +65,8 @@ export type FeatureDoc = {
   specs: SpecEntry[];
   /** The ticket tracking the feature as a whole, if any (see SpecEntry.link). */
   link?: ExternalLink;
+  /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
+  prs?: PullRequestLink[];
   /**
    * Name of the project member the feature is assigned to
    * (src/server/members.ts). Absent when nobody is assigned; set whole, like

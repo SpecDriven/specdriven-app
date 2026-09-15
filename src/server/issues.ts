@@ -22,6 +22,7 @@ import { ghAvailable, ghToken } from "./git/gh";
 import { githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
+import type { PullRequestState } from "./pullRequests";
 
 export type { GitHubRepo };
 
@@ -318,6 +319,40 @@ export async function getIssue(repo: GitHubRepo, number: number): Promise<Issue>
     throw new GitHubError(`#${number} is a pull request, not an issue`, 404);
   }
   return toIssue(raw);
+}
+
+/** The fields of GitHub's pull request object the lookup reads. */
+interface RawPullRequest {
+  number: number;
+  title: string;
+  state: string;
+  draft?: boolean;
+  merged_at?: string | null;
+}
+
+/**
+ * One pull request, for the editor's "Pull requests" field
+ * (specs/external-links/related-pull-requests.feature.md): its title and
+ * where it stands — draft, open, merged or closed. The same token and
+ * failure wording as the issue calls; the caller names the repository from
+ * the url typed, which need not be the code repo.
+ */
+export async function getPullRequest(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<{ number: number; title: string; state: PullRequestState }> {
+  const raw = await github<RawPullRequest>(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}`,
+  );
+  const state: PullRequestState = raw.merged_at
+    ? "merged"
+    : raw.state === "closed"
+      ? "closed"
+      : raw.draft
+        ? "draft"
+        : "open";
+  return { number: raw.number, title: raw.title, state };
 }
 
 export async function listComments(repo: GitHubRepo, number: number): Promise<IssueComment[]> {

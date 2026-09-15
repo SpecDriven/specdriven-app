@@ -79,6 +79,17 @@ export function externalLinkTypeOf(program: string): ExternalLinkType {
   return EXTERNAL_LINK_TYPES.find((t) => t !== "Other" && t.toLowerCase() === name) ?? "Other";
 }
 
+/**
+ * A pull request implementing a feature or a scenario
+ * (specs/external-links/related-pull-requests.feature.md). Held in the
+ * Automerge document only — never parsed from or written to markdown.
+ */
+export interface PullRequestLink {
+  url: string;
+  /** The pull request's title, read from GitHub or typed; empty when unknown. */
+  title: string;
+}
+
 export interface Scenario {
   name: string;
   version: number;
@@ -101,6 +112,11 @@ export interface Scenario {
   id?: string;
   /** The ticket tracking this scenario, if it has one. */
   link?: ExternalLink;
+  /**
+   * The pull requests implementing this scenario. Document-only, like `id`:
+   * carried on what the editor reads from the server, never serialized.
+   */
+  prs?: PullRequestLink[];
 }
 
 export interface Feature {
@@ -110,6 +126,8 @@ export interface Feature {
   scenarios: Scenario[];
   /** The ticket tracking the feature as a whole, if it has one. */
   link?: ExternalLink;
+  /** The pull requests implementing the feature as a whole; document-only. */
+  prs?: PullRequestLink[];
   /**
    * Name of the project member the feature is assigned to, if any — one of
    * the members listed in the data repo's `project-settings.json`
