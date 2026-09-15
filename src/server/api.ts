@@ -72,6 +72,7 @@ import {
   renameFeatureFile,
   reprojectFeatures,
   saveFeature,
+  savePullRequests,
   publishFeature,
   resolveFeatureConflict,
 } from "./features";
@@ -168,6 +169,7 @@ import {
   addComment,
   createIssue,
   getIssue,
+  getPullRequest,
   listComments,
   listIssues,
   parseIssueNumber,
@@ -176,6 +178,8 @@ import {
   type IssueState,
 } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
+import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
+import type { PullRequestLookup } from "./pullRequests";
 import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
 import {
   createReloadScheduler,
@@ -1270,6 +1274,34 @@ const postDeleteDraft = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/external-links/related-pull-requests.feature.md: the pull requests
+// linked to a feature (no `scenario` in the body) or to one of its scenarios.
+// A document-only write, like delete-draft: the links never reach the
+// markdown, so a save cannot carry them. The whole list is sent and the
+// document brought to it by url. The scenario is named by id, name and
+// version the way a save names it.
+const putPullRequests = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as {
+    scenario?: { name?: string; version?: number; id?: string } | null;
+    prs?: unknown;
+  };
+  const prs = validPullRequests(body.prs);
+  if (prs === null) return json({ error: "prs must be a list of { url, title } with http(s) urls" }, 400);
+  let target: ScenarioTarget | null = null;
+  if (body.scenario) {
+    const { name, version, id } = body.scenario;
+    if (typeof name !== "string" || typeof version !== "number") {
+      return json({ error: "scenario needs a name and a version" }, 400);
+    }
+    target = { name, version, ...(typeof id === "string" ? { id } : {}) };
+  }
+  try {
+    return json(await savePullRequests(dir, params.file!, target, prs));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/editor/spec-editor.feature.md "Delete Published Spec": deleting a
 // published scenario is allowed only while the Settings switch is on —
 // enforced here and not only in the UI, so nothing can remove published
@@ -1949,6 +1981,33 @@ const getTestName: Handler = async (req) => {
 };
 
 /**
+ * A pull request's title and state, read from GitHub for the "Pull requests"
+ * field (specs/external-links/related-pull-requests.feature.md). A url that
+ * is not a GitHub pull request is a 400; every other failure is a 200 with
+ * `title: null` and a `reason` for the hint — the link can be added either
+ * way, only the title is missing.
+ */
+const getPullRequestRoute: Handler = async (req) => {
+  const url = new URL(req.url).searchParams.get("url") ?? "";
+  const ref = parsePullRequestUrl(url);
+  if (!ref) return json({ error: "url must be a GitHub pull request url" }, 400);
+  if (isDemoMode()) {
+    const answer: PullRequestLookup = {
+      title: null,
+      reason: "Pull requests are not read from GitHub in demo mode.",
+    };
+    return json(answer);
+  }
+  try {
+    const answer: PullRequestLookup = await getPullRequest(ref.owner, ref.repo, ref.number);
+    return json(answer);
+  } catch (e) {
+    const answer: PullRequestLookup = { title: null, reason: (e as Error).message };
+    return json(answer);
+  }
+};
+
+/**
  * Open a test link in IntelliJ IDEA (specs/traceability.feature.md "Open
  * test in idea"): the url's file under the project's code repo, at the
  * url's line, through `idea --line <n> <file>` (src/server/idea.ts). Each
@@ -2062,6 +2121,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
   ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/test-name", getTestName],
+  ["GET", "/api/pull-request", getPullRequestRoute],
   ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
   ["GET", "/api/issues", getIssues],
   ["POST", "/api/issues", postIssue],
@@ -2077,6 +2137,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
+  ["PUT", "/api/features/:file/pull-requests", putPullRequests],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/agent/session", postAgentSession],
   ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],

@@ -6,7 +6,14 @@
 
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
-import type { ExternalLink, Feature, Scenario, ScenarioPick, ScenarioTarget } from "../parser";
+import type {
+  ExternalLink,
+  Feature,
+  PullRequestLink,
+  Scenario,
+  ScenarioPick,
+  ScenarioTarget,
+} from "../parser";
 import type { FeatureDoc, SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
@@ -206,5 +213,54 @@ export function removeDraftScenario(
   if (at === -1) return null;
   return A.change(doc, (d) => {
     A.deleteAt(d.specs, at);
+  });
+}
+
+/**
+ * Set the pull request links of the feature (`target` null) or of one of its
+ * scenarios (specs/external-links/related-pull-requests.feature.md). Like
+ * removeDraftScenario, a direct document operation: the links are never in
+ * the markdown, so no save can express them, and reconcile never touches
+ * them. The list is brought to `prs` by url — links gone from it are
+ * deleted, links new to it appended, a kept link's title updated in place —
+ * rather than replaced whole, so two peers linking different pull requests
+ * at the same time end with both. The scenario is the entry carrying the
+ * target's document id, else the one with its name and version. Null when
+ * no scenario matches.
+ */
+export function setPullRequests(
+  doc: A.Doc<FeatureDoc>,
+  target: ScenarioTarget | null,
+  prs: PullRequestLink[],
+): A.Doc<FeatureDoc> | null {
+  let at = -1;
+  if (target) {
+    at = target.id ? doc.specs.findIndex((s) => s.id === target.id) : -1;
+    if (at === -1) at = doc.specs.findIndex((s) => sameScenario(s, target));
+    if (at === -1) return null;
+  }
+  const wanted = new Map<string, string>();
+  for (const p of prs) if (!wanted.has(p.url)) wanted.set(p.url, p.title);
+  return A.change(doc, (d) => {
+    const holder: { prs?: PullRequestLink[] } = at === -1 ? d : d.specs[at]!;
+    // The list is created on first touch — even an empty one — and then
+    // only ever spliced, so every later peer pushes into the same list and
+    // concurrent links merge as a union. (Two peers creating it at the same
+    // moment is the one race the CRDT resolves to one side; the list exists
+    // from the first link on, so it never happens twice.)
+    if (!holder.prs) holder.prs = [];
+    const list = holder.prs;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (!wanted.has(list[i]!.url)) A.deleteAt(list, i);
+    }
+    const have = new Set<string>();
+    for (const p of list) {
+      have.add(p.url);
+      const title = wanted.get(p.url)!;
+      if (p.title !== title) p.title = title;
+    }
+    for (const [url, title] of wanted) {
+      if (!have.has(url)) list.push({ url, title });
+    }
   });
 }

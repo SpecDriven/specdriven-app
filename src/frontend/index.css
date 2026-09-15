@@ -7299,3 +7299,81 @@ aside.rail .rail-btn.pomodoro-chip.flash {
     animation: none;
   }
 }
+
+/* Pull request links (specs/external-links/related-pull-requests.feature.md):
+   a "Pull requests" list at the end of a scenario card, after the automated
+   tests; the editor pane's and the feature popover's field reuse the test
+   links' list and add-row layout. */
+.scenario-prs {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.scenario-prs-head {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--text-2);
+  font-weight: 550;
+}
+
+.pr-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8125rem;
+}
+
+.pr-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.pr-list a {
+  color: var(--accent-strong);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.pr-list a:hover {
+  text-decoration: underline;
+}
+
+.prs-field-wrap,
+.prs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.pr-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pr-add input {
+  flex: 2;
+  min-width: 0;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.pr-add input.pr-title {
+  flex: 1;
+  min-width: 7rem;
+}
+
+/* The state read from GitHub, or why nothing was read, under the add field. */
+.pr-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.pr-popover {
+  min-width: 26rem;
+}
