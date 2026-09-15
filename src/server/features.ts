@@ -3,7 +3,12 @@ import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
-import { importFeatureDoc, reconcile, removeDraftScenario } from "./automerge/reconcile";
+import {
+  importFeatureDoc,
+  reconcile,
+  removeDraftScenario,
+  setPullRequests,
+} from "./automerge/reconcile";
 import {
   createFeatureDoc,
   docDirRel,
@@ -34,7 +39,13 @@ import {
   slugify,
   titleFromFileName,
 } from "./parser";
-import type { Feature, ScenarioPick, ScenarioStatus, ScenarioTarget } from "./parser";
+import type {
+  Feature,
+  PullRequestLink,
+  ScenarioPick,
+  ScenarioStatus,
+  ScenarioTarget,
+} from "./parser";
 
 export { slugify } from "./parser";
 export type { ScenarioTarget } from "./parser";
@@ -161,8 +172,10 @@ export async function readFeatureForEditor(
 }
 
 /**
- * Fold the document's drafts, its ids, and the external links the file
- * doesn't carry, into a feature text for the editor.
+ * Fold the document's drafts, its ids, the external links the file doesn't
+ * carry, and the pull request links it never carries
+ * (specs/external-links/related-pull-requests.feature.md), into a feature
+ * text for the editor.
  */
 async function featureView(
   dataDir: string,
@@ -177,11 +190,13 @@ async function featureView(
   const ids = new Map(loaded.doc.specs.map((s) => [key(s), s.id] as const));
   // Plain copies of the document's links (docToFeature strips the proxies).
   const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
+  const docPrs = new Map(inDoc.scenarios.map((s) => [key(s), s.prs] as const));
   const have = new Set(feature.scenarios.map(key));
   const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
     .map((s) => {
       const link = docLinks.get(key(s));
+      const prs = docPrs.get(key(s));
       return {
         id: s.id,
         name: s.name,
@@ -190,6 +205,7 @@ async function featureView(
         body: s.body,
         tests: [...s.tests],
         ...(link ? { link } : {}),
+        ...(prs ? { prs } : {}),
       };
     });
   // Links: the file's own where it has one (it is the source for what it
@@ -200,17 +216,22 @@ async function featureView(
     const id = ids.get(key(s));
     const link = s.link ?? docLinks.get(key(s));
     if (link && !s.link) linked++;
+    const prs = docPrs.get(key(s));
     return {
       ...s,
       ...(id === undefined ? {} : { id }),
       ...(link ? { link } : {}),
+      ...(prs ? { prs } : {}),
     };
   });
   const link = feature.link ?? inDoc.link;
   if (link && !feature.link) linked++;
+  // Pull request links are the document's alone: the file never holds them,
+  // and serializeFeature never writes them, so `content` is unaffected.
   const parsed: Feature = {
     ...feature,
     ...(link ? { link } : {}),
+    ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     scenarios: sortScenarios([...scenarios, ...drafts]),
   };
   return {
@@ -502,6 +523,41 @@ export async function deleteDraftScenario(
     status: "saved",
     ...(await featureView(dataDir, name, content)),
     message: "draft deleted locally",
+  };
+}
+
+/**
+ * Set the pull request links of the feature (`target` null) or one scenario
+ * (specs/external-links/related-pull-requests.feature.md): a direct document
+ * write, never a markdown one — the file's bytes stay what the document
+ * projects — committed and pushed by the reload cron like any saved change.
+ * A feature with no document yet gets one minted from the file first, the
+ * way the first save does. Throws when the scenario is not in the document.
+ */
+export async function savePullRequests(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget | null,
+  prs: PullRequestLink[],
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  let loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) {
+    await createFeatureDoc(dataDir, name, importFeatureDoc(parseFeature(content)));
+    loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Could not create a document for ${name}`);
+  }
+  const next = setPullRequests(loaded.doc, target, prs);
+  if (next === null) {
+    throw new Error(`Scenario "${target!.name}" @v${target!.version} not found`);
+  }
+  await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, content)),
+    message: "pull requests saved locally",
   };
 }
 

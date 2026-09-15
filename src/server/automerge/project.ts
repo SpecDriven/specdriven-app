@@ -16,7 +16,13 @@
 // neither peer rewrites the other's form just to flip the links.
 
 import type * as A from "@automerge/automerge";
-import { serializeFeature, sortScenarios, type ExternalLink, type Feature } from "../parser";
+import {
+  serializeFeature,
+  sortScenarios,
+  type ExternalLink,
+  type Feature,
+  type PullRequestLink,
+} from "../parser";
 import type { FeatureDoc } from "./schema";
 
 export interface ProjectionOptions {
@@ -41,7 +47,16 @@ function plainLink(link: ExternalLink | undefined): ExternalLink | undefined {
   return link ? { program: link.program, ticket: link.ticket, url: link.url } : undefined;
 }
 
-/** The doc's view of the domain model — drafts included — in canonical order. */
+/** Plain copies of the pull request links held in the doc; undefined when none. */
+function plainPrs(prs: PullRequestLink[] | undefined): PullRequestLink[] | undefined {
+  return prs && prs.length > 0 ? prs.map((p) => ({ url: p.url, title: p.title })) : undefined;
+}
+
+/**
+ * The doc's view of the domain model — drafts included — in canonical order.
+ * Pull request links come along (the editor shows them) but serializeFeature
+ * never writes them, so the projection below stays free of them.
+ */
 export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   const feature: Feature = {
     name: doc.name,
@@ -56,12 +71,15 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
           tests: [...s.tests],
         };
         const link = plainLink(s.link);
-        return link ? { ...scenario, link } : scenario;
+        const prs = plainPrs(s.prs);
+        return { ...scenario, ...(link ? { link } : {}), ...(prs ? { prs } : {}) };
       }),
     ),
   };
   const link = plainLink(doc.link);
   if (link) feature.link = link;
+  const prs = plainPrs(doc.prs);
+  if (prs) feature.prs = prs;
   if (doc.assigned) feature.assigned = doc.assigned;
   return feature;
 }
