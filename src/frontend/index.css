@@ -7065,3 +7065,237 @@ aside.rail .rail-btn.pomodoro-chip.flash {
     grid-template-rows: 1fr 16rem;
   }
 }
+
+/* ---- Spec folders (specs/app/spec-folders.feature.md) ---------------- */
+
+/* "Manage specification folders": the folders the app knows, one row each
+   — name over path, the open one badged — with Open and a remove button
+   on the right. */
+.spec-folders-dialog {
+  width: min(34rem, 92vw);
+}
+
+.spec-folders {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.spec-folder {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface-1);
+}
+
+.spec-folder + .spec-folder {
+  border-top: 1px solid var(--border);
+}
+
+.spec-folder.current {
+  background: var(--accent-soft);
+}
+
+.spec-folder-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.spec-folder-name {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.spec-folder-badge {
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.spec-folder-path {
+  font-size: 0.72rem;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spec-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.spec-folder-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+}
+
+.spec-folder-remove:hover:not(:disabled) {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.spec-folder-remove:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* "Switch spec folder": the modal that covers the app while a switch runs.
+   Above every other dialog — a prompt that was open cannot be reached from
+   under it — and nothing on it closes. */
+.switch-backdrop {
+  z-index: 40;
+  cursor: progress;
+}
+
+.switch-dialog {
+  width: min(26rem, 90vw);
+  outline: none;
+}
+
+.switch-target {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--text-1);
+}
+
+.switch-target svg {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.switch-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.switch-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+}
+
+.switch-step {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--text-3);
+}
+
+.switch-step.current {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.switch-step.done {
+  color: var(--text-2);
+}
+
+.switch-mark {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+.switch-step.done .switch-mark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch-step.current .switch-mark {
+  border-color: var(--accent);
+  animation: switch-pulse 1s ease-in-out infinite;
+}
+
+.switch-ellipsis {
+  color: var(--text-3);
+}
+
+/* Indeterminate: the switch has no byte count to show, only steps. */
+.switch-progress {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  overflow: hidden;
+}
+
+.switch-progress > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: switch-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes switch-slide {
+  to {
+    left: 100%;
+  }
+}
+
+@keyframes switch-pulse {
+  50% {
+    background: var(--accent-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-progress > i {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
+  }
+  .switch-step.current .switch-mark {
+    animation: none;
+  }
+}

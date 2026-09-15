@@ -434,3 +434,18 @@ export function rememberDataRepo(state: SpecDrivenState, repo: string): void {
     ...normalizeRecentDataRepos(state.recentDataRepos),
   ]);
 }
+
+/**
+ * Takes a folder out of the list (specs/app/spec-folders.feature.md "Manage
+ * specification folders"): the app forgets it, the folder itself stays on
+ * disk. Returns whether it was there. The current folder is not removable —
+ * the list always offers the folder that is open — so callers refuse that
+ * before getting here.
+ */
+export function forgetDataRepo(state: SpecDrivenState, repo: string): boolean {
+  const target = repo.trim();
+  const before = normalizeRecentDataRepos(state.recentDataRepos);
+  const after = before.filter((entry) => entry !== target);
+  state.recentDataRepos = after;
+  return after.length !== before.length;
+}
