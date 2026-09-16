@@ -181,6 +181,7 @@ import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import type { PullRequestLookup } from "./pullRequests";
 import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
+import { fieldChoices, scanEntities } from "./entities";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -1981,6 +1982,23 @@ const getTestName: Handler = async (req) => {
 };
 
 /**
+ * The entity fields the scenario editor offers after `@` + Tab (specs/
+ * editor/data-model-integration-in-editor.feature.md), read from the Java
+ * classes and CDS entities in the project's code repo (src/server/
+ * entities.ts). No code repo, or one that is not there, is an empty list,
+ * not an error: the editor asks quietly on open and simply has nothing to
+ * offer — open-in-idea is where a missing folder is reported.
+ */
+const getEntityFields: Handler = withDataDir(async (dir) => {
+  const { codeRepo } = await readProjectSettings(dir);
+  if (codeRepo === null || !(await directoryExists(codeRepo))) {
+    return json({ codeRepo, entities: 0, fields: [] });
+  }
+  const entities = await scanEntities(codeRepo);
+  return json({ codeRepo, entities: entities.length, fields: fieldChoices(entities) });
+});
+
+/**
  * A pull request's title and state, read from GitHub for the "Pull requests"
  * field (specs/external-links/related-pull-requests.feature.md). A url that
  * is not a GitHub pull request is a 400; every other failure is a 200 with
@@ -2121,6 +2139,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
   ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/test-name", getTestName],
+  ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
   ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
   ["GET", "/api/issues", getIssues],
