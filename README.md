@@ -344,7 +344,7 @@ distribution behind `specdriven.app` in
 
 ```
 src/index.ts        web entry — Bun.serve() over the shared route table
-src/server/         api (routes shared by web + desktop), features, parser, search,
+src/server/         api (routes shared by web + desktop), features, parser, search, entities,
                     git/ (gh + cli + js engines), auth, github, tokenStore, repo, state, user, reload
 src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
