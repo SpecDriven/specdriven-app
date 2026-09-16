@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import {
   Bold,
@@ -32,6 +32,8 @@ import { markNodes, markText } from "./highlight";
 import { ImageSizingContext } from "./MarkdownImage";
 import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
+import { atQuery, entityFields, filterChoices, insertChoice, useEntityFields } from "./entityFields";
+import type { FieldChoice } from "./entityFields";
 import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
 
@@ -128,6 +130,27 @@ export function MarkdownEditor({
   // on: nothing else in the toolbar cares where the caret is.
   const [caret, setCaret] = useState(0);
 
+  // Entity-field completion (specs/editor/data-model-integration-in-editor
+  // .feature.md): Tab at the end of an `@…` run opens a list of the code
+  // repo's entity fields, filtered by whatever follows the `@` — typing
+  // keeps going into the textarea, the list narrows. `complete` remembers
+  // where the run started; the caret leaving it, a tab change, or focus
+  // going elsewhere closes the list. The choices load when an editor
+  // opens: a read-only body never completes, and never asks.
+  const { fields } = useEntityFields();
+  useEffect(() => {
+    if (!readOnly) void entityFields.load();
+  }, [readOnly]);
+  const [complete, setComplete] = useState<{ start: number } | null>(null);
+  const [completeIndex, setCompleteIndex] = useState(0);
+  const run = complete && tab === "write" && !readOnly ? atQuery(value, caret) : null;
+  const active = run && complete && run.start === complete.start ? run : null;
+  const items = active ? filterChoices(fields, active.query) : [];
+  const popup = active !== null && items.length > 0;
+  const listId = useId();
+  useEffect(() => setCompleteIndex(0), [active?.query]);
+  useEffect(() => setComplete(null), [tab]);
+
   // Search-term marks (specs/search.feature.md). A textarea cannot carry
   // markup, so a mirror of its text sits behind it — same font, padding and
   // wrapping, transparent ink — painting only the marks; the textarea over
@@ -202,7 +225,10 @@ export function MarkdownEditor({
     onChange(r.text);
     // Where the edit left the caret. setSelectionRange does not raise a
     // select event, so the toolbar is told here instead — otherwise it would
-    // go on acting on whatever the caret was in before.
+    // go on acting on whatever the caret was in before. The layout effect
+    // above restores `sel` on commit: told the same place, it agrees with
+    // the frame below instead of putting the old caret back for a frame.
+    sel.current = { start: r.start, end: r.end };
     setCaret(r.start);
     // Restore focus and selection once React has committed the new value.
     requestAnimationFrame(() => {
@@ -332,7 +358,50 @@ export function MarkdownEditor({
     void addImages(files);
   };
 
+  // Picking a field replaces the `@…` run with it, through apply() like any
+  // toolbar edit, so the caret lands after it and the toolbar hears.
+  const pick = (choice: FieldChoice) => {
+    const start = complete?.start;
+    if (start === undefined) return;
+    apply((t, _s, en) => insertChoice(t, start, en, choice));
+    setComplete(null);
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
+    if (tab === "write" && !readOnly) {
+      if (popup) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const step = e.key === "ArrowDown" ? 1 : items.length - 1;
+          setCompleteIndex((i) => (i + step) % items.length);
+          return;
+        }
+        if (e.key === "Tab" || e.key === "Enter") {
+          e.preventDefault();
+          pick(items[completeIndex] ?? items[0]!);
+          return;
+        }
+        if (e.key === "Escape") {
+          // Closes the list, not the pane around it (the app's Escape shortcut).
+          e.preventDefault();
+          e.stopPropagation();
+          setComplete(null);
+          return;
+        }
+      } else if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+        // Only at the end of an `@…` run, with something to offer: any
+        // other Tab keeps moving focus on (specs/editor/spec-editor.feature.md).
+        const ta = ref.current;
+        const at =
+          ta && ta.selectionStart === ta.selectionEnd ? atQuery(ta.value, ta.selectionStart) : null;
+        if (ta && at && fields.length > 0) {
+          e.preventDefault();
+          setCaret(ta.selectionStart);
+          setComplete({ start: at.start });
+          return;
+        }
+      }
+    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === "b") {
@@ -507,7 +576,32 @@ export function MarkdownEditor({
             onScroll={marks ? onScroll : undefined}
             onKeyDown={readOnly ? undefined : onKeyDown}
             onPaste={readOnly ? undefined : onPaste}
+            onBlur={() => setComplete(null)}
+            aria-autocomplete={readOnly ? undefined : "list"}
+            aria-controls={popup ? listId : undefined}
+            aria-activedescendant={popup ? `${listId}-${completeIndex}` : undefined}
           />
+          {popup && (
+            <div className="md-complete" role="listbox" id={listId} aria-label="Entity fields">
+              {items.map((c, i) => (
+                <button
+                  type="button"
+                  key={c.label}
+                  role="option"
+                  id={`${listId}-${i}`}
+                  aria-selected={i === completeIndex}
+                  className="md-complete-item"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pick(c)}
+                >
+                  <span className="md-complete-name">{c.label}</span>
+                  <span className="md-complete-desc">
+                    {c.entity} · {c.file}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : tab === "vim" ? (
         <Suspense fallback={<div className="md-vim-loading">Loading Vim…</div>}>
@@ -520,6 +614,7 @@ export function MarkdownEditor({
             onPasteFiles={(files) => void addImages(files)}
             onShortcut={onKeyDown}
             onCaretMove={setCaret}
+            completions={fields}
           />
         </Suspense>
       ) : (

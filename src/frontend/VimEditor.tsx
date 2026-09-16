@@ -14,7 +14,11 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { vim } from "@replit/codemirror-vim";
+import { getCM, vim } from "@replit/codemirror-vim";
+import { autocompletion, closeCompletion, startCompletion } from "@codemirror/autocomplete";
+import type { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
+import { atQuery, filterChoices } from "./entityFields";
+import type { FieldChoice } from "./entityFields";
 import { termsPattern } from "./highlight";
 
 // Vim mode (specs/ui.spec.md "Settings"): the Markdown editor's Vim tab is a
@@ -48,6 +52,11 @@ interface VimEditorProps {
    * what is under it (src/frontend/MarkdownEditor.tsx, the diagram button).
    */
   onCaretMove?: (offset: number) => void;
+  /**
+   * The entity fields Tab completes after an `@` in insert mode
+   * (specs/editor/data-model-integration-in-editor.feature.md).
+   */
+  completions?: FieldChoice[];
 }
 
 // Markdown syntax, in the app's own colours (index.css): headings and links
@@ -111,14 +120,14 @@ function minimalChange(from: string, to: string) {
 }
 
 export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEditor(
-  { value, onChange, placeholder, highlight, onPasteFiles, onShortcut, onCaretMove },
+  { value, onChange, placeholder, highlight, onPasteFiles, onShortcut, onCaretMove, completions },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The callbacks change every render; the extensions read the latest ones.
-  const latest = useRef({ onChange, onPasteFiles, onShortcut, onCaretMove });
-  latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove };
+  const latest = useRef({ onChange, onPasteFiles, onShortcut, onCaretMove, completions });
+  latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove, completions };
   const terms = highlight && highlight.length > 0 ? highlight : null;
   const termsKey = terms?.join(" ") ?? "";
 
@@ -140,6 +149,44 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
       });
     },
   }));
+
+  // Entity-field completion (specs/editor/data-model-integration-in-editor
+  // .feature.md), in insert mode only: Tab at the end of an `@…` run opens
+  // CodeMirror's completion list over the fields, which narrows as the
+  // user types and takes Enter or the arrows. Any other Tab, and Tab in
+  // normal mode, is left to whoever handles it next. Vim swallows the Esc
+  // that leaves insert mode, but the cursor step it makes closes the list;
+  // leaving at column 0 makes no step, so the update listener below
+  // closes it then.
+  const startFieldCompletion = (v: EditorView): boolean => {
+    if (!getCM(v)?.state.vim?.insertMode) return false;
+    const { from, to } = v.state.selection.main;
+    if (from !== to || !latest.current.completions?.length) return false;
+    const line = v.state.doc.lineAt(to);
+    if (!atQuery(line.text, to - line.from)) return false;
+    return startCompletion(v);
+  };
+  // The list is ranked here, not by CodeMirror's fuzzy matcher, so both
+  // tabs agree: fields starting with what was typed come first. Each
+  // keystroke asks again through `update` — the `@` run is short and the
+  // list small, so a fresh answer costs nothing.
+  const fieldResult = (state: EditorState, pos: number): CompletionResult | null => {
+    const line = state.doc.lineAt(pos);
+    const at = atQuery(line.text, pos - line.from);
+    if (!at) return null;
+    return {
+      from: line.from + at.start,
+      options: filterChoices(latest.current.completions ?? [], at.query).map((c) => ({
+        label: c.label,
+        detail: c.entity,
+        info: c.file,
+      })),
+      filter: false,
+      update: (_result, _from, _to, ctx) => fieldResult(ctx.state, ctx.pos),
+    };
+  };
+  const fieldSource = (ctx: CompletionContext): CompletionResult | null =>
+    fieldResult(ctx.state, ctx.pos);
 
   // One editor per set of search terms: the marks are baked into the
   // extensions, and a new set arrives only with a new hit, never by typing.
@@ -169,10 +216,16 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
           placeholder ? placeholderExt(placeholder) : [],
           terms ? highlightTerms(terms) : [],
           keymap.of([...defaultKeymap, ...historyKeymap]),
+          // Nothing else binds Tab, and vim claims no key but Esc and a few
+          // Ctrl chords in insert mode, so this is reached at default precedence.
+          autocompletion({ override: [fieldSource], activateOnTyping: false, icons: false }),
+          keymap.of([{ key: "Tab", run: startFieldCompletion }]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) latest.current.onChange(u.state.doc.toString());
             if (u.docChanged || u.selectionSet)
               latest.current.onCaretMove?.(u.state.selection.main.head);
+            if (u.selectionSet && !u.docChanged && !getCM(u.view)?.state.vim?.insertMode)
+              closeCompletion(u.view);
           }),
           EditorView.domEventHandlers({
             paste: (e) => {

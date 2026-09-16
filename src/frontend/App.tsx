@@ -120,6 +120,7 @@ import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testin
 import { IssuesPane, IssuesSidebar } from "./IssuesPane";
 import { issues, issuesKey, issuesTitle, searchIssues, useIssues } from "./issues";
 import { models, modelTitle, useModels } from "./eventModel/models";
+import { entityFields } from "./entityFields";
 import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
@@ -1885,6 +1886,9 @@ export function App() {
         // was flushed and sealed before the switch, so whenever its unmount
         // save runs it is a no-op rather than a PUT into this new folder.
         models.reset();
+        // Nor its entity fields: the next editor to open reads the new
+        // folder's code repo.
+        entityFields.reset();
         // And the old folder's issues: the effect below reloads them for
         // whichever GitHub repo the new folder's code repo is.
         setIssuesView(null);

@@ -1719,6 +1719,61 @@ button.link:disabled {
   color: inherit;
 }
 
+/* Entity-field completion (specs/editor/data-model-integration-in-editor
+   .feature.md): the list Tab opens after an `@`, in the write pane's bottom
+   corner — always in view, never clipped, whatever line the caret is on.
+   The same shape as the AI session's slash-command list. */
+.md-complete {
+  position: absolute;
+  left: 0.6rem;
+  bottom: 0.6rem;
+  z-index: 6;
+  width: min(28rem, calc(100% - 1.2rem));
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+}
+
+.md-complete-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.md-complete-item[aria-selected="true"],
+.md-complete-item:hover {
+  background: var(--accent-soft);
+}
+
+.md-complete-name {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.md-complete-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
 /* Vim tab (specs/ui.spec.md "Settings"): a CodeMirror editor running the vim
    extension, dressed like the textarea beside it — same font, padding and
    colours, the block cursor and status line in the accent. CodeMirror's own
@@ -1790,6 +1845,51 @@ button.link:disabled {
 .md-vim .cm-editor.cm-focused .cm-selectionBackground,
 .md-vim .cm-editor .cm-content ::selection {
   background: var(--accent-soft);
+}
+
+/* The entity-field list (specs/editor/data-model-integration-in-editor
+   .feature.md), dressed like the write pane's. */
+.md-vim .cm-tooltip.cm-tooltip-autocomplete {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+  padding: 0.3rem;
+}
+
+.md-vim .cm-tooltip-autocomplete > ul {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  max-height: 14rem;
+}
+
+.md-vim .cm-tooltip-autocomplete > ul > li {
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+}
+
+.md-vim .cm-tooltip-autocomplete > ul > li[aria-selected] {
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
+.md-vim .cm-tooltip-autocomplete .cm-completionDetail {
+  margin-left: 0.5rem;
+  color: var(--text-2);
+  font-style: normal;
+}
+
+/* The file the chosen field came from, beside the list. */
+.md-vim .cm-tooltip.cm-completionInfo {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-md);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
 }
 
 /* Search marks (specs/search.feature.md), the same as the other tabs'. */
