@@ -34,6 +34,7 @@ import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
 import { atQuery, entityFields, filterChoices, insertChoice, useEntityFields } from "./entityFields";
 import type { FieldChoice } from "./entityFields";
+import { anchorVisible, measureOffset, placePopup } from "./caretPosition";
 import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
 
@@ -151,6 +152,47 @@ export function MarkdownEditor({
   useEffect(() => setCompleteIndex(0), [active?.query]);
   useEffect(() => setComplete(null), [tab]);
 
+  // The list opens next to the `@` it is completing, not in a corner: the
+  // `@` is measured in the textarea (src/frontend/caretPosition.ts) and the
+  // list placed under it, or above it where the pane has no room below.
+  // Measured after layout, so the list's own size is known — until then it
+  // stays hidden rather than showing for a frame where it does not belong.
+  const listRef = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; flipped: boolean } | null>(null);
+  // Measuring the `@` and placing the list over it. Held in a ref so the
+  // scroll handler further down can ask for it again without the two going
+  // out of step.
+  const remeasure = useRef<() => void>(() => {});
+  remeasure.current = () => {
+    const ta = ref.current;
+    const list = listRef.current;
+    const start = complete?.start;
+    if (!ta || !list || start === undefined) return;
+    const anchor = measureOffset(ta, start);
+    if (!anchor) return;
+    const pane = { width: ta.clientWidth, height: ta.clientHeight };
+    // Scrolled past the `@`, the list has nothing left to point at: it
+    // closes rather than following the run off the edge of the pane.
+    if (!anchorVisible(anchor, pane)) {
+      setComplete(null);
+      return;
+    }
+    setPlace(
+      placePopup({
+        anchor,
+        pane,
+        popup: { width: list.offsetWidth, height: list.offsetHeight },
+      }),
+    );
+  };
+  // Re-measured whenever the run, the text or the list's length changes —
+  // the list narrows as the user types, so its height moves with it.
+  const placeKey = popup ? `${complete?.start}:${active?.query}:${items.length}:${value}` : null;
+  useLayoutEffect(() => {
+    if (!popup) setPlace(null);
+    else remeasure.current();
+  }, [popup, placeKey]);
+
   // Search-term marks (specs/search.feature.md). A textarea cannot carry
   // markup, so a mirror of its text sits behind it — same font, padding and
   // wrapping, transparent ink — painting only the marks; the textarea over
@@ -159,8 +201,11 @@ export function MarkdownEditor({
   const marks = highlight && highlight.length > 0 ? highlight : null;
   const mirrorRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  // Scrolling moves the marks' mirror with the text, and takes the open
+  // field list along with the `@` it points at.
   const onScroll = (e: UIEvent<HTMLTextAreaElement>) => {
     if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
+    if (popup) remeasure.current();
   };
   useEffect(() => {
     const ta = ref.current;
@@ -573,7 +618,7 @@ export function MarkdownEditor({
               onChange(e.target.value);
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-            onScroll={marks ? onScroll : undefined}
+            onScroll={marks || popup ? onScroll : undefined}
             onKeyDown={readOnly ? undefined : onKeyDown}
             onPaste={readOnly ? undefined : onPaste}
             onBlur={() => setComplete(null)}
@@ -582,7 +627,21 @@ export function MarkdownEditor({
             aria-activedescendant={popup ? `${listId}-${completeIndex}` : undefined}
           />
           {popup && (
-            <div className="md-complete" role="listbox" id={listId} aria-label="Entity fields">
+            <div
+              ref={listRef}
+              className="md-complete"
+              role="listbox"
+              id={listId}
+              aria-label="Entity fields"
+              data-flipped={place?.flipped ? "" : undefined}
+              // Placed over the `@` once measured; hidden for the frame
+              // before that, so it never shows where it does not belong.
+              style={
+                place
+                  ? { left: place.left, top: place.top }
+                  : { left: 0, top: 0, visibility: "hidden" }
+              }
+            >
               {items.map((c, i) => (
                 <button
                   type="button"
