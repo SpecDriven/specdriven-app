@@ -202,6 +202,14 @@ Below, in one scrolling column:
   focus), and double-click the handle for the natural size. The width is
   kept in the body as `<img src="…" alt="…" width="…">`, which any markdown
   viewer honours. With **Vim mode** on, a **Vim** tab appears as well.
+- **Entity fields**: when the project names a code repo (`code-repo` in
+  `project-settings.json`), type `@` and press `Tab` to pick a field of
+  one of its data entities — `@firstName`, or `@User.firstName` when two
+  entities share the name. Keep typing to narrow the list, `↑`/`↓` to move,
+  `Enter` or `Tab` to insert, `Esc` to close; any other `Tab` moves focus on
+  as usual. Fields are read from plain Java classes and records (test
+  folders are skipped) and from SAP CDS entities, projections included. In
+  the **Vim** tab the same works in insert mode.
 - **Scenario table**: a grid over the last markdown table in the body. Add
   and remove columns and rows here rather than editing the table by hand;
   writing `{name}` in the body creates a column of that name. **+ Add
