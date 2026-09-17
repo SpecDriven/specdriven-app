@@ -21,6 +21,7 @@ import {
   normalizeRoadmap,
   normalizeTasks,
   normalizeTesting,
+  normalizeGoogleCalendar,
   normalizeIssues,
   normalizeScenarioPreviewLines,
   normalizeOpenTestsInIdea,
@@ -88,6 +89,7 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
+import { EstimateError, estimateMinutes } from "./estimate";
 import {
   ChatError,
   answerPermission,
@@ -111,7 +113,7 @@ import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
-import { extractScenarios } from "./parser";
+import { extractScenarios, parsePage } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -142,6 +144,7 @@ import {
   savePage,
   type PageFolder,
 } from "./pages";
+import type { PageView } from "./pages";
 import {
   byNewest,
   createEntry,
@@ -408,6 +411,7 @@ async function stateFields(state: SpecDrivenState) {
     notebook: normalizeNotebook(state.notebook),
     models: normalizeModels(state.models),
     testing: normalizeTesting(state.testing),
+    googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
     issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
@@ -468,6 +472,7 @@ const putState: Handler = async (req) => {
     tasks?: boolean;
     models?: boolean;
     testing?: boolean;
+    googleCalendar?: boolean;
     issues?: boolean;
     syncServerUrl?: string | null;
   };
@@ -492,13 +497,14 @@ const putState: Handler = async (req) => {
     body.tasks === undefined &&
     body.models === undefined &&
     body.testing === undefined &&
+    body.googleCalendar === undefined &&
     body.issues === undefined &&
     body.syncServerUrl === undefined
   ) {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -746,6 +752,16 @@ const putState: Handler = async (req) => {
     if (body.testing) state.testing = true;
     else delete state.testing;
   }
+  // Google Calendar (specs/app/tasks.feature.md "Add task to Google
+  // Calendar"): opt-in — an absent key when off. Nothing to make: the
+  // estimate lands on the task's own page, and the event on Google's side.
+  if (body.googleCalendar !== undefined) {
+    if (typeof body.googleCalendar !== "boolean") {
+      return json({ error: "googleCalendar must be a boolean" }, 400);
+    }
+    if (body.googleCalendar) state.googleCalendar = true;
+    else delete state.googleCalendar;
+  }
   // GitHub issues (specs/app/github-issues.feature.md): opt-in — an
   // absent key when off. Nothing else to do: the issues live on GitHub.
   if (body.issues !== undefined) {
@@ -979,6 +995,35 @@ const deletePageRoute = (kind: PageFolder) =>
       return json({ error: (e as Error).message }, 400);
     }
   });
+
+// Add a task to Google Calendar (specs/app/tasks.feature.md): one short turn
+// of the developer's `claude` CLI proposes how long the task takes
+// (src/server/estimate.ts); the person confirms it in the client, which
+// writes the estimate on the page and opens the prefilled event itself.
+// Closed while the Google Calendar switch is off, like the other modules.
+// In demo mode the seam holds the scripted agent, which has no number to
+// give, so the route proposes one of its own.
+const DEMO_ESTIMATE_MINUTES = 30;
+
+const estimateTaskRoute = withDataDir(async (dir, _req, params) => {
+  if (!normalizeGoogleCalendar((await readState(getAppRoot())).googleCalendar)) {
+    return json({ error: "Google Calendar is switched off in Settings" }, 404);
+  }
+  let page: PageView | null;
+  try {
+    page = await readPage(dir, TASKS, params.file ?? "");
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+  if (page === null) return json({ error: "Task not found" }, 404);
+  if (isDemoMode()) return json({ minutes: DEMO_ESTIMATE_MINUTES });
+  try {
+    return json({ minutes: await estimateMinutes(parsePage(page.content), dir) });
+  } catch (e) {
+    if (e instanceof EstimateError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 502);
+  }
+});
 
 // The engineering notebook (specs/app/engineering-notebook.feature.md): the
 // dated markdown entries in the data repo's `notebook` folder. Reading,
@@ -2118,6 +2163,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/tasks", listPagesRoute(TASKS)],
   ["POST", "/api/tasks", createPageRoute(TASKS)],
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
+  ["POST", "/api/tasks/:file/estimate", estimateTaskRoute],
   ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
   ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
   ["GET", "/api/notebook", listEntriesRoute],

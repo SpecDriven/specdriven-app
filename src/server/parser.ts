@@ -40,6 +40,8 @@
 // `##` headings without a version, and headings inside fenced code blocks
 // (``` or ~~~), are ordinary content, not scenario boundaries.
 
+import { formatEstimateLine, parseEstimateLine } from "./calendar";
+
 /**
  * Scenario lifecycle: draft → proposed → published, advancing one way.
  * draft never appears in feature files — it is stored only in the Automerge
@@ -493,6 +495,7 @@ export function parseSupersedesLine(line: string): Supersedes | null {
 export function splitPageMeta(text: string): {
   text: string;
   assigned?: string;
+  estimate?: number;
   done?: boolean;
   author?: string;
   date?: string;
@@ -501,6 +504,7 @@ export function splitPageMeta(text: string): {
 } {
   let rest = text;
   let assigned: string | undefined;
+  let estimate: number | undefined;
   let done = false;
   let author: string | undefined;
   let date: string | undefined;
@@ -508,17 +512,19 @@ export function splitPageMeta(text: string): {
   let supersedes: Supersedes | undefined;
   // At most one line of each kind, so a pass per possible line settles them
   // whichever order they were written in (splitFeatureMeta).
-  for (let pass = 0; pass < 6; pass++) {
+  for (let pass = 0; pass < 7; pass++) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
+    const nextEstimate = estimate === undefined ? parseEstimateLine(line) : null;
     const nextAuthor = author === undefined ? parseAuthorLine(line) : null;
     const nextDate = date === undefined ? parseEntryDateLine(line) : null;
     const nextKind = kind === undefined ? parseKindLine(line) : null;
     const nextSupersedes = supersedes === undefined ? parseSupersedesLine(line) : null;
     if (nextAssigned) assigned = nextAssigned;
+    else if (nextEstimate !== null) estimate = nextEstimate;
     else if (nextAuthor) author = nextAuthor;
     else if (nextDate) date = nextDate;
     else if (nextKind) kind = nextKind;
@@ -530,6 +536,7 @@ export function splitPageMeta(text: string): {
   return {
     text: rest,
     ...(assigned ? { assigned } : {}),
+    ...(estimate !== undefined ? { estimate } : {}),
     ...(done ? { done } : {}),
     ...(author ? { author } : {}),
     ...(date ? { date } : {}),
@@ -878,6 +885,9 @@ export interface MarkdownPage {
   body: string;
   /** Name of the project member the document is assigned to, if any. */
   assigned?: string;
+  /** How long a task is estimated to take, in minutes — what its Add to
+      calendar button writes (tasks.feature.md, src/server/calendar.ts). */
+  estimate?: number;
   /** Whether the page is finished — a task's Done (tasks.feature.md). */
   done?: boolean;
   /**
@@ -907,11 +917,13 @@ export function parsePage(text: string): MarkdownPage {
   const at = lines.findIndex((line) => line.trim() !== "");
   const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
   const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
-  const { text: body, assigned, done, author, date, kind, supersedes } = splitPageMeta(rest);
+  const { text: body, assigned, estimate, done, author, date, kind, supersedes } =
+    splitPageMeta(rest);
   return {
     name: heading ? heading[1]! : "",
     body,
     ...(assigned ? { assigned } : {}),
+    ...(estimate !== undefined ? { estimate } : {}),
     ...(done ? { done: true } : {}),
     ...(author ? { author } : {}),
     ...(date ? { date } : {}),
@@ -930,6 +942,7 @@ export function serializePage(doc: MarkdownPage): string {
   const parts: string[] = [];
   if (doc.name) parts.push(`# ${doc.name}`);
   if (doc.assigned) parts.push(formatAssigned(doc.assigned));
+  if (doc.estimate) parts.push(formatEstimateLine(doc.estimate));
   if (doc.author) parts.push(formatAuthor(doc.author));
   if (doc.date) parts.push(formatEntryDate(doc.date));
   if (doc.kind) parts.push(formatKind(doc.kind));

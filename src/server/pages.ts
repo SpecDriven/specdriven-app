@@ -112,6 +112,9 @@ export interface PageListing {
   name: string;
   /** The project member the page is assigned to, if any. */
   assigned?: string;
+  /** How long a task is estimated to take, in minutes — what its Add to
+      calendar button writes (specs/app/tasks.feature.md). */
+  estimate?: number;
   /** Whether the page is done — what a task's Done button sets. */
   done?: boolean;
   /** A notebook entry's author (specs/app/engineering-notebook.feature.md). */
@@ -340,6 +343,7 @@ function listing(fileName: string, page: MarkdownPage | null): PageListing {
     fileName,
     name: page?.name || titleFromFileName(entryStem(fileName)),
     ...(page?.assigned ? { assigned: page.assigned } : {}),
+    ...(page?.estimate ? { estimate: page.estimate } : {}),
     ...(page?.done ? { done: true } : {}),
     ...(page?.author ? { author: page.author } : {}),
     ...(entryDate(fileName, page) ? { date: entryDate(fileName, page)! } : {}),
