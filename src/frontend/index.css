@@ -7480,3 +7480,61 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .pr-popover {
   min-width: 26rem;
 }
+
+/* Add a task to Google Calendar (specs/app/tasks.feature.md): the calendar
+   chip's popover — an estimate, its presets, a start, and the link that is
+   the form's submit, dressed as the dialogs' primary button. */
+.calendar-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.calendar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+
+.calendar-field input {
+  color: var(--text-1);
+}
+
+.calendar-field input[aria-invalid="true"] {
+  border-color: var(--danger-fg);
+}
+
+.calendar-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.chip.page-estimate.has-estimate {
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+.dialog-actions a.button-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.46rem 0.95rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.dialog-actions a.button-link:hover:not([aria-disabled="true"]) {
+  background: var(--accent-hover);
+}
+
+.dialog-actions a.button-link[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

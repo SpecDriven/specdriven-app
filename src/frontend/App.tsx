@@ -25,6 +25,16 @@ import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
 import type { PageListing } from "../server/pages";
+import {
+  formatEstimate,
+  fromLocalInput,
+  googleCalendarUrl,
+  localInputValue,
+  nextQuarterHour,
+  parseEstimate,
+} from "../server/calendar";
+import { AddToCalendarForm } from "./AddToCalendarForm";
+import type { EstimateProposal } from "./AddToCalendarForm";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import type { CodeGenTarget } from "../server/state";
@@ -69,6 +79,7 @@ import {
   X,
   ArrowDown,
   Bot,
+  CalendarPlus,
   Workflow,
 } from "lucide-react";
 import {
@@ -346,6 +357,9 @@ interface PageTab {
   /** Whether its pages can be ticked off — a task is done or it is not
       (specs/app/tasks.feature.md); a roadmap page is neither. */
   done: boolean;
+  /** Whether its pages can be put on the calendar — a task, with an
+      estimate of its time (specs/app/tasks.feature.md); a page cannot. */
+  calendar?: boolean;
   /**
    * Whether its pages are dated entries, listed newest first and grouped by
    * month, each signed and chipped with its kind — the engineering notebook
@@ -371,6 +385,7 @@ const PAGE_TABS: PageTab[] = [
     noun: "task",
     empty: "No tasks yet",
     done: true,
+    calendar: true,
     icon: ListTodo,
   },
   {
@@ -732,6 +747,7 @@ export function pageListingMetaEqual(a: PageListing, b: PageListing): boolean {
     a.name === b.name &&
     (a.assigned ?? "") === (b.assigned ?? "") &&
     Boolean(a.done) === Boolean(b.done) &&
+    (a.estimate ?? 0) === (b.estimate ?? 0) &&
     // A notebook entry's fields count too: a kind edited in the markdown must
     // not read as "nothing changed" and leave a stale chip on the row
     // (specs/app/engineering-notebook.feature.md).
@@ -990,6 +1006,13 @@ export function App() {
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   const [pageAssigneeMenuOpen, setPageAssigneeMenuOpen] = useState(false);
+  /** A task's calendar chip (specs/app/tasks.feature.md): the popover, the
+      estimate as typed, where it came from, and the start. */
+  const [pageCalendarOpen, setPageCalendarOpen] = useState(false);
+  const [pageEstimateText, setPageEstimateText] = useState("");
+  const [pageEstimateProposal, setPageEstimateProposal] = useState<EstimateProposal>("manual");
+  const [pageStartLocal, setPageStartLocal] = useState("");
+  const pageEstimateAbort = useRef<AbortController | null>(null);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   /** One pane (a phone, a narrow tablet): the sidebar is a drawer over the
@@ -1160,6 +1183,9 @@ export function App() {
   // The module's data lives in its own store (src/frontend/testing.ts).
   const [testingOn, setTestingOn] = useState(false);
   const [testsView, setTestsView] = useState<TestsRoute | null>(null);
+  // Google Calendar (specs/app/tasks.feature.md "Add task to Google
+  // Calendar"): the Settings switch behind every task's calendar chip.
+  const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
   const testsViewRef = useRef<TestsRoute | null>(null);
   testsViewRef.current = testsView;
   const testingStore = useTesting();
@@ -1277,6 +1303,7 @@ export function App() {
   const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
   const [settingsNotebookDraft, setSettingsNotebookDraft] = useState(true);
   const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
+  const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
   const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
   const [settingsModelsDraft, setSettingsModelsDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
@@ -1493,6 +1520,9 @@ export function App() {
       }
       if (typeof state.testing === "boolean") {
         setTestingOn(state.testing);
+      }
+      if (typeof state.googleCalendar === "boolean") {
+        setGoogleCalendarOn(state.googleCalendar);
       }
       if (typeof state.models === "boolean") {
         setModelsOn(state.models);
@@ -3139,6 +3169,7 @@ export function App() {
     fileName: page.fileName,
     name: page.name,
     ...(page.assigned ? { assigned: page.assigned } : {}),
+    ...(page.estimate ? { estimate: page.estimate } : {}),
     ...(page.done ? { done: true } : {}),
     // A notebook entry's own fields, or the header would show the kind chip
     // of an entry it is not looking at
@@ -3361,6 +3392,103 @@ export function App() {
     } finally {
       setPageDoneSaving(false);
     }
+  };
+
+  /**
+   * Write the task's estimate (specs/app/tasks.feature.md "Add task to
+   * Google Calendar"): the page's `**Estimate:** 1h 30m` line, written the
+   * same way the assignment and the Done marker are, so the chip and the
+   * next visit to the calendar start from it.
+   */
+  const savePageEstimate = async (minutes: number) => {
+    const page = openPage;
+    const content = openPageText;
+    if (!page || content === null) return;
+    if ((page.estimate ?? 0) === minutes) return;
+    const { estimate: _was, ...rest } = parsePage(content);
+    const next = serializePage({ ...rest, estimate: minutes });
+    if (await savePageMeta(next, "estimate")) {
+      toast.success(`Estimated at ${formatEstimate(minutes)} — saved locally.`);
+    }
+  };
+
+  /**
+   * Open the calendar chip's form: the estimate already on the task, else
+   * one proposed by Claude when the CLI is there, else an empty field with
+   * the presets; and the next quarter hour as the start.
+   */
+  const openPageCalendar = () => {
+    const page = openPage;
+    if (!page) return;
+    pageEstimateAbort.current?.abort();
+    setPageStartLocal(localInputValue(nextQuarterHour(new Date())));
+    setPageCalendarOpen(true);
+    if (page.estimate) {
+      setPageEstimateText(formatEstimate(page.estimate));
+      setPageEstimateProposal("stored");
+      return;
+    }
+    setPageEstimateText("");
+    if (!canRunAgentPane) {
+      setPageEstimateProposal("manual");
+      return;
+    }
+    setPageEstimateProposal("loading");
+    const abort = new AbortController();
+    pageEstimateAbort.current = abort;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/tasks/${encodeURIComponent(page.fileName)}/estimate`, {
+          method: "POST",
+          signal: abort.signal,
+        });
+        const data = (await res.json().catch(() => ({}))) as { minutes?: unknown; error?: string };
+        if (abort.signal.aborted) return;
+        if (res.ok && typeof data.minutes === "number") {
+          setPageEstimateText(formatEstimate(data.minutes));
+          setPageEstimateProposal("claude");
+          return;
+        }
+        if (data.error) toast.error(data.error);
+        setPageEstimateProposal("manual");
+      } catch (e) {
+        if (abort.signal.aborted) return;
+        toast.error(`Could not ask Claude for an estimate: ${(e as Error).message}`);
+        setPageEstimateProposal("manual");
+      }
+    })();
+  };
+
+  const closePageCalendar = () => {
+    pageEstimateAbort.current?.abort();
+    pageEstimateAbort.current = null;
+    setPageCalendarOpen(false);
+  };
+
+  /** The link was followed: keep the estimate on the task, and close. */
+  const submitPageCalendar = () => {
+    const minutes = parseEstimate(pageEstimateText);
+    if (minutes !== null) void savePageEstimate(minutes);
+    closePageCalendar();
+  };
+
+  /** The prefilled event for the open task, or null until the form makes one. */
+  const pageCalendarUrl = (): string | null => {
+    const page = openPage;
+    if (!page || openPageText === null) return null;
+    const minutes = parseEstimate(pageEstimateText);
+    const start = fromLocalInput(pageStartLocal);
+    if (minutes === null || start === null) return null;
+    const path = pageLink(page.fileName);
+    const link = location.protocol === "app:" ? desktopLink(path) : location.origin + path;
+    const body = parsePage(openPageText).body.trim();
+    const excerpt = body.length > 300 ? `${body.slice(0, 300)}…` : body;
+    return googleCalendarUrl({
+      title: page.name,
+      start,
+      minutes,
+      details: excerpt ? `${excerpt}\n\n${link}` : link,
+    });
   };
 
   /**
@@ -3649,6 +3777,7 @@ export function App() {
     setSettingsTasksDraft(tasks);
     setSettingsNotebookDraft(notebook);
     setSettingsTestingDraft(testingOn);
+    setSettingsGoogleCalendarDraft(googleCalendarOn);
     setSettingsIssuesDraft(issuesSetting);
     setSettingsModelsDraft(modelsOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
@@ -3825,6 +3954,7 @@ export function App() {
     // of every other module's switch.
     setNotebook(data.notebook !== false);
     setTestingOn(data.testing === true);
+    setGoogleCalendarOn(data.googleCalendar === true);
     setIssuesSetting(data.issues === true);
     setModelsOn(data.models === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
@@ -4043,6 +4173,20 @@ export function App() {
     }
     testing.reset();
     if (testsViewRef.current) goHome();
+  };
+
+  // Google Calendar (specs/app/tasks.feature.md "Add task to Google
+  // Calendar"): switched on, every task's header carries the calendar chip;
+  // off, the chip goes and nothing else changes — the estimates already on
+  // tasks stay in their files.
+  const toggleGoogleCalendar = async (on: boolean) => {
+    setSettingsGoogleCalendarDraft(on);
+    if (!(await patchSettings({ googleCalendar: on }))) {
+      setSettingsGoogleCalendarDraft(!on);
+      return;
+    }
+    setGoogleCalendarOn(on);
+    if (!on) setPageCalendarOpen(false);
   };
 
   // GitHub issues (specs/app/github-issues.feature.md): switched on, the
@@ -7848,6 +7992,44 @@ export function App() {
                     {openPage.done ? "Done" : "Mark done"}
                   </button>
                 )}
+                {/* The calendar chip (specs/app/tasks.feature.md "Add task to
+                    Google Calendar"): the task's estimate, or the invitation
+                    to make one and put the task on the calendar. Tasks only,
+                    and only with the Google Calendar switch on. */}
+                {pageTabOf(openPage.fileName).calendar && googleCalendarOn && (
+                  <span className="chip-anchor calendar-anchor">
+                    <button
+                      type="button"
+                      className={`chip page-estimate${openPage.estimate ? " has-estimate" : " muted"}`}
+                      aria-haspopup="dialog"
+                      aria-expanded={pageCalendarOpen}
+                      onClick={() => (pageCalendarOpen ? closePageCalendar() : openPageCalendar())}
+                    >
+                      <CalendarPlus size={14} aria-hidden="true" />
+                      {openPage.estimate ? formatEstimate(openPage.estimate) : "Add to calendar"}
+                    </button>
+                    <Popover
+                      open={pageCalendarOpen}
+                      onClose={closePageCalendar}
+                      label="Add this task to Google Calendar"
+                      className="chip-popover"
+                      containerSelector=".calendar-anchor"
+                    >
+                      {pageCalendarOpen && (
+                        <AddToCalendarForm
+                          estimateText={pageEstimateText}
+                          onEstimateChange={setPageEstimateText}
+                          startLocal={pageStartLocal}
+                          onStartChange={setPageStartLocal}
+                          proposal={pageEstimateProposal}
+                          url={pageCalendarUrl()}
+                          onSubmit={submitPageCalendar}
+                          onCancel={closePageCalendar}
+                        />
+                      )}
+                    </Popover>
+                  </span>
+                )}
                 {assignments && !pageTabOf(openPage.fileName).dated && (
                 <span className="chip-anchor page-assignee-anchor">
                   <button
@@ -8555,6 +8737,28 @@ export function App() {
                     role="switch"
                     checked={settingsTasksDraft}
                     onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
+                  />
+                  <span className="switch-track" aria-hidden="true" />
+                </span>
+              </label>
+              {/* Google Calendar (specs/app/tasks.feature.md "Add task to
+                  Google Calendar"): opt-in — a calendar chip on every task
+                  that estimates it and opens a prefilled event. */}
+              <label className="settings-row">
+                <span className="settings-row-label">
+                  Google Calendar
+                  <span className="settings-row-hint">
+                    {settingsGoogleCalendarDraft
+                      ? "An Add to calendar button on every task: an estimate of the time it takes, proposed by Claude when the CLI is on PATH, and a prefilled Google Calendar event. Nothing is sent to Google until you confirm the event there."
+                      : "Tasks have no calendar button."}
+                  </span>
+                </span>
+                <span className="switch">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    checked={settingsGoogleCalendarDraft}
+                    onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>

@@ -71,6 +71,12 @@ describe("matchApi", () => {
     const kind = matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/kind");
     expect(kind).not.toBeNull();
     expect(kind!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    // A task's estimate (specs/app/tasks.feature.md "Add task to Google
+    // Calendar"): one more segment under the task's file, POST only.
+    const estimate = matchApi("POST", "/api/tasks/tasks%2Fship-v2.md/estimate");
+    expect(estimate).not.toBeNull();
+    expect(estimate!.params).toEqual({ file: "tasks/ship-v2.md" });
+    expect(matchApi("GET", "/api/tasks/tasks%2Fship-v2.md/estimate")).toBeNull();
     expect(
       matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/supersedes"),
     ).not.toBeNull();
