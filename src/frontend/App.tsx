@@ -71,6 +71,7 @@ import {
   Gavel,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRight,
   Settings,
   Sun,
   Ticket,
@@ -717,6 +718,27 @@ function storeSidebarCollapsed(collapsed: boolean) {
   }
 }
 
+/** The editor column hidden so the coding agent pane can take the window
+    ("\"), remembered on this device like the sidebar's own collapse. */
+const EDITOR_HIDDEN_KEY = "sd-editor-hidden";
+
+export function readEditorHidden(): boolean {
+  try {
+    return localStorage.getItem(EDITOR_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function storeEditorHidden(hidden: boolean) {
+  try {
+    if (hidden) localStorage.setItem(EDITOR_HIDDEN_KEY, "1");
+    else localStorage.removeItem(EDITOR_HIDDEN_KEY);
+  } catch {
+    // Storage unavailable: the choice just does not survive a reload.
+  }
+}
+
 /** The sidebar's filter: features by scenario status and by assignee. */
 interface TreeFilter {
   status: Scenario["status"] | null;
@@ -1015,6 +1037,10 @@ export function App() {
   const pageEstimateAbort = useRef<AbortController | null>(null);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  /** The editor column hidden ("\"), so the coding agent pane can have the
+      window. Only ever acted on while that pane is a column beside it — see
+      `editorOff` below, which is what the layout actually follows. */
+  const [editorHidden, setEditorHidden] = useState(readEditorHidden);
   /** One pane (a phone, a narrow tablet): the sidebar is a drawer over the
       page, closed by default and closed again by navigating anywhere. */
   const compact = useMediaQuery(COMPACT_QUERY);
@@ -1152,6 +1178,16 @@ export function App() {
   // width, sessions. Restored once on boot — the pane, its width and the
   // last session come back the way they were left.
   const pane = useAgentChat();
+  // The coding agent pane shows only while code gen is on at all.
+  const paneShown = pane.open && codeGen;
+  /** The editor can be hidden only while the agent pane is a column beside
+      it — never in compact, where that pane covers the page instead, so
+      hiding the editor could leave a window with nothing in it. */
+  const canHideEditor = paneShown && !compact;
+  /** What the layout follows. Closing the pane or crossing into compact
+      brings the editor back without clearing the stored choice, so
+      reopening the pane restores it. */
+  const editorOff = canHideEditor && editorHidden;
   const [resizingAgent, setResizingAgent] = useState(false);
   useEffect(() => {
     void agentChat.restore();
@@ -5048,6 +5084,12 @@ export function App() {
       return !c;
     });
   };
+  const toggleEditor = () => {
+    setEditorHidden((h) => {
+      storeEditorHidden(!h);
+      return !h;
+    });
+  };
   // The drawer closes behind any navigation — a feature, a page, the
   // scenario editor — and when the window grows back into two panes.
   useEffect(() => {
@@ -5152,6 +5194,7 @@ export function App() {
       label: "Keyboard shortcuts",
       group: "Navigate",
       when: () => !quiet,
+      palette: () => !quietBehindPalette,
       run: () => setSheetOpen(true),
     },
     // The right pane on "]", as the left one is on "["
@@ -5162,7 +5205,20 @@ export function App() {
       label: pane.open ? "Close the coding agent pane" : "Open the coding agent pane",
       group: "Navigate",
       when: () => !quiet && codeGen && canOpenAgentPane,
+      palette: () => !quietBehindPalette && codeGen && canOpenAgentPane,
       run: () => agentChat.togglePane(),
+    },
+    // The editor pane on "\", the key between "[" and "]" that hide the two
+    // side panes (specs/ui/ui.feature.md "Hide the editor pane"). Offered
+    // only while the coding agent pane is a column beside it.
+    {
+      id: "editor-pane",
+      keys: "\\",
+      label: editorOff ? "Show the editor pane" : "Hide the editor pane",
+      group: "Navigate",
+      when: () => !quiet && canHideEditor,
+      palette: () => !quietBehindPalette && canHideEditor,
+      run: () => toggleEditor(),
     },
     {
       id: "go-home",
@@ -5170,6 +5226,7 @@ export function App() {
       label: "Go to Home (README)",
       group: "Navigate",
       when: () => !quiet,
+      palette: () => !quietBehindPalette,
       run: () => {
         goHome();
         void loadReadme();
@@ -5181,6 +5238,7 @@ export function App() {
       label: "Go to the roadmap",
       group: "Navigate",
       when: () => !quiet && roadmapPages.length > 0,
+      palette: () => !quietBehindPalette && roadmapPages.length > 0,
       run: () => {
         const page = roadmapPages[0];
         if (page) void showPage(page.fileName, { push: true });
@@ -5192,6 +5250,7 @@ export function App() {
       label: "Go to the tasks",
       group: "Navigate",
       when: () => !quiet && taskPages.length > 0,
+      palette: () => !quietBehindPalette && taskPages.length > 0,
       run: () => {
         const page = taskPages[0];
         if (page) void showPage(page.fileName, { push: true });
@@ -5231,6 +5290,7 @@ export function App() {
       label: "Go to the tests",
       group: "Navigate",
       when: () => !quiet && testingOn,
+      palette: () => !quietBehindPalette && testingOn,
       run: () => openTests({ kind: "plans" }, { push: true }),
     },
     {
@@ -5239,6 +5299,7 @@ export function App() {
       label: "Go to the issues",
       group: "Navigate",
       when: () => !quiet && issuesOn,
+      palette: () => !quietBehindPalette && issuesOn,
       run: () => openIssues({ kind: "list" }, { push: true }),
     },
     {
@@ -5247,6 +5308,7 @@ export function App() {
       label: "Go to the models",
       group: "Navigate",
       when: () => !quiet && modelsOn && modelsStore.models.length > 0,
+      palette: () => !quietBehindPalette && modelsOn && modelsStore.models.length > 0,
       run: () => {
         const first = modelsStore.models[0];
         if (first) openModelPane(first.fileName, { push: true });
@@ -5258,6 +5320,7 @@ export function App() {
       label: "Settings",
       group: "Navigate",
       when: () => !quiet,
+      palette: () => !quietBehindPalette,
       run: () => openSettings(),
     },
     {
@@ -5315,6 +5378,7 @@ export function App() {
       label: "Start a pomodoro",
       group: "Create",
       when: () => pomodoroOn && !quiet && editing === null && pom.timer === null,
+      palette: () => pomodoroOn && !quietBehindPalette && editing === null && pom.timer === null,
       run: () => startPomodoro(),
     },
     {
@@ -5352,6 +5416,7 @@ export function App() {
       group: "Publish",
       inFields: true,
       when: () => !quiet && (editing !== null || onFeaturePage),
+      palette: () => !quietBehindPalette && (editing !== null || onFeaturePage),
       run: () => {
         if (publishing !== null) return false;
         if (editing) {
@@ -5371,6 +5436,7 @@ export function App() {
       group: "Share",
       inFields: true,
       when: () => !quiet && (selected !== null || openPage !== null),
+      palette: () => !quietBehindPalette && (selected !== null || openPage !== null),
       run: () => {
         if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
         else if (selected) void copyLink(featurePath(selected));
@@ -5516,6 +5582,7 @@ export function App() {
     ...(issuesOn
       ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
       : []),
+    shortcutAction("editor-pane", <PanelRight size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
       ? [
@@ -5909,12 +5976,9 @@ export function App() {
     savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
-  // The coding agent pane shows only while code gen is on at all.
-  const paneShown = pane.open && codeGen;
-
   return (
     <main
-      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}`}
+      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
     >
       {compact && (
@@ -6078,6 +6142,19 @@ export function App() {
               settingsOpen={pomodoroSettings}
               onSettingsOpen={setPomodoroSettings}
             />
+            {canHideEditor && (
+              <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
+                <button
+                  type="button"
+                  className={`rail-btn${editorOff ? "" : " active"}`}
+                  aria-label="Editor pane"
+                  aria-pressed={!editorOff}
+                  onClick={toggleEditor}
+                >
+                  <PanelRight size={16} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
             {codeGen && canOpenAgentPane && (
               <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
                 <button
@@ -6243,9 +6320,24 @@ export function App() {
             )}
           </div>
           {/* The Pomodoro (specs/app/pomodoro.feature.md): its icon lives here,
-              left of the coding agent's Bot, and opens the bar beneath the
-              header. Nothing renders while the Settings switch is off. */}
+              left of the pane toggles, and opens the bar beneath the header.
+              Nothing renders while the Settings switch is off. */}
           <PomodoroToggle />
+          {/* The pane toggles sit in the order their panes do: the editor
+              first, then the coding agent's Bot to its right. */}
+          {canHideEditor && (
+            <Tooltip label={editorOff ? "Show the editor pane" : "Hide the editor pane"} keys="\">
+              <button
+                type="button"
+                className={`ibtn${editorOff ? "" : " active"}`}
+                aria-label="Editor pane"
+                aria-pressed={!editorOff}
+                onClick={toggleEditor}
+              >
+                <PanelRight size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          )}
           {codeGen && canOpenAgentPane && (
             <Tooltip label={pane.open ? "Close the coding agent pane" : "Open the coding agent pane"} keys="]">
               <button
@@ -6781,6 +6873,10 @@ export function App() {
         }}
       />
       )}
+      {/* Hidden ("\", specs/ui/ui.feature.md "Hide the editor pane") so the
+          coding agent pane can take the window — not rendered rather than
+          hidden in CSS, the way the agent pane itself is gated. */}
+      {!editorOff && (
       <section className="editor" aria-busy={featureLoading || undefined}>
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
@@ -8122,6 +8218,7 @@ export function App() {
         )}
         </ErrorBoundary>
       </section>
+      )}
       {/* Coding agent pane (specs/agents/coding-agent-ui.feature.md): a third
           column right of the editor, resized from its left edge the way the
           sidebar is from its right; on one-pane screens it covers the page. */}

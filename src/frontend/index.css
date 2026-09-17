@@ -4716,6 +4716,18 @@ aside header .collapse-btn {
   grid-template-columns: var(--sw) 1fr var(--aw);
 }
 
+/* The editor column hidden (specs/ui/ui.feature.md "Hide the editor pane"):
+   its track goes entirely and the pane takes what is left, so the 60vw cap
+   that keeps the pane clear of the editor no longer applies — and with
+   nothing left to resize against, the divider goes too. */
+.layout.agent-open.editor-hidden {
+  grid-template-columns: var(--sw) minmax(320px, 1fr);
+}
+
+.layout.agent-open.editor-hidden .agent-divider {
+  display: none;
+}
+
 .agent-divider {
   position: absolute;
   top: 0;
