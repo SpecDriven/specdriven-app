@@ -132,6 +132,27 @@ test("a page parses its Done marker in either order", () => {
   expect(before).toEqual({ name: "Ship v2", assigned: "Ada", done: true, body: "Cut it." });
 });
 
+// The Estimate line (specs/app/tasks.feature.md "Add task to Google
+// Calendar") is one more metadata line, in any order, written back in its
+// canonical form between the assignment and the status; one the app cannot
+// read as an estimate stays in the body where the person wrote it.
+test("a page parses its Estimate line in any order, and writes it before the status", () => {
+  const page = parsePage(
+    "# Ship v2\n\n**Status:** Done\n\n**Estimate:** 1h30m\n\n**Assigned:** Ada\n\nCut it.\n",
+  );
+  expect(page).toEqual({ name: "Ship v2", assigned: "Ada", estimate: 90, done: true, body: "Cut it." });
+  expect(serializePage(page)).toBe(
+    "# Ship v2\n\n**Assigned:** Ada\n\n**Estimate:** 1h 30m\n\n**Status:** Done\n\nCut it.\n",
+  );
+  expect(parsePage("# Ship v2\n\n**Estimate:** 2h\n")).toEqual({ name: "Ship v2", estimate: 120, body: "" });
+});
+
+test("a page with an estimate it cannot read keeps the line as body", () => {
+  const page = parsePage("# Ship v2\n\n**Estimate:** two days\n\nCut it.\n");
+  expect(page).toEqual({ name: "Ship v2", body: "**Estimate:** two days\n\nCut it." });
+  expect(serializePage(page)).toBe("# Ship v2\n\n**Estimate:** two days\n\nCut it.\n");
+});
+
 test("a page with another status keeps it as body", () => {
   const page = parsePage("# Ship v2\n\n**Status:** Blocked\n\nWaiting on legal.\n");
   expect(page).toEqual({
@@ -175,6 +196,39 @@ test("a task is marked done and reopened through its document", async () => {
   expect(await listPages(clones.a, TASKS)).toEqual([
     { fileName, name: "Ship v2", assigned: "Ada Lovelace" },
   ]);
+});
+
+// The calendar chip writes the estimate through the document like the Done
+// marker, so the listing and the chip read it back — and a save without the
+// line takes it away again.
+test("a task's estimate is saved and cleared through its document", async () => {
+  const clones = await twoClones(root);
+  const fileName = await createPage(clones.a, TASKS, "Ship v2");
+
+  const estimated = await savePage(
+    clones.a,
+    TASKS,
+    fileName,
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\n**Estimate:** 90m\n\nCut the build.\n",
+  );
+  expect(estimated.estimate).toBe(90);
+  expect(estimated.content).toBe(
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\n**Estimate:** 1h 30m\n\nCut the build.\n",
+  );
+  expect((await loadPageDoc(clones.a, fileName))?.doc.estimate).toBe(90);
+  expect(await listPages(clones.a, TASKS)).toEqual([
+    { fileName, name: "Ship v2", assigned: "Ada Lovelace", estimate: 90 },
+  ]);
+
+  const cleared = await savePage(
+    clones.a,
+    TASKS,
+    fileName,
+    "# Ship v2\n\n**Assigned:** Ada Lovelace\n\nCut the build.\n",
+  );
+  expect(cleared.estimate).toBeUndefined();
+  expect(cleared.content).not.toContain("Estimate:");
+  expect((await loadPageDoc(clones.a, fileName))?.doc.estimate).toBeUndefined();
 });
 
 test("a task is deleted with its document, committed and pushed", async () => {

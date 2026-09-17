@@ -22,6 +22,7 @@ export function docToPage(doc: A.Doc<PageDoc>): MarkdownPage {
     name: doc.name,
     body: doc.body,
     ...(doc.assigned ? { assigned: doc.assigned } : {}),
+    ...(doc.estimate ? { estimate: doc.estimate } : {}),
     ...(doc.done ? { done: true } : {}),
     ...(doc.author ? { author: doc.author } : {}),
     ...(doc.date ? { date: doc.date } : {}),
@@ -46,6 +47,7 @@ export function importPageDoc(page: MarkdownPage): A.Doc<PageDoc> {
     name: page.name,
     body: page.body,
     ...(page.assigned ? { assigned: page.assigned } : {}),
+    ...(page.estimate ? { estimate: page.estimate } : {}),
     ...(page.done ? { done: true } : {}),
     ...(page.author ? { author: page.author } : {}),
     ...(page.date ? { date: page.date } : {}),
@@ -64,6 +66,7 @@ export function importPageDoc(page: MarkdownPage): A.Doc<PageDoc> {
  */
 export function reconcilePage(doc: A.Doc<PageDoc>, target: MarkdownPage): A.Doc<PageDoc> {
   const assigned = doc.assigned;
+  const estimate = doc.estimate;
   const done = doc.done;
   const author = doc.author;
   const date = doc.date;
@@ -75,6 +78,10 @@ export function reconcilePage(doc: A.Doc<PageDoc>, target: MarkdownPage): A.Doc<
     if ((assigned ?? "") !== (target.assigned ?? "")) {
       if (target.assigned) d.assigned = target.assigned;
       else delete d.assigned;
+    }
+    if ((estimate ?? 0) !== (target.estimate ?? 0)) {
+      if (target.estimate) d.estimate = target.estimate;
+      else delete d.estimate;
     }
     if ((done ?? false) !== (target.done ?? false)) {
       if (target.done) d.done = true;

@@ -104,6 +104,11 @@ export type PageDoc = {
    */
   assigned?: string;
   /**
+   * How long a task is estimated to take, in minutes (specs/app/tasks
+   * .feature.md "Add task to Google Calendar"). Set whole like `assigned`.
+   */
+  estimate?: number;
+  /**
    * Whether the page is finished — a task's Done (specs/app/tasks.feature
    * .md). Absent until somebody ticks it off, and set whole like `assigned`,
    * so two people finishing the same task agree rather than merge.

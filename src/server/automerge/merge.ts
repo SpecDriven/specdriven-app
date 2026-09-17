@@ -58,6 +58,7 @@ export function threeWayPage(
     !same(t, b) && same(o, b) ? t : o;
   const eq = (x?: string, y?: string) => (x ?? "") === (y ?? "");
   const eqBool = (x?: boolean, y?: boolean) => (x ?? false) === (y ?? false);
+  const eqNum = (x?: number, y?: number) => (x ?? 0) === (y ?? 0);
   const eqLink = (x?: Supersedes, y?: Supersedes) =>
     (x?.title ?? "") === (y?.title ?? "") && (x?.url ?? "") === (y?.url ?? "");
   const merged: MarkdownPage = {
@@ -65,12 +66,14 @@ export function threeWayPage(
     body: mergeText(base.body, ours.body, theirs.body),
   };
   const assigned = pick(base.assigned, ours.assigned, theirs.assigned, eq);
+  const estimate = pick(base.estimate, ours.estimate, theirs.estimate, eqNum);
   const done = pick(base.done, ours.done, theirs.done, eqBool);
   const author = pick(base.author, ours.author, theirs.author, eq);
   const date = pick(base.date, ours.date, theirs.date, eq);
   const kind = pick(base.kind, ours.kind, theirs.kind, eq as (x?: EntryKind, y?: EntryKind) => boolean);
   const supersedes = pick(base.supersedes, ours.supersedes, theirs.supersedes, eqLink);
   if (assigned) merged.assigned = assigned;
+  if (estimate) merged.estimate = estimate;
   if (done) merged.done = true;
   if (author) merged.author = author;
   if (date) merged.date = date;

@@ -132,6 +132,13 @@ export interface SpecDrivenState {
    */
   testing?: boolean;
   /**
+   * Google Calendar (specs/app/tasks.feature.md "Add task to Google
+   * Calendar"): an "Add to calendar" button on every task that estimates the
+   * task and opens a prefilled Google Calendar event; absent means OFF. Off,
+   * no task carries the button and the estimate route is closed.
+   */
+  googleCalendar?: boolean;
+  /**
    * GitHub issue tracking (specs/app/github-issues.feature.md): an Issues
    * tab and pane for the issues of the GitHub repo the data repo's
    * code-repo pushes to; absent means OFF. On, the tab appears once the
@@ -318,6 +325,12 @@ export function normalizeModels(value: unknown): boolean {
 /** Effective test management setting: OFF unless explicitly turned on —
     opt-in like the roadmap and tasks (specs/app/tests.feature.md). */
 export function normalizeTesting(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective Google Calendar setting: OFF unless explicitly turned on —
+    opt-in like the other modules (specs/app/tasks.feature.md). */
+export function normalizeGoogleCalendar(value: unknown): boolean {
   return value === true;
 }
 
