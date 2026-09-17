@@ -270,6 +270,12 @@ const sdkFactory: QueryFactory = async ({ prompt, options }) => {
   return query({ prompt, options });
 };
 
+/** The factory a query goes through right now: the injected one, else the
+    SDK. What src/server/estimate.ts asks its one short turn of. */
+export function currentQueryFactory(): QueryFactory {
+  return queryFactory ?? sdkFactory;
+}
+
 /** Live sessions at once — each is a Claude subprocess. */
 export const MAX_LIVE_SESSIONS = 8;
 
@@ -545,7 +551,7 @@ async function ready(session: ChatSession): Promise<void> {
   }
 }
 
-function userMessage(text: string): SDKUserMessage {
+export function userMessage(text: string): SDKUserMessage {
   return { type: "user", message: { role: "user", content: text }, parent_tool_use_id: null };
 }
 

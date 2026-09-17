@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeCodeGen,
   normalizeCodeGenTarget,
+  normalizeGoogleCalendar,
   normalizeScenarioPreviewLines,
   settingsDirectory,
   DEFAULT_SCENARIO_PREVIEW_LINES,
@@ -180,4 +181,14 @@ test("the settings directory is the project's, unless only the home file exists"
   expect(await settingsDirectory(dir)).toBe(home);
   await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
   expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
+});
+
+// The Google Calendar switch (specs/app/tasks.feature.md "Add task to Google
+// Calendar"): opt-in like the tasks folder, so a settings file that never
+// mentions it means off.
+test("the Google Calendar setting is off unless explicitly turned on", () => {
+  expect(normalizeGoogleCalendar(undefined)).toBe(false);
+  expect(normalizeGoogleCalendar("true")).toBe(false);
+  expect(normalizeGoogleCalendar(false)).toBe(false);
+  expect(normalizeGoogleCalendar(true)).toBe(true);
 });
