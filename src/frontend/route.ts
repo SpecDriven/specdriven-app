@@ -1,8 +1,10 @@
 // Deep-link urls (specs/navigation.spec.md):
 //
 //   /                                               home
+//   /roadmap, /tasks, /notebook, /models            that tab, on its first page
 //   /roadmap/<page>                                 roadmap page
 //   /tasks/<task>                                   task
+//   /notebook/<entry>                               notebook entry
 //   /models/<model>                                 an Event Model's canvas
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
@@ -45,6 +47,14 @@ export interface Route {
    * The folder it opens with is what says which of the two it is.
    */
   page?: string;
+  /**
+   * A special folder with no page after it — `/tasks`, `/roadmap`,
+   * `/notebook`, `/models`. The url names the tab rather than one of its
+   * pages, so it opens the first one the tab lists, which is what the `g t` /
+   * `g r` / `g n` shortcuts and the collapsed rail already do. Resolving it
+   * needs the folder's listing, so the client does that, not parseRoute.
+   */
+  pageFolder?: string;
   /**
    * An Event Model (roadmap/support-event-modeling.md) as its file name,
    * repo-relative and with the `.model.json` suffix restored:
@@ -108,14 +118,18 @@ export function parseRoute(pathname: string): Route {
     return { issues: { kind: "list" } };
   }
   // A roadmap page or a task is a plain path under the folder it lives in; a
-  // hand-typed link may carry the `.md` suffix already.
-  if (segs[0] && PAGE_FOLDERS.includes(segs[0]) && segs[1]) {
+  // hand-typed link may carry the `.md` suffix already. The folder on its own
+  // names the tab, and opens the first page it lists.
+  if (segs[0] && PAGE_FOLDERS.includes(segs[0])) {
+    if (!segs[1]) return { pageFolder: segs[0] };
     const path = segs.slice(1).join("/").replace(/\.md$/, "");
     return { page: `${segs[0]}/${path}.md` };
   }
   // An Event Model is a plain path under its folder the same way; a link
-  // may carry the `.model.json` suffix already.
-  if (segs[0] === MODELS_FOLDER && segs[1]) {
+  // may carry the `.model.json` suffix already, and the bare folder opens the
+  // first model as the page folders open their first page.
+  if (segs[0] === MODELS_FOLDER) {
+    if (!segs[1]) return { pageFolder: MODELS_FOLDER };
     const path = segs.slice(1).join("/").replace(/\.model\.json$/, "");
     return { model: `${MODELS_FOLDER}/${path}.model.json` };
   }
