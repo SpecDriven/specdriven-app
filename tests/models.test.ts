@@ -123,7 +123,9 @@ test("a model's url is its path under the folder", () => {
   expect(modelLink("models/shop/cart.model.json")).toBe("/models/shop/cart");
   expect(parseRoute("/models/cart")).toEqual({ model: "models/cart.model.json" });
   expect(parseRoute("/models/shop/cart.model.json")).toEqual({ model: "models/shop/cart.model.json" });
-  expect(parseRoute("/models")).toEqual({});
+  // The bare folder names the Models tab, which opens on its first model
+  // (route.ts "a bare special folder names its tab").
+  expect(parseRoute("/models")).toEqual({ pageFolder: "models" });
   expect(pagePath(null, null, null, "models/cart.model.json")).toBe("/models/cart");
 });
 

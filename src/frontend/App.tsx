@@ -130,8 +130,8 @@ import { AgentPane } from "./AgentPane";
 import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
 import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
 import { IssuesPane, IssuesSidebar } from "./IssuesPane";
-import { issues, issuesKey, issuesTitle, searchIssues, useIssues } from "./issues";
-import { models, modelTitle, useModels } from "./eventModel/models";
+import { issues, issuesKey, issuesTitle, searchIssues, setIssuesReadOnly, useIssues } from "./issues";
+import { models, modelsState, modelTitle, useModels } from "./eventModel/models";
 import { entityFields } from "./entityFields";
 import {
   AGENT_DEFAULT_WIDTH,
@@ -167,6 +167,7 @@ import {
   issuesPath,
   type IssuesRoute,
   modelLink,
+  MODELS_FOLDER,
 } from "./route";
 import {
   addTestLink,
@@ -1253,6 +1254,14 @@ export function App() {
       each superseded entry the one that replaced it
       (specs/app/engineering-notebook.feature.md). */
   const [notebookPages, setNotebookPages] = useState<PageListing[]>([]);
+  /** The same three listings, readable in the tick they are fetched in —
+      what a bare `/tasks`, `/roadmap` or `/notebook` opens its first page
+      from, before the state above has re-rendered. */
+  const pagesRef = useRef<Record<PageTab["folder"], PageListing[]>>({
+    roadmap: [],
+    tasks: [],
+    notebook: [],
+  });
   const [supersededBy, setSupersededBy] = useState<Record<string, PageListing>>({});
   const [openPage, setOpenPage] = useState<PageListing | null>(null);
   const openPageRef = useRef<PageListing | null>(null);
@@ -1468,6 +1477,10 @@ export function App() {
       supersededBy?: Record<string, PageListing>;
     };
     const pages = Array.isArray(data.pages) ? data.pages : [];
+    // The ref, not the state, is what a bare `/tasks` resolves against: a
+    // deep link is opened in the same tick as this load, before React has
+    // re-rendered with the new listing.
+    pagesRef.current[folder] = pages;
     if (folder === "tasks") setTaskPages(pages);
     else if (folder === "notebook") {
       setNotebookPages(pages);
@@ -1576,6 +1589,9 @@ export function App() {
       // demo defaults it on so a visitor finds the diagram button without
       // first finding Settings. Turning it off there still sticks.
       setExcalidrawDemoMode(Boolean(state.demo));
+      // The demo's Issues tab reads the release repo but cannot write to it
+      // (src/frontend/issues.ts), so the pane offers no New / Edit / Comment.
+      setIssuesReadOnly(Boolean(state.demo));
       setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -2187,6 +2203,18 @@ export function App() {
       await showPage(route.page);
     } else if (route.model) {
       openModelPane(route.model);
+    } else if (route.pageFolder) {
+      // A folder with no page after it opens the first page its tab lists —
+      // what `g t` / `g r` / `g n` and the collapsed rail do. An empty folder
+      // (or one whose tab is switched off) has no page to open, so it falls
+      // home rather than showing an empty pane.
+      const first =
+        route.pageFolder === MODELS_FOLDER
+          ? modelsState().models[0]?.fileName
+          : pagesRef.current[route.pageFolder as PageTab["folder"]]?.[0]?.fileName;
+      if (first === undefined) return void goHome();
+      if (route.pageFolder === MODELS_FOLDER) openModelPane(first);
+      else await showPage(first);
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
@@ -5579,7 +5607,9 @@ export function App() {
       : []),
     shortcutAction("go-issues", <Bug size={14} />),
     shortcutAction("go-models", <Workflow size={14} />),
-    ...(issuesOn
+    // Not in the demo: its Issues tab reads the release repo and writes
+    // nothing (src/frontend/issues.ts), so the palette offers no new issue.
+    ...(issuesOn && !demo
       ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
       : []),
     shortcutAction("editor-pane", <PanelRight size={14} />),

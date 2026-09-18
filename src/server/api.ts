@@ -937,8 +937,9 @@ const getFeatures = withDataDir(async (dir) => {
     codeRepo: settings.codeRepo,
     // GitHub issue tracking (specs/app/github-issues.feature.md): the
     // repository the code repo pushes to, when it is a GitHub one — the
-    // Issues tab shows for it, and only for it.
-    issuesRepo: settings.codeRepo === null ? null : await readIssuesRepo(dir),
+    // Issues tab shows for it, and only for it. readIssuesRepo answers for
+    // the demo too, which names its repo outright (demo.ts).
+    issuesRepo: await readIssuesRepo(dir),
   });
 });
 
@@ -1979,17 +1980,25 @@ const deleteTestExecution = withTesting(async (dir, _req, params) => {
 // the repository the data repo's code-repo pushes to (src/server/issues.ts).
 // Served only while the Settings switch is on — enforced here and not only
 // in the UI, like the other switches. Every call goes to GitHub as the
-// user; the demo never talks to GitHub, and a data repo whose code repo is
-// not a GitHub one has no issues to show.
+// user; a data repo whose code repo is not a GitHub one has no issues to
+// show.
+//
+// The demo reads the public release repo (demo.ts DEMO_ISSUES_REPO) so its
+// Issues tab shows real issues, but stays read-only: a visitor is signed in
+// to nothing, so a write would be an anonymous one on a public repository —
+// refused here rather than sent to GitHub to fail.
 const withIssues = (
   handler: (
     repo: NonNullable<Awaited<ReturnType<typeof readIssuesRepo>>>,
     req: Request,
     params: Params,
   ) => Response | Promise<Response>,
+  { readOnlyInDemo = false }: { readOnlyInDemo?: boolean } = {},
 ): Handler =>
   withDataDir(async (dir, req, params) => {
-    if (isDemoMode()) return json({ error: "GitHub issues are disabled in demo mode" }, 403);
+    if (readOnlyInDemo && isDemoMode()) {
+      return json({ error: "The demo cannot change GitHub issues" }, 403);
+    }
     if (!normalizeIssues((await readState(getAppRoot())).issues)) {
       return json({ error: "GitHub issues are switched off in Settings" }, 404);
     }
@@ -2119,14 +2128,19 @@ const getIssueRoute = withIssues(async (repo, _req, params) => {
   const [issue, comments] = await Promise.all([getIssue(repo, number), listComments(repo, number)]);
   return json({ issue, comments });
 });
-const postIssue = withIssues(async (repo, req) =>
-  json({ issue: await createIssue(repo, await bodyOf(req)) }, 201),
+const postIssue = withIssues(
+  async (repo, req) => json({ issue: await createIssue(repo, await bodyOf(req)) }, 201),
+  { readOnlyInDemo: true },
 );
-const putIssue = withIssues(async (repo, req, params) =>
-  json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
+const putIssue = withIssues(
+  async (repo, req, params) =>
+    json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
+  { readOnlyInDemo: true },
 );
-const postIssueComment = withIssues(async (repo, req, params) =>
-  json({ comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) }, 201),
+const postIssueComment = withIssues(
+  async (repo, req, params) =>
+    json({ comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) }, 201),
+  { readOnlyInDemo: true },
 );
 
 /** Pattern segments starting with `:` bind the (decoded) path segment. */
