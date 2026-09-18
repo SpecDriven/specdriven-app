@@ -15,6 +15,21 @@ import { issuesPath, type IssuesRoute } from "./route";
 
 export type { GitHubRepo, Issue, IssueComment, IssueState };
 
+// Demo mode (src/server/demo.ts): the demo reads the public release repo's
+// issues so its Issues tab has something real to show, but cannot change
+// them — a visitor is signed in to nothing, so every write would be an
+// anonymous one on someone else's repository. The server refuses them
+// (src/server/api.ts withIssues readOnlyInDemo); this flag takes the
+// affordances off the screen too, so nothing offers an edit that cannot work.
+let readOnly = false;
+
+/** Told by App.tsx once /api/state reports demo mode. */
+export function setIssuesReadOnly(on: boolean): void {
+  if (readOnly === on) return;
+  readOnly = on;
+  set({ ...state, readOnly: on });
+}
+
 /** One issue opened in the pane: the issue itself and its comments. */
 export interface IssueDetail {
   issue: Issue;
@@ -34,6 +49,8 @@ export interface IssuesStore {
   /** Whether a list load is under way. */
   loading: boolean;
   error: string | null;
+  /** Read-only: the issues show, but nothing offers to change them (demo). */
+  readOnly: boolean;
 }
 
 export const EMPTY_ISSUES: IssuesStore = {
@@ -44,6 +61,7 @@ export const EMPTY_ISSUES: IssuesStore = {
   loaded: false,
   loading: false,
   error: null,
+  readOnly: false,
 };
 
 let state: IssuesStore = EMPTY_ISSUES;
@@ -139,10 +157,11 @@ export const issues = {
     const open = Object.keys(state.details).map(Number);
     await Promise.all(open.map((n) => issues.open(n, { quiet: true })));
   },
-  /** Forget everything — the data repo changed, or the tab went away. */
+  /** Forget everything — the data repo changed, or the tab went away.
+      Read-only is the mode the app runs in, not data, so it survives. */
   reset(): void {
     dirtyKeys.clear();
-    set(EMPTY_ISSUES);
+    set({ ...EMPTY_ISSUES, readOnly });
   },
   /** Editors report their unsaved state here (see refresh). */
   setDirty(key: string, dirty: boolean): void {

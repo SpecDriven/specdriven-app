@@ -18,6 +18,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { getAuth } from "./auth";
+import { DEMO_ISSUES_REPO, isDemoMode } from "./demo";
 import { ghAvailable, ghToken } from "./git/gh";
 import { githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
@@ -145,8 +146,14 @@ export async function repoOfFolder(dir: string): Promise<GitHubRepo | null> {
  * project-settings.json `code-repo` pushes to. Null when the file names no
  * code repo, or the code repo is not a GitHub one — then there is no Issues
  * tab.
+ *
+ * The demo is the exception: its dataset is a copy with no .git anywhere, so
+ * no remote can be read from it. It tracks the public release repo instead
+ * (DEMO_ISSUES_REPO), read-only through the anonymous rate limit, so the
+ * Issues tab has something real to show.
  */
 export async function readIssuesRepo(dataDir: string): Promise<GitHubRepo | null> {
+  if (isDemoMode()) return DEMO_ISSUES_REPO;
   const { codeRepo } = await readProjectSettings(dataDir);
   if (codeRepo === null) return null;
   return repoOfFolder(codeRepo);

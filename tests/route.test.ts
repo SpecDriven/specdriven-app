@@ -34,13 +34,27 @@ describe("parseRoute", () => {
     expect(parseRoute("/roadmap/q3/pricing")).toEqual({ page: "roadmap/q3/pricing.md" });
     // A hand-typed link carrying the suffix doesn't double it up.
     expect(parseRoute("/roadmap/pricing.md")).toEqual({ page: "roadmap/pricing.md" });
-    expect(parseRoute("/roadmap")).toEqual({});
     expect(pageLink("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
     expect(parseRoute(pageLink("roadmap/a b.md"))).toEqual({ page: "roadmap/a b.md" });
     // Tasks read the same way, under their own folder.
     expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
     expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
-    expect(parseRoute("/tasks")).toEqual({});
+  });
+
+  // A special folder with no page after it names the tab, not a page: the
+  // client opens the first page that tab lists, the way `g t` / `g r` / `g n`
+  // and the collapsed rail do. Before this, a bare folder fell through to the
+  // feature branch and landed home — the tab the url named never opened.
+  test("a bare special folder names its tab", () => {
+    expect(parseRoute("/tasks")).toEqual({ pageFolder: "tasks" });
+    expect(parseRoute("/roadmap")).toEqual({ pageFolder: "roadmap" });
+    expect(parseRoute("/notebook")).toEqual({ pageFolder: "notebook" });
+    expect(parseRoute("/models")).toEqual({ pageFolder: "models" });
+    // A trailing slash is the same url; empty segments are dropped.
+    expect(parseRoute("/tasks/")).toEqual({ pageFolder: "tasks" });
+    // A folder with a page after it still addresses that page.
+    expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
+    expect(parseRoute("/models/cart")).toEqual({ model: "models/cart.model.json" });
   });
 
   // GitHub issues (specs/app/github-issues.feature.md): the list, the

@@ -23,6 +23,7 @@ import { setQueryFactory } from "./agentChat";
 import { simulatedQuery } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
+import type { GitHubRepo } from "./repo";
 import { resetSearchCache } from "./search";
 import { readState, writeState } from "./state";
 import type { SpecDrivenState } from "./state";
@@ -45,6 +46,20 @@ export const DEMO_USER = {
   email: "test-user@specdriven.demo",
 } as const;
 
+/**
+ * The repository whose issues the demo's Issues tab shows. The demo dataset
+ * is a .git-less copy, so no code repo on disk names a remote to read; this
+ * public repo stands in, and src/server/issues.ts readIssuesRepo returns it
+ * while DEMO_MODE is on. Reads go out anonymously — a visitor is signed in
+ * to nothing — so GitHub's anonymous rate limit applies and writes fail with
+ * the module's usual "sign in" message.
+ */
+export const DEMO_ISSUES_REPO: GitHubRepo = {
+  url: "https://github.com/SpecDriven/specdriven-app-release",
+  owner: "SpecDriven",
+  name: "specdriven-app-release",
+};
+
 /** The pristine snapshot shipped with the app; never written at runtime. */
 function demoSource(): string {
   return process.env.DEMO_DATA_DIR || resolve(process.cwd(), "demo-data");
@@ -55,14 +70,17 @@ function demoSource(): string {
  * settings write racing a reseed can never unset them: the bundled git
  * engine (no gh/git binaries probed), no sync cron, and code gen sessions on
  * and pinned to the pane, which here means the simulation (demoAgent.ts).
- * The roadmap folder stays opt-in here as everywhere else (specs/app/roadmap
- * .feature.md): the demo opens on Specs, and a visitor who wants the demo
- * dataset's roadmap pages turns the tab on in Settings. The Models tab is
- * on, though: the dataset ships an Event Model of the water damage claim
+ *
+ * Every optional module is on. A visitor has no reason to guess which
+ * switches hide the rest of the app, and the demo dataset ships content for
+ * each: roadmap and tasks pages, an Event Model of the water damage claim
  * (demo-data/models/claims/home-claims/) whose slices link that feature
- * (demo-data/specs/claims/home-claims/), so the feature's page offers the
- * canvas and the canvas offers the spec — an example worth nothing behind a
- * setting a visitor would not know to flip.
+ * (demo-data/specs/claims/home-claims/), test cases, assignable members in
+ * demo-data/project-settings.json, and the release repo's issues. The one
+ * exception is "Open test links in IntelliJ IDEA" (openTestsInIdea): it runs
+ * `idea` on the visitor's own machine, which a hosted demo has no business
+ * doing and no server-side `idea` to do it with — so test links keep going
+ * to GitHub, and that switch stays off (specs/traceability.feature.md).
  */
 const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   gitEngine: "js",
@@ -70,6 +88,18 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   codeGen: true,
   codeGenTarget: "pane",
   models: true,
+  roadmap: true,
+  tasks: true,
+  notebook: true,
+  testing: true,
+  assignments: true,
+  deletePublished: true,
+  googleCalendar: true,
+  issues: true,
+  showTestLinks: true,
+  projectManagement: true,
+  publishExternalLinks: true,
+  openTestsInIdea: false,
 };
 
 /** How long in-flight requests may keep using a replaced generation dir. */
