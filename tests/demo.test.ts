@@ -143,12 +143,12 @@ test("the coding agent pane is on and is the only target on offer", async () => 
   expect(state.canRunPi).toBe(false);
 });
 
-// The roadmap folder is opt-in (specs/app/roadmap.feature.md) and the demo
-// leaves it that way: it opens on Specs, with no Roadmap tab, and a visitor
-// who wants the dataset's pages turns the tab on in Settings.
-test("the roadmap folder is off, though the dataset's pages are there", async () => {
+// Every optional module is on in the demo (src/server/demo.ts
+// DEMO_SETTINGS): a visitor has no reason to guess which switches hide the
+// rest of the app, and the dataset ships content for each.
+test("the roadmap folder is on and lists the dataset's pages", async () => {
   const state = await bootState();
-  expect(state.roadmap).toBe(false);
+  expect(state.roadmap).toBe(true);
 
   const { pages } = await (await api("/api/roadmap")).json();
   expect(pages).toEqual([
@@ -158,6 +158,29 @@ test("the roadmap folder is off, though the dataset's pages are there", async ()
       assigned: "Dana Whitfield",
     },
   ]);
+});
+
+test("every optional module is on except IntelliJ IDEA", async () => {
+  const state = await bootState();
+  for (const module of [
+    "roadmap",
+    "tasks",
+    "notebook",
+    "models",
+    "testing",
+    "assignments",
+    "deletePublished",
+    "googleCalendar",
+    "issues",
+    "showTestLinks",
+    "projectManagement",
+    "publishExternalLinks",
+  ] as const) {
+    expect(`${module}=${state[module]}`).toBe(`${module}=true`);
+  }
+  // The exception: "Open test links in IntelliJ IDEA" runs `idea` on the
+  // visitor's own machine, which a hosted demo cannot and should not do.
+  expect(state.openTestsInIdea).toBe(false);
 });
 
 // The Models tab, unlike the roadmap's, is on: the dataset's Event Model
@@ -296,6 +319,32 @@ test("GitHub sign-in routes refuse in demo mode", async () => {
   ] as const) {
     const res = await api(path, { method });
     expect(res.status).toBe(403);
+  }
+});
+
+// The Issues tab is the one place the demo does reach GitHub: it reads the
+// public release repo (src/server/demo.ts DEMO_ISSUES_REPO) so the tab has
+// real issues to show. Writes stay refused — a visitor is signed in to
+// nothing, so every one would be anonymous on someone else's repository.
+test("the demo tracks the release repo's issues and refuses every write", async () => {
+  const { issuesRepo } = await (await api("/api/features")).json();
+  expect(issuesRepo).toEqual({
+    url: "https://github.com/SpecDriven/specdriven-app-release",
+    owner: "SpecDriven",
+    name: "specdriven-app-release",
+  });
+
+  for (const [method, path] of [
+    ["POST", "/api/issues"],
+    ["PUT", "/api/issues/1"],
+    ["POST", "/api/issues/1/comments"],
+  ] as const) {
+    const res = await api(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "nope", body: "nope" }),
+    });
+    expect(`${method} ${path} → ${res.status}`).toBe(`${method} ${path} → 403`);
   }
 });
 

@@ -37,6 +37,12 @@ export function useModels(): ModelsStore {
   return useSyncExternalStore(subscribe, () => state, () => state);
 }
 
+/** The listing outside React — what a bare `/models` resolves its first
+    model from, in the same tick `load()` filled the store. */
+export function modelsState(): ModelsStore {
+  return state;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,

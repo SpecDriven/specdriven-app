@@ -92,12 +92,17 @@ async function copyIssuesLink(view: IssuesRoute): Promise<void> {
   }
 }
 
-/** The ⋯ menu's items for one issue, the same in the list, the sidebar and the pane. */
-function issueMenuItems(issue: Issue, prompt: Prompt, confirm: Confirm): MenuItem[] {
-  return [
-    { id: "rename", label: "Edit title", icon: <Pencil size={13} />, onSelect: () => void renameIssueFlow(issue, prompt) },
+/** The ⋯ menu's items for one issue, the same in the list, the sidebar and the pane.
+    Read-only (the demo) keeps the two that only read: the link and GitHub. */
+function issueMenuItems(issue: Issue, prompt: Prompt, confirm: Confirm, readOnly = false): MenuItem[] {
+  const reading: MenuItem[] = [
     { id: "copy", label: "Copy link", icon: <Link size={13} />, onSelect: () => void copyIssuesLink({ kind: "issue", number: issue.number }) },
     { id: "github", label: "Open on GitHub", icon: <ExternalLink size={13} />, onSelect: () => window.open(issue.url, "_blank", "noopener") },
+  ];
+  if (readOnly) return reading;
+  return [
+    { id: "rename", label: "Edit title", icon: <Pencil size={13} />, onSelect: () => void renameIssueFlow(issue, prompt) },
+    ...reading,
     ...(issue.state === "open"
       ? [
           { id: "close", label: "Close as completed", icon: <CircleCheck size={13} />, onSelect: () => void closeIssueFlow(issue, confirm) },
@@ -272,9 +277,11 @@ function ListView({ store, repoCrumb, prompt, confirm, onNavigate, onOpenSetting
           <>
             <RepoLink store={store} />
             <StateFilter filter={store.filter} onChange={(s) => void issues.load(s)} />
-            <button type="button" className="primary-action" onClick={() => onNavigate({ kind: "new" }, { push: true })}>
-              <Plus size={14} aria-hidden="true" /> New issue
-            </button>
+            {!store.readOnly && (
+              <button type="button" className="primary-action" onClick={() => onNavigate({ kind: "new" }, { push: true })}>
+                <Plus size={14} aria-hidden="true" /> New issue
+              </button>
+            )}
           </>
         }
       />
@@ -288,12 +295,16 @@ function ListView({ store, repoCrumb, prompt, confirm, onNavigate, onOpenSetting
             <Bug size={28} aria-hidden="true" />
             <p>No {store.filter === "all" ? "" : store.filter + " "}issues.</p>
             <p className="hint">
-              Issues live on GitHub, in {store.repo ? `${store.repo.owner}/${store.repo.name}` : "the code repo"}; what is
-              created here shows up there at once.
+              Issues live on GitHub, in {store.repo ? `${store.repo.owner}/${store.repo.name}` : "the code repo"}
+              {store.readOnly
+                ? "; the demo shows them as they are there, and changes none of them."
+                : "; what is created here shows up there at once."}
             </p>
-            <button type="button" onClick={() => onNavigate({ kind: "new" }, { push: true })}>
-              + New issue
-            </button>
+            {!store.readOnly && (
+              <button type="button" onClick={() => onNavigate({ kind: "new" }, { push: true })}>
+                + New issue
+              </button>
+            )}
           </div>
         ) : (
           <table className="tests-table issues-table" aria-busy={store.loading || undefined}>
@@ -316,7 +327,7 @@ function ListView({ store, repoCrumb, prompt, confirm, onNavigate, onOpenSetting
                   key={issue.number}
                   issue={issue}
                   go={onNavigate}
-                  menu={<MoreMenu label={`Menu for #${issue.number}`} items={issueMenuItems(issue, prompt, confirm)} />}
+                  menu={<MoreMenu label={`Menu for #${issue.number}`} items={issueMenuItems(issue, prompt, confirm, store.readOnly)} />}
                 />
               ))}
             </tbody>
@@ -365,10 +376,25 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const dirty = title.trim() !== "" || body.trim() !== "";
+  // Read-only (the demo) takes the New issue buttons off the screen, but the
+  // url stays typeable — say why rather than offer a form the server refuses.
+  const readOnly = store.readOnly;
   useEffect(() => {
     issues.setDirty("new", dirty);
     return () => issues.setDirty("new", false);
   }, [dirty]);
+  if (readOnly) {
+    return (
+      <div className="view-error">
+        <p>The demo shows this repository's issues; it does not create them.</p>
+        <div className="view-error-actions">
+          <ViewLink to={{ kind: "list" }} go={onNavigate}>
+            Back to the issues
+          </ViewLink>
+        </div>
+      </div>
+    );
+  }
   const submit = async () => {
     if (!title.trim() || busy) return;
     setBusy(true);
@@ -481,6 +507,7 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
   confirm: Confirm;
   onNavigate: Navigate;
 }) {
+  const store = useIssues();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(issue.body);
   const [saving, setSaving] = useState(false);
@@ -524,7 +551,7 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
             <a className="tests-link" href={issue.url} target="_blank" rel="noopener noreferrer" title="Open on GitHub">
               GitHub <ExternalLink size={11} aria-hidden="true" />
             </a>
-            {open ? (
+            {store.readOnly ? null : open ? (
               <button type="button" className="secondary" onClick={() => void closeIssueFlow(issue, confirm)}>
                 <CircleCheck size={14} aria-hidden="true" /> Close issue
               </button>
@@ -533,7 +560,7 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
                 <RotateCcw size={14} aria-hidden="true" /> Reopen
               </button>
             )}
-            <MoreMenu label={`Menu for #${issue.number}`} items={issueMenuItems(issue, prompt, confirm)} />
+            <MoreMenu label={`Menu for #${issue.number}`} items={issueMenuItems(issue, prompt, confirm, store.readOnly)} />
           </>
         }
       />
@@ -561,7 +588,7 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
         <section className="issue-body">
           <div className="tests-section-head">
             <h3 className="issue-section-title">Description</h3>
-            {!editing && (
+            {!editing && !store.readOnly && (
               <button type="button" className="ibtn issue-edit" aria-label="Edit description" onClick={startEdit}>
                 <Pencil size={13} aria-hidden="true" /> Edit
               </button>
@@ -594,14 +621,16 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
           ) : (
             comments.map((c) => <CommentCard key={c.id} comment={c} />)
           )}
-          <div className="issue-comment-form">
-            <MarkdownEditor value={comment} onChange={setComment} placeholder="Leave a comment…" />
-            <div className="issue-form-actions">
-              <button type="button" className="primary-action" disabled={!comment.trim() || commenting} onClick={() => void addComment()}>
-                <MessageSquare size={14} aria-hidden="true" /> {commenting ? "Commenting…" : "Comment"}
-              </button>
+          {!store.readOnly && (
+            <div className="issue-comment-form">
+              <MarkdownEditor value={comment} onChange={setComment} placeholder="Leave a comment…" />
+              <div className="issue-form-actions">
+                <button type="button" className="primary-action" disabled={!comment.trim() || commenting} onClick={() => void addComment()}>
+                  <MessageSquare size={14} aria-hidden="true" /> {commenting ? "Commenting…" : "Comment"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </section>
       </div>
     </>
@@ -630,9 +659,11 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
   const activeNumber = view?.kind === "issue" ? view.number : null;
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-issues" aria-labelledby="side-tab-issues">
-      <div className="sidebar-actions">
-        <button onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ New issue</button>
-      </div>
+      {!store.readOnly && (
+        <div className="sidebar-actions">
+          <button onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ New issue</button>
+        </div>
+      )}
       <div className="page-rows">
         <a
           href="/issues"
@@ -674,7 +705,7 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
                 label={`Menu for #${issue.number}`}
                 className="tree-menu"
                 containerSelector=".tree-row-menu"
-                items={issueMenuItems(issue, prompt, confirm)}
+                items={issueMenuItems(issue, prompt, confirm, store.readOnly)}
               />
             </span>
           </div>
