@@ -15,11 +15,13 @@ import { syncDataDir } from "../src/server/reload";
 import {
   NOTEBOOK,
   NOTEBOOK_FOLDER,
+  ROADMAP,
   createPage,
   importPageDrift,
   isPageFolderPath,
   listPages,
   readPage,
+  renamePageFile,
   savePage,
 } from "../src/server/pages";
 import {
@@ -27,6 +29,7 @@ import {
   createEntry,
   entryFileOf,
   entryUrl,
+  relinkEntries,
   setEntryKind,
   setSupersedes,
   supersededBy,
@@ -386,4 +389,189 @@ test("byNewest sorts by date then title", () => {
     { fileName: "notebook/d.md", name: "Z" },
   ];
   expect(byNewest(entries).map((e) => e.name)).toEqual(["A", "A", "B", "Z"]);
+});
+
+// Issue #122: an entry renamed in the app kept its old file name, so the url
+// went on naming a title the entry no longer had — and the retired slug then
+// refused the original title forever. Renaming moves the file too, keeping
+// the date in front of it so the folder still reads in order.
+test("renaming an entry keeps its date and takes the new title's slug", async () => {
+  const fileName = await createEntry(root, "Always use worktrees", "Observation", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  const result = await renamePageFile(
+    root,
+    NOTEBOOK,
+    fileName,
+    "Multiple Claude sessions without worktrees",
+  );
+  expect(result.fileName).toBe(
+    "notebook/2026-09-12-multiple-claude-sessions-without-worktrees.md",
+  );
+  expect(result.name).toBe("Multiple Claude sessions without worktrees");
+  expect(await Bun.file(join(root, fileName)).exists()).toBe(false);
+  // The heading moved with the file, so the two can never drift apart again,
+  // and the author, date and kind the entry was signed with are untouched.
+  const renamed = await readPage(root, NOTEBOOK, result.fileName);
+  expect(renamed?.name).toBe("Multiple Claude sessions without worktrees");
+  expect(renamed?.author).toBe("ada");
+  expect(renamed?.date).toBe("2026-09-12");
+  expect(renamed?.kind).toBe("Observation");
+});
+
+// The document moves with the markdown, or the drift pass mints a fresh one
+// at the new path and drops the orphan — losing the entry's merge history.
+test("renaming an entry carries its document along", async () => {
+  const fileName = await createEntry(root, "Spec first", "Observation", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  const before = await loadPageDoc(root, fileName);
+  const docid = await Bun.file(join(root, pageDocDirRel(fileName), "docid")).text();
+  const { fileName: to } = await renamePageFile(root, NOTEBOOK, fileName, "Spec before code");
+  expect(await exists(join(root, pageDocDirRel(fileName)))).toBe(false);
+  expect(await exists(join(root, pageDocDirRel(to)))).toBe(true);
+  // The same document, not a new one: the lineage — and so every merge the
+  // entry has been through — survived the move.
+  expect(await Bun.file(join(root, pageDocDirRel(to), "docid")).text()).toBe(docid);
+  expect((await loadPageDoc(root, to))?.doc.name).toBe("Spec before code");
+  expect(before).not.toBeNull();
+});
+
+// The guards createPage already has, in the same words — and the case the
+// issue left behind: an entry whose heading already drifted from its file
+// name is renamed back to the title it displays, which slugifies to the name
+// it already has. That repairs the heading rather than failing.
+test("renaming an entry validates, and an unchanged slug only repairs the heading", async () => {
+  const fileName = await createEntry(root, "Spec first", "Observation", { date: "2026-09-12" });
+  expect(renamePageFile(root, NOTEBOOK, fileName, "   ")).rejects.toThrow(
+    "Notebook entry name is required",
+  );
+  expect(renamePageFile(root, NOTEBOOK, "notebook/2026-09-12-ghost.md", "Boo")).rejects.toThrow(
+    "Notebook entry not found",
+  );
+  // Renaming onto a slug another entry holds is refused, the way creating one
+  // over it is.
+  await createEntry(root, "Ship on Fridays", "Decision", { date: "2026-09-12" });
+  expect(renamePageFile(root, NOTEBOOK, fileName, "Ship on Fridays")).rejects.toThrow(
+    "Notebook entry already exists",
+  );
+  // A heading that drifted from the file name: renaming to it is not an error.
+  await savePage(
+    root,
+    NOTEBOOK,
+    fileName,
+    serializePage({ ...parsePage((await readPage(root, NOTEBOOK, fileName))!.content), name: "Drifted" }),
+  );
+  const same = await renamePageFile(root, NOTEBOOK, fileName, "Spec first");
+  expect(same).toEqual({
+    fileName,
+    name: "Spec first",
+    message: "file name unchanged",
+  });
+  expect((await readPage(root, NOTEBOOK, fileName))?.name).toBe("Spec first");
+});
+
+// Issue #122 itself: the entry was renamed to an observation, and the
+// original title could never be used again. Once the rename moves the file,
+// the old slug is free for the decision the rename was made to allow.
+test("the slug a renamed entry gave up is free for a new entry", async () => {
+  const fileName = await createEntry(root, "Always use worktrees", "Observation", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  await renamePageFile(root, NOTEBOOK, fileName, "Multiple Claude sessions without worktrees");
+  const decision = await createEntry(root, "Always use worktrees", "Decision", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  expect(decision).toBe(fileName);
+  expect((await readPage(root, NOTEBOOK, decision))?.kind).toBe("Decision");
+});
+
+// "the notebook never rewrites history, it adds to it" — but a link that no
+// longer resolves drops the badge silently, so the links naming a renamed
+// entry follow it. Unlike a feature file rename, where links go stale.
+test("supersedes links and body links follow a renamed entry", async () => {
+  const earlier = await createEntry(root, "Photo reminder at 24 hours", "Decision", {
+    date: "2026-07-28",
+    author: "ada",
+  });
+  const later = await createEntry(root, "Photo reminder at four hours", "Decision", {
+    date: "2026-08-19",
+    author: "grace",
+  });
+  await setSupersedes(root, later, { title: "Photo reminder at 24 hours", url: entryUrl(earlier) });
+  // A hand-typed cross-link in a third entry's body, beside links that name
+  // nothing of ours and must be left exactly as they are.
+  const other = await createEntry(root, "Hail day", "Observation", { date: "2026-08-05" });
+  await savePage(
+    root,
+    NOTEBOOK,
+    other,
+    serializePage({
+      ...parsePage((await readPage(root, NOTEBOOK, other))!.content),
+      body: `See [the decision](${entryUrl(earlier)}) and [the site](https://example.com/notebook/x).`,
+    }),
+  );
+
+  const { fileName: to } = await relinkAndRename(earlier, "Photo reminder at one day");
+  expect(to).toBe("notebook/2026-07-28-photo-reminder-at-one-day.md");
+
+  // The link text is the writer's own words and is kept; only the url moved.
+  const linking = await readPage(root, NOTEBOOK, later);
+  expect(linking?.supersedes).toEqual({
+    title: "Photo reminder at 24 hours",
+    url: entryUrl(to),
+  });
+  const body = (await readPage(root, NOTEBOOK, other))!.content;
+  expect(body).toContain(`[the decision](${entryUrl(to)})`);
+  expect(body).toContain("[the site](https://example.com/notebook/x)");
+  // The badge still resolves, so the supersede chain survived the rename.
+  const entries = byNewest(await listPages(root, NOTEBOOK));
+  expect(supersededBy(entries)[to]?.fileName).toBe(later);
+  // Written through the document, not behind its back: the next tick has
+  // nothing to reconcile, so the old url cannot come back.
+  expect((await loadPageDoc(root, later))?.doc.supersedes?.url).toBe(entryUrl(to));
+});
+
+/** Rename an entry the way the notebook's route does — with the relink. */
+async function relinkAndRename(fileName: string, name: string) {
+  return renamePageFile(root, NOTEBOOK, fileName, name, { relink: relinkEntries });
+}
+
+// A roadmap page is renamed by the same call, but takes no date: the prefix
+// belongs to the notebook, whose folder reads in order.
+test("renaming a roadmap page keeps its folder and takes no date prefix", async () => {
+  await createPage(root, ROADMAP, "q3/Plan");
+  const nested = await renamePageFile(root, ROADMAP, "roadmap/q3/plan.md", "Better Plan!");
+  expect(nested.fileName).toBe("roadmap/q3/better-plan.md");
+  // A page whose name merely begins with a year is given no date it never had.
+  await createPage(root, ROADMAP, "2026 plan");
+  const dated = await renamePageFile(root, ROADMAP, "roadmap/2026-plan.md", "Plan B");
+  expect(dated.fileName).toBe("roadmap/plan-b.md");
+});
+
+// The rename is a `git mv`, committed and pushed, and the other clone sees
+// the entry under its new name — with its document — on the next pull.
+test("renaming an entry is a git mv, committed and pushed", async () => {
+  const clones = await twoClones(root);
+  const fileName = await createEntry(clones.a, "Spec first", "Observation", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  const result = await renamePageFile(clones.a, NOTEBOOK, fileName, "Spec before code");
+  const to = "notebook/2026-09-12-spec-before-code.md";
+  expect(result).toEqual({
+    fileName: to,
+    name: "Spec before code",
+    message: "renamed, committed and pushed",
+  });
+  const log = await git(clones.a, "log", "-1", "--pretty=%s");
+  expect(log.stdout.toString()).toContain(`Rename notebook entry: ${fileName} -> ${to}`);
+  await git(clones.b, "pull", "origin", "main");
+  expect(await Bun.file(join(clones.b, to)).exists()).toBe(true);
+  expect(await Bun.file(join(clones.b, fileName)).exists()).toBe(false);
+  expect(await exists(join(clones.b, pageDocDirRel(to)))).toBe(true);
 });

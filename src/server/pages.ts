@@ -32,7 +32,7 @@ import {
   savePageDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
-import { commitAndPush, removeAndPush } from "./git";
+import { commitAndPush, moveAndPush, removeAndPush } from "./git";
 import {
   parsePage,
   serializePage,
@@ -238,6 +238,94 @@ export async function createPage(
     `Create ${kind.label}: ${pageName}`,
   );
   return fileName;
+}
+
+/** What a caller may say about the page it is renaming. */
+export interface RenamePageOptions {
+  /**
+   * Rewrite the links that name the page, after its heading is saved and
+   * before its file moves. The notebook passes notebook.ts's relinkEntries so
+   * a `**Supersedes:**` line follows the entry it points at; pages with no
+   * links of their own pass nothing. A callback rather than an import, since
+   * notebook.ts already imports this module.
+   */
+  relink?: (dataDir: string, from: string, to: string) => Promise<unknown>;
+}
+
+/**
+ * Rename a page: its `# heading` and its file both, so the two can never
+ * drift apart and the url follows the title (issue #122 — an entry renamed
+ * in the app kept its old file name, and the retired slug then refused the
+ * original title forever). A `git mv` committed and pushed, like a renamed
+ * feature file (features.ts renameFeatureFile).
+ *
+ * The heading is saved through the document first, so the chunks land in the
+ * directory the move then carries along; `git mv` stages the file as it
+ * stands, so that edit rides the rename commit.
+ */
+export async function renamePageFile(
+  dataDir: string,
+  kind: PageFolder,
+  fileName: string,
+  newName: string,
+  options: RenamePageOptions = {},
+): Promise<{ fileName: string; name: string; message: string }> {
+  const from = safe(kind, fileName);
+  const current = await readTextFile(`${dataDir}/${from}`);
+  if (current === null) throw new Error(`${capitalize(kind.label)} not found: ${from}`);
+  // A flat folder takes the name whole, as createPage does; a nested page
+  // keeps the folder it is in — a rename never re-nests.
+  const segments = kind.flat ? [newName.trim()] : newName.split("/").map((s) => s.trim());
+  const title = segments.pop() ?? "";
+  const slug = slugify(title);
+  if (!slug) throw new Error(`${capitalize(kind.label)} name is required`);
+  const folder = from.split("/").slice(0, -1).join("/");
+  const to = safe(kind, `${folder}/${datePrefixed(kind, from, slug)}.md`);
+
+  // The heading is repaired whether or not the file moves: an entry that
+  // already drifted — a new title over the old file name — is renamed back to
+  // the title it displays, which slugifies to the name it already has.
+  const page = parsePage(current);
+  if (page.name !== title) {
+    await savePage(dataDir, kind, from, serializePage({ ...page, name: title }));
+  }
+  if (to === from) return { fileName: from, name: title, message: "file name unchanged" };
+  if (await fileExists(`${dataDir}/${to}`)) {
+    throw new Error(`${capitalize(kind.label)} already exists: ${to}`);
+  }
+
+  // Before the move, so no failure leaves a link pointing at a file that is
+  // no longer there. Nothing resolves a link to a file as it is written, so
+  // naming the new url a moment early costs nothing.
+  await options.relink?.(dataDir, from, to);
+  // The document moves with the markdown or its lineage is lost: the drift
+  // pass mints a fresh document for a page that has none, and drops the one
+  // whose page is gone.
+  const moves = (await hasPageDoc(dataDir, from))
+    ? [{ from: pageDocDirRel(from), to: pageDocDirRel(to) }]
+    : [];
+  const sync = await moveAndPush(
+    dataDir,
+    from,
+    to,
+    `Rename ${kind.label}: ${from} -> ${to}`,
+    moves,
+  );
+  return { fileName: to, name: title, message: sync.message };
+}
+
+/**
+ * The renamed file's stem: a notebook entry keeps the `yyyy-mm-dd` its name
+ * begins with, so the folder still reads in order, and every other page is
+ * its slug alone — a roadmap page named `2026-plan.md` claims no date. A
+ * title that carries the date itself is not given it twice.
+ */
+function datePrefixed(kind: PageFolder, from: string, slug: string): string {
+  if (kind.folder !== NOTEBOOK_FOLDER) return slug;
+  const base = from.slice(from.lastIndexOf("/") + 1);
+  const date = base.match(/^(\d{4}-\d{2}-\d{2})-/)?.[1];
+  if (!date) return slug;
+  return slug.startsWith(`${date}-`) ? slug : `${date}-${slug}`;
 }
 
 /**

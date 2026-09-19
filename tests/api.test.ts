@@ -71,6 +71,14 @@ describe("matchApi", () => {
     const kind = matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/kind");
     expect(kind).not.toBeNull();
     expect(kind!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    // Renaming a page moves its file (issue #122), so every page folder has
+    // the route and it too must sit above `/:file`.
+    const rename = matchApi("POST", "/api/notebook/notebook%2F2026-09-12-spec-first.md/rename");
+    expect(rename).not.toBeNull();
+    expect(rename!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    expect(matchApi("POST", "/api/roadmap/roadmap%2Fpricing.md/rename")).not.toBeNull();
+    expect(matchApi("POST", "/api/tasks/tasks%2Fship-v2.md/rename")).not.toBeNull();
+    expect(matchApi("GET", "/api/notebook/notebook%2F2026-09-12-spec-first.md/rename")).toBeNull();
     // A task's estimate (specs/app/tasks.feature.md "Add task to Google
     // Calendar"): one more segment under the task's file, POST only.
     const estimate = matchApi("POST", "/api/tasks/tasks%2Fship-v2.md/estimate");

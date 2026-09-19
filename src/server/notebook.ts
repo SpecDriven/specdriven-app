@@ -14,7 +14,7 @@
 // never write to a data repo by itself: unlike the roadmap, the folder is not
 // created when the switch goes on but when the first entry is written.
 
-import { NOTEBOOK, readPage, savePage, type PageListing, type PageView } from "./pages";
+import { NOTEBOOK, listPages, readPage, savePage, type PageListing, type PageView } from "./pages";
 import { createPage } from "./pages";
 import {
   parsePage,
@@ -97,6 +97,53 @@ export async function setSupersedes(
     const { supersedes: _drop, ...rest } = page;
     return link ? { ...rest, supersedes: link } : rest;
   });
+}
+
+/**
+ * Follow a renamed entry: every `**Supersedes:**` line and every inline link
+ * that named it is pointed at its new url, so the supersede chain and the
+ * cross-links between entries survive a rename (issue #122). Unlike a feature
+ * file rename, where links to the old name go stale, an entry is cited by
+ * other entries — a dead link there would quietly drop a badge.
+ *
+ * Saved through each entry's document, never straight to the file: a page
+ * written behind its document's back drifts, and the next tick reconciles the
+ * old url back in. Returns the entries that changed.
+ */
+export async function relinkEntries(
+  dataDir: string,
+  from: string,
+  to: string,
+): Promise<string[]> {
+  const url = entryUrl(to);
+  const changed: string[] = [];
+  for (const entry of await listPages(dataDir, NOTEBOOK)) {
+    if (entry.fileName === from) continue;
+    const current = await readPage(dataDir, NOTEBOOK, entry.fileName);
+    if (current === null) continue;
+    const page = parsePage(current.content);
+    // The link text is the writer's own words and is kept as written; only
+    // the url is maintained, so the sentence still reads after the rename.
+    const supersedes =
+      page.supersedes && entryFileOf(page.supersedes.url) === from
+        ? { ...page.supersedes, url }
+        : page.supersedes;
+    const body = relinkBody(page.body, from, url);
+    if (supersedes === page.supersedes && body === page.body) continue;
+    const next = { ...page, body, ...(supersedes ? { supersedes } : {}) };
+    await savePage(dataDir, NOTEBOOK, entry.fileName, serializePage(next));
+    changed.push(entry.fileName);
+  }
+  return changed;
+}
+
+/** Inline `[text](<entry>)` links naming the entry, pointed at its new url. */
+function relinkBody(body: string, from: string, url: string): string {
+  return body.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, text: string, target: string) =>
+    // entryFileOf returns null for anything that is not one of ours — an
+    // absolute url, a path that climbs out — so those are left alone.
+    entryFileOf(target) === from ? `[${text}](${url})` : whole,
+  );
 }
 
 /**

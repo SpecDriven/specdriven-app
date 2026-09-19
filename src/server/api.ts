@@ -141,14 +141,17 @@ import {
   listPages,
   pageFolderNamed,
   readPage,
+  renamePageFile,
   savePage,
   type PageFolder,
+  type RenamePageOptions,
 } from "./pages";
 import type { PageView } from "./pages";
 import {
   byNewest,
   createEntry,
   entryFileOf,
+  relinkEntries,
   setEntryKind,
   setSupersedes,
   supersededBy,
@@ -992,6 +995,20 @@ const deletePageRoute = (kind: PageFolder) =>
   withDataDir(async (dir, _req, params) => {
     try {
       return json(await deletePage(dir, kind, params.file ?? ""));
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  });
+
+// Renaming a page (specs/app/roadmap.feature.md): the `# heading` and the
+// file both, so the url follows the title — a `git mv`, committed and pushed.
+// The notebook passes relinkEntries, so the links naming an entry follow it.
+const renamePageRoute = (kind: PageFolder, options: RenamePageOptions = {}) =>
+  withDataDir(async (dir, req, params) => {
+    const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
+    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
+    try {
+      return json(await renamePageFile(dir, kind, params.file ?? "", body.name, options));
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
@@ -2164,6 +2181,7 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/readme", putReadme],
   ["GET", "/api/roadmap", listPagesRoute(ROADMAP)],
   ["POST", "/api/roadmap", createPageRoute(ROADMAP)],
+  ["POST", "/api/roadmap/:file/rename", renamePageRoute(ROADMAP)],
   ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
   ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
   ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
@@ -2176,12 +2194,14 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/models/:file/slices/:slice/feature", generateSliceFeatureRoute],
   ["GET", "/api/tasks", listPagesRoute(TASKS)],
   ["POST", "/api/tasks", createPageRoute(TASKS)],
+  ["POST", "/api/tasks/:file/rename", renamePageRoute(TASKS)],
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
   ["POST", "/api/tasks/:file/estimate", estimateTaskRoute],
   ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
   ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
   ["GET", "/api/notebook", listEntriesRoute],
   ["POST", "/api/notebook", createEntryRoute],
+  ["POST", "/api/notebook/:file/rename", withNotebook(renamePageRoute(NOTEBOOK, { relink: relinkEntries }))],
   ["PUT", "/api/notebook/:file/kind", putEntryKindRoute],
   ["PUT", "/api/notebook/:file/supersedes", putEntrySupersedesRoute],
   ["GET", "/api/notebook/:file", withNotebook(readPageRoute(NOTEBOOK))],
