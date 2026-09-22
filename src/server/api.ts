@@ -154,20 +154,6 @@ import {
   supersededBy,
 } from "./notebook";
 import {
-  NotFoundError,
-  createCase,
-  createPlan,
-  deleteCase,
-  deleteExecution,
-  deletePlan,
-  readTesting,
-  setResult,
-  startExecution,
-  updateCase,
-  updateExecution,
-  updatePlan,
-} from "./testing";
-import {
   GitHubError,
   addComment,
   createIssue,
@@ -196,6 +182,8 @@ import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
 import { version as appVersion } from "../../package.json";
+import { bodyOf, json, type Handler, type Params } from "./http";
+import { pluginStates, provideDataAccess, routes as routeRegistry, syncPlugins } from "../plugins/host/loader";
 
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
@@ -291,6 +279,8 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  // The built-in plugins the switches ask for (src/plugins/host/loader.ts).
+  await syncPlugins(state as Record<string, unknown>);
   // External links go into the markdown projections only while the setting
   // says so (specs/external-links/project-management-jira-linear-etc.
   // feature.md) — decided before the first sync tick writes a projection.
@@ -305,9 +295,6 @@ export async function applyStartupState(): Promise<void> {
   void applyNetSync(state);
 }
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status });
-}
 
 /**
  * Git-engine fields for /api/state (specs/git-operations.spec.md): the
@@ -345,8 +332,6 @@ async function authFields() {
   };
 }
 
-type Params = Record<string, string>;
-type Handler = (req: Request, params: Params) => Response | Promise<Response>;
 
 /**
  * Resolve the configured data repo (local path or GitHub url, cloned on first
@@ -411,6 +396,9 @@ async function stateFields(state: SpecDrivenState) {
     notebook: normalizeNotebook(state.notebook),
     models: normalizeModels(state.models),
     testing: normalizeTesting(state.testing),
+    // The plugins (specs/app/plugins.feature.md): every module behind the
+    // kernel, with whether it is mounted — what Settings → Plugins lists.
+    plugins: pluginStates(),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
     issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -442,6 +430,8 @@ const getState: Handler = async (req) => {
     await reseedDemo();
   }
   const state = await readState(getAppRoot());
+  // A demo reseed above rewrote the switches; the plugins follow them.
+  await syncPlugins(state as Record<string, unknown>);
   return json({
     ...(await stateFields(state)),
     // specs/user-info-settings.spec.md: the OS user by default, with
@@ -786,6 +776,9 @@ const putState: Handler = async (req) => {
   }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  // The switches mount and unmount their plugins on the spot: a module
+  // turned off answers 404 from here on, one turned on has its routes.
+  await syncPlugins(state as Record<string, unknown>);
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
@@ -1902,79 +1895,8 @@ const unlessDemo =
       ? json({ error: "GitHub sign-in is disabled in demo mode" }, 403)
       : handler(req, params);
 
-// Test management (specs/app/tests.feature.md): the module's cases,
-// plans and executions, all in one Automerge document (src/server/testing.ts).
-// Served only while the Settings switch is on — enforced here and not only
-// in the UI, like the other switches. One read returns the whole module;
-// each write returns the entity it touched, for the client to merge in.
-const withTesting = (
-  handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
-): Handler =>
-  withDataDir(async (dir, req, params) => {
-    if (!normalizeTesting((await readState(getAppRoot())).testing)) {
-      return json({ error: "Test management is switched off in Settings" }, 404);
-    }
-    try {
-      return await handler(dir, req, params);
-    } catch (e) {
-      const status = e instanceof NotFoundError ? 404 : 400;
-      return json({ error: (e as Error).message }, status);
-    }
-  });
-
-const bodyOf = async (req: Request): Promise<Record<string, unknown>> => {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("A JSON object body is required");
-  }
-  return body;
-};
-
-const getTesting = withTesting(async (dir) => json(await readTesting(dir)));
-
-const postTestCase = withTesting(async (dir, req) =>
-  json({ case: await createCase(dir, await bodyOf(req)) }, 201),
-);
-const putTestCase = withTesting(async (dir, req, params) =>
-  json({ case: await updateCase(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const deleteTestCase = withTesting(async (dir, _req, params) => {
-  await deleteCase(dir, params.id ?? "");
-  return json({ ok: true });
-});
-
-const postTestPlan = withTesting(async (dir, req) =>
-  json({ plan: await createPlan(dir, await bodyOf(req)) }, 201),
-);
-const putTestPlan = withTesting(async (dir, req, params) =>
-  json({ plan: await updatePlan(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const deleteTestPlan = withTesting(async (dir, _req, params) => {
-  await deletePlan(dir, params.id ?? "");
-  return json({ ok: true });
-});
-
-const postTestExecution = withTesting(async (dir, req, params) => {
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  return json({ execution: await startExecution(dir, params.id ?? "", body) }, 201);
-});
-const putTestExecution = withTesting(async (dir, req, params) =>
-  json({ execution: await updateExecution(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const putTestResult = withTesting(async (dir, req, params) => {
-  const body = await bodyOf(req);
-  // Who recorded it: the git author when known, else the signed-in login,
-  // else the OS user (specs/user-info-settings.spec.md).
-  const user = await getCurrentUser();
-  const by = user.name ?? user.login ?? user.username;
-  return json({
-    execution: await setResult(dir, params.id ?? "", params.caseId ?? "", { ...body, by }),
-  });
-});
-const deleteTestExecution = withTesting(async (dir, _req, params) => {
-  await deleteExecution(dir, params.id ?? "");
-  return json({ ok: true });
-});
+// The test management module's routes live in its plugin
+// (src/plugins/builtin/tests/host.ts) and exist only while it is mounted.
 
 // GitHub issue tracking (specs/app/github-issues.feature.md): the issues of
 // the repository the data repo's code-repo pushes to (src/server/issues.ts).
@@ -2143,8 +2065,10 @@ const postIssueComment = withIssues(
   { readOnlyInDemo: true },
 );
 
-/** Pattern segments starting with `:` bind the (decoded) path segment. */
-const routes: [method: string, pattern: string, handler: Handler][] = [
+// The core routes, registered first on the plugin kernel's route registry
+// (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
+// plugin appends its own, and a disposed one takes them away again.
+const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
   ["POST", "/api/choose-folder", postChooseFolder],
@@ -2187,17 +2111,6 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/notebook/:file", withNotebook(readPageRoute(NOTEBOOK))],
   ["PUT", "/api/notebook/:file", withNotebook(savePageRoute(NOTEBOOK))],
   ["DELETE", "/api/notebook/:file", withNotebook(deletePageRoute(NOTEBOOK))],
-  ["GET", "/api/tests", getTesting],
-  ["POST", "/api/tests/cases", postTestCase],
-  ["PUT", "/api/tests/cases/:id", putTestCase],
-  ["DELETE", "/api/tests/cases/:id", deleteTestCase],
-  ["POST", "/api/tests/plans", postTestPlan],
-  ["PUT", "/api/tests/plans/:id", putTestPlan],
-  ["DELETE", "/api/tests/plans/:id", deleteTestPlan],
-  ["POST", "/api/tests/plans/:id/executions", postTestExecution],
-  ["PUT", "/api/tests/executions/:id", putTestExecution],
-  ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
-  ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
@@ -2231,43 +2144,15 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/agent/chat/:id", deleteAgentChat],
   // "/active" before "/:id": the table is first-match.
 ];
+for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);
+// Plugins reach the data dir through the kernel (src/plugins/host/services.ts).
+provideDataAccess({ withDir: withDataDir });
 
-export interface ApiMatch {
-  handler: Handler;
-  params: Params;
-}
+export type { ApiMatch } from "../plugins/host/services";
 
-/**
- * Match a request line against the route table. Segments are matched before
- * decoding, so an encoded `/` in a parameter (`billing%2Fq.feature.md`)
- * stays one segment — the params come out decoded.
- */
-export function matchApi(method: string, pathname: string): ApiMatch | null {
-  const segments = pathname.split("/");
-  for (const [m, pattern, handler] of routes) {
-    if (m !== method) continue;
-    const want = pattern.split("/");
-    if (want.length !== segments.length) continue;
-    const params: Params = {};
-    let ok = true;
-    for (let i = 0; i < want.length; i++) {
-      const w = want[i]!;
-      const got = segments[i]!;
-      if (w.startsWith(":")) {
-        try {
-          params[w.slice(1)] = decodeURIComponent(got);
-        } catch {
-          ok = false; // malformed percent-encoding
-          break;
-        }
-      } else if (w !== got) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) return { handler, params };
-  }
-  return null;
+/** Match a request line against the route table — core rows, then the mounted plugins. */
+export function matchApi(method: string, pathname: string) {
+  return routeRegistry.match(method, pathname);
 }
 
 /** Serve an API request, or null when the path is not an API route. */

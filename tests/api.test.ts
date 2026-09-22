@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { matchApi } from "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 
 describe("matchApi", () => {
   test("literal routes match by method", () => {
@@ -98,7 +99,12 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/issues/12/comments")).toBeNull();
   });
 
-  test("test management routes match by method", () => {
+  test("test management routes match by method", async () => {
+    // The module is a plugin (specs/app/plugins.feature.md): its routes are
+    // there while the switch mounts it, and gone — 404 — when it does not.
+    await syncPlugins({ testing: false });
+    expect(matchApi("GET", "/api/tests")).toBeNull();
+    await syncPlugins({ testing: true });
     expect(matchApi("GET", "/api/tests")).not.toBeNull();
     expect(matchApi("POST", "/api/tests")).toBeNull();
     expect(matchApi("GET", "/api/tests/cases")).toBeNull();

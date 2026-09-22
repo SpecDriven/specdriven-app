@@ -25,6 +25,7 @@ import { ensureSpecsFolder } from "./features";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo, normalizeModels, normalizeRoadmap, normalizeTasks } from "./state";
 import { getLogger, withSpan } from "./telemetry";
+import { sync as pluginSync } from "../plugins/host/loader";
 
 export const DEFAULT_RELOAD_SECONDS = 60;
 
@@ -139,6 +140,9 @@ export async function syncDataDir(
         const drift = await importModelDrift(dir);
         if (drift) parts.push(drift);
       }
+      // The plugins' own drift passes (src/plugins/host/services.ts), in
+      // mount order, after the core's.
+      parts.push(...(await pluginSync.run(dir)));
     }
     const synced = await syncSavedChanges(dir);
     parts.push(synced.message);
