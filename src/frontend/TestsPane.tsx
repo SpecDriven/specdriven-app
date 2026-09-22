@@ -34,7 +34,7 @@ import { StatusIcon } from "./StatusIcon";
 import { SaveIndicator, toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { isTypingTarget } from "./shortcuts";
-import { testsPath, type TestsRoute } from "./route";
+import { testsPath, type TestsRoute } from "../plugins/builtin/tests/route";
 import {
   PRIORITY_LABEL,
   PRIORITY_ORDER,

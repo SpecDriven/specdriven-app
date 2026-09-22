@@ -21,7 +21,8 @@ import type {
 } from "../server/automerge/schema";
 import type { TestingView } from "../server/testing";
 import { toast } from "./Toasts";
-import { SPECS_FOLDER, featurePath, scenarioPath, testsPath, type TestsRoute } from "./route";
+import { SPECS_FOLDER, featurePath, scenarioPath } from "./route";
+import { testsPath, type TestsRoute } from "../plugins/builtin/tests/route";
 
 export type {
   CasePriority,
@@ -96,6 +97,8 @@ async function attempt<T>(work: () => Promise<T>, failure: string): Promise<T | 
 const jsonBody = (body: unknown): RequestInit => ({ method: "PUT", body: JSON.stringify(body) });
 
 export const testing = {
+  /** Watch the store outside React — the plugin tab hands this to App. */
+  subscribe,
   /** GET /api/tests into the store; the pane shows `error` when it fails. */
   async load(): Promise<void> {
     try {
