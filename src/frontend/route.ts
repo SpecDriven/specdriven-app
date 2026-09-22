@@ -9,12 +9,12 @@
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
-//   /tests                                          test plans (specs/app/tests.feature.md)
-//   /tests/cases                                    the test case library
-//   /tests/cases/<id>, /tests/plans/<id>, /tests/runs/<id>
 //   /issues                                         GitHub issues (specs/app/github-issues.feature.md)
 //   /issues/new                                     the new-issue form
 //   /issues/<number>                                one issue
+//
+// A plugin's views (`/tests`, specs/app/plugins.feature.md) are parsed by the
+// plugin itself, before this; App asks the mounted tabs first.
 //
 // <feature> is the file path *within the spec tree* minus `.feature.md`, and
 // may span several segments when the feature lives in a folder
@@ -61,31 +61,12 @@ export interface Route {
    * `models/cart.model.json`.
    */
   model?: string;
-  /** A view of the test management module (specs/app/tests.feature.md). */
-  tests?: TestsRoute;
   /** A view of the GitHub issues module (specs/app/github-issues.feature.md). */
   issues?: IssuesRoute;
 }
 
 /** The GitHub issues module's views: the list, the new-issue form, or one issue. */
 export type IssuesRoute = { kind: "list" } | { kind: "new" } | { kind: "issue"; number: number };
-
-/**
- * The test management module's views: the plan list, the case library, or
- * one case, plan or run by its document id.
- */
-export type TestsRoute =
-  | { kind: "plans" }
-  | { kind: "cases" }
-  | { kind: "case"; id: string }
-  | { kind: "plan"; id: string }
-  | { kind: "run"; id: string };
-
-const TESTS_SEGMENTS: Record<string, "case" | "plan" | "run"> = {
-  cases: "case",
-  plans: "plan",
-  runs: "run",
-};
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
 
@@ -100,15 +81,6 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
-  // The test management module: `/tests` is its plan list, `/tests/cases`
-  // the library, and an id after `cases`, `plans` or `runs` opens that one.
-  // Anything else under `/tests` falls back to the plan list.
-  if (segs[0] === "tests") {
-    if (segs[1] === "cases" && !segs[2]) return { tests: { kind: "cases" } };
-    const kind = segs[1] ? TESTS_SEGMENTS[segs[1]] : undefined;
-    if (kind && segs[2]) return { tests: { kind, id: segs[2] } };
-    return { tests: { kind: "plans" } };
-  }
   // GitHub issues: `/issues` is the list, `/issues/new` the form, and a
   // number opens that issue. Anything else under `/issues` is the list.
   if (segs[0] === "issues") {
@@ -215,22 +187,6 @@ export function pageLink(fileName: string): string {
   const folder = pageFolderOf(fileName);
   const stem = fileName.slice(folder.length + 1).replace(/\.md$/, "");
   return `/${folder}/${stem.split("/").map(encodeURIComponent).join("/")}`;
-}
-
-/** The url of a test management view — the inverse of parseRoute's `tests`. */
-export function testsPath(view: TestsRoute): string {
-  switch (view.kind) {
-    case "plans":
-      return "/tests";
-    case "cases":
-      return "/tests/cases";
-    case "case":
-      return `/tests/cases/${encodeURIComponent(view.id)}`;
-    case "plan":
-      return `/tests/plans/${encodeURIComponent(view.id)}`;
-    case "run":
-      return `/tests/runs/${encodeURIComponent(view.id)}`;
-  }
 }
 
 /** The url of a GitHub issues view — the inverse of parseRoute's `issues`. */

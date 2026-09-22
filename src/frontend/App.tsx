@@ -62,7 +62,6 @@ import {
   Link,
   ListFilter,
   ListTodo,
-  FlaskConical,
   Bug,
   Map as MapIcon,
   Menu as MenuIcon,
@@ -127,8 +126,8 @@ import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
-import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
-import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
+import { client, matchPluginRoute, syncClientPlugins, tabs } from "../plugins/client/loader";
+import { useRegistry, useTabStore, type PluginView, type TabApp } from "../plugins/client/tabs";
 import { IssuesPane, IssuesSidebar } from "./IssuesPane";
 import { issues, issuesKey, issuesTitle, searchIssues, setIssuesReadOnly, useIssues } from "./issues";
 import { models, modelsState, modelTitle, useModels } from "./eventModel/models";
@@ -162,8 +161,6 @@ import {
   pageFolderOf,
   pageLink,
   scenarioPath,
-  testsPath,
-  type TestsRoute,
   issuesPath,
   type IssuesRoute,
   modelLink,
@@ -416,15 +413,14 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
   return <Icon size={size} aria-hidden="true" />;
 }
 
-type SidebarTab = "specs" | PageTab["folder"] | "tests" | "issues" | "models";
+/** A core tab, or a plugin's tab by its id (src/plugins/client/tabs.ts). */
+type SidebarTab = "specs" | PageTab["folder"] | "issues" | "models" | (string & {});
 
 function readSidebarTab(): SidebarTab {
   try {
-    const stored = localStorage.getItem("sd-sidebar-tab");
-    if (stored === "tests") return "tests";
-    if (stored === "issues") return "issues";
-    if (stored === "models") return "models";
-    return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
+    // Every stored name is kept: one that is not on offer any more falls
+    // back to Specs where `shownTab` is derived.
+    return localStorage.getItem("sd-sidebar-tab") ?? "specs";
   } catch {
     return "specs";
   }
@@ -1215,17 +1211,24 @@ export function App() {
   // rather than appearing once the boot fetch lands. The server has the last
   // word either way.
   const [notebook, setNotebook] = useState(true);
-  // Test management (specs/app/tests.feature.md): the Settings
-  // switch, and which of the module's views has the pane — null when none.
-  // The module's data lives in its own store (src/frontend/testing.ts).
+  // Test management (specs/app/tests.feature.md): the Settings switch, as
+  // the Settings dialog's row shows it. The module itself is a plugin
+  // (src/plugins/builtin/tests): its tab, pane, urls and store come from
+  // the tab registry below, mounted while the switch is on.
   const [testingOn, setTestingOn] = useState(false);
-  const [testsView, setTestsView] = useState<TestsRoute | null>(null);
+  // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
+  // which plugin view has the pane — null when none. App knows only the tab
+  // id and an opaque view; the tab parses, renders and titles it.
+  const pluginTabs = useRegistry(tabs);
+  const [pluginView, setPluginView] = useState<PluginView | null>(null);
+  const pluginViewRef = useRef<PluginView | null>(null);
+  pluginViewRef.current = pluginView;
+  const activeTab = pluginView ? (pluginTabs.find((t) => t.id === pluginView.tab) ?? null) : null;
+  /** Ticks with the active tab's store, so titles read through it stay current. */
+  const activeTabTick = useTabStore(activeTab);
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): the Settings switch behind every task's calendar chip.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
-  const testsViewRef = useRef<TestsRoute | null>(null);
-  testsViewRef.current = testsView;
-  const testingStore = useTesting();
   // GitHub issues (specs/app/github-issues.feature.md): which of the
   // module's views has the pane — null when none. The issues themselves live
   // in their own store (src/frontend/issues.ts).
@@ -1316,7 +1319,7 @@ export function App() {
   /** The tab on screen: a page tab only while its switch still shows it. */
   const shownTab: SidebarTab =
     shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
-    (sidebarTab === "tests" && testingOn) ||
+    pluginTabs.some((tab) => tab.id === sidebarTab) ||
     (sidebarTab === "issues" && issuesOn) ||
     (sidebarTab === "models" && modelsOn)
       ? sidebarTab
@@ -1607,9 +1610,9 @@ export function App() {
           loadReadme(),
           // The special folders' pages ride along when they are shown at all.
           loadShownPages(state),
-          // So do the test plans, when the module is on — before the deep
-          // link below, which may name one of them.
-          state.testing === true ? testing.load() : Promise.resolve(),
+          // So do the plugins — the Tests tab and its plans — before the deep
+          // link below, which may name one of their views.
+          syncClientPlugins(state.plugins),
           state.models === true ? models.load() : Promise.resolve(),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
@@ -1644,9 +1647,9 @@ export function App() {
       if (openPageFile && openPageTextRef.current === openPageSaved.current) {
         void showPage(openPageFile);
       }
-      // The test management module too — unless one of its editors holds an
-      // unsaved draft (the store checks).
-      if (testingOn) void testing.refresh();
+      // The plugins too — each refreshes its own store, unless one of its
+      // editors holds an unsaved draft.
+      client.emit("reload/tick");
       // The models too: the list, and the open canvas — which re-reads only
       // while nothing on it is unsaved (src/frontend/eventModel/ModelsPane.tsx).
       if (modelsOn) {
@@ -1668,7 +1671,6 @@ export function App() {
     conflict,
     roadmap,
     tasks,
-    testingOn,
     modelsOn,
     openPageFile,
     loadFeatures,
@@ -1791,9 +1793,9 @@ export function App() {
   // must not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
-    // A tests view owns its url (openTests pushes it); with no feature
-    // selected this effect would otherwise rewrite it to `/`.
-    if (testsView || issuesView) return;
+    // A plugin's view owns its url (openPluginView pushes it); with no
+    // feature selected this effect would otherwise rewrite it to `/`.
+    if (pluginView || issuesView) return;
     const url = pagePath(selected, paneScenario, openPageFile, openModel);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -1804,7 +1806,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, testsView, issuesView]);
+  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, pluginView, issuesView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1814,8 +1816,8 @@ export function App() {
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
     // An open roadmap page or task names the window the way a feature does, so
     // a shared link previews as that page (specs/app/tasks.feature.md).
-    const base = testsView
-      ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
+    const base = pluginView && activeTab
+      ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : issuesView
         ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
       : openModel
@@ -1831,7 +1833,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore, openModel, modelsStore, clock]);
+  }, [selected, feature, paneScenario, openPage, pluginView, activeTab, activeTabTick, issuesView, issuesStore, openModel, modelsStore, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1860,7 +1862,7 @@ export function App() {
           loadFeatures(),
           loadReadme(),
           loadShownPages(state),
-          state.testing === true ? testing.load() : Promise.resolve(),
+          syncClientPlugins(state.plugins),
           state.models === true ? models.load() : Promise.resolve(),
         ]);
         await openFromLocation(entryPath);
@@ -1961,9 +1963,9 @@ export function App() {
         setTaskPages([]);
         setNotebookPages([]);
         setSupersededBy({});
-        // Nor are the old folder's test plans; the module reloads below.
-        testing.reset();
-        setTestsView(null);
+        // Nor are the old folder's plugin views; the plugins reload their
+        // stores below, on the data/changed event.
+        setPluginView(null);
         // Nor its models: the store empties and refills below. The canvas
         // was flushed and sealed before the switch, so whenever its unmount
         // save runs it is a no-op rather than a PUT into this new folder.
@@ -1984,7 +1986,7 @@ export function App() {
           loadFeatures(),
           loadReadme(),
           loadShownPages(state),
-          state.testing === true ? testing.load() : Promise.resolve(),
+          syncClientPlugins(state.plugins).then(() => client.serial("data/changed")),
           state.models === true ? models.load() : Promise.resolve(),
         ]);
       } else {
@@ -2033,7 +2035,7 @@ export function App() {
       // Opening a feature leaves the open page, saving what its editor still
       // holds — the same courtesy the README editor gets.
       closePage();
-      setTestsView(null);
+      setPluginView(null);
       setIssuesView(null);
       setOpenModel(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
@@ -2104,7 +2106,7 @@ export function App() {
   const goHome = () => {
     editorRef.current.close();
     closePage();
-    setTestsView(null);
+    setPluginView(null);
     setIssuesView(null);
     setOpenModel(null);
     setSelectedFolder(null);
@@ -2115,30 +2117,45 @@ export function App() {
   };
 
   /**
-   * Open a view of the test management module (specs/app/tests.feature.md).
-   * The pane is the module's alone, so the feature and the page
+   * Open a view of a plugin's tab (specs/app/plugins.feature.md) — the Tests
+   * tab, say. The pane is the module's alone, so the feature and the page
    * leave — saving what their editors hold, the way goHome does — and the
-   * sidebar turns to the Tests tab. The view owns its url from here on.
+   * sidebar turns to that tab. The view owns its url from here on; the tab
+   * says what the url is.
    */
-  const openTests = (view: TestsRoute, opts: { push?: boolean } = {}) => {
+  const openPluginView = (tab: string, view: unknown, opts: { push?: boolean } = {}) => {
+    const owner = tabs.get(tab);
+    if (!owner) return;
     editorRef.current.close();
     closePage();
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
-    selectSidebarTab("tests");
+    selectSidebarTab(tab);
     setIssuesView(null);
     setOpenModel(null);
-    setTestsView(view);
-    if (opts.push && location.pathname !== testsPath(view)) {
-      history.pushState(null, "", testsPath(view));
+    setPluginView({ tab, view });
+    const path = owner.route.path(view);
+    if (opts.push && location.pathname !== path) {
+      history.pushState(null, "", path);
     }
   };
+  /** A tab's navigate callback, bound to its id. */
+  const navigateIn = (tab: string) => (view: unknown, opts?: { push?: boolean }) =>
+    openPluginView(tab, view, opts);
+
+  // A plugin switched off takes its open view with it: the pane leaves and
+  // the app goes home (specs/app/plugins.feature.md "Turning a plugin off
+  // unwinds everything it registered").
+  useEffect(() => {
+    if (pluginView && !pluginTabs.some((t) => t.id === pluginView.tab)) goHome();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pluginTabs]);
 
   /**
    * Open a view of the GitHub issues module (specs/app/github-issues
-   * .feature.md) — openTests's twin: the pane is the module's alone, and the
+   * .feature.md) — openPluginView's twin: the pane is the module's alone, and the
    * sidebar turns to the Issues tab.
    */
   const openIssues = (view: IssuesRoute, opts: { push?: boolean } = {}) => {
@@ -2149,7 +2166,7 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab("issues");
-    setTestsView(null);
+    setPluginView(null);
     setOpenModel(null);
     setIssuesView(view);
     if (opts.push && location.pathname !== issuesPath(view)) {
@@ -2159,7 +2176,7 @@ export function App() {
 
   /**
    * Open an Event Model's canvas (roadmap/support-event-modeling.md) —
-   * openTests's twin: the pane is the canvas's alone, and the sidebar turns
+   * openPluginView's twin: the pane is the canvas's alone, and the sidebar turns
    * to the Models tab. The model owns its url from here on.
    */
   const openModelPane = (fileName: string, opts: { push?: boolean } = {}) => {
@@ -2170,7 +2187,7 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab("models");
-    setTestsView(null);
+    setPluginView(null);
     setIssuesView(null);
     setOpenModel(fileName);
     if (opts.push && location.pathname !== modelLink(fileName)) {
@@ -2195,8 +2212,12 @@ export function App() {
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
-    if (route.tests) {
-      openTests(route.tests);
+    // A plugin's url first (specs/app/plugins.feature.md "Plugin urls serve
+    // the app shell"): the mounted tabs each know their own. With the plugin
+    // off nothing matches, and the url reads as home below.
+    const pluginHit = matchPluginRoute(pathname);
+    if (pluginHit) {
+      openPluginView(pluginHit.tab.id, pluginHit.view);
     } else if (route.issues) {
       openIssues(route.issues);
     } else if (route.page) {
@@ -2225,7 +2246,7 @@ export function App() {
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
       editorRef.current.close();
       closePage();
-      setTestsView(null);
+      setPluginView(null);
       setIssuesView(null);
       setOpenModel(null);
       setSelected(null);
@@ -3215,7 +3236,7 @@ export function App() {
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
-    setTestsView(null);
+    setPluginView(null);
     setIssuesView(null);
     setOpenModel(null);
     openPageSession.current += 1;
@@ -4018,6 +4039,9 @@ export function App() {
     // of every other module's switch.
     setNotebook(data.notebook !== false);
     setTestingOn(data.testing === true);
+    // The switches' plugins mount and unmount to match — a tab appears or
+    // goes before this returns (src/plugins/client/loader.ts).
+    await syncClientPlugins(data.plugins);
     setGoogleCalendarOn(data.googleCalendar === true);
     setIssuesSetting(data.issues === true);
     setModelsOn(data.models === true);
@@ -4224,19 +4248,11 @@ export function App() {
   // Test management (specs/app/tests.feature.md): switched on, the
   // Tests tab appears and the module loads; off, the tab goes and a view of
   // it that is open leaves the pane. The document in the data repo, if any,
-  // is left where it is either way.
+  // is left where it is either way. All of that is the plugin's mount and
+  // dispose (src/plugins/builtin/tests/client.tsx), which patchSettings runs.
   const toggleTesting = async (on: boolean) => {
     setSettingsTestingDraft(on);
-    if (!(await patchSettings({ testing: on }))) {
-      setSettingsTestingDraft(!on);
-      return;
-    }
-    if (on) {
-      await testing.load();
-      return;
-    }
-    testing.reset();
-    if (testsViewRef.current) goHome();
+    if (!(await patchSettings({ testing: on }))) setSettingsTestingDraft(!on);
   };
 
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
@@ -5312,15 +5328,20 @@ export function App() {
         if (tab) void newPage(tab);
       },
     },
-    {
-      id: "go-tests",
-      keys: "g e",
-      label: "Go to the tests",
-      group: "Navigate",
-      when: () => !quiet && testingOn,
-      palette: () => !quietBehindPalette && testingOn,
-      run: () => openTests({ kind: "plans" }, { push: true }),
-    },
+    // Each plugin's tab has its own `g` chord (specs/app/plugins.feature.md).
+    ...pluginTabs
+      .filter((tab) => tab.shortcut)
+      .map(
+        (tab): Shortcut => ({
+          id: `go-${tab.id}`,
+          keys: tab.shortcut!,
+          label: `Go to the ${tab.title.toLowerCase()}`,
+          group: "Navigate",
+          when: () => !quiet,
+          palette: () => !quietBehindPalette,
+          run: () => openPluginView(tab.id, tab.route.home, { push: true }),
+        }),
+      ),
     {
       id: "go-issues",
       keys: "g i",
@@ -5594,17 +5615,11 @@ export function App() {
     shortcutAction("go-home", <Home size={14} />),
     shortcutAction("go-roadmap", <MapIcon size={14} />),
     shortcutAction("go-tasks", <ListTodo size={14} />),
-    shortcutAction("go-tests", <FlaskConical size={14} />),
-    ...(testingOn
-      ? [
-          action("new-plan", "New test plan", <FlaskConical size={14} />, () =>
-            void newPlanFlow(prompt, openTests),
-          ),
-          action("new-case", "New test case", <FlaskConical size={14} />, () =>
-            void newCaseFlow(prompt, openTests),
-          ),
-        ]
-      : []),
+    // The plugins' tabs: the way there, and each tab's own commands.
+    ...pluginTabs.flatMap((tab) => [
+      shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
+      ...(tab.palette?.commands?.({ prompt, confirm, navigate: navigateIn(tab.id) }) ?? []),
+    ]),
     shortcutAction("go-issues", <Bug size={14} />),
     shortcutAction("go-models", <Workflow size={14} />),
     // Not in the demo: its Issues tab reads the release repo and writes
@@ -5647,19 +5662,22 @@ export function App() {
       .find((f) => f.fileName === fileName)
       ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
-    // The Tests tab searches the module's own store: the server's full-text
-    // index knows only markdown (src/frontend/testing.ts searchTests).
-    if (shownTab === "tests") {
-      return searchTests(q, testingStore).map(
+    // A plugin's tab searches its own store — the server's full-text index
+    // knows only markdown — when the tab offers a search.
+    const shownPlugin = pluginTabs.find((tab) => tab.id === shownTab);
+    if (shownPlugin?.palette?.search) {
+      const { group } = shownPlugin.palette;
+      const Icon = shownPlugin.icon;
+      return shownPlugin.palette.search(q).map(
         (hit): PaletteItem => ({
-          id: `tests:${hit.kind}:${hit.id}`,
-          group: "Tests",
+          id: hit.id,
+          group,
           label: hit.label,
           text: hit.label,
           sub: hit.sub,
-          icon: <FlaskConical size={14} />,
+          icon: <Icon size={14} />,
           href: hit.href,
-          run: () => openTests(hit.view, { push: true }),
+          run: () => openPluginView(shownPlugin.id, hit.view, { push: true }),
         }),
       );
     }
@@ -5819,6 +5837,16 @@ export function App() {
         goHome();
         void loadReadme();
       }),
+  };
+  /** What a plugin's tab gets from App (src/plugins/client/tabs.ts). */
+  const tabApp: TabApp = {
+    features,
+    members,
+    assignments,
+    repoCrumb,
+    autosaveSeconds,
+    prompt,
+    confirm,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -6092,7 +6120,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !testsView && !issuesView && !openModel ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !pluginView && !issuesView && !openModel ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -6127,18 +6155,20 @@ export function App() {
               </Tooltip>
             );
           })}
-          {testingOn && (
-            <Tooltip label="Tests" keys="g e">
+          {pluginTabs.map((tab) => (
+            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
-                href="/tests"
-                className={`rail-link${testsView ? " active" : ""}`}
-                aria-label="Tests"
-                onClick={(e) => spaClick(e, () => openTests({ kind: "plans" }, { push: true }))}
+                href={tab.route.path(tab.route.home)}
+                className={`rail-link${pluginView?.tab === tab.id ? " active" : ""}`}
+                aria-label={tab.title}
+                onClick={(e) =>
+                  spaClick(e, () => openPluginView(tab.id, tab.route.home, { push: true }))
+                }
               >
-                <FlaskConical size={16} aria-hidden="true" />
+                <tab.icon size={16} aria-hidden="true" />
               </a>
             </Tooltip>
-          )}
+          ))}
           {modelsOn && modelsStore.models.length > 0 && (
             <Tooltip label="Models" keys="g m">
               <a
@@ -6424,7 +6454,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {(shownPageTabs.length > 0 || testingOn || issuesOn || modelsOn) && (
+        {(shownPageTabs.length > 0 || pluginTabs.length > 0 || issuesOn || modelsOn) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -6484,24 +6514,29 @@ export function App() {
                 <Bug size={14} aria-hidden="true" /> Issues
               </button>
             )}
-            {testingOn && (
+            {/* The plugins' tabs (specs/app/plugins.feature.md), in their
+                order, after the core's. */}
+            {pluginTabs.map((tab) => (
               <button
+                key={tab.id}
                 type="button"
                 role="tab"
-                id="side-tab-tests"
-                aria-selected={shownTab === "tests"}
-                aria-controls="side-panel-tests"
-                className={shownTab === "tests" ? "active" : ""}
+                id={`side-tab-${tab.id}`}
+                aria-selected={shownTab === tab.id}
+                aria-controls={`side-panel-${tab.id}`}
+                className={shownTab === tab.id ? "active" : ""}
                 onClick={() => {
-                  selectSidebarTab("tests");
+                  selectSidebarTab(tab.id);
                   // The tab is the module's door: with none of its views
-                  // open yet, it opens the plan list.
-                  if (!testsViewRef.current) openTests({ kind: "plans" }, { push: true });
+                  // open yet, it opens the tab's home view.
+                  if (pluginViewRef.current?.tab !== tab.id) {
+                    openPluginView(tab.id, tab.route.home, { push: true });
+                  }
                 }}
               >
-                <FlaskConical size={14} aria-hidden="true" /> Tests
+                <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
-            )}
+            ))}
           </div>
         )}
         {shownTab === "specs" && (
@@ -6791,11 +6826,18 @@ export function App() {
             </div>
           </div>
           ))}
-        {/* The Tests tab (specs/app/tests.feature.md): the plans and
-            the case library, with their ⋯ menus (src/frontend/TestsPane.tsx). */}
-        {shownTab === "tests" && testingOn && (
-          <TestsSidebar view={testsView} prompt={prompt} confirm={confirm} onNavigate={openTests} />
-        )}
+        {/* A plugin's tab (specs/app/plugins.feature.md) — the Tests tab's
+            plans and case library, say: the tab's own sidebar. */}
+        {pluginTabs
+          .filter((tab) => tab.id === shownTab)
+          .map((tab) => (
+            <tab.Sidebar
+              key={tab.id}
+              view={pluginView?.tab === tab.id ? pluginView.view : null}
+              app={tabApp}
+              navigate={navigateIn(tab.id)}
+            />
+          ))}
         {/* The Issues tab (specs/app/github-issues.feature.md): the code
             repo's GitHub issues, open or closed (src/frontend/IssuesPane.tsx). */}
         {shownTab === "issues" && issuesOn && (
@@ -6915,7 +6957,11 @@ export function App() {
             selected ??
             openPage?.fileName ??
             openModel ??
-            (testsView ? testsKey(testsView) : issuesView ? issuesKey(issuesView) : "home")
+            (pluginView && activeTab
+              ? activeTab.route.key(pluginView.view)
+              : issuesView
+                ? issuesKey(issuesView)
+                : "home")
           }
         >
         {editing && selected && feature ? (
@@ -7918,21 +7964,11 @@ export function App() {
             onNavigate={openIssues}
             onOpenSettings={openSettings}
           />
-        ) : testsView && testingOn ? (
-          /* The test management module (specs/app/tests.feature.md):
-             plans, cases and runs take the whole pane (src/frontend/TestsPane
-             .tsx); App only knows which view is open. */
-          <TestsPane
-            view={testsView}
-            features={features}
-            members={members}
-            assignments={assignments}
-            repoCrumb={repoCrumb}
-            autosaveSeconds={autosaveSeconds}
-            prompt={prompt}
-            confirm={confirm}
-            onNavigate={openTests}
-          />
+        ) : pluginView && activeTab ? (
+          /* A plugin's view (specs/app/plugins.feature.md) — the test
+             management module's plans, cases and runs, say — takes the whole
+             pane; App only knows which tab and view are open. */
+          <activeTab.Pane view={pluginView.view} app={tabApp} navigate={navigateIn(activeTab.id)} />
         ) : openPage && openPageText === null ? (
           <PageSkeleton cards={1} />
         ) : openPage && openPageText !== null ? (
