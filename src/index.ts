@@ -1,5 +1,6 @@
 import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
+import { shell } from "./plugins/host/loader";
 import { isDemoMode, setupDemo } from "./server/demo";
 import { initTelemetry } from "./server/telemetry";
 
@@ -45,10 +46,11 @@ const server = Bun.serve({
     // serves the shell too.
     "/models": index,
     "/models/*": index,
-    // The test management module (specs/app/tests.feature.md): its
-    // plans, cases and runs address the same way.
-    "/tests": index,
-    "/tests/*": index,
+    // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
+    // app shell"): each module behind the kernel names its prefix in its
+    // manifest, on or off, so a deep link to a switched-off tab still lands
+    // in the app and goes home there.
+    ...Object.fromEntries(shell.prefixes().flatMap((p) => [[p, index], [`${p}/*`, index]])),
     // GitHub issue tracking (specs/app/github-issues.feature.md): the list,
     // the new-issue form and one issue by number.
     "/issues": index,

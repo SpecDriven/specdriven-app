@@ -7,9 +7,9 @@ import {
   resolveScenario,
   pageLink,
   scenarioPath,
-  testsPath,
   issuesPath,
 } from "../src/frontend/route";
+import { parseTestsRoute, testsPath } from "../src/plugins/builtin/tests/route";
 import type { Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number): Scenario => ({
@@ -75,19 +75,23 @@ describe("parseRoute", () => {
     expect(issuesPath({ kind: "issue", number: 7 })).toBe("/issues/7");
   });
 
-  // The test management module (specs/app/tests.feature.md): the
-  // plan list, the case library, and one case, plan or run by id.
+  // The test management module (specs/app/tests.feature.md) parses its own
+  // urls, as a plugin (src/plugins/builtin/tests/route.ts): the plan list,
+  // the case library, and one case, plan or run by id. To the core router
+  // they are nothing — home — until the mounted tab claims them.
   test("tests routes", () => {
-    expect(parseRoute("/tests")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/cases")).toEqual({ tests: { kind: "cases" } });
-    expect(parseRoute("/tests/plans/p1")).toEqual({ tests: { kind: "plan", id: "p1" } });
-    expect(parseRoute("/tests/cases/a%20b")).toEqual({ tests: { kind: "case", id: "a b" } });
-    expect(parseRoute("/tests/runs/r1/extra")).toEqual({ tests: { kind: "run", id: "r1" } });
+    expect(parseTestsRoute("/tests")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/cases")).toEqual({ kind: "cases" });
+    expect(parseTestsRoute("/tests/plans/p1")).toEqual({ kind: "plan", id: "p1" });
+    expect(parseTestsRoute("/tests/cases/a%20b")).toEqual({ kind: "case", id: "a b" });
+    expect(parseTestsRoute("/tests/runs/r1/extra")).toEqual({ kind: "run", id: "r1" });
     // Anything else under /tests is the plan list, not home.
-    expect(parseRoute("/tests/plans")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/nope/x")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/testsy")).toEqual({});
+    expect(parseTestsRoute("/tests/plans")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/nope/x")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/testsy")).toBeNull();
+    expect(parseTestsRoute("/features/x")).toBeNull();
+    expect(parseRoute("/tests/plans/p1")).toEqual({});
     for (const view of [
       { kind: "plans" as const },
       { kind: "cases" as const },
@@ -95,7 +99,7 @@ describe("parseRoute", () => {
       { kind: "plan" as const, id: "p1" },
       { kind: "run" as const, id: "r/1" },
     ]) {
-      expect(parseRoute(testsPath(view))).toEqual({ tests: view });
+      expect(parseTestsRoute(testsPath(view))).toEqual(view);
     }
     expect(testsPath({ kind: "run", id: "r/1" })).toBe("/tests/runs/r%2F1");
   });
