@@ -6,6 +6,12 @@ import "@fontsource-variable/jetbrains-mono";
 
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { publishSdk } from "../plugins/client/sdk";
+
+// One React on the page (roadmap/plugin-architecture.md): plugin bundles
+// import react through shims that read it from here, so it is published
+// before the app — and any plugin — renders.
+publishSdk();
 
 // Under Electron (specs/desktop-app.spec.md "Window") the CSS makes room
 // for the macOS traffic lights and marks the sidebar header as the drag
