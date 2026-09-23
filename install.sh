@@ -288,7 +288,11 @@ info "Installing dependencies…"
 
 info ""
 info "Building the desktop app — this fetches Electron and takes a few minutes…"
-( cd "$TARGET" && "$BUN" run build:desktop ) || die "\`bun run build:desktop\` failed in $TARGET"
+# --local: only the installer this machine runs (the AppImage or the .dmg, for
+# its own architecture) — not the release's .deb, whose packager needs a Ruby
+# library that non-Debian distros lack, nor builds for other architectures.
+( cd "$TARGET" && "$BUN" run build:desktop --local ) \
+  || die "\`bun run build:desktop --local\` failed in $TARGET"
 
 # --- start it -------------------------------------------------------------------
 
@@ -333,11 +337,14 @@ info "  bun run start            # http://localhost:3000"
 # be dragged into Applications. Linux has no equivalent, so nothing runs there.
 case "$(uname -s)" in
   Darwin)
-    dmg="$TARGET/release/SpecDriven-$VERSION-arm64.dmg"
-    if [ -f "$dmg" ]; then
-      info ""
-      info "Opening ${dmg}…"
-      open "$dmg"
-    fi
+    # -arm64 on Apple silicon; electron-builder leaves the x64 suffix off.
+    for dmg in "$TARGET"/release/SpecDriven-"$VERSION"*.dmg; do
+      if [ -f "$dmg" ]; then
+        info ""
+        info "Opening ${dmg}…"
+        open "$dmg"
+        break
+      fi
+    done
     ;;
 esac
