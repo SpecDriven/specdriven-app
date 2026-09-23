@@ -88,7 +88,11 @@ describe("matchApi", () => {
   // whole module, and a write per entity.
   // GitHub issues (specs/app/github-issues.feature.md): list and create,
   // one issue read and edited, and its comments added to.
-  test("issue routes match by method", () => {
+  test("issue routes match by method", async () => {
+    // The module is a plugin: its routes exist while the switch mounts it.
+    await syncPlugins({ issues: false });
+    expect(matchApi("GET", "/api/issues")).toBeNull();
+    await syncPlugins({ issues: true });
     expect(matchApi("GET", "/api/issues")).not.toBeNull();
     expect(matchApi("POST", "/api/issues")).not.toBeNull();
     expect(matchApi("DELETE", "/api/issues")).toBeNull();

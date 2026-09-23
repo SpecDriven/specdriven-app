@@ -153,19 +153,7 @@ import {
   setSupersedes,
   supersededBy,
 } from "./notebook";
-import {
-  GitHubError,
-  addComment,
-  createIssue,
-  getIssue,
-  getPullRequest,
-  listComments,
-  listIssues,
-  parseIssueNumber,
-  readIssuesRepo,
-  updateIssue,
-  type IssueState,
-} from "./issues";
+import { getPullRequest, readIssuesRepo } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import type { PullRequestLookup } from "./pullRequests";
@@ -1898,48 +1886,7 @@ const unlessDemo =
 // The test management module's routes live in its plugin
 // (src/plugins/builtin/tests/host.ts) and exist only while it is mounted.
 
-// GitHub issue tracking (specs/app/github-issues.feature.md): the issues of
-// the repository the data repo's code-repo pushes to (src/server/issues.ts).
-// Served only while the Settings switch is on — enforced here and not only
-// in the UI, like the other switches. Every call goes to GitHub as the
-// user; a data repo whose code repo is not a GitHub one has no issues to
-// show.
-//
-// The demo reads the public release repo (demo.ts DEMO_ISSUES_REPO) so its
-// Issues tab shows real issues, but stays read-only: a visitor is signed in
-// to nothing, so a write would be an anonymous one on a public repository —
-// refused here rather than sent to GitHub to fail.
-const withIssues = (
-  handler: (
-    repo: NonNullable<Awaited<ReturnType<typeof readIssuesRepo>>>,
-    req: Request,
-    params: Params,
-  ) => Response | Promise<Response>,
-  { readOnlyInDemo = false }: { readOnlyInDemo?: boolean } = {},
-): Handler =>
-  withDataDir(async (dir, req, params) => {
-    if (readOnlyInDemo && isDemoMode()) {
-      return json({ error: "The demo cannot change GitHub issues" }, 403);
-    }
-    if (!normalizeIssues((await readState(getAppRoot())).issues)) {
-      return json({ error: "GitHub issues are switched off in Settings" }, 404);
-    }
-    const repo = await readIssuesRepo(dir);
-    if (repo === null) {
-      return json(
-        { error: `No GitHub code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` },
-        404,
-      );
-    }
-    try {
-      return await handler(repo, req, params);
-    } catch (e) {
-      const status = e instanceof GitHubError ? e.status : 502;
-      return json({ error: (e as Error).message }, status);
-    }
-  });
-
-const ISSUE_STATES: IssueState[] = ["open", "closed", "all"];
+// GitHub issue tracking lives in its plugin (src/plugins/builtin/issues/host.ts).
 
 /**
  * The name of the test a reference url points at (specs/external-links/
@@ -2040,31 +1987,6 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
   return json(test);
 });
 
-const getIssues = withIssues(async (repo, req) => {
-  const wanted = new URL(req.url).searchParams.get("state");
-  const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
-  return json({ repo, state, issues: await listIssues(repo, state) });
-});
-const getIssueRoute = withIssues(async (repo, _req, params) => {
-  const number = parseIssueNumber(params.number);
-  const [issue, comments] = await Promise.all([getIssue(repo, number), listComments(repo, number)]);
-  return json({ issue, comments });
-});
-const postIssue = withIssues(
-  async (repo, req) => json({ issue: await createIssue(repo, await bodyOf(req)) }, 201),
-  { readOnlyInDemo: true },
-);
-const putIssue = withIssues(
-  async (repo, req, params) =>
-    json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
-  { readOnlyInDemo: true },
-);
-const postIssueComment = withIssues(
-  async (repo, req, params) =>
-    json({ comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) }, 201),
-  { readOnlyInDemo: true },
-);
-
 // The core routes, registered first on the plugin kernel's route registry
 // (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
 // plugin appends its own, and a disposed one takes them away again.
@@ -2115,11 +2037,6 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
   ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
-  ["GET", "/api/issues", getIssues],
-  ["POST", "/api/issues", postIssue],
-  ["GET", "/api/issues/:number", getIssueRoute],
-  ["PUT", "/api/issues/:number", putIssue],
-  ["POST", "/api/issues/:number/comments", postIssueComment],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],

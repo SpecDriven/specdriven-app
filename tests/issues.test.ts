@@ -9,6 +9,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 import {
   GitHubError,
   addComment,
@@ -344,6 +345,10 @@ describe("the GitHub API", () => {
       await writeFile(join(data, "README.md"), "# Specs\n");
       await writeFile(join(data, "project-settings.json"), JSON.stringify(codeRepo ? { "code-repo": codeRepo } : {}));
       await writeState({ dataRepo: data, reloadFrequencySeconds: 0, issues: true }, appRoot);
+      // The module is a plugin (specs/app/plugins.feature.md): the server
+      // mounts it from the settings at startup and on every settings write;
+      // a state written behind its back is followed by hand here.
+      await syncPlugins({ issues: true });
       return data;
     }
 
@@ -358,9 +363,10 @@ describe("the GitHub API", () => {
       await fakeRepo(join(root, "app"), "https://github.com/acme/app.git");
       const data = await dataRepo("../app");
       await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, appRoot);
-      const off = await handleApi(new Request("http://localhost/api/issues"));
-      expect(off!.status).toBe(404);
-      expect(((await off!.json()) as { error: string }).error).toContain("switched off");
+      await syncPlugins({ issues: false });
+      // Off, the plugin is not mounted and the route is not there: the
+      // server answers 404 the way it does for any unknown path.
+      expect(await handleApi(new Request("http://localhost/api/issues"))).toBeNull();
       expect(seen).toHaveLength(0);
       let state = await handleApi(new Request("http://localhost/api/state"));
       expect(((await state!.json()) as { issues: boolean }).issues).toBe(false);

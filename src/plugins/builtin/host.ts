@@ -5,6 +5,8 @@
 
 import type { Context, Plugin } from "../kernel";
 import type { PluginManifest } from "../manifest";
+import issues from "./issues/host";
+import { manifest as issuesManifest } from "./issues/manifest";
 import tests from "./tests/host";
 import { manifest as testsManifest } from "./tests/manifest";
 
@@ -13,4 +15,7 @@ export interface HostPlugin {
   plugin: Plugin<Context>;
 }
 
-export const builtinHostPlugins: HostPlugin[] = [{ manifest: testsManifest, plugin: tests }];
+export const builtinHostPlugins: HostPlugin[] = [
+  { manifest: issuesManifest, plugin: issues },
+  { manifest: testsManifest, plugin: tests },
+];

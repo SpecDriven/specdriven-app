@@ -8,10 +8,10 @@ import { handleApi, matchApi } from "../src/server/api";
 import { pluginStates, shell, sync, syncPlugins } from "../src/plugins/host/loader";
 import { pluginWanted } from "../src/plugins/manifest";
 import { manifest as testsManifest } from "../src/plugins/builtin/tests/manifest";
-import { matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
+import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 
 afterEach(async () => {
-  await syncPlugins({ testing: false });
+  await syncPlugins({ testing: false, issues: false });
   await syncClientPlugins([]);
 });
 
@@ -20,6 +20,13 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   expect(matchApi("GET", "/api/tests")).toBeNull();
   expect(await handleApi(new Request("http://x/api/tests"))).toBeNull();
   expect(pluginStates()).toEqual([
+    {
+      id: "issues",
+      displayName: "GitHub issues",
+      description: "The code repo's GitHub issues on their own tab",
+      builtin: true,
+      enabled: false,
+    },
     {
       id: "tests",
       displayName: "Test management",
@@ -35,7 +42,7 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
     id: "e1",
     caseId: "c/1",
   });
-  expect(pluginStates()[0]!.enabled).toBe(true);
+  expect(pluginStates().find((p) => p.id === "tests")!.enabled).toBe(true);
   // Core routes still come first, and are untouched by the mount.
   expect(matchApi("GET", "/api/state")).not.toBeNull();
   expect(matchApi("POST", "/api/tests/open-in-idea")).not.toBeNull();
@@ -43,7 +50,7 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   await syncPlugins({ testing: false });
   expect(matchApi("GET", "/api/tests")).toBeNull();
   expect(matchApi("POST", "/api/tests/open-in-idea")).not.toBeNull();
-  expect(pluginStates()[0]!.enabled).toBe(false);
+  expect(pluginStates().find((p) => p.id === "tests")!.enabled).toBe(false);
 });
 
 test("a switch that is absent means the manifest's default", () => {
@@ -95,5 +102,40 @@ test("the browser loader registers the tab while the server says it is on", asyn
     expect(tabs.list()).toEqual([]);
   } finally {
     console.error = quiet;
+  }
+});
+
+test("the Issues tab registers only while the store knows a GitHub repo", async () => {
+  // The plugin's first list load is a fetch this test answers by hand: a
+  // data folder whose code repo is not on GitHub has no tab, and one whose
+  // code repo is gets it — with the tab following the store either way.
+  const realFetch = globalThis.fetch;
+  let answer: { status: number; body: unknown } = {
+    status: 404,
+    body: { error: "No GitHub code repo" },
+  };
+  globalThis.fetch = (async () => Response.json(answer.body, { status: answer.status })) as typeof fetch;
+  try {
+    await syncClientPlugins([{ id: "issues", enabled: true }]);
+    expect(tabs.list().map((t) => t.id)).toEqual([]);
+    expect(matchPluginRoute("/issues/12")).toBeNull();
+
+    // The data folder changes to one with a GitHub code repo.
+    answer = {
+      status: 200,
+      body: { repo: { owner: "acme", name: "app", url: "https://github.com/acme/app" }, state: "open", issues: [] },
+    };
+    await client.serial("data/changed");
+    expect(tabs.list().map((t) => t.id)).toEqual(["issues"]);
+    expect(matchPluginRoute("/issues/12")?.view).toEqual({ kind: "issue", number: 12 });
+
+    // And back to one without: the tab goes, the plugin stays mounted.
+    answer = { status: 404, body: { error: "No GitHub code repo" } };
+    await client.serial("data/changed");
+    expect(tabs.list()).toEqual([]);
+
+    await syncClientPlugins([]);
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });

@@ -11,7 +11,7 @@
 import { useSyncExternalStore } from "react";
 import type { GitHubRepo, Issue, IssueComment, IssueState } from "../server/issues";
 import { toast } from "./Toasts";
-import { issuesPath, type IssuesRoute } from "./route";
+import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 
 export type { GitHubRepo, Issue, IssueComment, IssueState };
 
@@ -135,6 +135,8 @@ export function applyComment(store: IssuesStore, number: number, comment: IssueC
 }
 
 export const issues = {
+  /** Watch the store outside React — the plugin tab hands this to App. */
+  subscribe,
   /** GET /api/issues for a state filter into the store; the pane shows `error` when it fails. */
   async load(filter: IssueState = state.filter): Promise<void> {
     set({ ...state, filter, loading: true });
