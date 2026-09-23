@@ -42,10 +42,6 @@ const server = Bun.serve({
     // (specs/app/engineering-notebook.feature.md).
     "/notebook": index,
     "/notebook/*": index,
-    // Event Models (roadmap/support-event-modeling.md): each model's url
-    // serves the shell too.
-    "/models": index,
-    "/models/*": index,
     // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
     // app shell"): each module behind the kernel names its prefix in its
     // manifest, on or off, so a deep link to a switched-off tab still lands

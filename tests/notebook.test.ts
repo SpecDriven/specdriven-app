@@ -71,7 +71,7 @@ test("a sync tick never creates the notebook folder", async () => {
   await syncDataDir(clones.a);
   expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
   // Even with every other folder asked for, the notebook is not made.
-  await syncDataDir(clones.a, { roadmap: true, tasks: true, models: true });
+  await syncDataDir(clones.a, { roadmap: true, tasks: true });
   expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
 });
 
