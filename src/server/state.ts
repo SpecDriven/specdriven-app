@@ -99,7 +99,17 @@ export interface SpecDrivenState {
    * the manifests' defaults — decide, and the app writes the list back once
    * (src/plugins/profile.ts). Device-local like the switches it replaces.
    */
-  plugins?: { enabled?: string[] };
+  plugins?: {
+    enabled?: string[];
+    /** Explicit plugin folders, `{ path }` rows. */
+    sources?: { path: string }[];
+    /** Data-repo plugin folders trusted to load. */
+    trusted?: string[];
+    /** Folder plugins already adopted once, so switching one off sticks. */
+    seen?: string[];
+    /** The marketplaces to browse, `{ name, source }`; absent, the SpecDriven index. */
+    marketplaces?: { name: string; source: string }[];
+  };
   /**
    * @deprecated The per-module switches from before the profile: `roadmap`,
    * `tasks`, `notebook` (the one that was on unless turned off), `models`,

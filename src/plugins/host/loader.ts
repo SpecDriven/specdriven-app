@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { version as appVersion } from "../../../package.json";
 import { Context, type Disposer, type Plugin, type Scope } from "../kernel";
 import type { PluginManifest } from "../manifest";
+import type { InstallRecord } from "../marketplace";
 import { PROFILE_KEY, readProfile, writeProfile } from "../profile";
 import { builtinHostPlugins } from "../builtin/host";
 import { builtinManifests } from "../builtin/manifests";
@@ -31,6 +32,7 @@ import {
   pluginBuildHome,
   pluginsHome,
   repoPluginsDir,
+  safeId,
   type DiscoveredPlugin,
   type SourceKind,
 } from "./sources";
@@ -114,6 +116,8 @@ interface External {
   dir: string;
   source: SourceKind;
   manifest?: PluginManifest;
+  /** Where a marketplace install came from, for a folder that has the record. */
+  install?: InstallRecord;
   trusted: boolean;
   /** Why it is not running: from discovery, the build, or the mount. */
   error?: string;
@@ -308,8 +312,19 @@ function externalState(entry: External, enabled: boolean): PluginState {
     active: scope?.status === "active",
     ...(build?.clientCode ? { client: clientUrl(entry.id, build.rev), rev: build.rev } : {}),
     ...(entry.manifest?.permissions ? { permissions: entry.manifest.permissions } : {}),
+    ...(entry.install ? { install: entry.install } : {}),
     ...(error ? { error } : {}),
   };
+}
+
+/** A folder plugin as the loader knows it, for the marketplace's Update and Remove. */
+export function externalPlugin(
+  id: string,
+): { id: string; dir: string; source: SourceKind; install?: InstallRecord } | undefined {
+  const entry = external.get(id);
+  return entry
+    ? { id: entry.id, dir: entry.dir, source: entry.source, ...(entry.install ? { install: entry.install } : {}) }
+    : undefined;
 }
 
 /** The bundle route's url for a plugin's browser half at a revision. */
@@ -367,6 +382,7 @@ async function absorbDiscovered(found: DiscoveredPlugin[], trusted: string[]): P
       // Same folder as before: keep its build and its mount, refresh the rest.
       entry.source = plugin.source;
       entry.manifest = plugin.manifest;
+      entry.install = plugin.install;
       entry.trusted = isTrusted;
       // A discovery error replaces an old one; an old build or mount error
       // stays until the next build clears it.
@@ -380,6 +396,7 @@ async function absorbDiscovered(found: DiscoveredPlugin[], trusted: string[]): P
         dir: plugin.dir,
         source: plugin.source,
         manifest: plugin.manifest,
+        install: plugin.install,
         trusted: isTrusted,
         error,
         discoveryError: error,
@@ -536,11 +553,6 @@ async function pruneBuilds(folder: string, keep: string): Promise<void> {
   }
 }
 
-/** A plugin id as a folder name: the scope's `/` cannot be one. */
-function safeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
 // ---- watching ---------------------------------------------------------------
 
 const pending = new Map<string, ReturnType<typeof setTimeout>>();
@@ -618,7 +630,15 @@ function watchFolders(options: SyncOptions): void {
   }
 }
 
-/** Re-read the settings and sync, as a folder change asks. */
+/**
+ * Re-read the settings and sync, as a folder change asks — and as an
+ * install, update or removal does once it changed the plugins folder. The
+ * browser hears of it when the set or a revision changed.
+ */
+export async function rescanPlugins(): Promise<void> {
+  return rescan();
+}
+
 async function rescan(): Promise<void> {
   if (!lastOptions.readState) return;
   const before = new Map([...external].map(([id, e]) => [id, e.build?.rev]));
