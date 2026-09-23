@@ -31,8 +31,13 @@ import {
   savePage,
 } from "../src/server/pages";
 import { parsePage, serializePage } from "../src/server/parser";
-import { normalizeTasks } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `tasks` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeTasks = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { tasks: value }, builtinManifests).enabled.includes("tasks");
 
 let root: string;
 

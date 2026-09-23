@@ -93,43 +93,28 @@ export interface SpecDrivenState {
       immutable unless this is explicitly turned on. */
   deletePublished?: boolean;
   /**
-   * Show the data repo's `roadmap` folder — the markdown pages above the
-   * feature folders (specs/app/roadmap.feature.md); absent means OFF. On, the
-   * folder is created if the repo has none, and the sidebar lists its pages;
-   * off, the folder and its pages are simply not shown.
+   * The plugin profile (specs/app/plugins.feature.md "The profile lists
+   * enabled plugins in tab order"): the enabled plugins, in the order their
+   * tabs follow Specs. Absent, the legacy switches below — or, without them,
+   * the manifests' defaults — decide, and the app writes the list back once
+   * (src/plugins/profile.ts). Device-local like the switches it replaces.
+   */
+  plugins?: { enabled?: string[] };
+  /**
+   * @deprecated The per-module switches from before the profile: `roadmap`,
+   * `tasks`, `notebook` (the one that was on unless turned off), `models`,
+   * `testing` and `issues`. A file that still has them is read as the
+   * matching profile once; `PUT /api/state` takes them as aliases for one
+   * release. Never written any more.
    */
   roadmap?: boolean;
-  /**
-   * Show the data repo's `tasks` folder — the same markdown pages as the
-   * roadmap's, called tasks and listed on their own sidebar tab
-   * (specs/app/tasks.feature.md); absent means OFF. On, the folder is created
-   * if the repo has none, and the sidebar lists its tasks; off, the folder
-   * and its tasks are simply not shown.
-   */
+  /** @deprecated See `roadmap`. */
   tasks?: boolean;
-  /**
-   * Show the data repo's `notebook` folder — the engineering notebook's
-   * dated entries on their own sidebar tab
-   * (specs/app/engineering-notebook.feature.md). Absent means ON: this is the
-   * one module that ships switched on, stored as `false` when a user turns it
-   * off. Nothing is created by the switch — the folder appears with the first
-   * entry — so a default-on module never touches a data repo by itself.
-   */
+  /** @deprecated See `roadmap`. */
   notebook?: boolean;
-  /**
-   * Show the data repo's `models` folder — Event Models on their own Models
-   * tab and canvas (roadmap/support-event-modeling.md); absent means OFF.
-   * On, the folder is created if the repo has none; off, the folder and its
-   * models are simply not shown.
-   */
+  /** @deprecated See `roadmap`. */
   models?: boolean;
-  /**
-   * Show the test management module (specs/app/tests.feature.md) —
-   * test cases, plans and executions on their own sidebar tab and pane;
-   * absent means OFF. On, the tab appears and the module's document is
-   * made in the data repo on its first write; off, the tab is simply not
-   * shown and the document, if any, is left alone.
-   */
+  /** @deprecated See `roadmap`. */
   testing?: boolean;
   /**
    * Google Calendar (specs/app/tasks.feature.md "Add task to Google
@@ -138,13 +123,7 @@ export interface SpecDrivenState {
    * no task carries the button and the estimate route is closed.
    */
   googleCalendar?: boolean;
-  /**
-   * GitHub issue tracking (specs/app/github-issues.feature.md): an Issues
-   * tab and pane for the issues of the GitHub repo the data repo's
-   * code-repo pushes to; absent means OFF. On, the tab appears once the
-   * project-settings.json names such a repo; off, nothing in the app asks
-   * GitHub for issues.
-   */
+  /** @deprecated See `roadmap`. */
   issues?: boolean;
   /**
    * Optional websocket sync server for near-real-time document sync
@@ -296,47 +275,9 @@ export function normalizeAssignments(value: unknown): boolean {
   return value === true;
 }
 
-/** Effective roadmap setting: OFF unless explicitly turned on — the roadmap
-    folder is opt-in (specs/app/roadmap.feature.md). */
-export function normalizeRoadmap(value: unknown): boolean {
-  return value === true;
-}
-
-/** Effective tasks setting: OFF unless explicitly turned on — the tasks
-    folder is opt-in like the roadmap's (specs/app/tasks.feature.md). */
-export function normalizeTasks(value: unknown): boolean {
-  return value === true;
-}
-
-/** Effective engineering notebook setting: ON unless explicitly turned off —
-    the one module that ships on (specs/app/engineering-notebook.feature.md).
-    It is safe to default on because the switch creates nothing: the notebook
-    folder appears with the first entry, not when the app starts. */
-export function normalizeNotebook(value: unknown): boolean {
-  return value !== false;
-}
-
-/** Effective models setting: OFF unless explicitly turned on — the models
-    folder is opt-in like the roadmap's (roadmap/support-event-modeling.md). */
-export function normalizeModels(value: unknown): boolean {
-  return value === true;
-}
-
-/** Effective test management setting: OFF unless explicitly turned on —
-    opt-in like the roadmap and tasks (specs/app/tests.feature.md). */
-export function normalizeTesting(value: unknown): boolean {
-  return value === true;
-}
-
 /** Effective Google Calendar setting: OFF unless explicitly turned on —
     opt-in like the other modules (specs/app/tasks.feature.md). */
 export function normalizeGoogleCalendar(value: unknown): boolean {
-  return value === true;
-}
-
-/** Effective GitHub issues setting: OFF unless explicitly turned on —
-    opt-in like the other modules (specs/app/github-issues.feature.md). */
-export function normalizeIssues(value: unknown): boolean {
   return value === true;
 }
 

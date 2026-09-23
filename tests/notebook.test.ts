@@ -34,8 +34,13 @@ import {
   supersededBy,
   today,
 } from "../src/server/notebook";
-import { normalizeNotebook } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `notebook` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeNotebook = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { notebook: value }, builtinManifests).enabled.includes("notebook");
 
 let root: string;
 

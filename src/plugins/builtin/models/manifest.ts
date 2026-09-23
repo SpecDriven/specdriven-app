@@ -8,7 +8,8 @@ export const manifest: PluginManifest = {
   api: "1",
   displayName: "Event models",
   description: "Event Models drawn on a canvas, sliced into specs",
-  // The historical settings key; off unless turned on.
-  switch: { key: "models", default: false },
+  // Off unless turned on; `models` was its switch before the profile.
+  defaultEnabled: false,
+  legacyKey: "models",
   paths: ["/models"],
 };

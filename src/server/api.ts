@@ -16,13 +16,7 @@ import {
   normalizeProjectManagement,
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
-  normalizeModels,
-  normalizeNotebook,
-  normalizeRoadmap,
-  normalizeTasks,
-  normalizeTesting,
   normalizeGoogleCalendar,
-  normalizeIssues,
   normalizeScenarioPreviewLines,
   normalizeOpenTestsInIdea,
   normalizeShowTestLinks,
@@ -137,7 +131,21 @@ import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
 import { version as appVersion } from "../../package.json";
 import { bodyOf, json, type Handler, type Params } from "./http";
-import { pluginStates, provideDataAccess, routes as routeRegistry, syncPlugins } from "../plugins/host/loader";
+import {
+  pluginStates,
+  provideDataAccess,
+  routes as routeRegistry,
+  syncPlugins,
+} from "../plugins/host/loader";
+import { builtinManifests } from "../plugins/builtin/manifests";
+import {
+  hasLegacyKeys,
+  legacyFields,
+  readProfile,
+  storedProfile,
+  withPlugin,
+  writeProfile,
+} from "../plugins/profile";
 
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
@@ -233,7 +241,16 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
-  // The built-in plugins the switches ask for (src/plugins/host/loader.ts).
+  // The profile (specs/app/plugins.feature.md "The profile lists enabled
+  // plugins in tab order"): a settings file from before plugins, with the
+  // per-module switches, is read as the matching list once and written back
+  // as `plugins.enabled`, so the file carries the list from here on.
+  const profile = readProfile(state as Record<string, unknown>, builtinManifests);
+  if (profile.migrated && hasLegacyKeys(state as Record<string, unknown>, builtinManifests)) {
+    writeProfile(state as Record<string, unknown>, profile.enabled, builtinManifests);
+    await writeState(state, getAppRoot());
+  }
+  // The built-in plugins the profile asks for (src/plugins/host/loader.ts).
   await syncPlugins(state as Record<string, unknown>);
   // External links go into the markdown projections only while the setting
   // says so (specs/external-links/project-management-jira-linear-etc.
@@ -343,18 +360,13 @@ async function stateFields(state: SpecDrivenState) {
     canRunCodex: codexAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
-    roadmap: normalizeRoadmap(state.roadmap),
-    tasks: normalizeTasks(state.tasks),
-    // The engineering notebook (specs/app/engineering-notebook.feature.md):
-    // the one module that is on unless turned off.
-    notebook: normalizeNotebook(state.notebook),
-    models: normalizeModels(state.models),
-    testing: normalizeTesting(state.testing),
-    // The plugins (specs/app/plugins.feature.md): every module behind the
-    // kernel, with whether it is mounted — what Settings → Plugins lists.
+    // The plugins (specs/app/plugins.feature.md): the profile's entries in
+    // tab order, then the built-ins it leaves off — what Settings → Plugins
+    // lists — with the per-module switches they replaced (`roadmap`,
+    // `testing`, …) still reported for one release.
     plugins: pluginStates(),
+    ...legacyFields(readProfile(state as Record<string, unknown>, builtinManifests).enabled, builtinManifests),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
-    issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -411,13 +423,16 @@ const putState: Handler = async (req) => {
     codeGenTarget?: string;
     deletePublished?: boolean;
     assignments?: boolean;
+    /** The profile: the enabled plugins, in tab order. */
+    plugins?: { enabled?: unknown };
+    /** The per-module switches the profile replaced — aliases for one release. */
     roadmap?: boolean;
     notebook?: boolean;
     tasks?: boolean;
     models?: boolean;
     testing?: boolean;
-    googleCalendar?: boolean;
     issues?: boolean;
+    googleCalendar?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -436,6 +451,7 @@ const putState: Handler = async (req) => {
     body.codeGenTarget === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
+    body.plugins === undefined &&
     body.roadmap === undefined &&
     body.notebook === undefined &&
     body.tasks === undefined &&
@@ -448,7 +464,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -639,63 +655,46 @@ const putState: Handler = async (req) => {
     if (body.assignments) state.assignments = true;
     else delete state.assignments;
   }
-  // The roadmap folder (specs/app/roadmap.feature.md): opt-in — the default
-  // OFF is an absent key. Turning it on creates the folder below, once the
-  // settings are written.
+  // The profile (specs/app/plugins.feature.md "The profile lists enabled
+  // plugins in tab order"): the ordered list of enabled plugins, taken whole
+  // as `plugins.enabled` — or edited one id at a time through the switches it
+  // replaced (`roadmap`, `testing`, …), which stay as aliases for one
+  // release: on appends the id, off removes it. Either way the file carries
+  // the list from here on and the legacy keys go.
+  const raw = state as Record<string, unknown>;
+  const before = readProfile(raw, builtinManifests).enabled;
+  let enabled = before;
+  if (body.plugins !== undefined) {
+    if (
+      !body.plugins ||
+      typeof body.plugins !== "object" ||
+      !Array.isArray(body.plugins.enabled) ||
+      !body.plugins.enabled.every((id) => typeof id === "string" && id.length > 0)
+    ) {
+      return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
+    }
+    enabled = storedProfile({ plugins: body.plugins }) ?? [];
+  }
+  for (const manifest of builtinManifests) {
+    const key = manifest.legacyKey as keyof typeof body | undefined;
+    if (!key || body[key] === undefined) continue;
+    if (typeof body[key] !== "boolean") {
+      return json({ error: `${key} must be a boolean` }, 400);
+    }
+    enabled = withPlugin(enabled, manifest.id, body[key] as boolean);
+  }
+  writeProfile(raw, enabled, builtinManifests);
+  // The special folders (specs/app/roadmap.feature.md "Create roadmap folder
+  // if necessary", specs/app/tasks.feature.md) and the models folder
+  // (roadmap/support-event-modeling.md) are made below when their plugin
+  // goes on, once the settings are written. The notebook's is not: it
+  // appears with the first entry, which is what lets a module ship on
+  // without writing to anybody's repo.
   const turnedOn: PageFolder[] = [];
-  if (body.roadmap !== undefined) {
-    if (typeof body.roadmap !== "boolean") {
-      return json({ error: "roadmap must be a boolean" }, 400);
-    }
-    if (body.roadmap && !normalizeRoadmap(state.roadmap)) turnedOn.push(ROADMAP);
-    if (body.roadmap) state.roadmap = true;
-    else delete state.roadmap;
-  }
-  // The tasks folder (specs/app/tasks.feature.md): the roadmap switch's twin
-  // — opt-in, an absent key when off, and the folder made below when it goes
-  // on.
-  if (body.tasks !== undefined) {
-    if (typeof body.tasks !== "boolean") {
-      return json({ error: "tasks must be a boolean" }, 400);
-    }
-    if (body.tasks && !normalizeTasks(state.tasks)) turnedOn.push(TASKS);
-    if (body.tasks) state.tasks = true;
-    else delete state.tasks;
-  }
-  // The engineering notebook (specs/app/engineering-notebook.feature.md):
-  // the switches' odd one out — ON unless explicitly turned off, so it is the
-  // `false` that is stored and the absent key that means on. Nothing is
-  // created here: the folder appears with the first entry, which is what lets
-  // a module ship on without writing to anybody's repo.
-  if (body.notebook !== undefined) {
-    if (typeof body.notebook !== "boolean") {
-      return json({ error: "notebook must be a boolean" }, 400);
-    }
-    if (body.notebook) delete state.notebook;
-    else state.notebook = false;
-  }
-  // The models folder (roadmap/support-event-modeling.md): the roadmap
-  // switch's third twin — opt-in, an absent key when off, and the folder
-  // made below when it goes on.
-  let modelsTurnedOn = false;
-  if (body.models !== undefined) {
-    if (typeof body.models !== "boolean") {
-      return json({ error: "models must be a boolean" }, 400);
-    }
-    if (body.models && !normalizeModels(state.models)) modelsTurnedOn = true;
-    if (body.models) state.models = true;
-    else delete state.models;
-  }
-  // Test management (specs/app/tests.feature.md): opt-in — an absent
-  // key when off. Nothing to make on the spot: the module's document is
-  // minted on its first write.
-  if (body.testing !== undefined) {
-    if (typeof body.testing !== "boolean") {
-      return json({ error: "testing must be a boolean" }, 400);
-    }
-    if (body.testing) state.testing = true;
-    else delete state.testing;
-  }
+  const nowOn = (id: string) => enabled.includes(id) && !before.includes(id);
+  if (nowOn("roadmap")) turnedOn.push(ROADMAP);
+  if (nowOn("tasks")) turnedOn.push(TASKS);
+  const modelsTurnedOn = nowOn("models");
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): opt-in — an absent key when off. Nothing to make: the
   // estimate lands on the task's own page, and the event on Google's side.
@@ -705,15 +704,6 @@ const putState: Handler = async (req) => {
     }
     if (body.googleCalendar) state.googleCalendar = true;
     else delete state.googleCalendar;
-  }
-  // GitHub issues (specs/app/github-issues.feature.md): opt-in — an
-  // absent key when off. Nothing else to do: the issues live on GitHub.
-  if (body.issues !== undefined) {
-    if (typeof body.issues !== "boolean") {
-      return json({ error: "issues must be a boolean" }, 400);
-    }
-    if (body.issues) state.issues = true;
-    else delete state.issues;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -730,8 +720,8 @@ const putState: Handler = async (req) => {
   }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
-  // The switches mount and unmount their plugins on the spot: a module
-  // turned off answers 404 from here on, one turned on has its routes.
+  // The profile mounts and unmounts its plugins on the spot: a module turned
+  // off answers 404 from here on, one turned on has its routes.
   await syncPlugins(state as Record<string, unknown>);
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
@@ -1255,7 +1245,7 @@ async function resolveSessionRequest(
       dir,
       wantedModels,
       files.map((f) => f.fileName),
-      { linkedToSpecs: normalizeModels(state.models) },
+      { linkedToSpecs: readProfile(state as Record<string, unknown>, builtinManifests).enabled.includes("models") },
     );
     models = bundled.models;
     // A model's own specs join the session whole, unless already picked.

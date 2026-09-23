@@ -181,6 +181,18 @@ test("every optional module is on except IntelliJ IDEA", async () => {
   // The exception: "Open test links in IntelliJ IDEA" runs `idea` on the
   // visitor's own machine, which a hosted demo cannot and should not do.
   expect(state.openTestsInIdea).toBe(false);
+  // The profile behind the module switches (specs/app/plugins.feature.md
+  // "The profile lists enabled plugins in tab order"): every built-in, on.
+  expect(
+    (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
+  ).toEqual([
+    ["roadmap", true, true],
+    ["tasks", true, true],
+    ["notebook", true, true],
+    ["issues", true, true],
+    ["models", true, true],
+    ["tests", true, true],
+  ]);
 });
 
 // The Models tab, unlike the roadmap's, is on: the dataset's Event Model
