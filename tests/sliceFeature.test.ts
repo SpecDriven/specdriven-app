@@ -32,6 +32,7 @@ import {
 } from "../src/server/models";
 import { writeState } from "../src/server/state";
 import { stopServers } from "./helpers/fixtures";
+import { syncPlugins } from "../src/plugins/host/loader";
 
 let root: string;
 let home: string;
@@ -326,8 +327,15 @@ describe("a session bundles the model", () => {
     expect((await missing.json()).error).toBe("model not found: models/none.model.json");
   });
 
-  test("the slice feature route exists", () => {
-    expect(matchApi("POST", "/api/models/models%2Fcart.model.json/slices/add-item/feature")).not.toBeNull();
+  // The route is the Models plugin's (src/plugins/builtin/models/host.ts):
+  // there while the switch has it mounted.
+  test("the slice feature route exists", async () => {
+    await syncPlugins({ models: true });
+    try {
+      expect(matchApi("POST", "/api/models/models%2Fcart.model.json/slices/add-item/feature")).not.toBeNull();
+    } finally {
+      await syncPlugins({ models: false });
+    }
     expect(matchApi("GET", "/api/models/models%2Fcart.model.json/slices/add-item/feature")).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 // store's lifecycle — comes from the registered tab.
 
 import type { ComponentType, ReactNode } from "react";
-import { useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { Disposer } from "../kernel";
 import type { Crumb } from "../../frontend/Breadcrumbs";
@@ -30,6 +30,18 @@ export interface TabApp {
   confirm: Confirm;
   /** Opens the Settings dialog — where the GitHub sign-in lives, say. */
   openSettings: () => void;
+  /** Open a feature page, pushing its url. */
+  openFeature: (fileName: string) => void;
+  /** A feature the module just wrote: re-read the listing, then open it. */
+  featureCreated: (fileName: string) => Promise<void>;
+  /** Open the code gen session dialog; absent while code gen is off. */
+  startSession?: () => void;
+  /** Copy an app url (a path) as a shareable link. */
+  copyLink: (path: string) => void;
+  /** The path last copied, for a "Copied" tick. */
+  copied: string | null;
+  /** Leave the pane for home — the open view's thing is gone. */
+  goHome: () => void;
 }
 
 /** Open one of the tab's views; `push` adds a history entry. */
@@ -64,16 +76,36 @@ export interface TabPlugin<V = unknown> {
     title(view: V): string;
     /** The view the tab opens on. */
     home: V;
+    /**
+     * Turn a view that names no one thing — the tab itself, `/models` — into
+     * the one it opens (the first model), or null when there is nothing to
+     * open: a deep link then goes home, and the tab has no rail icon and no
+     * `g` chord (specs/app/tasks.feature.md "A bare folder url opens that
+     * tab"). Absent, every view opens as it is.
+     */
+    resolve?(view: V): V | null;
   };
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
   palette?: {
     group: PaletteGroup;
-    /** The palette opened from this tab searches the tab's own data. */
-    search?(query: string): PaletteHit<V>[];
+    /** The palette opened from this tab searches the tab's own data — its
+        store, or its own server route. */
+    search?(query: string, signal: AbortSignal): PaletteHit<V>[] | Promise<PaletteHit<V>[]>;
     /** Commands the palette offers while the tab is mounted. */
     commands?(host: { prompt: Prompt; confirm: Confirm; navigate: Navigate<V> }): PaletteItem[];
   };
+  /**
+   * Crumbs a feature page carries back into the module — an Event Model
+   * whose slice links the feature, say. App makes each a link to the view.
+   */
+  featureCrumbs?(fileName: string): { label: ReactNode; title: string; view: V }[];
+  /**
+   * What a code gen session started while the view is open bundles beyond
+   * the picked specs: model files for the prompt, and how the session dialog
+   * names each. Null when the view bundles nothing.
+   */
+  session?(view: V): { models: string[]; labels: string[] } | null;
   /** The tab's store, so App re-renders titles when it changes. */
   subscribe?(listener: () => void): () => void;
 }
@@ -142,6 +174,32 @@ export function useTabStore(tab: TabPlugin | null): number {
 }
 const ticks = new WeakMap<object, number>();
 
+/**
+ * A counter that ticks with every listed tab's store — what App reads the
+ * tabs' crumbs, rail icons and session bundles through.
+ */
+export function useTabStores(list: TabPlugin[]): number {
+  const cell = useMemo(() => ({ n: 0 }), [list]);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const offs = list.map((t) =>
+        (t.subscribe ?? noop)(() => {
+          cell.n += 1;
+          listener();
+        }),
+      );
+      return () => offs.forEach((off) => off());
+    },
+    [list, cell],
+  );
+  return useSyncExternalStore(subscribe, () => cell.n, () => 0);
+}
+
+/** Whether a tab has anything to open: its home resolves to a view. */
+export function tabReachable(tab: TabPlugin): boolean {
+  return !tab.route.resolve || tab.route.resolve(tab.route.home) !== null;
+}
+
 /** Which plugin view has the main pane. */
 export interface PluginView {
   tab: string;
@@ -153,6 +211,9 @@ declare module "../kernel" {
     tabs: Registry<TabPlugin>;
   }
   interface Events {
+    /** The data folder is about to change: land what an open editor holds
+        in the folder it was typed in, and seal it against later saves. */
+    "data/leaving": () => void | Promise<void>;
     /** The data folder changed: forget the old one's data and load the new. */
     "data/changed": () => void | Promise<void>;
     /** The reload tick, with the plugin view that has the pane: refresh what

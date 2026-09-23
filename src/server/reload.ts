@@ -20,10 +20,9 @@ import {
   importPageDrift,
   type PageFolder,
 } from "./pages";
-import { ensureModelsFolder, importModelDrift } from "./models";
 import { ensureSpecsFolder } from "./features";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
-import { readState, needsDataRepo, normalizeModels, normalizeRoadmap, normalizeTasks } from "./state";
+import { readState, needsDataRepo, normalizeRoadmap, normalizeTasks } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 import { sync as pluginSync } from "../plugins/host/loader";
 
@@ -56,7 +55,6 @@ export async function reloadData(rootDir: string): Promise<string> {
   return syncDataDir(dir, {
     roadmap: normalizeRoadmap(state.roadmap),
     tasks: normalizeTasks(state.tasks),
-    models: normalizeModels(state.models),
   });
 }
 
@@ -70,15 +68,12 @@ export interface SyncOptions {
   roadmap?: boolean;
   /** The Tasks setting (specs/app/tasks.feature.md), the same for `tasks`. */
   tasks?: boolean;
-  /** The Models setting (roadmap/support-event-modeling.md), the same for
-      `models` — Event Model JSON files rather than markdown pages. */
-  models?: boolean;
 }
 
 /** The tick itself, on an already-resolved data dir (shared with tests). */
 export async function syncDataDir(
   dir: string,
-  { roadmap = false, tasks = false, models = false }: SyncOptions = {},
+  { roadmap = false, tasks = false }: SyncOptions = {},
 ): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
     const pulled = await pull(dir);
@@ -133,15 +128,9 @@ export async function syncDataDir(
       // their documents.
       const notebookDrift = await importPageDrift(dir, NOTEBOOK);
       if (notebookDrift) parts.push(notebookDrift);
-      // The models folder (roadmap/support-event-modeling.md): the same,
-      // for the Event Models' JSON files and their documents.
-      if (models) {
-        await ensureModelsFolder(dir);
-        const drift = await importModelDrift(dir);
-        if (drift) parts.push(drift);
-      }
       // The plugins' own drift passes (src/plugins/host/services.ts), in
-      // mount order, after the core's.
+      // mount order, after the core's — the Event Models' folder among them
+      // (src/plugins/builtin/models/host.ts).
       parts.push(...(await pluginSync.run(dir)));
     }
     const synced = await syncSavedChanges(dir);

@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -79,7 +79,6 @@ import {
   ArrowDown,
   Bot,
   CalendarPlus,
-  Workflow,
 } from "lucide-react";
 import {
   EntryKindChip,
@@ -98,15 +97,6 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { createPromiseQueue } from "./promiseQueue";
 export { createPromiseQueue };
 
-// Event Models (roadmap/support-event-modeling.md): the canvas and its
-// sidebar list ship in their own chunk — React Flow only reaches someone
-// who opens the Models tab.
-const ModelsPane = lazy(() =>
-  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsPane })),
-);
-const ModelsSidebar = lazy(() =>
-  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsSidebar })),
-);
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -117,6 +107,7 @@ import {
   useExcalidrawEnabled,
 } from "./excalidrawPref";
 import { markText } from "./highlight";
+import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -126,8 +117,13 @@ import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../plugins/client/loader";
-import { useRegistry, useTabStore, type PluginView, type TabApp } from "../plugins/client/tabs";
-import { models, modelsState, modelTitle, useModels } from "./eventModel/models";
+import {
+  tabReachable,
+  useRegistry,
+  useTabStores,
+  type PluginView,
+  type TabApp,
+} from "../plugins/client/tabs";
 import { entityFields } from "./entityFields";
 import {
   AGENT_DEFAULT_WIDTH,
@@ -158,8 +154,6 @@ import {
   pageFolderOf,
   pageLink,
   scenarioPath,
-  modelLink,
-  MODELS_FOLDER,
 } from "./route";
 import {
   addTestLink,
@@ -409,7 +403,7 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
 }
 
 /** A core tab, or a plugin's tab by its id (src/plugins/client/tabs.ts). */
-type SidebarTab = "specs" | PageTab["folder"] | "models" | (string & {});
+type SidebarTab = "specs" | PageTab["folder"] | (string & {});
 
 function readSidebarTab(): SidebarTab {
   try {
@@ -786,25 +780,6 @@ function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }
     .map(([dir, list]) => ({ dir, pages: list }));
 }
 
-
-/** Placeholder for a page while its content is on the way. */
-function PageSkeleton({ cards }: { cards: number }) {
-  return (
-    <div className="skeleton-page" aria-busy="true" aria-label="Loading">
-      <div className="skeleton-bar">
-        <span className="skeleton" style={{ height: "1.1rem", width: "18rem" }} />
-        <span className="skeleton" style={{ height: "1.75rem", width: "6rem", marginLeft: "auto" }} />
-      </div>
-      {Array.from({ length: cards }, (_, i) => (
-        <div key={i} className="skeleton-card">
-          <span className="skeleton" style={{ height: "0.9rem", width: `${40 + (i % 3) * 10}%` }} />
-          <span className="skeleton" style={{ height: "0.7rem", width: "90%" }} />
-          <span className="skeleton" style={{ height: "0.7rem", width: "72%" }} />
-        </div>
-      ))}
-    </div>
-  );
-}
 
 /** Two-letter initials for an assignee chip. */
 function initialsOf(name: string): string {
@@ -1220,7 +1195,7 @@ export function App() {
   pluginViewRef.current = pluginView;
   const activeTab = pluginView ? (pluginTabs.find((t) => t.id === pluginView.tab) ?? null) : null;
   /** Ticks with the active tab's store, so titles read through it stay current. */
-  const activeTabTick = useTabStore(activeTab);
+  const tabsTick = useTabStores(pluginTabs);
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): the Settings switch behind every task's calendar chip.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
@@ -1230,16 +1205,9 @@ export function App() {
   // folder's code repo is a GitHub one.
   const [issuesSetting, setIssuesSetting] = useState(false);
   // Event Models (roadmap/support-event-modeling.md): the Settings switch,
-  // and which model's canvas has the pane — null when none. The listing
-  // lives in its own store (src/frontend/eventModel/models.ts); the open
-  // model's file lives in the pane.
-  const [modelsOn, setModelsOn] = useState(false);
-  const [openModel, setOpenModel] = useState<string | null>(null);
-  const openModelRef = useRef<string | null>(null);
-  openModelRef.current = openModel;
-  /** Bumped on each reload tick so an open canvas re-reads its file. */
-  const [modelsReloadKey, setModelsReloadKey] = useState(0);
-  const modelsStore = useModels();
+  // as the Settings dialog's row shows it. The module is a plugin
+  // (src/plugins/builtin/models).
+  const [modelsSetting, setModelsSetting] = useState(false);
   const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
   const [taskPages, setTaskPages] = useState<PageListing[]>([]);
   /** The notebook's entries, newest first as the server lists them, and for
@@ -1272,16 +1240,6 @@ export function App() {
    */
   const pageSaveQueue = useRef(createPromiseQueue());
   /**
-   * The open canvas's parting save. Repo switch awaits it: it lands what the
-   * canvas still holds in the folder it was drawn in, then seals the pane so
-   * no later save of its — the unmount one above all — reaches the new
-   * folder (src/frontend/eventModel/ModelsPane.tsx).
-   */
-  const modelSaveFlush = useRef<() => Promise<void>>(async () => {});
-  const bindModelSave = useCallback((handle: { flush: () => Promise<void> } | null) => {
-    modelSaveFlush.current = handle?.flush ?? (async () => {});
-  }, []);
-  /**
    * Nested count of Done / Assigned writes that have been queued and not
    * yet finished. Autosave skips while this is > 0 so a snapshot taken
    * before the marker cannot overwrite it.
@@ -1308,8 +1266,7 @@ export function App() {
   /** The tab on screen: a page tab only while its switch still shows it. */
   const shownTab: SidebarTab =
     shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
-    pluginTabs.some((tab) => tab.id === sidebarTab) ||
-    (sidebarTab === "models" && modelsOn)
+    pluginTabs.some((tab) => tab.id === sidebarTab)
       ? sidebarTab
       : "specs";
   /** The pages of one special folder, as the sidebar and palette list them. */
@@ -1565,7 +1522,7 @@ export function App() {
         setGoogleCalendarOn(state.googleCalendar);
       }
       if (typeof state.models === "boolean") {
-        setModelsOn(state.models);
+        setModelsSetting(state.models);
       }
       if (typeof state.issues === "boolean") {
         setIssuesSetting(state.issues);
@@ -1599,7 +1556,6 @@ export function App() {
           // link below, which may name one of their views. The demo's
           // modules read but never write (src/server/demo.ts).
           syncClientPlugins(state.plugins, { demo: Boolean(state.demo) }),
-          state.models === true ? models.load() : Promise.resolve(),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
@@ -1636,12 +1592,6 @@ export function App() {
       // The plugins too — each refreshes its own store, unless one of its
       // editors holds an unsaved draft; some only while their view is open.
       client.emit("reload/tick", pluginViewRef.current);
-      // The models too: the list, and the open canvas — which re-reads only
-      // while nothing on it is unsaved (src/frontend/eventModel/ModelsPane.tsx).
-      if (modelsOn) {
-        void models.load();
-        setModelsReloadKey((k) => k + 1);
-      }
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
   }, [
@@ -1654,7 +1604,6 @@ export function App() {
     conflict,
     roadmap,
     tasks,
-    modelsOn,
     openPageFile,
     loadFeatures,
     loadReadme,
@@ -1779,7 +1728,7 @@ export function App() {
     // A plugin's view owns its url (openPluginView pushes it); with no
     // feature selected this effect would otherwise rewrite it to `/`.
     if (pluginView) return;
-    const url = pagePath(selected, paneScenario, openPageFile, openModel);
+    const url = pagePath(selected, paneScenario, openPageFile);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
     if (location.pathname === url) return;
@@ -1789,7 +1738,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, pluginView]);
+  }, [loading, needsRepo, selected, paneScenario, openPageFile, pluginView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1801,8 +1750,6 @@ export function App() {
     // a shared link previews as that page (specs/app/tasks.feature.md).
     const base = pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
-      : openModel
-        ? `SpecDriven — ${modelTitle(openModel, modelsStore)}`
       : openPage
         ? `SpecDriven — ${openPage.name || openPage.fileName}`
       : !selected || !feature
@@ -1814,7 +1761,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, openPage, pluginView, activeTab, activeTabTick, openModel, modelsStore, clock]);
+  }, [selected, feature, paneScenario, openPage, pluginView, activeTab, tabsTick, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1844,7 +1791,6 @@ export function App() {
           loadReadme(),
           loadShownPages(state),
           syncClientPlugins(state.plugins),
-          state.models === true ? models.load() : Promise.resolve(),
         ]);
         await openFromLocation(entryPath);
       } else {
@@ -1908,13 +1854,12 @@ export function App() {
     await pageTick.current();
     await pageSaveQueue.current.idle();
     closePage({ save: false });
-    // An open model belongs to the old folder too: its last save goes out
-    // there, and the flush seals the canvas on its way out. The unmount
-    // below lands in a later React commit that nothing here awaits, so the
-    // seal — not the ordering — is what keeps its parting save from writing
-    // the old model into the new folder.
-    await modelSaveFlush.current();
-    setOpenModel(null);
+    // So does whatever a plugin's view holds — an Event Model's canvas, say:
+    // its last save goes out there, and the plugin seals the view on its way
+    // out. The unmount below lands in a later React commit that nothing here
+    // awaits, so the seal — not the ordering — is what keeps its parting save
+    // from writing into the new folder.
+    await client.serial("data/leaving");
     // A feature description belongs to the folder it was typed in too. Its
     // own cleanup tick would only run once the selection empties below —
     // after the switch — and the server resolves the data folder per request,
@@ -1947,10 +1892,6 @@ export function App() {
         // Nor are the old folder's plugin views; the plugins reload their
         // stores below, on the data/changed event.
         setPluginView(null);
-        // Nor its models: the store empties and refills below. The canvas
-        // was flushed and sealed before the switch, so whenever its unmount
-        // save runs it is a no-op rather than a PUT into this new folder.
-        models.reset();
         // Nor its entity fields: the next editor to open reads the new
         // folder's code repo.
         entityFields.reset();
@@ -1967,7 +1908,6 @@ export function App() {
           syncClientPlugins(state.plugins, { demo: Boolean(state.demo) }).then(() =>
             client.serial("data/changed"),
           ),
-          state.models === true ? models.load() : Promise.resolve(),
         ]);
       } else {
         toast.error(state.error ?? "Could not use this directory");
@@ -2016,8 +1956,7 @@ export function App() {
       // holds — the same courtesy the README editor gets.
       closePage();
       setPluginView(null);
-      setOpenModel(null);
-      // A new feature shows up in the tree, so the sidebar turns to the Specs
+        // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
       setSelected(file);
@@ -2086,7 +2025,6 @@ export function App() {
     editorRef.current.close();
     closePage();
     setPluginView(null);
-    setOpenModel(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -2099,11 +2037,15 @@ export function App() {
    * tab, say. The pane is the module's alone, so the feature and the page
    * leave — saving what their editors hold, the way goHome does — and the
    * sidebar turns to that tab. The view owns its url from here on; the tab
-   * says what the url is.
+   * says what the url is. A view that names no one thing — `/models` — opens
+   * the one the tab resolves it to; false when there is nothing to open.
    */
-  const openPluginView = (tab: string, view: unknown, opts: { push?: boolean } = {}) => {
+  const openPluginView = (tab: string, view: unknown, opts: { push?: boolean } = {}): boolean => {
     const owner = tabs.get(tab);
-    if (!owner) return;
+    if (!owner) return false;
+    const resolved = owner.route.resolve ? owner.route.resolve(view) : view;
+    if (resolved === null) return false;
+    view = resolved;
     editorRef.current.close();
     closePage();
     setSelected(null);
@@ -2111,12 +2053,15 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab(tab);
-    setOpenModel(null);
     setPluginView({ tab, view });
+    // A url that is not the view's own (`/models` opening the first model)
+    // canonicalises in place, so a reload reopens the same view.
     const path = owner.route.path(view);
-    if (opts.push && location.pathname !== path) {
-      history.pushState(null, "", path);
+    if (location.pathname !== path) {
+      if (opts.push) history.pushState(null, "", path);
+      else history.replaceState(null, "", path);
     }
+    return true;
   };
   /** A tab's navigate callback, bound to its id. */
   const navigateIn = (tab: string) => (view: unknown, opts?: { push?: boolean }) =>
@@ -2130,26 +2075,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginTabs]);
 
-  /**
-   * Open an Event Model's canvas (roadmap/support-event-modeling.md) —
-   * openPluginView's twin: the pane is the canvas's alone, and the sidebar turns
-   * to the Models tab. The model owns its url from here on.
-   */
-  const openModelPane = (fileName: string, opts: { push?: boolean } = {}) => {
-    editorRef.current.close();
-    closePage();
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
-    setSelectedFolder(null);
-    selectSidebarTab("models");
-    setPluginView(null);
-    setOpenModel(fileName);
-    if (opts.push && location.pathname !== modelLink(fileName)) {
-      history.pushState(null, "", modelLink(fileName));
-    }
-  };
-
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
@@ -2158,23 +2083,18 @@ export function App() {
     // off nothing matches, and the url reads as home below.
     const pluginHit = matchPluginRoute(pathname);
     if (pluginHit) {
-      openPluginView(pluginHit.tab.id, pluginHit.view);
+      // A tab with nothing to open — an empty models folder — goes home.
+      if (!openPluginView(pluginHit.tab.id, pluginHit.view)) goHome();
     } else if (route.page) {
       await showPage(route.page);
-    } else if (route.model) {
-      openModelPane(route.model);
     } else if (route.pageFolder) {
       // A folder with no page after it opens the first page its tab lists —
       // what `g t` / `g r` / `g n` and the collapsed rail do. An empty folder
       // (or one whose tab is switched off) has no page to open, so it falls
       // home rather than showing an empty pane.
-      const first =
-        route.pageFolder === MODELS_FOLDER
-          ? modelsState().models[0]?.fileName
-          : pagesRef.current[route.pageFolder as PageTab["folder"]]?.[0]?.fileName;
+      const first = pagesRef.current[route.pageFolder as PageTab["folder"]]?.[0]?.fileName;
       if (first === undefined) return void goHome();
-      if (route.pageFolder === MODELS_FOLDER) openModelPane(first);
-      else await showPage(first);
+      await showPage(first);
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
@@ -2186,8 +2106,7 @@ export function App() {
       editorRef.current.close();
       closePage();
       setPluginView(null);
-      setOpenModel(null);
-      setSelected(null);
+        setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
     }
@@ -2305,18 +2224,21 @@ export function App() {
   };
 
   /**
-   * The Event Model a session bundles (roadmap/support-event-modeling.md):
-   * the one open on the Models tab — its JSON goes into the prompt after
-   * the specs, and the specs its slices link come along whole. A model
-   * alone is a session too (src/server/api.ts resolveSessionRequest).
+   * What the open plugin view bundles into a session beyond the picked specs
+   * (src/plugins/client/tabs.ts `session`) — the Event Model on the Models
+   * tab's canvas (roadmap/support-event-modeling.md), whose JSON goes into
+   * the prompt after the specs. A model alone is a session too
+   * (src/server/api.ts resolveSessionRequest).
    */
-  const sessionModels = (): string[] => (openModel && modelsOn ? [openModel] : []);
+  const sessionBundle = (): { models: string[]; labels: string[] } =>
+    (pluginView && activeTab?.session?.(pluginView.view)) || { models: [], labels: [] };
+  const sessionModels = (): string[] => sessionBundle().models;
 
   /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
       dialog both say what a session would run over. */
   const describeSelection = (
     files: { scenarios?: ScenarioPick[] }[],
-    modelFiles: string[] = sessionModels(),
+    bundled: string[] = sessionBundle().labels,
   ): string => {
     const whole = files.filter((f) => !f.scenarios).length;
     const partial = files.length - whole;
@@ -2329,7 +2251,7 @@ export function App() {
           `${partial} spec${partial === 1 ? "" : "s"}`,
       );
     }
-    for (const model of modelFiles) parts.push(`the model “${modelTitle(model, modelsStore)}”`);
+    parts.push(...bundled);
     return parts.join(" and ");
   };
 
@@ -3175,7 +3097,6 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     setPluginView(null);
-    setOpenModel(null);
     openPageSession.current += 1;
     openPageSaved.current = data.content;
     openPageTextRef.current = data.content;
@@ -3801,7 +3722,7 @@ export function App() {
     setSettingsTestingDraft(testingOn);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
     setSettingsIssuesDraft(issuesSetting);
-    setSettingsModelsDraft(modelsOn);
+    setSettingsModelsDraft(modelsSetting);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -3981,7 +3902,7 @@ export function App() {
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo) });
     setGoogleCalendarOn(data.googleCalendar === true);
     setIssuesSetting(data.issues === true);
-    setModelsOn(data.models === true);
+    setModelsSetting(data.models === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -4167,19 +4088,12 @@ export function App() {
   // Event Models (roadmap/support-event-modeling.md): switched on, the
   // server creates the models folder if the data repo has none and the
   // Models tab lists its models; off, the tab goes and an open canvas
-  // leaves the pane. The files stay where they are.
+  // leaves the pane. The files stay where they are. All of that but the
+  // folder is the plugin's mount and dispose (src/plugins/builtin/models/
+  // client.tsx), which patchSettings runs.
   const toggleModels = async (on: boolean) => {
     setSettingsModelsDraft(on);
-    if (!(await patchSettings({ models: on }))) {
-      setSettingsModelsDraft(!on);
-      return;
-    }
-    if (on) {
-      await models.load();
-      return;
-    }
-    models.reset();
-    if (openModelRef.current) goHome();
+    if (!(await patchSettings({ models: on }))) setSettingsModelsDraft(!on);
   };
 
   // Test management (specs/app/tests.feature.md): switched on, the
@@ -5263,6 +5177,7 @@ export function App() {
       },
     },
     // Each plugin's tab has its own `g` chord (specs/app/plugins.feature.md).
+    // A tab with nothing to open (an empty models folder) has no chord.
     ...pluginTabs
       .filter((tab) => tab.shortcut)
       .map(
@@ -5271,23 +5186,11 @@ export function App() {
           keys: tab.shortcut!,
           label: `Go to the ${tab.title.toLowerCase()}`,
           group: "Navigate",
-          when: () => !quiet,
-          palette: () => !quietBehindPalette,
-          run: () => openPluginView(tab.id, tab.route.home, { push: true }),
+          when: () => !quiet && tabReachable(tab),
+          palette: () => !quietBehindPalette && tabReachable(tab),
+          run: () => void openPluginView(tab.id, tab.route.home, { push: true }),
         }),
       ),
-    {
-      id: "go-models",
-      keys: "g m",
-      label: "Go to the models",
-      group: "Navigate",
-      when: () => !quiet && modelsOn && modelsStore.models.length > 0,
-      palette: () => !quietBehindPalette && modelsOn && modelsStore.models.length > 0,
-      run: () => {
-        const first = modelsStore.models[0];
-        if (first) openModelPane(first.fileName, { push: true });
-      },
-    },
     {
       id: "settings",
       keys: ["mod+,", "g s"],
@@ -5545,7 +5448,6 @@ export function App() {
       shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
       ...(tab.palette?.commands?.({ prompt, confirm, navigate: navigateIn(tab.id) }) ?? []),
     ]),
-    shortcutAction("go-models", <Workflow size={14} />),
     shortcutAction("editor-pane", <PanelRight size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
@@ -5587,7 +5489,7 @@ export function App() {
     if (shownPlugin?.palette?.search) {
       const { group } = shownPlugin.palette;
       const Icon = shownPlugin.icon;
-      return shownPlugin.palette.search(q).map(
+      return (await shownPlugin.palette.search(q, signal)).map(
         (hit): PaletteItem => ({
           id: hit.id,
           group,
@@ -5596,7 +5498,7 @@ export function App() {
           sub: hit.sub,
           icon: <Icon size={14} />,
           href: hit.href,
-          run: () => openPluginView(shownPlugin.id, hit.view, { push: true }),
+          run: () => void openPluginView(shownPlugin.id, hit.view, { push: true }),
         }),
       );
     }
@@ -5606,22 +5508,6 @@ export function App() {
     );
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
-    // The Models tab searched the models: one hit per model, by its name and
-    // what is on its canvas (src/server/search.ts).
-    if (shownTab === "models") {
-      return (data.results ?? []).map(
-        (r): PaletteItem => ({
-          id: `models:${r.fileName}`,
-          group: "Models",
-          label: r.featureName,
-          text: r.featureName,
-          sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
-          icon: <Workflow size={14} />,
-          href: modelLink(r.fileName),
-          run: () => openModelPane(r.fileName, { push: true }),
-        }),
-      );
-    }
     // A page tab searched its own folder, so every hit belongs to that tab.
     const pageTab = shownPageTabs.find((tab) => tab.folder === shownTab);
     if (pageTab) {
@@ -5752,6 +5638,15 @@ export function App() {
     prompt,
     confirm,
     openSettings,
+    openFeature: (fileName) => void openFeature(fileName, { push: true }),
+    featureCreated: async (fileName) => {
+      await loadFeatures();
+      await openFeature(fileName, { push: true });
+    },
+    startSession: codeGen ? startSession : undefined,
+    copyLink: (path) => void copyLink(path),
+    copied,
+    goHome,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -5772,31 +5667,20 @@ export function App() {
     });
   };
 
-  // The way back to the model (roadmap/support-event-modeling.md): a
-  // feature holding a slice's scenarios carries a crumb naming the Event
-  // Model — and the slice, in the tooltip — that opens its canvas. One per
-  // model linking the feature; none while the Models tab is off.
-  const modelCrumbs = (fileName: string): Crumb[] => {
-    if (!modelsOn) return [];
-    const crumbs: Crumb[] = [];
-    for (const model of modelsStore.models) {
-      const links = model.links.filter((l) => l.feature === fileName);
-      if (links.length === 0) continue;
-      const slices = links.map((l) => `“${l.slice || "Untitled slice"}”`).join(", ");
-      crumbs.push({
-        label: (
-          <span className="crumb-model">
-            <Workflow size={12} aria-hidden="true" />
-            {model.name}
-          </span>
-        ),
-        href: modelLink(model.fileName),
-        title: `Open the Event Model “${model.name}” — slice ${slices}`,
-        onClick: (e) => spaClick(e, () => openModelPane(model.fileName, { push: true })),
-      });
-    }
-    return crumbs;
-  };
+  // The way back into a module (src/plugins/client/tabs.ts featureCrumbs): a
+  // feature holding an Event Model slice's scenarios carries a crumb naming
+  // the model, say, that opens its canvas. None while the module is off.
+  const pluginCrumbs = (fileName: string): Crumb[] =>
+    pluginTabs.flatMap((tab) =>
+      (tab.featureCrumbs?.(fileName) ?? []).map(
+        (c): Crumb => ({
+          label: c.label,
+          title: c.title,
+          href: tab.route.path(c.view),
+          onClick: (e) => spaClick(e, () => void openPluginView(tab.id, c.view, { push: true })),
+        }),
+      ),
+    );
 
   // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
   // matches by having a scenario in the chosen status, and by its assignee.
@@ -6025,7 +5909,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !pluginView && !openModel ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !pluginView ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -6060,34 +5944,22 @@ export function App() {
               </Tooltip>
             );
           })}
-          {pluginTabs.map((tab) => (
+          {/* A tab with nothing to open — an empty models folder — has no
+              icon on the rail. */}
+          {pluginTabs.filter(tabReachable).map((tab) => (
             <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
                 href={tab.route.path(tab.route.home)}
                 className={`rail-link${pluginView?.tab === tab.id ? " active" : ""}`}
                 aria-label={tab.title}
                 onClick={(e) =>
-                  spaClick(e, () => openPluginView(tab.id, tab.route.home, { push: true }))
+                  spaClick(e, () => void openPluginView(tab.id, tab.route.home, { push: true }))
                 }
               >
                 <tab.icon size={16} aria-hidden="true" />
               </a>
             </Tooltip>
           ))}
-          {modelsOn && modelsStore.models.length > 0 && (
-            <Tooltip label="Models" keys="g m">
-              <a
-                href={modelLink(modelsStore.models[0]!.fileName)}
-                className={`rail-link${openModel ? " active" : ""}`}
-                aria-label="Models"
-                onClick={(e) =>
-                  spaClick(e, () => openModelPane(modelsStore.models[0]!.fileName, { push: true }))
-                }
-              >
-                <Workflow size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          )}
           <div className="rail-bottom">
             <PomodoroBar
               compact
@@ -6347,7 +6219,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {(shownPageTabs.length > 0 || pluginTabs.length > 0 || modelsOn) && (
+        {(shownPageTabs.length > 0 || pluginTabs.length > 0) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -6374,21 +6246,6 @@ export function App() {
                 <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
             ))}
-            {/* Event Models (roadmap/support-event-modeling.md): the
-                canvases, listed. */}
-            {modelsOn && (
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-models"
-                aria-selected={shownTab === "models"}
-                aria-controls="side-panel-models"
-                className={shownTab === "models" ? "active" : ""}
-                onClick={() => selectSidebarTab("models")}
-              >
-                <Workflow size={14} aria-hidden="true" /> Models
-              </button>
-            )}
             {/* The plugins' tabs (specs/app/plugins.feature.md), in their
                 order, after the core's. */}
             {pluginTabs.map((tab) => (
@@ -6713,21 +6570,6 @@ export function App() {
               navigate={navigateIn(tab.id)}
             />
           ))}
-        {/* The Models tab (roadmap/support-event-modeling.md): the Event
-            Models, with New, Import and their ⋯ menus
-            (src/frontend/eventModel/ModelsPane.tsx). */}
-        {shownTab === "models" && modelsOn && (
-          <Suspense fallback={null}>
-            <ModelsSidebar
-              active={openModel}
-              prompt={prompt}
-              confirm={confirm}
-              onNavigate={openModelPane}
-              onCopyLink={(path) => void copyLink(path)}
-              onClosed={() => goHome()}
-            />
-          </Suspense>
-        )}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
             current user; its menu holds User info and Settings. */}
         <div className="user-corner">
@@ -6826,7 +6668,6 @@ export function App() {
           key={
             selected ??
             openPage?.fileName ??
-            openModel ??
             (pluginView && activeTab ? activeTab.route.key(pluginView.view) : "home")
           }
         >
@@ -7153,7 +6994,7 @@ export function App() {
                   Clicking the name edits it — committed and pushed on the
                   server; the file name never changes. */}
               <Breadcrumbs
-                items={[repoCrumb, ...folderCrumbs(selected), ...modelCrumbs(selected)]}
+                items={[repoCrumb, ...folderCrumbs(selected), ...pluginCrumbs(selected)]}
                 tail={
                   renameDraft === null ? (
                     <Tooltip label="Rename feature">
@@ -7791,34 +7632,6 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
-        ) : openModel && modelsOn ? (
-          /* An Event Model's canvas (roadmap/support-event-modeling.md)
-             takes the whole pane (src/frontend/eventModel/ModelsPane.tsx);
-             App only knows which model is open. Keyed by the file, so
-             switching models starts the pane afresh. */
-          <Suspense fallback={<PageSkeleton cards={1} />}>
-            <ModelsPane
-              key={openModel}
-              fileName={openModel}
-              features={features}
-              members={members}
-              assignments={assignments}
-              repoCrumb={repoCrumb}
-              reloadKey={modelsReloadKey}
-              prompt={prompt}
-              confirm={confirm}
-              onOpenFeature={(f) => void openFeature(f, { push: true })}
-              onFeatureCreated={async (f) => {
-                await loadFeatures();
-                await openFeature(f, { push: true });
-              }}
-              onStartSession={codeGen ? startSession : undefined}
-              onCopyLink={(path) => void copyLink(path)}
-              copied={copied}
-              onClosed={goHome}
-              onSaveHandle={bindModelSave}
-            />
-          </Suspense>
         ) : pluginView && activeTab ? (
           /* A plugin's view (specs/app/plugins.feature.md) — the test
              management module's plans, cases and runs, say — takes the whole

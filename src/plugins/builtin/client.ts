@@ -5,6 +5,8 @@ import type { Context, Plugin } from "../kernel";
 import type { PluginManifest } from "../manifest";
 import issues from "./issues/client";
 import { manifest as issuesManifest } from "./issues/manifest";
+import models from "./models/client";
+import { manifest as modelsManifest } from "./models/manifest";
 import tests from "./tests/client";
 import { manifest as testsManifest } from "./tests/manifest";
 
@@ -15,5 +17,6 @@ export interface ClientPlugin {
 
 export const builtinClientPlugins: ClientPlugin[] = [
   { manifest: issuesManifest, plugin: issues },
+  { manifest: modelsManifest, plugin: models },
   { manifest: testsManifest, plugin: tests },
 ];

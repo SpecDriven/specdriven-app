@@ -54,6 +54,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const models = {
+  subscribe,
+
   /** Read the listing; errors land in the store rather than a toast. */
   async load(): Promise<void> {
     try {
