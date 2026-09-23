@@ -74,10 +74,11 @@ function demoSource(): string {
  *
  * Every optional module is on. A visitor has no reason to guess which
  * switches hide the rest of the app, and the demo dataset ships content for
- * each: roadmap and tasks pages, an Event Model of the water damage claim
- * (demo-data/models/claims/home-claims/) whose slices link that feature
- * (demo-data/specs/claims/home-claims/), test cases, assignable members in
- * demo-data/project-settings.json, and the release repo's issues. The one
+ * each: roadmap and tasks pages, test cases, assignable members in
+ * demo-data/project-settings.json, and the release repo's issues — and an
+ * Event Model of the water damage claim (demo-data/models/claims/
+ * home-claims/), which shows once the Models plugin is installed; it is
+ * not built in any more, and the demo loads no plugin from outside. The one
  * exception is "Open test links in IntelliJ IDEA" (openTestsInIdea): it runs
  * `idea` on the visitor's own machine, which a hosted demo has no business
  * doing and no server-side `idea` to do it with — so test links keep going

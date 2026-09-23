@@ -65,7 +65,7 @@ const log = getLogger("features");
 
 /**
  * The spec tree's folder exists, created here when it does not — the same
- * shape as ensurePageFolder / ensureModelsFolder, but unconditional: `specs/`
+ * shape as ensurePageFolder, but unconditional: `specs/`
  * is where features live, not an opt-in tab. Git does not track empty
  * directories, so a fresh one holds nothing to commit until a feature lands in
  * it. Returns whether this call created it.
@@ -271,8 +271,8 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
  * (specs/ui/folders.feature.md): `billing/Basic Quote` creates
  * `specs/billing/basic-quote.feature.md`, creating the folders as needed. The
  * file holds the heading alone unless `text` brings the whole feature — a
- * slice's scaffold (src/server/eventModel/feature.ts), whose heading is
- * the name.
+ * plugin's scaffold (an Event Model slice's, through @specdriven/host),
+ * whose heading is the name.
  *
  * The name is relative to the spec tree: a leading `specs/` is accepted (the
  * client lists folders with it) but never doubled.

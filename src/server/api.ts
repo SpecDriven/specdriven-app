@@ -108,10 +108,9 @@ import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
-import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
+import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
-import { MODELS_FOLDER, ensureModelsFolder, sessionModels } from "./models";
-import type { ModelInput } from "./agent";
+import type { SessionSection } from "./agent";
 import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
@@ -136,10 +135,11 @@ import {
   pluginStates,
   provideDataAccess,
   routes as routeRegistry,
+  sessionParts,
   sourcePaths,
   syncPlugins,
 } from "../plugins/host/loader";
-import { builtinManifests } from "../plugins/builtin/manifests";
+import { profileManifests } from "../plugins/builtin/manifests";
 import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
@@ -250,9 +250,9 @@ export async function applyStartupState(): Promise<void> {
   // plugins in tab order"): a settings file from before plugins, with the
   // per-module switches, is read as the matching list once and written back
   // as `plugins.enabled`, so the file carries the list from here on.
-  const profile = readProfile(state as Record<string, unknown>, builtinManifests);
-  if (profile.migrated && hasLegacyKeys(state as Record<string, unknown>, builtinManifests)) {
-    writeProfile(state as Record<string, unknown>, profile.enabled, builtinManifests);
+  const profile = readProfile(state as Record<string, unknown>, profileManifests);
+  if (profile.migrated && hasLegacyKeys(state as Record<string, unknown>, profileManifests)) {
+    writeProfile(state as Record<string, unknown>, profile.enabled, profileManifests);
     await writeState(state, getAppRoot());
   }
   // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts).
@@ -410,7 +410,7 @@ async function stateFields(state: SpecDrivenState) {
     // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
     // git repository with an index"): the git urls Settings → Plugins lists.
     pluginMarketplaces: marketplaceEntries(profileSection(state)),
-    ...legacyFields(readProfile(state as Record<string, unknown>, builtinManifests).enabled, builtinManifests),
+    ...legacyFields(readProfile(state as Record<string, unknown>, profileManifests).enabled, profileManifests),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
@@ -711,7 +711,7 @@ const putState: Handler = async (req) => {
   // release: on appends the id, off removes it. Either way the file carries
   // the list from here on and the legacy keys go.
   const raw = state as Record<string, unknown>;
-  const before = readProfile(raw, builtinManifests).enabled;
+  const before = readProfile(raw, profileManifests).enabled;
   let enabled = before;
   if (body.plugins !== undefined) {
     if (!body.plugins || typeof body.plugins !== "object") {
@@ -763,7 +763,7 @@ const putState: Handler = async (req) => {
       (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, marketplaces: unique };
     }
   }
-  for (const manifest of builtinManifests) {
+  for (const manifest of profileManifests) {
     const key = manifest.legacyKey as keyof typeof body | undefined;
     if (!key || body[key] === undefined) continue;
     if (typeof body[key] !== "boolean") {
@@ -771,18 +771,17 @@ const putState: Handler = async (req) => {
     }
     enabled = withPlugin(enabled, manifest.id, body[key] as boolean);
   }
-  writeProfile(raw, enabled, builtinManifests);
+  writeProfile(raw, enabled, profileManifests);
   // The special folders (specs/app/roadmap.feature.md "Create roadmap folder
-  // if necessary", specs/app/tasks.feature.md) and the models folder
-  // (roadmap/support-event-modeling.md) are made below when their plugin
-  // goes on, once the settings are written. The notebook's is not: it
-  // appears with the first entry, which is what lets a module ship on
-  // without writing to anybody's repo.
+  // if necessary", specs/app/tasks.feature.md) are made below when their
+  // plugin goes on, once the settings are written; a plugin with a folder
+  // of its own makes it as it mounts. The notebook's is not: it appears
+  // with the first entry, which is what lets a module ship on without
+  // writing to anybody's repo.
   const turnedOn: PageFolder[] = [];
   const nowOn = (id: string) => enabled.includes(id) && !before.includes(id);
   if (nowOn("roadmap")) turnedOn.push(ROADMAP);
   if (nowOn("tasks")) turnedOn.push(TASKS);
-  const modelsTurnedOn = nowOn("models");
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): opt-in — an absent key when off. Nothing to make: the
   // estimate lands on the task's own page, and the event on Google's side.
@@ -817,16 +816,13 @@ const putState: Handler = async (req) => {
   // Scenario "Create roadmap folder if necessary": the switch is what asks
   // for the folder, so it is made on the spot rather than on the next tick.
   // A repo we cannot reach is left to that tick; the switch still stands.
-  if ((turnedOn.length > 0 || modelsTurnedOn) && !needsDataRepo(state)) {
+  if (turnedOn.length > 0 && !needsDataRepo(state)) {
     try {
       const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
       for (const kind of turnedOn) {
         if (await ensurePageFolder(dir, kind)) {
           reloadLog.info(`created the ${kind.folder} folder`);
         }
-      }
-      if (modelsTurnedOn && (await ensureModelsFolder(dir))) {
-        reloadLog.info(`created the ${MODELS_FOLDER} folder`);
       }
     } catch (e) {
       reloadLog.error((e as Error).message, errorAttributes(e));
@@ -949,8 +945,8 @@ const getFeatures = withDataDir(async (dir) => {
   return json({
     features: await listFeatures(dir),
     // Only the spec tree is walked, so the reserved top-level folders —
-    // `roadmap/`, `tasks/`, `models/`, each listed on its own tab — are out of
-    // range by construction rather than subtracted here.
+    // `roadmap/`, `tasks/`, a plugin's `models/`, each listed on its own tab
+    // — are out of range by construction rather than subtracted here.
     folders: await listFolders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
@@ -993,14 +989,14 @@ const getSearch = withDataDir(async (dir, req) => {
     Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.min(Math.floor(rawLimit), 50) : 20;
   const scope = url.searchParams.get("scope") ?? "specs";
   if (!isSearchScope(scope)) return json({ error: `unknown search scope: ${scope}` }, 400);
-  // `scope=models` searches the Event Models (roadmap/support-event-modeling
-  // .md) — what the Models tab's palette searches.
-  const kind = scope === "specs" || scope === MODELS_FOLDER ? null : pageFolderNamed(scope);
+  // A plugin's scope (`scope=models`, the Event Models plugin's) searches
+  // what that plugin lists — what its tab's palette searches.
+  const kind = scope === "specs" ? null : pageFolderNamed(scope);
   const results = kind
     ? await searchPages(dir, kind, q, limit)
-    : scope === MODELS_FOLDER
-      ? await searchModels(dir, q, limit)
-      : await searchSpecs(dir, q, limit);
+    : scope === "specs"
+      ? await searchSpecs(dir, q, limit)
+      : await searchScope(dir, scope, q, limit);
   return json({ query: q, scope, results });
 });
 
@@ -1297,21 +1293,23 @@ const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS
 // comes back as an error for the client's error box.
 /**
  * What a session request resolves to — the name, the selected specs read
- * from the repo, the Event Models that go with them, and where the session
+ * from the repo, what the plugins bundle with them, and where the session
  * would run — or the refusal to send back. Shared by the session route and
  * the prompt route below, so a copied prompt is the same text a started
  * session gets.
  *
- * The models (roadmap/support-event-modeling.md): the ones the client
- * names — the model open when the session started, whose linked specs
- * then come along whole — plus, with the Models setting on, any whose
- * slice links a selected spec. A session may run from a model alone.
+ * The plugins' part (src/plugins/host/services.ts SessionParts): the
+ * request's `attachments` name what was open on a plugin's tab, by plugin
+ * id — the model on the Models tab, whose linked specs then come along
+ * whole — and every mounted contributor is asked, so one may bundle what
+ * the picked specs link (a model whose slice links one). A session may run
+ * from attachments alone.
  */
 async function resolveSessionRequest(
   dir: string,
-  body: { name?: unknown; files?: unknown; models?: unknown },
+  body: { name?: unknown; files?: unknown; attachments?: unknown },
 ): Promise<
-  { name: string; specs: SpecInput[]; place: SessionPlace; models: ModelInput[] } | Response
+  { name: string; specs: SpecInput[]; place: SessionPlace; sections: SessionSection[] } | Response
 > {
   // The Settings switch is the gate, enforced here and not only in the UI:
   // switched off, nothing can hand a spec to Claude.
@@ -1321,23 +1319,28 @@ async function resolveSessionRequest(
   }
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) return json({ error: "name is required" }, 400);
-  const wantedModels = parseSessionModels(body.models);
-  if (wantedModels === null) return json({ error: "models must be a list of model files" }, 400);
+  const attachments = parseSessionAttachments(body.attachments);
+  if (attachments === null) {
+    return json({ error: "attachments must map a plugin id to a list of names" }, 400);
+  }
+  const contributors = sessionParts.entries();
+  const unknown = Object.keys(attachments).find((id) => !contributors.some(([key]) => key === id));
+  if (unknown !== undefined) return json({ error: `nothing takes attachments for ${unknown}` }, 400);
   const files = parseSessionFiles(body.files) ?? [];
-  if (files.length === 0 && wantedModels.length === 0) {
+  if (files.length === 0 && Object.values(attachments).every((refs) => refs.length === 0)) {
     return json({ error: "files must name at least one spec or scenario" }, 400);
   }
-  let models: ModelInput[] = [];
+  const sections: SessionSection[] = [];
   try {
-    const bundled = await sessionModels(
-      dir,
-      wantedModels,
-      files.map((f) => f.fileName),
-      { linkedToSpecs: readProfile(state as Record<string, unknown>, builtinManifests).enabled.includes("models") },
-    );
-    models = bundled.models;
-    // A model's own specs join the session whole, unless already picked.
-    for (const fileName of bundled.features) files.push({ fileName });
+    const specFiles = files.map((f) => f.fileName);
+    for (const [id, contribute] of contributors) {
+      const bundled = await contribute(dir, { refs: attachments[id] ?? [], specFiles });
+      sections.push(...bundled.sections);
+      // What an attachment links joins the session whole, unless already picked.
+      for (const fileName of bundled.features) {
+        if (!files.some((f) => f.fileName === fileName)) files.push({ fileName });
+      }
+    }
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -1372,28 +1375,36 @@ async function resolveSessionRequest(
       400,
     );
   }
-  return { name, specs, models, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
+  return { name, specs, sections, place: codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir } };
 }
 
-/** The model files a session request names: none when absent, null when malformed. */
-function parseSessionModels(value: unknown): string[] | null {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) return null;
-  return [...new Set(value as string[])];
+/**
+ * What a session request attaches, by plugin id: none when absent, null
+ * when malformed.
+ */
+function parseSessionAttachments(value: unknown): Record<string, string[]> | null {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+  const out: Record<string, string[]> = {};
+  for (const [id, refs] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(refs) || !refs.every((v) => typeof v === "string")) return null;
+    out[id] = [...new Set(refs as string[])];
+  }
+  return out;
 }
 
 const postAgentSession = withDataDir(async (dir, req) => {
   const body = (await req.json()) as {
     name?: string;
     files?: unknown;
-    models?: unknown;
+    attachments?: unknown;
     target?: unknown;
   };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
   const target = normalizeCodeGenTarget(body.target);
   if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
-  const { name, specs, place, models } = resolved;
+  const { name, specs, place, sections } = resolved;
   // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
@@ -1408,7 +1419,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
         place,
         name,
         agent,
-        prompt: buildSessionPrompt(name, specs, place, models),
+        prompt: buildSessionPrompt(name, specs, place, sections),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
       return json({ name, id: meta.id, target });
@@ -1421,7 +1432,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   }
   try {
     const sessionsDir = await sessionsDirectory(getAppRoot());
-    return json(await launchDesktopSession(place, name, specs, { sessionsDir, models }));
+    return json(await launchDesktopSession(place, name, specs, { sessionsDir, sections }));
   } catch (e) {
     return json({ error: (e as Error).message }, 502);
   }
@@ -1432,11 +1443,11 @@ const postAgentSession = withDataDir(async (dir, req) => {
 // pasted into an agent the app doesn't drive. Nothing is launched and no
 // session is recorded — only the text comes back.
 const postAgentSessionPrompt = withDataDir(async (dir, req) => {
-  const body = (await req.json()) as { name?: unknown; files?: unknown; models?: unknown };
+  const body = (await req.json()) as { name?: unknown; files?: unknown; attachments?: unknown };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
-  const { name, specs, place, models } = resolved;
-  return json({ name, prompt: buildSessionPrompt(name, specs, place, models) });
+  const { name, specs, place, sections } = resolved;
+  return json({ name, prompt: buildSessionPrompt(name, specs, place, sections) });
 });
 
 // ---------------------------------------------------------------------------

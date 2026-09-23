@@ -5,9 +5,12 @@
 // it adds — the ones on first, in tab order, which the arrows change; then
 // the ones off. Off, a plugin's tab, routes and shortcuts are gone and its
 // files in the data folder stay. An id in the profile that no plugin
-// provides is reported here and otherwise ignored. Below them, the folders
-// plugins load from and the marketplaces — neither in the hosted demo.
+// provides is reported here and otherwise ignored — or, for a module that
+// moved to the marketplace (the Event Models), found there to install.
+// Below them, the folders plugins load from and the marketplaces — neither
+// in the hosted demo.
 
+import { useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
 import type { PluginStatus } from "../plugins/client/loader";
 import type { MarketplaceRef } from "../plugins/marketplace";
@@ -50,6 +53,8 @@ function originOf(plugin: PluginStatus): string {
 
 export function PluginsPage(props: PluginsPageProps) {
   const { plugins, demo } = props;
+  // The id a not-installed row asked the marketplaces for.
+  const [wanted, setWanted] = useState<string | null>(null);
   const on = plugins.filter((p) => p.enabled);
   const off = plugins.filter((p) => !p.enabled);
 
@@ -159,9 +164,16 @@ export function PluginsPage(props: PluginsPageProps) {
             <span className="switch-track" aria-hidden="true" />
           </label>
         ) : (
-          <button type="button" className="link" onClick={() => void props.setEnabled(plugin.id, false)}>
-            Remove from list
-          </button>
+          <span className="plugin-market-actions">
+            {!demo && (
+              <button type="button" className="link" onClick={() => setWanted(plugin.id)}>
+                Find in marketplace
+              </button>
+            )}
+            <button type="button" className="link" onClick={() => void props.setEnabled(plugin.id, false)}>
+              Remove from list
+            </button>
+          </span>
         )}
       </div>
     );
@@ -280,6 +292,7 @@ export function PluginsPage(props: PluginsPageProps) {
           <PluginMarketplace
             marketplaces={props.marketplaces}
             plugins={plugins}
+            wanted={wanted}
             patchSettings={props.patchSettings}
             prompt={props.prompt}
             confirm={props.confirm}

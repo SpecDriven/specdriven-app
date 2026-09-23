@@ -2,19 +2,27 @@
 // from a local folder", roadmap/plugin-architecture.md "Package shape"): a
 // plugin written in TypeScript is built by the app itself when the server
 // runs on Bun — the dev server and the compiled binary. The browser half is
-// bundled with `react`, `react-dom` and the JSX runtime pointed at shims
-// that re-export what src/plugins/client/sdk.ts published on the page, so
-// the output has no bare specifier — a plain `import(url)` loads it — and
-// there is one React. The Electron main process runs on node and cannot
-// build; it loads a prebuilt `dist/` only.
+// bundled with `react`, `react-dom`, the JSX runtime and `@specdriven/client`
+// pointed at shims that re-export what src/plugins/client/sdk.ts published
+// on the page, so the output has no bare specifier — a plain `import(url)`
+// loads it — and there is one React. The host half is bundled the same way
+// over `@specdriven/host`, which the host loader publishes. The Electron
+// main process runs on node and cannot build; it loads a prebuilt `dist/`
+// only.
 
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-import { SDK_GLOBAL, SHARED_MODULES, type SharedModule } from "../shared";
+import {
+  HOST_SHARED_MODULES,
+  SDK_GLOBAL,
+  SHARED_MODULES,
+  type HostSharedModule,
+  type SharedModule,
+} from "../shared";
 
-export { SDK_GLOBAL, SHARED_MODULES, type SharedModule };
+export { HOST_SHARED_MODULES, SDK_GLOBAL, SHARED_MODULES, type HostSharedModule, type SharedModule };
 
 /** Whether this runtime can build: Bun with its bundler, not node. */
 export function canBuild(): boolean {
@@ -35,12 +43,13 @@ export function setBuildDisabled(disabled: boolean): void {
 let sharedExportsCache: Promise<Record<SharedModule, string[]>> | null = null;
 export function sharedExports(): Promise<Record<SharedModule, string[]>> {
   sharedExportsCache ??= (async () => {
-    const [react, reactDom, reactDomClient, jsxRuntime, jsxDevRuntime] = await Promise.all([
+    const [react, reactDom, reactDomClient, jsxRuntime, jsxDevRuntime, client] = await Promise.all([
       import("react"),
       import("react-dom"),
       import("react-dom/client"),
       import("react/jsx-runtime"),
       import("react/jsx-dev-runtime"),
+      import("../sdk/client"),
     ]);
     // React's own internals (`__CLIENT_INTERNALS…`) stay out: no plugin needs
     // them, and their names are what marks a bundle that carries its own React.
@@ -52,13 +61,23 @@ export function sharedExports(): Promise<Record<SharedModule, string[]>> {
       "react-dom/client": names(reactDomClient),
       "react/jsx-runtime": names(jsxRuntime),
       "react/jsx-dev-runtime": names(jsxDevRuntime),
+      "@specdriven/client": names(client),
     };
   })();
   return sharedExportsCache;
 }
 
+/** The host SDK's export names, read from the server's own copy. */
+let hostExportsCache: Promise<Record<HostSharedModule, string[]>> | null = null;
+export function hostSharedExports(): Promise<Record<HostSharedModule, string[]>> {
+  hostExportsCache ??= import("../sdk/host").then((host) => ({
+    "@specdriven/host": Object.keys(host).filter((k) => k !== "default"),
+  }));
+  return hostExportsCache;
+}
+
 /** The source of the shim standing in for one shared module. */
-export function shimSource(name: SharedModule, exportNames: readonly string[]): string {
+export function shimSource(name: SharedModule | HostSharedModule, exportNames: readonly string[]): string {
   const lines = [
     `const m = globalThis.${SDK_GLOBAL}?.modules?.[${JSON.stringify(name)}];`,
     `if (!m) throw new Error(${JSON.stringify(`SpecDriven did not publish ${name} for plugins`)});`,
@@ -69,26 +88,35 @@ export function shimSource(name: SharedModule, exportNames: readonly string[]): 
 }
 
 const SHIM_NAMESPACE = "specdriven-shim";
-const sharedFilter = new RegExp(
-  `^(${SHARED_MODULES.map((m) => m.replace(/[/.]/g, "\\$&")).join("|")})$`,
-);
 
 /** The Bun.build plugin that points the shared modules at their shims. */
-export async function shimPlugin(): Promise<import("bun").BunPlugin> {
-  const exports = await sharedExports();
+function shimsFor(name: string, exports: Record<string, string[]>): import("bun").BunPlugin {
+  const filter = new RegExp(
+    `^(${Object.keys(exports).map((m) => m.replace(/[/.]/g, "\\$&")).join("|")})$`,
+  );
   return {
-    name: "specdriven-shared-react",
+    name,
     setup(build) {
-      build.onResolve({ filter: sharedFilter }, (args) => ({
+      build.onResolve({ filter }, (args) => ({
         path: args.path,
         namespace: SHIM_NAMESPACE,
       }));
       build.onLoad({ filter: /.*/, namespace: SHIM_NAMESPACE }, (args) => ({
         loader: "js",
-        contents: shimSource(args.path as SharedModule, exports[args.path as SharedModule] ?? []),
+        contents: shimSource(args.path as SharedModule, exports[args.path] ?? []),
       }));
     },
   };
+}
+
+/** The browser half's shims: React and `@specdriven/client`. */
+export async function shimPlugin(): Promise<import("bun").BunPlugin> {
+  return shimsFor("specdriven-shared-react", await sharedExports());
+}
+
+/** The host half's shim: `@specdriven/host`. */
+export async function hostShimPlugin(): Promise<import("bun").BunPlugin> {
+  return shimsFor("specdriven-shared-host", await hostSharedExports());
 }
 
 /**
@@ -133,6 +161,7 @@ export async function buildHost(entry: string, outDir: string): Promise<void> {
     target: "node",
     format: "esm",
     external: ["electron", "bun", "bun:*"],
+    plugins: [await hostShimPlugin()],
     sourcemap: "linked",
   });
 }

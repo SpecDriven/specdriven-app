@@ -64,9 +64,13 @@ export async function syncDataDir(dir: string): Promise<string> {
       // below it is not opt-in: `specs/` is where features live.
       await ensureSpecsFolder(dir);
       // A repo written before the spec tree had its own folder is moved into
-      // it once, here — features, their documents and the model links that
-      // name them — so the drift pass below sees the migrated tree.
-      const migrated = await migrateToSpecsFolder(dir);
+      // it once, here — features and their documents, with the plugins told
+      // where each went (an Event Model's slice links name them) — so the
+      // drift pass below sees the migrated tree.
+      const migrated = await migrateToSpecsFolder(dir, {
+        reserved: pluginSync.reserved(),
+        moved: (at, moved) => pluginSync.runMoved(at, moved),
+      });
       if (migrated > 0) parts.push(`moved ${migrated} feature(s) under specs/`);
       // Documents an older app version filed under the store's per-kind
       // roots are lifted into the mirrored layout, after the step above has
@@ -89,8 +93,8 @@ export async function syncDataDir(dir: string): Promise<string> {
       // The plugins' own drift passes (src/plugins/host/services.ts), in
       // mount order, after the core's — the roadmap and tasks folders, made
       // here when their switch is on and the repo has none
-      // (src/plugins/builtin/pages/host.ts), and the Event Models' folder
-      // (src/plugins/builtin/models/host.ts) among them.
+      // (src/plugins/builtin/pages/host.ts), and an installed plugin's, the
+      // Event Models' among them.
       parts.push(...(await pluginSync.run(dir)));
     }
     const synced = await syncSavedChanges(dir);

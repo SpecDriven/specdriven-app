@@ -80,7 +80,6 @@ test("a settings file with the old switches is rewritten as the profile on start
     ["tasks", false],
     ["notebook", false],
     ["issues", false],
-    ["models", false],
   ]);
   expect([s.testing, s.roadmap, s.notebook, s.tasks]).toEqual([true, true, false, false]);
 });
@@ -93,7 +92,6 @@ test("a fresh install gets the defaults without a settings write", async () => {
     ["roadmap", false],
     ["tasks", false],
     ["issues", false],
-    ["models", false],
     ["tests", false],
   ]);
 });

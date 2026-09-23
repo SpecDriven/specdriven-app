@@ -8,7 +8,7 @@ import type { Dirent } from "node:fs";
 /**
  * The spec tree's root in the data repo (specs/ui/folders.feature.md): every
  * `.feature.md` lives under here, which makes `specs/` a peer of the other
- * top-level folders — `roadmap/`, `tasks/`, `models/` — rather than the
+ * top-level folders — `roadmap/`, `tasks/`, a plugin's `models/` — rather than the
  * "everything that isn't one of those" the feature tree used to be.
  */
 export const SPECS_FOLDER = "specs";
