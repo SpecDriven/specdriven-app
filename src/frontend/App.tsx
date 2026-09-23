@@ -62,7 +62,6 @@ import {
   Link,
   ListFilter,
   ListTodo,
-  Bug,
   Map as MapIcon,
   Menu as MenuIcon,
   NotebookPen,
@@ -128,8 +127,6 @@ import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../plugins/client/loader";
 import { useRegistry, useTabStore, type PluginView, type TabApp } from "../plugins/client/tabs";
-import { IssuesPane, IssuesSidebar } from "./IssuesPane";
-import { issues, issuesKey, issuesTitle, searchIssues, setIssuesReadOnly, useIssues } from "./issues";
 import { models, modelsState, modelTitle, useModels } from "./eventModel/models";
 import { entityFields } from "./entityFields";
 import {
@@ -161,8 +158,6 @@ import {
   pageFolderOf,
   pageLink,
   scenarioPath,
-  issuesPath,
-  type IssuesRoute,
   modelLink,
   MODELS_FOLDER,
 } from "./route";
@@ -414,7 +409,7 @@ function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number 
 }
 
 /** A core tab, or a plugin's tab by its id (src/plugins/client/tabs.ts). */
-type SidebarTab = "specs" | PageTab["folder"] | "issues" | "models" | (string & {});
+type SidebarTab = "specs" | PageTab["folder"] | "models" | (string & {});
 
 function readSidebarTab(): SidebarTab {
   try {
@@ -1229,17 +1224,11 @@ export function App() {
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): the Settings switch behind every task's calendar chip.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
-  // GitHub issues (specs/app/github-issues.feature.md): which of the
-  // module's views has the pane — null when none. The issues themselves live
-  // in their own store (src/frontend/issues.ts).
-  const [issuesView, setIssuesView] = useState<IssuesRoute | null>(null);
-  const issuesViewRef = useRef<IssuesRoute | null>(null);
-  issuesViewRef.current = issuesView;
-  const issuesStore = useIssues();
-  // The Settings switch: off, there is no tab and nothing asks GitHub.
+  // GitHub issues (specs/app/github-issues.feature.md): the Settings switch,
+  // as the Settings dialog's row shows it. The module is a plugin
+  // (src/plugins/builtin/issues) whose tab registers only while the data
+  // folder's code repo is a GitHub one.
   const [issuesSetting, setIssuesSetting] = useState(false);
-  /** Whether there is an Issues tab: the switch on and a GitHub code repo. */
-  const issuesOn = issuesSetting && issuesRepo !== null;
   // Event Models (roadmap/support-event-modeling.md): the Settings switch,
   // and which model's canvas has the pane — null when none. The listing
   // lives in its own store (src/frontend/eventModel/models.ts); the open
@@ -1320,7 +1309,6 @@ export function App() {
   const shownTab: SidebarTab =
     shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
     pluginTabs.some((tab) => tab.id === sidebarTab) ||
-    (sidebarTab === "issues" && issuesOn) ||
     (sidebarTab === "models" && modelsOn)
       ? sidebarTab
       : "specs";
@@ -1592,9 +1580,6 @@ export function App() {
       // demo defaults it on so a visitor finds the diagram button without
       // first finding Settings. Turning it off there still sticks.
       setExcalidrawDemoMode(Boolean(state.demo));
-      // The demo's Issues tab reads the release repo but cannot write to it
-      // (src/frontend/issues.ts), so the pane offers no New / Edit / Comment.
-      setIssuesReadOnly(Boolean(state.demo));
       setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -1611,8 +1596,9 @@ export function App() {
           // The special folders' pages ride along when they are shown at all.
           loadShownPages(state),
           // So do the plugins — the Tests tab and its plans — before the deep
-          // link below, which may name one of their views.
-          syncClientPlugins(state.plugins),
+          // link below, which may name one of their views. The demo's
+          // modules read but never write (src/server/demo.ts).
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo) }),
           state.models === true ? models.load() : Promise.resolve(),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
@@ -1648,17 +1634,14 @@ export function App() {
         void showPage(openPageFile);
       }
       // The plugins too — each refreshes its own store, unless one of its
-      // editors holds an unsaved draft.
-      client.emit("reload/tick");
+      // editors holds an unsaved draft; some only while their view is open.
+      client.emit("reload/tick", pluginViewRef.current);
       // The models too: the list, and the open canvas — which re-reads only
       // while nothing on it is unsaved (src/frontend/eventModel/ModelsPane.tsx).
       if (modelsOn) {
         void models.load();
         setModelsReloadKey((k) => k + 1);
       }
-      // The issues too — only while one of the module's views is open, so
-      // an idle app does not spend GitHub's rate limit on every tick.
-      if (issuesViewRef.current) void issues.refresh();
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
   }, [
@@ -1795,7 +1778,7 @@ export function App() {
     if (loading || needsRepo) return;
     // A plugin's view owns its url (openPluginView pushes it); with no
     // feature selected this effect would otherwise rewrite it to `/`.
-    if (pluginView || issuesView) return;
+    if (pluginView) return;
     const url = pagePath(selected, paneScenario, openPageFile, openModel);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -1806,7 +1789,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, pluginView, issuesView]);
+  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, pluginView]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1818,8 +1801,6 @@ export function App() {
     // a shared link previews as that page (specs/app/tasks.feature.md).
     const base = pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
-      : issuesView
-        ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
       : openModel
         ? `SpecDriven — ${modelTitle(openModel, modelsStore)}`
       : openPage
@@ -1833,7 +1814,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, openPage, pluginView, activeTab, activeTabTick, issuesView, issuesStore, openModel, modelsStore, clock]);
+  }, [selected, feature, paneScenario, openPage, pluginView, activeTab, activeTabTick, openModel, modelsStore, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1973,9 +1954,6 @@ export function App() {
         // Nor its entity fields: the next editor to open reads the new
         // folder's code repo.
         entityFields.reset();
-        // And the old folder's issues: the effect below reloads them for
-        // whichever GitHub repo the new folder's code repo is.
-        setIssuesView(null);
         // A page url from the old folder would only miss in the new one, and
         // nothing else resets it — the selection was already empty while a
         // page was open, so the canonical-url effect has no change to react
@@ -1986,7 +1964,9 @@ export function App() {
           loadFeatures(),
           loadReadme(),
           loadShownPages(state),
-          syncClientPlugins(state.plugins).then(() => client.serial("data/changed")),
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo) }).then(() =>
+            client.serial("data/changed"),
+          ),
           state.models === true ? models.load() : Promise.resolve(),
         ]);
       } else {
@@ -2036,7 +2016,6 @@ export function App() {
       // holds — the same courtesy the README editor gets.
       closePage();
       setPluginView(null);
-      setIssuesView(null);
       setOpenModel(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
@@ -2107,7 +2086,6 @@ export function App() {
     editorRef.current.close();
     closePage();
     setPluginView(null);
-    setIssuesView(null);
     setOpenModel(null);
     setSelectedFolder(null);
     setSelected(null);
@@ -2133,7 +2111,6 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab(tab);
-    setIssuesView(null);
     setOpenModel(null);
     setPluginView({ tab, view });
     const path = owner.route.path(view);
@@ -2154,27 +2131,6 @@ export function App() {
   }, [pluginTabs]);
 
   /**
-   * Open a view of the GitHub issues module (specs/app/github-issues
-   * .feature.md) — openPluginView's twin: the pane is the module's alone, and the
-   * sidebar turns to the Issues tab.
-   */
-  const openIssues = (view: IssuesRoute, opts: { push?: boolean } = {}) => {
-    editorRef.current.close();
-    closePage();
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
-    setSelectedFolder(null);
-    selectSidebarTab("issues");
-    setPluginView(null);
-    setOpenModel(null);
-    setIssuesView(view);
-    if (opts.push && location.pathname !== issuesPath(view)) {
-      history.pushState(null, "", issuesPath(view));
-    }
-  };
-
-  /**
    * Open an Event Model's canvas (roadmap/support-event-modeling.md) —
    * openPluginView's twin: the pane is the canvas's alone, and the sidebar turns
    * to the Models tab. The model owns its url from here on.
@@ -2188,26 +2144,11 @@ export function App() {
     setSelectedFolder(null);
     selectSidebarTab("models");
     setPluginView(null);
-    setIssuesView(null);
     setOpenModel(fileName);
     if (opts.push && location.pathname !== modelLink(fileName)) {
       history.pushState(null, "", modelLink(fileName));
     }
   };
-
-  // The issues load once the code repo's GitHub repository is known, and
-  // reload when a different one takes its place (another data folder); with
-  // none, the store empties and the tab goes.
-  const issuesRepoKey = issuesOn ? `${issuesRepo!.owner}/${issuesRepo!.name}` : null;
-  useEffect(() => {
-    if (issuesRepoKey === null) {
-      issues.reset();
-      if (issuesViewRef.current) goHome();
-      return;
-    }
-    void issues.load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issuesRepoKey]);
 
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
@@ -2218,8 +2159,6 @@ export function App() {
     const pluginHit = matchPluginRoute(pathname);
     if (pluginHit) {
       openPluginView(pluginHit.tab.id, pluginHit.view);
-    } else if (route.issues) {
-      openIssues(route.issues);
     } else if (route.page) {
       await showPage(route.page);
     } else if (route.model) {
@@ -2247,7 +2186,6 @@ export function App() {
       editorRef.current.close();
       closePage();
       setPluginView(null);
-      setIssuesView(null);
       setOpenModel(null);
       setSelected(null);
       setFeature(null);
@@ -3237,7 +3175,6 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     setPluginView(null);
-    setIssuesView(null);
     setOpenModel(null);
     openPageSession.current += 1;
     openPageSaved.current = data.content;
@@ -4041,7 +3978,7 @@ export function App() {
     setTestingOn(data.testing === true);
     // The switches' plugins mount and unmount to match — a tab appears or
     // goes before this returns (src/plugins/client/loader.ts).
-    await syncClientPlugins(data.plugins);
+    await syncClientPlugins(data.plugins, { demo: Boolean(data.demo) });
     setGoogleCalendarOn(data.googleCalendar === true);
     setIssuesSetting(data.issues === true);
     setModelsOn(data.models === true);
@@ -4271,15 +4208,12 @@ export function App() {
 
   // GitHub issues (specs/app/github-issues.feature.md): switched on, the
   // Issues tab appears (given a GitHub code repo) and the issues load; off,
-  // the tab goes and a view of it that is open leaves the pane — the
-  // effect on issuesRepoKey does both, as it does on a data folder change.
+  // the tab goes and a view of it that is open leaves the pane. All of that
+  // is the plugin's mount and dispose (src/plugins/builtin/issues/client
+  // .tsx), which patchSettings runs.
   const toggleIssues = async (on: boolean) => {
     setSettingsIssuesDraft(on);
-    if (!(await patchSettings({ issues: on }))) {
-      setSettingsIssuesDraft(!on);
-      return;
-    }
-    setIssuesSetting(on);
+    if (!(await patchSettings({ issues: on }))) setSettingsIssuesDraft(!on);
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -5343,15 +5277,6 @@ export function App() {
         }),
       ),
     {
-      id: "go-issues",
-      keys: "g i",
-      label: "Go to the issues",
-      group: "Navigate",
-      when: () => !quiet && issuesOn,
-      palette: () => !quietBehindPalette && issuesOn,
-      run: () => openIssues({ kind: "list" }, { push: true }),
-    },
-    {
       id: "go-models",
       keys: "g m",
       label: "Go to the models",
@@ -5620,13 +5545,7 @@ export function App() {
       shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
       ...(tab.palette?.commands?.({ prompt, confirm, navigate: navigateIn(tab.id) }) ?? []),
     ]),
-    shortcutAction("go-issues", <Bug size={14} />),
     shortcutAction("go-models", <Workflow size={14} />),
-    // Not in the demo: its Issues tab reads the release repo and writes
-    // nothing (src/frontend/issues.ts), so the palette offers no new issue.
-    ...(issuesOn && !demo
-      ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
-      : []),
     shortcutAction("editor-pane", <PanelRight size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
@@ -5678,21 +5597,6 @@ export function App() {
           icon: <Icon size={14} />,
           href: hit.href,
           run: () => openPluginView(shownPlugin.id, hit.view, { push: true }),
-        }),
-      );
-    }
-    // So does the Issues tab: the loaded issues, by number, title and body.
-    if (shownTab === "issues") {
-      return searchIssues(q, issuesStore).map(
-        (hit): PaletteItem => ({
-          id: `issues:${hit.number}`,
-          group: "Issues",
-          label: hit.label,
-          text: hit.label,
-          sub: hit.sub,
-          icon: <Bug size={14} />,
-          href: hit.href,
-          run: () => openIssues(hit.view, { push: true }),
         }),
       );
     }
@@ -5847,6 +5751,7 @@ export function App() {
     autosaveSeconds,
     prompt,
     confirm,
+    openSettings,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -6120,7 +6025,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !pluginView && !issuesView && !openModel ? " active" : ""}`}
+              className={`rail-link${!selected && !openPage && !pluginView && !openModel ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -6180,18 +6085,6 @@ export function App() {
                 }
               >
                 <Workflow size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          )}
-          {issuesOn && (
-            <Tooltip label="Issues" keys="g i">
-              <a
-                href="/issues"
-                className={`rail-link${issuesView ? " active" : ""}`}
-                aria-label="Issues"
-                onClick={(e) => spaClick(e, () => openIssues({ kind: "list" }, { push: true }))}
-              >
-                <Bug size={16} aria-hidden="true" />
               </a>
             </Tooltip>
           )}
@@ -6454,7 +6347,7 @@ export function App() {
             Settings switches show adds its own list beside it. The bar only
             shows once there is something to switch to — one tab is no tab
             bar. */}
-        {(shownPageTabs.length > 0 || pluginTabs.length > 0 || issuesOn || modelsOn) && (
+        {(shownPageTabs.length > 0 || pluginTabs.length > 0 || modelsOn) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -6494,24 +6387,6 @@ export function App() {
                 onClick={() => selectSidebarTab("models")}
               >
                 <Workflow size={14} aria-hidden="true" /> Models
-              </button>
-            )}
-            {/* GitHub issues (specs/app/github-issues.feature.md): to the
-                right of Tasks, for the GitHub repo the code repo pushes to. */}
-            {issuesOn && (
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-issues"
-                aria-selected={shownTab === "issues"}
-                aria-controls="side-panel-issues"
-                className={shownTab === "issues" ? "active" : ""}
-                onClick={() => {
-                  selectSidebarTab("issues");
-                  if (!issuesViewRef.current) openIssues({ kind: "list" }, { push: true });
-                }}
-              >
-                <Bug size={14} aria-hidden="true" /> Issues
               </button>
             )}
             {/* The plugins' tabs (specs/app/plugins.feature.md), in their
@@ -6838,11 +6713,6 @@ export function App() {
               navigate={navigateIn(tab.id)}
             />
           ))}
-        {/* The Issues tab (specs/app/github-issues.feature.md): the code
-            repo's GitHub issues, open or closed (src/frontend/IssuesPane.tsx). */}
-        {shownTab === "issues" && issuesOn && (
-          <IssuesSidebar view={issuesView} prompt={prompt} confirm={confirm} onNavigate={openIssues} />
-        )}
         {/* The Models tab (roadmap/support-event-modeling.md): the Event
             Models, with New, Import and their ⋯ menus
             (src/frontend/eventModel/ModelsPane.tsx). */}
@@ -6957,11 +6827,7 @@ export function App() {
             selected ??
             openPage?.fileName ??
             openModel ??
-            (pluginView && activeTab
-              ? activeTab.route.key(pluginView.view)
-              : issuesView
-                ? issuesKey(issuesView)
-                : "home")
+            (pluginView && activeTab ? activeTab.route.key(pluginView.view) : "home")
           }
         >
         {editing && selected && feature ? (
@@ -7953,17 +7819,6 @@ export function App() {
               onSaveHandle={bindModelSave}
             />
           </Suspense>
-        ) : issuesView && issuesOn ? (
-          /* GitHub issues (specs/app/github-issues.feature.md): the list,
-             the form and one issue take the whole pane (src/frontend/IssuesPane.tsx). */
-          <IssuesPane
-            view={issuesView}
-            repoCrumb={repoCrumb}
-            prompt={prompt}
-            confirm={confirm}
-            onNavigate={openIssues}
-            onOpenSettings={openSettings}
-          />
         ) : pluginView && activeTab ? (
           /* A plugin's view (specs/app/plugins.feature.md) — the test
              management module's plans, cases and runs, say — takes the whole

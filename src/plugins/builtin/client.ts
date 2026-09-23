@@ -3,6 +3,8 @@
 
 import type { Context, Plugin } from "../kernel";
 import type { PluginManifest } from "../manifest";
+import issues from "./issues/client";
+import { manifest as issuesManifest } from "./issues/manifest";
 import tests from "./tests/client";
 import { manifest as testsManifest } from "./tests/manifest";
 
@@ -11,4 +13,7 @@ export interface ClientPlugin {
   plugin: Plugin<Context>;
 }
 
-export const builtinClientPlugins: ClientPlugin[] = [{ manifest: testsManifest, plugin: tests }];
+export const builtinClientPlugins: ClientPlugin[] = [
+  { manifest: issuesManifest, plugin: issues },
+  { manifest: testsManifest, plugin: tests },
+];
