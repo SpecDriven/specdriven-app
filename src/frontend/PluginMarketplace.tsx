@@ -188,127 +188,143 @@ export function PluginMarketplace({
   const removeMarketplace = (name: string) =>
     patchSettings({ plugins: { marketplaces: marketplaces.filter((m) => m.name !== name) } });
 
+  const statusFor = (name: string) => statuses?.find((s) => s.name === name);
+
+  const renderRow = (marketplace: string, row: MarketplaceIndex["plugins"][number]) => {
+    const installed = installedFor(marketplace, row.name);
+    const id = `${marketplace}/${row.name}`;
+    const working = busy === id || (installed !== undefined && busy === installed.id);
+    const meta = [
+      row.version ? `v${row.version}` : "",
+      row.category ?? "",
+      installed
+        ? "Installed" +
+          (installed.install?.version && installed.install.version !== row.version
+            ? ` (v${installed.install.version})`
+            : "")
+        : "",
+    ].filter(Boolean);
+    return (
+      <div
+        className={`plugin-market-row${row.name === wanted && !installed ? " wanted" : ""}`}
+        key={row.name}
+        data-plugin={row.name}
+      >
+        <span className="settings-row-label">
+          <span className="plugin-row-name">
+            {row.name}
+            {meta.length > 0 && <span className="plugin-row-meta">{meta.join(" · ")}</span>}
+          </span>
+          {row.description && <span className="settings-row-hint">{row.description}</span>}
+        </span>
+        {installed ? (
+          <span className="plugin-market-row-actions">
+            <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
+              Update
+            </button>
+            <button type="button" className="link" disabled={working} onClick={() => void remove(installed)}>
+              Remove
+            </button>
+          </span>
+        ) : (
+          <button type="button" className="link" disabled={working} onClick={() => void install(marketplace, row.name)}>
+            {working ? "Installing…" : "Install"}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // One block per marketplace: its name, owner and url with Remove, then —
+  // once browsed — the plugins its index lists. Adding and refreshing sit
+  // above them all.
   return (
-    <div className="settings-row plugin-marketplaces" data-testid="plugin-marketplaces">
-      <span className="settings-row-label">
-        {/* The page's section says what a marketplace is; this row lists them. */}
-        <span>Configured</span>
-        {marketplaces.length === 0 && (
-          <span className="settings-row-hint">None — add the git url of one to browse its plugins.</span>
-        )}
-        {marketplaces.length > 0 && (
-          <ul className="plugin-source-list">
-            {marketplaces.map((m) => (
-              <li key={m.name}>
-                <code title={m.source}>
-                  {m.name} · {m.source}
-                </code>
-                <button
-                  type="button"
-                  className="link"
-                  aria-label={`Remove marketplace ${m.name}`}
-                  onClick={() => void removeMarketplace(m.name)}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {error && (
-          <span className="settings-row-hint plugin-row-error" role="alert">
-            {error}
-          </span>
-        )}
-        {open && loading && statuses === null && <span className="settings-row-hint">Reading the marketplaces…</span>}
-        {open && wanted && statuses !== null && !loading && !listedWanted && (
-          <span className="settings-row-hint plugin-row-error" role="alert">
-            No marketplace here lists {wanted}. Add the one that does, or Refresh.
-          </span>
-        )}
-        {open &&
-          statuses?.map((m) => (
-            <div className="plugin-market" key={m.name} data-marketplace={m.name}>
-              <span className="plugin-market-title">
-                {m.index?.name ?? m.name}
-                {m.index?.owner && (
-                  <span className="plugin-row-meta">
-                    {m.index.owner.url ? (
-                      <a href={m.index.owner.url} target="_blank" rel="noreferrer">
-                        {m.index.owner.name}
-                      </a>
-                    ) : (
-                      m.index.owner.name
-                    )}
-                  </span>
-                )}
-              </span>
-              {m.error && (
-                <span className="settings-row-hint plugin-row-error" role="alert">
-                  {m.error}
-                </span>
-              )}
-              {m.index && m.index.plugins.length === 0 && (
-                <span className="settings-row-hint">This marketplace lists no plugins yet.</span>
-              )}
-              {m.index?.plugins.map((row) => {
-                const installed = installedFor(m.name, row.name);
-                const id = `${m.name}/${row.name}`;
-                const working = busy === id || (installed !== undefined && busy === installed.id);
-                return (
-                  <div
-                    className={`plugin-market-row${row.name === wanted && !installed ? " wanted" : ""}`}
-                    key={row.name}
-                    data-plugin={row.name}
-                  >
-                    <span className="settings-row-label">
-                      <span className="plugin-row-name">
-                        {row.name}
-                        <span className="plugin-row-meta">
-                          {row.version ? `v${row.version}` : ""}
-                          {row.version && row.category ? " · " : ""}
-                          {row.category ?? ""}
-                          {installed ? (row.version || row.category ? " · " : "") + "Installed" : ""}
-                          {installed?.install?.version && installed.install.version !== row.version
-                            ? ` (v${installed.install.version})`
-                            : ""}
-                        </span>
-                      </span>
-                      {row.description && <span className="settings-row-hint">{row.description}</span>}
+    <div className="plugin-marketplaces" data-testid="plugin-marketplaces">
+      <div className="settings-row plugin-market-toolbar">
+        <span className="settings-row-label">
+          {marketplaces.length === 0 ? (
+            <span className="settings-row-hint">None yet — add the git url of one to browse its plugins.</span>
+          ) : (
+            <span className="settings-row-hint">
+              {marketplaces.length} configured
+              {open ? "" : " — Browse plugins to see what they list."}
+            </span>
+          )}
+          {error && (
+            <span className="settings-row-hint plugin-row-error" role="alert">
+              {error}
+            </span>
+          )}
+          {open && loading && statuses === null && <span className="settings-row-hint">Reading the marketplaces…</span>}
+          {open && wanted && statuses !== null && !loading && !listedWanted && (
+            <span className="settings-row-hint plugin-row-error" role="alert">
+              No marketplace here lists {wanted}. Add the one that does, or Refresh.
+            </span>
+          )}
+        </span>
+        <span className="plugin-market-row-actions">
+          <button
+            type="button"
+            className="link"
+            disabled={loading || marketplaces.length === 0}
+            onClick={() => (open ? void load(true) : setOpen(true))}
+          >
+            {open ? (loading ? "Refreshing…" : "Refresh") : "Browse plugins"}
+          </button>
+          <button type="button" className="link" onClick={() => void addMarketplace()}>
+            Add marketplace…
+          </button>
+        </span>
+      </div>
+      {marketplaces.map((m) => {
+        const status = open ? statusFor(m.name) : undefined;
+        const index = status?.index;
+        return (
+          <div className="plugin-market" key={m.name} data-marketplace={m.name}>
+            <div className="plugin-market-head">
+              <span className="settings-row-label">
+                <span className="plugin-market-title">
+                  {index?.name ?? m.name}
+                  {index?.owner && (
+                    <span className="plugin-row-meta">
+                      by{" "}
+                      {index.owner.url ? (
+                        <a href={index.owner.url} target="_blank" rel="noreferrer">
+                          {index.owner.name}
+                        </a>
+                      ) : (
+                        index.owner.name
+                      )}
                     </span>
-                    {installed ? (
-                      <span className="plugin-market-actions">
-                        <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
-                          Update
-                        </button>
-                        <button type="button" className="link" disabled={working} onClick={() => void remove(installed)}>
-                          Remove
-                        </button>
-                      </span>
-                    ) : (
-                      <button type="button" className="link" disabled={working} onClick={() => void install(m.name, row.name)}>
-                        {working ? "Installing…" : "Install"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+                  )}
+                </span>
+                <code className="plugin-market-source" title={m.source}>
+                  {m.source}
+                </code>
+              </span>
+              <button
+                type="button"
+                className="link"
+                aria-label={`Remove marketplace ${m.name}`}
+                onClick={() => void removeMarketplace(m.name)}
+              >
+                Remove
+              </button>
             </div>
-          ))}
-      </span>
-      <span className="plugin-market-actions">
-        <button type="button" className="link" onClick={() => void addMarketplace()}>
-          Add marketplace…
-        </button>
-        <button
-          type="button"
-          className="link"
-          disabled={loading || marketplaces.length === 0}
-          onClick={() => (open ? void load(true) : setOpen(true))}
-        >
-          {open ? (loading ? "Refreshing…" : "Refresh") : "Browse plugins"}
-        </button>
-      </span>
+            {status?.error && (
+              <span className="settings-row-hint plugin-row-error" role="alert">
+                {status.error}
+              </span>
+            )}
+            {index && index.plugins.length === 0 && (
+              <span className="settings-row-hint">This marketplace lists no plugins yet.</span>
+            )}
+            {index && index.plugins.length > 0 && (
+              <div className="plugin-market-list">{index.plugins.map((row) => renderRow(m.name, row))}</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -7176,27 +7176,61 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   cursor: not-allowed;
 }
 
-/* Plugins → Marketplaces: each index under the configured list,
-   its plugins as rows with Install, Update or Remove beside them. */
+/* Plugins → Marketplaces: Browse and Add above, then one block per
+   marketplace — its name, owner and url with Remove — and the plugins its
+   index lists as full-width rows, the action at the right edge. */
+.plugin-market-toolbar {
+  align-items: flex-start;
+}
+
 .plugin-market {
-  margin-top: 0.5rem;
-  padding-top: 0.35rem;
-  border-top: 1px dashed var(--border);
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.plugin-market-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .plugin-market-title {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  font-size: 0.9rem;
   font-weight: 600;
+}
+
+.plugin-market-source {
+  min-width: 0;
+  font-size: 0.6875rem;
+  color: var(--text-3, var(--text-2));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugin-market > .settings-row-hint {
+  display: block;
+  margin-top: 0.4rem;
+}
+
+/* The listed plugins sit on their own inset surface under the header. */
+.plugin-market-list {
+  margin-top: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  padding: 0 0.75rem;
 }
 
 .plugin-market-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.35rem 0;
+  gap: 1rem;
+  padding: 0.6rem 0;
 }
 
 .plugin-market-row + .plugin-market-row {
@@ -7206,10 +7240,19 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 /* The row a not-installed plugin's "Find in marketplace" asked for. */
 .plugin-market-row.wanted {
   background: var(--accent-soft);
-  border-radius: 6px;
-  padding-inline: 0.5rem;
+  margin-inline: -0.75rem;
+  padding-inline: 0.75rem;
 }
 
+/* Install, Update and Remove, Browse and Add: side by side. */
+.plugin-market-row-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  white-space: nowrap;
+}
+
+/* The Plugins page's own "Find in marketplace" / "Remove from list" pair. */
 .plugin-market-actions {
   display: flex;
   flex-direction: column;
