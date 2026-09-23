@@ -12,6 +12,10 @@ import { join } from "node:path";
 import { loadPageDoc, pageDocDirRel } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
 import { syncDataDir } from "../src/server/reload";
+// The folder's drift pass is the tasks plugin's (src/plugins/builtin/pages
+// /host.ts): it runs while the switch has the plugin mounted.
+import "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 import {
   ROADMAP,
   ROADMAP_FOLDER,
@@ -27,8 +31,13 @@ import {
   savePage,
 } from "../src/server/pages";
 import { parsePage, serializePage } from "../src/server/parser";
-import { normalizeTasks } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `tasks` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeTasks = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { tasks: value }, builtinManifests).enabled.includes("tasks");
 
 let root: string;
 
@@ -68,9 +77,15 @@ test("ensurePageFolder creates the tasks folder once", async () => {
 
 test("a sync tick creates the tasks folder only when the setting is on", async () => {
   const clones = await twoClones(root);
-  await syncDataDir(clones.a, { roadmap: true });
-  expect(await exists(join(clones.a, TASKS_FOLDER))).toBe(false);
-  await syncDataDir(clones.a, { tasks: true });
+  await syncPlugins({ roadmap: true, tasks: false });
+  try {
+    await syncDataDir(clones.a);
+    expect(await exists(join(clones.a, TASKS_FOLDER))).toBe(false);
+    await syncPlugins({ roadmap: false, tasks: true });
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ roadmap: false, tasks: false });
+  }
   expect(await exists(join(clones.a, TASKS_FOLDER))).toBe(true);
 });
 
@@ -78,7 +93,12 @@ test("a sync tick commits and pushes every file in the tasks folder", async () =
   const clones = await twoClones(root);
   await mkdir(join(clones.a, TASKS_FOLDER), { recursive: true });
   await writeFile(join(clones.a, TASKS_FOLDER, "ship-v2.md"), "# Ship v2\n\nCut the build.\n");
-  await syncDataDir(clones.a, { tasks: true });
+  await syncPlugins({ tasks: true });
+  try {
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ tasks: false });
+  }
 
   await git(clones.b, "pull", "origin", "main");
   expect(await Bun.file(join(clones.b, TASKS_FOLDER, "ship-v2.md")).text()).toContain(

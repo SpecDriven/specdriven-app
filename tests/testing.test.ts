@@ -8,7 +8,6 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hasTestingDoc } from "../src/server/automerge/store";
-import { normalizeTesting } from "../src/server/state";
 import {
   NotFoundError,
   createCase,
@@ -25,6 +24,12 @@ import {
   updateExecution,
   updatePlan,
 } from "../src/server/testing";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `testing` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeTesting = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { testing: value }, builtinManifests).enabled.includes("tests");
 
 let root: string;
 

@@ -33,7 +33,9 @@ export type PaletteScope =
   | "notebook"
   | "tests"
   | "issues"
-  | "models";
+  | "models"
+  // A plugin's tab, by its id (src/plugins/client/tabs.ts).
+  | (string & {});
 
 export interface PaletteItem {
   id: string;

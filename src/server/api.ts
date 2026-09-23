@@ -16,13 +16,7 @@ import {
   normalizeProjectManagement,
   normalizeProjectManagementTool,
   normalizePublishExternalLinks,
-  normalizeModels,
-  normalizeNotebook,
-  normalizeRoadmap,
-  normalizeTasks,
-  normalizeTesting,
   normalizeGoogleCalendar,
-  normalizeIssues,
   normalizeScenarioPreviewLines,
   normalizeOpenTestsInIdea,
   normalizeShowTestLinks,
@@ -89,7 +83,6 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
-import { EstimateError, estimateMinutes } from "./estimate";
 import {
   ChatError,
   answerPermission,
@@ -113,76 +106,14 @@ import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
-import { extractScenarios, parsePage } from "./parser";
+import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
-import {
-  MODELS_FOLDER,
-  createModel,
-  deleteModel,
-  ensureModelsFolder,
-  exportModel,
-  generateSliceFeature,
-  listModels,
-  readModel,
-  saveModel,
-  sessionModels,
-} from "./models";
+import { MODELS_FOLDER, ensureModelsFolder, sessionModels } from "./models";
 import type { ModelInput } from "./agent";
-import { serializeExport } from "./eventModel/serialize";
-import {
-  NOTEBOOK,
-  ROADMAP,
-  TASKS,
-  createPage,
-  deletePage,
-  ensurePageFolder,
-  listPages,
-  pageFolderNamed,
-  readPage,
-  renamePageFile,
-  savePage,
-  type PageFolder,
-  type RenamePageOptions,
-} from "./pages";
-import type { PageView } from "./pages";
-import {
-  byNewest,
-  createEntry,
-  entryFileOf,
-  relinkEntries,
-  setEntryKind,
-  setSupersedes,
-  supersededBy,
-} from "./notebook";
-import {
-  NotFoundError,
-  createCase,
-  createPlan,
-  deleteCase,
-  deleteExecution,
-  deletePlan,
-  readTesting,
-  setResult,
-  startExecution,
-  updateCase,
-  updateExecution,
-  updatePlan,
-} from "./testing";
-import {
-  GitHubError,
-  addComment,
-  createIssue,
-  getIssue,
-  getPullRequest,
-  listComments,
-  listIssues,
-  parseIssueNumber,
-  readIssuesRepo,
-  updateIssue,
-  type IssueState,
-} from "./issues";
+import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
+import { getPullRequest, readIssuesRepo } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import type { PullRequestLookup } from "./pullRequests";
@@ -199,6 +130,27 @@ import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
 import { version as appVersion } from "../../package.json";
+import { isAbsolute } from "node:path";
+import { bodyOf, json, type Handler, type Params } from "./http";
+import {
+  pluginStates,
+  provideDataAccess,
+  routes as routeRegistry,
+  sourcePaths,
+  syncPlugins,
+} from "../plugins/host/loader";
+import { builtinManifests } from "../plugins/builtin/manifests";
+import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
+import { marketplaceRoutes } from "../plugins/host/marketplace";
+import {
+  PROFILE_KEY,
+  hasLegacyKeys,
+  legacyFields,
+  readProfile,
+  storedProfile,
+  withPlugin,
+  writeProfile,
+} from "../plugins/profile";
 
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
@@ -294,6 +246,17 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  // The profile (specs/app/plugins.feature.md "The profile lists enabled
+  // plugins in tab order"): a settings file from before plugins, with the
+  // per-module switches, is read as the matching list once and written back
+  // as `plugins.enabled`, so the file carries the list from here on.
+  const profile = readProfile(state as Record<string, unknown>, builtinManifests);
+  if (profile.migrated && hasLegacyKeys(state as Record<string, unknown>, builtinManifests)) {
+    writeProfile(state as Record<string, unknown>, profile.enabled, builtinManifests);
+    await writeState(state, getAppRoot());
+  }
+  // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts).
+  await syncHostPlugins(state);
   // External links go into the markdown projections only while the setting
   // says so (specs/external-links/project-management-jira-linear-etc.
   // feature.md) — decided before the first sync tick writes a projection.
@@ -308,9 +271,6 @@ export async function applyStartupState(): Promise<void> {
   void applyNetSync(state);
 }
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status });
-}
 
 /**
  * Git-engine fields for /api/state (specs/git-operations.spec.md): the
@@ -348,8 +308,6 @@ async function authFields() {
   };
 }
 
-type Params = Record<string, string>;
-type Handler = (req: Request, params: Params) => Response | Promise<Response>;
 
 /**
  * Resolve the configured data repo (local path or GitHub url, cloned on first
@@ -371,6 +329,40 @@ function withDataDir(
     }
     return handler(dir, req, params);
   };
+}
+
+/** The resolved data dir, or null while none is configured or reachable. */
+async function currentDataDir(): Promise<string | null> {
+  const state = await readState(getAppRoot());
+  if (needsDataRepo(state)) return null;
+  try {
+    return await resolveDataRepo(state.dataRepo!, getAppRoot());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The plugins the settings ask for (src/plugins/host/loader.ts): the
+ * built-ins the profile lists, and — outside the demo, whose dataset is
+ * ephemeral and whose host is shared — whatever the plugin folders hold,
+ * a plugin found for the first time added to the profile and stored.
+ */
+async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
+  const raw = state as Record<string, unknown>;
+  if (isDemoMode()) return syncPlugins(raw);
+  return syncPlugins(raw, {
+    sources: true,
+    dataDir: await currentDataDir(),
+    persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
+    readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
+  });
+}
+
+/** The profile's `plugins` section as stored, whatever keys it has. */
+function profileSection(state: SpecDrivenState): Record<string, unknown> {
+  const section = (state as Record<string, unknown>)[PROFILE_KEY];
+  return section && typeof section === "object" ? (section as Record<string, unknown>) : {};
 }
 
 async function stateFields(state: SpecDrivenState) {
@@ -407,15 +399,19 @@ async function stateFields(state: SpecDrivenState) {
     canRunCodex: codexAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
-    roadmap: normalizeRoadmap(state.roadmap),
-    tasks: normalizeTasks(state.tasks),
-    // The engineering notebook (specs/app/engineering-notebook.feature.md):
-    // the one module that is on unless turned off.
-    notebook: normalizeNotebook(state.notebook),
-    models: normalizeModels(state.models),
-    testing: normalizeTesting(state.testing),
+    // The plugins (specs/app/plugins.feature.md): the profile's entries in
+    // tab order, then the built-ins it leaves off — what Settings → Plugins
+    // lists — with the per-module switches they replaced (`roadmap`,
+    // `testing`, …) still reported for one release.
+    plugins: pluginStates(),
+    // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
+    // plugin loads from a local folder"), which Settings → Plugins lists.
+    pluginSources: sourcePaths(profileSection(state)),
+    // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
+    // git repository with an index"): the git urls Settings → Plugins lists.
+    pluginMarketplaces: marketplaceEntries(profileSection(state)),
+    ...legacyFields(readProfile(state as Record<string, unknown>, builtinManifests).enabled, builtinManifests),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
-    issues: normalizeIssues(state.issues),
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
@@ -445,6 +441,9 @@ const getState: Handler = async (req) => {
     await reseedDemo();
   }
   const state = await readState(getAppRoot());
+  // A demo reseed above rewrote the switches; the plugins follow them, and a
+  // plugin folder that appeared meanwhile is picked up.
+  await syncHostPlugins(state);
   return json({
     ...(await stateFields(state)),
     // specs/user-info-settings.spec.md: the OS user by default, with
@@ -470,13 +469,19 @@ const putState: Handler = async (req) => {
     codeGenTarget?: string;
     deletePublished?: boolean;
     assignments?: boolean;
+    /**
+     * The profile: the enabled plugins, in tab order; the explicit plugin
+     * folders; a data-repo plugin folder to trust from now on.
+     */
+    plugins?: { enabled?: unknown; sources?: unknown; trust?: unknown; marketplaces?: unknown };
+    /** The per-module switches the profile replaced — aliases for one release. */
     roadmap?: boolean;
     notebook?: boolean;
     tasks?: boolean;
     models?: boolean;
     testing?: boolean;
-    googleCalendar?: boolean;
     issues?: boolean;
+    googleCalendar?: boolean;
     syncServerUrl?: string | null;
   };
   if (
@@ -495,6 +500,7 @@ const putState: Handler = async (req) => {
     body.codeGenTarget === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
+    body.plugins === undefined &&
     body.roadmap === undefined &&
     body.notebook === undefined &&
     body.tasks === undefined &&
@@ -507,7 +513,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -698,63 +704,85 @@ const putState: Handler = async (req) => {
     if (body.assignments) state.assignments = true;
     else delete state.assignments;
   }
-  // The roadmap folder (specs/app/roadmap.feature.md): opt-in — the default
-  // OFF is an absent key. Turning it on creates the folder below, once the
-  // settings are written.
+  // The profile (specs/app/plugins.feature.md "The profile lists enabled
+  // plugins in tab order"): the ordered list of enabled plugins, taken whole
+  // as `plugins.enabled` — or edited one id at a time through the switches it
+  // replaced (`roadmap`, `testing`, …), which stay as aliases for one
+  // release: on appends the id, off removes it. Either way the file carries
+  // the list from here on and the legacy keys go.
+  const raw = state as Record<string, unknown>;
+  const before = readProfile(raw, builtinManifests).enabled;
+  let enabled = before;
+  if (body.plugins !== undefined) {
+    if (!body.plugins || typeof body.plugins !== "object") {
+      return json({ error: "plugins must be an object" }, 400);
+    }
+    const { enabled: list, sources, trust, marketplaces } = body.plugins;
+    if (list === undefined && sources === undefined && trust === undefined && marketplaces === undefined) {
+      return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
+    }
+    if (list !== undefined) {
+      if (!Array.isArray(list) || !list.every((id) => typeof id === "string" && id.length > 0)) {
+        return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
+      }
+      enabled = storedProfile({ plugins: { enabled: list } }) ?? [];
+    }
+    // The explicit plugin folders (specs/app/plugins.feature.md "A plugin
+    // loads from a local folder"): absolute paths, taken whole.
+    if (sources !== undefined) {
+      if (!Array.isArray(sources) || !sources.every((p) => typeof p === "string" && isAbsolute(p))) {
+        return json({ error: "plugins.sources must be a list of absolute folder paths" }, 400);
+      }
+      const section = profileSection(state);
+      const unique = sources.filter((p, i) => sources.indexOf(p) === i);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, sources: unique.map((path) => ({ path })) };
+    }
+    // A plugin under the data repo is trusted once, by its folder, before
+    // its first load — the repo is pulled from GitHub.
+    if (trust !== undefined) {
+      if (typeof trust !== "string" || !isAbsolute(trust)) {
+        return json({ error: "plugins.trust must be an absolute folder path" }, 400);
+      }
+      const section = profileSection(state);
+      const trusted = Array.isArray(section.trusted) ? section.trusted.filter((t) => typeof t === "string") : [];
+      if (!trusted.includes(trust)) trusted.push(trust);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, trusted };
+    }
+    // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
+    // git repository with an index"): `{ name, source }` rows, taken whole;
+    // an empty list is the choice of none, unlike no key at all.
+    if (marketplaces !== undefined) {
+      const rows = Array.isArray(marketplaces) ? marketplaces.map(marketplaceRef) : null;
+      if (!rows || rows.some((r) => r === null)) {
+        return json({ error: "plugins.marketplaces must be a list of { name, source } rows" }, 400);
+      }
+      const unique = (rows as { name: string; source: string }[]).filter(
+        (r, i, all) => all.findIndex((x) => x.name === r.name) === i,
+      );
+      const section = profileSection(state);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, marketplaces: unique };
+    }
+  }
+  for (const manifest of builtinManifests) {
+    const key = manifest.legacyKey as keyof typeof body | undefined;
+    if (!key || body[key] === undefined) continue;
+    if (typeof body[key] !== "boolean") {
+      return json({ error: `${key} must be a boolean` }, 400);
+    }
+    enabled = withPlugin(enabled, manifest.id, body[key] as boolean);
+  }
+  writeProfile(raw, enabled, builtinManifests);
+  // The special folders (specs/app/roadmap.feature.md "Create roadmap folder
+  // if necessary", specs/app/tasks.feature.md) and the models folder
+  // (roadmap/support-event-modeling.md) are made below when their plugin
+  // goes on, once the settings are written. The notebook's is not: it
+  // appears with the first entry, which is what lets a module ship on
+  // without writing to anybody's repo.
   const turnedOn: PageFolder[] = [];
-  if (body.roadmap !== undefined) {
-    if (typeof body.roadmap !== "boolean") {
-      return json({ error: "roadmap must be a boolean" }, 400);
-    }
-    if (body.roadmap && !normalizeRoadmap(state.roadmap)) turnedOn.push(ROADMAP);
-    if (body.roadmap) state.roadmap = true;
-    else delete state.roadmap;
-  }
-  // The tasks folder (specs/app/tasks.feature.md): the roadmap switch's twin
-  // — opt-in, an absent key when off, and the folder made below when it goes
-  // on.
-  if (body.tasks !== undefined) {
-    if (typeof body.tasks !== "boolean") {
-      return json({ error: "tasks must be a boolean" }, 400);
-    }
-    if (body.tasks && !normalizeTasks(state.tasks)) turnedOn.push(TASKS);
-    if (body.tasks) state.tasks = true;
-    else delete state.tasks;
-  }
-  // The engineering notebook (specs/app/engineering-notebook.feature.md):
-  // the switches' odd one out — ON unless explicitly turned off, so it is the
-  // `false` that is stored and the absent key that means on. Nothing is
-  // created here: the folder appears with the first entry, which is what lets
-  // a module ship on without writing to anybody's repo.
-  if (body.notebook !== undefined) {
-    if (typeof body.notebook !== "boolean") {
-      return json({ error: "notebook must be a boolean" }, 400);
-    }
-    if (body.notebook) delete state.notebook;
-    else state.notebook = false;
-  }
-  // The models folder (roadmap/support-event-modeling.md): the roadmap
-  // switch's third twin — opt-in, an absent key when off, and the folder
-  // made below when it goes on.
-  let modelsTurnedOn = false;
-  if (body.models !== undefined) {
-    if (typeof body.models !== "boolean") {
-      return json({ error: "models must be a boolean" }, 400);
-    }
-    if (body.models && !normalizeModels(state.models)) modelsTurnedOn = true;
-    if (body.models) state.models = true;
-    else delete state.models;
-  }
-  // Test management (specs/app/tests.feature.md): opt-in — an absent
-  // key when off. Nothing to make on the spot: the module's document is
-  // minted on its first write.
-  if (body.testing !== undefined) {
-    if (typeof body.testing !== "boolean") {
-      return json({ error: "testing must be a boolean" }, 400);
-    }
-    if (body.testing) state.testing = true;
-    else delete state.testing;
-  }
+  const nowOn = (id: string) => enabled.includes(id) && !before.includes(id);
+  if (nowOn("roadmap")) turnedOn.push(ROADMAP);
+  if (nowOn("tasks")) turnedOn.push(TASKS);
+  const modelsTurnedOn = nowOn("models");
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
   // Calendar"): opt-in — an absent key when off. Nothing to make: the
   // estimate lands on the task's own page, and the event on Google's side.
@@ -764,15 +792,6 @@ const putState: Handler = async (req) => {
     }
     if (body.googleCalendar) state.googleCalendar = true;
     else delete state.googleCalendar;
-  }
-  // GitHub issues (specs/app/github-issues.feature.md): opt-in — an
-  // absent key when off. Nothing else to do: the issues live on GitHub.
-  if (body.issues !== undefined) {
-    if (typeof body.issues !== "boolean") {
-      return json({ error: "issues must be a boolean" }, 400);
-    }
-    if (body.issues) state.issues = true;
-    else delete state.issues;
   }
   // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
   // or null turns it off — the default, stored as an absent key.
@@ -789,6 +808,9 @@ const putState: Handler = async (req) => {
   }
   await writeState(state, getAppRoot());
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
+  // The profile mounts and unmounts its plugins on the spot: a module turned
+  // off answers 404 from here on, one turned on has its routes.
+  await syncHostPlugins(state);
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
@@ -829,13 +851,7 @@ const putState: Handler = async (req) => {
   // is logged and the switch still stands; the folder is configured either way.
   if (pickedDir) {
     const dir = pickedDir;
-    await syncTick(() =>
-      syncDataDir(dir, {
-        roadmap: normalizeRoadmap(state.roadmap),
-        tasks: normalizeTasks(state.tasks),
-        models: normalizeModels(state.models),
-      }),
-    );
+    await syncTick(() => syncDataDir(dir));
   }
   await applyNetSync(state);
   return json(await stateFields(state));
@@ -944,264 +960,6 @@ const getFeatures = withDataDir(async (dir) => {
     // the demo too, which names its repo outright (demo.ts).
     issuesRepo: await readIssuesRepo(dir),
   });
-});
-
-// The special folders' pages (specs/app/roadmap.feature.md, specs/app/tasks
-// .feature.md): the markdown files in the data repo's `roadmap` and `tasks`
-// folders, listed with the member each is assigned to. One set of handlers
-// serves both — the folder a route is mounted under picks the descriptor.
-const listPagesRoute = (kind: PageFolder) =>
-  withDataDir(async (dir) => json({ pages: await listPages(dir, kind) }));
-
-const createPageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, req) => {
-    const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-    try {
-      return json({ fileName: await createPage(dir, kind, body.name) }, 201);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-const readPageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, _req, params) => {
-    try {
-      const page = await readPage(dir, kind, params.file ?? "");
-      return page === null
-        ? json({ error: `${kind.label[0]!.toUpperCase()}${kind.label.slice(1)} not found` }, 404)
-        : json(page);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// The page editor's autosave: a local write through the page's document —
-// the reload cron commits and pushes it, like a saved scenario.
-const savePageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
-    if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
-    try {
-      return json(await savePage(dir, kind, params.file ?? "", body.content));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// Deleting a page (specs/app/roadmap.feature.md): the markdown and its
-// document go, committed and pushed like a deleted feature.
-const deletePageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, _req, params) => {
-    try {
-      return json(await deletePage(dir, kind, params.file ?? ""));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// Renaming a page (specs/app/roadmap.feature.md): the `# heading` and the
-// file both, so the url follows the title — a `git mv`, committed and pushed.
-// The notebook passes relinkEntries, so the links naming an entry follow it.
-const renamePageRoute = (kind: PageFolder, options: RenamePageOptions = {}) =>
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-    try {
-      return json(await renamePageFile(dir, kind, params.file ?? "", body.name, options));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// Add a task to Google Calendar (specs/app/tasks.feature.md): one short turn
-// of the developer's `claude` CLI proposes how long the task takes
-// (src/server/estimate.ts); the person confirms it in the client, which
-// writes the estimate on the page and opens the prefilled event itself.
-// Closed while the Google Calendar switch is off, like the other modules.
-// In demo mode the seam holds the scripted agent, which has no number to
-// give, so the route proposes one of its own.
-const DEMO_ESTIMATE_MINUTES = 30;
-
-const estimateTaskRoute = withDataDir(async (dir, _req, params) => {
-  if (!normalizeGoogleCalendar((await readState(getAppRoot())).googleCalendar)) {
-    return json({ error: "Google Calendar is switched off in Settings" }, 404);
-  }
-  let page: PageView | null;
-  try {
-    page = await readPage(dir, TASKS, params.file ?? "");
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-  if (page === null) return json({ error: "Task not found" }, 404);
-  if (isDemoMode()) return json({ minutes: DEMO_ESTIMATE_MINUTES });
-  try {
-    return json({ minutes: await estimateMinutes(parsePage(page.content), dir) });
-  } catch (e) {
-    if (e instanceof EstimateError) return json({ error: e.message }, e.status);
-    return json({ error: (e as Error).message }, 502);
-  }
-});
-
-// The engineering notebook (specs/app/engineering-notebook.feature.md): the
-// dated markdown entries in the data repo's `notebook` folder. Reading,
-// saving and deleting one is what any page does, so those routes are the
-// factories above with the notebook's descriptor — wrapped in the switch,
-// which unlike the other modules' is on unless it has been turned off. Only
-// what makes an entry an entry is handled here: creating one with today's
-// date and an author, and the two metadata edits the header offers.
-const withNotebook = (handler: Handler): Handler =>
-  async (req, params) => {
-    if (!normalizeNotebook((await readState(getAppRoot())).notebook)) {
-      return json({ error: "The engineering notebook is switched off in Settings" }, 404);
-    }
-    return handler(req, params);
-  };
-
-const listEntriesRoute = withNotebook(
-  withDataDir(async (dir) => {
-    // Newest first, and each superseded entry told which entry replaced it —
-    // derived on every read, so a link removed by hand takes its badge with
-    // it on the next sync.
-    const entries = byNewest(await listPages(dir, NOTEBOOK));
-    return json({ pages: entries, supersededBy: supersededBy(entries) });
-  }),
-);
-
-const createEntryRoute = withNotebook(
-  withDataDir(async (dir, req) => {
-    const body = (await req.json().catch(() => null)) as {
-      name?: unknown;
-      kind?: unknown;
-    } | null;
-    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-    if (body.kind !== undefined && body.kind !== "Observation" && body.kind !== "Decision") {
-      return json({ error: "kind must be Observation or Decision" }, 400);
-    }
-    try {
-      const kind = body.kind ?? "Observation";
-      return json({ fileName: await createEntry(dir, body.name, kind) }, 201);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
-
-// The kind chip in an entry's header, and the "Supersedes…" picker beside it.
-// Both are local writes through the document, like any page save.
-const putEntryKindRoute = withNotebook(
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
-    if (body?.kind !== "Observation" && body?.kind !== "Decision") {
-      return json({ error: "kind must be Observation or Decision" }, 400);
-    }
-    try {
-      return json(await setEntryKind(dir, params.file ?? "", body.kind));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
-
-const putEntrySupersedesRoute = withNotebook(
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as {
-      title?: unknown;
-      url?: unknown;
-    } | null;
-    // A null body — or one with no url — unpicks the link.
-    const url = typeof body?.url === "string" ? body.url.trim() : "";
-    try {
-      if (!url) return json(await setSupersedes(dir, params.file ?? "", null));
-      if (typeof body?.title !== "string" || !body.title.trim()) {
-        return json({ error: "title is required" }, 400);
-      }
-      if (entryFileOf(url) === null) return json({ error: "url must name an entry" }, 400);
-      return json(await setSupersedes(dir, params.file ?? "", { title: body.title.trim(), url }));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
-
-// Event Models (roadmap/support-event-modeling.md): the JSON files in the
-// data repo's `models` folder, each drawn on the Models tab's canvas. The
-// same shape as the page routes: list, create, read, save, delete — plus an
-// export of the schema's half for other tools, and an import of one.
-const listModelsRoute = withDataDir(async (dir) => json({ models: await listModels(dir) }));
-
-const createModelRoute = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => null)) as { name?: unknown; model?: unknown } | null;
-  if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-  try {
-    return json({ fileName: await createModel(dir, body.name, body.model) }, 201);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-const readModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    const model = await readModel(dir, params.file ?? "");
-    return model === null ? json({ error: "Model not found" }, 404) : json(model);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-// The canvas's autosave: a local write through the model's document — the
-// reload cron commits and pushes it, like a saved scenario.
-const saveModelRoute = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => null)) as { file?: unknown } | null;
-  if (body?.file === null || typeof body?.file !== "object") {
-    return json({ error: "file is required" }, 400);
-  }
-  try {
-    return json(await saveModel(dir, params.file ?? "", body.file));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-const deleteModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    return json(await deleteModel(dir, params.file ?? ""));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-// The bridge to the specs (src/server/eventModel/feature.ts): a slice
-// scaffolds its feature file — one scenario per Given / When / Then — and
-// is linked to it. The body may name the feature (with a `/` for a folder);
-// the slice's title otherwise. The canvas opens the new feature.
-const generateSliceFeatureRoute = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-  const name = typeof body?.name === "string" ? body.name : undefined;
-  try {
-    return json(await generateSliceFeature(dir, params.file ?? "", params.slice ?? "", name), 201);
-  } catch (e) {
-    const message = (e as Error).message;
-    return json({ error: message }, /not found/i.test(message) ? 404 : 400);
-  }
-});
-
-// The schema's half alone, as a download — what eventmodelers.ai and the
-// other tools that speak the published schema take.
-const exportModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    const model = await exportModel(dir, params.file ?? "");
-    if (model === null) return json({ error: "Model not found" }, 404);
-    const stem = (params.file ?? "").split("/").pop()!.replace(/\.model\.json$/, "");
-    return new Response(serializeExport(model), {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${stem}.eventmodel.json"`,
-      },
-    });
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
 });
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
@@ -1575,7 +1333,7 @@ async function resolveSessionRequest(
       dir,
       wantedModels,
       files.map((f) => f.fileName),
-      { linkedToSpecs: normalizeModels(state.models) },
+      { linkedToSpecs: readProfile(state as Record<string, unknown>, builtinManifests).enabled.includes("models") },
     );
     models = bundled.models;
     // A model's own specs join the session whole, unless already picked.
@@ -1919,122 +1677,10 @@ const unlessDemo =
       ? json({ error: "GitHub sign-in is disabled in demo mode" }, 403)
       : handler(req, params);
 
-// Test management (specs/app/tests.feature.md): the module's cases,
-// plans and executions, all in one Automerge document (src/server/testing.ts).
-// Served only while the Settings switch is on — enforced here and not only
-// in the UI, like the other switches. One read returns the whole module;
-// each write returns the entity it touched, for the client to merge in.
-const withTesting = (
-  handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
-): Handler =>
-  withDataDir(async (dir, req, params) => {
-    if (!normalizeTesting((await readState(getAppRoot())).testing)) {
-      return json({ error: "Test management is switched off in Settings" }, 404);
-    }
-    try {
-      return await handler(dir, req, params);
-    } catch (e) {
-      const status = e instanceof NotFoundError ? 404 : 400;
-      return json({ error: (e as Error).message }, status);
-    }
-  });
+// The test management module's routes live in its plugin
+// (src/plugins/builtin/tests/host.ts) and exist only while it is mounted.
 
-const bodyOf = async (req: Request): Promise<Record<string, unknown>> => {
-  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("A JSON object body is required");
-  }
-  return body;
-};
-
-const getTesting = withTesting(async (dir) => json(await readTesting(dir)));
-
-const postTestCase = withTesting(async (dir, req) =>
-  json({ case: await createCase(dir, await bodyOf(req)) }, 201),
-);
-const putTestCase = withTesting(async (dir, req, params) =>
-  json({ case: await updateCase(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const deleteTestCase = withTesting(async (dir, _req, params) => {
-  await deleteCase(dir, params.id ?? "");
-  return json({ ok: true });
-});
-
-const postTestPlan = withTesting(async (dir, req) =>
-  json({ plan: await createPlan(dir, await bodyOf(req)) }, 201),
-);
-const putTestPlan = withTesting(async (dir, req, params) =>
-  json({ plan: await updatePlan(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const deleteTestPlan = withTesting(async (dir, _req, params) => {
-  await deletePlan(dir, params.id ?? "");
-  return json({ ok: true });
-});
-
-const postTestExecution = withTesting(async (dir, req, params) => {
-  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  return json({ execution: await startExecution(dir, params.id ?? "", body) }, 201);
-});
-const putTestExecution = withTesting(async (dir, req, params) =>
-  json({ execution: await updateExecution(dir, params.id ?? "", await bodyOf(req)) }),
-);
-const putTestResult = withTesting(async (dir, req, params) => {
-  const body = await bodyOf(req);
-  // Who recorded it: the git author when known, else the signed-in login,
-  // else the OS user (specs/user-info-settings.spec.md).
-  const user = await getCurrentUser();
-  const by = user.name ?? user.login ?? user.username;
-  return json({
-    execution: await setResult(dir, params.id ?? "", params.caseId ?? "", { ...body, by }),
-  });
-});
-const deleteTestExecution = withTesting(async (dir, _req, params) => {
-  await deleteExecution(dir, params.id ?? "");
-  return json({ ok: true });
-});
-
-// GitHub issue tracking (specs/app/github-issues.feature.md): the issues of
-// the repository the data repo's code-repo pushes to (src/server/issues.ts).
-// Served only while the Settings switch is on — enforced here and not only
-// in the UI, like the other switches. Every call goes to GitHub as the
-// user; a data repo whose code repo is not a GitHub one has no issues to
-// show.
-//
-// The demo reads the public release repo (demo.ts DEMO_ISSUES_REPO) so its
-// Issues tab shows real issues, but stays read-only: a visitor is signed in
-// to nothing, so a write would be an anonymous one on a public repository —
-// refused here rather than sent to GitHub to fail.
-const withIssues = (
-  handler: (
-    repo: NonNullable<Awaited<ReturnType<typeof readIssuesRepo>>>,
-    req: Request,
-    params: Params,
-  ) => Response | Promise<Response>,
-  { readOnlyInDemo = false }: { readOnlyInDemo?: boolean } = {},
-): Handler =>
-  withDataDir(async (dir, req, params) => {
-    if (readOnlyInDemo && isDemoMode()) {
-      return json({ error: "The demo cannot change GitHub issues" }, 403);
-    }
-    if (!normalizeIssues((await readState(getAppRoot())).issues)) {
-      return json({ error: "GitHub issues are switched off in Settings" }, 404);
-    }
-    const repo = await readIssuesRepo(dir);
-    if (repo === null) {
-      return json(
-        { error: `No GitHub code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` },
-        404,
-      );
-    }
-    try {
-      return await handler(repo, req, params);
-    } catch (e) {
-      const status = e instanceof GitHubError ? e.status : 502;
-      return json({ error: (e as Error).message }, status);
-    }
-  });
-
-const ISSUE_STATES: IssueState[] = ["open", "closed", "all"];
+// GitHub issue tracking lives in its plugin (src/plugins/builtin/issues/host.ts).
 
 /**
  * The name of the test a reference url points at (specs/external-links/
@@ -2135,35 +1781,24 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
   return json(test);
 });
 
-const getIssues = withIssues(async (repo, req) => {
-  const wanted = new URL(req.url).searchParams.get("state");
-  const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
-  return json({ repo, state, issues: await listIssues(repo, state) });
+// The core routes, registered first on the plugin kernel's route registry
+// (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
+// plugin appends its own, and a disposed one takes them away again.
+// The marketplace (src/plugins/host/marketplace.ts): browse, install with a
+// consent step, update and remove — none of it in the demo.
+const market = marketplaceRoutes({
+  demo: isDemoMode,
+  readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
+  persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
 });
-const getIssueRoute = withIssues(async (repo, _req, params) => {
-  const number = parseIssueNumber(params.number);
-  const [issue, comments] = await Promise.all([getIssue(repo, number), listComments(repo, number)]);
-  return json({ issue, comments });
-});
-const postIssue = withIssues(
-  async (repo, req) => json({ issue: await createIssue(repo, await bodyOf(req)) }, 201),
-  { readOnlyInDemo: true },
-);
-const putIssue = withIssues(
-  async (repo, req, params) =>
-    json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
-  { readOnlyInDemo: true },
-);
-const postIssueComment = withIssues(
-  async (repo, req, params) =>
-    json({ comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) }, 201),
-  { readOnlyInDemo: true },
-);
 
-/** Pattern segments starting with `:` bind the (decoded) path segment. */
-const routes: [method: string, pattern: string, handler: Handler][] = [
+const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
+  ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
+  ["POST", "/api/plugins/install", market.postInstall],
+  ["POST", "/api/plugins/:id/update", market.postUpdate],
+  ["DELETE", "/api/plugins/:id", market.deletePlugin],
   ["POST", "/api/choose-folder", postChooseFolder],
   ["POST", "/api/reload", postReload],
   ["POST", "/api/auth/github/start", unlessDemo(postAuthStart)],
@@ -2179,54 +1814,10 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/search", getSearch],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
-  ["GET", "/api/roadmap", listPagesRoute(ROADMAP)],
-  ["POST", "/api/roadmap", createPageRoute(ROADMAP)],
-  ["POST", "/api/roadmap/:file/rename", renamePageRoute(ROADMAP)],
-  ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
-  ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
-  ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
-  ["GET", "/api/models", listModelsRoute],
-  ["POST", "/api/models", createModelRoute],
-  ["GET", "/api/models/:file", readModelRoute],
-  ["PUT", "/api/models/:file", saveModelRoute],
-  ["DELETE", "/api/models/:file", deleteModelRoute],
-  ["GET", "/api/models/:file/export", exportModelRoute],
-  ["POST", "/api/models/:file/slices/:slice/feature", generateSliceFeatureRoute],
-  ["GET", "/api/tasks", listPagesRoute(TASKS)],
-  ["POST", "/api/tasks", createPageRoute(TASKS)],
-  ["POST", "/api/tasks/:file/rename", renamePageRoute(TASKS)],
-  ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
-  ["POST", "/api/tasks/:file/estimate", estimateTaskRoute],
-  ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
-  ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
-  ["GET", "/api/notebook", listEntriesRoute],
-  ["POST", "/api/notebook", createEntryRoute],
-  ["POST", "/api/notebook/:file/rename", withNotebook(renamePageRoute(NOTEBOOK, { relink: relinkEntries }))],
-  ["PUT", "/api/notebook/:file/kind", putEntryKindRoute],
-  ["PUT", "/api/notebook/:file/supersedes", putEntrySupersedesRoute],
-  ["GET", "/api/notebook/:file", withNotebook(readPageRoute(NOTEBOOK))],
-  ["PUT", "/api/notebook/:file", withNotebook(savePageRoute(NOTEBOOK))],
-  ["DELETE", "/api/notebook/:file", withNotebook(deletePageRoute(NOTEBOOK))],
-  ["GET", "/api/tests", getTesting],
-  ["POST", "/api/tests/cases", postTestCase],
-  ["PUT", "/api/tests/cases/:id", putTestCase],
-  ["DELETE", "/api/tests/cases/:id", deleteTestCase],
-  ["POST", "/api/tests/plans", postTestPlan],
-  ["PUT", "/api/tests/plans/:id", putTestPlan],
-  ["DELETE", "/api/tests/plans/:id", deleteTestPlan],
-  ["POST", "/api/tests/plans/:id/executions", postTestExecution],
-  ["PUT", "/api/tests/executions/:id", putTestExecution],
-  ["PUT", "/api/tests/executions/:id/results/:caseId", putTestResult],
-  ["DELETE", "/api/tests/executions/:id", deleteTestExecution],
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
   ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
-  ["GET", "/api/issues", getIssues],
-  ["POST", "/api/issues", postIssue],
-  ["GET", "/api/issues/:number", getIssueRoute],
-  ["PUT", "/api/issues/:number", putIssue],
-  ["POST", "/api/issues/:number/comments", postIssueComment],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
@@ -2251,43 +1842,15 @@ const routes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/agent/chat/:id", deleteAgentChat],
   // "/active" before "/:id": the table is first-match.
 ];
+for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);
+// Plugins reach the data dir through the kernel (src/plugins/host/services.ts).
+provideDataAccess({ withDir: withDataDir, dir: currentDataDir });
 
-export interface ApiMatch {
-  handler: Handler;
-  params: Params;
-}
+export type { ApiMatch } from "../plugins/host/services";
 
-/**
- * Match a request line against the route table. Segments are matched before
- * decoding, so an encoded `/` in a parameter (`billing%2Fq.feature.md`)
- * stays one segment — the params come out decoded.
- */
-export function matchApi(method: string, pathname: string): ApiMatch | null {
-  const segments = pathname.split("/");
-  for (const [m, pattern, handler] of routes) {
-    if (m !== method) continue;
-    const want = pattern.split("/");
-    if (want.length !== segments.length) continue;
-    const params: Params = {};
-    let ok = true;
-    for (let i = 0; i < want.length; i++) {
-      const w = want[i]!;
-      const got = segments[i]!;
-      if (w.startsWith(":")) {
-        try {
-          params[w.slice(1)] = decodeURIComponent(got);
-        } catch {
-          ok = false; // malformed percent-encoding
-          break;
-        }
-      } else if (w !== got) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) return { handler, params };
-  }
-  return null;
+/** Match a request line against the route table — core rows, then the mounted plugins. */
+export function matchApi(method: string, pathname: string) {
+  return routeRegistry.match(method, pathname);
 }
 
 /** Serve an API request, or null when the path is not an API route. */

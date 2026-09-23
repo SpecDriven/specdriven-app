@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -7,9 +7,7 @@ import type {
 } from "react";
 import {
   parseFeature,
-  parsePage,
   serializeFeature,
-  serializePage,
   slugify,
   sortScenarios,
   titleFromFileName,
@@ -24,25 +22,12 @@ import type {
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
-import type { PageListing } from "../server/pages";
-import {
-  formatEstimate,
-  fromLocalInput,
-  googleCalendarUrl,
-  localInputValue,
-  nextQuarterHour,
-  parseEstimate,
-} from "../server/calendar";
-import { AddToCalendarForm } from "./AddToCalendarForm";
-import type { EstimateProposal } from "./AddToCalendarForm";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
 import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
   Check,
-  CheckCircle2,
-  Circle,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -61,17 +46,11 @@ import {
   Keyboard,
   Link,
   ListFilter,
-  ListTodo,
-  FlaskConical,
-  Bug,
-  Map as MapIcon,
   Menu as MenuIcon,
-  NotebookPen,
-  Eye,
-  Gavel,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
+  Puzzle,
   Settings,
   Sun,
   Ticket,
@@ -80,16 +59,7 @@ import {
   X,
   ArrowDown,
   Bot,
-  CalendarPlus,
-  Workflow,
 } from "lucide-react";
-import {
-  EntryKindChip,
-  dayOf,
-  entryGroups,
-  entryKindOf,
-  type EntryKind,
-} from "./notebook";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
@@ -100,15 +70,6 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { createPromiseQueue } from "./promiseQueue";
 export { createPromiseQueue };
 
-// Event Models (roadmap/support-event-modeling.md): the canvas and its
-// sidebar list ship in their own chunk — React Flow only reaches someone
-// who opens the Models tab.
-const ModelsPane = lazy(() =>
-  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsPane })),
-);
-const ModelsSidebar = lazy(() =>
-  import("./eventModel/ModelsPane").then((m) => ({ default: m.ModelsSidebar })),
-);
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -119,7 +80,11 @@ import {
   useExcalidrawEnabled,
 } from "./excalidrawPref";
 import { markText } from "./highlight";
+import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
+import { AppPageLayout, PageSection } from "./AppPage";
+import { PluginsPage } from "./PluginsPage";
+import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
@@ -127,11 +92,23 @@ import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
-import { TestsPane, TestsSidebar, newCaseFlow, newPlanFlow } from "./TestsPane";
-import { searchTests, testing, testsKey, testsTitle, useTesting } from "./testing";
-import { IssuesPane, IssuesSidebar } from "./IssuesPane";
-import { issues, issuesKey, issuesTitle, searchIssues, setIssuesReadOnly, useIssues } from "./issues";
-import { models, modelsState, modelTitle, useModels } from "./eventModel/models";
+import {
+  client,
+  clientLoadErrors,
+  isRemounting,
+  matchPluginRoute,
+  syncClientPlugins,
+  tabs,
+  watchPluginChanges,
+  type PluginStatus,
+} from "../plugins/client/loader";
+import {
+  tabReachable,
+  useRegistry,
+  useTabStores,
+  type PluginView,
+  type TabApp,
+} from "../plugins/client/tabs";
 import { entityFields } from "./entityFields";
 import {
   AGENT_DEFAULT_WIDTH,
@@ -153,22 +130,17 @@ import {
 import type { LinkDraft } from "./externallinks";
 import { ScenarioTable } from "./ScenarioTable";
 import {
+  appPagePath,
   desktopLink,
   featurePath,
+  matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
   resolveScenario,
-  pageFolderOf,
-  pageLink,
   scenarioPath,
-  testsPath,
-  type TestsRoute,
-  issuesPath,
-  type IssuesRoute,
-  modelLink,
-  MODELS_FOLDER,
 } from "./route";
+import type { AppPage } from "./route";
 import {
   addTestLink,
   canSetTestLink,
@@ -341,90 +313,19 @@ function clearDescHeight(): void {
   }
 }
 
-// The sidebar's tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
-// .md): Specs, the feature tree, and one tab per special folder the settings
-// show — Roadmap and Tasks, each a list of markdown pages. They all share the
-// one column, so the choice is remembered like the sidebar width: a tab left
-// open is meant to stay open, not to reset on every reload.
-interface PageTab {
-  /** The data repo's folder — the tab's id, and its `/api/<folder>` routes. */
-  folder: "roadmap" | "tasks" | "notebook";
-  /** The tab's label, the breadcrumb above one of its pages, and the palette
-      group its pages fall under. */
-  title: "Roadmap" | "Tasks" | "Notebook";
-  /** What one of its pages is called, in buttons and messages. */
-  noun: string;
-  /** What the tab says when the folder holds nothing yet. */
-  empty: string;
-  /** Whether its pages can be ticked off — a task is done or it is not
-      (specs/app/tasks.feature.md); a roadmap page is neither. */
-  done: boolean;
-  /** Whether its pages can be put on the calendar — a task, with an
-      estimate of its time (specs/app/tasks.feature.md); a page cannot. */
-  calendar?: boolean;
-  /**
-   * Whether its pages are dated entries, listed newest first and grouped by
-   * month, each signed and chipped with its kind — the engineering notebook
-   * (specs/app/engineering-notebook.feature.md). The other tabs list their
-   * pages by subfolder, in name order.
-   */
-  dated?: boolean;
-  icon: typeof MapIcon;
-}
-
-const PAGE_TABS: PageTab[] = [
-  {
-    folder: "roadmap",
-    title: "Roadmap",
-    noun: "page",
-    empty: "No roadmap pages yet",
-    done: false,
-    icon: MapIcon,
-  },
-  {
-    folder: "tasks",
-    title: "Tasks",
-    noun: "task",
-    empty: "No tasks yet",
-    done: true,
-    calendar: true,
-    icon: ListTodo,
-  },
-  {
-    folder: "notebook",
-    title: "Notebook",
-    noun: "entry",
-    empty:
-      "No entries yet. The notebook is a shared, dated log of what you notice about the way you work and what you decide to do about it.",
-    done: false,
-    dated: true,
-    icon: NotebookPen,
-  },
-];
-
-
-
-/** The tab a page's file name belongs to — its folder is the first segment. */
-function pageTabOf(fileName: string): PageTab {
-  const folder = pageFolderOf(fileName);
-  return PAGE_TABS.find((tab) => tab.folder === folder) ?? PAGE_TABS[0]!;
-}
-
-/** The icon of the tab a page belongs to — the map, or the task list. */
-function PageTabIcon({ fileName, size = 14 }: { fileName: string; size?: number }) {
-  const Icon = pageTabOf(fileName).icon;
-  return <Icon size={size} aria-hidden="true" />;
-}
-
-type SidebarTab = "specs" | PageTab["folder"] | "tests" | "issues" | "models";
+/** A core tab, or a plugin's tab by its id (src/plugins/client/tabs.ts). */
+// The sidebar's tabs: Specs, the feature tree, and one tab per mounted
+// plugin — the special folders' page lists among them (src/plugins/builtin
+// /pages). They all share the one column, so the choice is remembered like
+// the sidebar width: a tab left open is meant to stay open, not to reset on
+// every reload.
+type SidebarTab = "specs" | (string & {});
 
 function readSidebarTab(): SidebarTab {
   try {
-    const stored = localStorage.getItem("sd-sidebar-tab");
-    if (stored === "tests") return "tests";
-    if (stored === "issues") return "issues";
-    if (stored === "models") return "models";
-    return PAGE_TABS.find((tab) => tab.folder === stored)?.folder ?? "specs";
+    // Every stored name is kept: one that is not on offer any more falls
+    // back to Specs where `shownTab` is derived.
+    return localStorage.getItem("sd-sidebar-tab") ?? "specs";
   } catch {
     return "specs";
   }
@@ -569,11 +470,20 @@ export function pageScenario(
 
 /** What the command palette offers before typing: the last pages opened. */
 interface RecentEntry {
-  /** `page` covers both special folders; `roadmap` is what older lists hold. */
-  kind: "feature" | "scenario" | "page";
+  /** `plugin` is a plugin tab's view — a roadmap page, a task, an entry. */
+  kind: "feature" | "scenario" | "plugin";
+  /** A feature's file name; a plugin view's url. */
   fileName: string;
   name: string;
   scenario?: { name: string; version: number };
+  /** The plugin tab the view belongs to. */
+  tab?: string;
+}
+
+/** The url of a special folder's page, for a list written before pages
+    were plugins (src/plugins/builtin/pages/route.ts pageLink). */
+function legacyPageUrl(fileName: string): string {
+  return `/${fileName.replace(/\.md$/, "").split("/").map(encodeURIComponent).join("/")}`;
 }
 
 const RECENT_KEY = "sd-recent";
@@ -583,11 +493,19 @@ function readRecent(): RecentEntry[] {
     const raw = localStorage.getItem(RECENT_KEY);
     const list = raw ? (JSON.parse(raw) as RecentEntry[]) : [];
     if (!Array.isArray(list)) return [];
-    // A list written before the tasks folder existed calls its pages
-    // "roadmap"; they are pages like any other.
-    return list
-      .slice(0, 8)
-      .map((e) => ((e.kind as string) === "roadmap" ? { ...e, kind: "page" as const } : e));
+    // A list written before the special folders were plugins calls their
+    // pages "page" — or "roadmap", before the tasks folder existed; each is
+    // the view at its url on the folder's tab.
+    return list.slice(0, 8).map((e) => {
+      const kind = e.kind as string;
+      if (kind !== "page" && kind !== "roadmap") return e;
+      return {
+        kind: "plugin" as const,
+        fileName: legacyPageUrl(e.fileName),
+        name: e.name,
+        tab: e.fileName.split("/")[0],
+      };
+    });
   } catch {
     return [];
   }
@@ -744,75 +662,6 @@ export function storeEditorHidden(hidden: boolean) {
 interface TreeFilter {
   status: Scenario["status"] | null;
   assignee: string | null;
-}
-
-/** Pages grouped by the subfolder under their own folder, top level first. */
-/** A page row's tooltip: its name, and whatever else the row only hints at. */
-function pageRowTitle(page: PageListing): string {
-  const parts = [page.name];
-  if (page.done) parts.push("done");
-  if (page.assigned) parts.push(`assigned to ${page.assigned}`);
-  // A notebook entry is signed and dated rather than assigned
-  // (specs/app/engineering-notebook.feature.md).
-  if (page.author) parts.push(`by ${page.author}`);
-  if (page.date) parts.push(page.date);
-  return parts.join(" — ");
-}
-
-/**
- * Whether two listings agree on the fields the sidebar and the pane header
- * show. Autosave uses this so a tick that only tidied whitespace does not
- * replace the listing — and so a Done marker the tick did not carry cannot
- * be mistaken for "nothing changed" and left stale on the row.
- */
-export function pageListingMetaEqual(a: PageListing, b: PageListing): boolean {
-  return (
-    a.name === b.name &&
-    (a.assigned ?? "") === (b.assigned ?? "") &&
-    Boolean(a.done) === Boolean(b.done) &&
-    (a.estimate ?? 0) === (b.estimate ?? 0) &&
-    // A notebook entry's fields count too: a kind edited in the markdown must
-    // not read as "nothing changed" and leave a stale chip on the row
-    // (specs/app/engineering-notebook.feature.md).
-    (a.author ?? "") === (b.author ?? "") &&
-    (a.date ?? "") === (b.date ?? "") &&
-    (a.kind ?? "") === (b.kind ?? "") &&
-    (a.supersedes?.url ?? "") === (b.supersedes?.url ?? "") &&
-    (a.supersedes?.title ?? "") === (b.supersedes?.title ?? "")
-  );
-}
-
-function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
-  const groups = new Map<string, PageListing[]>();
-  for (const page of pages) {
-    const dir = page.fileName.split("/").slice(1, -1).join("/");
-    const list = groups.get(dir) ?? [];
-    list.push(page);
-    groups.set(dir, list);
-  }
-  return [...groups]
-    .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
-    .map(([dir, list]) => ({ dir, pages: list }));
-}
-
-
-/** Placeholder for a page while its content is on the way. */
-function PageSkeleton({ cards }: { cards: number }) {
-  return (
-    <div className="skeleton-page" aria-busy="true" aria-label="Loading">
-      <div className="skeleton-bar">
-        <span className="skeleton" style={{ height: "1.1rem", width: "18rem" }} />
-        <span className="skeleton" style={{ height: "1.75rem", width: "6rem", marginLeft: "auto" }} />
-      </div>
-      {Array.from({ length: cards }, (_, i) => (
-        <div key={i} className="skeleton-card">
-          <span className="skeleton" style={{ height: "0.9rem", width: `${40 + (i % 3) * 10}%` }} />
-          <span className="skeleton" style={{ height: "0.7rem", width: "90%" }} />
-          <span className="skeleton" style={{ height: "0.7rem", width: "72%" }} />
-        </div>
-      ))}
-    </div>
-  );
 }
 
 /** Two-letter initials for an assignee chip. */
@@ -1028,14 +877,6 @@ export function App() {
   const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
-  const [pageAssigneeMenuOpen, setPageAssigneeMenuOpen] = useState(false);
-  /** A task's calendar chip (specs/app/tasks.feature.md): the popover, the
-      estimate as typed, where it came from, and the start. */
-  const [pageCalendarOpen, setPageCalendarOpen] = useState(false);
-  const [pageEstimateText, setPageEstimateText] = useState("");
-  const [pageEstimateProposal, setPageEstimateProposal] = useState<EstimateProposal>("manual");
-  const [pageStartLocal, setPageStartLocal] = useState("");
-  const pageEstimateAbort = useRef<AbortController | null>(null);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   /** The editor column hidden ("\"), so the coding agent pane can have the
@@ -1050,8 +891,6 @@ export function App() {
   /** The sidebar's filter, and its menu. */
   const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  /** A page entry's ⋯ menu (file name), if open. */
-  const [pageMenu, setPageMenu] = useState<string | null>(null);
   /** A feature is being fetched — the skeleton shows until it lands. */
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -1080,8 +919,6 @@ export function App() {
    * the terms of the search hit that opened it, gone when the pane closes.
    */
   const [searchTerms, setSearchTerms] = useState<string[] | null>(null);
-  /** The same for the open roadmap page's editor. */
-  const [pageTerms, setPageTerms] = useState<string[] | null>(null);
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
@@ -1200,134 +1037,49 @@ export function App() {
   // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
   // dropdown shows only once the Settings switch turns assignments on.
   const [assignments, setAssignments] = useState(false);
-  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
-  // .feature.md): each opt-in — with its switch on, the folder's markdown
-  // pages get a sidebar tab and one of them can be open in the main pane.
-  // The lists are per folder; the open page is not, since a page and a
-  // feature share the one pane. `openPage` is the open page's listing (name
-  // and assignment), `openPageText` what its editor holds; the refs are what
-  // the last landed save put on disk and whether one is still on its way,
-  // read by a tick between renders — the same shape the README editor uses.
-  const [roadmap, setRoadmap] = useState(false);
-  const [tasks, setTasks] = useState(false);
-  // The engineering notebook (specs/app/engineering-notebook.feature.md): the
-  // one module that starts on, so the tab is there from the first paint
-  // rather than appearing once the boot fetch lands. The server has the last
-  // word either way.
-  const [notebook, setNotebook] = useState(true);
-  // Test management (specs/app/tests.feature.md): the Settings
-  // switch, and which of the module's views has the pane — null when none.
-  // The module's data lives in its own store (src/frontend/testing.ts).
-  const [testingOn, setTestingOn] = useState(false);
-  const [testsView, setTestsView] = useState<TestsRoute | null>(null);
+  // The plugins (specs/app/plugins.feature.md) as `GET /api/state` lists
+  // them: the profile's entries in tab order, then the built-ins it leaves
+  // off — what Settings → Plugins renders, each with its switch. Every
+  // module — the special folders, Event Models, Tests, Issues — is one of
+  // them; App names none.
+  const [plugins, setPlugins] = useState<PluginStatus[]>([]);
+  // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
+  // plugin loads from a local folder"), listed under the plugins.
+  const [pluginSources, setPluginSources] = useState<string[]>([]);
+  const [pluginMarketplaces, setPluginMarketplaces] = useState<MarketplaceRef[]>([]);
+  // A browser half that failed to load, by plugin id — shown beside the row.
+  const pluginLoadErrors = useSyncExternalStore(clientLoadErrors.subscribe, clientLoadErrors.snapshot);
+  // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
+  // which plugin view has the pane — null when none. App knows only the tab
+  // id and an opaque view; the tab parses, renders and titles it.
+  const pluginTabs = useRegistry(tabs);
+  const [pluginView, setPluginView] = useState<PluginView | null>(null);
+  const pluginViewRef = useRef<PluginView | null>(null);
+  pluginViewRef.current = pluginView;
+  const activeTab = pluginView ? (pluginTabs.find((t) => t.id === pluginView.tab) ?? null) : null;
+  /** Ticks with the active tab's store, so titles read through it stay current. */
+  const tabsTick = useTabStores(pluginTabs);
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
-  // Calendar"): the Settings switch behind every task's calendar chip.
+  // Calendar"): the Settings switch behind every task's calendar chip, as
+  // the Settings dialog's row shows it; the tasks plugin reads it too.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
-  const testsViewRef = useRef<TestsRoute | null>(null);
-  testsViewRef.current = testsView;
-  const testingStore = useTesting();
-  // GitHub issues (specs/app/github-issues.feature.md): which of the
-  // module's views has the pane — null when none. The issues themselves live
-  // in their own store (src/frontend/issues.ts).
-  const [issuesView, setIssuesView] = useState<IssuesRoute | null>(null);
-  const issuesViewRef = useRef<IssuesRoute | null>(null);
-  issuesViewRef.current = issuesView;
-  const issuesStore = useIssues();
-  // The Settings switch: off, there is no tab and nothing asks GitHub.
-  const [issuesSetting, setIssuesSetting] = useState(false);
-  /** Whether there is an Issues tab: the switch on and a GitHub code repo. */
-  const issuesOn = issuesSetting && issuesRepo !== null;
-  // Event Models (roadmap/support-event-modeling.md): the Settings switch,
-  // and which model's canvas has the pane — null when none. The listing
-  // lives in its own store (src/frontend/eventModel/models.ts); the open
-  // model's file lives in the pane.
-  const [modelsOn, setModelsOn] = useState(false);
-  const [openModel, setOpenModel] = useState<string | null>(null);
-  const openModelRef = useRef<string | null>(null);
-  openModelRef.current = openModel;
-  /** Bumped on each reload tick so an open canvas re-reads its file. */
-  const [modelsReloadKey, setModelsReloadKey] = useState(0);
-  const modelsStore = useModels();
-  const [roadmapPages, setRoadmapPages] = useState<PageListing[]>([]);
-  const [taskPages, setTaskPages] = useState<PageListing[]>([]);
-  /** The notebook's entries, newest first as the server lists them, and for
-      each superseded entry the one that replaced it
-      (specs/app/engineering-notebook.feature.md). */
-  const [notebookPages, setNotebookPages] = useState<PageListing[]>([]);
-  /** The same three listings, readable in the tick they are fetched in —
-      what a bare `/tasks`, `/roadmap` or `/notebook` opens its first page
-      from, before the state above has re-rendered. */
-  const pagesRef = useRef<Record<PageTab["folder"], PageListing[]>>({
-    roadmap: [],
-    tasks: [],
-    notebook: [],
-  });
-  const [supersededBy, setSupersededBy] = useState<Record<string, PageListing>>({});
-  const [openPage, setOpenPage] = useState<PageListing | null>(null);
-  const openPageRef = useRef<PageListing | null>(null);
-  openPageRef.current = openPage;
-  const [openPageText, setOpenPageText] = useState<string | null>(null);
-  const openPageTextRef = useRef<string | null>(null);
-  openPageTextRef.current = openPageText;
-  const openPageSaved = useRef<string | null>(null);
-  /**
-   * Page writes go through one queue so an autosave tick and a Done /
-   * Assigned PUT cannot land out of order — last-write-wins on the file
-   * would drop the marker, or worse, write the previous page's buffer into
-   * the next one after a quick navigation. `pageMetaSaving` is the Done /
-   * Assigned path in particular: an autosave that captured the buffer
-   * before the marker was applied skips rather than overwriting it.
-   */
-  const pageSaveQueue = useRef(createPromiseQueue());
-  /**
-   * The open canvas's parting save. Repo switch awaits it: it lands what the
-   * canvas still holds in the folder it was drawn in, then seals the pane so
-   * no later save of its — the unmount one above all — reaches the new
-   * folder (src/frontend/eventModel/ModelsPane.tsx).
-   */
-  const modelSaveFlush = useRef<() => Promise<void>>(async () => {});
-  const bindModelSave = useCallback((handle: { flush: () => Promise<void> } | null) => {
-    modelSaveFlush.current = handle?.flush ?? (async () => {});
-  }, []);
-  /**
-   * Nested count of Done / Assigned writes that have been queued and not
-   * yet finished. Autosave skips while this is > 0 so a snapshot taken
-   * before the marker cannot overwrite it.
-   */
-  const pageMetaSaving = useRef(0);
-  /** Bumped per page load, so a save landing after a move stamps nothing. */
-  const openPageSession = useRef(0);
-  /** Whether an assignment change on the open page is in flight. */
-  const [pageAssignedSaving, setPageAssignedSaving] = useState(false);
-  const [pageDoneSaving, setPageDoneSaving] = useState(false);
-  /** A notebook entry's kind or supersession is on its way to the server. */
-  const [entryKindSaving, setEntryKindSaving] = useState(false);
-  const [entryKindMenuOpen, setEntryKindMenuOpen] = useState(false);
-  const [entrySupersedesMenuOpen, setEntrySupersedesMenuOpen] = useState(false);
-  /** The open page's file name — what effects watch, since the listing object
-      is replaced on every save and would restart their timers. */
-  const openPageFile = openPage?.fileName ?? null;
-  /** Which sidebar tab is open — Specs, Roadmap or Tasks; remembered. */
+  /** Which sidebar tab is open — Specs or a plugin's; remembered. */
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
-  /** The page tabs on offer: one per folder its Settings switch shows. */
-  const shownPageTabs = PAGE_TABS.filter((tab) =>
-    tab.folder === "tasks" ? tasks : tab.folder === "notebook" ? notebook : roadmap,
-  );
-  /** The tab on screen: a page tab only while its switch still shows it. */
-  const shownTab: SidebarTab =
-    shownPageTabs.some((tab) => tab.folder === sidebarTab) ||
-    (sidebarTab === "tests" && testingOn) ||
-    (sidebarTab === "issues" && issuesOn) ||
-    (sidebarTab === "models" && modelsOn)
-      ? sidebarTab
-      : "specs";
-  /** The pages of one special folder, as the sidebar and palette list them. */
-  const pagesIn = (folder: PageTab["folder"]): PageListing[] =>
-    folder === "tasks" ? taskPages : folder === "notebook" ? notebookPages : roadmapPages;
+  /** The tab on screen: a plugin's tab only while it is still mounted. */
+  const shownTab: SidebarTab = pluginTabs.some((tab) => tab.id === sidebarTab)
+    ? sidebarTab
+    : "specs";
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * The app's own page holding the editor pane — Settings or Plugins
+   * (specs/user-info-settings.feature.md "open Settings", "open Plugins") —
+   * or null. Like a plugin's view it owns the pane and its url.
+   */
+  const [appPage, setAppPage] = useState<AppPage | null>(null);
+  /** Whether opening the page pushed a history entry that closing can pop. */
+  const appPagePushed = useRef(false);
   const [settingsDraft, setSettingsDraft] = useState(String(DEFAULT_AUTOSYNC_SECONDS));
   /** The autosync switch: off saves a frequency of 0, which stops the reload. */
   const [settingsAutosyncOnDraft, setSettingsAutosyncOnDraft] = useState(true);
@@ -1344,13 +1096,7 @@ export function App() {
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
-  const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
-  const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
-  const [settingsNotebookDraft, setSettingsNotebookDraft] = useState(true);
-  const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
   const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
-  const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
-  const [settingsModelsDraft, setSettingsModelsDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -1468,36 +1214,6 @@ export function App() {
     return listing;
   }, []);
 
-  /** One special folder's pages, for its sidebar tab. */
-  const loadPages = useCallback(async (folder: PageTab["folder"]): Promise<void> => {
-    const res = await fetch(`/api/${folder}`);
-    if (!res.ok) return;
-    const data = (await res.json()) as {
-      pages?: PageListing[];
-      supersededBy?: Record<string, PageListing>;
-    };
-    const pages = Array.isArray(data.pages) ? data.pages : [];
-    // The ref, not the state, is what a bare `/tasks` resolves against: a
-    // deep link is opened in the same tick as this load, before React has
-    // re-rendered with the new listing.
-    pagesRef.current[folder] = pages;
-    if (folder === "tasks") setTaskPages(pages);
-    else if (folder === "notebook") {
-      setNotebookPages(pages);
-      setSupersededBy(data.supersededBy ?? {});
-    } else setRoadmapPages(pages);
-  }, []);
-
-  /** The pages of whichever folders a settings payload says are shown. */
-  const loadShownPages = useCallback(
-    async (shown: { roadmap?: unknown; tasks?: unknown; notebook?: unknown }): Promise<void> => {
-      await Promise.all(
-        PAGE_TABS.filter((tab) => shown[tab.folder] === true).map((tab) => loadPages(tab.folder)),
-      );
-    },
-    [loadPages],
-  );
-
   /** Read the data repo's README into the home editor, dropping any unsaved edit. */
   const loadReadme = useCallback(async (): Promise<void> => {
     const res = await fetch("/api/readme");
@@ -1558,26 +1274,11 @@ export function App() {
       if (typeof state.assignments === "boolean") {
         setAssignments(state.assignments);
       }
-      if (typeof state.roadmap === "boolean") {
-        setRoadmap(state.roadmap);
-      }
-      if (typeof state.tasks === "boolean") {
-        setTasks(state.tasks);
-      }
-      if (typeof state.notebook === "boolean") {
-        setNotebook(state.notebook);
-      }
-      if (typeof state.testing === "boolean") {
-        setTestingOn(state.testing);
-      }
+      setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
+      setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
+      setPluginMarketplaces(Array.isArray(state.pluginMarketplaces) ? state.pluginMarketplaces : []);
       if (typeof state.googleCalendar === "boolean") {
         setGoogleCalendarOn(state.googleCalendar);
-      }
-      if (typeof state.models === "boolean") {
-        setModelsOn(state.models);
-      }
-      if (typeof state.issues === "boolean") {
-        setIssuesSetting(state.issues);
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
@@ -1589,9 +1290,6 @@ export function App() {
       // demo defaults it on so a visitor finds the diagram button without
       // first finding Settings. Turning it off there still sticks.
       setExcalidrawDemoMode(Boolean(state.demo));
-      // The demo's Issues tab reads the release repo but cannot write to it
-      // (src/frontend/issues.ts), so the pane offers no New / Edit / Comment.
-      setIssuesReadOnly(Boolean(state.demo));
       setAppVersion(typeof state.version === "string" ? state.version : null);
       setGitEngineState(state.gitEngine ?? null);
       setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -1605,19 +1303,18 @@ export function App() {
         await Promise.all([
           loadFeatures(),
           loadReadme(),
-          // The special folders' pages ride along when they are shown at all.
-          loadShownPages(state),
-          // So do the test plans, when the module is on — before the deep
-          // link below, which may name one of them.
-          state.testing === true ? testing.load() : Promise.resolve(),
-          state.models === true ? models.load() : Promise.resolve(),
+          // So do the plugins — the special folders' pages, the Tests tab and
+          // its plans — before the deep link below, which may name one of
+          // their views. The demo's modules read but never write
+          // (src/server/demo.ts).
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
         ]);
         // Deep link (specs/navigation.spec.md): the entry url picks the view.
         await openFromLocation();
       }
       setLoading(false);
     })();
-  }, [loadFeatures, loadReadme, loadShownPages]);
+  }, [loadFeatures, loadReadme]);
 
   // Mirror the server's cron reload (specs/crud-feature.spec.md): refresh the
   // feature list on the same cadence so pulled changes show up, without
@@ -1633,29 +1330,13 @@ export function App() {
       if (selected && !dirty && !editing && !conflict && !descPending) void openFeature(selected);
       // A pulled README shows up too — unless the home editor holds an edit
       // that hasn't landed yet.
-      if (!selected && !openPageFile && readmeText.current === readmeSaved.current) void loadReadme();
-      // The special folders follow the same rule: each shown list refreshes,
-      // and the open page only while its editor has nothing unsaved in it.
-      for (const tab of PAGE_TABS) {
-        if (tab.folder === "tasks" ? tasks : tab.folder === "notebook" ? notebook : roadmap) {
-          void loadPages(tab.folder);
-        }
+      if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
+        void loadReadme();
       }
-      if (openPageFile && openPageTextRef.current === openPageSaved.current) {
-        void showPage(openPageFile);
-      }
-      // The test management module too — unless one of its editors holds an
-      // unsaved draft (the store checks).
-      if (testingOn) void testing.refresh();
-      // The models too: the list, and the open canvas — which re-reads only
-      // while nothing on it is unsaved (src/frontend/eventModel/ModelsPane.tsx).
-      if (modelsOn) {
-        void models.load();
-        setModelsReloadKey((k) => k + 1);
-      }
-      // The issues too — only while one of the module's views is open, so
-      // an idle app does not spend GitHub's rate limit on every tick.
-      if (issuesViewRef.current) void issues.refresh();
+      // The plugins follow the same rule — each refreshes its own store (the
+      // special folders their page lists), and what is open on screen only
+      // while its editor holds nothing unsaved.
+      client.emit("reload/tick", pluginViewRef.current);
     }, reloadSeconds * 1000);
     return () => clearInterval(id);
   }, [
@@ -1666,14 +1347,8 @@ export function App() {
     dirty,
     editing,
     conflict,
-    roadmap,
-    tasks,
-    testingOn,
-    modelsOn,
-    openPageFile,
     loadFeatures,
     loadReadme,
-    loadPages,
   ]);
 
   // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
@@ -1765,7 +1440,6 @@ export function App() {
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog. The
   // editor pane is part of the page, not a dialog — Tab reaches the sidebar
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
-  const settingsTrapRef = useFocusTrap(settingsOpen);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
@@ -1783,18 +1457,19 @@ export function App() {
 
   // Canonical url (specs/navigation.spec.md "Resolution rules"): the address
   // bar shows the page that is open — the scenario page's own url while it is
-  // open, the feature's otherwise, and an open roadmap page or task's own url
-  // while one holds the pane (specs/app/tasks.feature.md "Support deep link
-  // just like Features"). Opening a scenario page pushes, like a feature
+  // open, the feature's otherwise. A plugin's view — an open roadmap page or
+  // task among them (specs/app/tasks.feature.md "Support deep link just like
+  // Features") — owns its own url. Opening a scenario page pushes, like a feature
   // switch does in openFeature, so Back leaves it the way `<` does.
   // Everything else rewrites in place: a rename moving an open page's url
   // must not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
-    // A tests view owns its url (openTests pushes it); with no feature
-    // selected this effect would otherwise rewrite it to `/`.
-    if (testsView || issuesView) return;
-    const url = pagePath(selected, paneScenario, openPageFile, openModel);
+    // A plugin's view owns its url (openPluginView pushes it), and so does
+    // an app page; with no feature selected this effect would otherwise
+    // rewrite it to `/`.
+    if (pluginView || appPage) return;
+    const url = pagePath(selected, paneScenario);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
     if (location.pathname === url) return;
@@ -1804,7 +1479,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, openPageFile, openModel, testsView, issuesView]);
+  }, [loading, needsRepo, selected, paneScenario, pluginView, appPage]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1812,16 +1487,13 @@ export function App() {
   useEffect(() => {
     const s = paneScenario ?? undefined;
     const name = feature && selected ? feature.name || titleFromFileName(selected) : "";
-    // An open roadmap page or task names the window the way a feature does, so
-    // a shared link previews as that page (specs/app/tasks.feature.md).
-    const base = testsView
-      ? `SpecDriven — ${testsTitle(testsView, testingStore)}`
-      : issuesView
-        ? `SpecDriven — ${issuesTitle(issuesView, issuesStore)}`
-      : openModel
-        ? `SpecDriven — ${modelTitle(openModel, modelsStore)}`
-      : openPage
-        ? `SpecDriven — ${openPage.name || openPage.fileName}`
+    // A plugin's view — an open roadmap page or task, say — names the window
+    // the way a feature does, so a shared link previews as that page
+    // (specs/app/tasks.feature.md).
+    const base = appPage
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : "Plugins"}`
+      : pluginView && activeTab
+      ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
         ? "SpecDriven"
         : s
@@ -1831,7 +1503,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, openPage, testsView, testingStore, issuesView, issuesStore, openModel, modelsStore, clock]);
+  }, [selected, feature, paneScenario, pluginView, appPage, activeTab, tabsTick, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1853,15 +1525,13 @@ export function App() {
         setNeedsRepo(false);
         // A freshly picked folder opens on its README, like a start does
         // (specs/app-startup.feature.md "A newly picked data folder opens on
-        // its README") — unless there is a deep link to honor. The special
-        // folders' pages ride along, as they do on a start with a folder
-        // already configured (specs/app/roadmap.feature.md).
+        // its README") — unless there is a deep link to honor. The plugins —
+        // the special folders' pages among them — ride along, as they do on a
+        // start with a folder already configured (specs/app/roadmap.feature.md).
         await Promise.all([
           loadFeatures(),
           loadReadme(),
-          loadShownPages(state),
-          state.testing === true ? testing.load() : Promise.resolve(),
-          state.models === true ? models.load() : Promise.resolve(),
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
         ]);
         await openFromLocation(entryPath);
       } else {
@@ -1919,19 +1589,13 @@ export function App() {
     readmeText.current = null;
     setReadme(null);
     await editorRef.current.close();
-    // An open page belongs to the old folder too (specs/app/roadmap.feature
-    // .md): its last save goes out there, then the pane empties so no later
-    // tick writes what it held into the new folder.
-    await pageTick.current();
-    await pageSaveQueue.current.idle();
-    closePage({ save: false });
-    // An open model belongs to the old folder too: its last save goes out
-    // there, and the flush seals the canvas on its way out. The unmount
-    // below lands in a later React commit that nothing here awaits, so the
-    // seal — not the ordering — is what keeps its parting save from writing
-    // the old model into the new folder.
-    await modelSaveFlush.current();
-    setOpenModel(null);
+    // So does whatever a plugin's view holds — an open roadmap page or an
+    // Event Model's canvas, say:
+    // its last save goes out there, and the plugin seals the view on its way
+    // out. The unmount below lands in a later React commit that nothing here
+    // awaits, so the seal — not the ordering — is what keeps its parting save
+    // from writing into the new folder.
+    await client.serial("data/leaving");
     // A feature description belongs to the folder it was typed in too. Its
     // own cleanup tick would only run once the selection empties below —
     // after the switch — and the server resolves the data folder per request,
@@ -1955,25 +1619,14 @@ export function App() {
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
-        // The old folder's pages are not this folder's: the tabs empty, and
-        // refill below for whichever folders the settings show.
-        setRoadmapPages([]);
-        setTaskPages([]);
-        setNotebookPages([]);
-        setSupersededBy({});
-        // Nor are the old folder's test plans; the module reloads below.
-        testing.reset();
-        setTestsView(null);
-        // Nor its models: the store empties and refills below. The canvas
-        // was flushed and sealed before the switch, so whenever its unmount
-        // save runs it is a no-op rather than a PUT into this new folder.
-        models.reset();
+        // The old folder's plugin views — its pages among them — are not
+        // this folder's; the plugins reload their stores below, on the
+        // data/changed event.
+        setPluginView(null);
+        setAppPage(null);
         // Nor its entity fields: the next editor to open reads the new
         // folder's code repo.
         entityFields.reset();
-        // And the old folder's issues: the effect below reloads them for
-        // whichever GitHub repo the new folder's code repo is.
-        setIssuesView(null);
         // A page url from the old folder would only miss in the new one, and
         // nothing else resets it — the selection was already empty while a
         // page was open, so the canonical-url effect has no change to react
@@ -1983,9 +1636,9 @@ export function App() {
         await Promise.all([
           loadFeatures(),
           loadReadme(),
-          loadShownPages(state),
-          state.testing === true ? testing.load() : Promise.resolve(),
-          state.models === true ? models.load() : Promise.resolve(),
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }).then(() =>
+            client.serial("data/changed"),
+          ),
         ]);
       } else {
         toast.error(state.error ?? "Could not use this directory");
@@ -2030,12 +1683,11 @@ export function App() {
       // here must land on top of, not under. And not before the fetch, or
       // the old feature page would show for the duration of the request.
       editorRef.current.close();
-      // Opening a feature leaves the open page, saving what its editor still
-      // holds — the same courtesy the README editor gets.
-      closePage();
-      setTestsView(null);
-      setIssuesView(null);
-      setOpenModel(null);
+      // Opening a feature leaves the open plugin view — a page saves what
+      // its editor still holds as it unmounts, the same courtesy the README
+      // editor gets. An app page — Settings, Plugins — leaves too.
+      setPluginView(null);
+      setAppPage(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -2103,10 +1755,8 @@ export function App() {
    */
   const goHome = () => {
     editorRef.current.close();
-    closePage();
-    setTestsView(null);
-    setIssuesView(null);
-    setOpenModel(null);
+    setPluginView(null);
+    setAppPage(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -2115,106 +1765,131 @@ export function App() {
   };
 
   /**
-   * Open a view of the test management module (specs/app/tests.feature.md).
-   * The pane is the module's alone, so the feature and the page
+   * Open a view of a plugin's tab (specs/app/plugins.feature.md) — the Tests
+   * tab, say. The pane is the module's alone, so the feature and the page
    * leave — saving what their editors hold, the way goHome does — and the
-   * sidebar turns to the Tests tab. The view owns its url from here on.
+   * sidebar turns to that tab. The view owns its url from here on; the tab
+   * says what the url is. A view that names no one thing — `/models` — opens
+   * the one the tab resolves it to; false when there is nothing to open.
    */
-  const openTests = (view: TestsRoute, opts: { push?: boolean } = {}) => {
+  const openPluginView = (tab: string, view: unknown, opts: { push?: boolean } = {}): boolean => {
+    const owner = tabs.get(tab);
+    if (!owner) return false;
+    const resolved = owner.route.resolve ? owner.route.resolve(view) : view;
+    if (resolved === null) return false;
+    view = resolved;
     editorRef.current.close();
-    closePage();
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
-    selectSidebarTab("tests");
-    setIssuesView(null);
-    setOpenModel(null);
-    setTestsView(view);
-    if (opts.push && location.pathname !== testsPath(view)) {
-      history.pushState(null, "", testsPath(view));
+    selectSidebarTab(tab);
+    setAppPage(null);
+    setPluginView({ tab, view });
+    // A url that is not the view's own (`/models` opening the first model)
+    // canonicalises in place, so a reload reopens the same view.
+    const path = owner.route.path(view);
+    if (location.pathname !== path) {
+      if (opts.push) history.pushState(null, "", path);
+      else history.replaceState(null, "", path);
     }
+    return true;
   };
+  /** A tab's navigate callback, bound to its id. */
+  const navigateIn = (tab: string) => (view: unknown, opts?: { push?: boolean }) =>
+    openPluginView(tab, view, opts);
 
   /**
-   * Open a view of the GitHub issues module (specs/app/github-issues
-   * .feature.md) — openTests's twin: the pane is the module's alone, and the
-   * sidebar turns to the Issues tab.
+   * Open Settings or Plugins in the editor pane (specs/user-info-settings.
+   * feature.md "open Settings", "open Plugins") — a page, not a dialog, so
+   * it has the pane's room. What was open leaves the way it does for a
+   * plugin's view, saving what its editor holds, and the page takes its own
+   * url. Going from one app page to the other rewrites the url in place, so
+   * closing either returns to what was open before both.
    */
-  const openIssues = (view: IssuesRoute, opts: { push?: boolean } = {}) => {
+  const openAppPage = (page: AppPage, opts: { push?: boolean } = { push: true }) => {
     editorRef.current.close();
-    closePage();
+    setPluginView(null);
     setSelected(null);
     setFeature(null);
     setSelectedScenario(null);
     setSelectedFolder(null);
-    selectSidebarTab("issues");
-    setTestsView(null);
-    setOpenModel(null);
-    setIssuesView(view);
-    if (opts.push && location.pathname !== issuesPath(view)) {
-      history.pushState(null, "", issuesPath(view));
+    setDrawerOpen(false);
+    setSettingsError(null);
+    const path = appPagePath(page);
+    if (location.pathname !== path) {
+      if (opts.push && !appPage) {
+        history.pushState(null, "", path);
+        appPagePushed.current = true;
+      } else {
+        history.replaceState(null, "", path);
+      }
+    }
+    setAppPage(page);
+  };
+  const openSettings = () => openAppPage("settings");
+  const openPlugins = () => openAppPage("plugins");
+  /** ✕ or ESC: back to what was open, or home after a deep link. */
+  const closeAppPage = () => {
+    if (appPagePushed.current) {
+      appPagePushed.current = false;
+      history.back();
+    } else {
+      goHome();
     }
   };
 
-  /**
-   * Open an Event Model's canvas (roadmap/support-event-modeling.md) —
-   * openTests's twin: the pane is the canvas's alone, and the sidebar turns
-   * to the Models tab. The model owns its url from here on.
-   */
-  const openModelPane = (fileName: string, opts: { push?: boolean } = {}) => {
-    editorRef.current.close();
-    closePage();
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
-    setSelectedFolder(null);
-    selectSidebarTab("models");
-    setTestsView(null);
-    setIssuesView(null);
-    setOpenModel(fileName);
-    if (opts.push && location.pathname !== modelLink(fileName)) {
-      history.pushState(null, "", modelLink(fileName));
-    }
-  };
-
-  // The issues load once the code repo's GitHub repository is known, and
-  // reload when a different one takes its place (another data folder); with
-  // none, the store empties and the tab goes.
-  const issuesRepoKey = issuesOn ? `${issuesRepo!.owner}/${issuesRepo!.name}` : null;
+  // A plugin switched off takes its open view with it: the pane leaves and
+  // the app goes home (specs/app/plugins.feature.md "Turning a plugin off
+  // unwinds everything it registered").
   useEffect(() => {
-    if (issuesRepoKey === null) {
-      issues.reset();
-      if (issuesViewRef.current) goHome();
-      return;
+    // A tab being remounted — its plugin was rebuilt — is back in a moment.
+    if (pluginView && !pluginTabs.some((t) => t.id === pluginView.tab) && !isRemounting(pluginView.tab)) {
+      goHome();
     }
-    void issues.load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issuesRepoKey]);
+  }, [pluginTabs]);
+
+  /**
+   * Re-read the plugins from the server — a plugin from a folder was
+   * rebuilt, or a folder came or went (specs/app/plugins.feature.md "A
+   * plugin loads from a local folder"): the browser half remounts from its
+   * new url, without a reload.
+   */
+  const refreshPlugins = useCallback(async () => {
+    const res = await fetch("/api/state");
+    if (!res.ok) return;
+    const data = await res.json();
+    setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
+    setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
+    setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
+    await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
+    client.emit("settings/changed", data);
+  }, []);
+  useEffect(() => {
+    if (loading || demo) return;
+    return watchPluginChanges(() => void refreshPlugins());
+  }, [loading, demo, refreshPlugins]);
 
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
-    if (route.tests) {
-      openTests(route.tests);
-    } else if (route.issues) {
-      openIssues(route.issues);
-    } else if (route.page) {
-      await showPage(route.page);
-    } else if (route.model) {
-      openModelPane(route.model);
-    } else if (route.pageFolder) {
-      // A folder with no page after it opens the first page its tab lists —
-      // what `g t` / `g r` / `g n` and the collapsed rail do. An empty folder
-      // (or one whose tab is switched off) has no page to open, so it falls
-      // home rather than showing an empty pane.
-      const first =
-        route.pageFolder === MODELS_FOLDER
-          ? modelsState().models[0]?.fileName
-          : pagesRef.current[route.pageFolder as PageTab["folder"]]?.[0]?.fileName;
-      if (first === undefined) return void goHome();
-      if (route.pageFolder === MODELS_FOLDER) openModelPane(first);
-      else await showPage(first);
+    // The app's own pages first, so no plugin can claim their urls.
+    const page = matchAppPage(pathname);
+    if (page) {
+      openAppPage(page, { push: false });
+      return;
+    }
+    // Back out of an app page: the entry it pushed is gone.
+    appPagePushed.current = false;
+    setAppPage(null);
+    // A plugin's url first (specs/app/plugins.feature.md "Plugin urls serve
+    // the app shell"): the mounted tabs each know their own. With the plugin
+    // off nothing matches, and the url reads as home below.
+    const pluginHit = matchPluginRoute(pathname);
+    if (pluginHit) {
+      // A tab with nothing to open — an empty models folder — goes home.
+      if (!openPluginView(pluginHit.tab.id, pluginHit.view)) goHome();
     } else if (route.feature) {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
@@ -2224,10 +1899,7 @@ export function App() {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").
       editorRef.current.close();
-      closePage();
-      setTestsView(null);
-      setIssuesView(null);
-      setOpenModel(null);
+      setPluginView(null);
       setSelected(null);
       setFeature(null);
       setSelectedScenario(null);
@@ -2346,18 +2018,21 @@ export function App() {
   };
 
   /**
-   * The Event Model a session bundles (roadmap/support-event-modeling.md):
-   * the one open on the Models tab — its JSON goes into the prompt after
-   * the specs, and the specs its slices link come along whole. A model
-   * alone is a session too (src/server/api.ts resolveSessionRequest).
+   * What the open plugin view bundles into a session beyond the picked specs
+   * (src/plugins/client/tabs.ts `session`) — the Event Model on the Models
+   * tab's canvas (roadmap/support-event-modeling.md), whose JSON goes into
+   * the prompt after the specs. A model alone is a session too
+   * (src/server/api.ts resolveSessionRequest).
    */
-  const sessionModels = (): string[] => (openModel && modelsOn ? [openModel] : []);
+  const sessionBundle = (): { models: string[]; labels: string[] } =>
+    (pluginView && activeTab?.session?.(pluginView.view)) || { models: [], labels: [] };
+  const sessionModels = (): string[] => sessionBundle().models;
 
   /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
       dialog both say what a session would run over. */
   const describeSelection = (
     files: { scenarios?: ScenarioPick[] }[],
-    modelFiles: string[] = sessionModels(),
+    bundled: string[] = sessionBundle().labels,
   ): string => {
     const whole = files.filter((f) => !f.scenarios).length;
     const partial = files.length - whole;
@@ -2370,7 +2045,7 @@ export function App() {
           `${partial} spec${partial === 1 ? "" : "s"}`,
       );
     }
-    for (const model of modelFiles) parts.push(`the model “${modelTitle(model, modelsStore)}”`);
+    parts.push(...bundled);
     return parts.join(" and ");
   };
 
@@ -3159,7 +2834,7 @@ export function App() {
   // feature opens) saves what was typed since the last tick, so nothing
   // written on the home view is lost to the navigation.
   const readmeOpen =
-    !loading && !needsRepo && selected === null && openPageFile === null && readme !== null;
+    !loading && !needsRepo && selected === null && pluginView === null && readme !== null;
   useEffect(() => {
     if (!readmeOpen) return;
     const id = setInterval(() => void readmeTick.current(), autosaveSeconds * 1000);
@@ -3169,553 +2844,7 @@ export function App() {
     };
   }, [readmeOpen, autosaveSeconds]);
 
-  /**
-   * Open a page of a special folder — a roadmap page (specs/app/roadmap
-   * .feature.md) or a task (specs/app/tasks.feature.md): its markdown takes
-   * the main pane, autosaved on the scenario editor's interval like the
-   * README. A page and a feature share the pane, so opening one drops the
-   * other. Called again on the cron tick to show what a pull brought.
-   */
-  const showPage = async (
-    fileName: string,
-    opts: {
-      push?: boolean;
-      /** A search hit's matched words, marked in the page (specs/search.feature.md). */
-      terms?: string[];
-    } = {},
-  ) => {
-    const tab = pageTabOf(fileName);
-    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`);
-    const data = (await res.json().catch(() => ({}))) as PageListing & {
-      content?: string;
-      error?: string;
-    };
-    if (!res.ok || typeof data.content !== "string") {
-      // Gone — deleted, renamed, or a stale deep link. A missing page says so
-      // the way a missing feature does (specs/navigation.spec.md "link to a
-      // missing feature"); any other failure keeps the server's own message.
-      if (openPageRef.current?.fileName === fileName) closePage({ save: false });
-      toast.error(
-        res.status === 404
-          ? `${tab.noun[0]!.toUpperCase()}${tab.noun.slice(1)} "${fileName}" not found — the link may be stale.`
-          : (data.error ?? `Could not open the ${tab.noun} "${fileName}"`),
-      );
-      await loadPages(tab.folder);
-      return;
-    }
-    editorRef.current.close();
-    // The page's row lives on its own tab, so a deep link or the palette
-    // turns the sidebar there; a refresh of the open page leaves it alone.
-    const samePage = openPageRef.current?.fileName === fileName;
-    if (!samePage) selectSidebarTab(tab.folder);
-    // A refresh of the open page (the reload cron, a rename) keeps its search
-    // marks too; a hit's terms replace them, and another page starts without.
-    if (opts.terms !== undefined || !samePage) setPageTerms(opts.terms ?? null);
-    setSelected(null);
-    setFeature(null);
-    setSelectedScenario(null);
-    setSelectedFolder(null);
-    setTestsView(null);
-    setIssuesView(null);
-    setOpenModel(null);
-    openPageSession.current += 1;
-    openPageSaved.current = data.content;
-    openPageTextRef.current = data.content;
-    setOpenPageText(data.content);
-    setOpenPage(pageListingOf(data));
-    if (opts.push && location.pathname !== pageLink(fileName)) {
-      history.pushState(null, "", pageLink(fileName));
-    }
-  };
-
-  /** The listing fields of a page response, without its content. */
-  const pageListingOf = (page: PageListing): PageListing => ({
-    fileName: page.fileName,
-    name: page.name,
-    ...(page.assigned ? { assigned: page.assigned } : {}),
-    ...(page.estimate ? { estimate: page.estimate } : {}),
-    ...(page.done ? { done: true } : {}),
-    // A notebook entry's own fields, or the header would show the kind chip
-    // of an entry it is not looking at
-    // (specs/app/engineering-notebook.feature.md).
-    ...(page.author ? { author: page.author } : {}),
-    ...(page.date ? { date: page.date } : {}),
-    ...(page.kind ? { kind: page.kind } : {}),
-    ...(page.supersedes ? { supersedes: page.supersedes } : {}),
-  });
-
-  /**
-   * Leave the open page. What its editor holds goes out first, so
-   * nothing typed there is lost to the navigation — the way the README
-   * editor's unmount tick saves it.
-   */
-  const closePage = ({ save = true }: { save?: boolean } = {}) => {
-    if (openPageRef.current === null) return;
-    if (save) void pageTick.current();
-    // Invalidate in-flight UI applies: a Done / Assigned PUT that returns
-    // after this page has left must not put its buffer back into the pane
-    // (and then autosave it into whatever replaced it).
-    openPageSession.current += 1;
-    openPageRef.current = null;
-    openPageTextRef.current = null;
-    setOpenPage(null);
-    setOpenPageText(null);
-    setPageTerms(null);
-  };
-
-  /** One autosave tick of the open page — autosaveReadme's twin. */
-  const autosavePage = async () => {
-    // A Done / Assigned write is already queued: wait for it rather than
-    // racing, and do not enqueue a snapshot that predates the marker.
-    if (pageMetaSaving.current > 0) {
-      await pageSaveQueue.current.idle();
-      return;
-    }
-    const content = openPageTextRef.current;
-    const page = openPageRef.current;
-    const session = openPageSession.current;
-    if (content === null || page === null || content === openPageSaved.current) return;
-    await pageSaveQueue.current.run(async () => {
-      if (pageMetaSaving.current > 0) return;
-      if (content === openPageSaved.current) return;
-      setSaving(true);
-      try {
-        const res = await fetch(
-          `/api/${pageTabOf(page.fileName).folder}/${encodeURIComponent(page.fileName)}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content }),
-          },
-        );
-        const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
-        if (res.ok) {
-          if (session === openPageSession.current) {
-            // What went out is what counts as saved: the file holds the
-            // document's projection, which can be tidier than the buffer, and
-            // taking that back would have every tick save the same text again.
-            openPageSaved.current = content;
-            markSaved();
-            // Only when the heading, assignment, or Done marker actually
-            // moved: a new listing object on every tick would restart the
-            // timers watching it.
-            const listing = pageListingOf(data);
-            setOpenPage((open) =>
-              open === null || pageListingMetaEqual(open, listing) ? open : listing,
-            );
-          }
-        } else {
-          toast.error(`${page.fileName} not saved: ${data.error ?? res.statusText} — will retry.`);
-        }
-      } catch (e) {
-        toast.error(`${page.fileName} not saved: ${(e as Error).message} — will retry.`);
-      } finally {
-        setSaving(false);
-      }
-    });
-  };
-  const pageTick = useRef(autosavePage);
-  useEffect(() => {
-    pageTick.current = autosavePage;
-  });
-  const pageEditorOpen = !loading && !needsRepo && openPageFile !== null && openPageText !== null;
-  useEffect(() => {
-    if (!pageEditorOpen) return;
-    const id = setInterval(() => void pageTick.current(), autosaveSeconds * 1000);
-    return () => {
-      clearInterval(id);
-      void pageTick.current();
-    };
-  }, [pageEditorOpen, autosaveSeconds]);
-
-  /**
-   * The members the open page's "Assigned" dropdown offers — the project's,
-   * plus whoever it is assigned to when that name is no longer on the list
-   * (assignableMembers, for features).
-   */
-  const pageAssignableMembers = (): ProjectMember[] => {
-    const assigned = openPage?.assigned;
-    if (!assigned || members.some((m) => m.name === assigned)) return members;
-    return [...members, { name: assigned }];
-  };
-
-  /**
-   * The decisions the open entry may say it supersedes
-   * (specs/app/engineering-notebook.feature.md): the earlier ones — an entry
-   * cannot supersede itself, and replacing something written later would read
-   * backwards. Same-day decisions count as earlier, since the date is all the
-   * order there is.
-   */
-  const supersedableEntries = (): PageListing[] => {
-    const open = openPage;
-    if (!open) return [];
-    return notebookPages.filter(
-      (entry) =>
-        entry.fileName !== open.fileName &&
-        entry.kind === "Decision" &&
-        (entry.date ?? "") <= (open.date ?? ""),
-    );
-  };
-
-  /**
-   * Write the open page's markdown back through its document — the path the
-   * "Assigned" dropdown and the Done button share. What comes back replaces
-   * what the editor holds, so the metadata line the server wrote shows
-   * without a reload, and the sidebar reloads so the list agrees. Returns
-   * whether it landed; the caller says what changed.
-   */
-  const savePageMeta = async (next: string, whatFailed: string): Promise<boolean> => {
-    const page = openPage;
-    if (!page) return false;
-    const tab = pageTabOf(page.fileName);
-    const session = openPageSession.current;
-    pageMetaSaving.current += 1;
-    try {
-      return await pageSaveQueue.current.run(async () => {
-        try {
-          const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: next }),
-          });
-          const data = (await res.json().catch(() => ({}))) as PageListing & {
-            content?: string;
-            error?: string;
-          };
-          if (!res.ok || typeof data.content !== "string") {
-            toast.error(data.error ?? `Could not save the ${whatFailed}`);
-            return false;
-          }
-          // The write landed on the file it was aimed at. Reload the sidebar
-          // so a Done marker shows even when the pane has moved on.
-          void loadPages(tab.folder);
-          if (session !== openPageSession.current) return true;
-          openPageSaved.current = data.content;
-          openPageTextRef.current = data.content;
-          setOpenPageText(data.content);
-          setOpenPage(pageListingOf(data));
-          markSaved();
-          return true;
-        } catch {
-          toast.error(`Could not save the ${whatFailed} — is the server running?`);
-          return false;
-        }
-      });
-    } finally {
-      pageMetaSaving.current -= 1;
-    }
-  };
-
-  /**
-   * Assign the open page to a project member, or to nobody — just like a
-   * feature (src/server/members.ts). The name lands on the page's
-   * `**Assigned:**` line, saved on the spot; the cron pushes it.
-   */
-  const savePageAssigned = async (name: string) => {
-    const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    const assigned = name.trim();
-    if ((page.assigned ?? "") === assigned) return;
-    const { assigned: previous, ...rest } = parsePage(content);
-    const next = serializePage(assigned ? { ...rest, assigned } : rest);
-    setPageAssignedSaving(true);
-    try {
-      if (await savePageMeta(next, "assignment")) {
-        toast.success(
-          assigned
-            ? `Assigned to ${assigned} — saved locally.`
-            : "Assignment cleared — saved locally.",
-          { action: { label: "Undo", run: () => void savePageAssigned(previous ?? "") } },
-        );
-      }
-    } finally {
-      setPageAssignedSaving(false);
-    }
-  };
-
-  /**
-   * Tick the open task off, or reopen it (specs/app/tasks.feature.md): the
-   * page's `**Status:** Done` line, written the same way the assignment is,
-   * so the sidebar strikes the task through on the next listing.
-   */
-  const savePageDone = async (done: boolean) => {
-    const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    if ((page.done ?? false) === done) return;
-    const { done: _was, ...rest } = parsePage(content);
-    const next = serializePage(done ? { ...rest, done: true } : rest);
-    setPageDoneSaving(true);
-    try {
-      if (await savePageMeta(next, "status")) {
-        toast.success(done ? "Marked done — saved locally." : "Reopened — saved locally.", {
-          action: { label: "Undo", run: () => void savePageDone(!done) },
-        });
-      }
-    } finally {
-      setPageDoneSaving(false);
-    }
-  };
-
-  /**
-   * Write the task's estimate (specs/app/tasks.feature.md "Add task to
-   * Google Calendar"): the page's `**Estimate:** 1h 30m` line, written the
-   * same way the assignment and the Done marker are, so the chip and the
-   * next visit to the calendar start from it.
-   */
-  const savePageEstimate = async (minutes: number) => {
-    const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    if ((page.estimate ?? 0) === minutes) return;
-    const { estimate: _was, ...rest } = parsePage(content);
-    const next = serializePage({ ...rest, estimate: minutes });
-    if (await savePageMeta(next, "estimate")) {
-      toast.success(`Estimated at ${formatEstimate(minutes)} — saved locally.`);
-    }
-  };
-
-  /**
-   * Open the calendar chip's form: the estimate already on the task, else
-   * one proposed by Claude when the CLI is there, else an empty field with
-   * the presets; and the next quarter hour as the start.
-   */
-  const openPageCalendar = () => {
-    const page = openPage;
-    if (!page) return;
-    pageEstimateAbort.current?.abort();
-    setPageStartLocal(localInputValue(nextQuarterHour(new Date())));
-    setPageCalendarOpen(true);
-    if (page.estimate) {
-      setPageEstimateText(formatEstimate(page.estimate));
-      setPageEstimateProposal("stored");
-      return;
-    }
-    setPageEstimateText("");
-    if (!canRunAgentPane) {
-      setPageEstimateProposal("manual");
-      return;
-    }
-    setPageEstimateProposal("loading");
-    const abort = new AbortController();
-    pageEstimateAbort.current = abort;
-    void (async () => {
-      try {
-        const res = await fetch(`/api/tasks/${encodeURIComponent(page.fileName)}/estimate`, {
-          method: "POST",
-          signal: abort.signal,
-        });
-        const data = (await res.json().catch(() => ({}))) as { minutes?: unknown; error?: string };
-        if (abort.signal.aborted) return;
-        if (res.ok && typeof data.minutes === "number") {
-          setPageEstimateText(formatEstimate(data.minutes));
-          setPageEstimateProposal("claude");
-          return;
-        }
-        if (data.error) toast.error(data.error);
-        setPageEstimateProposal("manual");
-      } catch (e) {
-        if (abort.signal.aborted) return;
-        toast.error(`Could not ask Claude for an estimate: ${(e as Error).message}`);
-        setPageEstimateProposal("manual");
-      }
-    })();
-  };
-
-  const closePageCalendar = () => {
-    pageEstimateAbort.current?.abort();
-    pageEstimateAbort.current = null;
-    setPageCalendarOpen(false);
-  };
-
-  /** The link was followed: keep the estimate on the task, and close. */
-  const submitPageCalendar = () => {
-    const minutes = parseEstimate(pageEstimateText);
-    if (minutes !== null) void savePageEstimate(minutes);
-    closePageCalendar();
-  };
-
-  /** The prefilled event for the open task, or null until the form makes one. */
-  const pageCalendarUrl = (): string | null => {
-    const page = openPage;
-    if (!page || openPageText === null) return null;
-    const minutes = parseEstimate(pageEstimateText);
-    const start = fromLocalInput(pageStartLocal);
-    if (minutes === null || start === null) return null;
-    const path = pageLink(page.fileName);
-    const link = location.protocol === "app:" ? desktopLink(path) : location.origin + path;
-    const body = parsePage(openPageText).body.trim();
-    const excerpt = body.length > 300 ? `${body.slice(0, 300)}…` : body;
-    return googleCalendarUrl({
-      title: page.name,
-      start,
-      minutes,
-      details: excerpt ? `${excerpt}\n\n${link}` : link,
-    });
-  };
-
-  /**
-   * An entry's kind chip (specs/app/engineering-notebook.feature.md): the
-   * header changes it, never a hand edit of the metadata line. Saved through
-   * the page's document like the Done marker, so the editor's text and the
-   * sidebar row follow.
-   */
-  const saveEntryKind = async (kind: "Observation" | "Decision") => {
-    const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    if (entryKindOf(page) === kind) return;
-    setEntryKindSaving(true);
-    try {
-      const next = serializePage({ ...parsePage(content), kind });
-      if (await savePageMeta(next, "kind")) {
-        toast.success(`Now a${kind === "Observation" ? "n observation" : " decision"} — saved locally.`);
-      }
-    } finally {
-      setEntryKindSaving(false);
-    }
-  };
-
-  /**
-   * "Supersedes…": point this decision at the one it replaces, or unpick it.
-   * The earlier entry is never touched — the badge on it is derived from this
-   * link, so removing the link removes the badge.
-   */
-  const saveEntrySupersedes = async (earlier: PageListing | null) => {
-    const page = openPage;
-    const content = openPageText;
-    if (!page || content === null) return;
-    setEntryKindSaving(true);
-    try {
-      const { supersedes: _was, ...rest } = parsePage(content);
-      const next = serializePage(
-        earlier
-          ? { ...rest, supersedes: { title: earlier.name, url: pageLink(earlier.fileName) } }
-          : rest,
-      );
-      if (await savePageMeta(next, "supersedes link")) {
-        toast.success(
-          earlier ? `Supersedes ${earlier.name} — saved locally.` : "Supersedes cleared — saved locally.",
-        );
-      }
-    } finally {
-      setEntryKindSaving(false);
-    }
-  };
-
-  /** "+ New page" / "+ New task": a markdown file in the tab's folder,
-      opened right away. */
-  const newPage = async (tab: PageTab) => {
-    // A notebook entry is an observation or a decision
-    // (specs/app/engineering-notebook.feature.md), so its dialog asks which
-    // before it asks anything else; the folder is flat, so it says nothing
-    // about subfolders. Every other page tab keeps the plain name prompt.
-    const result = await promptWithChoice({
-      title: tab.dated ? "New entry" : `New ${tab.noun}`,
-      hint: tab.dated
-        ? "Today's date goes in front of the file name, so the notebook reads in order."
-        : `Use folder/name to create inside a subfolder of ${tab.folder}.`,
-      placeholder: tab.dated
-        ? "A spec change lands before the code"
-        : tab.folder === "tasks"
-          ? "Ship v2"
-          : "Pricing",
-      confirmLabel: tab.dated ? "Create entry" : `Create ${tab.noun}`,
-      ...(tab.dated
-        ? {
-            choicesLabel: "Kind",
-            choices: [
-              {
-                label: "Observation",
-                value: "Observation",
-                hint: "Something you noticed about the way you work.",
-              },
-              {
-                label: "Decision",
-                value: "Decision",
-                hint: "Something you have decided to do about it.",
-              },
-            ],
-          }
-        : {}),
-    });
-    const input = result?.text;
-    if (!input) return;
-    const res = await fetch(`/api/${tab.folder}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input, ...(result?.choice ? { kind: result.choice } : {}) }),
-    });
-    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
-    if (!res.ok || !data.fileName) {
-      toast.error(data.error ?? `Could not create the ${tab.noun}`);
-      return;
-    }
-    await loadPages(tab.folder);
-    await showPage(data.fileName, { push: true });
-  };
-
-  /**
-   * Rename a page: its `# heading` and its file both, so the url follows the
-   * title (specs/app/roadmap.feature.md). The server owns both halves — a
-   * `git mv` committed and pushed — so this is one round trip and the two can
-   * never drift apart.
-   */
-  const renamePage = async (page: PageListing) => {
-    const tab = pageTabOf(page.fileName);
-    const name = await prompt({
-      title: `Rename ${tab.noun}`,
-      initial: page.name,
-      confirmLabel: "Rename",
-    });
-    if (!name || name.trim() === page.name) return;
-    const res = await fetch(
-      `/api/${tab.folder}/${encodeURIComponent(page.fileName)}/rename`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
-      },
-    );
-    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
-    if (!res.ok || !data.fileName) {
-      toast.error(data.error ?? `Could not rename the ${tab.noun}`);
-      return;
-    }
-    toast.success(`Renamed to “${name.trim()}”.`);
-    await loadPages(tab.folder);
-    // Re-open at the new file name — never push, or the retired url is left
-    // behind for Back to land on; the canonical-url effect rewrites in place.
-    if (openPageRef.current?.fileName === page.fileName) await showPage(data.fileName);
-  };
-
-  /** Delete a page — committed and pushed right away, so it is confirmed first. */
-  const removePage = async (page: PageListing) => {
-    const tab = pageTabOf(page.fileName);
-    const ok = await confirm({
-      title: `Delete ${tab.noun}`,
-      body: `Delete “${page.name}”? This is committed and pushed right away.`,
-      confirmLabel: `Delete ${tab.noun}`,
-    });
-    if (!ok) return;
-    if (openPageRef.current?.fileName === page.fileName) {
-      closePage({ save: false });
-      history.replaceState(null, "", "/");
-    }
-    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
-      method: "DELETE",
-    });
-    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
-    if (!res.ok) {
-      toast.error(data.error ?? `Could not delete the ${tab.noun}`);
-      return;
-    }
-    toast.success(`Deleted “${page.name}”${data.message ? ` — ${data.message}` : ""}.`);
-    await loadPages(tab.folder);
-  };
-
-  /** Switch the sidebar to the Specs, Roadmap or Tasks tab; the choice sticks. */
+  /** Switch the sidebar to the Specs tab or a plugin's; the choice sticks. */
   const selectSidebarTab = (tab: SidebarTab) => {
     setSidebarTab(tab);
     storeSidebarTab(tab);
@@ -3820,7 +2949,13 @@ export function App() {
     .join("")
     .toUpperCase();
 
-  const openSettings = () => {
+  // The Settings page's fields start from what is saved each time it opens
+  // — after the render that opened it, so a deep link to /settings reads
+  // the state the boot just loaded. A layout effect, so the fields never
+  // paint with their defaults first.
+  const settingsShown = appPage === "settings";
+  useLayoutEffect(() => {
+    if (!settingsShown) return;
     // A stored 0 means autosync is off; the field keeps a usable frequency so
     // switching it back on needs no typing.
     setSettingsAutosyncOnDraft(reloadSeconds > 0);
@@ -3839,19 +2974,13 @@ export function App() {
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
-    setSettingsRoadmapDraft(roadmap);
-    setSettingsTasksDraft(tasks);
-    setSettingsNotebookDraft(notebook);
-    setSettingsTestingDraft(testingOn);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
-    setSettingsIssuesDraft(issuesSetting);
-    setSettingsModelsDraft(modelsOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
     setAuthStatus(null);
-    setSettingsOpen(true);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsShown]);
 
   // Browser sign-in (specs/git-operations.spec.md "connect to GitHub via the
   // browser"): the server hands back GitHub's authorize url, the browser
@@ -3903,12 +3032,12 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!settingsShown) {
       setDeviceFlow(null);
       setWebConnecting(false);
       setAuthStatus(null);
     }
-  }, [settingsOpen]);
+  }, [settingsShown]);
 
   // While the browser tab is with GitHub, poll for the callback's outcome.
   useEffect(() => {
@@ -4014,15 +3143,17 @@ export function App() {
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
-    setRoadmap(data.roadmap === true);
-    setTasks(data.tasks === true);
-    // The notebook's default is on, so an absent key means on — the opposite
-    // of every other module's switch.
-    setNotebook(data.notebook !== false);
-    setTestingOn(data.testing === true);
+    // The profile's plugins mount and unmount to match, in its order — a
+    // tab appears, goes or moves before this returns (src/plugins/client/
+    // loader.ts).
+    setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
+    setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
+    setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
+    await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
+    // The mounted ones follow the other switches they read — the tasks'
+    // calendar chip follows Google Calendar's, say.
+    client.emit("settings/changed", data);
     setGoogleCalendarOn(data.googleCalendar === true);
-    setIssuesSetting(data.issues === true);
-    setModelsOn(data.models === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -4175,70 +3306,40 @@ export function App() {
     if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
   };
 
-  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
-  // .feature.md): switched on, the server creates the folder if the data repo
-  // has none and the sidebar lists its pages. Off, the folder is simply not
-  // shown — a page of it that is open leaves the pane, and the files stay
-  // where they are.
-  const togglePageFolder = async (tab: PageTab, on: boolean) => {
-    const setDraft =
-      tab.folder === "tasks"
-        ? setSettingsTasksDraft
-        : tab.folder === "notebook"
-          ? setSettingsNotebookDraft
-          : setSettingsRoadmapDraft;
-    setDraft(on);
-    if (!(await patchSettings({ [tab.folder]: on }))) {
-      setDraft(!on);
-      return;
-    }
-    if (on) {
-      await loadPages(tab.folder);
-      return;
-    }
-    if (tab.folder === "tasks") setTaskPages([]);
-    else if (tab.folder === "notebook") {
-      setNotebookPages([]);
-      setSupersededBy({});
-    } else setRoadmapPages([]);
-    const open = openPageRef.current;
-    if (open && pageTabOf(open.fileName).folder === tab.folder) goHome();
+  // The profile (specs/app/plugins.feature.md "Turning a plugin off unwinds
+  // everything it registered", "The profile lists enabled plugins in tab
+  // order"): Settings → Plugins edits the ordered list of enabled plugins
+  // and sends it whole. The server mounts and unmounts to match — a special
+  // folder is created when its plugin goes on — and the browser follows in
+  // patchSettings: a tab appears, goes or moves, and an open view of a
+  // plugin now off leaves the pane. The data in the repo is left alone.
+  const enabledPluginIds = () => plugins.filter((p) => p.enabled).map((p) => p.id);
+  const setProfile = async (enabled: string[]) => {
+    const previous = plugins;
+    // Optimistic, like every switch: the rows re-order at once, and snap
+    // back if the server refuses.
+    setPlugins((rows) => {
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const on = enabled.map((id) => ({ ...(byId.get(id) ?? { id }), enabled: true }));
+      const off = rows.filter((r) => !enabled.includes(r.id)).map((r) => ({ ...r, enabled: false }));
+      return [...on, ...off];
+    });
+    if (!(await patchSettings({ plugins: { enabled } }))) setPlugins(previous);
   };
-
-  // Event Models (roadmap/support-event-modeling.md): switched on, the
-  // server creates the models folder if the data repo has none and the
-  // Models tab lists its models; off, the tab goes and an open canvas
-  // leaves the pane. The files stay where they are.
-  const toggleModels = async (on: boolean) => {
-    setSettingsModelsDraft(on);
-    if (!(await patchSettings({ models: on }))) {
-      setSettingsModelsDraft(!on);
-      return;
-    }
-    if (on) {
-      await models.load();
-      return;
-    }
-    models.reset();
-    if (openModelRef.current) goHome();
+  const setPluginEnabled = (id: string, on: boolean) => {
+    const rest = enabledPluginIds().filter((x) => x !== id);
+    return setProfile(on ? [...rest, id] : rest);
   };
-
-  // Test management (specs/app/tests.feature.md): switched on, the
-  // Tests tab appears and the module loads; off, the tab goes and a view of
-  // it that is open leaves the pane. The document in the data repo, if any,
-  // is left where it is either way.
-  const toggleTesting = async (on: boolean) => {
-    setSettingsTestingDraft(on);
-    if (!(await patchSettings({ testing: on }))) {
-      setSettingsTestingDraft(!on);
-      return;
-    }
-    if (on) {
-      await testing.load();
-      return;
-    }
-    testing.reset();
-    if (testsViewRef.current) goHome();
+  /** Move an enabled plugin one place up (-1) or down (+1) in tab order. */
+  const movePlugin = (id: string, delta: -1 | 1) => {
+    const enabled = enabledPluginIds();
+    const i = enabled.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= enabled.length) return Promise.resolve();
+    const next = [...enabled];
+    next.splice(i, 1);
+    next.splice(j, 0, id);
+    return setProfile(next);
   };
 
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
@@ -4252,20 +3353,6 @@ export function App() {
       return;
     }
     setGoogleCalendarOn(on);
-    if (!on) setPageCalendarOpen(false);
-  };
-
-  // GitHub issues (specs/app/github-issues.feature.md): switched on, the
-  // Issues tab appears (given a GitHub code repo) and the issues load; off,
-  // the tab goes and a view of it that is open leaves the pane — the
-  // effect on issuesRepoKey does both, as it does on a data folder change.
-  const toggleIssues = async (on: boolean) => {
-    setSettingsIssuesDraft(on);
-    if (!(await patchSettings({ issues: on }))) {
-      setSettingsIssuesDraft(!on);
-      return;
-    }
-    setIssuesSetting(on);
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -5067,7 +4154,6 @@ export function App() {
   // same list. Single keys stay quiet while a dialog or menu is open and
   // while typing in a field; ESC works everywhere.
   const dialogOpen =
-    settingsOpen ||
     userInfoOpen ||
     foldersOpen ||
     switching !== null ||
@@ -5087,9 +4173,7 @@ export function App() {
     featureMenuOpen ||
     cardMenu !== null ||
     assigneeMenuOpen ||
-    pageAssigneeMenuOpen ||
-    filterMenuOpen ||
-    pageMenu !== null;
+    filterMenuOpen;
   const quiet = dialogOpen || menuOpen;
   /**
    * `quiet` with the palette itself discounted. A shortcut's `when` keeps its
@@ -5120,11 +4204,13 @@ export function App() {
       return !h;
     });
   };
-  // The drawer closes behind any navigation — a feature, a page, the
-  // scenario editor — and when the window grows back into two panes.
+  // The drawer closes behind any navigation — a feature, a plugin's view (a
+  // page, say), the scenario editor — and when the window grows back into
+  // two panes.
+  const pluginViewKey = pluginView && activeTab ? activeTab.route.key(pluginView.view) : null;
   useEffect(() => {
     setDrawerOpen(false);
-  }, [compact, selected, openPage?.fileName, editing !== null]);
+  }, [compact, selected, pluginViewKey, editing !== null]);
   // specs/editor/spec-editor.feature.md "Adding Scanarios": a small dialog
   // asks for the scenario's name first; the editor pane opens with it. A
   // new scenario starts as a draft: autosave (specs/editor-autosave.feature.md)
@@ -5183,7 +4269,8 @@ export function App() {
   // then the editor pane — its way back, leaving the scenario autosaved
   // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
   // key came from the sidebar, which stays reachable beside the pane; then
-  // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
+  // an app page — Settings, Plugins — the same way; then a selected folder
+  // (specs/folders.spec.md). A field keeps its own ESC.
   const closeTopmost = (e: KeyboardEvent): void | false => {
     if (sessionError !== null) return setSessionError(null);
     if (startDialog) return setStartDialog(false);
@@ -5193,7 +4280,6 @@ export function App() {
       dismissConflict();
       return;
     }
-    if (settingsOpen) return setSettingsOpen(false);
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -5203,6 +4289,12 @@ export function App() {
     const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
     if (editing && !fromSidebar) {
       editorRef.current.back();
+      return;
+    }
+    if (appPage && !fromSidebar) {
+      // A field on the page saves on blur; leave it first so it does.
+      if (e.target instanceof HTMLElement) e.target.blur();
+      closeAppPage();
       return;
     }
     if (isTypingTarget(e.target)) return false;
@@ -5262,88 +4354,22 @@ export function App() {
         void loadReadme();
       },
     },
-    {
-      id: "go-roadmap",
-      keys: "g r",
-      label: "Go to the roadmap",
-      group: "Navigate",
-      when: () => !quiet && roadmapPages.length > 0,
-      palette: () => !quietBehindPalette && roadmapPages.length > 0,
-      run: () => {
-        const page = roadmapPages[0];
-        if (page) void showPage(page.fileName, { push: true });
-      },
-    },
-    {
-      id: "go-tasks",
-      keys: "g t",
-      label: "Go to the tasks",
-      group: "Navigate",
-      when: () => !quiet && taskPages.length > 0,
-      palette: () => !quietBehindPalette && taskPages.length > 0,
-      run: () => {
-        const page = taskPages[0];
-        if (page) void showPage(page.fileName, { push: true });
-      },
-    },
-    // The engineering notebook (specs/app/engineering-notebook.feature.md):
-    // the newest entry, and the command that writes a new one.
-    {
-      id: "go-notebook",
-      keys: "g n",
-      label: "Go to the notebook",
-      group: "Navigate",
-      when: () => !quiet && notebook && notebookPages.length > 0,
-      run: () => {
-        const page = notebookPages[0];
-        if (page) void showPage(page.fileName, { push: true });
-      },
-    },
-    {
-      id: "new-notebook-entry",
-      // A palette command with no key of its own: `c` already writes a
-      // feature or a scenario, and an entry is written far less often.
-      keys: [],
-      hidden: true,
-      label: "New notebook entry",
-      group: "Create",
-      when: () => !quiet && notebook,
-      palette: () => !quietBehindPalette && notebook,
-      run: () => {
-        const tab = PAGE_TABS.find((t) => t.folder === "notebook");
-        if (tab) void newPage(tab);
-      },
-    },
-    {
-      id: "go-tests",
-      keys: "g e",
-      label: "Go to the tests",
-      group: "Navigate",
-      when: () => !quiet && testingOn,
-      palette: () => !quietBehindPalette && testingOn,
-      run: () => openTests({ kind: "plans" }, { push: true }),
-    },
-    {
-      id: "go-issues",
-      keys: "g i",
-      label: "Go to the issues",
-      group: "Navigate",
-      when: () => !quiet && issuesOn,
-      palette: () => !quietBehindPalette && issuesOn,
-      run: () => openIssues({ kind: "list" }, { push: true }),
-    },
-    {
-      id: "go-models",
-      keys: "g m",
-      label: "Go to the models",
-      group: "Navigate",
-      when: () => !quiet && modelsOn && modelsStore.models.length > 0,
-      palette: () => !quietBehindPalette && modelsOn && modelsStore.models.length > 0,
-      run: () => {
-        const first = modelsStore.models[0];
-        if (first) openModelPane(first.fileName, { push: true });
-      },
-    },
+    // Each plugin's tab has its own `g` chord (specs/app/plugins.feature.md) —
+    // `g r`, `g t` and `g n` open the special folders on their first page. A
+    // tab with nothing to open (an empty folder) has no chord.
+    ...pluginTabs
+      .filter((tab) => tab.shortcut)
+      .map(
+        (tab): Shortcut => ({
+          id: `go-${tab.id}`,
+          keys: tab.shortcut!,
+          label: `Go to the ${tab.title.toLowerCase()}`,
+          group: "Navigate",
+          when: () => !quiet && tabReachable(tab),
+          palette: () => !quietBehindPalette && tabReachable(tab),
+          run: () => void openPluginView(tab.id, tab.route.home, { push: true }),
+        }),
+      ),
     {
       id: "settings",
       keys: ["mod+,", "g s"],
@@ -5352,6 +4378,15 @@ export function App() {
       when: () => !quiet,
       palette: () => !quietBehindPalette,
       run: () => openSettings(),
+    },
+    {
+      id: "plugins",
+      keys: "g p",
+      label: "Plugins",
+      group: "Navigate",
+      when: () => !quiet,
+      palette: () => !quietBehindPalette,
+      run: () => openPlugins(),
     },
     {
       id: "theme",
@@ -5465,12 +4500,13 @@ export function App() {
       label: "Copy link to this page",
       group: "Share",
       inFields: true,
-      when: () => !quiet && (selected !== null || openPage !== null),
-      palette: () => !quietBehindPalette && (selected !== null || openPage !== null),
+      when: () => !quiet && (selected !== null || pluginView !== null),
+      palette: () => !quietBehindPalette && (selected !== null || pluginView !== null),
       run: () => {
         if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
         else if (selected) void copyLink(featurePath(selected));
-        else if (openPage) void copyLink(pageLink(openPage.fileName));
+        // A plugin's view — an open roadmap page or task, say — has its own url.
+        else if (pluginView && activeTab) void copyLink(activeTab.route.path(pluginView.view));
       },
     },
     // Handled by the fields themselves (src/frontend/MarkdownEditor.tsx and
@@ -5550,9 +4586,6 @@ export function App() {
   const paletteActions: PaletteItem[] = [
     shortcutAction("create", <Plus size={14} />),
     action("new-folder", "New folder", <FolderInput size={14} />, () => void createFolder()),
-    // "New notebook entry" (specs/app/engineering-notebook.feature.md): a
-    // palette command, since the tab's own button is a tab away.
-    shortcutAction("new-notebook-entry", <NotebookPen size={14} />),
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
     ...(selected && feature
@@ -5594,26 +4627,18 @@ export function App() {
         ]
       : []),
     shortcutAction("go-home", <Home size={14} />),
-    shortcutAction("go-roadmap", <MapIcon size={14} />),
-    shortcutAction("go-tasks", <ListTodo size={14} />),
-    shortcutAction("go-tests", <FlaskConical size={14} />),
-    ...(testingOn
-      ? [
-          action("new-plan", "New test plan", <FlaskConical size={14} />, () =>
-            void newPlanFlow(prompt, openTests),
-          ),
-          action("new-case", "New test case", <FlaskConical size={14} />, () =>
-            void newCaseFlow(prompt, openTests),
-          ),
-        ]
-      : []),
-    shortcutAction("go-issues", <Bug size={14} />),
-    shortcutAction("go-models", <Workflow size={14} />),
-    // Not in the demo: its Issues tab reads the release repo and writes
-    // nothing (src/frontend/issues.ts), so the palette offers no new issue.
-    ...(issuesOn && !demo
-      ? [action("new-issue", "New GitHub issue", <Bug size={14} />, () => openIssues({ kind: "new" }, { push: true }))]
-      : []),
+    // The plugins' tabs: the way there, and each tab's own commands —
+    // "New notebook entry" among them (specs/app/engineering-notebook
+    // .feature.md), since the tab's own button is a tab away.
+    ...pluginTabs.flatMap((tab) => [
+      shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
+      ...(tab.palette?.commands?.({
+        prompt,
+        promptWithChoice,
+        confirm,
+        navigate: navigateIn(tab.id),
+      }) ?? []),
+    ]),
     shortcutAction("editor-pane", <PanelRight size={14} />),
     shortcutAction("agent-pane", <Bot size={14} />),
     ...(codeGen && canOpenAgentPane
@@ -5625,6 +4650,7 @@ export function App() {
         ]
       : []),
     shortcutAction("settings", <Settings size={14} />),
+    shortcutAction("plugins", <Puzzle size={14} />),
     shortcutAction(
       "sidebar",
       compact ? (
@@ -5649,75 +4675,29 @@ export function App() {
       .find((f) => f.fileName === fileName)
       ?.scenarios.find((x) => x.name === s.name && x.version === s.version)?.status ?? "proposed";
   const resolvePalette = async (q: string, signal: AbortSignal): Promise<PaletteItem[]> => {
-    // The Tests tab searches the module's own store: the server's full-text
-    // index knows only markdown (src/frontend/testing.ts searchTests).
-    if (shownTab === "tests") {
-      return searchTests(q, testingStore).map(
+    // A plugin's tab searches its own data when it offers a search — its
+    // store (the server's full-text index knows only markdown), or its own
+    // scope of that index (a special folder's pages).
+    const shownPlugin = pluginTabs.find((tab) => tab.id === shownTab);
+    if (shownPlugin?.palette?.search) {
+      const { group } = shownPlugin.palette;
+      const Icon = shownPlugin.icon;
+      return (await shownPlugin.palette.search(q, signal)).map(
         (hit): PaletteItem => ({
-          id: `tests:${hit.kind}:${hit.id}`,
-          group: "Tests",
+          id: hit.id,
+          group,
           label: hit.label,
           text: hit.label,
           sub: hit.sub,
-          icon: <FlaskConical size={14} />,
+          icon: <Icon size={14} />,
           href: hit.href,
-          run: () => openTests(hit.view, { push: true }),
+          run: () => void openPluginView(shownPlugin.id, hit.view, { push: true }),
         }),
       );
     }
-    // So does the Issues tab: the loaded issues, by number, title and body.
-    if (shownTab === "issues") {
-      return searchIssues(q, issuesStore).map(
-        (hit): PaletteItem => ({
-          id: `issues:${hit.number}`,
-          group: "Issues",
-          label: hit.label,
-          text: hit.label,
-          sub: hit.sub,
-          icon: <Bug size={14} />,
-          href: hit.href,
-          run: () => openIssues(hit.view, { push: true }),
-        }),
-      );
-    }
-    const res = await fetch(
-      `/api/search?scope=${shownTab}&q=${encodeURIComponent(q)}`,
-      { signal },
-    );
+    const res = await fetch(`/api/search?scope=specs&q=${encodeURIComponent(q)}`, { signal });
     const data = (await res.json()) as { results?: SearchResultItem[]; error?: string };
     if (!res.ok) throw new Error(data.error ?? "Search failed");
-    // The Models tab searched the models: one hit per model, by its name and
-    // what is on its canvas (src/server/search.ts).
-    if (shownTab === "models") {
-      return (data.results ?? []).map(
-        (r): PaletteItem => ({
-          id: `models:${r.fileName}`,
-          group: "Models",
-          label: r.featureName,
-          text: r.featureName,
-          sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
-          icon: <Workflow size={14} />,
-          href: modelLink(r.fileName),
-          run: () => openModelPane(r.fileName, { push: true }),
-        }),
-      );
-    }
-    // A page tab searched its own folder, so every hit belongs to that tab.
-    const pageTab = shownPageTabs.find((tab) => tab.folder === shownTab);
-    if (pageTab) {
-      return (data.results ?? []).map(
-        (r): PaletteItem => ({
-          id: `${pageTab.folder}:${r.fileName}`,
-          group: pageTab.title,
-          label: r.featureName,
-          text: r.featureName,
-          sub: r.snippet ? markText(r.snippet, r.terms) : undefined,
-          icon: <pageTab.icon size={14} />,
-          href: pageLink(r.fileName),
-          run: () => void showPage(r.fileName, { push: true, terms: r.terms }),
-        }),
-      );
-    }
     return (data.results ?? []).map(
       (r): PaletteItem => ({
         id: `${r.kind}:${r.fileName}:${r.scenario?.name ?? ""}@${r.scenario?.version ?? 0}`,
@@ -5742,43 +4722,52 @@ export function App() {
       }),
     );
   };
-  const recentItems: PaletteItem[] = recent.map((e) => ({
-    id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
-    group: "Recent",
-    label: e.scenario ? e.scenario.name : e.name,
-    text: e.scenario ? e.scenario.name : e.name,
-    sub: e.scenario ? e.name : e.kind === "page" ? pageTabOf(e.fileName).title : undefined,
-    icon:
-      e.kind === "page" ? (
-        <PageTabIcon fileName={e.fileName} />
-      ) : e.scenario ? (
-        <StatusIcon status={scenarioStatus(e.fileName, e.scenario)} size={14} />
-      ) : (
-        <FileText size={14} />
-      ),
-    href:
-      e.kind === "page"
-        ? pageLink(e.fileName)
-        : e.scenario
-          ? scenarioPath(e.fileName, e.scenario)
-          : featurePath(e.fileName),
-    run: ({ alt }) => {
-      if (e.kind === "page") void showPage(e.fileName, { push: true });
-      else
-        openResult(
-          {
-            kind: e.scenario ? "scenario" : "feature",
-            fileName: e.fileName,
-            featureName: e.name,
-            scenario: e.scenario,
-            score: 0,
-            terms: [],
-            snippet: "",
-          },
-          alt,
-        );
-    },
-  }));
+  // A plugin view is offered while its tab is mounted — a page of a folder
+  // switched off since is not.
+  const recentItems: PaletteItem[] = recent.flatMap((e): PaletteItem[] => {
+    const owner = e.kind === "plugin" ? pluginTabs.find((t) => t.id === e.tab) : undefined;
+    if (e.kind === "plugin" && !owner) return [];
+    return [
+      {
+        id: `recent:${e.kind}:${e.fileName}:${e.scenario?.name ?? ""}@${e.scenario?.version ?? 0}`,
+        group: "Recent",
+        label: e.scenario ? e.scenario.name : e.name,
+        text: e.scenario ? e.scenario.name : e.name,
+        sub: e.scenario ? e.name : owner?.title,
+        icon: owner ? (
+          <owner.icon size={14} aria-hidden="true" />
+        ) : e.scenario ? (
+          <StatusIcon status={scenarioStatus(e.fileName, e.scenario)} size={14} />
+        ) : (
+          <FileText size={14} />
+        ),
+        href: owner
+          ? e.fileName
+          : e.scenario
+            ? scenarioPath(e.fileName, e.scenario)
+            : featurePath(e.fileName),
+        run: ({ alt }) => {
+          if (owner) {
+            const view = owner.route.match(e.fileName);
+            if (view !== null) openPluginView(owner.id, view, { push: true });
+            return;
+          }
+          openResult(
+            {
+              kind: e.scenario ? "scenario" : "feature",
+              fileName: e.fileName,
+              featureName: e.name,
+              scenario: e.scenario,
+              score: 0,
+              terms: [],
+              snippet: "",
+            },
+            alt,
+          );
+        },
+      },
+    ];
+  });
   // Remember what is open, for the palette's empty state.
   useEffect(() => {
     if (loading) return;
@@ -5793,8 +4782,18 @@ export function App() {
             scenario: { name: paneScenario.name, version: paneScenario.version },
           }
         : { kind: "feature", fileName: selected, name };
-    } else if (openPage) {
-      entry = { kind: "page", fileName: openPage.fileName, name: openPage.name };
+    } else if (pluginView && activeTab?.recent) {
+      // A plugin's view the tab says is worth remembering — a page, say —
+      // by its url, so it reopens the way a link to it would.
+      const name = activeTab.recent(pluginView.view);
+      if (name !== null) {
+        entry = {
+          kind: "plugin",
+          fileName: activeTab.route.path(pluginView.view),
+          name,
+          tab: activeTab.id,
+        };
+      }
     }
     if (!entry) return;
     const added = entry;
@@ -5806,7 +4805,7 @@ export function App() {
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, selected, paneScenario?.name, paneScenario?.version, openPage?.fileName]);
+  }, [loading, selected, paneScenario?.name, paneScenario?.version, pluginViewKey]);
 
   // The header's trail (src/frontend/Breadcrumbs.tsx): the data folder, then
   // the feature's folders — a click selects the folder in the sidebar, so
@@ -5821,6 +4820,27 @@ export function App() {
         goHome();
         void loadReadme();
       }),
+  };
+  /** What a plugin's tab gets from App (src/plugins/client/tabs.ts). */
+  const tabApp: TabApp = {
+    features,
+    members,
+    assignments,
+    repoCrumb,
+    autosaveSeconds,
+    prompt,
+    promptWithChoice,
+    confirm,
+    openSettings,
+    openFeature: (fileName) => void openFeature(fileName, { push: true }),
+    featureCreated: async (fileName) => {
+      await loadFeatures();
+      await openFeature(fileName, { push: true });
+    },
+    startSession: codeGen ? startSession : undefined,
+    copyLink: (path) => void copyLink(path),
+    copied,
+    goHome,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -5841,31 +4861,20 @@ export function App() {
     });
   };
 
-  // The way back to the model (roadmap/support-event-modeling.md): a
-  // feature holding a slice's scenarios carries a crumb naming the Event
-  // Model — and the slice, in the tooltip — that opens its canvas. One per
-  // model linking the feature; none while the Models tab is off.
-  const modelCrumbs = (fileName: string): Crumb[] => {
-    if (!modelsOn) return [];
-    const crumbs: Crumb[] = [];
-    for (const model of modelsStore.models) {
-      const links = model.links.filter((l) => l.feature === fileName);
-      if (links.length === 0) continue;
-      const slices = links.map((l) => `“${l.slice || "Untitled slice"}”`).join(", ");
-      crumbs.push({
-        label: (
-          <span className="crumb-model">
-            <Workflow size={12} aria-hidden="true" />
-            {model.name}
-          </span>
-        ),
-        href: modelLink(model.fileName),
-        title: `Open the Event Model “${model.name}” — slice ${slices}`,
-        onClick: (e) => spaClick(e, () => openModelPane(model.fileName, { push: true })),
-      });
-    }
-    return crumbs;
-  };
+  // The way back into a module (src/plugins/client/tabs.ts featureCrumbs): a
+  // feature holding an Event Model slice's scenarios carries a crumb naming
+  // the model, say, that opens its canvas. None while the module is off.
+  const pluginCrumbs = (fileName: string): Crumb[] =>
+    pluginTabs.flatMap((tab) =>
+      (tab.featureCrumbs?.(fileName) ?? []).map(
+        (c): Crumb => ({
+          label: c.label,
+          title: c.title,
+          href: tab.route.path(c.view),
+          onClick: (e) => spaClick(e, () => void openPluginView(tab.id, c.view, { push: true })),
+        }),
+      ),
+    );
 
   // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
   // matches by having a scenario in the chosen status, and by its assignee.
@@ -6008,6 +5017,626 @@ export function App() {
     savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
 
+  // Settings (specs/ui/ui.feature.md "Settings", specs/user-info-settings.
+  // feature.md "open Settings"): a page in the editor pane with the room a
+  // dialog lacked — the sections listed on the left, each a titled group of
+  // label-left, control-right rows. Every control saves itself the moment it
+  // changes (macOS style), so there is no Save button; the ✕ or ESC goes
+  // back. The plugins have their own page, linked under the sections.
+  const renderSettingsPage = () => (
+    <AppPageLayout
+      title="Settings"
+      sections={[
+        { id: "settings-general", title: "General" },
+        ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
+        { id: "settings-editor", title: "Specs" },
+        { id: "settings-project", title: "Project management" },
+        { id: "settings-workflow", title: "Workflow" },
+        ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
+      ]}
+      onClose={closeAppPage}
+      actions={<span className="app-page-status">Saved to .specdriven/settings.json as you change it</span>}
+      aside={
+        <button type="button" className="app-page-nav-link" onClick={openPlugins}>
+          <Puzzle size={13} aria-hidden="true" /> Plugins
+        </button>
+      }
+    >
+      <PageSection
+        id="settings-general"
+        title="General"
+        hint="How the app looks and which editing aids it offers. These are remembered on this device, not in the settings file."
+      >
+        {/* Appearance (specs/ui.spec.md "Settings"): applied right away
+            and remembered on this device, not in the settings file. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Appearance
+            <span className="settings-row-hint">
+              Applied immediately and remembered on this device.
+            </span>
+          </span>
+          <select
+            value={theme}
+            onChange={(e) => {
+              const pref = e.target.value as ThemePref;
+              setTheme(pref);
+              applyThemePref(pref);
+            }}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
+            on this device like the theme (src/frontend/VimEditor.tsx).
+            Hidden in the demo, which pins it off — modal editing is a
+            trap for a visitor who did not ask for it. */}
+        {!demo && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Vim mode
+            <span className="settings-row-hint">
+              Adds a Vim tab to every Markdown editor: modal editing with Vim&apos;s
+              keys and a status line for : commands. Esc stays inside the editor.
+              Remembered on this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={vimMode}
+              onChange={(e) => applyVimPref(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
+        {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
+            a diagram button in every Markdown editor's toolbar, remembered
+            on this device. The demo keeps the row and starts it on
+            (src/frontend/excalidrawPref.ts). */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Excalidraw diagrams
+            <span className="settings-row-hint">
+              Adds a diagram button to every Markdown editor&apos;s toolbar: draw in
+              Excalidraw and the drawing is embedded as an SVG image in the data repo.
+              Remembered on this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={excalidrawOn}
+              onChange={(e) => applyExcalidrawPref(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* The Pomodoro (specs/app/pomodoro.feature.md): off by default —
+            a timer nobody asked for is a row of sidebar taken from the
+            work. Turning it on opens the bar, so the switch shows what
+            it just switched on (src/frontend/pomodoroPref.ts). */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Pomodoro timer
+            <span className="settings-row-hint">
+              Times your own work in pomodoros: a timer icon in the sidebar header
+              that opens the bar beneath it, the <kbd>p</kbd> key, and the command
+              palette. Close the bar and the icon keeps the clock. Remembered on
+              this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={pomodoroOn}
+              onChange={(e) => {
+                applyPomodoroEnabled(e.target.checked);
+                if (e.target.checked) applyPomodoroShown(true);
+              }}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+      </PageSection>
+      {/* Demo mode has nothing to sync with: the whole autosync/live
+          sync group hides — the server refuses the changes anyway. */}
+      {!demo && (
+      <PageSection
+        id="settings-sync"
+        title="Sync"
+        hint="How the data repo is pulled and pushed, and whether running apps share edits live."
+      >
+        {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
+            default; off stores a frequency of 0, which stops the reload. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Autosync
+            <span className="settings-row-hint">
+              {settingsAutosyncOnDraft
+                ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
+                : "Autosync is off: the data repo is only pulled and pushed when you publish."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsAutosyncOnDraft}
+              onChange={(e) => void toggleAutosync(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsAutosyncOnDraft && (
+          <label className="settings-row">
+            <span className="settings-row-label">Autosync frequency (seconds)</span>
+            <input
+              type="number"
+              min={1}
+              value={settingsDraft}
+              onChange={(e) => setSettingsDraft(e.target.value)}
+              onBlur={() => void commitAutosyncSeconds()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </label>
+        )}
+        {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
+            accelerator on top of git, with an explicit privacy warning. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Live sync server (optional)
+            <span className="settings-row-hint">
+              Syncs edits between running apps in near-real time over websocket; git
+              remains the source of record. On a public server such as
+              wss://sync.automerge.org, anyone who has a document&apos;s id can read
+              that document — leave it off to keep specs in the git repo only.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsSyncOnDraft}
+              onChange={(e) => void toggleLiveSync(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsSyncOnDraft && (
+          <div className="settings-row">
+            <input
+              type="text"
+              aria-label="Live sync server url"
+              value={settingsSyncDraft}
+              onChange={(e) => setSettingsSyncDraft(e.target.value)}
+              onBlur={() => void commitSyncUrl()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="wss://sync.automerge.org"
+            />
+          </div>
+        )}
+      </PageSection>
+      )}
+      <PageSection
+        id="settings-editor"
+        title="Specs"
+        hint="How the scenario editor saves and how scenarios read in the feature list."
+      >
+        {/* Editor autosave (specs/editor-autosave.feature.md): the open
+            editor saves itself at this interval. There is no off switch —
+            only how often, at least 3 seconds. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Autosave interval (seconds)
+            <span className="settings-row-hint">
+              An open scenario editor saves itself this often, so an unsaved edit is
+              never more than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds;
+              the default is {DEFAULT_AUTOSAVE_SECONDS}.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={MIN_AUTOSAVE_SECONDS}
+            value={settingsAutosaveDraft}
+            onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
+            onBlur={() => void commitAutosaveSeconds()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Scenario preview lines
+            <span className="settings-row-hint">
+              How many lines of the rendered Markdown body each scenario shows in the
+              list.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={settingsLinesDraft}
+            onChange={(e) => setSettingsLinesDraft(e.target.value)}
+            onBlur={() => void commitPreviewLines()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+        {/* specs/traceability.spec.md: the test-links table is optional,
+            controlled here; default ON. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Show links to automated tests
+            <span className="settings-row-hint">
+              Each scenario ends with a table of GitHub links to its automated tests,
+              when it has any.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsTestLinksDraft}
+              onChange={(e) => void toggleTestLinks(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* specs/traceability.feature.md "Open test in idea": a click on
+            a test link runs `idea --line <n> <file>` on the file in the
+            code repo instead of opening GitHub; default OFF. */}
+        {settingsTestLinksDraft && (
+          <label className="settings-row">
+            <span className="settings-row-label">
+              Open test links in IntelliJ IDEA
+              <span className="settings-row-hint">
+                {canOpenInIdea
+                  ? "A click on a test link opens the file at its line in IntelliJ IDEA, from the project's code repo, instead of on GitHub."
+                  : "Needs idea on PATH. On a Mac: "}
+                {!canOpenInIdea && (
+                  <code>
+                    ln -s &quot;/Applications/IntelliJ IDEA.app/Contents/MacOS/idea&quot;
+                    /usr/local/bin/idea
+                  </code>
+                )}
+              </span>
+            </span>
+            <span className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={settingsOpenInIdeaDraft}
+                onChange={(e) => void toggleOpenInIdea(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden="true" />
+            </span>
+          </label>
+        )}
+      </PageSection>
+      <PageSection
+        id="settings-project"
+        title="Project management"
+        hint="Links from features and scenarios to the tickets tracking them."
+      >
+        {/* Project management (specs/external-links/project-management-
+            jira-linear-etc.feature.md): the master switch for tickets;
+            default ON. Off, no feature or scenario shows or asks for
+            one. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Project management
+            <span className="settings-row-hint">
+              {settingsProjectManagementDraft
+                ? "Features and scenarios carry a link to the ticket tracking them; the editors ask for the ticket's url."
+                : "Ticket links are off: nothing in the app shows or asks for one. Links already recorded are kept."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsProjectManagementDraft}
+              onChange={(e) => void toggleProjectManagement(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsProjectManagementDraft && (
+          <>
+            {/* The tool chosen here is the `<program>` of every new
+                link, which is why the editors need only the url. */}
+            <label className="settings-row">
+              <span className="settings-row-label">
+                Project management tool
+                <span className="settings-row-hint">
+                  Where the tickets live. Its name is what a link shows —{" "}
+                  <code>{settingsToolDraft.trim() || DEFAULT_PROJECT_MANAGEMENT_TOOL}:ABC-123</code>.
+                </span>
+              </span>
+              <span className="settings-tool">
+                <select
+                  aria-label="Project management tool"
+                  value={
+                    PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim())
+                      ? settingsToolDraft.trim()
+                      : "Other"
+                  }
+                  onChange={(e) => void changeTool(e.target.value === "Other" ? "" : e.target.value)}
+                >
+                  {PROJECT_MANAGEMENT_TOOLS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
+                {!PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim()) && (
+                  <input
+                    className="settings-tool-name"
+                    value={settingsToolDraft}
+                    placeholder="Tool name"
+                    aria-label="Project management tool name"
+                    spellCheck={false}
+                    onChange={(e) => void changeTool(e.target.value)}
+                  />
+                )}
+              </span>
+            </label>
+            {/* specs/external-links/project-management-jira-linear-etc.
+                feature.md "Publishing links into projected feature (.md)
+                files": the ticket links go into the markdown only while
+                this is on; default ON. */}
+            <label className="settings-row">
+              <span className="settings-row-label">
+                Publish external links
+                <span className="settings-row-hint">
+                  Write each feature's and scenario's ticket link (Jira, Linear…) into the
+                  .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
+                  keeps the links in the app only.
+                </span>
+              </span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settingsPublishLinksDraft}
+                  onChange={(e) => void toggleExternalLinks(e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+          </>
+        )}
+      </PageSection>
+      <PageSection
+        id="settings-workflow"
+        title="Workflow"
+        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete them."
+      >
+        {/* Code gen (specs/agents/claude.spec.md): off takes the selection
+            checkboxes and Start session away, and the server refuses a
+            session, so no spec can reach Claude — neither the CLI nor
+            Claude Code Desktop. Hidden in demo mode, where it is pinned
+            off (no Claude to hand specs to). */}
+        {!demo && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Code generation
+            <span className="settings-row-hint">
+              {settingsCodeGenDraft
+                ? "Specs and scenarios can be selected and handed to a coding agent — a new session in Claude Code Desktop, or a chat in the app's own coding agent pane — which implements them in the data repo."
+                : "Code generation is off: no selection checkboxes, and sessions are refused."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsCodeGenDraft}
+              onChange={(e) => void toggleCodeGen(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
+        {/* Feature assignment (src/server/members.ts): opt-in — with
+            the switch off the feature page offers no "Assigned"
+            dropdown, and nothing already assigned is rewritten. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Assign features to project members
+            <span className="settings-row-hint">
+              {settingsAssignmentsDraft
+                ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
+                : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsAssignmentsDraft}
+              onChange={(e) => void toggleAssignments(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* Google Calendar (specs/app/tasks.feature.md "Add task to
+            Google Calendar"): opt-in — a calendar chip on every task
+            that estimates it and opens a prefilled event. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Google Calendar
+            <span className="settings-row-hint">
+              {settingsGoogleCalendarDraft
+                ? "An Add to calendar button on every task: an estimate of the time it takes, proposed by Claude when the CLI is on PATH, and a prefilled Google Calendar event. Nothing is sent to Google until you confirm the event there."
+                : "Tasks have no calendar button."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsGoogleCalendarDraft}
+              onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* Deleting published scenarios
+            (specs/editor/spec-editor.feature.md "Delete Published
+            Spec"): opt-in — with the switch off published scenarios
+            stay immutable and the editor offers no Delete for them. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Allow deleting published specs
+            <span className="settings-row-hint">
+              {settingsDeletePublishedDraft
+                ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
+                : "Published scenarios are immutable and cannot be deleted."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsDeletePublishedDraft}
+              onChange={(e) => void toggleDeletePublished(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+      </PageSection>
+      {/* Git engine (specs/git-operations.spec.md): which one carries
+          the operations out and who supplies GitHub credentials.
+          Hidden in demo mode along with the sign-in — the demo
+          dataset never syncs with GitHub. */}
+      {!demo && (
+      <PageSection
+        id="settings-git"
+        title="Git & GitHub"
+        hint="Which git carries the syncing and publishing out, and the GitHub account it uses."
+      >
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Git engine
+            <span className="settings-row-hint">
+              {gitEngineEffective === "gh"
+                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
+                : gitEngineEffective === "js"
+                  ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
+                  : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
+            </span>
+          </span>
+          <select
+            value={settingsEngineDraft}
+            onChange={(e) => void pickGitEngine(e.target.value)}
+          >
+            <option value="auto">
+              Automatic — GitHub CLI when installed (recommended)
+            </option>
+            <option value="gh" disabled={!gh?.available}>
+              GitHub CLI (gh){gh?.available ? "" : " — not installed"}
+            </option>
+            <option value="cli" disabled={!cliGitAvailable}>
+              System git{cliGitAvailable ? "" : " — not installed"}
+            </option>
+            {/* Bundled with the app, so never disabled. */}
+            <option value="js">Built-in (no git needed)</option>
+          </select>
+        </label>
+        {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
+            when that engine is in effect, else the device flow. */}
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub account</span>
+          {gh?.available && (
+            <p className="hint">
+              {gh.signedIn ? (
+                <>
+                  GitHub CLI signed in
+                  {gh.login ? (
+                    <>
+                      {" "}
+                      as <strong>{gh.login}</strong>
+                    </>
+                  ) : null}
+                  .
+                </>
+              ) : (
+                <>
+                  GitHub CLI installed but signed out — run <code>gh auth login</code>,
+                  then reopen Settings.
+                </>
+              )}
+            </p>
+          )}
+          {auth?.signedIn ? (
+            <div className="auth-row">
+              <span>
+                Signed in as <strong>{auth.login}</strong>
+              </span>
+              <button className="secondary" onClick={signOutGitHub}>
+                Sign out
+              </button>
+            </div>
+          ) : deviceFlow ? (
+            <div className="auth-device">
+              <p>
+                Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
+                <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
+                  {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
+                </a>
+              </p>
+              <p className="hint">Waiting for GitHub…</p>
+            </div>
+          ) : webConnecting ? (
+            <div className="auth-device">
+              <p>Finish signing in to GitHub in your browser, then come back here.</p>
+              <p className="hint">Waiting for GitHub…</p>
+              <button className="secondary" onClick={() => setWebConnecting(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="auth-row">
+              {/* Browser OAuth needs an http(s) callback; the desktop
+                  app:// pages offer the device code only. */}
+              {canConnectViaBrowser && (
+                <button className="secondary" onClick={connectGitHub}>
+                  Connect to GitHub
+                </button>
+              )}
+              <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
+                {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
+              </button>
+            </div>
+          )}
+          {authStatus && <p className="error">{authStatus}</p>}
+          <p className="hint">
+            Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
+            sign-in on the system git and built-in ones. Local folders work without
+            either.
+          </p>
+        </div>
+      </PageSection>
+      )}
+      {settingsError && <p className="error settings-error">{settingsError}</p>}
+    </AppPageLayout>
+  );
+
   return (
     <main
       className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}`}
@@ -6094,7 +5723,7 @@ export function App() {
           <Tooltip label="Home" keys="g h">
             <a
               href="/"
-              className={`rail-link${!selected && !openPage && !testsView && !issuesView && !openModel ? " active" : ""}`}
+              className={`rail-link${!selected && !pluginView ? " active" : ""}`}
               aria-label="Home"
               onClick={(e) =>
                 spaClick(e, () => {
@@ -6106,67 +5735,22 @@ export function App() {
               <Home size={16} aria-hidden="true" />
             </a>
           </Tooltip>
-          {shownPageTabs.map((tab) => {
-            const first = pagesIn(tab.folder)[0];
-            if (!first) return null;
-            const active = openPage !== null && pageTabOf(openPage.fileName).folder === tab.folder;
-            return (
-              <Tooltip
-                key={tab.folder}
-                label={tab.title}
-                keys={
-                  tab.folder === "tasks" ? "g t" : tab.folder === "notebook" ? "g n" : "g r"
-                }
-              >
-                <a
-                  href={pageLink(first.fileName)}
-                  className={`rail-link${active ? " active" : ""}`}
-                  aria-label={tab.title}
-                  onClick={(e) => spaClick(e, () => void showPage(first.fileName, { push: true }))}
-                >
-                  <PageTabIcon fileName={first.fileName} size={16} />
-                </a>
-              </Tooltip>
-            );
-          })}
-          {testingOn && (
-            <Tooltip label="Tests" keys="g e">
+          {/* The plugins' tabs — the special folders first. A tab with nothing
+              to open — an empty folder — has no icon on the rail. */}
+          {pluginTabs.filter(tabReachable).map((tab) => (
+            <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
-                href="/tests"
-                className={`rail-link${testsView ? " active" : ""}`}
-                aria-label="Tests"
-                onClick={(e) => spaClick(e, () => openTests({ kind: "plans" }, { push: true }))}
-              >
-                <FlaskConical size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          )}
-          {modelsOn && modelsStore.models.length > 0 && (
-            <Tooltip label="Models" keys="g m">
-              <a
-                href={modelLink(modelsStore.models[0]!.fileName)}
-                className={`rail-link${openModel ? " active" : ""}`}
-                aria-label="Models"
+                href={tab.route.path(tab.route.home)}
+                className={`rail-link${pluginView?.tab === tab.id ? " active" : ""}`}
+                aria-label={tab.title}
                 onClick={(e) =>
-                  spaClick(e, () => openModelPane(modelsStore.models[0]!.fileName, { push: true }))
+                  spaClick(e, () => void openPluginView(tab.id, tab.route.home, { push: true }))
                 }
               >
-                <Workflow size={16} aria-hidden="true" />
+                <tab.icon size={16} aria-hidden="true" />
               </a>
             </Tooltip>
-          )}
-          {issuesOn && (
-            <Tooltip label="Issues" keys="g i">
-              <a
-                href="/issues"
-                className={`rail-link${issuesView ? " active" : ""}`}
-                aria-label="Issues"
-                onClick={(e) => spaClick(e, () => openIssues({ kind: "list" }, { push: true }))}
-              >
-                <Bug size={16} aria-hidden="true" />
-              </a>
-            </Tooltip>
-          )}
+          ))}
           <div className="rail-bottom">
             <PomodoroBar
               compact
@@ -6422,11 +6006,11 @@ export function App() {
             closed (src/frontend/pomodoroPref.ts). */}
         <PomodoroBar settingsOpen={pomodoroSettings} onSettingsOpen={setPomodoroSettings} />
         {/* Sidebar tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
-            .md): Specs is the feature tree, and each special folder the
-            Settings switches show adds its own list beside it. The bar only
-            shows once there is something to switch to — one tab is no tab
-            bar. */}
-        {(shownPageTabs.length > 0 || testingOn || issuesOn || modelsOn) && (
+            .md): Specs is the feature tree, and each mounted plugin — each
+            special folder the Settings switches show among them — adds its
+            own beside it. The bar only shows once there is something to
+            switch to — one tab is no tab bar. */}
+        {pluginTabs.length > 0 && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             <button
               type="button"
@@ -6439,79 +6023,38 @@ export function App() {
             >
               <FileText size={14} aria-hidden="true" /> Specs
             </button>
-            {shownPageTabs.map((tab) => (
+            {/* The plugins' tabs (specs/app/plugins.feature.md), in their
+                order, after the core's. */}
+            {pluginTabs.map((tab) => (
               <button
-                key={tab.folder}
+                key={tab.id}
                 type="button"
                 role="tab"
-                id={`side-tab-${tab.folder}`}
-                aria-selected={shownTab === tab.folder}
-                aria-controls={`side-panel-${tab.folder}`}
-                className={shownTab === tab.folder ? "active" : ""}
-                onClick={() => selectSidebarTab(tab.folder)}
+                id={`side-tab-${tab.id}`}
+                aria-selected={shownTab === tab.id}
+                aria-controls={`side-panel-${tab.id}`}
+                className={shownTab === tab.id ? "active" : ""}
+                onClick={() => {
+                  selectSidebarTab(tab.id);
+                  // The tab is the module's door: with none of its views
+                  // open yet, it opens the tab's home view — unless the tab
+                  // is a list to pick from (a special folder's pages).
+                  if (tab.opensOnSelect !== false && pluginViewRef.current?.tab !== tab.id) {
+                    openPluginView(tab.id, tab.route.home, { push: true });
+                  }
+                }}
               >
                 <tab.icon size={14} aria-hidden="true" /> {tab.title}
               </button>
             ))}
-            {/* Event Models (roadmap/support-event-modeling.md): the
-                canvases, listed. */}
-            {modelsOn && (
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-models"
-                aria-selected={shownTab === "models"}
-                aria-controls="side-panel-models"
-                className={shownTab === "models" ? "active" : ""}
-                onClick={() => selectSidebarTab("models")}
-              >
-                <Workflow size={14} aria-hidden="true" /> Models
-              </button>
-            )}
-            {/* GitHub issues (specs/app/github-issues.feature.md): to the
-                right of Tasks, for the GitHub repo the code repo pushes to. */}
-            {issuesOn && (
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-issues"
-                aria-selected={shownTab === "issues"}
-                aria-controls="side-panel-issues"
-                className={shownTab === "issues" ? "active" : ""}
-                onClick={() => {
-                  selectSidebarTab("issues");
-                  if (!issuesViewRef.current) openIssues({ kind: "list" }, { push: true });
-                }}
-              >
-                <Bug size={14} aria-hidden="true" /> Issues
-              </button>
-            )}
-            {testingOn && (
-              <button
-                type="button"
-                role="tab"
-                id="side-tab-tests"
-                aria-selected={shownTab === "tests"}
-                aria-controls="side-panel-tests"
-                className={shownTab === "tests" ? "active" : ""}
-                onClick={() => {
-                  selectSidebarTab("tests");
-                  // The tab is the module's door: with none of its views
-                  // open yet, it opens the plan list.
-                  if (!testsViewRef.current) openTests({ kind: "plans" }, { push: true });
-                }}
-              >
-                <FlaskConical size={14} aria-hidden="true" /> Tests
-              </button>
-            )}
           </div>
         )}
         {shownTab === "specs" && (
         <div
           className="side-panel"
-          role={shownPageTabs.length > 0 ? "tabpanel" : undefined}
+          role={pluginTabs.length > 0 ? "tabpanel" : undefined}
           id="side-panel-specs"
-          aria-labelledby={shownPageTabs.length > 0 ? "side-tab-specs" : undefined}
+          aria-labelledby={pluginTabs.length > 0 ? "side-tab-specs" : undefined}
         >
         <div className="sidebar-actions">
           <button onClick={createFolder}>+ New folder</button>
@@ -6688,138 +6231,21 @@ export function App() {
         )}
         </div>
         )}
-        {/* The page tabs (specs/app/roadmap.feature.md, specs/app/tasks.feature
-            .md): one folder's page list, with a "New page" / "New task" button
-            where the Specs tab has its "New" buttons. */}
-        {shownPageTabs
-          .filter((tab) => tab.folder === shownTab)
+        {/* A plugin's tab (specs/app/plugins.feature.md) — a special folder's
+            page list or the Tests tab's plans and case library, say: the
+            tab's own sidebar. */}
+        {pluginTabs
+          .filter((tab) => tab.id === shownTab)
           .map((tab) => (
-          <div
-            key={tab.folder}
-            className="side-panel page-list"
-            role="tabpanel"
-            id={`side-panel-${tab.folder}`}
-            aria-labelledby={`side-tab-${tab.folder}`}
-          >
-            <div className="sidebar-actions">
-              <button onClick={() => void newPage(tab)}>+ New {tab.noun}</button>
-            </div>
-            <div className="page-rows">
-            {/* Pages grouped by their subfolder under the folder — the
-                notebook's entries by the month they were written in instead
-                (specs/app/engineering-notebook.feature.md) — each with a
-                ⋯ menu: Rename, Copy link, Delete. */}
-            {(tab.dated ? entryGroups : pageGroups)(pagesIn(tab.folder)).map(({ dir, pages }) => (
-                <div key={dir || "."}>
-                  {dir && <div className="page-group">{dir}</div>}
-                  {pages.map((page) => (
-                    <div
-                      key={page.fileName}
-                      className={`page-row${dir && !tab.dated ? " nested" : ""}${tab.dated ? " entry-row" : ""}${tab.dated && supersededBy[page.fileName] ? " superseded" : ""}`}
-                    >
-                      <a
-                        href={pageLink(page.fileName)}
-                        className={`page-entry${page.fileName === openPage?.fileName ? " active" : ""}${page.done ? " done" : ""}`}
-                        title={
-                          tab.dated && supersededBy[page.fileName]
-                            ? `${pageRowTitle(page)} — superseded by ${supersededBy[page.fileName]!.name}`
-                            : pageRowTitle(page)
-                        }
-                        aria-current={page.fileName === openPage?.fileName ? "page" : undefined}
-                        onClick={(e) =>
-                          spaClick(e, () => void showPage(page.fileName, { push: true }))
-                        }
-                      >
-                        {page.name}
-                        {/* An entry's row carries what makes it an entry: its
-                            kind, who signed it and the day. */}
-                        {tab.dated && (
-                          <span className="entry-meta">
-                            <EntryKindChip kind={entryKindOf(page)} />
-                            {page.author && <span className="entry-author">{page.author}</span>}
-                            {page.date && <span className="entry-day">{dayOf(page.date)}</span>}
-                          </span>
-                        )}
-                      </a>
-                      <span className="tree-row-menu">
-                        <Tooltip label="More actions">
-                          <button
-                            type="button"
-                            className="tree-menu-btn"
-                            aria-label={`Menu for ${page.name}`}
-                            aria-haspopup="menu"
-                            aria-expanded={pageMenu === page.fileName}
-                            onClick={() =>
-                              setPageMenu((m) => (m === page.fileName ? null : page.fileName))
-                            }
-                          >
-                            <Ellipsis size={14} aria-hidden="true" />
-                          </button>
-                        </Tooltip>
-                        <Menu
-                          open={pageMenu === page.fileName}
-                          onClose={() => setPageMenu(null)}
-                          label={`Menu for ${page.name}`}
-                          className="tree-menu"
-                          containerSelector=".tree-row-menu"
-                          items={[
-                            {
-                              id: "rename",
-                              label: "Rename",
-                              icon: <Pencil size={13} />,
-                              onSelect: () => void renamePage(page),
-                            },
-                            {
-                              id: "copy",
-                              label: "Copy link",
-                              icon: <Link size={13} />,
-                              onSelect: () => void copyLink(pageLink(page.fileName)),
-                            },
-                            {
-                              id: "delete",
-                              label: "Delete",
-                              icon: <Trash2 size={13} />,
-                              danger: true,
-                              onSelect: () => void removePage(page),
-                            },
-                          ]}
-                        />
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            {pagesIn(tab.folder).length === 0 && <p className="empty">{tab.empty}</p>}
-            </div>
-          </div>
-          ))}
-        {/* The Tests tab (specs/app/tests.feature.md): the plans and
-            the case library, with their ⋯ menus (src/frontend/TestsPane.tsx). */}
-        {shownTab === "tests" && testingOn && (
-          <TestsSidebar view={testsView} prompt={prompt} confirm={confirm} onNavigate={openTests} />
-        )}
-        {/* The Issues tab (specs/app/github-issues.feature.md): the code
-            repo's GitHub issues, open or closed (src/frontend/IssuesPane.tsx). */}
-        {shownTab === "issues" && issuesOn && (
-          <IssuesSidebar view={issuesView} prompt={prompt} confirm={confirm} onNavigate={openIssues} />
-        )}
-        {/* The Models tab (roadmap/support-event-modeling.md): the Event
-            Models, with New, Import and their ⋯ menus
-            (src/frontend/eventModel/ModelsPane.tsx). */}
-        {shownTab === "models" && modelsOn && (
-          <Suspense fallback={null}>
-            <ModelsSidebar
-              active={openModel}
-              prompt={prompt}
-              confirm={confirm}
-              onNavigate={openModelPane}
-              onCopyLink={(path) => void copyLink(path)}
-              onClosed={() => goHome()}
+            <tab.Sidebar
+              key={tab.id}
+              view={pluginView?.tab === tab.id ? pluginView.view : null}
+              app={tabApp}
+              navigate={navigateIn(tab.id)}
             />
-          </Suspense>
-        )}
+          ))}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
-            current user; its menu holds User info and Settings. */}
+            current user; its menu holds User info, Settings and Plugins. */}
         <div className="user-corner">
           <Menu
             open={userMenuOpen}
@@ -6845,6 +6271,16 @@ export function App() {
                 onSelect: () => {
                   setDrawerOpen(false);
                   openSettings();
+                },
+              },
+              {
+                id: "plugins",
+                label: "Plugins",
+                icon: <Puzzle size={13} />,
+                keys: "g p",
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openPlugins();
                 },
               },
             ]}
@@ -6913,14 +6349,33 @@ export function App() {
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
         <ErrorBoundary
-          key={
-            selected ??
-            openPage?.fileName ??
-            openModel ??
-            (testsView ? testsKey(testsView) : issuesView ? issuesKey(issuesView) : "home")
-          }
+          key={appPage ?? selected ?? pluginViewKey ?? "home"}
         >
-        {editing && selected && feature ? (
+        {appPage === "settings" ? (
+          renderSettingsPage()
+        ) : appPage === "plugins" ? (
+          /* Plugins (specs/app/plugins.feature.md): its own page, opened
+             from the user menu — the plugins on in tab order, the ones off,
+             the folders they load from and the marketplaces. */
+          <PluginsPage
+            plugins={plugins}
+            loadErrors={pluginLoadErrors}
+            hasIssuesRepo={Boolean(issuesRepo)}
+            demo={demo}
+            sources={pluginSources}
+            marketplaces={pluginMarketplaces}
+            error={settingsError}
+            setEnabled={setPluginEnabled}
+            move={movePlugin}
+            patchSettings={patchSettings}
+            prompt={prompt}
+            confirm={confirm}
+            browseFolder={canChooseFolder ? chooseFolderNative : undefined}
+            onChanged={refreshPlugins}
+            onOpenSettings={openSettings}
+            onClose={closeAppPage}
+          />
+        ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
              beside it — with a bar on top and one scrolling column below. */
@@ -7243,7 +6698,7 @@ export function App() {
                   Clicking the name edits it — committed and pushed on the
                   server; the file name never changes. */}
               <Breadcrumbs
-                items={[repoCrumb, ...folderCrumbs(selected), ...modelCrumbs(selected)]}
+                items={[repoCrumb, ...folderCrumbs(selected), ...pluginCrumbs(selected)]}
                 tail={
                   renameDraft === null ? (
                     <Tooltip label="Rename feature">
@@ -7881,340 +7336,12 @@ export function App() {
         ) : selected && !feature && featureLoading ? (
           /* A feature opened by deep link, still on its way. */
           <PageSkeleton cards={3} />
-        ) : openModel && modelsOn ? (
-          /* An Event Model's canvas (roadmap/support-event-modeling.md)
-             takes the whole pane (src/frontend/eventModel/ModelsPane.tsx);
-             App only knows which model is open. Keyed by the file, so
-             switching models starts the pane afresh. */
-          <Suspense fallback={<PageSkeleton cards={1} />}>
-            <ModelsPane
-              key={openModel}
-              fileName={openModel}
-              features={features}
-              members={members}
-              assignments={assignments}
-              repoCrumb={repoCrumb}
-              reloadKey={modelsReloadKey}
-              prompt={prompt}
-              confirm={confirm}
-              onOpenFeature={(f) => void openFeature(f, { push: true })}
-              onFeatureCreated={async (f) => {
-                await loadFeatures();
-                await openFeature(f, { push: true });
-              }}
-              onStartSession={codeGen ? startSession : undefined}
-              onCopyLink={(path) => void copyLink(path)}
-              copied={copied}
-              onClosed={goHome}
-              onSaveHandle={bindModelSave}
-            />
-          </Suspense>
-        ) : issuesView && issuesOn ? (
-          /* GitHub issues (specs/app/github-issues.feature.md): the list,
-             the form and one issue take the whole pane (src/frontend/IssuesPane.tsx). */
-          <IssuesPane
-            view={issuesView}
-            repoCrumb={repoCrumb}
-            prompt={prompt}
-            confirm={confirm}
-            onNavigate={openIssues}
-            onOpenSettings={openSettings}
-          />
-        ) : testsView && testingOn ? (
-          /* The test management module (specs/app/tests.feature.md):
-             plans, cases and runs take the whole pane (src/frontend/TestsPane
-             .tsx); App only knows which view is open. */
-          <TestsPane
-            view={testsView}
-            features={features}
-            members={members}
-            assignments={assignments}
-            repoCrumb={repoCrumb}
-            autosaveSeconds={autosaveSeconds}
-            prompt={prompt}
-            confirm={confirm}
-            onNavigate={openTests}
-          />
-        ) : openPage && openPageText === null ? (
-          <PageSkeleton cards={1} />
-        ) : openPage && openPageText !== null ? (
-          /* A roadmap page (specs/app/roadmap.feature.md) or a task
-             (specs/app/tasks.feature.md): a regular markdown file, edited and
-             autosaved like the README — with the "Assigned" dropdown a feature
-             has, when assignments are on. Assigning is what makes a task a
-             task, so the dropdown is the point of the tab. */
-          <>
-            <header className="editor-bar page-header">
-              <Breadcrumbs
-                items={[repoCrumb, { label: pageTabOf(openPage.fileName).title }]}
-                tail={
-                  <span className="crumb current plain">
-                    {openPage.name || openPage.fileName}
-                  </span>
-                }
-              />
-              <div className="editor-actions page-actions">
-                <SaveIndicator
-                  saving={saving}
-                  savedAt={savedAt}
-                  dirty={openPageText !== openPageSaved.current}
-                />
-                {/* The same "Copy link" the feature name carries
-                    (specs/navigation.spec.md "share a link"), for the page's
-                    own url (specs/app/tasks.feature.md). */}
-                <Tooltip
-                  label={copied === pageLink(openPage.fileName) ? "Copied" : "Copy link"}
-                  keys="mod+shift+c"
-                >
-                  <button
-                    type="button"
-                    className="ibtn"
-                    aria-label="Copy link"
-                    onClick={() => void copyLink(pageLink(openPage.fileName))}
-                  >
-                    {copied === pageLink(openPage.fileName) ? (
-                      <Check size={15} aria-hidden="true" />
-                    ) : (
-                      <Link size={15} aria-hidden="true" />
-                    )}
-                  </button>
-                </Tooltip>
-                <span className="readme-hint">
-                  {`Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
-                </span>
-              </div>
-            </header>
-            {(assignments ||
-              pageTabOf(openPage.fileName).done ||
-              pageTabOf(openPage.fileName).dated) && (
-              <div className="props">
-                {/* A notebook entry's header
-                    (specs/app/engineering-notebook.feature.md): the kind chip
-                    that changes it, the decision it supersedes, and the
-                    author and date the app set — shown, never edited. */}
-                {pageTabOf(openPage.fileName).dated && (
-                  <>
-                    <span className="chip-anchor entry-kind-anchor">
-                      <button
-                        type="button"
-                        className={`chip entry-kind-chip entry-kind-${entryKindOf(openPage).toLowerCase()}`}
-                        aria-haspopup="menu"
-                        aria-expanded={entryKindMenuOpen}
-                        aria-label={`Kind: ${entryKindOf(openPage)}`}
-                        disabled={entryKindSaving}
-                        onClick={() => setEntryKindMenuOpen((o) => !o)}
-                      >
-                        {entryKindOf(openPage) === "Decision" ? (
-                          <Gavel size={14} aria-hidden="true" />
-                        ) : (
-                          <Eye size={14} aria-hidden="true" />
-                        )}
-                        {entryKindOf(openPage)}
-                      </button>
-                      <Menu
-                        open={entryKindMenuOpen}
-                        onClose={() => setEntryKindMenuOpen(false)}
-                        label="Entry kind"
-                        className="chip-menu"
-                        containerSelector=".entry-kind-anchor"
-                        items={(["Observation", "Decision"] as const).map((kind) => ({
-                          id: kind,
-                          label: kind,
-                          checked: entryKindOf(openPage) === kind,
-                          icon:
-                            kind === "Decision" ? <Gavel size={13} /> : <Eye size={13} />,
-                          onSelect: () => void saveEntryKind(kind),
-                        }))}
-                      />
-                    </span>
-                    {/* "Supersedes…": a decision may replace an earlier one.
-                        Only decisions offer it — an observation replaces
-                        nothing. */}
-                    {entryKindOf(openPage) === "Decision" && (
-                      <span className="chip-anchor entry-supersedes-anchor">
-                        <button
-                          type="button"
-                          className={`chip${openPage.supersedes ? "" : " muted"}`}
-                          aria-haspopup="menu"
-                          aria-expanded={entrySupersedesMenuOpen}
-                          aria-label={`Supersedes: ${openPage.supersedes?.title ?? "nothing"}`}
-                          disabled={entryKindSaving}
-                          onClick={() => setEntrySupersedesMenuOpen((o) => !o)}
-                        >
-                          <ArrowDown size={14} aria-hidden="true" />
-                          {openPage.supersedes
-                            ? `Supersedes ${openPage.supersedes.title}`
-                            : "Supersedes…"}
-                        </button>
-                        <Menu
-                          open={entrySupersedesMenuOpen}
-                          onClose={() => setEntrySupersedesMenuOpen(false)}
-                          label="Supersedes"
-                          className="chip-menu"
-                          containerSelector=".entry-supersedes-anchor"
-                          items={[
-                            {
-                              id: "",
-                              label: "Nothing",
-                              checked: !openPage.supersedes,
-                              onSelect: () => void saveEntrySupersedes(null),
-                            },
-                            ...supersedableEntries().map((entry) => ({
-                              id: entry.fileName,
-                              label: entry.name,
-                              checked: openPage.supersedes?.url === pageLink(entry.fileName),
-                              icon: <Gavel size={13} />,
-                              onSelect: () => void saveEntrySupersedes(entry),
-                            })),
-                          ]}
-                        />
-                      </span>
-                    )}
-                    {/* Who signed it and when — set by the app at creation. */}
-                    {openPage.author && (
-                      <span className="chip muted entry-author-chip">
-                        <span className="avatar chip-avatar" aria-hidden="true">
-                          {initialsOf(openPage.author)}
-                        </span>
-                        {openPage.author}
-                      </span>
-                    )}
-                    {openPage.date && (
-                      <span className="chip muted entry-date-chip">{openPage.date}</span>
-                    )}
-                    {/* The badge an entry wears once a later decision replaced
-                        it — derived from that entry's link, not stored here. */}
-                    {supersededBy[openPage.fileName] && (
-                      <a
-                        className="chip entry-superseded-chip"
-                        href={pageLink(supersededBy[openPage.fileName]!.fileName)}
-                        onClick={(e) =>
-                          spaClick(e, () =>
-                            void showPage(supersededBy[openPage.fileName]!.fileName, {
-                              push: true,
-                            }),
-                          )
-                        }
-                      >
-                        Superseded by {supersededBy[openPage.fileName]!.name}
-                      </a>
-                    )}
-                  </>
-                )}
-                {/* The Done button (specs/app/tasks.feature.md): a task is
-                    finished or it is not, and the chip says which. Tasks only
-                    — a roadmap page is never ticked off. */}
-                {pageTabOf(openPage.fileName).done && (
-                  <button
-                    type="button"
-                    className={`chip page-done${openPage.done ? " is-done" : " muted"}`}
-                    aria-pressed={openPage.done === true}
-                    disabled={pageDoneSaving}
-                    onClick={() => void savePageDone(!openPage.done)}
-                  >
-                    {openPage.done ? (
-                      <CheckCircle2 size={14} aria-hidden="true" />
-                    ) : (
-                      <Circle size={14} aria-hidden="true" />
-                    )}
-                    {openPage.done ? "Done" : "Mark done"}
-                  </button>
-                )}
-                {/* The calendar chip (specs/app/tasks.feature.md "Add task to
-                    Google Calendar"): the task's estimate, or the invitation
-                    to make one and put the task on the calendar. Tasks only,
-                    and only with the Google Calendar switch on. */}
-                {pageTabOf(openPage.fileName).calendar && googleCalendarOn && (
-                  <span className="chip-anchor calendar-anchor">
-                    <button
-                      type="button"
-                      className={`chip page-estimate${openPage.estimate ? " has-estimate" : " muted"}`}
-                      aria-haspopup="dialog"
-                      aria-expanded={pageCalendarOpen}
-                      onClick={() => (pageCalendarOpen ? closePageCalendar() : openPageCalendar())}
-                    >
-                      <CalendarPlus size={14} aria-hidden="true" />
-                      {openPage.estimate ? formatEstimate(openPage.estimate) : "Add to calendar"}
-                    </button>
-                    <Popover
-                      open={pageCalendarOpen}
-                      onClose={closePageCalendar}
-                      label="Add this task to Google Calendar"
-                      className="chip-popover"
-                      containerSelector=".calendar-anchor"
-                    >
-                      {pageCalendarOpen && (
-                        <AddToCalendarForm
-                          estimateText={pageEstimateText}
-                          onEstimateChange={setPageEstimateText}
-                          startLocal={pageStartLocal}
-                          onStartChange={setPageStartLocal}
-                          proposal={pageEstimateProposal}
-                          url={pageCalendarUrl()}
-                          onSubmit={submitPageCalendar}
-                          onCancel={closePageCalendar}
-                        />
-                      )}
-                    </Popover>
-                  </span>
-                )}
-                {assignments && !pageTabOf(openPage.fileName).dated && (
-                <span className="chip-anchor page-assignee-anchor">
-                  <button
-                    type="button"
-                    className={`chip${openPage.assigned ? "" : " muted"}`}
-                    aria-haspopup="menu"
-                    aria-expanded={pageAssigneeMenuOpen}
-                    aria-label={`Assigned: ${openPage.assigned ?? "nobody"}`}
-                    disabled={pageAssignedSaving}
-                    onClick={() => setPageAssigneeMenuOpen((o) => !o)}
-                  >
-                    {openPage.assigned ? (
-                      <span className="avatar chip-avatar" aria-hidden="true">
-                        {initialsOf(openPage.assigned)}
-                      </span>
-                    ) : (
-                      <UserRound size={14} aria-hidden="true" />
-                    )}
-                    {openPage.assigned ?? "Unassigned"}
-                  </button>
-                  <Menu
-                    open={pageAssigneeMenuOpen}
-                    onClose={() => setPageAssigneeMenuOpen(false)}
-                    label="Assigned member"
-                    className="chip-menu"
-                    containerSelector=".page-assignee-anchor"
-                    items={[
-                      {
-                        id: "",
-                        label: "Unassigned",
-                        checked: !openPage.assigned,
-                        onSelect: () => void savePageAssigned(""),
-                      },
-                      ...pageAssignableMembers().map((m) => ({
-                        id: m.name,
-                        label: m.name,
-                        checked: openPage.assigned === m.name,
-                        icon: (
-                          <span className="avatar chip-avatar" aria-hidden="true">
-                            {initialsOf(m.name)}
-                          </span>
-                        ),
-                        onSelect: () => void savePageAssigned(m.name),
-                      })),
-                    ]}
-                  />
-                </span>
-                )}
-              </div>
-            )}
-            <MarkdownEditor
-              value={openPageText}
-              onChange={setOpenPageText}
-              highlight={pageTerms ?? undefined}
-              placeholder={`Write this ${pageTabOf(openPage.fileName).noun} in Markdown…`}
-            />
-          </>
+        ) : pluginView && activeTab ? (
+          /* A plugin's view (specs/app/plugins.feature.md) — a roadmap page,
+             a task, or the test management module's plans, cases and runs,
+             say — takes the whole pane; App only knows which tab and view
+             are open. */
+          <activeTab.Pane view={pluginView.view} app={tabApp} navigate={navigateIn(activeTab.id)} />
         ) : (
           <>
             {/* Home (specs/app-startup.feature.md "App Starts with existing
@@ -8387,742 +7514,6 @@ export function App() {
                 {resolving === "draft" ? "Publishing…" : "Publish manual edit"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-      {settingsOpen && (
-        <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div
-            className="dialog settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Settings"
-            ref={settingsTrapRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* macOS-style: every control saves itself the moment it changes,
-                so there is no Save button — the ✕, ESC or a click outside
-                closes. The header sticks so the ✕ stays reachable while the
-                dialog scrolls. */}
-            <div className="settings-header">
-              <h3>Settings</h3>
-              <button
-                className="settings-close"
-                aria-label="Close settings"
-                onClick={() => setSettingsOpen(false)}
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
-            </div>
-            <section className="settings-group">
-              {/* Appearance (specs/ui.spec.md "Settings"): applied right away
-                  and remembered on this device, not in the settings file. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Appearance
-                  <span className="settings-row-hint">
-                    Applied immediately and remembered on this device.
-                  </span>
-                </span>
-                <select
-                  autoFocus
-                  value={theme}
-                  onChange={(e) => {
-                    const pref = e.target.value as ThemePref;
-                    setTheme(pref);
-                    applyThemePref(pref);
-                  }}
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-              </label>
-              {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
-                  on this device like the theme (src/frontend/VimEditor.tsx).
-                  Hidden in the demo, which pins it off — modal editing is a
-                  trap for a visitor who did not ask for it. */}
-              {!demo && (
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Vim mode
-                  <span className="settings-row-hint">
-                    Adds a Vim tab to every Markdown editor: modal editing with Vim&apos;s
-                    keys and a status line for : commands. Esc stays inside the editor.
-                    Remembered on this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={vimMode}
-                    onChange={(e) => applyVimPref(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              )}
-              {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
-                  a diagram button in every Markdown editor's toolbar, remembered
-                  on this device. The demo keeps the row and starts it on
-                  (src/frontend/excalidrawPref.ts). */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Excalidraw diagrams
-                  <span className="settings-row-hint">
-                    Adds a diagram button to every Markdown editor&apos;s toolbar: draw in
-                    Excalidraw and the drawing is embedded as an SVG image in the data repo.
-                    Remembered on this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={excalidrawOn}
-                    onChange={(e) => applyExcalidrawPref(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The Pomodoro (specs/app/pomodoro.feature.md): off by default —
-                  a timer nobody asked for is a row of sidebar taken from the
-                  work. Turning it on opens the bar, so the switch shows what
-                  it just switched on (src/frontend/pomodoroPref.ts). */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Pomodoro timer
-                  <span className="settings-row-hint">
-                    Times your own work in pomodoros: a timer icon in the sidebar header
-                    that opens the bar beneath it, the <kbd>p</kbd> key, and the command
-                    palette. Close the bar and the icon keeps the clock. Remembered on
-                    this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={pomodoroOn}
-                    onChange={(e) => {
-                      applyPomodoroEnabled(e.target.checked);
-                      if (e.target.checked) applyPomodoroShown(true);
-                    }}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-            </section>
-            {/* Demo mode has nothing to sync with: the whole autosync/live
-                sync group hides — the server refuses the changes anyway. */}
-            {!demo && (
-            <section className="settings-group">
-              {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
-                  default; off stores a frequency of 0, which stops the reload. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Autosync
-                  <span className="settings-row-hint">
-                    {settingsAutosyncOnDraft
-                      ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
-                      : "Autosync is off: the data repo is only pulled and pushed when you publish."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsAutosyncOnDraft}
-                    onChange={(e) => void toggleAutosync(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsAutosyncOnDraft && (
-                <label className="settings-row">
-                  <span className="settings-row-label">Autosync frequency (seconds)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={settingsDraft}
-                    onChange={(e) => setSettingsDraft(e.target.value)}
-                    onBlur={() => void commitAutosyncSeconds()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                  />
-                </label>
-              )}
-              {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
-                  accelerator on top of git, with an explicit privacy warning. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Live sync server (optional)
-                  <span className="settings-row-hint">
-                    Syncs edits between running apps in near-real time over websocket; git
-                    remains the source of record. On a public server such as
-                    wss://sync.automerge.org, anyone who has a document&apos;s id can read
-                    that document — leave it off to keep specs in the git repo only.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsSyncOnDraft}
-                    onChange={(e) => void toggleLiveSync(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsSyncOnDraft && (
-                <div className="settings-row">
-                  <input
-                    type="text"
-                    aria-label="Live sync server url"
-                    value={settingsSyncDraft}
-                    onChange={(e) => setSettingsSyncDraft(e.target.value)}
-                    onBlur={() => void commitSyncUrl()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                    placeholder="wss://sync.automerge.org"
-                  />
-                </div>
-              )}
-            </section>
-            )}
-            <section className="settings-group">
-              {/* Editor autosave (specs/editor-autosave.feature.md): the open
-                  editor saves itself at this interval. There is no off switch —
-                  only how often, at least 3 seconds. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Autosave interval (seconds)
-                  <span className="settings-row-hint">
-                    An open scenario editor saves itself this often, so an unsaved edit is
-                    never more than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds;
-                    the default is {DEFAULT_AUTOSAVE_SECONDS}.
-                  </span>
-                </span>
-                <input
-                  type="number"
-                  min={MIN_AUTOSAVE_SECONDS}
-                  value={settingsAutosaveDraft}
-                  onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
-                  onBlur={() => void commitAutosaveSeconds()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                />
-              </label>
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Scenario preview lines
-                  <span className="settings-row-hint">
-                    How many lines of the rendered Markdown body each scenario shows in the
-                    list.
-                  </span>
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  value={settingsLinesDraft}
-                  onChange={(e) => setSettingsLinesDraft(e.target.value)}
-                  onBlur={() => void commitPreviewLines()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                />
-              </label>
-              {/* specs/traceability.spec.md: the test-links table is optional,
-                  controlled here; default ON. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Show links to automated tests
-                  <span className="settings-row-hint">
-                    Each scenario ends with a table of GitHub links to its automated tests,
-                    when it has any.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTestLinksDraft}
-                    onChange={(e) => void toggleTestLinks(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* specs/traceability.feature.md "Open test in idea": a click on
-                  a test link runs `idea --line <n> <file>` on the file in the
-                  code repo instead of opening GitHub; default OFF. */}
-              {settingsTestLinksDraft && (
-                <label className="settings-row">
-                  <span className="settings-row-label">
-                    Open test links in IntelliJ IDEA
-                    <span className="settings-row-hint">
-                      {canOpenInIdea
-                        ? "A click on a test link opens the file at its line in IntelliJ IDEA, from the project's code repo, instead of on GitHub."
-                        : "Needs idea on PATH. On a Mac: "}
-                      {!canOpenInIdea && (
-                        <code>
-                          ln -s &quot;/Applications/IntelliJ IDEA.app/Contents/MacOS/idea&quot;
-                          /usr/local/bin/idea
-                        </code>
-                      )}
-                    </span>
-                  </span>
-                  <span className="switch">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      checked={settingsOpenInIdeaDraft}
-                      onChange={(e) => void toggleOpenInIdea(e.target.checked)}
-                    />
-                    <span className="switch-track" aria-hidden="true" />
-                  </span>
-                </label>
-              )}
-              {/* Project management (specs/external-links/project-management-
-                  jira-linear-etc.feature.md): the master switch for tickets;
-                  default ON. Off, no feature or scenario shows or asks for
-                  one. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Project management
-                  <span className="settings-row-hint">
-                    {settingsProjectManagementDraft
-                      ? "Features and scenarios carry a link to the ticket tracking them; the editors ask for the ticket's url."
-                      : "Ticket links are off: nothing in the app shows or asks for one. Links already recorded are kept."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsProjectManagementDraft}
-                    onChange={(e) => void toggleProjectManagement(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsProjectManagementDraft && (
-                <>
-                  {/* The tool chosen here is the `<program>` of every new
-                      link, which is why the editors need only the url. */}
-                  <label className="settings-row">
-                    <span className="settings-row-label">
-                      Project management tool
-                      <span className="settings-row-hint">
-                        Where the tickets live. Its name is what a link shows —{" "}
-                        <code>{settingsToolDraft.trim() || DEFAULT_PROJECT_MANAGEMENT_TOOL}:ABC-123</code>.
-                      </span>
-                    </span>
-                    <span className="settings-tool">
-                      <select
-                        aria-label="Project management tool"
-                        value={
-                          PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim())
-                            ? settingsToolDraft.trim()
-                            : "Other"
-                        }
-                        onChange={(e) => void changeTool(e.target.value === "Other" ? "" : e.target.value)}
-                      >
-                        {PROJECT_MANAGEMENT_TOOLS.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                        <option value="Other">Other</option>
-                      </select>
-                      {!PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim()) && (
-                        <input
-                          className="settings-tool-name"
-                          value={settingsToolDraft}
-                          placeholder="Tool name"
-                          aria-label="Project management tool name"
-                          spellCheck={false}
-                          onChange={(e) => void changeTool(e.target.value)}
-                        />
-                      )}
-                    </span>
-                  </label>
-                  {/* specs/external-links/project-management-jira-linear-etc.
-                      feature.md "Publishing links into projected feature (.md)
-                      files": the ticket links go into the markdown only while
-                      this is on; default ON. */}
-                  <label className="settings-row">
-                    <span className="settings-row-label">
-                      Publish external links
-                      <span className="settings-row-hint">
-                        Write each feature's and scenario's ticket link (Jira, Linear…) into the
-                        .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
-                        keeps the links in the app only.
-                      </span>
-                    </span>
-                    <span className="switch">
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        checked={settingsPublishLinksDraft}
-                        onChange={(e) => void toggleExternalLinks(e.target.checked)}
-                      />
-                      <span className="switch-track" aria-hidden="true" />
-                    </span>
-                  </label>
-                </>
-              )}
-            </section>
-            <section className="settings-group">
-              {/* Code gen (specs/agents/claude.spec.md): off takes the selection
-                  checkboxes and Start session away, and the server refuses a
-                  session, so no spec can reach Claude — neither the CLI nor
-                  Claude Code Desktop. Hidden in demo mode, where it is pinned
-                  off (no Claude to hand specs to). */}
-              {!demo && (
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Code generation
-                  <span className="settings-row-hint">
-                    {settingsCodeGenDraft
-                      ? "Specs and scenarios can be selected and handed to a coding agent — a new session in Claude Code Desktop, or a chat in the app's own coding agent pane — which implements them in the data repo."
-                      : "Code generation is off: no selection checkboxes, and sessions are refused."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsCodeGenDraft}
-                    onChange={(e) => void toggleCodeGen(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              )}
-              {/* Feature assignment (src/server/members.ts): opt-in — with
-                  the switch off the feature page offers no "Assigned"
-                  dropdown, and nothing already assigned is rewritten. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Assign features to project members
-                  <span className="settings-row-hint">
-                    {settingsAssignmentsDraft
-                      ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
-                      : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsAssignmentsDraft}
-                    onChange={(e) => void toggleAssignments(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The roadmap folder (specs/app/roadmap.feature.md): opt-in
-                  — the switch is what controls the folder's visibility, and
-                  turning it on creates the folder if the data folder has
-                  none. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Roadmap folder
-                  <span className="settings-row-hint">
-                    {settingsRoadmapDraft
-                      ? "The data folder's roadmap folder — markdown pages, listed above the feature folders. It is created if it isn't there yet."
-                      : "The roadmap folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsRoadmapDraft}
-                    onChange={(e) => void togglePageFolder(PAGE_TABS[0]!, e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The tasks folder (specs/app/tasks.feature.md): the roadmap
-                  switch's twin — the folder's markdown pages become a Tasks
-                  tab, each assignable to a project member. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Tasks
-                  <span className="settings-row-hint">
-                    {settingsTasksDraft
-                      ? "The data folder's tasks folder — a markdown page per task, assignable to a project member, on their own sidebar tab. It is created if it isn't there yet."
-                      : "The tasks folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTasksDraft}
-                    onChange={(e) => void togglePageFolder(PAGE_TABS[1]!, e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Google Calendar (specs/app/tasks.feature.md "Add task to
-                  Google Calendar"): opt-in — a calendar chip on every task
-                  that estimates it and opens a prefilled event. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Google Calendar
-                  <span className="settings-row-hint">
-                    {settingsGoogleCalendarDraft
-                      ? "An Add to calendar button on every task: an estimate of the time it takes, proposed by Claude when the CLI is on PATH, and a prefilled Google Calendar event. Nothing is sent to Google until you confirm the event there."
-                      : "Tasks have no calendar button."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsGoogleCalendarDraft}
-                    onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The engineering notebook
-                  (specs/app/engineering-notebook.feature.md): on unless
-                  turned off — the folder is made by the first entry, not by
-                  the switch, so a default-on module writes to nobody's repo
-                  on its own. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Engineering notebook
-                  <span className="settings-row-hint">
-                    {settingsNotebookDraft
-                      ? "A shared, dated log of observations and decisions about your process, kept in the data repo's notebook folder."
-                      : "The Notebook tab is not shown; the entries already written stay in the data folder."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsNotebookDraft}
-                    onChange={(e) => void togglePageFolder(PAGE_TABS[2]!, e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Event Models (roadmap/support-event-modeling.md): opt-in
-                  — the data folder's models folder, one JSON file per
-                  model, drawn on a canvas on their own tab. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Event Models
-                  <span className="settings-row-hint">
-                    {settingsModelsDraft
-                      ? "The data folder's models folder — Event Models on a canvas, one JSON file each, on their own sidebar tab. It is created if it isn't there yet."
-                      : "The models folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsModelsDraft}
-                    onChange={(e) => void toggleModels(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Test management (specs/app/tests.feature.md): opt-in
-                  — test plans, cases and runs on their own tab and pane,
-                  kept in the app's documents rather than in markdown. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Test management
-                  <span className="settings-row-hint">
-                    {settingsTestingDraft
-                      ? "A Tests tab with test plans, a test case library and run results. Stored in the data folder's documents, synced like everything else — no markdown files."
-                      : "The Tests tab is not shown; test plans already recorded stay in the data folder."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTestingDraft}
-                    onChange={(e) => void toggleTesting(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* GitHub issues (specs/app/github-issues.feature.md): opt-in
-                  — the code repo's GitHub issues on their own tab and pane. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  GitHub issues
-                  <span className="settings-row-hint">
-                    {!settingsIssuesDraft
-                      ? "The Issues tab is not shown, and nothing asks GitHub for issues."
-                      : issuesRepo
-                        ? `An Issues tab with the issues of ${issuesRepo.owner}/${issuesRepo.name} — the GitHub repo the code-repo in the data folder's project-settings.json pushes to. Create, edit, comment on, close and reopen them here.`
-                        : "An Issues tab for the GitHub repo the code-repo in the data folder's project-settings.json pushes to. That file names no GitHub code repo yet, so the tab stays hidden until it does."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsIssuesDraft}
-                    onChange={(e) => void toggleIssues(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Deleting published scenarios
-                  (specs/editor/spec-editor.feature.md "Delete Published
-                  Spec"): opt-in — with the switch off published scenarios
-                  stay immutable and the editor offers no Delete for them. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Allow deleting published specs
-                  <span className="settings-row-hint">
-                    {settingsDeletePublishedDraft
-                      ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
-                      : "Published scenarios are immutable and cannot be deleted."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsDeletePublishedDraft}
-                    onChange={(e) => void toggleDeletePublished(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Git engine (specs/git-operations.spec.md): which one carries
-                  the operations out and who supplies GitHub credentials.
-                  Hidden in demo mode along with the sign-in — the demo
-                  dataset never syncs with GitHub. */}
-              {!demo && (
-                <>
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Git engine
-                  <span className="settings-row-hint">
-                    {gitEngineEffective === "gh"
-                      ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
-                      : gitEngineEffective === "js"
-                        ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
-                        : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
-                  </span>
-                </span>
-                <select
-                  value={settingsEngineDraft}
-                  onChange={(e) => void pickGitEngine(e.target.value)}
-                >
-                  <option value="auto">
-                    Automatic — GitHub CLI when installed (recommended)
-                  </option>
-                  <option value="gh" disabled={!gh?.available}>
-                    GitHub CLI (gh){gh?.available ? "" : " — not installed"}
-                  </option>
-                  <option value="cli" disabled={!cliGitAvailable}>
-                    System git{cliGitAvailable ? "" : " — not installed"}
-                  </option>
-                  {/* Bundled with the app, so never disabled. */}
-                  <option value="js">Built-in (no git needed)</option>
-                </select>
-              </label>
-              {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
-                  when that engine is in effect, else the device flow. */}
-              <div className="settings-row auth-section">
-                <span className="auth-title">GitHub account</span>
-                {gh?.available && (
-                  <p className="hint">
-                    {gh.signedIn ? (
-                      <>
-                        GitHub CLI signed in
-                        {gh.login ? (
-                          <>
-                            {" "}
-                            as <strong>{gh.login}</strong>
-                          </>
-                        ) : null}
-                        .
-                      </>
-                    ) : (
-                      <>
-                        GitHub CLI installed but signed out — run <code>gh auth login</code>,
-                        then reopen this dialog.
-                      </>
-                    )}
-                  </p>
-                )}
-                {auth?.signedIn ? (
-                  <div className="auth-row">
-                    <span>
-                      Signed in as <strong>{auth.login}</strong>
-                    </span>
-                    <button className="secondary" onClick={signOutGitHub}>
-                      Sign out
-                    </button>
-                  </div>
-                ) : deviceFlow ? (
-                  <div className="auth-device">
-                    <p>
-                      Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
-                      <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
-                        {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
-                      </a>
-                    </p>
-                    <p className="hint">Waiting for GitHub…</p>
-                  </div>
-                ) : webConnecting ? (
-                  <div className="auth-device">
-                    <p>Finish signing in to GitHub in your browser, then come back here.</p>
-                    <p className="hint">Waiting for GitHub…</p>
-                    <button className="secondary" onClick={() => setWebConnecting(false)}>
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="auth-row">
-                    {/* Browser OAuth needs an http(s) callback; the desktop
-                        app:// pages offer the device code only. */}
-                    {canConnectViaBrowser && (
-                      <button className="secondary" onClick={connectGitHub}>
-                        Connect to GitHub
-                      </button>
-                    )}
-                    <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
-                      {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
-                    </button>
-                  </div>
-                )}
-                {authStatus && <p className="error">{authStatus}</p>}
-                <p className="hint">
-                  Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
-                  sign-in on the system git and built-in ones. Local folders work without
-                  either.
-                </p>
-              </div>
-                </>
-              )}
-            </section>
-            <p className="hint settings-footnote">
-              Changes are saved to .specdriven/settings.json as you make them.
-            </p>
-            <p className="hint settings-footnote">
-              <kbd>esc</kbd> to exit
-            </p>
-            {settingsError && <p className="error settings-error">{settingsError}</p>}
           </div>
         </div>
       )}

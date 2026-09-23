@@ -4,6 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { matchApi } from "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 
 describe("matchApi", () => {
   test("literal routes match by method", () => {
@@ -45,7 +46,12 @@ describe("matchApi", () => {
 
   // Roadmap pages (specs/app/roadmap.feature.md): the folder's listing, a
   // page by name, and creating one.
-  test("roadmap routes match by method", () => {
+  // A special folder is a plugin (src/plugins/builtin/pages/host.ts): its
+  // routes are there while its switch mounts it, and gone — 404 — when not.
+  test("roadmap routes match by method", async () => {
+    await syncPlugins({ roadmap: false });
+    expect(matchApi("GET", "/api/roadmap")).toBeNull();
+    await syncPlugins({ roadmap: true });
     expect(matchApi("GET", "/api/roadmap")).not.toBeNull();
     expect(matchApi("POST", "/api/roadmap")).not.toBeNull();
     expect(matchApi("DELETE", "/api/roadmap")).toBeNull();
@@ -59,7 +65,12 @@ describe("matchApi", () => {
   // page routes over its folder, plus the two metadata writes its header
   // offers. The `/kind` and `/supersedes` routes must win over `/:file`,
   // which the first-match table gives them by sitting above it.
-  test("notebook routes match by method", () => {
+  test("notebook routes match by method", async () => {
+    // On unless switched off; the tasks folder's estimate and the roadmap's
+    // rename need their switches.
+    await syncPlugins({ notebook: false });
+    expect(matchApi("GET", "/api/notebook")).toBeNull();
+    await syncPlugins({ tasks: true, roadmap: true });
     expect(matchApi("GET", "/api/notebook")).not.toBeNull();
     expect(matchApi("POST", "/api/notebook")).not.toBeNull();
     expect(matchApi("DELETE", "/api/notebook")).toBeNull();
@@ -95,7 +106,11 @@ describe("matchApi", () => {
   // whole module, and a write per entity.
   // GitHub issues (specs/app/github-issues.feature.md): list and create,
   // one issue read and edited, and its comments added to.
-  test("issue routes match by method", () => {
+  test("issue routes match by method", async () => {
+    // The module is a plugin: its routes exist while the switch mounts it.
+    await syncPlugins({ issues: false });
+    expect(matchApi("GET", "/api/issues")).toBeNull();
+    await syncPlugins({ issues: true });
     expect(matchApi("GET", "/api/issues")).not.toBeNull();
     expect(matchApi("POST", "/api/issues")).not.toBeNull();
     expect(matchApi("DELETE", "/api/issues")).toBeNull();
@@ -106,7 +121,12 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/issues/12/comments")).toBeNull();
   });
 
-  test("test management routes match by method", () => {
+  test("test management routes match by method", async () => {
+    // The module is a plugin (specs/app/plugins.feature.md): its routes are
+    // there while the switch mounts it, and gone — 404 — when it does not.
+    await syncPlugins({ testing: false });
+    expect(matchApi("GET", "/api/tests")).toBeNull();
+    await syncPlugins({ testing: true });
     expect(matchApi("GET", "/api/tests")).not.toBeNull();
     expect(matchApi("POST", "/api/tests")).toBeNull();
     expect(matchApi("GET", "/api/tests/cases")).toBeNull();

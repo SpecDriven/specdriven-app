@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appPagePath,
   featurePath,
+  matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
   resolveScenario,
-  pageLink,
   scenarioPath,
-  testsPath,
-  issuesPath,
 } from "../src/frontend/route";
+import { pageLink, pagesPath, parsePageRoute } from "../src/plugins/builtin/pages/route";
+import { issuesPath, parseIssuesRoute } from "../src/plugins/builtin/issues/route";
+import { parseTestsRoute, testsPath } from "../src/plugins/builtin/tests/route";
 import type { Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number): Scenario => ({
@@ -27,67 +29,52 @@ describe("parseRoute", () => {
     expect(parseRoute("/settings")).toEqual({});
   });
 
-  // Roadmap pages (specs/app/roadmap.feature.md) and tasks (specs/app/tasks
-  // .feature.md) address the markdown files in those data-repo folders.
-  test("roadmap pages", () => {
-    expect(parseRoute("/roadmap/pricing")).toEqual({ page: "roadmap/pricing.md" });
-    expect(parseRoute("/roadmap/q3/pricing")).toEqual({ page: "roadmap/q3/pricing.md" });
-    // A hand-typed link carrying the suffix doesn't double it up.
-    expect(parseRoute("/roadmap/pricing.md")).toEqual({ page: "roadmap/pricing.md" });
-    expect(pageLink("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
-    expect(parseRoute(pageLink("roadmap/a b.md"))).toEqual({ page: "roadmap/a b.md" });
-    // Tasks read the same way, under their own folder.
-    expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
-    expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
-  });
-
-  // A special folder with no page after it names the tab, not a page: the
-  // client opens the first page that tab lists, the way `g t` / `g r` / `g n`
-  // and the collapsed rail do. Before this, a bare folder fell through to the
-  // feature branch and landed home — the tab the url named never opened.
-  test("a bare special folder names its tab", () => {
-    expect(parseRoute("/tasks")).toEqual({ pageFolder: "tasks" });
-    expect(parseRoute("/roadmap")).toEqual({ pageFolder: "roadmap" });
-    expect(parseRoute("/notebook")).toEqual({ pageFolder: "notebook" });
-    expect(parseRoute("/models")).toEqual({ pageFolder: "models" });
-    // A trailing slash is the same url; empty segments are dropped.
-    expect(parseRoute("/tasks/")).toEqual({ pageFolder: "tasks" });
-    // A folder with a page after it still addresses that page.
-    expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
-    expect(parseRoute("/models/cart")).toEqual({ model: "models/cart.model.json" });
+  // Roadmap pages, tasks and notebook entries are the pages plugin's urls
+  // (src/plugins/builtin/pages/route.ts); to the core they are home.
+  test("the special folders' urls are not the core's", () => {
+    expect(parseRoute("/roadmap/pricing")).toEqual({});
+    expect(parseRoute("/tasks")).toEqual({});
+    expect(parseRoute("/notebook/2026-09-12-spec-first")).toEqual({});
   });
 
   // GitHub issues (specs/app/github-issues.feature.md): the list, the
   // new-issue form, and one issue by number.
+  // Parsed by the plugin (src/plugins/builtin/issues/route.ts); to the core
+  // router the urls are home until the mounted tab claims them.
   test("issues routes", () => {
-    expect(parseRoute("/issues")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/new")).toEqual({ issues: { kind: "new" } });
-    expect(parseRoute("/issues/12")).toEqual({ issues: { kind: "issue", number: 12 } });
+    expect(parseIssuesRoute("/issues")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/new")).toEqual({ kind: "new" });
+    expect(parseIssuesRoute("/issues/12")).toEqual({ kind: "issue", number: 12 });
     // Anything else under /issues is the list, not home.
-    expect(parseRoute("/issues/0")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/abc")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/12/extra")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issuesx")).toEqual({});
+    expect(parseIssuesRoute("/issues/0")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/abc")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/12/extra")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issuesx")).toBeNull();
+    expect(parseRoute("/issues/12")).toEqual({});
     for (const view of [{ kind: "list" as const }, { kind: "new" as const }, { kind: "issue" as const, number: 7 }]) {
-      expect(parseRoute(issuesPath(view))).toEqual({ issues: view });
+      expect(parseIssuesRoute(issuesPath(view))).toEqual(view);
     }
     expect(issuesPath({ kind: "issue", number: 7 })).toBe("/issues/7");
   });
 
-  // The test management module (specs/app/tests.feature.md): the
-  // plan list, the case library, and one case, plan or run by id.
+  // The test management module (specs/app/tests.feature.md) parses its own
+  // urls, as a plugin (src/plugins/builtin/tests/route.ts): the plan list,
+  // the case library, and one case, plan or run by id. To the core router
+  // they are nothing — home — until the mounted tab claims them.
   test("tests routes", () => {
-    expect(parseRoute("/tests")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/cases")).toEqual({ tests: { kind: "cases" } });
-    expect(parseRoute("/tests/plans/p1")).toEqual({ tests: { kind: "plan", id: "p1" } });
-    expect(parseRoute("/tests/cases/a%20b")).toEqual({ tests: { kind: "case", id: "a b" } });
-    expect(parseRoute("/tests/runs/r1/extra")).toEqual({ tests: { kind: "run", id: "r1" } });
+    expect(parseTestsRoute("/tests")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/cases")).toEqual({ kind: "cases" });
+    expect(parseTestsRoute("/tests/plans/p1")).toEqual({ kind: "plan", id: "p1" });
+    expect(parseTestsRoute("/tests/cases/a%20b")).toEqual({ kind: "case", id: "a b" });
+    expect(parseTestsRoute("/tests/runs/r1/extra")).toEqual({ kind: "run", id: "r1" });
     // Anything else under /tests is the plan list, not home.
-    expect(parseRoute("/tests/plans")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/tests/nope/x")).toEqual({ tests: { kind: "plans" } });
-    expect(parseRoute("/testsy")).toEqual({});
+    expect(parseTestsRoute("/tests/plans")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/tests/nope/x")).toEqual({ kind: "plans" });
+    expect(parseTestsRoute("/testsy")).toBeNull();
+    expect(parseTestsRoute("/features/x")).toBeNull();
+    expect(parseRoute("/tests/plans/p1")).toEqual({});
     for (const view of [
       { kind: "plans" as const },
       { kind: "cases" as const },
@@ -95,7 +82,7 @@ describe("parseRoute", () => {
       { kind: "plan" as const, id: "p1" },
       { kind: "run" as const, id: "r/1" },
     ]) {
-      expect(parseRoute(testsPath(view))).toEqual({ tests: view });
+      expect(parseTestsRoute(testsPath(view))).toEqual(view);
     }
     expect(testsPath({ kind: "run", id: "r/1" })).toBe("/tests/runs/r%2F1");
   });
@@ -223,24 +210,6 @@ describe("pagePath", () => {
     );
   });
 
-  // specs/app/tasks.feature.md "Support deep link just like Features": an
-  // open task or roadmap page holds the pane, so its own url is the canonical
-  // one — a feature left behind must not keep the address bar.
-  test("an open task or roadmap page is that page's url", () => {
-    expect(pagePath(null, null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
-    expect(pagePath(null, null, "roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
-    // Opening one drops the feature, and the url says so before the state
-    // catches up.
-    expect(pagePath("specs/billing/quotes.feature.md", null, "tasks/ship-v2.md")).toBe("/tasks/ship-v2");
-    // No page open leaves the feature rules untouched.
-    expect(pagePath("specs/billing/quotes.feature.md", null, null)).toBe("/features/billing/quotes");
-  });
-
-  test("a task url resolves back to the task it was copied from", () => {
-    const fileName = "tasks/sprint-4/ship-v2.md";
-    expect(parseRoute(pagePath(null, null, fileName))).toEqual({ page: fileName });
-  });
-
   test("the shared link resolves back to the page it was copied from", () => {
     const file = "specs/billing/quotes.feature.md";
     const scenarios = [sc("Basic Quote", 1), sc("Basic Quote", 2)];
@@ -303,5 +272,70 @@ describe("repoDisplayName", () => {
 
   test("windows separators", () => {
     expect(repoDisplayName("C:\\dev\\specs-insurance")).toBe("specs-insurance");
+  });
+});
+
+// Roadmap pages (specs/app/roadmap.feature.md), tasks (specs/app/tasks
+// .feature.md) and notebook entries address the markdown files in those
+// data-repo folders — each folder its own plugin, parsing only its own prefix.
+describe("parsePageRoute", () => {
+  test("roadmap pages", () => {
+    expect(parsePageRoute("roadmap", "/roadmap/pricing")).toEqual({ fileName: "roadmap/pricing.md" });
+    expect(parsePageRoute("roadmap", "/roadmap/q3/pricing")).toEqual({
+      fileName: "roadmap/q3/pricing.md",
+    });
+    // A hand-typed link carrying the suffix doesn't double it up.
+    expect(parsePageRoute("roadmap", "/roadmap/pricing.md")).toEqual({
+      fileName: "roadmap/pricing.md",
+    });
+    expect(pageLink("roadmap/q3/pricing.md")).toBe("/roadmap/q3/pricing");
+    expect(parsePageRoute("roadmap", pageLink("roadmap/a b.md"))).toEqual({
+      fileName: "roadmap/a b.md",
+    });
+    // Tasks read the same way, under their own folder — and only there.
+    expect(parsePageRoute("tasks", "/tasks/ship-v2")).toEqual({ fileName: "tasks/ship-v2.md" });
+    expect(parsePageRoute("roadmap", "/tasks/ship-v2")).toBeNull();
+    expect(pageLink("tasks/sprint-4/ship-v2.md")).toBe("/tasks/sprint-4/ship-v2");
+  });
+
+  // A special folder with no page after it names the tab, not a page: the
+  // tab opens the first page it lists, the way `g t` / `g r` / `g n` and the
+  // collapsed rail do (specs/app/tasks.feature.md "A bare folder url opens
+  // that tab").
+  test("a bare special folder names its tab", () => {
+    expect(parsePageRoute("tasks", "/tasks")).toEqual({ fileName: null });
+    expect(parsePageRoute("roadmap", "/roadmap")).toEqual({ fileName: null });
+    expect(parsePageRoute("notebook", "/notebook")).toEqual({ fileName: null });
+    // A trailing slash is the same url; empty segments are dropped.
+    expect(parsePageRoute("tasks", "/tasks/")).toEqual({ fileName: null });
+  });
+
+  // specs/app/tasks.feature.md "Support deep link just like Features": an
+  // open task holds the pane, and its url resolves back to it.
+  test("a page's url resolves back to the page it was copied from", () => {
+    const fileName = "tasks/sprint-4/ship-v2.md";
+    expect(pagesPath("tasks", { fileName })).toBe("/tasks/sprint-4/ship-v2");
+    expect(parsePageRoute("tasks", pagesPath("tasks", { fileName }))).toEqual({ fileName });
+    expect(pagesPath("tasks", { fileName: null })).toBe("/tasks");
+    // A search hit's marks are not part of the url.
+    expect(pagesPath("tasks", { fileName, terms: ["ship"] })).toBe("/tasks/sprint-4/ship-v2");
+  });
+});
+
+// specs/user-info-settings.feature.md "open Settings", "open Plugins": the
+// app's own pages have their own urls.
+describe("app pages", () => {
+  test("Settings and Plugins have urls that resolve back to them", () => {
+    expect(appPagePath("settings")).toBe("/settings");
+    expect(appPagePath("plugins")).toBe("/plugins");
+    expect(matchAppPage("/settings")).toBe("settings");
+    expect(matchAppPage("/plugins/")).toBe("plugins");
+  });
+
+  test("anything else is not an app page", () => {
+    expect(matchAppPage("/")).toBeNull();
+    expect(matchAppPage("/settings/extra")).toBeNull();
+    expect(matchAppPage("/features/settings")).toBeNull();
+    expect(matchAppPage("/tasks")).toBeNull();
   });
 });
