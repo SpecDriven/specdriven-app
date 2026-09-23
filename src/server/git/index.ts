@@ -207,6 +207,17 @@ export async function hasUpstream(repoDir: string): Promise<boolean> {
   return backend().hasUpstream(repoDir);
 }
 
+export async function checkoutRef(repoDir: string, ref: string): Promise<string> {
+  return traced("checkout_ref", repoDir, () => backend().checkoutRef(repoDir, ref), (commit) => ({
+    "git.ref": ref,
+    "git.commit": commit,
+  }));
+}
+
+export async function headCommit(repoDir: string): Promise<string> {
+  return backend().headCommit(repoDir);
+}
+
 export async function clone(url: string, dir: string): Promise<void> {
   return withSpan("git.clone", { ...gitAttrs(dir), "git.url": url }, async () => {
     log.info(`cloning ${url}`, { "specdriven.dir": dir });

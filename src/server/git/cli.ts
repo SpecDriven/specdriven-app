@@ -391,9 +391,40 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     };
   }
 
+  async function headCommit(repoDir: string): Promise<string> {
+    const res = await git(repoDir, "rev-parse", "HEAD");
+    if (res.exitCode !== 0) throw new Error(`Not a git repository: ${repoDir}`);
+    return res.stdout.toString().trim();
+  }
+
+  /**
+   * A marketplace plugin is pinned to the ref its index names
+   * (specs/app/plugins.feature.md "A plugin from the marketplace is
+   * installed with consent"): the remote's branches and tags are fetched,
+   * then `origin/<ref>` is tried before the bare ref, so a branch follows
+   * the remote rather than the local branch the clone made.
+   */
+  async function checkoutRef(repoDir: string, ref: string): Promise<string> {
+    const fetched = await git(repoDir, "fetch", "origin", "--tags");
+    if (fetched.exitCode !== 0) {
+      const output = fetched.stderr + fetched.stdout;
+      throw new Error(
+        `Could not fetch ${ref}: ${isAuthFailure(output) ? SIGN_IN_HINT : output.trim()}`,
+      );
+    }
+    let res = await git(repoDir, "checkout", "--detach", `origin/${ref}`);
+    if (res.exitCode !== 0) res = await git(repoDir, "checkout", "--detach", ref);
+    if (res.exitCode !== 0) {
+      throw new Error(`The repository has no ref "${ref}": ${(res.stderr + res.stdout).trim()}`);
+    }
+    return headCommit(repoDir);
+  }
+
   return {
     name,
     clone: (url, dir) => (cloneWith ?? gitClone)(git, url, dir),
+    checkoutRef,
+    headCommit,
     pull,
     push,
     theirsVersion,

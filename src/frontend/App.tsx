@@ -82,6 +82,8 @@ import {
 import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
+import { PluginMarketplace } from "./PluginMarketplace";
+import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
 import { pomodoro, titlePrefix, usePomodoro } from "./pomodoro";
@@ -1040,6 +1042,7 @@ export function App() {
   // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
   // plugin loads from a local folder"), listed under the plugins.
   const [pluginSources, setPluginSources] = useState<string[]>([]);
+  const [pluginMarketplaces, setPluginMarketplaces] = useState<MarketplaceRef[]>([]);
   // A browser half that failed to load, by plugin id — shown beside the row.
   const pluginLoadErrors = useSyncExternalStore(clientLoadErrors.subscribe, clientLoadErrors.snapshot);
   // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
@@ -1262,6 +1265,7 @@ export function App() {
       }
       setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
       setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
+      setPluginMarketplaces(Array.isArray(state.pluginMarketplaces) ? state.pluginMarketplaces : []);
       if (typeof state.googleCalendar === "boolean") {
         setGoogleCalendarOn(state.googleCalendar);
       }
@@ -1801,6 +1805,7 @@ export function App() {
     const data = await res.json();
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
+    setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     client.emit("settings/changed", data);
   }, []);
@@ -3071,6 +3076,7 @@ export function App() {
     // loader.ts).
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
+    setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     // The mounted ones follow the other switches they read — the tasks'
     // calendar chip follows Google Calendar's, say.
@@ -7391,7 +7397,9 @@ export function App() {
                         ? "Data folder"
                         : plugin.source === "path"
                           ? "Linked folder"
-                          : "Installed";
+                          : plugin.install
+                            ? `Marketplace ${plugin.install.marketplace}`
+                            : "Installed";
                 const untrusted = installed && plugin.trusted === false;
                 const loadError = pluginLoadErrors.get(plugin.id);
                 // The Issues plugin's tab needs a GitHub code repo besides its
@@ -7540,6 +7548,19 @@ export function App() {
                     Add folder…
                   </button>
                 </div>
+              )}
+              {/* The marketplaces (specs/app/plugins.feature.md "The marketplace
+                  is a git repository with an index"): browse, install with
+                  consent, update, remove — not in the demo. */}
+              {!demo && (
+                <PluginMarketplace
+                  marketplaces={pluginMarketplaces}
+                  plugins={plugins}
+                  patchSettings={patchSettings}
+                  prompt={prompt}
+                  confirm={confirm}
+                  onChanged={refreshPlugins}
+                />
               )}
             </section>
             <p className="hint settings-footnote">

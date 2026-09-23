@@ -57,4 +57,13 @@ export interface GitBackend {
   removeAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   commitAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
+  /**
+   * Put a clone at a ref the remote names — a tag, a branch or a commit —
+   * fetching first, so an update lands on what the remote holds now, and
+   * detached, so a branch name leaves no stale local branch behind. Answers
+   * the commit checked out. Throws with a user-facing message.
+   */
+  checkoutRef(repoDir: string, ref: string): Promise<string>;
+  /** The commit HEAD is at. */
+  headCommit(repoDir: string): Promise<string>;
 }
