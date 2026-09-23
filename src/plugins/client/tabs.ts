@@ -31,7 +31,7 @@ export interface TabApp {
   prompt: Prompt;
   promptWithChoice: PromptWithChoice;
   confirm: Confirm;
-  /** Opens the Settings dialog — where the GitHub sign-in lives, say. */
+  /** Opens the Settings page — where the GitHub sign-in lives, say. */
   openSettings: () => void;
   /** Open a feature page, pushing its url. */
   openFeature: (fileName: string) => void;
