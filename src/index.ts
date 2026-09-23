@@ -33,6 +33,10 @@ const routes = () => ({
   // (src/electron/static.ts).
   "/features": index,
   "/features/*": index,
+  // The app's own pages (specs/user-info-settings.feature.md "open
+  // Settings", "open Plugins") take the editor pane at their own urls.
+  "/settings": index,
+  "/plugins": index,
   // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
   // app shell") — the special folders' pages among them: each module
   // behind the kernel names its prefix in its manifest, on or off, so a

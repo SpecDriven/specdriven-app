@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appPagePath,
   featurePath,
+  matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
@@ -317,5 +319,23 @@ describe("parsePageRoute", () => {
     expect(pagesPath("tasks", { fileName: null })).toBe("/tasks");
     // A search hit's marks are not part of the url.
     expect(pagesPath("tasks", { fileName, terms: ["ship"] })).toBe("/tasks/sprint-4/ship-v2");
+  });
+});
+
+// specs/user-info-settings.feature.md "open Settings", "open Plugins": the
+// app's own pages have their own urls.
+describe("app pages", () => {
+  test("Settings and Plugins have urls that resolve back to them", () => {
+    expect(appPagePath("settings")).toBe("/settings");
+    expect(appPagePath("plugins")).toBe("/plugins");
+    expect(matchAppPage("/settings")).toBe("settings");
+    expect(matchAppPage("/plugins/")).toBe("plugins");
+  });
+
+  test("anything else is not an app page", () => {
+    expect(matchAppPage("/")).toBeNull();
+    expect(matchAppPage("/settings/extra")).toBeNull();
+    expect(matchAppPage("/features/settings")).toBeNull();
+    expect(matchAppPage("/tasks")).toBeNull();
   });
 });
