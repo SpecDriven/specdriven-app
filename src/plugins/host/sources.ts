@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { parsePackageManifest, type PluginManifest } from "../manifest";
+import { INSTALL_RECORD_FILE, parseInstallRecord, type InstallRecord } from "../marketplace";
 
 /** Where a filesystem plugin was found, in load order. */
 export type SourceKind = "home" | "repo" | "path";
@@ -21,6 +22,8 @@ export interface DiscoveredPlugin {
   dir: string;
   source: SourceKind;
   manifest?: PluginManifest;
+  /** Where a marketplace install came from, for a folder that has the record. */
+  install?: InstallRecord;
   /** Why the folder cannot load: no manifest, one the app refuses, a duplicate id. */
   error?: string;
 }
@@ -38,6 +41,16 @@ export function pluginsHome(): string {
 /** Where the app keeps the halves it built, by plugin and revision. */
 export function pluginBuildHome(): string {
   return join(specdrivenHome(), "plugin-builds");
+}
+
+/** Where the marketplace clones live: `~/.specdriven/marketplaces/<name>`. */
+export function marketplacesHome(): string {
+  return join(specdrivenHome(), "marketplaces");
+}
+
+/** A plugin id as a folder name: the scope's `/` cannot be one. */
+export function safeId(id: string): string {
+  return id.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
 /** A data repo's own plugins folder: `<repo>/.specdriven/plugins`. */
@@ -112,13 +125,23 @@ export async function readPluginFolder(
   } catch (e) {
     return { id: folderName(dir), dir, source, error: `package.json does not parse: ${(e as Error).message}` };
   }
+  const install = await readInstallRecord(dir);
   try {
     const manifest = parsePackageManifest(raw, appVersion);
-    return { id: manifest.id, dir, source, manifest };
+    return { id: manifest.id, dir, source, manifest, ...(install ? { install } : {}) };
   } catch (e) {
     const named = (raw as { specdriven?: { id?: unknown }; name?: unknown } | null)?.specdriven?.id;
     const id = typeof named === "string" && named ? named : folderName(dir);
-    return { id, dir, source, error: (e as Error).message };
+    return { id, dir, source, ...(install ? { install } : {}), error: (e as Error).message };
+  }
+}
+
+/** The install record a marketplace install left in the folder, if any. */
+export async function readInstallRecord(dir: string): Promise<InstallRecord | null> {
+  try {
+    return parseInstallRecord(JSON.parse(await readFile(join(dir, INSTALL_RECORD_FILE), "utf8")));
+  } catch {
+    return null;
   }
 }
 

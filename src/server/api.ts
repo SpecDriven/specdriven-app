@@ -140,6 +140,8 @@ import {
   syncPlugins,
 } from "../plugins/host/loader";
 import { builtinManifests } from "../plugins/builtin/manifests";
+import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
+import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
   PROFILE_KEY,
   hasLegacyKeys,
@@ -405,6 +407,9 @@ async function stateFields(state: SpecDrivenState) {
     // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
     // plugin loads from a local folder"), which Settings → Plugins lists.
     pluginSources: sourcePaths(profileSection(state)),
+    // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
+    // git repository with an index"): the git urls Settings → Plugins lists.
+    pluginMarketplaces: marketplaceEntries(profileSection(state)),
     ...legacyFields(readProfile(state as Record<string, unknown>, builtinManifests).enabled, builtinManifests),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -468,7 +473,7 @@ const putState: Handler = async (req) => {
      * The profile: the enabled plugins, in tab order; the explicit plugin
      * folders; a data-repo plugin folder to trust from now on.
      */
-    plugins?: { enabled?: unknown; sources?: unknown; trust?: unknown };
+    plugins?: { enabled?: unknown; sources?: unknown; trust?: unknown; marketplaces?: unknown };
     /** The per-module switches the profile replaced — aliases for one release. */
     roadmap?: boolean;
     notebook?: boolean;
@@ -712,8 +717,8 @@ const putState: Handler = async (req) => {
     if (!body.plugins || typeof body.plugins !== "object") {
       return json({ error: "plugins must be an object" }, 400);
     }
-    const { enabled: list, sources, trust } = body.plugins;
-    if (list === undefined && sources === undefined && trust === undefined) {
+    const { enabled: list, sources, trust, marketplaces } = body.plugins;
+    if (list === undefined && sources === undefined && trust === undefined && marketplaces === undefined) {
       return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
     }
     if (list !== undefined) {
@@ -742,6 +747,20 @@ const putState: Handler = async (req) => {
       const trusted = Array.isArray(section.trusted) ? section.trusted.filter((t) => typeof t === "string") : [];
       if (!trusted.includes(trust)) trusted.push(trust);
       (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, trusted };
+    }
+    // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
+    // git repository with an index"): `{ name, source }` rows, taken whole;
+    // an empty list is the choice of none, unlike no key at all.
+    if (marketplaces !== undefined) {
+      const rows = Array.isArray(marketplaces) ? marketplaces.map(marketplaceRef) : null;
+      if (!rows || rows.some((r) => r === null)) {
+        return json({ error: "plugins.marketplaces must be a list of { name, source } rows" }, 400);
+      }
+      const unique = (rows as { name: string; source: string }[]).filter(
+        (r, i, all) => all.findIndex((x) => x.name === r.name) === i,
+      );
+      const section = profileSection(state);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, marketplaces: unique };
     }
   }
   for (const manifest of builtinManifests) {
@@ -1765,9 +1784,21 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
 // The core routes, registered first on the plugin kernel's route registry
 // (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
 // plugin appends its own, and a disposed one takes them away again.
+// The marketplace (src/plugins/host/marketplace.ts): browse, install with a
+// consent step, update and remove — none of it in the demo.
+const market = marketplaceRoutes({
+  demo: isDemoMode,
+  readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
+  persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
+});
+
 const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
+  ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
+  ["POST", "/api/plugins/install", market.postInstall],
+  ["POST", "/api/plugins/:id/update", market.postUpdate],
+  ["DELETE", "/api/plugins/:id", market.deletePlugin],
   ["POST", "/api/choose-folder", postChooseFolder],
   ["POST", "/api/reload", postReload],
   ["POST", "/api/auth/github/start", unlessDemo(postAuthStart)],
