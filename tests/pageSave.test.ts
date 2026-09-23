@@ -3,7 +3,8 @@
 // tick must notice when only the Done marker moved.
 
 import { describe, expect, test } from "bun:test";
-import { createPromiseQueue, pageListingMetaEqual } from "../src/frontend/App";
+import { createPromiseQueue } from "../src/frontend/App";
+import { pageListingMetaEqual } from "../src/frontend/pages/pages";
 import type { PageListing } from "../src/server/pages";
 
 const listing = (over: Partial<PageListing> = {}): PageListing => ({

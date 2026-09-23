@@ -9,8 +9,11 @@ import issues from "./issues/host";
 import { manifest as issuesManifest } from "./issues/manifest";
 import models from "./models/host";
 import { manifest as modelsManifest } from "./models/manifest";
+import { pagesHost } from "./pages/host";
+import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
 import tests from "./tests/host";
 import { manifest as testsManifest } from "./tests/manifest";
+import { NOTEBOOK, ROADMAP, TASKS } from "../../server/pages";
 
 export interface HostPlugin {
   manifest: PluginManifest;
@@ -18,6 +21,10 @@ export interface HostPlugin {
 }
 
 export const builtinHostPlugins: HostPlugin[] = [
+  // The special folders: one plugin each, from the pages factory.
+  { manifest: roadmapManifest, plugin: pagesHost(ROADMAP) },
+  { manifest: tasksManifest, plugin: pagesHost(TASKS) },
+  { manifest: notebookManifest, plugin: pagesHost(NOTEBOOK) },
   { manifest: issuesManifest, plugin: issues },
   { manifest: modelsManifest, plugin: models },
   { manifest: testsManifest, plugin: tests },

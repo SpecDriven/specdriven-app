@@ -9,10 +9,11 @@ import { pluginStates, shell, sync, syncPlugins } from "../src/plugins/host/load
 import { pluginWanted } from "../src/plugins/manifest";
 import { manifest as testsManifest } from "../src/plugins/builtin/tests/manifest";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
-import { tabReachable } from "../src/plugins/client/tabs";
+import { tabReachable, type TabPlugin } from "../src/plugins/client/tabs";
+import { pageSettings } from "../src/frontend/pages/pages";
 
 afterEach(async () => {
-  await syncPlugins({ testing: false, issues: false, models: false });
+  await syncPlugins({ testing: false, issues: false, models: false, roadmap: false, tasks: false });
   await syncClientPlugins([]);
 });
 
@@ -21,6 +22,28 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   expect(matchApi("GET", "/api/tests")).toBeNull();
   expect(await handleApi(new Request("http://x/api/tests"))).toBeNull();
   expect(pluginStates()).toEqual([
+    // The special folders come first; the notebook is on unless switched off.
+    {
+      id: "roadmap",
+      displayName: "Roadmap",
+      description: "Markdown roadmap pages on their own tab",
+      builtin: true,
+      enabled: false,
+    },
+    {
+      id: "tasks",
+      displayName: "Tasks",
+      description: "Tasks to assign, tick off and put on the calendar",
+      builtin: true,
+      enabled: false,
+    },
+    {
+      id: "notebook",
+      displayName: "Engineering notebook",
+      description: "A shared, dated log of observations and decisions",
+      builtin: true,
+      enabled: true,
+    },
     {
       id: "issues",
       displayName: "GitHub issues",
@@ -208,6 +231,96 @@ test("the Models tab opens its first model, and a feature page crumbs back to it
 
     await syncClientPlugins([]);
     expect(tabs.get("models")).toBeUndefined();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// The special folders (src/plugins/builtin/pages): three plugins from one
+// factory, each with its own switch — the notebook's on unless turned off —
+// and its own routes.
+test("each special folder's switch mounts its own routes", async () => {
+  await syncPlugins({ roadmap: false, tasks: false, notebook: false });
+  for (const folder of ["roadmap", "tasks", "notebook"]) {
+    expect(matchApi("GET", `/api/${folder}`)).toBeNull();
+    expect(shell.matches(`/${folder}/x`)).toBe(true);
+  }
+  expect(matchApi("POST", "/api/tasks/tasks%2Fship.md/estimate")).toBeNull();
+
+  await syncPlugins({ tasks: true });
+  expect(matchApi("GET", "/api/roadmap")).toBeNull();
+  expect(matchApi("GET", "/api/tasks/tasks%2Fship.md")!.params).toEqual({ file: "tasks/ship.md" });
+  expect(matchApi("POST", "/api/tasks/tasks%2Fship.md/estimate")).not.toBeNull();
+  // An absent notebook key means on.
+  expect(matchApi("GET", "/api/notebook")).not.toBeNull();
+  // Only the notebook has the entry routes; only tasks have the estimate.
+  expect(matchApi("PUT", "/api/notebook/notebook%2Fa.md/kind")).not.toBeNull();
+  expect(matchApi("PUT", "/api/tasks/tasks%2Fa.md/kind")).toBeNull();
+  expect(matchApi("POST", "/api/notebook/notebook%2Fa.md/estimate")).toBeNull();
+
+  await syncPlugins({ roadmap: true, tasks: false, notebook: false });
+  expect(matchApi("DELETE", "/api/roadmap/roadmap%2Fpricing.md")).not.toBeNull();
+  expect(matchApi("GET", "/api/tasks")).toBeNull();
+  expect(matchApi("GET", "/api/notebook")).toBeNull();
+});
+
+test("a special folder's tab opens its first page, and is a list to pick from", async () => {
+  // Each folder's listing is the one fetch its plugin makes on mount.
+  const realFetch = globalThis.fetch;
+  let listed: Record<string, unknown[]> = { tasks: [], notebook: [] };
+  globalThis.fetch = (async (url: string) =>
+    Response.json({ pages: listed[String(url).split("/").pop()!] ?? [] })) as unknown as typeof fetch;
+  try {
+    await syncClientPlugins(
+      [
+        { id: "tasks", enabled: true },
+        { id: "notebook", enabled: true },
+      ],
+      { demo: false, settings: { googleCalendar: true, canRunAgentPane: false } },
+    );
+    expect(tabs.list().map((t) => [t.id, t.shortcut])).toEqual([
+      ["tasks", "g t"],
+      ["notebook", "g n"],
+    ]);
+    const tasksTab = tabs.get("tasks") as TabPlugin<{ fileName: string | null }>;
+    // The tab bar only turns the sidebar; a row, the rail or `g t` opens a page.
+    expect(tasksTab.opensOnSelect).toBe(false);
+    // An empty folder: the bare url resolves to nothing, so it goes home.
+    expect(tabReachable(tasksTab as TabPlugin)).toBe(false);
+    expect(matchPluginRoute("/tasks")!.view).toEqual({ fileName: null });
+    // Another folder's url is not this tab's.
+    expect(matchPluginRoute("/notebook/2026-09-12-a")?.tab.id).toBe("notebook");
+
+    listed = {
+      tasks: [{ fileName: "tasks/ship-v2.md", name: "Ship v2" }],
+      notebook: [],
+    };
+    await client.serial("data/changed");
+    expect(tabReachable(tasksTab as TabPlugin)).toBe(true);
+    expect(tasksTab.route.resolve!({ fileName: null })).toEqual({ fileName: "tasks/ship-v2.md" });
+    expect(tasksTab.route.title({ fileName: "tasks/ship-v2.md" })).toBe("Ship v2");
+    // A page the listing does not hold yet is titled from its file name.
+    expect(tasksTab.route.title({ fileName: "tasks/cut-the-build.md" })).toBe("Cut The Build");
+    // What the palette's Recent list remembers it by.
+    expect(tasksTab.recent!({ fileName: "tasks/ship-v2.md" })).toBe("Ship v2");
+    expect(tasksTab.recent!({ fileName: null })).toBeNull();
+    // A stale link is not worth remembering.
+    expect(tasksTab.recent!({ fileName: "tasks/nope.md" })).toBeNull();
+
+    // "New notebook entry" is the notebook's palette command, and only its.
+    const host = { prompt: async () => null, promptWithChoice: async () => null, confirm: async () => false, navigate: () => {} };
+    expect(tabs.get("notebook")!.palette!.commands!(host).map((c) => c.id)).toEqual([
+      "action:new-notebook-entry",
+    ]);
+    expect(tasksTab.palette!.commands).toBeUndefined();
+
+    // The Google Calendar switch reaches the tasks' header as it flips.
+    expect(pageSettings.get().googleCalendar).toBe(true);
+    client.emit("settings/changed", { googleCalendar: false });
+    expect(pageSettings.get().googleCalendar).toBe(false);
+
+    await syncClientPlugins([]);
+    expect(tabs.list()).toEqual([]);
   } finally {
     globalThis.fetch = realFetch;
   }
