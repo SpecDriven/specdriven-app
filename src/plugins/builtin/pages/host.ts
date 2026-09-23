@@ -26,6 +26,7 @@ import {
   importPageDrift,
   listPages,
   readPage,
+  renamePageFile,
   savePage,
   type PageFolder,
 } from "../../../server/pages";
@@ -33,6 +34,7 @@ import {
   byNewest,
   createEntry,
   entryFileOf,
+  relinkEntries,
   setEntryKind,
   setSupersedes,
   supersededBy,
@@ -166,6 +168,18 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
         const b = await body<{ content?: unknown }>(req);
         if (typeof b?.content !== "string") return json({ error: "content is required" }, 400);
         return json(await savePage(dir, kind, params.file ?? "", b.content));
+      });
+
+      // Renaming a page (specs/app/roadmap.feature.md): the `# heading` and
+      // the file both, so the url follows the title — a `git mv`, committed
+      // and pushed. The notebook passes relinkEntries, so the links naming an
+      // entry follow it.
+      add("POST", `${base}/:file/rename`, async (dir, req, params) => {
+        const b = await body<{ name?: unknown }>(req);
+        if (typeof b?.name !== "string") return json({ error: "name is required" }, 400);
+        return json(
+          await renamePageFile(dir, kind, params.file ?? "", b.name, notebook ? { relink: relinkEntries } : {}),
+        );
       });
 
       // Deleting a page (specs/app/roadmap.feature.md): the markdown and its
