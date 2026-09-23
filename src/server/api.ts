@@ -344,16 +344,17 @@ async function currentDataDir(): Promise<string | null> {
 
 /**
  * The plugins the settings ask for (src/plugins/host/loader.ts): the
- * built-ins the profile lists, and — outside the demo, whose dataset is
- * ephemeral and whose host is shared — whatever the plugin folders hold,
- * a plugin found for the first time added to the profile and stored.
+ * built-ins the profile lists and whatever the plugin folders hold, a
+ * plugin found for the first time added to the profile and stored. The
+ * demo's folders are its own home's alone — what it installed from the
+ * marketplace at start (demo.ts installDemoPlugins); its dataset is
+ * ephemeral, so the data folder's plugins are not read there.
  */
 async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   const raw = state as Record<string, unknown>;
-  if (isDemoMode()) return syncPlugins(raw);
   return syncPlugins(raw, {
     sources: true,
-    dataDir: await currentDataDir(),
+    dataDir: isDemoMode() ? null : await currentDataDir(),
     persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   });
@@ -1796,7 +1797,7 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
 // (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
 // plugin appends its own, and a disposed one takes them away again.
 // The marketplace (src/plugins/host/marketplace.ts): browse, install with a
-// consent step, update and remove — none of it in the demo.
+// consent step, update and remove — in the demo, browsing alone.
 const market = marketplaceRoutes({
   demo: isDemoMode,
   readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,

@@ -6,7 +6,8 @@
 // version, category and description — marked when installed, with Install,
 // Update or Remove beside it. Install shows what the manifest declares and a
 // note that the plugin runs with the app's own rights, and fetches nothing
-// into the profile until the user confirms. Not offered in the hosted demo.
+// into the profile until the user confirms. The hosted demo lists its
+// marketplaces, open from the start, and offers none of the actions.
 
 import { useCallback, useEffect, useState } from "react";
 import type { PluginStatus } from "../plugins/client/loader";
@@ -40,6 +41,11 @@ export interface PluginMarketplaceProps {
    * scrolled to, so installing it is one click and its consent away.
    */
   wanted?: string | null;
+  /**
+   * Browse only (the hosted demo): the list is open from the start and
+   * nothing is installed, updated, removed, refreshed or added.
+   */
+  readOnly?: boolean;
   /** Re-read the plugins after an install, update or removal. */
   onChanged(): Promise<void>;
 }
@@ -73,12 +79,13 @@ export function PluginMarketplace({
   marketplaces,
   plugins,
   wanted = null,
+  readOnly = false,
   patchSettings,
   prompt,
   confirm,
   onChanged,
 }: PluginMarketplaceProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(readOnly);
   const [statuses, setStatuses] = useState<MarketplaceStatus[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -217,7 +224,7 @@ export function PluginMarketplace({
           </span>
           {row.description && <span className="settings-row-hint">{row.description}</span>}
         </span>
-        {installed ? (
+        {readOnly ? null : installed ? (
           <span className="plugin-market-row-actions">
             <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
               Update
@@ -242,7 +249,12 @@ export function PluginMarketplace({
     <div className="plugin-marketplaces" data-testid="plugin-marketplaces">
       <div className="settings-row plugin-market-toolbar">
         <span className="settings-row-label">
-          {marketplaces.length === 0 ? (
+          {readOnly ? (
+            <span className="settings-row-hint">
+              The demo installed its marketplace plugins when it started. Installing, updating and removing them is
+              off in the hosted demo.
+            </span>
+          ) : marketplaces.length === 0 ? (
             <span className="settings-row-hint">None yet — add the git url of one to browse its plugins.</span>
           ) : (
             <span className="settings-row-hint">
@@ -262,19 +274,21 @@ export function PluginMarketplace({
             </span>
           )}
         </span>
-        <span className="plugin-market-row-actions">
-          <button
-            type="button"
-            className="link"
-            disabled={loading || marketplaces.length === 0}
-            onClick={() => (open ? void load(true) : setOpen(true))}
-          >
-            {open ? (loading ? "Refreshing…" : "Refresh") : "Browse plugins"}
-          </button>
-          <button type="button" className="link" onClick={() => void addMarketplace()}>
-            Add marketplace…
-          </button>
-        </span>
+        {!readOnly && (
+          <span className="plugin-market-row-actions">
+            <button
+              type="button"
+              className="link"
+              disabled={loading || marketplaces.length === 0}
+              onClick={() => (open ? void load(true) : setOpen(true))}
+            >
+              {open ? (loading ? "Refreshing…" : "Refresh") : "Browse plugins"}
+            </button>
+            <button type="button" className="link" onClick={() => void addMarketplace()}>
+              Add marketplace…
+            </button>
+          </span>
+        )}
       </div>
       {marketplaces.map((m) => {
         const status = open ? statusFor(m.name) : undefined;
@@ -302,14 +316,16 @@ export function PluginMarketplace({
                   {m.source}
                 </code>
               </span>
-              <button
-                type="button"
-                className="link"
-                aria-label={`Remove marketplace ${m.name}`}
-                onClick={() => void removeMarketplace(m.name)}
-              >
-                Remove
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="link"
+                  aria-label={`Remove marketplace ${m.name}`}
+                  onClick={() => void removeMarketplace(m.name)}
+                >
+                  Remove
+                </button>
+              )}
             </div>
             {status?.error && (
               <span className="settings-row-hint plugin-row-error" role="alert">

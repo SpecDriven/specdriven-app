@@ -403,7 +403,10 @@ async function exists(path: string): Promise<boolean> {
 // ---- the routes ----------------------------------------------------------------
 
 export interface MarketplaceRouteDeps {
-  /** The hosted demo offers none of this (its host is shared). */
+  /**
+   * The hosted demo lets a visitor browse, from the cache and never
+   * refreshed, and change nothing (its host is shared).
+   */
   demo(): boolean;
   readState(): Promise<Record<string, unknown>>;
   persist(state: Record<string, unknown>): Promise<void>;
@@ -422,9 +425,9 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   deletePlugin: Handler;
 } {
   const guard =
-    (handler: Handler): Handler =>
+    (handler: Handler, inDemo = false): Handler =>
     async (req, params) => {
-      if (deps.demo()) return json({ error: "Plugins cannot be installed in demo mode" }, 403);
+      if (deps.demo() && !inDemo) return json({ error: "Plugins cannot be installed in demo mode" }, 403);
       try {
         return await handler(req, params);
       } catch (e) {
@@ -436,10 +439,10 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
 
   return {
     getMarketplaces: guard(async (req) => {
-      const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+      const refresh = !deps.demo() && new URL(req.url).searchParams.get("refresh") === "1";
       const marketplaces = await loadMarketplaces(await entries(), { refresh });
       return json({ marketplaces });
-    }),
+    }, true),
     postInstall: guard(async (req) => {
       const body = await bodyOf(req);
       const { marketplace, name, step } = body;

@@ -9,7 +9,7 @@ if (process.argv[2] === "plugin") {
 import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
 import { shell } from "./plugins/host/loader";
-import { isDemoMode, setupDemo } from "./server/demo";
+import { installDemoPlugins, isDemoMode, setupDemo } from "./server/demo";
 import { initTelemetry } from "./server/telemetry";
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
@@ -17,8 +17,12 @@ import { initTelemetry } from "./server/telemetry";
 initTelemetry();
 
 // Demo mode (DEMO_MODE=1): seed the ephemeral demo dataset and sandbox all
-// state under the demo root before startup reads any settings.
-if (isDemoMode()) await setupDemo();
+// state under the demo root before startup reads any settings, then fetch
+// the demo's marketplace plugins in the background.
+if (isDemoMode()) {
+  await setupDemo();
+  void installDemoPlugins();
+}
 
 // The API itself lives in server/api.ts so the desktop app can serve the
 // same routes over its app:// protocol (specs/desktop-app.spec.md).
