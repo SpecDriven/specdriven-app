@@ -155,7 +155,9 @@ test("every optional module is on except IntelliJ IDEA", async () => {
   // visitor's own machine, which a hosted demo cannot and should not do.
   expect(state.openTestsInIdea).toBe(false);
   // The profile behind the module switches (specs/app/plugins.feature.md
-  // "The profile lists enabled plugins in tab order"): every built-in, on.
+  // "The profile lists enabled plugins in tab order"): every built-in, on,
+  // then the Event Models from the marketplace — listed before the demo has
+  // fetched them (installDemoPlugins, not run here), so not active yet.
   expect(
     (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
   ).toEqual([
@@ -164,6 +166,7 @@ test("every optional module is on except IntelliJ IDEA", async () => {
     ["notebook", true, true],
     ["issues", true, true],
     ["tests", true, true],
+    ["models", true, false],
   ]);
 });
 

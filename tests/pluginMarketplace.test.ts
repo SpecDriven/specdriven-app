@@ -6,8 +6,8 @@
 // before anything is installed, refused with nothing left behind when the
 // app cannot run it, installed pinned to the ref the index names on
 // confirmation — its tab in the profile and its routes answering at once —
-// updated to the ref the index names now, and removed with its folder;
-// none of it in the demo.
+// updated to the ref the index names now, and removed with its folder.
+// The demo installs its own at start and lets a visitor browse, no more.
 
 import { $ } from "bun";
 import { afterEach, beforeEach, expect, test } from "bun:test";
@@ -19,6 +19,7 @@ import { setGitEngine, type GitEngine } from "../src/server/git";
 import { readState, writeState } from "../src/server/state";
 import { pluginStates, rescanPlugins, stopWatching, syncPlugins } from "../src/plugins/host/loader";
 import { setBuildDisabled } from "../src/plugins/host/build";
+import { DEMO_MARKETPLACE_PLUGINS, installDemoPlugins } from "../src/server/demo";
 import { marketplacesHome, pluginsHome } from "../src/plugins/host/sources";
 import {
   INSTALL_RECORD_FILE,
@@ -434,10 +435,23 @@ test("the settings carry the marketplaces, and GET /api/state lists them", async
   ]);
 });
 
-test("none of it is offered in the hosted demo", async () => {
+test("the hosted demo browses the marketplaces, never refreshed, and changes nothing", async () => {
+  const market = join(work, "market");
+  await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.0.0" }], { hello: { version: "1.0.0" } });
+  await boot([{ name: "local", source: market }]);
   process.env.DEMO_MODE = "1";
+  const listed = await json(await api("GET", "/api/plugins/marketplaces"));
+  expect(listed.status).toBe(200);
+  expect(listed.body.marketplaces[0].index.plugins.map((p: any) => p.name)).toEqual(["hello"]);
+  // A row added upstream stays away: a visitor's Refresh does not pull.
+  await marketplaceRepo(market, [
+    { name: "hello", source: "./plugins/hello", version: "1.0.0" },
+    { name: "later", source: "./plugins/later", version: "0.1.0" },
+  ], { hello: { version: "1.0.0" }, later: { version: "0.1.0" } });
+  const refreshed = await json(await api("GET", "/api/plugins/marketplaces?refresh=1"));
+  expect(refreshed.body.marketplaces[0].index.plugins).toHaveLength(1);
+
   for (const [method, path] of [
-    ["GET", "/api/plugins/marketplaces"],
     ["POST", "/api/plugins/install"],
     ["POST", "/api/plugins/x/update"],
     ["DELETE", "/api/plugins/x"],
@@ -446,4 +460,31 @@ test("none of it is offered in the hosted demo", async () => {
     expect(status).toBe(403);
     expect(body.error).toMatch(/demo/);
   }
+});
+
+test("the hosted demo installs the Event Models from the marketplace at start and lists them on", async () => {
+  const market = join(work, "market");
+  await marketplaceRepo(market, [{ name: "models", source: "./plugins/models", version: "1.0.0" }], { models: { version: "1.0.0" } });
+  process.env.DEMO_MODE = "1";
+  await writeState(
+    { plugins: { enabled: DEMO_MARKETPLACE_PLUGINS.map((p) => p.id), marketplaces: [{ name: "specdriven", source: market }] } } as never,
+    root,
+  );
+  // Listed before the install lands: reported, not mounted.
+  let state = await json(await api("GET", "/api/state"));
+  expect(state.body.plugins.find((p: any) => p.id === "models")).toMatchObject({ enabled: true, active: false });
+
+  await installDemoPlugins([{ name: "specdriven", source: market }]);
+  state = await json(await api("GET", "/api/state"));
+  expect(state.body.plugins.find((p: any) => p.id === "models")).toMatchObject({
+    enabled: true,
+    active: true,
+    install: { marketplace: "specdriven", name: "models", version: "1.0.0" },
+  });
+  expect((await json(await api("GET", "/api/models"))).body).toEqual({ version: "1.0.0" });
+
+  // A restart finds it installed and fetches nothing.
+  await rm(market, { recursive: true, force: true });
+  await installDemoPlugins([{ name: "specdriven", source: market }]);
+  expect(await installedFolders()).toEqual(["models"]);
 });
