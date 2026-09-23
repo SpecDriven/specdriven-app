@@ -10,6 +10,10 @@ import { loadPageDoc, pageDocDirRel } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
 import { parsePage, serializePage } from "../src/server/parser";
 import { syncDataDir } from "../src/server/reload";
+// The folder's drift pass is the roadmap plugin's (src/plugins/builtin/pages
+// /host.ts): it runs while the switch has the plugin mounted.
+import "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 import {
   ROADMAP,
   ROADMAP_FOLDER,
@@ -65,9 +69,15 @@ test("ensurePageFolder creates the roadmap folder once", async () => {
 
 test("a sync tick creates the folder only when the setting is on", async () => {
   const clones = await twoClones(root);
+  await syncPlugins({ roadmap: false });
   await syncDataDir(clones.a);
   expect(await exists(join(clones.a, ROADMAP_FOLDER))).toBe(false);
-  await syncDataDir(clones.a, { roadmap: true });
+  await syncPlugins({ roadmap: true });
+  try {
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ roadmap: false });
+  }
   expect(await exists(join(clones.a, ROADMAP_FOLDER))).toBe(true);
 });
 
@@ -77,7 +87,12 @@ test("a sync tick commits and pushes every file in the roadmap folder", async ()
   await mkdir(join(clones.a, ROADMAP_FOLDER), { recursive: true });
   await writeFile(join(clones.a, ROADMAP_FOLDER, "pricing.md"), "# Pricing\n\nCharge for it.\n");
   await writeFile(join(clones.a, ROADMAP_FOLDER, "notes.md"), "# Notes\n");
-  await syncDataDir(clones.a, { roadmap: true });
+  await syncPlugins({ roadmap: true });
+  try {
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ roadmap: false });
+  }
 
   await git(clones.b, "pull", "origin", "main");
   expect(await Bun.file(join(clones.b, ROADMAP_FOLDER, "notes.md")).exists()).toBe(true);

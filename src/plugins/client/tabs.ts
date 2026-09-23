@@ -10,13 +10,15 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { Disposer } from "../kernel";
 import type { Crumb } from "../../frontend/Breadcrumbs";
-import type { ConfirmOptions, PromptOptions } from "../../frontend/ModalPrompts";
+import type { ConfirmOptions, PromptOptions, PromptResult } from "../../frontend/ModalPrompts";
 import type { PaletteGroup, PaletteItem } from "../../frontend/CommandPalette";
 import type { FeatureListing } from "../../server/features";
 import type { ProjectMember } from "../../server/members";
 
 export type Prompt = (opts: PromptOptions) => Promise<string | null>;
 export type Confirm = (opts: ConfirmOptions) => Promise<boolean>;
+/** A prompt with a radio group: the text together with the picked value. */
+export type PromptWithChoice = (opts: PromptOptions) => Promise<PromptResult | null>;
 
 /** What App hands a tab's components: the shared state and dialogs. */
 export interface TabApp {
@@ -27,6 +29,7 @@ export interface TabApp {
   repoCrumb: Crumb;
   autosaveSeconds: number;
   prompt: Prompt;
+  promptWithChoice: PromptWithChoice;
   confirm: Confirm;
   /** Opens the Settings dialog — where the GitHub sign-in lives, say. */
   openSettings: () => void;
@@ -85,6 +88,14 @@ export interface TabPlugin<V = unknown> {
      */
     resolve?(view: V): V | null;
   };
+  /**
+   * Whether picking the tab in the sidebar's tab bar also opens its home
+   * view. Absent is yes — the tab is the module's door. A list-only tab
+   * (a special folder's pages, specs/app/roadmap.feature.md) says no: the
+   * tab bar just turns the sidebar, and on a small screen the drawer stays
+   * open for a row to be picked.
+   */
+  opensOnSelect?: boolean;
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
   palette?: {
@@ -93,7 +104,12 @@ export interface TabPlugin<V = unknown> {
         store, or its own server route. */
     search?(query: string, signal: AbortSignal): PaletteHit<V>[] | Promise<PaletteHit<V>[]>;
     /** Commands the palette offers while the tab is mounted. */
-    commands?(host: { prompt: Prompt; confirm: Confirm; navigate: Navigate<V> }): PaletteItem[];
+    commands?(host: {
+      prompt: Prompt;
+      promptWithChoice: PromptWithChoice;
+      confirm: Confirm;
+      navigate: Navigate<V>;
+    }): PaletteItem[];
   };
   /**
    * Crumbs a feature page carries back into the module — an Event Model
@@ -106,6 +122,12 @@ export interface TabPlugin<V = unknown> {
    * names each. Null when the view bundles nothing.
    */
   session?(view: V): { models: string[]; labels: string[] } | null;
+  /**
+   * The name the command palette's Recent list shows for a view that was
+   * open, or null for a view not worth remembering. Absent, the tab's views
+   * are not remembered.
+   */
+  recent?(view: V): string | null;
   /** The tab's store, so App re-renders titles when it changes. */
   subscribe?(listener: () => void): () => void;
 }
@@ -219,5 +241,8 @@ declare module "../kernel" {
     /** The reload tick, with the plugin view that has the pane: refresh what
         is on screen, unless an editor is dirty. */
     "reload/tick": (open: PluginView | null) => void;
+    /** The app's settings changed (`GET /api/state`'s payload) — a switch a
+        module reads beside its own, the Google Calendar one say. */
+    "settings/changed": (state: Record<string, unknown>) => void;
   }
 }

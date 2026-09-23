@@ -12,17 +12,10 @@
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
 import { pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
-import {
-  NOTEBOOK,
-  ROADMAP,
-  TASKS,
-  ensurePageFolder,
-  importPageDrift,
-  type PageFolder,
-} from "./pages";
+import { NOTEBOOK, importPageDrift } from "./pages";
 import { ensureSpecsFolder } from "./features";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
-import { readState, needsDataRepo, normalizeRoadmap, normalizeTasks } from "./state";
+import { readState, needsDataRepo } from "./state";
 import { getLogger, withSpan } from "./telemetry";
 import { sync as pluginSync } from "../plugins/host/loader";
 
@@ -48,33 +41,11 @@ export async function reloadData(rootDir: string): Promise<string> {
     return "data repo not configured; skipped reload";
   }
   const dir = await resolveDataRepo(state.dataRepo!, rootDir);
-  // The notebook takes no option: its entries are pulled, absorbed and pushed
-  // whichever way its switch is set (specs/app/engineering-notebook.feature
-  // .md "Entries are shared through git") — the switch hides the tab, it does
-  // not stop the sync.
-  return syncDataDir(dir, {
-    roadmap: normalizeRoadmap(state.roadmap),
-    tasks: normalizeTasks(state.tasks),
-  });
-}
-
-/** What a tick does beyond pulling and pushing. */
-export interface SyncOptions {
-  /**
-   * The Roadmap setting (specs/app/roadmap.feature.md): on, the tick makes
-   * sure the `roadmap` folder exists and keeps its pages' documents in step
-   * with their markdown. Off, the folder is none of the app's business.
-   */
-  roadmap?: boolean;
-  /** The Tasks setting (specs/app/tasks.feature.md), the same for `tasks`. */
-  tasks?: boolean;
+  return syncDataDir(dir);
 }
 
 /** The tick itself, on an already-resolved data dir (shared with tests). */
-export async function syncDataDir(
-  dir: string,
-  { roadmap = false, tasks = false }: SyncOptions = {},
-): Promise<string> {
+export async function syncDataDir(dir: string): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
     const pulled = await pull(dir);
     if (!pulled.ok) {
@@ -105,19 +76,6 @@ export async function syncDataDir(
       if (lifted > 0) parts.push(`moved ${lifted} document(s) to the mirrored automerge layout`);
       const drifted = await importDrift(dir);
       if (drifted) parts.push(drifted);
-      // Scenario "Create roadmap folder if necessary", and its twin for the
-      // tasks folder: the folder is made here when the setting asks for one
-      // and the repo has none — and the push below commits everything in it,
-      // like any other saved change.
-      const shown: PageFolder[] = [
-        ...(roadmap ? [ROADMAP] : []),
-        ...(tasks ? [TASKS] : []),
-      ];
-      for (const kind of shown) {
-        await ensurePageFolder(dir, kind);
-        const drift = await importPageDrift(dir, kind);
-        if (drift) parts.push(drift);
-      }
       // The engineering notebook (specs/app/engineering-notebook.feature.md):
       // its entries drift like any page, but the folder is never made here.
       // The switch is on by default, and a default-on module that created a
@@ -129,8 +87,10 @@ export async function syncDataDir(
       const notebookDrift = await importPageDrift(dir, NOTEBOOK);
       if (notebookDrift) parts.push(notebookDrift);
       // The plugins' own drift passes (src/plugins/host/services.ts), in
-      // mount order, after the core's — the Event Models' folder among them
-      // (src/plugins/builtin/models/host.ts).
+      // mount order, after the core's — the roadmap and tasks folders, made
+      // here when their switch is on and the repo has none
+      // (src/plugins/builtin/pages/host.ts), and the Event Models' folder
+      // (src/plugins/builtin/models/host.ts) among them.
       parts.push(...(await pluginSync.run(dir)));
     }
     const synced = await syncSavedChanges(dir);

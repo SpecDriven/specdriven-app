@@ -12,6 +12,8 @@ import { loadPageDoc, pageDocDirRel } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
 import { parsePage, serializePage } from "../src/server/parser";
 import { syncDataDir } from "../src/server/reload";
+import "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 import {
   NOTEBOOK,
   NOTEBOOK_FOLDER,
@@ -70,8 +72,13 @@ test("a sync tick never creates the notebook folder", async () => {
   const clones = await twoClones(root);
   await syncDataDir(clones.a);
   expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
-  // Even with every other folder asked for, the notebook is not made.
-  await syncDataDir(clones.a, { roadmap: true, tasks: true });
+  // Even with every folder's plugin mounted, the notebook is not made.
+  await syncPlugins({ roadmap: true, tasks: true, notebook: true });
+  try {
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ roadmap: false, tasks: false });
+  }
   expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
 });
 
