@@ -2,9 +2,12 @@
 // MiniSearch index over feature names/descriptions and scenario names/bodies,
 // and one more over each special folder's pages — the roadmap's (specs/app
 // /roadmap.feature.md) and the tasks folder's (specs/app/tasks.feature.md) —
-// which is what that folder's sidebar tab searches instead of the specs. Each index is cached per data dir and rebuilt only when a stat
-// fingerprint of its files changes, so edits made by the API, the reload
-// cron's `git pull`, or an external editor are all picked up.
+// which is what that folder's sidebar tab searches instead of the specs —
+// and one per scope a plugin adds (the Event Models plugin's `models`),
+// over the files it lists. Each index is cached per data dir and rebuilt
+// only when a stat fingerprint of its files changes, so edits made by the
+// API, the reload cron's `git pull`, or an external editor are all picked
+// up.
 
 import { stat } from "node:fs/promises";
 import MiniSearch from "minisearch";
@@ -12,22 +15,43 @@ import { walk } from "./walk";
 import { readTextFile } from "./fsx";
 import { parseFeature, parsePage, titleFromFileName } from "./parser";
 import { PAGE_FOLDERS, pageFiles, pageFolderNamed, type PageFolder } from "./pages";
-import { MODELS_FOLDER, modelFiles } from "./models";
-import { modelTextError, parseModelFile } from "./eventModel/serialize";
-import { allElements } from "./eventModel/types";
 
 /**
- * What a search runs over: the spec files, a special folder's pages, or the
- * Event Models (roadmap/support-event-modeling.md) — what the Models tab
- * searches.
+ * A search scope a plugin adds (src/plugins/host/services.ts SearchScopes):
+ * the files it covers, and what of each one is searched — one hit per file,
+ * the `kind` the results carry. A file `document` returns null for (not
+ * one of the plugin's, or unreadable) is left out.
  */
-export type SearchScope = "specs" | (typeof PAGE_FOLDERS)[number]["folder"] | typeof MODELS_FOLDER;
+export interface SearchSource {
+  kind: string;
+  files(dataDir: string): Promise<string[]>;
+  document(fileName: string, content: string): { name: string; text: string } | null;
+}
+
+const pluginScopes = new Map<string, SearchSource>();
+
+/** Add a plugin's scope; the disposer takes it away again. */
+export function addSearchScope(scope: string, source: SearchSource): () => void {
+  if (scope === "specs" || pageFolderNamed(scope) !== null) {
+    throw new Error(`search scope ${scope} is the app's own`);
+  }
+  pluginScopes.set(scope, source);
+  return () => {
+    if (pluginScopes.get(scope) === source) pluginScopes.delete(scope);
+    for (const key of [...cache.keys()]) if (key.startsWith(`${scope}:`)) cache.delete(key);
+  };
+}
+
+/**
+ * What a search runs over: the spec files, a special folder's pages, or a
+ * scope a plugin added — what that plugin's tab searches.
+ */
+export type SearchScope = "specs" | (typeof PAGE_FOLDERS)[number]["folder"] | (string & {});
 
 export function isSearchScope(value: unknown): value is SearchScope {
   return (
     value === "specs" ||
-    value === MODELS_FOLDER ||
-    (typeof value === "string" && pageFolderNamed(value) !== null)
+    (typeof value === "string" && (pageFolderNamed(value) !== null || pluginScopes.has(value)))
   );
 }
 
@@ -37,7 +61,7 @@ interface SearchDoc {
   name: string;
   /** Indexed: feature description, scenario body (tests table excluded) or page body. */
   text: string;
-  kind: "feature" | "scenario" | "page" | "model";
+  kind: "feature" | "scenario" | "page" | (string & {});
   fileName: string;
   featureName: string;
   scenarioName?: string;
@@ -45,7 +69,8 @@ interface SearchDoc {
 }
 
 export interface SearchResultItem {
-  kind: "feature" | "scenario" | "page" | "model";
+  /** A plugin's hits carry its scope's kind (`model` for an Event Model). */
+  kind: "feature" | "scenario" | "page" | (string & {});
   /** Path relative to the data repo root, e.g. `billing/quotes.feature.md`. */
   fileName: string;
   /** The feature's display name — for a page hit, the page's. */
@@ -146,36 +171,25 @@ async function buildPageIndex(
   return index;
 }
 
-/**
- * One document per model: its name, and as text the titles of its slices,
- * elements and specifications — what someone remembers of a model.
- */
-async function buildModelIndex(
+/** One document per file of a plugin's scope, as the plugin reads it. */
+async function buildPluginIndex(
   dataDir: string,
+  source: SearchSource,
   files: string[],
 ): Promise<MiniSearch<SearchDoc>> {
   const docs: SearchDoc[] = [];
   for (const fileName of files) {
     const content = await readTextFile(`${dataDir}/${fileName}`);
-    if (content === null || modelTextError(content) !== null) continue;
-    const file = parseModelFile(content);
-    const name = file.name || titleFromFileName(fileName.replace(/\.model\.json$/, ""));
-    const words: string[] = [];
-    for (const slice of file.model.slices) {
-      words.push(slice.title);
-      for (const spec of slice.specifications) words.push(spec.title);
-    }
-    for (const { element } of allElements(file.model)) {
-      words.push(element.title);
-      if (element.description) words.push(element.description);
-    }
+    if (content === null) continue;
+    const found = source.document(fileName, content);
+    if (found === null) continue;
     docs.push({
-      id: `M:${fileName}`,
-      kind: "model",
-      name,
-      text: words.join(" · "),
+      id: `X:${fileName}`,
+      kind: source.kind,
+      name: found.name,
+      text: found.text,
       fileName,
-      featureName: name,
+      featureName: found.name,
     });
   }
   const index = newIndex();
@@ -184,11 +198,12 @@ async function buildModelIndex(
 }
 
 async function getIndex(dataDir: string, scope: SearchScope): Promise<MiniSearch<SearchDoc>> {
-  const folder = scope === "specs" || scope === MODELS_FOLDER ? null : pageFolderNamed(scope);
+  const folder = scope === "specs" ? null : pageFolderNamed(scope);
+  const source = folder || scope === "specs" ? undefined : pluginScopes.get(scope);
   const files = folder
     ? await pageFiles(dataDir, folder.folder)
-    : scope === MODELS_FOLDER
-      ? await modelFiles(dataDir, MODELS_FOLDER)
+    : source
+      ? await source.files(dataDir)
       : (await walk(dataDir)).files.sort();
   const fp = await fingerprint(dataDir, files);
   const key = `${scope}:${dataDir}`;
@@ -196,8 +211,8 @@ async function getIndex(dataDir: string, scope: SearchScope): Promise<MiniSearch
   if (cached && cached.fingerprint === fp) return cached.index;
   const index = folder
     ? await buildPageIndex(dataDir, files)
-    : scope === MODELS_FOLDER
-      ? await buildModelIndex(dataDir, files)
+    : source
+      ? await buildPluginIndex(dataDir, source, files)
       : await buildSpecsIndex(dataDir, files);
   cache.set(key, { fingerprint: fp, index });
   return index;
@@ -246,13 +261,14 @@ export async function searchSpecs(
   return search(dataDir, "specs", query, limit);
 }
 
-/** The same search over the Event Models: one hit per model. */
-export async function searchModels(
+/** The same search over a plugin's scope: one hit per file. */
+export async function searchScope(
   dataDir: string,
+  scope: string,
   query: string,
   limit = 20,
 ): Promise<SearchResultItem[]> {
-  return search(dataDir, MODELS_FOLDER, query, limit);
+  return search(dataDir, scope, query, limit);
 }
 
 /** The same search over a special folder's pages: one hit per page. */

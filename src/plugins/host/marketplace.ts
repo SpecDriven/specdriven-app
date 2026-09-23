@@ -16,7 +16,7 @@ import { join, resolve, sep } from "node:path";
 import { version as appVersion } from "../../../package.json";
 import { checkoutRef, clone, headCommit, pull } from "../../server/git";
 import { bodyOf, json, type Handler } from "../../server/http";
-import { builtinManifests } from "../builtin/manifests";
+import { builtinManifests, profileManifests } from "../builtin/manifests";
 import {
   INSTALL_RECORD_FILE,
   indexRowRefusal,
@@ -475,8 +475,8 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       // (while the folder is there, `seen` is what keeps the loader from
       // adopting it afresh), so a later reinstall goes on again.
       const state = await deps.readState();
-      const { enabled } = readProfile(state, builtinManifests);
-      writeProfile(state, enabled.filter((x) => x !== id), builtinManifests);
+      const { enabled } = readProfile(state, profileManifests);
+      writeProfile(state, enabled.filter((x) => x !== id), profileManifests);
       await deps.persist(state);
       await rescanPlugins();
       const dir = await removePluginFolder(id);

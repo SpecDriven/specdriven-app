@@ -34,6 +34,12 @@ export interface PluginMarketplaceProps {
   patchSettings(patch: Record<string, unknown>): Promise<boolean>;
   prompt(opts: PromptOptions): Promise<string | null>;
   confirm(opts: ConfirmOptions): Promise<boolean>;
+  /**
+   * A plugin the profile lists but nothing provides (a built-in that moved
+   * to the marketplace): Browse opens, the rows of that name are marked and
+   * scrolled to, so installing it is one click and its consent away.
+   */
+  wanted?: string | null;
   /** Re-read the plugins after an install, update or removal. */
   onChanged(): Promise<void>;
 }
@@ -63,7 +69,15 @@ export function consentBody(preview: InstallPreview, marketplace: string): strin
   return lines.join("\n\n");
 }
 
-export function PluginMarketplace({ marketplaces, plugins, patchSettings, prompt, confirm, onChanged }: PluginMarketplaceProps) {
+export function PluginMarketplace({
+  marketplaces,
+  plugins,
+  wanted = null,
+  patchSettings,
+  prompt,
+  confirm,
+  onChanged,
+}: PluginMarketplaceProps) {
   const [open, setOpen] = useState(false);
   const [statuses, setStatuses] = useState<MarketplaceStatus[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -87,6 +101,19 @@ export function PluginMarketplace({ marketplaces, plugins, patchSettings, prompt
   useEffect(() => {
     if (open) void load(false);
   }, [open, key, load]);
+
+  // Asked for a plugin by name: browse, and bring its row into view once listed.
+  useEffect(() => {
+    if (wanted) setOpen(true);
+  }, [wanted]);
+  const listedWanted =
+    wanted !== null && (statuses ?? []).some((m) => m.index?.plugins.some((row) => row.name === wanted));
+  useEffect(() => {
+    if (!wanted || !listedWanted) return;
+    document
+      .querySelector(`.plugin-market-row[data-plugin="${CSS.escape(wanted)}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [wanted, listedWanted]);
 
   /** The installed plugin an index row corresponds to, by its install record. */
   const installedFor = (marketplace: string, name: string): PluginStatus | undefined =>
@@ -194,6 +221,11 @@ export function PluginMarketplace({ marketplaces, plugins, patchSettings, prompt
           </span>
         )}
         {open && loading && statuses === null && <span className="settings-row-hint">Reading the marketplaces…</span>}
+        {open && wanted && statuses !== null && !loading && !listedWanted && (
+          <span className="settings-row-hint plugin-row-error" role="alert">
+            No marketplace here lists {wanted}. Add the one that does, or Refresh.
+          </span>
+        )}
         {open &&
           statuses?.map((m) => (
             <div className="plugin-market" key={m.name} data-marketplace={m.name}>
@@ -224,7 +256,11 @@ export function PluginMarketplace({ marketplaces, plugins, patchSettings, prompt
                 const id = `${m.name}/${row.name}`;
                 const working = busy === id || (installed !== undefined && busy === installed.id);
                 return (
-                  <div className="plugin-market-row" key={row.name} data-plugin={row.name}>
+                  <div
+                    className={`plugin-market-row${row.name === wanted && !installed ? " wanted" : ""}`}
+                    key={row.name}
+                    data-plugin={row.name}
+                  >
                     <span className="settings-row-label">
                       <span className="plugin-row-name">
                         {row.name}

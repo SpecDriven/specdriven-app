@@ -8,7 +8,6 @@
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
 import type { EntryKind, ExternalLink, PullRequestLink, ScenarioStatus } from "../parser";
-import type { EventModel, Layout, Links } from "../eventModel/types";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
 // the doc-only `draft` state.
@@ -131,31 +130,6 @@ export type PageDoc = {
    * mix of two.
    */
   supersedes?: { title: string; url: string };
-};
-
-// Event Model documents (roadmap/support-event-modeling.md): the
-// `models/<slug>.model.json` file in the data repo is a projection of the
-// document below — canonical JSON (src/server/eventModel/serialize.ts) —
-// so two people moving cards on the same canvas merge at the CRDT level.
-// The model half keeps the published schema's shape (src/server/eventModel/
-// types.ts) as nested maps and lists, so a title edited here and a card
-// moved there both land; titles and descriptions are collaborative text.
-export const MODEL_SCHEMA_VERSION = 1;
-
-export type ModelDoc = {
-  schemaVersion: number;
-  /** Stable identity of the document, independent of its file path. */
-  id: string;
-  /** The model's name — the file's `name`, what the sidebar lists. */
-  name: string;
-  /** The published schema's half: the slices and everything in them. */
-  model: EventModel;
-  /** Where each card sits on the canvas. */
-  layout: Layout;
-  /** Which feature file holds each slice's scenarios. */
-  links: Links;
-  /** Name of the project member the model is assigned to; set whole. */
-  assigned?: string;
 };
 
 // Test management (specs/app/tests.feature.md): a lightweight

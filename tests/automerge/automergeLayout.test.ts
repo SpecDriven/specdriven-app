@@ -1,7 +1,7 @@
 // The store's mirrored layout (specs/datastore/automerge-store.feature.md
 // "Storage layout"): a document's directory is its source path with the top
 // folder mapped — `specs/`, `roadmap/`, `tasks/`, `notebook/` as they are,
-// `models/` as `event-models/` — plus `test-management/project/` for the one
+// `models/` (the Event Models plugin's) as `event-models/` — plus `test-management/project/` for the one
 // document with no markdown side. And the one-shot migration
 // (src/server/migrate.ts migrateAutomergeLayout) that lifts a repo written
 // under the old per-kind roots (`features/`, `docs/`, `models/`, `testing/`)
@@ -16,21 +16,21 @@ import { $ } from "bun";
 import {
   AUTOMERGE_ROOT,
   createFeatureDoc,
-  createModelDoc,
+  createFileDoc,
   createPageDoc,
   createTestingDoc,
   docDirRel,
   featureFileOfDocidPath,
   listFeatureDocs,
-  listModelDocs,
+  listFileDocs,
   listPageDocs,
   loadFeatureDoc,
-  loadModelDoc,
+  loadFileDoc,
   loadPageDoc,
   loadTestingDoc,
-  modelDocDirRel,
+  fileDocDirRel,
   newFeatureDoc,
-  newModelDoc,
+  newFileDoc,
   newPageDoc,
   newTestingDoc,
   pageDocDirRel,
@@ -76,8 +76,9 @@ function pageDoc(name: string) {
   return newPageDoc({ name, body: "some body\n" });
 }
 
+/** An Event Model's document, as the Models plugin keeps one per model file. */
 function modelDoc() {
-  return newModelDoc({
+  return newFileDoc(1, {
     name: "Cart",
     model: { slices: [] },
     layout: { lanes: [], slices: {}, elements: {} },
@@ -91,7 +92,7 @@ async function seedEveryKind(dataDir: string): Promise<Record<string, string>> {
   ids[FEATURE] = (await createFeatureDoc(dataDir, FEATURE, featureDoc())).docId;
   ids[ROADMAP_PAGE] = (await createPageDoc(dataDir, ROADMAP_PAGE, pageDoc("Auth"))).docId;
   ids[TASK_PAGE] = (await createPageDoc(dataDir, TASK_PAGE, pageDoc("Ship it"))).docId;
-  ids[MODEL] = (await createModelDoc(dataDir, MODEL, modelDoc())).docId;
+  ids[MODEL] = (await createFileDoc(dataDir, MODEL, modelDoc())).docId;
   ids.testing = (await createTestingDoc(dataDir, newTestingDoc())).docId;
   return ids;
 }
@@ -129,8 +130,8 @@ test("a document's directory mirrors its source path under the store root", () =
   expect(pageDocDirRel("notebook/2026-09-12-worktrees.md")).toBe(
     ".specdriven/automerge/notebook/2026-09-12-worktrees.md",
   );
-  expect(modelDocDirRel(MODEL)).toBe(".specdriven/automerge/event-models/cart.model.json");
-  expect(modelDocDirRel("models/claims/home.model.json")).toBe(
+  expect(fileDocDirRel(MODEL)).toBe(".specdriven/automerge/event-models/cart.model.json");
+  expect(fileDocDirRel("models/claims/home.model.json")).toBe(
     ".specdriven/automerge/event-models/claims/home.model.json",
   );
   expect(testingDocDirRel()).toBe(".specdriven/automerge/test-management/project");
@@ -149,7 +150,7 @@ test("listings walk the mirrored folders and come back with the source folder in
   expect(await listPageDocs(root, "roadmap")).toEqual([ROADMAP_PAGE]);
   expect(await listPageDocs(root, "tasks")).toEqual([TASK_PAGE]);
   expect(await listPageDocs(root, "notebook")).toEqual([]);
-  expect(await listModelDocs(root)).toEqual([MODEL]);
+  expect(await listFileDocs(root, "models", ".model.json")).toEqual([MODEL]);
   const top = (await readdir(join(root, AUTOMERGE_ROOT))).sort();
   expect(top).toEqual(["event-models", "roadmap", "specs", "tasks", "test-management"]);
 });
@@ -171,11 +172,11 @@ test("the migration lifts every kind out of the old roots in one commit, identit
   expect(await docid(data, docDirRel(FEATURE))).toBe(ids[FEATURE]!);
   expect(await docid(data, pageDocDirRel(ROADMAP_PAGE))).toBe(ids[ROADMAP_PAGE]!);
   expect(await docid(data, pageDocDirRel(TASK_PAGE))).toBe(ids[TASK_PAGE]!);
-  expect(await docid(data, modelDocDirRel(MODEL))).toBe(ids[MODEL]!);
+  expect(await docid(data, fileDocDirRel(MODEL))).toBe(ids[MODEL]!);
   expect(await docid(data, testingDocDirRel())).toBe(ids.testing!);
   expect((await loadFeatureDoc(data, FEATURE))?.docId).toBe(ids[FEATURE]!);
   expect((await loadPageDoc(data, ROADMAP_PAGE))?.doc.name).toBe("Auth");
-  expect((await loadModelDoc(data, MODEL))?.doc.name).toBe("Cart");
+  expect((await loadFileDoc<{ name: string }>(data, MODEL))?.doc.name).toBe("Cart");
   expect((await loadTestingDoc(data))?.docId).toBe(ids.testing!);
 
   // One commit of pure renames, pushed, tree clean.

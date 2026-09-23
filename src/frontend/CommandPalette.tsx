@@ -23,7 +23,8 @@ export type PaletteGroup =
   | "Notebook"
   | "Tests"
   | "Issues"
-  | "Models";
+  // A plugin's own group (the Event Models plugin's "Models"), after these.
+  | (string & {});
 
 /** What the query searches, after the sidebar tab the palette opened from. */
 export type PaletteScope =
@@ -33,7 +34,6 @@ export type PaletteScope =
   | "notebook"
   | "tests"
   | "issues"
-  | "models"
   // A plugin's tab, by its id (src/plugins/client/tabs.ts).
   | (string & {});
 
@@ -60,8 +60,13 @@ const GROUP_ORDER: PaletteGroup[] = [
   "Notebook",
   "Tests",
   "Issues",
-  "Models",
 ];
+
+/** A group's place in the list: the app's in their order, a plugin's after them. */
+function groupRank(group: PaletteGroup): number {
+  const i = GROUP_ORDER.indexOf(group);
+  return i < 0 ? GROUP_ORDER.length : i;
+}
 
 export function CommandPalette({
   initialQuery,
@@ -131,7 +136,7 @@ export function CommandPalette({
     const list: PaletteItem[] = q
       ? [...actions.filter((a) => a.text.toLowerCase().includes(q)), ...found]
       : [...recent, ...actions];
-    return list.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
+    return list.sort((a, b) => groupRank(a.group) - groupRank(b.group));
   }, [query, actions, recent, found]);
 
   useEffect(() => setActive(0), [query, found.length]);
