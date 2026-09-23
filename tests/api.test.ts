@@ -66,10 +66,11 @@ describe("matchApi", () => {
   // offers. The `/kind` and `/supersedes` routes must win over `/:file`,
   // which the first-match table gives them by sitting above it.
   test("notebook routes match by method", async () => {
-    // On unless switched off; the tasks folder's estimate needs its switch.
+    // On unless switched off; the tasks folder's estimate and the roadmap's
+    // rename need their switches.
     await syncPlugins({ notebook: false });
     expect(matchApi("GET", "/api/notebook")).toBeNull();
-    await syncPlugins({ tasks: true });
+    await syncPlugins({ tasks: true, roadmap: true });
     expect(matchApi("GET", "/api/notebook")).not.toBeNull();
     expect(matchApi("POST", "/api/notebook")).not.toBeNull();
     expect(matchApi("DELETE", "/api/notebook")).toBeNull();
@@ -81,6 +82,14 @@ describe("matchApi", () => {
     const kind = matchApi("PUT", "/api/notebook/notebook%2F2026-09-12-spec-first.md/kind");
     expect(kind).not.toBeNull();
     expect(kind!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    // Renaming a page moves its file (issue #122), so every page folder has
+    // the route and it too must sit above `/:file`.
+    const rename = matchApi("POST", "/api/notebook/notebook%2F2026-09-12-spec-first.md/rename");
+    expect(rename).not.toBeNull();
+    expect(rename!.params).toEqual({ file: "notebook/2026-09-12-spec-first.md" });
+    expect(matchApi("POST", "/api/roadmap/roadmap%2Fpricing.md/rename")).not.toBeNull();
+    expect(matchApi("POST", "/api/tasks/tasks%2Fship-v2.md/rename")).not.toBeNull();
+    expect(matchApi("GET", "/api/notebook/notebook%2F2026-09-12-spec-first.md/rename")).toBeNull();
     // A task's estimate (specs/app/tasks.feature.md "Add task to Google
     // Calendar"): one more segment under the task's file, POST only.
     const estimate = matchApi("POST", "/api/tasks/tasks%2Fship-v2.md/estimate");

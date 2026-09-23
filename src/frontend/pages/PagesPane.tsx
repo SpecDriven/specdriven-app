@@ -885,7 +885,12 @@ export function PagesSidebar({
   /** A row's ⋯ menu (file name), if open. */
   const [menu, setMenu] = useState<string | null>(null);
 
-  /** Rename a page (its `# heading`), saved through the page's document. */
+  /**
+   * Rename a page: its `# heading` and its file both, so the url follows the
+   * title (specs/app/roadmap.feature.md). The server owns both halves — a
+   * `git mv` committed and pushed — so this is one round trip and the two can
+   * never drift apart.
+   */
   const renamePage = async (page: PageListing) => {
     const name = await app.prompt({
       title: `Rename ${tab.noun}`,
@@ -893,31 +898,27 @@ export function PagesSidebar({
       confirmLabel: "Rename",
     });
     if (!name || name.trim() === page.name) return;
-    // What the open editor holds lands first, so the rename reads it.
+    // What the open editor holds lands first, so the rename carries it.
     const open = openPage();
     if (open?.fileName === page.fileName) await open.flush();
-    const url = `/api/${tab.folder}/${encodeURIComponent(page.fileName)}`;
-    const res = await fetch(url);
-    const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
-    if (!res.ok || typeof data.content !== "string") {
-      toast.error(data.error ?? `Could not read the ${tab.noun}`);
-      return;
-    }
-    const next = serializePage({ ...parsePage(data.content), name: name.trim() });
-    const put = await fetch(url, {
-      method: "PUT",
+    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}/rename`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: next }),
+      body: JSON.stringify({ name: name.trim() }),
     });
-    const saved = (await put.json().catch(() => ({}))) as { error?: string };
-    if (!put.ok) {
-      toast.error(saved.error ?? `Could not rename the ${tab.noun}`);
+    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
+    if (!res.ok || !data.fileName) {
+      toast.error(data.error ?? `Could not rename the ${tab.noun}`);
       return;
     }
-    toast.success(`Renamed to “${name.trim()}” — saved locally.`);
+    toast.success(`Renamed to “${name.trim()}”.`);
     await store.load();
     const still = openPage();
-    if (still?.fileName === page.fileName) await still.reload();
+    if (still?.fileName !== page.fileName) return;
+    // Re-open at the new file name — never push, or the retired url is left
+    // behind for Back to land on; without push the url is rewritten in place.
+    if (data.fileName === page.fileName) await still.reload();
+    else navigate({ fileName: data.fileName });
   };
 
   /** Delete a page — committed and pushed right away, so it is confirmed first. */
