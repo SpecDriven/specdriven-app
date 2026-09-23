@@ -9,9 +9,10 @@ import { pluginStates, shell, sync, syncPlugins } from "../src/plugins/host/load
 import { pluginWanted } from "../src/plugins/manifest";
 import { manifest as testsManifest } from "../src/plugins/builtin/tests/manifest";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
+import { tabReachable } from "../src/plugins/client/tabs";
 
 afterEach(async () => {
-  await syncPlugins({ testing: false, issues: false });
+  await syncPlugins({ testing: false, issues: false, models: false });
   await syncClientPlugins([]);
 });
 
@@ -24,6 +25,13 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
       id: "issues",
       displayName: "GitHub issues",
       description: "The code repo's GitHub issues on their own tab",
+      builtin: true,
+      enabled: false,
+    },
+    {
+      id: "models",
+      displayName: "Event models",
+      description: "Event Models drawn on a canvas, sliced into specs",
       builtin: true,
       enabled: false,
     },
@@ -114,7 +122,7 @@ test("the Issues tab registers only while the store knows a GitHub repo", async 
     status: 404,
     body: { error: "No GitHub code repo" },
   };
-  globalThis.fetch = (async () => Response.json(answer.body, { status: answer.status })) as typeof fetch;
+  globalThis.fetch = (async () => Response.json(answer.body, { status: answer.status })) as unknown as typeof fetch;
   try {
     await syncClientPlugins([{ id: "issues", enabled: true }]);
     expect(tabs.list().map((t) => t.id)).toEqual([]);
@@ -135,6 +143,71 @@ test("the Issues tab registers only while the store knows a GitHub repo", async 
     expect(tabs.list()).toEqual([]);
 
     await syncClientPlugins([]);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the Models switch mounts the canvas's routes and the folder's drift pass", async () => {
+  await syncPlugins({ models: false });
+  expect(matchApi("GET", "/api/models")).toBeNull();
+  expect(matchApi("POST", "/api/models/m%2Fa.model.json/slices/s1/feature")).toBeNull();
+  expect(shell.matches("/models/shop/cart")).toBe(true);
+
+  await syncPlugins({ models: true });
+  expect(matchApi("GET", "/api/models")).not.toBeNull();
+  expect(matchApi("GET", "/api/models/models%2Fcart.model.json/export")!.params).toEqual({
+    file: "models/cart.model.json",
+  });
+  expect(matchApi("POST", "/api/models/m%2Fa.model.json/slices/s1/feature")!.params).toEqual({
+    file: "m/a.model.json",
+    slice: "s1",
+  });
+
+  await syncPlugins({ models: false });
+  expect(matchApi("PUT", "/api/models/models%2Fcart.model.json")).toBeNull();
+});
+
+test("the Models tab opens its first model, and a feature page crumbs back to it", async () => {
+  // The listing is the one fetch the plugin makes on mount; answered here.
+  const realFetch = globalThis.fetch;
+  let listed: unknown[] = [];
+  globalThis.fetch = (async () => Response.json({ models: listed })) as unknown as typeof fetch;
+  try {
+    await syncClientPlugins([{ id: "models", enabled: true }]);
+    const tab = tabs.get("models")!;
+    expect(tab).toBeDefined();
+    // An empty folder: the bare url resolves to nothing, so it goes home and
+    // the tab has no rail icon or chord.
+    expect(tabReachable(tab)).toBe(false);
+    const bare = matchPluginRoute("/models")!;
+    expect(bare.view).toEqual({ fileName: null });
+    expect(tab.route.resolve!(bare.view)).toBeNull();
+
+    listed = [
+      {
+        fileName: "models/cart.model.json",
+        name: "Cart",
+        links: [{ slice: "Add item", feature: "specs/cart.feature.md" }],
+      },
+    ];
+    await client.serial("data/changed");
+    expect(tabReachable(tab)).toBe(true);
+    expect(tab.route.resolve!(bare.view)).toEqual({ fileName: "models/cart.model.json" });
+    expect(tab.route.title({ fileName: "models/cart.model.json" })).toBe("Cart");
+
+    const crumbs = tab.featureCrumbs!("specs/cart.feature.md");
+    expect(crumbs.map((c) => [c.title, tab.route.path(c.view)])).toEqual([
+      ["Open the Event Model “Cart” — slice “Add item”", "/models/cart"],
+    ]);
+    expect(tab.featureCrumbs!("specs/other.feature.md")).toEqual([]);
+    expect(tab.session!({ fileName: "models/cart.model.json" })).toEqual({
+      models: ["models/cart.model.json"],
+      labels: ["the model “Cart”"],
+    });
+
+    await syncClientPlugins([]);
+    expect(tabs.get("models")).toBeUndefined();
   } finally {
     globalThis.fetch = realFetch;
   }

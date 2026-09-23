@@ -117,20 +117,8 @@ import { extractScenarios, parsePage } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
-import {
-  MODELS_FOLDER,
-  createModel,
-  deleteModel,
-  ensureModelsFolder,
-  exportModel,
-  generateSliceFeature,
-  listModels,
-  readModel,
-  saveModel,
-  sessionModels,
-} from "./models";
+import { MODELS_FOLDER, ensureModelsFolder, sessionModels } from "./models";
 import type { ModelInput } from "./agent";
-import { serializeExport } from "./eventModel/serialize";
 import {
   NOTEBOOK,
   ROADMAP,
@@ -811,7 +799,6 @@ const putState: Handler = async (req) => {
       syncDataDir(dir, {
         roadmap: normalizeRoadmap(state.roadmap),
         tasks: normalizeTasks(state.tasks),
-        models: normalizeModels(state.models),
       }),
     );
   }
@@ -1087,86 +1074,6 @@ const putEntrySupersedesRoute = withNotebook(
     }
   }),
 );
-
-// Event Models (roadmap/support-event-modeling.md): the JSON files in the
-// data repo's `models` folder, each drawn on the Models tab's canvas. The
-// same shape as the page routes: list, create, read, save, delete — plus an
-// export of the schema's half for other tools, and an import of one.
-const listModelsRoute = withDataDir(async (dir) => json({ models: await listModels(dir) }));
-
-const createModelRoute = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => null)) as { name?: unknown; model?: unknown } | null;
-  if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-  try {
-    return json({ fileName: await createModel(dir, body.name, body.model) }, 201);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-const readModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    const model = await readModel(dir, params.file ?? "");
-    return model === null ? json({ error: "Model not found" }, 404) : json(model);
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-// The canvas's autosave: a local write through the model's document — the
-// reload cron commits and pushes it, like a saved scenario.
-const saveModelRoute = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => null)) as { file?: unknown } | null;
-  if (body?.file === null || typeof body?.file !== "object") {
-    return json({ error: "file is required" }, 400);
-  }
-  try {
-    return json(await saveModel(dir, params.file ?? "", body.file));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-const deleteModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    return json(await deleteModel(dir, params.file ?? ""));
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
-
-// The bridge to the specs (src/server/eventModel/feature.ts): a slice
-// scaffolds its feature file — one scenario per Given / When / Then — and
-// is linked to it. The body may name the feature (with a `/` for a folder);
-// the slice's title otherwise. The canvas opens the new feature.
-const generateSliceFeatureRoute = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-  const name = typeof body?.name === "string" ? body.name : undefined;
-  try {
-    return json(await generateSliceFeature(dir, params.file ?? "", params.slice ?? "", name), 201);
-  } catch (e) {
-    const message = (e as Error).message;
-    return json({ error: message }, /not found/i.test(message) ? 404 : 400);
-  }
-});
-
-// The schema's half alone, as a download — what eventmodelers.ai and the
-// other tools that speak the published schema take.
-const exportModelRoute = withDataDir(async (dir, _req, params) => {
-  try {
-    const model = await exportModel(dir, params.file ?? "");
-    if (model === null) return json({ error: "Model not found" }, 404);
-    const stem = (params.file ?? "").split("/").pop()!.replace(/\.model\.json$/, "");
-    return new Response(serializeExport(model), {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${stem}.eventmodel.json"`,
-      },
-    });
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-});
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
@@ -2013,13 +1920,6 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
   ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
   ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
-  ["GET", "/api/models", listModelsRoute],
-  ["POST", "/api/models", createModelRoute],
-  ["GET", "/api/models/:file", readModelRoute],
-  ["PUT", "/api/models/:file", saveModelRoute],
-  ["DELETE", "/api/models/:file", deleteModelRoute],
-  ["GET", "/api/models/:file/export", exportModelRoute],
-  ["POST", "/api/models/:file/slices/:slice/feature", generateSliceFeatureRoute],
   ["GET", "/api/tasks", listPagesRoute(TASKS)],
   ["POST", "/api/tasks", createPageRoute(TASKS)],
   ["GET", "/api/tasks/:file", readPageRoute(TASKS)],

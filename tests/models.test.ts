@@ -33,7 +33,10 @@ import {
 import { syncDataDir } from "../src/server/reload";
 import { searchModels, resetSearchCache } from "../src/server/search";
 import { normalizeModels } from "../src/server/state";
-import { modelLink, parseRoute, pagePath } from "../src/frontend/route";
+import { parseRoute } from "../src/frontend/route";
+import { modelLink, modelsPath, parseModelsRoute } from "../src/plugins/builtin/models/route";
+import "../src/server/api";
+import { syncPlugins } from "../src/plugins/host/loader";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
 
 let root: string;
@@ -104,11 +107,19 @@ test("ensureModelsFolder creates the folder once", async () => {
   expect(await ensureModelsFolder(root)).toBe(false);
 });
 
+// The folder's drift pass is the plugin's (src/plugins/builtin/models/
+// host.ts): it runs while the switch has the plugin mounted.
 test("a sync tick creates the folder only when the setting is on", async () => {
   const clones = await twoClones(root);
+  await syncPlugins({ models: false });
   await syncDataDir(clones.a);
   expect(await exists(join(clones.a, MODELS_FOLDER))).toBe(false);
-  await syncDataDir(clones.a, { models: true });
+  await syncPlugins({ models: true });
+  try {
+    await syncDataDir(clones.a);
+  } finally {
+    await syncPlugins({ models: false });
+  }
   expect(await exists(join(clones.a, MODELS_FOLDER))).toBe(true);
 });
 
@@ -121,12 +132,18 @@ test("model paths are the folder and what is under it", () => {
 test("a model's url is its path under the folder", () => {
   expect(modelLink("models/cart.model.json")).toBe("/models/cart");
   expect(modelLink("models/shop/cart.model.json")).toBe("/models/shop/cart");
-  expect(parseRoute("/models/cart")).toEqual({ model: "models/cart.model.json" });
-  expect(parseRoute("/models/shop/cart.model.json")).toEqual({ model: "models/shop/cart.model.json" });
-  // The bare folder names the Models tab, which opens on its first model
-  // (route.ts "a bare special folder names its tab").
-  expect(parseRoute("/models")).toEqual({ pageFolder: "models" });
-  expect(pagePath(null, null, null, "models/cart.model.json")).toBe("/models/cart");
+  // The plugin parses its own urls (src/plugins/builtin/models/route.ts); to
+  // the core router they are home until the mounted tab claims them.
+  expect(parseModelsRoute("/models/cart")).toEqual({ fileName: "models/cart.model.json" });
+  expect(parseModelsRoute("/models/shop/cart.model.json")).toEqual({
+    fileName: "models/shop/cart.model.json",
+  });
+  // The bare folder names the Models tab, which opens on its first model.
+  expect(parseModelsRoute("/models")).toEqual({ fileName: null });
+  expect(parseModelsRoute("/modelsx")).toBeNull();
+  expect(parseRoute("/models/cart")).toEqual({});
+  expect(modelsPath({ fileName: "models/cart.model.json" })).toBe("/models/cart");
+  expect(modelsPath({ fileName: null })).toBe("/models");
 });
 
 test("listModels names the models, nested ones included, skipping what is not one", async () => {

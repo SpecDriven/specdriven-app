@@ -49,12 +49,10 @@ describe("parseRoute", () => {
     expect(parseRoute("/tasks")).toEqual({ pageFolder: "tasks" });
     expect(parseRoute("/roadmap")).toEqual({ pageFolder: "roadmap" });
     expect(parseRoute("/notebook")).toEqual({ pageFolder: "notebook" });
-    expect(parseRoute("/models")).toEqual({ pageFolder: "models" });
     // A trailing slash is the same url; empty segments are dropped.
     expect(parseRoute("/tasks/")).toEqual({ pageFolder: "tasks" });
     // A folder with a page after it still addresses that page.
     expect(parseRoute("/tasks/ship-v2")).toEqual({ page: "tasks/ship-v2.md" });
-    expect(parseRoute("/models/cart")).toEqual({ model: "models/cart.model.json" });
   });
 
   // GitHub issues (specs/app/github-issues.feature.md): the list, the

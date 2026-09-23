@@ -64,7 +64,7 @@ import type { ConfirmOptions, PromptOptions } from "../ModalPrompts";
 import { createPromiseQueue } from "../promiseQueue";
 import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
-import { modelLink } from "../route";
+import { modelLink } from "../../plugins/builtin/models/route";
 import { Inspector } from "./Inspector";
 import { SliceActionsContext, type SliceActions } from "./context";
 import { dropTarget } from "./geometry";
@@ -254,6 +254,11 @@ function ModelCanvas({
     if (file) derive(file);
   }, [file, derive]);
 
+  // Read through a ref, so a new callback from a re-rendering parent does not
+  // re-run the load below.
+  const onClosedRef = useRef(onClosed);
+  onClosedRef.current = onClosed;
+
   // Load, and re-read on the reload tick while nothing is unsaved.
   const load = useCallback(async (): Promise<void> => {
     const gen = ++loadGen.current;
@@ -263,7 +268,7 @@ function ModelCanvas({
     if (!res.ok || !data.file) {
       if (res.status === 404) {
         toast.error(`Model "${fileName}" not found — the link may be stale.`);
-        onClosed();
+        onClosedRef.current();
         return;
       }
       setError(data.error ?? `Could not open the model "${fileName}"`);
@@ -277,7 +282,7 @@ function ModelCanvas({
     fileRef.current = data.file;
     setFile(data.file);
     setDirty(false);
-  }, [fileName, onClosed]);
+  }, [fileName]);
 
   useEffect(() => {
     void load();
