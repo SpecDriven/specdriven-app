@@ -26,6 +26,11 @@ export interface PluginStatus {
 export interface ClientConfig {
   /** Demo mode (src/server/demo.ts): read-only modules, no writes offered. */
   demo: boolean;
+  /**
+   * `GET /api/state`'s payload as it stood at mount; later changes arrive
+   * as the "settings/changed" event.
+   */
+  settings?: Record<string, unknown>;
 }
 
 /**

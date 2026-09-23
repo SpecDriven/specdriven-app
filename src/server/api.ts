@@ -89,7 +89,6 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
-import { EstimateError, estimateMinutes } from "./estimate";
 import {
   ChatError,
   answerPermission,
@@ -113,34 +112,13 @@ import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
-import { extractScenarios, parsePage } from "./parser";
+import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchModels, searchPages, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import { MODELS_FOLDER, ensureModelsFolder, sessionModels } from "./models";
 import type { ModelInput } from "./agent";
-import {
-  NOTEBOOK,
-  ROADMAP,
-  TASKS,
-  createPage,
-  deletePage,
-  ensurePageFolder,
-  listPages,
-  pageFolderNamed,
-  readPage,
-  savePage,
-  type PageFolder,
-} from "./pages";
-import type { PageView } from "./pages";
-import {
-  byNewest,
-  createEntry,
-  entryFileOf,
-  setEntryKind,
-  setSupersedes,
-  supersededBy,
-} from "./notebook";
+import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
 import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
@@ -795,12 +773,7 @@ const putState: Handler = async (req) => {
   // is logged and the switch still stands; the folder is configured either way.
   if (pickedDir) {
     const dir = pickedDir;
-    await syncTick(() =>
-      syncDataDir(dir, {
-        roadmap: normalizeRoadmap(state.roadmap),
-        tasks: normalizeTasks(state.tasks),
-      }),
-    );
+    await syncTick(() => syncDataDir(dir));
   }
   await applyNetSync(state);
   return json(await stateFields(state));
@@ -910,170 +883,6 @@ const getFeatures = withDataDir(async (dir) => {
     issuesRepo: await readIssuesRepo(dir),
   });
 });
-
-// The special folders' pages (specs/app/roadmap.feature.md, specs/app/tasks
-// .feature.md): the markdown files in the data repo's `roadmap` and `tasks`
-// folders, listed with the member each is assigned to. One set of handlers
-// serves both — the folder a route is mounted under picks the descriptor.
-const listPagesRoute = (kind: PageFolder) =>
-  withDataDir(async (dir) => json({ pages: await listPages(dir, kind) }));
-
-const createPageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, req) => {
-    const body = (await req.json().catch(() => null)) as { name?: unknown } | null;
-    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-    try {
-      return json({ fileName: await createPage(dir, kind, body.name) }, 201);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-const readPageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, _req, params) => {
-    try {
-      const page = await readPage(dir, kind, params.file ?? "");
-      return page === null
-        ? json({ error: `${kind.label[0]!.toUpperCase()}${kind.label.slice(1)} not found` }, 404)
-        : json(page);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// The page editor's autosave: a local write through the page's document —
-// the reload cron commits and pushes it, like a saved scenario.
-const savePageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
-    if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
-    try {
-      return json(await savePage(dir, kind, params.file ?? "", body.content));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// Deleting a page (specs/app/roadmap.feature.md): the markdown and its
-// document go, committed and pushed like a deleted feature.
-const deletePageRoute = (kind: PageFolder) =>
-  withDataDir(async (dir, _req, params) => {
-    try {
-      return json(await deletePage(dir, kind, params.file ?? ""));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  });
-
-// Add a task to Google Calendar (specs/app/tasks.feature.md): one short turn
-// of the developer's `claude` CLI proposes how long the task takes
-// (src/server/estimate.ts); the person confirms it in the client, which
-// writes the estimate on the page and opens the prefilled event itself.
-// Closed while the Google Calendar switch is off, like the other modules.
-// In demo mode the seam holds the scripted agent, which has no number to
-// give, so the route proposes one of its own.
-const DEMO_ESTIMATE_MINUTES = 30;
-
-const estimateTaskRoute = withDataDir(async (dir, _req, params) => {
-  if (!normalizeGoogleCalendar((await readState(getAppRoot())).googleCalendar)) {
-    return json({ error: "Google Calendar is switched off in Settings" }, 404);
-  }
-  let page: PageView | null;
-  try {
-    page = await readPage(dir, TASKS, params.file ?? "");
-  } catch (e) {
-    return json({ error: (e as Error).message }, 400);
-  }
-  if (page === null) return json({ error: "Task not found" }, 404);
-  if (isDemoMode()) return json({ minutes: DEMO_ESTIMATE_MINUTES });
-  try {
-    return json({ minutes: await estimateMinutes(parsePage(page.content), dir) });
-  } catch (e) {
-    if (e instanceof EstimateError) return json({ error: e.message }, e.status);
-    return json({ error: (e as Error).message }, 502);
-  }
-});
-
-// The engineering notebook (specs/app/engineering-notebook.feature.md): the
-// dated markdown entries in the data repo's `notebook` folder. Reading,
-// saving and deleting one is what any page does, so those routes are the
-// factories above with the notebook's descriptor — wrapped in the switch,
-// which unlike the other modules' is on unless it has been turned off. Only
-// what makes an entry an entry is handled here: creating one with today's
-// date and an author, and the two metadata edits the header offers.
-const withNotebook = (handler: Handler): Handler =>
-  async (req, params) => {
-    if (!normalizeNotebook((await readState(getAppRoot())).notebook)) {
-      return json({ error: "The engineering notebook is switched off in Settings" }, 404);
-    }
-    return handler(req, params);
-  };
-
-const listEntriesRoute = withNotebook(
-  withDataDir(async (dir) => {
-    // Newest first, and each superseded entry told which entry replaced it —
-    // derived on every read, so a link removed by hand takes its badge with
-    // it on the next sync.
-    const entries = byNewest(await listPages(dir, NOTEBOOK));
-    return json({ pages: entries, supersededBy: supersededBy(entries) });
-  }),
-);
-
-const createEntryRoute = withNotebook(
-  withDataDir(async (dir, req) => {
-    const body = (await req.json().catch(() => null)) as {
-      name?: unknown;
-      kind?: unknown;
-    } | null;
-    if (typeof body?.name !== "string") return json({ error: "name is required" }, 400);
-    if (body.kind !== undefined && body.kind !== "Observation" && body.kind !== "Decision") {
-      return json({ error: "kind must be Observation or Decision" }, 400);
-    }
-    try {
-      const kind = body.kind ?? "Observation";
-      return json({ fileName: await createEntry(dir, body.name, kind) }, 201);
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
-
-// The kind chip in an entry's header, and the "Supersedes…" picker beside it.
-// Both are local writes through the document, like any page save.
-const putEntryKindRoute = withNotebook(
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
-    if (body?.kind !== "Observation" && body?.kind !== "Decision") {
-      return json({ error: "kind must be Observation or Decision" }, 400);
-    }
-    try {
-      return json(await setEntryKind(dir, params.file ?? "", body.kind));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
-
-const putEntrySupersedesRoute = withNotebook(
-  withDataDir(async (dir, req, params) => {
-    const body = (await req.json().catch(() => null)) as {
-      title?: unknown;
-      url?: unknown;
-    } | null;
-    // A null body — or one with no url — unpicks the link.
-    const url = typeof body?.url === "string" ? body.url.trim() : "";
-    try {
-      if (!url) return json(await setSupersedes(dir, params.file ?? "", null));
-      if (typeof body?.title !== "string" || !body.title.trim()) {
-        return json({ error: "title is required" }, 400);
-      }
-      if (entryFileOf(url) === null) return json({ error: "url must name an entry" }, 400);
-      return json(await setSupersedes(dir, params.file ?? "", { title: body.title.trim(), url }));
-    } catch (e) {
-      return json({ error: (e as Error).message }, 400);
-    }
-  }),
-);
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
@@ -1915,24 +1724,6 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/search", getSearch],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
-  ["GET", "/api/roadmap", listPagesRoute(ROADMAP)],
-  ["POST", "/api/roadmap", createPageRoute(ROADMAP)],
-  ["GET", "/api/roadmap/:file", readPageRoute(ROADMAP)],
-  ["PUT", "/api/roadmap/:file", savePageRoute(ROADMAP)],
-  ["DELETE", "/api/roadmap/:file", deletePageRoute(ROADMAP)],
-  ["GET", "/api/tasks", listPagesRoute(TASKS)],
-  ["POST", "/api/tasks", createPageRoute(TASKS)],
-  ["GET", "/api/tasks/:file", readPageRoute(TASKS)],
-  ["POST", "/api/tasks/:file/estimate", estimateTaskRoute],
-  ["PUT", "/api/tasks/:file", savePageRoute(TASKS)],
-  ["DELETE", "/api/tasks/:file", deletePageRoute(TASKS)],
-  ["GET", "/api/notebook", listEntriesRoute],
-  ["POST", "/api/notebook", createEntryRoute],
-  ["PUT", "/api/notebook/:file/kind", putEntryKindRoute],
-  ["PUT", "/api/notebook/:file/supersedes", putEntrySupersedesRoute],
-  ["GET", "/api/notebook/:file", withNotebook(readPageRoute(NOTEBOOK))],
-  ["PUT", "/api/notebook/:file", withNotebook(savePageRoute(NOTEBOOK))],
-  ["DELETE", "/api/notebook/:file", withNotebook(deletePageRoute(NOTEBOOK))],
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
