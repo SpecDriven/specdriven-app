@@ -6,8 +6,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { handleApi, matchApi } from "../src/server/api";
 import { pluginStates, shell, sync, syncPlugins } from "../src/plugins/host/loader";
-import { pluginWanted } from "../src/plugins/manifest";
-import { manifest as testsManifest } from "../src/plugins/builtin/tests/manifest";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { hasLegacyKeys, legacyFields, readProfile, withPlugin, writeProfile } from "../src/plugins/profile";
+import { version as appVersion } from "../package.json";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 import { tabReachable, type TabPlugin } from "../src/plugins/client/tabs";
 import { pageSettings } from "../src/frontend/pages/pages";
@@ -21,50 +22,36 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   await syncPlugins({ testing: false });
   expect(matchApi("GET", "/api/tests")).toBeNull();
   expect(await handleApi(new Request("http://x/api/tests"))).toBeNull();
+  // The profile's entries first — the notebook, on unless switched off — then
+  // the built-ins it leaves off, in load order.
+  const row = (id: string, enabled: boolean) => {
+    const m = builtinManifests.find((x) => x.id === id)!;
+    return {
+      id,
+      displayName: m.displayName,
+      description: m.description,
+      version: appVersion,
+      builtin: true,
+      installed: true,
+      enabled,
+      active: enabled,
+    };
+  };
   expect(pluginStates()).toEqual([
-    // The special folders come first; the notebook is on unless switched off.
-    {
-      id: "roadmap",
-      displayName: "Roadmap",
-      description: "Markdown roadmap pages on their own tab",
-      builtin: true,
-      enabled: false,
-    },
-    {
-      id: "tasks",
-      displayName: "Tasks",
-      description: "Tasks to assign, tick off and put on the calendar",
-      builtin: true,
-      enabled: false,
-    },
-    {
-      id: "notebook",
-      displayName: "Engineering notebook",
-      description: "A shared, dated log of observations and decisions",
-      builtin: true,
-      enabled: true,
-    },
-    {
-      id: "issues",
-      displayName: "GitHub issues",
-      description: "The code repo's GitHub issues on their own tab",
-      builtin: true,
-      enabled: false,
-    },
-    {
-      id: "models",
-      displayName: "Event models",
-      description: "Event Models drawn on a canvas, sliced into specs",
-      builtin: true,
-      enabled: false,
-    },
-    {
-      id: "tests",
-      displayName: "Test management",
-      description: "Test cases, plans and runs on their own tab",
-      builtin: true,
-      enabled: false,
-    },
+    row("notebook", true),
+    row("roadmap", false),
+    row("tasks", false),
+    row("issues", false),
+    row("models", false),
+    row("tests", false),
+  ]);
+  expect(pluginStates().map((p) => [p.displayName, p.description])).toEqual([
+    ["Engineering notebook", "A shared, dated log of observations and decisions"],
+    ["Roadmap", "Markdown roadmap pages on their own tab"],
+    ["Tasks", "Tasks to assign, tick off and put on the calendar"],
+    ["GitHub issues", "The code repo's GitHub issues on their own tab"],
+    ["Event models", "Event Models drawn on a canvas, sliced into specs"],
+    ["Test management", "Test cases, plans and runs on their own tab"],
   ]);
 
   await syncPlugins({ testing: true });
@@ -84,11 +71,88 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   expect(pluginStates().find((p) => p.id === "tests")!.enabled).toBe(false);
 });
 
-test("a switch that is absent means the manifest's default", () => {
-  expect(pluginWanted(testsManifest, {})).toBe(false);
-  expect(pluginWanted(testsManifest, { testing: true })).toBe(true);
-  expect(pluginWanted(testsManifest, { testing: "yes" })).toBe(false);
-  expect(pluginWanted({ ...testsManifest, switch: undefined }, {})).toBe(true);
+// The profile (specs/app/plugins.feature.md "The profile lists enabled
+// plugins in tab order"): `plugins.enabled` when the settings have it; a
+// settings file from before plugins is read as the matching list.
+test("a settings file from before plugins is read as the matching profile", () => {
+  // Nothing at all: the manifests' defaults — only the notebook is on.
+  expect(readProfile({}, builtinManifests)).toEqual({ enabled: ["notebook"], migrated: true });
+  // The legacy switches, in load order whatever order the file had them in.
+  expect(
+    readProfile({ testing: true, notebook: false, roadmap: true, models: "yes" }, builtinManifests),
+  ).toEqual({ enabled: ["roadmap", "tests"], migrated: true });
+  // The list, once there, is the whole truth: order kept, legacy keys ignored,
+  // an id nothing provides kept for Settings to report, junk dropped.
+  const state: Record<string, unknown> = {
+    plugins: { enabled: ["tests", "notebook", "acme-jira", "tests", 7, ""] },
+    testing: false,
+    roadmap: true,
+  };
+  expect(readProfile(state, builtinManifests)).toEqual({
+    enabled: ["tests", "notebook", "acme-jira"],
+    migrated: false,
+  });
+  // What `GET /api/state` still reports for one release.
+  expect(legacyFields(["tests", "notebook"], builtinManifests)).toEqual({
+    roadmap: false,
+    tasks: false,
+    notebook: true,
+    issues: false,
+    models: false,
+    testing: true,
+  });
+  // Writing the profile drops the legacy switches and keeps the section's
+  // other keys.
+  const file: Record<string, unknown> = {
+    dataRepo: "/x",
+    testing: true,
+    notebook: false,
+    plugins: { sources: [{ path: "/dev/jira" }] },
+  };
+  expect(hasLegacyKeys(file, builtinManifests)).toBe(true);
+  writeProfile(file, ["tests", "roadmap"], builtinManifests);
+  expect(file).toEqual({
+    dataRepo: "/x",
+    plugins: { sources: [{ path: "/dev/jira" }], enabled: ["tests", "roadmap"] },
+  });
+  expect(hasLegacyKeys(file, builtinManifests)).toBe(false);
+  // A switch edits the list: on appends, off removes, either is idempotent.
+  expect(withPlugin(["notebook"], "tests", true)).toEqual(["notebook", "tests"]);
+  expect(withPlugin(["notebook", "tests"], "tests", true)).toEqual(["notebook", "tests"]);
+  expect(withPlugin(["notebook", "tests"], "notebook", false)).toEqual(["tests"]);
+});
+
+test("the profile's order is the tab order, and an id nothing provides is reported", async () => {
+  await syncPlugins({ plugins: { enabled: ["tests", "acme-jira", "notebook"] } });
+  expect(pluginStates().map((p) => [p.id, p.enabled, p.active, p.installed])).toEqual([
+    ["tests", true, true, true],
+    ["acme-jira", true, false, false],
+    ["notebook", true, true, true],
+    ["roadmap", false, false, true],
+    ["tasks", false, false, true],
+    ["issues", false, false, true],
+    ["models", false, false, true],
+  ]);
+  expect(pluginStates()[1]!.error).toMatch(/No installed plugin has this id/);
+  expect(matchApi("GET", "/api/tests")).not.toBeNull();
+  expect(matchApi("GET", "/api/notebook")).not.toBeNull();
+
+  // The browser follows the same order for the tabs, and a reorder alone —
+  // no mount, no unmount — moves them.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ pages: [], cases: [], plans: [], executions: [] })) as unknown as typeof fetch;
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    await syncClientPlugins(pluginStates());
+    expect(tabs.list().map((t) => t.id)).toEqual(["tests", "notebook"]);
+    await syncPlugins({ plugins: { enabled: ["notebook", "tests"] } });
+    await syncClientPlugins(pluginStates());
+    expect(tabs.list().map((t) => t.id)).toEqual(["notebook", "tests"]);
+  } finally {
+    globalThis.fetch = realFetch;
+    console.error = quiet;
+  }
 });
 
 test("the plugin's urls serve the app shell whether it is on or off", () => {

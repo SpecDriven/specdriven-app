@@ -10,16 +10,31 @@ import { builtinClientPlugins } from "../builtin/client";
 import { Registry, type PluginView, type TabPlugin } from "./tabs";
 
 export const client = new Context();
-export const tabs = new Registry<TabPlugin>();
+/** Each plugin's position in the profile, which is its tab's position. */
+const rank = new Map<string, number>();
+export const tabs = new Registry<TabPlugin>((tab) => rank.get(tab.id));
 client.provide("tabs", tabs);
 
 const mounted = new Map<string, Scope>();
 let turn: Promise<void> = Promise.resolve();
 
-/** One row of `GET /api/state`'s `plugins`. */
+/**
+ * One row of `GET /api/state`'s `plugins` (src/plugins/host/loader.ts
+ * PluginState), in the profile's order: what the browser mounts, and what
+ * Settings → Plugins lists.
+ */
 export interface PluginStatus {
   id: string;
+  /** Listed in the profile — what mounts the browser half. */
   enabled: boolean;
+  displayName?: string;
+  description?: string;
+  version?: string;
+  builtin?: boolean;
+  installed?: boolean;
+  /** The host half is mounted and applied. */
+  active?: boolean;
+  error?: string;
 }
 
 /** What every browser half is configured with. */
@@ -34,28 +49,34 @@ export interface ClientConfig {
 }
 
 /**
- * Bring the mounted client halves in line with what the server reports.
- * Resolves once every newly mounted plugin has applied — loaded its store —
- * so a deep link that follows finds the data there.
+ * Bring the mounted client halves in line with what the server reports:
+ * the enabled plugins in the profile's order, which the tabs take. Resolves
+ * once every newly mounted plugin has applied — loaded its store — so a deep
+ * link that follows finds the data there.
  */
 export function syncClientPlugins(
   plugins: PluginStatus[] | undefined,
   config: ClientConfig = { demo: false },
 ): Promise<void> {
   const run = turn.then(async () => {
-    const enabled = new Set((plugins ?? []).filter((p) => p.enabled).map((p) => p.id));
-    for (const { manifest, plugin } of builtinClientPlugins) {
-      const want = enabled.has(manifest.id);
-      const have = mounted.get(manifest.id);
-      if (want && !have) {
-        const scope = client.plugin(plugin, config);
-        mounted.set(manifest.id, scope);
-        await scope.ready;
-      } else if (!want && have) {
-        mounted.delete(manifest.id);
-        await have.dispose();
+    const enabled = (plugins ?? []).filter((p) => p.enabled).map((p) => p.id);
+    rank.clear();
+    enabled.forEach((id, i) => rank.set(id, i));
+    for (const [id, scope] of [...mounted]) {
+      if (!enabled.includes(id)) {
+        mounted.delete(id);
+        await scope.dispose();
       }
     }
+    for (const id of enabled) {
+      const entry = builtinClientPlugins.find((p) => p.manifest.id === id);
+      if (!entry || mounted.has(id)) continue;
+      const scope = client.plugin(entry.plugin, config);
+      mounted.set(id, scope);
+      await scope.ready;
+    }
+    // A reorder without a mount or unmount still moves the tabs.
+    tabs.resort();
   });
   turn = run.catch(() => {});
   return run;

@@ -30,6 +30,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronUp,
   ChevronRight,
   Ellipsis,
   Pencil,
@@ -88,7 +89,13 @@ import { PomodoroBar, PomodoroToggle } from "./PomodoroBar";
 import { applyPomodoroEnabled, applyPomodoroShown, usePomodoroEnabled } from "./pomodoroPref";
 import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
-import { client, matchPluginRoute, syncClientPlugins, tabs } from "../plugins/client/loader";
+import {
+  client,
+  matchPluginRoute,
+  syncClientPlugins,
+  tabs,
+  type PluginStatus,
+} from "../plugins/client/loader";
 import {
   tabReachable,
   useRegistry,
@@ -1021,23 +1028,12 @@ export function App() {
   // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
   // dropdown shows only once the Settings switch turns assignments on.
   const [assignments, setAssignments] = useState(false);
-  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
-  // .feature.md): the Settings switches, as the Settings dialog's rows show
-  // them. Each folder is a plugin (src/plugins/builtin/pages): its tab, page
-  // list, editor, urls and store come from the tab registry below, mounted
-  // while its switch is on.
-  const [roadmap, setRoadmap] = useState(false);
-  const [tasks, setTasks] = useState(false);
-  // The engineering notebook (specs/app/engineering-notebook.feature.md): the
-  // one module that starts on, so the tab is there from the first paint
-  // rather than appearing once the boot fetch lands. The server has the last
-  // word either way.
-  const [notebook, setNotebook] = useState(true);
-  // Test management (specs/app/tests.feature.md): the Settings switch, as
-  // the Settings dialog's row shows it. The module itself is a plugin
-  // (src/plugins/builtin/tests): its tab, pane, urls and store come from
-  // the tab registry below, mounted while the switch is on.
-  const [testingOn, setTestingOn] = useState(false);
+  // The plugins (specs/app/plugins.feature.md) as `GET /api/state` lists
+  // them: the profile's entries in tab order, then the built-ins it leaves
+  // off — what Settings → Plugins renders, each with its switch. Every
+  // module — the special folders, Event Models, Tests, Issues — is one of
+  // them; App names none.
+  const [plugins, setPlugins] = useState<PluginStatus[]>([]);
   // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
   // which plugin view has the pane — null when none. App knows only the tab
   // id and an opaque view; the tab parses, renders and titles it.
@@ -1052,15 +1048,6 @@ export function App() {
   // Calendar"): the Settings switch behind every task's calendar chip, as
   // the Settings dialog's row shows it; the tasks plugin reads it too.
   const [googleCalendarOn, setGoogleCalendarOn] = useState(false);
-  // GitHub issues (specs/app/github-issues.feature.md): the Settings switch,
-  // as the Settings dialog's row shows it. The module is a plugin
-  // (src/plugins/builtin/issues) whose tab registers only while the data
-  // folder's code repo is a GitHub one.
-  const [issuesSetting, setIssuesSetting] = useState(false);
-  // Event Models (roadmap/support-event-modeling.md): the Settings switch,
-  // as the Settings dialog's row shows it. The module is a plugin
-  // (src/plugins/builtin/models).
-  const [modelsSetting, setModelsSetting] = useState(false);
   /** Which sidebar tab is open — Specs or a plugin's; remembered. */
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(readSidebarTab);
   /** The tab on screen: a plugin's tab only while it is still mounted. */
@@ -1087,13 +1074,7 @@ export function App() {
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
-  const [settingsRoadmapDraft, setSettingsRoadmapDraft] = useState(false);
-  const [settingsTasksDraft, setSettingsTasksDraft] = useState(false);
-  const [settingsNotebookDraft, setSettingsNotebookDraft] = useState(true);
-  const [settingsTestingDraft, setSettingsTestingDraft] = useState(false);
   const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
-  const [settingsIssuesDraft, setSettingsIssuesDraft] = useState(false);
-  const [settingsModelsDraft, setSettingsModelsDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
   const [settingsSyncOnDraft, setSettingsSyncOnDraft] = useState(false);
@@ -1271,26 +1252,9 @@ export function App() {
       if (typeof state.assignments === "boolean") {
         setAssignments(state.assignments);
       }
-      if (typeof state.roadmap === "boolean") {
-        setRoadmap(state.roadmap);
-      }
-      if (typeof state.tasks === "boolean") {
-        setTasks(state.tasks);
-      }
-      if (typeof state.notebook === "boolean") {
-        setNotebook(state.notebook);
-      }
-      if (typeof state.testing === "boolean") {
-        setTestingOn(state.testing);
-      }
+      setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
       if (typeof state.googleCalendar === "boolean") {
         setGoogleCalendarOn(state.googleCalendar);
-      }
-      if (typeof state.models === "boolean") {
-        setModelsSetting(state.models);
-      }
-      if (typeof state.issues === "boolean") {
-        setIssuesSetting(state.issues);
       }
       setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
       setCanChooseFolder(Boolean(state.canChooseFolder));
@@ -2901,13 +2865,7 @@ export function App() {
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
-    setSettingsRoadmapDraft(roadmap);
-    setSettingsTasksDraft(tasks);
-    setSettingsNotebookDraft(notebook);
-    setSettingsTestingDraft(testingOn);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
-    setSettingsIssuesDraft(issuesSetting);
-    setSettingsModelsDraft(modelsSetting);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
@@ -3076,21 +3034,15 @@ export function App() {
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
-    setRoadmap(data.roadmap === true);
-    setTasks(data.tasks === true);
-    // The notebook's default is on, so an absent key means on — the opposite
-    // of every other module's switch.
-    setNotebook(data.notebook !== false);
-    setTestingOn(data.testing === true);
-    // The switches' plugins mount and unmount to match — a tab appears or
-    // goes before this returns (src/plugins/client/loader.ts).
+    // The profile's plugins mount and unmount to match, in its order — a
+    // tab appears, goes or moves before this returns (src/plugins/client/
+    // loader.ts).
+    setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     // The mounted ones follow the other switches they read — the tasks'
     // calendar chip follows Google Calendar's, say.
     client.emit("settings/changed", data);
     setGoogleCalendarOn(data.googleCalendar === true);
-    setIssuesSetting(data.issues === true);
-    setModelsSetting(data.models === true);
     setSyncServerUrl(typeof data.syncServerUrl === "string" ? data.syncServerUrl : null);
     setGitEngineState(data.gitEngine ?? null);
     setGitEngineEffective(data.gitEngineEffective ?? "cli");
@@ -3243,42 +3195,40 @@ export function App() {
     if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
   };
 
-  // The special folders (specs/app/roadmap.feature.md, specs/app/tasks
-  // .feature.md): switched on, the server creates the folder if the data repo
-  // has none and the sidebar lists its pages. Off, the folder is simply not
-  // shown — a page of it that is open leaves the pane, and the files stay
-  // where they are. All of that but the folder is the plugin's mount and
-  // dispose (src/plugins/builtin/pages/client.tsx), which patchSettings runs.
-  const togglePageFolder = async (folder: "roadmap" | "tasks" | "notebook", on: boolean) => {
-    const setDraft =
-      folder === "tasks"
-        ? setSettingsTasksDraft
-        : folder === "notebook"
-          ? setSettingsNotebookDraft
-          : setSettingsRoadmapDraft;
-    setDraft(on);
-    if (!(await patchSettings({ [folder]: on }))) setDraft(!on);
+  // The profile (specs/app/plugins.feature.md "Turning a plugin off unwinds
+  // everything it registered", "The profile lists enabled plugins in tab
+  // order"): Settings → Plugins edits the ordered list of enabled plugins
+  // and sends it whole. The server mounts and unmounts to match — a special
+  // folder is created when its plugin goes on — and the browser follows in
+  // patchSettings: a tab appears, goes or moves, and an open view of a
+  // plugin now off leaves the pane. The data in the repo is left alone.
+  const enabledPluginIds = () => plugins.filter((p) => p.enabled).map((p) => p.id);
+  const setProfile = async (enabled: string[]) => {
+    const previous = plugins;
+    // Optimistic, like every switch: the rows re-order at once, and snap
+    // back if the server refuses.
+    setPlugins((rows) => {
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const on = enabled.map((id) => ({ ...(byId.get(id) ?? { id }), enabled: true }));
+      const off = rows.filter((r) => !enabled.includes(r.id)).map((r) => ({ ...r, enabled: false }));
+      return [...on, ...off];
+    });
+    if (!(await patchSettings({ plugins: { enabled } }))) setPlugins(previous);
   };
-
-  // Event Models (roadmap/support-event-modeling.md): switched on, the
-  // server creates the models folder if the data repo has none and the
-  // Models tab lists its models; off, the tab goes and an open canvas
-  // leaves the pane. The files stay where they are. All of that but the
-  // folder is the plugin's mount and dispose (src/plugins/builtin/models/
-  // client.tsx), which patchSettings runs.
-  const toggleModels = async (on: boolean) => {
-    setSettingsModelsDraft(on);
-    if (!(await patchSettings({ models: on }))) setSettingsModelsDraft(!on);
+  const setPluginEnabled = (id: string, on: boolean) => {
+    const rest = enabledPluginIds().filter((x) => x !== id);
+    return setProfile(on ? [...rest, id] : rest);
   };
-
-  // Test management (specs/app/tests.feature.md): switched on, the
-  // Tests tab appears and the module loads; off, the tab goes and a view of
-  // it that is open leaves the pane. The document in the data repo, if any,
-  // is left where it is either way. All of that is the plugin's mount and
-  // dispose (src/plugins/builtin/tests/client.tsx), which patchSettings runs.
-  const toggleTesting = async (on: boolean) => {
-    setSettingsTestingDraft(on);
-    if (!(await patchSettings({ testing: on }))) setSettingsTestingDraft(!on);
+  /** Move an enabled plugin one place up (-1) or down (+1) in tab order. */
+  const movePlugin = (id: string, delta: -1 | 1) => {
+    const enabled = enabledPluginIds();
+    const i = enabled.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= enabled.length) return Promise.resolve();
+    const next = [...enabled];
+    next.splice(i, 1);
+    next.splice(j, 0, id);
+    return setProfile(next);
   };
 
   // Google Calendar (specs/app/tasks.feature.md "Add task to Google
@@ -3292,16 +3242,6 @@ export function App() {
       return;
     }
     setGoogleCalendarOn(on);
-  };
-
-  // GitHub issues (specs/app/github-issues.feature.md): switched on, the
-  // Issues tab appears (given a GitHub code repo) and the issues load; off,
-  // the tab goes and a view of it that is open leaves the pane. All of that
-  // is the plugin's mount and dispose (src/plugins/builtin/issues/client
-  // .tsx), which patchSettings runs.
-  const toggleIssues = async (on: boolean) => {
-    setSettingsIssuesDraft(on);
-    if (!(await patchSettings({ issues: on }))) setSettingsIssuesDraft(!on);
   };
 
   const pickGitEngine = async (engine: string) => {
@@ -7232,51 +7172,6 @@ export function App() {
                   <span className="switch-track" aria-hidden="true" />
                 </span>
               </label>
-              {/* The roadmap folder (specs/app/roadmap.feature.md): opt-in
-                  — the switch is what controls the folder's visibility, and
-                  turning it on creates the folder if the data folder has
-                  none. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Roadmap folder
-                  <span className="settings-row-hint">
-                    {settingsRoadmapDraft
-                      ? "The data folder's roadmap folder — markdown pages, listed above the feature folders. It is created if it isn't there yet."
-                      : "The roadmap folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsRoadmapDraft}
-                    onChange={(e) => void togglePageFolder("roadmap", e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The tasks folder (specs/app/tasks.feature.md): the roadmap
-                  switch's twin — the folder's markdown pages become a Tasks
-                  tab, each assignable to a project member. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Tasks
-                  <span className="settings-row-hint">
-                    {settingsTasksDraft
-                      ? "The data folder's tasks folder — a markdown page per task, assignable to a project member, on their own sidebar tab. It is created if it isn't there yet."
-                      : "The tasks folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTasksDraft}
-                    onChange={(e) => void togglePageFolder("tasks", e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
               {/* Google Calendar (specs/app/tasks.feature.md "Add task to
                   Google Calendar"): opt-in — a calendar chip on every task
                   that estimates it and opens a prefilled event. */}
@@ -7295,97 +7190,6 @@ export function App() {
                     role="switch"
                     checked={settingsGoogleCalendarDraft}
                     onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The engineering notebook
-                  (specs/app/engineering-notebook.feature.md): on unless
-                  turned off — the folder is made by the first entry, not by
-                  the switch, so a default-on module writes to nobody's repo
-                  on its own. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Engineering notebook
-                  <span className="settings-row-hint">
-                    {settingsNotebookDraft
-                      ? "A shared, dated log of observations and decisions about your process, kept in the data repo's notebook folder."
-                      : "The Notebook tab is not shown; the entries already written stay in the data folder."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsNotebookDraft}
-                    onChange={(e) => void togglePageFolder("notebook", e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Event Models (roadmap/support-event-modeling.md): opt-in
-                  — the data folder's models folder, one JSON file per
-                  model, drawn on a canvas on their own tab. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Event Models
-                  <span className="settings-row-hint">
-                    {settingsModelsDraft
-                      ? "The data folder's models folder — Event Models on a canvas, one JSON file each, on their own sidebar tab. It is created if it isn't there yet."
-                      : "The models folder is not shown; nothing in it is touched."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsModelsDraft}
-                    onChange={(e) => void toggleModels(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Test management (specs/app/tests.feature.md): opt-in
-                  — test plans, cases and runs on their own tab and pane,
-                  kept in the app's documents rather than in markdown. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Test management
-                  <span className="settings-row-hint">
-                    {settingsTestingDraft
-                      ? "A Tests tab with test plans, a test case library and run results. Stored in the data folder's documents, synced like everything else — no markdown files."
-                      : "The Tests tab is not shown; test plans already recorded stay in the data folder."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTestingDraft}
-                    onChange={(e) => void toggleTesting(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* GitHub issues (specs/app/github-issues.feature.md): opt-in
-                  — the code repo's GitHub issues on their own tab and pane. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  GitHub issues
-                  <span className="settings-row-hint">
-                    {!settingsIssuesDraft
-                      ? "The Issues tab is not shown, and nothing asks GitHub for issues."
-                      : issuesRepo
-                        ? `An Issues tab with the issues of ${issuesRepo.owner}/${issuesRepo.name} — the GitHub repo the code-repo in the data folder's project-settings.json pushes to. Create, edit, comment on, close and reopen them here.`
-                        : "An Issues tab for the GitHub repo the code-repo in the data folder's project-settings.json pushes to. That file names no GitHub code repo yet, so the tab stays hidden until it does."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsIssuesDraft}
-                    onChange={(e) => void toggleIssues(e.target.checked)}
                   />
                   <span className="switch-track" aria-hidden="true" />
                 </span>
@@ -7522,6 +7326,100 @@ export function App() {
               </div>
                 </>
               )}
+            </section>
+            {/* Plugins (specs/app/plugins.feature.md "A built-in module is a
+                plugin like any other"): every module the app has, built-in
+                or not, with its switch, its version and a line saying what
+                it adds — the profile's entries first, in tab order, which
+                the arrows change. Off, a plugin's tab, routes and shortcuts
+                are gone and its files in the data folder stay. An id in the
+                profile that no plugin provides is reported here and
+                otherwise ignored. */}
+            <section className="settings-group settings-plugins" aria-label="Plugins">
+              <p className="settings-group-title">
+                Plugins
+                <span className="settings-row-hint">
+                  Each adds a sidebar tab; on, in this order after Specs. Switching one off takes its tab,
+                  shortcuts and routes away and leaves its files in the data folder alone.
+                </span>
+              </p>
+              {plugins.map((plugin, i) => {
+                const enabledCount = plugins.filter((p) => p.enabled).length;
+                const name = plugin.displayName ?? plugin.id;
+                const installed = plugin.installed !== false;
+                // The Issues plugin's tab needs a GitHub code repo besides its
+                // switch (specs/app/github-issues.feature.md).
+                const note =
+                  plugin.id === "issues" && plugin.enabled && !issuesRepo
+                    ? "The data folder's project-settings.json names no GitHub code repo yet, so the tab stays hidden until it does."
+                    : null;
+                return (
+                  <div className="settings-row plugin-row" key={plugin.id} data-plugin={plugin.id}>
+                    <span className="settings-row-label">
+                      <span className="plugin-row-name">
+                        {name}
+                        <span className="plugin-row-meta">
+                          {plugin.builtin ? "Built-in" : installed ? "Installed" : "Not installed"}
+                          {plugin.version ? ` · v${plugin.version}` : ""}
+                        </span>
+                      </span>
+                      {plugin.description && (
+                        <span className="settings-row-hint">{plugin.description}</span>
+                      )}
+                      {note && <span className="settings-row-hint">{note}</span>}
+                      {plugin.error && (
+                        <span className="settings-row-hint plugin-row-error" role="alert">
+                          {plugin.error}
+                        </span>
+                      )}
+                    </span>
+                    {plugin.enabled && installed && (
+                      <span className="plugin-row-order">
+                        <button
+                          type="button"
+                          className="plugin-row-move"
+                          aria-label={`Move ${name} up`}
+                          title="Move up"
+                          disabled={i === 0}
+                          onClick={() => void movePlugin(plugin.id, -1)}
+                        >
+                          <ChevronUp size={14} aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          className="plugin-row-move"
+                          aria-label={`Move ${name} down`}
+                          title="Move down"
+                          disabled={i >= enabledCount - 1}
+                          onClick={() => void movePlugin(plugin.id, 1)}
+                        >
+                          <ChevronDown size={14} aria-hidden="true" />
+                        </button>
+                      </span>
+                    )}
+                    {installed ? (
+                      <label className="switch">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={name}
+                          checked={plugin.enabled}
+                          onChange={(e) => void setPluginEnabled(plugin.id, e.target.checked)}
+                        />
+                        <span className="switch-track" aria-hidden="true" />
+                      </label>
+                    ) : (
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => void setPluginEnabled(plugin.id, false)}
+                      >
+                        Remove from list
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </section>
             <p className="hint settings-footnote">
               Changes are saved to .specdriven/settings.json as you make them.

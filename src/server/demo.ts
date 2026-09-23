@@ -26,6 +26,7 @@ import { getAppRoot } from "./paths";
 import type { GitHubRepo } from "./repo";
 import { resetSearchCache } from "./search";
 import { readState, writeState } from "./state";
+import { builtinManifests } from "../plugins/builtin/manifests";
 import type { SpecDrivenState } from "./state";
 
 export function isDemoMode(): boolean {
@@ -87,15 +88,13 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   reloadFrequencySeconds: 0,
   codeGen: true,
   codeGenTarget: "pane",
-  models: true,
-  roadmap: true,
-  tasks: true,
-  notebook: true,
-  testing: true,
+  // Every built-in plugin, in load order (specs/app/plugins.feature.md
+  // "The profile lists enabled plugins in tab order"): a visitor sees the
+  // whole app.
+  plugins: { enabled: builtinManifests.map((m) => m.id) },
   assignments: true,
   deletePublished: true,
   googleCalendar: true,
-  issues: true,
   showTestLinks: true,
   projectManagement: true,
   publishExternalLinks: true,

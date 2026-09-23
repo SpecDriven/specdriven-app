@@ -27,8 +27,14 @@ import {
   updateIssue,
 } from "../src/server/issues";
 import { signOut } from "../src/server/auth";
-import { normalizeIssues, writeState } from "../src/server/state";
+import { writeState } from "../src/server/state";
 import { createFileBackend, saveToken, setTokenBackend } from "../src/server/tokenStore";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `issues` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeIssues = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { issues: value }, builtinManifests).enabled.includes("issues");
 
 let root: string;
 
