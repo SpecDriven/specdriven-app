@@ -23,6 +23,8 @@ export interface ShellPaths {
   add(prefix: string): Disposer;
   matches(pathname: string): boolean;
   prefixes(): string[];
+  /** Hear of a prefix added or removed — a plugin folder came or went. */
+  subscribe(listener: () => void): Disposer;
 }
 
 export interface SyncHooks {
@@ -41,6 +43,8 @@ export interface DataAccess {
   withDir(
     handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
   ): Handler;
+  /** The resolved data dir, or null while none is configured or reachable. */
+  dir(): Promise<string | null>;
 }
 
 declare module "../kernel" {
@@ -98,13 +102,25 @@ export function createRouteRegistry(): RouteRegistry {
 
 export function createShellPaths(): ShellPaths {
   const prefixes: string[] = [];
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const l of [...listeners]) l();
+  };
   return {
     add(prefix) {
       const clean = `/${prefix.replace(/^\/+|\/+$/g, "")}`;
       prefixes.push(clean);
+      notify();
       return () => {
         const i = prefixes.indexOf(clean);
         if (i >= 0) prefixes.splice(i, 1);
+        notify();
+      };
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
       };
     },
     matches(pathname) {

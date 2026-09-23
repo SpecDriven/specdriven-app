@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -91,9 +91,12 @@ import { renderMarkdown } from "./markdown";
 import { AgentPane } from "./AgentPane";
 import {
   client,
+  clientLoadErrors,
+  isRemounting,
   matchPluginRoute,
   syncClientPlugins,
   tabs,
+  watchPluginChanges,
   type PluginStatus,
 } from "../plugins/client/loader";
 import {
@@ -1034,6 +1037,11 @@ export function App() {
   // module — the special folders, Event Models, Tests, Issues — is one of
   // them; App names none.
   const [plugins, setPlugins] = useState<PluginStatus[]>([]);
+  // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
+  // plugin loads from a local folder"), listed under the plugins.
+  const [pluginSources, setPluginSources] = useState<string[]>([]);
+  // A browser half that failed to load, by plugin id — shown beside the row.
+  const pluginLoadErrors = useSyncExternalStore(clientLoadErrors.subscribe, clientLoadErrors.snapshot);
   // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
   // which plugin view has the pane — null when none. App knows only the tab
   // id and an opaque view; the tab parses, renders and titles it.
@@ -1253,6 +1261,7 @@ export function App() {
         setAssignments(state.assignments);
       }
       setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
+      setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
       if (typeof state.googleCalendar === "boolean") {
         setGoogleCalendarOn(state.googleCalendar);
       }
@@ -1773,9 +1782,32 @@ export function App() {
   // the app goes home (specs/app/plugins.feature.md "Turning a plugin off
   // unwinds everything it registered").
   useEffect(() => {
-    if (pluginView && !pluginTabs.some((t) => t.id === pluginView.tab)) goHome();
+    // A tab being remounted — its plugin was rebuilt — is back in a moment.
+    if (pluginView && !pluginTabs.some((t) => t.id === pluginView.tab) && !isRemounting(pluginView.tab)) {
+      goHome();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginTabs]);
+
+  /**
+   * Re-read the plugins from the server — a plugin from a folder was
+   * rebuilt, or a folder came or went (specs/app/plugins.feature.md "A
+   * plugin loads from a local folder"): the browser half remounts from its
+   * new url, without a reload.
+   */
+  const refreshPlugins = useCallback(async () => {
+    const res = await fetch("/api/state");
+    if (!res.ok) return;
+    const data = await res.json();
+    setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
+    setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
+    await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
+    client.emit("settings/changed", data);
+  }, []);
+  useEffect(() => {
+    if (loading || demo) return;
+    return watchPluginChanges(() => void refreshPlugins());
+  }, [loading, demo, refreshPlugins]);
 
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
@@ -3038,6 +3070,7 @@ export function App() {
     // tab appears, goes or moves before this returns (src/plugins/client/
     // loader.ts).
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
+    setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     // The mounted ones follow the other switches they read — the tasks'
     // calendar chip follows Google Calendar's, say.
@@ -7347,6 +7380,20 @@ export function App() {
                 const enabledCount = plugins.filter((p) => p.enabled).length;
                 const name = plugin.displayName ?? plugin.id;
                 const installed = plugin.installed !== false;
+                // Where it came from is the one thing that tells a built-in
+                // from a plugin loaded from a folder.
+                const origin =
+                  plugin.builtin
+                    ? "Built-in"
+                    : !installed
+                      ? "Not installed"
+                      : plugin.source === "repo"
+                        ? "Data folder"
+                        : plugin.source === "path"
+                          ? "Linked folder"
+                          : "Installed";
+                const untrusted = installed && plugin.trusted === false;
+                const loadError = pluginLoadErrors.get(plugin.id);
                 // The Issues plugin's tab needs a GitHub code repo besides its
                 // switch (specs/app/github-issues.feature.md).
                 const note =
@@ -7358,8 +7405,8 @@ export function App() {
                     <span className="settings-row-label">
                       <span className="plugin-row-name">
                         {name}
-                        <span className="plugin-row-meta">
-                          {plugin.builtin ? "Built-in" : installed ? "Installed" : "Not installed"}
+                        <span className="plugin-row-meta" title={plugin.dir}>
+                          {origin}
                           {plugin.version ? ` · v${plugin.version}` : ""}
                         </span>
                       </span>
@@ -7367,9 +7414,21 @@ export function App() {
                         <span className="settings-row-hint">{plugin.description}</span>
                       )}
                       {note && <span className="settings-row-hint">{note}</span>}
+                      {untrusted && (
+                        <span className="settings-row-hint">
+                          This plugin came with the data folder, which is pulled from GitHub. It runs
+                          with the app's own rights once trusted
+                          {plugin.permissions?.length ? ` and asks for ${plugin.permissions.join(", ")}` : ""}.
+                        </span>
+                      )}
                       {plugin.error && (
                         <span className="settings-row-hint plugin-row-error" role="alert">
                           {plugin.error}
+                        </span>
+                      )}
+                      {loadError && !plugin.error && (
+                        <span className="settings-row-hint plugin-row-error" role="alert">
+                          {loadError}
                         </span>
                       )}
                     </span>
@@ -7397,7 +7456,15 @@ export function App() {
                         </button>
                       </span>
                     )}
-                    {installed ? (
+                    {untrusted ? (
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => void patchSettings({ plugins: { trust: plugin.dir } })}
+                      >
+                        Trust and load
+                      </button>
+                    ) : installed ? (
                       <label className="switch">
                         <input
                           type="checkbox"
@@ -7420,6 +7487,60 @@ export function App() {
                   </div>
                 );
               })}
+              {/* The explicit plugin folders (specs/app/plugins.feature.md "A
+                  plugin loads from a local folder"): the vibe-coded plugin
+                  under development, linked by path — `specdriven plugin link`
+                  does the same. Not in the demo, whose host is shared. */}
+              {!demo && (
+                <div className="settings-row plugin-sources" data-testid="plugin-sources">
+                  <span className="settings-row-label">
+                    <span>Plugin folders</span>
+                    <span className="settings-row-hint">
+                      Folders with a plugin's package.json, loaded besides ~/.specdriven/plugins and the
+                      data folder's .specdriven/plugins. A TypeScript plugin is built here and rebuilt as
+                      you edit it.
+                    </span>
+                    {pluginSources.length > 0 && (
+                      <ul className="plugin-source-list">
+                        {pluginSources.map((path) => (
+                          <li key={path}>
+                            <code title={path}>{path}</code>
+                            <button
+                              type="button"
+                              className="link"
+                              aria-label={`Unlink ${path}`}
+                              onClick={() =>
+                                void patchSettings({
+                                  plugins: { sources: pluginSources.filter((p) => p !== path) },
+                                })
+                              }
+                            >
+                              Unlink
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="link"
+                    onClick={async () => {
+                      const path = await prompt({
+                        title: "Link a plugin folder",
+                        hint: "The absolute path of a folder holding the plugin's package.json.",
+                        placeholder: "/Users/me/dev/my-plugin",
+                        confirmLabel: "Link",
+                        browse: canChooseFolder ? chooseFolderNative : undefined,
+                      });
+                      const clean = path?.trim();
+                      if (clean) void patchSettings({ plugins: { sources: [...pluginSources, clean] } });
+                    }}
+                  >
+                    Add folder…
+                  </button>
+                </div>
+              )}
             </section>
             <p className="hint settings-footnote">
               Changes are saved to .specdriven/settings.json as you make them.

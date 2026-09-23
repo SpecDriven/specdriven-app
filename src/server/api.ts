@@ -130,15 +130,18 @@ import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger } from "./telemetry";
 import { version as appVersion } from "../../package.json";
+import { isAbsolute } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
 import {
   pluginStates,
   provideDataAccess,
   routes as routeRegistry,
+  sourcePaths,
   syncPlugins,
 } from "../plugins/host/loader";
 import { builtinManifests } from "../plugins/builtin/manifests";
 import {
+  PROFILE_KEY,
   hasLegacyKeys,
   legacyFields,
   readProfile,
@@ -250,8 +253,8 @@ export async function applyStartupState(): Promise<void> {
     writeProfile(state as Record<string, unknown>, profile.enabled, builtinManifests);
     await writeState(state, getAppRoot());
   }
-  // The built-in plugins the profile asks for (src/plugins/host/loader.ts).
-  await syncPlugins(state as Record<string, unknown>);
+  // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts).
+  await syncHostPlugins(state);
   // External links go into the markdown projections only while the setting
   // says so (specs/external-links/project-management-jira-linear-etc.
   // feature.md) — decided before the first sync tick writes a projection.
@@ -326,6 +329,40 @@ function withDataDir(
   };
 }
 
+/** The resolved data dir, or null while none is configured or reachable. */
+async function currentDataDir(): Promise<string | null> {
+  const state = await readState(getAppRoot());
+  if (needsDataRepo(state)) return null;
+  try {
+    return await resolveDataRepo(state.dataRepo!, getAppRoot());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The plugins the settings ask for (src/plugins/host/loader.ts): the
+ * built-ins the profile lists, and — outside the demo, whose dataset is
+ * ephemeral and whose host is shared — whatever the plugin folders hold,
+ * a plugin found for the first time added to the profile and stored.
+ */
+async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
+  const raw = state as Record<string, unknown>;
+  if (isDemoMode()) return syncPlugins(raw);
+  return syncPlugins(raw, {
+    sources: true,
+    dataDir: await currentDataDir(),
+    persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
+    readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
+  });
+}
+
+/** The profile's `plugins` section as stored, whatever keys it has. */
+function profileSection(state: SpecDrivenState): Record<string, unknown> {
+  const section = (state as Record<string, unknown>)[PROFILE_KEY];
+  return section && typeof section === "object" ? (section as Record<string, unknown>) : {};
+}
+
 async function stateFields(state: SpecDrivenState) {
   return {
     dataRepo: state.dataRepo ?? null,
@@ -365,6 +402,9 @@ async function stateFields(state: SpecDrivenState) {
     // lists — with the per-module switches they replaced (`roadmap`,
     // `testing`, …) still reported for one release.
     plugins: pluginStates(),
+    // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
+    // plugin loads from a local folder"), which Settings → Plugins lists.
+    pluginSources: sourcePaths(profileSection(state)),
     ...legacyFields(readProfile(state as Record<string, unknown>, builtinManifests).enabled, builtinManifests),
     googleCalendar: normalizeGoogleCalendar(state.googleCalendar),
     syncServerUrl: state.syncServerUrl ?? null,
@@ -396,8 +436,9 @@ const getState: Handler = async (req) => {
     await reseedDemo();
   }
   const state = await readState(getAppRoot());
-  // A demo reseed above rewrote the switches; the plugins follow them.
-  await syncPlugins(state as Record<string, unknown>);
+  // A demo reseed above rewrote the switches; the plugins follow them, and a
+  // plugin folder that appeared meanwhile is picked up.
+  await syncHostPlugins(state);
   return json({
     ...(await stateFields(state)),
     // specs/user-info-settings.spec.md: the OS user by default, with
@@ -423,8 +464,11 @@ const putState: Handler = async (req) => {
     codeGenTarget?: string;
     deletePublished?: boolean;
     assignments?: boolean;
-    /** The profile: the enabled plugins, in tab order. */
-    plugins?: { enabled?: unknown };
+    /**
+     * The profile: the enabled plugins, in tab order; the explicit plugin
+     * folders; a data-repo plugin folder to trust from now on.
+     */
+    plugins?: { enabled?: unknown; sources?: unknown; trust?: unknown };
     /** The per-module switches the profile replaced — aliases for one release. */
     roadmap?: boolean;
     notebook?: boolean;
@@ -665,15 +709,40 @@ const putState: Handler = async (req) => {
   const before = readProfile(raw, builtinManifests).enabled;
   let enabled = before;
   if (body.plugins !== undefined) {
-    if (
-      !body.plugins ||
-      typeof body.plugins !== "object" ||
-      !Array.isArray(body.plugins.enabled) ||
-      !body.plugins.enabled.every((id) => typeof id === "string" && id.length > 0)
-    ) {
+    if (!body.plugins || typeof body.plugins !== "object") {
+      return json({ error: "plugins must be an object" }, 400);
+    }
+    const { enabled: list, sources, trust } = body.plugins;
+    if (list === undefined && sources === undefined && trust === undefined) {
       return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
     }
-    enabled = storedProfile({ plugins: body.plugins }) ?? [];
+    if (list !== undefined) {
+      if (!Array.isArray(list) || !list.every((id) => typeof id === "string" && id.length > 0)) {
+        return json({ error: "plugins.enabled must be a list of plugin ids" }, 400);
+      }
+      enabled = storedProfile({ plugins: { enabled: list } }) ?? [];
+    }
+    // The explicit plugin folders (specs/app/plugins.feature.md "A plugin
+    // loads from a local folder"): absolute paths, taken whole.
+    if (sources !== undefined) {
+      if (!Array.isArray(sources) || !sources.every((p) => typeof p === "string" && isAbsolute(p))) {
+        return json({ error: "plugins.sources must be a list of absolute folder paths" }, 400);
+      }
+      const section = profileSection(state);
+      const unique = sources.filter((p, i) => sources.indexOf(p) === i);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, sources: unique.map((path) => ({ path })) };
+    }
+    // A plugin under the data repo is trusted once, by its folder, before
+    // its first load — the repo is pulled from GitHub.
+    if (trust !== undefined) {
+      if (typeof trust !== "string" || !isAbsolute(trust)) {
+        return json({ error: "plugins.trust must be an absolute folder path" }, 400);
+      }
+      const section = profileSection(state);
+      const trusted = Array.isArray(section.trusted) ? section.trusted.filter((t) => typeof t === "string") : [];
+      if (!trusted.includes(trust)) trusted.push(trust);
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, trusted };
+    }
   }
   for (const manifest of builtinManifests) {
     const key = manifest.legacyKey as keyof typeof body | undefined;
@@ -722,7 +791,7 @@ const putState: Handler = async (req) => {
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
   // The profile mounts and unmounts its plugins on the spot: a module turned
   // off answers 404 from here on, one turned on has its routes.
-  await syncPlugins(state as Record<string, unknown>);
+  await syncHostPlugins(state);
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
@@ -1744,7 +1813,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
 ];
 for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);
 // Plugins reach the data dir through the kernel (src/plugins/host/services.ts).
-provideDataAccess({ withDir: withDataDir });
+provideDataAccess({ withDir: withDataDir, dir: currentDataDir });
 
 export type { ApiMatch } from "../plugins/host/services";
 
