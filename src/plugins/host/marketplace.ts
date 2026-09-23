@@ -53,7 +53,10 @@ export async function loadMarketplaces(
     entries.map(async (entry): Promise<MarketplaceStatus> => {
       const dir = join(marketplacesHome(), entry.name);
       try {
-        await cacheMarketplace(entry, dir, opts.refresh === true);
+        // A cache with no index yet — cloned before the index was pushed —
+        // is pulled on Browse too, not only on Refresh.
+        const stale = !(await exists(join(dir, "marketplace.json")));
+        await cacheMarketplace(entry, dir, opts.refresh === true || stale);
         return { ...entry, dir, index: await readIndex(dir) };
       } catch (e) {
         return { ...entry, dir, error: (e as Error).message };

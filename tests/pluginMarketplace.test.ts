@@ -240,6 +240,19 @@ test("each marketplace is cloned through the git engine and its index listed; a 
   // Cached under the home, by name.
   expect(await stat(join(marketplacesHome(), "good", ".git")).then(() => true)).toBe(true);
 
+  // A marketplace whose index was pushed after the clone is pulled on Browse.
+  const late = join(work, "late");
+  await mkdir(late);
+  await $`git init -q -b main ${late}`.quiet();
+  await writeFile(join(late, "README.md"), "soon\n");
+  await git(late, "add", "-A");
+  await git(late, "commit", "-q", "-m", "empty");
+  await writeState({ plugins: { enabled: [], marketplaces: [{ name: "late", source: late }] } } as never, root);
+  expect((await json(await api("GET", "/api/plugins/marketplaces"))).body.marketplaces[0].error).toMatch(/no marketplace.json/);
+  await marketplaceRepo(late, [{ name: "hello", source: "./plugins/hello", version: "1.0.0" }], { hello: { version: "1.0.0" } });
+  expect((await json(await api("GET", "/api/plugins/marketplaces"))).body.marketplaces[0].index.plugins).toHaveLength(1);
+  await writeState({ plugins: { enabled: [], marketplaces: [{ name: "good", source: good }, { name: "broken", source: broken }] } } as never, root);
+
   // Refresh pulls: a row added upstream shows up.
   await marketplaceRepo(good, [
     { name: "hello", source: "./plugins/hello", version: "1.0.0" },
