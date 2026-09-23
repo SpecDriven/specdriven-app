@@ -670,7 +670,7 @@ function fakeBun(log: string, onBuild = ""): string {
   return `#!/bin/sh
 printf '%s | %s\n' "$(pwd)" "$*" >> ${shellQuote(log)}
 case "$*" in
-  "run build:desktop") ${onBuild || ":"} ;;
+  "run build:desktop --local") ${onBuild || ":"} ;;
 esac
 `;
 }
@@ -720,7 +720,7 @@ test("the run ends with the .dmg opened, and nothing started", async () => {
   // last, once everything else has been said, and the .app is not.
   expect(logLines(log)).toEqual([
     `${target} | install`,
-    `${target} | run build:desktop`,
+    `${target} | run build:desktop --local`,
     `open | ${dmg}`,
   ]);
   expect(stdout).toContain("Installing dependencies…");
@@ -781,7 +781,7 @@ test("the run ends with the AppImage made runnable and started", async () => {
   expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
   expect(lstatSync(image).mode & 0o111).not.toBe(0);
   expect(await waits(() => logLines(log).includes("appimage | started"))).toBe(true);
-  expect(logLines(log).slice(0, 2)).toEqual([`${target} | install`, `${target} | run build:desktop`]);
+  expect(logLines(log).slice(0, 2)).toEqual([`${target} | install`, `${target} | run build:desktop --local`]);
 });
 
 test("with no display the app is built but left unstarted", async () => {
@@ -810,7 +810,7 @@ test("a build that fails stops the run and says where the checkout is", async ()
 
   const { stderr, code } = await runInstaller(good.url, home, { tools });
   expect(code).toBe(1);
-  expect(stderr).toContain(`\`bun run build:desktop\` failed in ${target}`);
+  expect(stderr).toContain(`\`bun run build:desktop --local\` failed in ${target}`);
   // The verified source is still there to look at or build by hand.
   expect(existsSync(join(target, "package.json"))).toBe(true);
 });
