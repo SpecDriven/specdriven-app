@@ -32,7 +32,9 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
       description: m.description,
       version: appVersion,
       builtin: true,
+      source: "builtin" as const,
       installed: true,
+      trusted: true,
       enabled,
       active: enabled,
     };

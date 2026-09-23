@@ -156,6 +156,12 @@ export class Registry<T extends { id: string; order?: number }> {
     };
   }
 
+  /** Tell the subscribers to look again, the list unchanged. */
+  touch(): void {
+    this.items = [...this.items];
+    this.notify();
+  }
+
   /** Re-sort after the ranks changed — the profile was reordered, say. */
   resort(): void {
     const next = this.sorted([...this.items]);

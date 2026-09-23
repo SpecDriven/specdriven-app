@@ -3049,6 +3049,32 @@ button.table-add:hover {
   cursor: default;
 }
 
+/* The explicit plugin folders under the plugin rows: each path with its
+   Unlink beside it. */
+.plugin-source-list {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.plugin-source-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.plugin-source-list code {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The project management tool: the list of the usual ones, plus the name
    field that appears for a tool the list doesn't offer. */
 .settings-tool {
