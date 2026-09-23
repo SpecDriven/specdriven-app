@@ -1,17 +1,13 @@
 // Deep-link urls (specs/navigation.spec.md):
 //
 //   /                                               home
-//   /roadmap, /tasks, /notebook                     that tab, on its first page
-//   /roadmap/<page>                                 roadmap page
-//   /tasks/<task>                                   task
-//   /notebook/<entry>                               notebook entry
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
 //
-// A plugin's views (`/tests`, `/issues`, `/models`, specs/app/plugins.feature
-// .md) are parsed by the plugin itself, before this; App asks the mounted
-// tabs first.
+// A plugin's views (`/roadmap`, `/tasks`, `/notebook`, `/tests`, `/issues`,
+// `/models`, specs/app/plugins.feature.md) are parsed by the plugin itself,
+// before this; App asks the mounted tabs first.
 //
 // <feature> is the file path *within the spec tree* minus `.feature.md`, and
 // may span several segments when the feature lives in a folder
@@ -37,21 +33,6 @@ export interface Route {
   /** Feature file name, with the `.feature.md` suffix restored. */
   feature?: string;
   scenario?: ScenarioRef;
-  /**
-   * A special folder's page — a roadmap page (specs/app/roadmap.feature.md)
-   * or a task (specs/app/tasks.feature.md) — as its file name, repo-relative
-   * and with the `.md` suffix restored: `roadmap/pricing.md`, `tasks/ship.md`.
-   * The folder it opens with is what says which of the two it is.
-   */
-  page?: string;
-  /**
-   * A special folder with no page after it — `/tasks`, `/roadmap`,
-   * `/notebook`. The url names the tab rather than one of its
-   * pages, so it opens the first one the tab lists, which is what the `g t` /
-   * `g r` / `g n` shortcuts and the collapsed rail already do. Resolving it
-   * needs the folder's listing, so the client does that, not parseRoute.
-   */
-  pageFolder?: string;
 }
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
@@ -67,14 +48,6 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
-  // A roadmap page or a task is a plain path under the folder it lives in; a
-  // hand-typed link may carry the `.md` suffix already. The folder on its own
-  // names the tab, and opens the first page it lists.
-  if (segs[0] && PAGE_FOLDERS.includes(segs[0])) {
-    if (!segs[1]) return { pageFolder: segs[0] };
-    const path = segs.slice(1).join("/").replace(/\.md$/, "");
-    return { page: `${segs[0]}/${path}.md` };
-  }
   if (segs[0] !== "features" || !segs[1]) return {};
   // The feature path runs up to the first `scenarios` segment that has a slug
   // after it (folders make feature paths multi-segment).
@@ -125,30 +98,12 @@ export function repoDisplayName(repo: string): string {
   return repo.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/, "") || repo;
 }
 
-/** The special folders' names, shared with the server (src/server/pages.ts). */
-export const PAGE_FOLDERS = ["roadmap", "tasks", "notebook"];
-
-/** The engineering notebook's folder (specs/app/engineering-notebook.feature.md). */
-export const NOTEBOOK_FOLDER = "notebook";
-
 /**
  * The spec tree's folder, shared with the server (src/server/walk.ts). Urls
  * never carry it — see `featurePath` — so it appears only where a route is
  * converted to or from a repo-relative file name.
  */
 export const SPECS_FOLDER = "specs";
-
-/** The folder a page's file name lives in — `roadmap`, `tasks` or `notebook`. */
-export function pageFolderOf(fileName: string): string {
-  return fileName.split("/")[0] ?? "";
-}
-
-/** `roadmap/q3/pricing.md` -> `/roadmap/q3/pricing`; `tasks/ship.md` likewise. */
-export function pageLink(fileName: string): string {
-  const folder = pageFolderOf(fileName);
-  const stem = fileName.slice(folder.length + 1).replace(/\.md$/, "");
-  return `/${folder}/${stem.split("/").map(encodeURIComponent).join("/")}`;
-}
 
 export function featurePath(fileName: string): string {
   const stem = fileName.replace(/\.feature\.md$/, "");
@@ -171,16 +126,14 @@ export function scenarioPath(
 /**
  * The url of what is on screen (specs/navigation.spec.md "URL scheme"): the
  * scenario's own url while its page is open, otherwise the feature's, and `/`
- * with no feature open. A roadmap page or a task takes the same pane a
- * feature does, so while one is open its own url is what the address bar
- * shows (specs/app/tasks.feature.md "Support deep link just like Features").
+ * with no feature open. A plugin's view — a roadmap page or a task, say —
+ * takes the same pane a feature does and owns its own url, which the plugin
+ * mints (src/plugins/builtin/pages/route.ts).
  */
 export function pagePath(
   fileName: string | null,
   scenario: Pick<Scenario, "name" | "version"> | null,
-  page: string | null = null,
 ): string {
-  if (page) return pageLink(page);
   if (!fileName) return "/";
   return scenario ? scenarioPath(fileName, scenario) : featurePath(fileName);
 }

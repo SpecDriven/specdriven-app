@@ -28,24 +28,15 @@ const server = Bun.serve({
 
     // Deep links (specs/navigation.spec.md): every /features/... url serves
     // the app shell; the client resolves it against /api/features/:file. The
-    // special folders' pages address the same way (specs/app/roadmap.feature
-    // .md, specs/app/tasks.feature.md), so their urls serve the shell too —
-    // the desktop shell already falls back to it for any unbundled path
+    // desktop shell already falls back to it for any unbundled path
     // (src/electron/static.ts).
     "/features": index,
     "/features/*": index,
-    "/roadmap": index,
-    "/roadmap/*": index,
-    "/tasks": index,
-    "/tasks/*": index,
-    // The engineering notebook's entries address the same way
-    // (specs/app/engineering-notebook.feature.md).
-    "/notebook": index,
-    "/notebook/*": index,
     // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
-    // app shell"): each module behind the kernel names its prefix in its
-    // manifest, on or off, so a deep link to a switched-off tab still lands
-    // in the app and goes home there.
+    // app shell") — the special folders' pages among them: each module
+    // behind the kernel names its prefix in its manifest, on or off, so a
+    // deep link to a switched-off tab still lands in the app and goes home
+    // there.
     ...Object.fromEntries(shell.prefixes().flatMap((p) => [[p, index], [`${p}/*`, index]])),
   },
   fetch: async (req) => (await handleApi(req)) ?? new Response("Not Found", { status: 404 }),

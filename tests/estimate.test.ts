@@ -13,6 +13,7 @@ import { InputQueue, setQueryFactory } from "../src/server/agentChat";
 import type { QueryLike } from "../src/server/agentChat";
 import { estimatePrompt, minutesFromResult } from "../src/server/estimate";
 import { writeState } from "../src/server/state";
+import { syncPlugins } from "../src/plugins/host/loader";
 
 /** A stand-in for the SDK's Query that answers with one scripted message. */
 class FakeQuery implements QueryLike {
@@ -87,6 +88,9 @@ beforeEach(async () => {
     return fake;
   });
   await writeState({ dataRepo: data, tasks: true, googleCalendar: true }, root);
+  // The route is the tasks plugin's (src/plugins/builtin/pages/host.ts): it
+  // exists while the Tasks switch has the plugin mounted.
+  await syncPlugins({ tasks: true });
   await mkdir(join(data, "tasks"), { recursive: true });
   await writeFile(
     join(data, TASK),
@@ -96,6 +100,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   reloader.stop();
+  await syncPlugins({ tasks: false });
   setClaudeAvailability(null);
   setQueryFactory(null);
   await rm(root, { recursive: true, force: true });
