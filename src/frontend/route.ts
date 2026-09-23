@@ -1,17 +1,17 @@
 // Deep-link urls (specs/navigation.spec.md):
 //
 //   /                                               home
-//   /roadmap, /tasks, /notebook, /models            that tab, on its first page
+//   /roadmap, /tasks, /notebook                     that tab, on its first page
 //   /roadmap/<page>                                 roadmap page
 //   /tasks/<task>                                   task
 //   /notebook/<entry>                               notebook entry
-//   /models/<model>                                 an Event Model's canvas
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
 //
-// A plugin's views (`/tests`, `/issues`, specs/app/plugins.feature.md) are parsed by the
-// plugin itself, before this; App asks the mounted tabs first.
+// A plugin's views (`/tests`, `/issues`, `/models`, specs/app/plugins.feature
+// .md) are parsed by the plugin itself, before this; App asks the mounted
+// tabs first.
 //
 // <feature> is the file path *within the spec tree* minus `.feature.md`, and
 // may span several segments when the feature lives in a folder
@@ -46,18 +46,12 @@ export interface Route {
   page?: string;
   /**
    * A special folder with no page after it — `/tasks`, `/roadmap`,
-   * `/notebook`, `/models`. The url names the tab rather than one of its
+   * `/notebook`. The url names the tab rather than one of its
    * pages, so it opens the first one the tab lists, which is what the `g t` /
    * `g r` / `g n` shortcuts and the collapsed rail already do. Resolving it
    * needs the folder's listing, so the client does that, not parseRoute.
    */
   pageFolder?: string;
-  /**
-   * An Event Model (roadmap/support-event-modeling.md) as its file name,
-   * repo-relative and with the `.model.json` suffix restored:
-   * `models/cart.model.json`.
-   */
-  model?: string;
 }
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
@@ -80,14 +74,6 @@ export function parseRoute(pathname: string): Route {
     if (!segs[1]) return { pageFolder: segs[0] };
     const path = segs.slice(1).join("/").replace(/\.md$/, "");
     return { page: `${segs[0]}/${path}.md` };
-  }
-  // An Event Model is a plain path under its folder the same way; a link
-  // may carry the `.model.json` suffix already, and the bare folder opens the
-  // first model as the page folders open their first page.
-  if (segs[0] === MODELS_FOLDER) {
-    if (!segs[1]) return { pageFolder: MODELS_FOLDER };
-    const path = segs.slice(1).join("/").replace(/\.model\.json$/, "");
-    return { model: `${MODELS_FOLDER}/${path}.model.json` };
   }
   if (segs[0] !== "features" || !segs[1]) return {};
   // The feature path runs up to the first `scenarios` segment that has a slug
@@ -145,21 +131,12 @@ export const PAGE_FOLDERS = ["roadmap", "tasks", "notebook"];
 /** The engineering notebook's folder (specs/app/engineering-notebook.feature.md). */
 export const NOTEBOOK_FOLDER = "notebook";
 
-/** The Event Models' folder, shared with the server (src/server/models.ts). */
-export const MODELS_FOLDER = "models";
-
 /**
  * The spec tree's folder, shared with the server (src/server/walk.ts). Urls
  * never carry it — see `featurePath` — so it appears only where a route is
  * converted to or from a repo-relative file name.
  */
 export const SPECS_FOLDER = "specs";
-
-/** `models/shop/cart.model.json` -> `/models/shop/cart`. */
-export function modelLink(fileName: string): string {
-  const stem = fileName.slice(MODELS_FOLDER.length + 1).replace(/\.model\.json$/, "");
-  return `/${MODELS_FOLDER}/${stem.split("/").map(encodeURIComponent).join("/")}`;
-}
 
 /** The folder a page's file name lives in — `roadmap`, `tasks` or `notebook`. */
 export function pageFolderOf(fileName: string): string {
@@ -202,9 +179,7 @@ export function pagePath(
   fileName: string | null,
   scenario: Pick<Scenario, "name" | "version"> | null,
   page: string | null = null,
-  model: string | null = null,
 ): string {
-  if (model) return modelLink(model);
   if (page) return pageLink(page);
   if (!fileName) return "/";
   return scenario ? scenarioPath(fileName, scenario) : featurePath(fileName);
