@@ -28,6 +28,8 @@ export interface TabApp {
   autosaveSeconds: number;
   prompt: Prompt;
   confirm: Confirm;
+  /** Opens the Settings dialog — where the GitHub sign-in lives, say. */
+  openSettings: () => void;
 }
 
 /** Open one of the tab's views; `push` adds a history entry. */
@@ -153,7 +155,8 @@ declare module "../kernel" {
   interface Events {
     /** The data folder changed: forget the old one's data and load the new. */
     "data/changed": () => void | Promise<void>;
-    /** The reload tick: refresh what is on screen, unless an editor is dirty. */
-    "reload/tick": () => void;
+    /** The reload tick, with the plugin view that has the pane: refresh what
+        is on screen, unless an editor is dirty. */
+    "reload/tick": (open: PluginView | null) => void;
   }
 }

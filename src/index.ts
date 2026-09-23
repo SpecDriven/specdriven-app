@@ -51,10 +51,6 @@ const server = Bun.serve({
     // manifest, on or off, so a deep link to a switched-off tab still lands
     // in the app and goes home there.
     ...Object.fromEntries(shell.prefixes().flatMap((p) => [[p, index], [`${p}/*`, index]])),
-    // GitHub issue tracking (specs/app/github-issues.feature.md): the list,
-    // the new-issue form and one issue by number.
-    "/issues": index,
-    "/issues/*": index,
   },
   fetch: async (req) => (await handleApi(req)) ?? new Response("Not Found", { status: 404 }),
   // `bun run build` compiles with --production, which inlines NODE_ENV here:
