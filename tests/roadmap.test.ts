@@ -26,8 +26,13 @@ import {
   readPage,
   savePage,
 } from "../src/server/pages";
-import { normalizeRoadmap } from "../src/server/state";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `roadmap` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeRoadmap = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { roadmap: value }, builtinManifests).enabled.includes("roadmap");
 
 let root: string;
 

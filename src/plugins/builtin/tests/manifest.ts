@@ -8,7 +8,8 @@ export const manifest: PluginManifest = {
   api: "1",
   displayName: "Test management",
   description: "Test cases, plans and runs on their own tab",
-  // The historical settings key; off unless turned on.
-  switch: { key: "testing", default: false },
+  // Off unless turned on; `testing` was its switch before the profile.
+  defaultEnabled: false,
+  legacyKey: "testing",
   paths: ["/tests"],
 };

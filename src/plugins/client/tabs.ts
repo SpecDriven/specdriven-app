@@ -132,21 +132,42 @@ export interface TabPlugin<V = unknown> {
   subscribe?(listener: () => void): () => void;
 }
 
-/** A registry App renders from: add is reversible, and React subscribes. */
+/**
+ * A registry App renders from: add is reversible, and React subscribes.
+ * Items sort by `rank` when the registry was given one — the profile's
+ * order, for the tabs (specs/app/plugins.feature.md "The profile lists
+ * enabled plugins in tab order") — and by their own `order` otherwise.
+ */
 export class Registry<T extends { id: string; order?: number }> {
   private items: T[] = [];
   private readonly listeners = new Set<() => void>();
+
+  constructor(private readonly rank?: (item: T) => number | undefined) {}
 
   add(item: T): Disposer {
     if (this.items.some((x) => x.id === item.id)) {
       throw new Error(`"${item.id}" is already registered`);
     }
-    this.items = [...this.items, item].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    this.items = this.sorted([...this.items, item]);
     this.notify();
     return () => {
       this.items = this.items.filter((x) => x !== item);
       this.notify();
     };
+  }
+
+  /** Re-sort after the ranks changed — the profile was reordered, say. */
+  resort(): void {
+    const next = this.sorted([...this.items]);
+    if (next.some((item, i) => item !== this.items[i])) {
+      this.items = next;
+      this.notify();
+    }
+  }
+
+  private sorted(items: T[]): T[] {
+    const key = (item: T) => this.rank?.(item) ?? item.order ?? 0;
+    return items.sort((a, b) => key(a) - key(b));
   }
 
   /** The current items, a stable array until the next change. */

@@ -2983,6 +2983,72 @@ button.table-add:hover {
   min-width: 0;
 }
 
+/* Settings → Plugins (specs/app/plugins.feature.md): a titled group whose
+   rows are the profile's plugins in tab order, each with its name, where it
+   came from and its version, a line on what it adds, the arrows that move
+   it, and its switch. */
+.settings-group-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.7rem 0 0.5rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.settings-group-title + .settings-row,
+.plugin-row + .plugin-row {
+  border-top: 1px solid var(--border);
+}
+
+.plugin-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.plugin-row-meta {
+  font-size: 0.6875rem;
+  font-weight: 400;
+  color: var(--text-3, var(--text-2));
+}
+
+.plugin-row-error {
+  color: var(--danger-fg);
+}
+
+.plugin-row-order {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.plugin-row-move {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.plugin-row-move:hover:not(:disabled) {
+  background: var(--surface-3, var(--surface-1));
+  color: var(--text-1);
+}
+
+.plugin-row-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* The project management tool: the list of the usual ones, plus the name
    field that appears for a tool the list doesn't offer. */
 .settings-tool {
