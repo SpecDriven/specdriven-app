@@ -33,38 +33,12 @@ const PRISTINE_README = "# Demo specs\n";
 const PRISTINE_FEATURE = "# Quote\n\n## Get a quote [published]\n\nsome text\n";
 const PRISTINE_PAGE =
   "# Usage-Based Auto\n\n**Assigned:** Dana Whitfield\n\nPrice on how they drive.\n";
-/** An Event Model with one slice, linked to the quote feature — as the
-    bundled dataset links its water damage model to that feature. */
-const PRISTINE_MODEL = JSON.stringify({
-  format: "specdriven-event-model/1",
-  name: "Quote",
-  model: {
-    slices: [
-      {
-        id: "slice-quote",
-        title: "Quote",
-        sliceType: "STATE_CHANGE",
-        commands: [{ id: "get-a-quote", title: "Get a quote", type: "COMMAND", fields: [], dependencies: [] }],
-        events: [],
-        readmodels: [],
-        screens: [],
-        processors: [],
-        tables: [],
-        specifications: [],
-      },
-    ],
-  },
-  layout: { lanes: [], slices: {}, elements: {} },
-  links: { "slice-quote": { feature: "specs/billing/quote.feature.md" } },
-});
-
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-demo-"));
   source = await mkdtemp(join(tmpdir(), "specdriven-demo-src-"));
   await Bun.write(join(source, "README.md"), PRISTINE_README);
   await Bun.write(join(source, "specs", "billing", "quote.feature.md"), PRISTINE_FEATURE);
   await Bun.write(join(source, "roadmap", "usage-based-auto.md"), PRISTINE_PAGE);
-  await Bun.write(join(source, "models", "quote.model.json"), PRISTINE_MODEL);
   process.env.SPECDRIVEN_ROOT = root;
   process.env.DEMO_MODE = "1";
   process.env.DEMO_DATA_DIR = source;
@@ -166,7 +140,6 @@ test("every optional module is on except IntelliJ IDEA", async () => {
     "roadmap",
     "tasks",
     "notebook",
-    "models",
     "testing",
     "assignments",
     "deletePublished",
@@ -190,41 +163,8 @@ test("every optional module is on except IntelliJ IDEA", async () => {
     ["tasks", true, true],
     ["notebook", true, true],
     ["issues", true, true],
-    ["models", true, true],
     ["tests", true, true],
   ]);
-});
-
-// The Models tab, unlike the roadmap's, is on: the dataset's Event Model
-// (src/server/demo.ts DEMO_SETTINGS) is there to be found from its feature.
-test("the Models tab is on and lists the dataset's Event Model, linked to its feature", async () => {
-  const state = await bootState();
-  expect(state.models).toBe(true);
-
-  const { models } = await (await api("/api/models")).json();
-  expect(models).toEqual([
-    {
-      fileName: "models/quote.model.json",
-      name: "Quote",
-      slices: 1,
-      links: [{ sliceId: "slice-quote", slice: "Quote", feature: "specs/billing/quote.feature.md" }],
-    },
-  ]);
-});
-
-test("a model save lands in the working copy; the snapshot is untouched", async () => {
-  const before = await snapshot(source);
-  const state = await bootState();
-  const file = "models/quote.model.json";
-  const { file: model } = await (await api(`/api/models/${encodeURIComponent(file)}`)).json();
-  const res = await api(`/api/models/${encodeURIComponent(file)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: { ...model, name: "Quote, edited in the demo" } }),
-  });
-  expect(res.status).toBe(200);
-  expect(await readFile(join(state.dataRepo, file), "utf8")).toContain("edited in the demo");
-  expect(await snapshot(source)).toEqual(before);
 });
 
 test("a roadmap edit lands in the working copy; the snapshot is untouched", async () => {

@@ -2020,13 +2020,20 @@ export function App() {
   /**
    * What the open plugin view bundles into a session beyond the picked specs
    * (src/plugins/client/tabs.ts `session`) — the Event Model on the Models
-   * tab's canvas (roadmap/support-event-modeling.md), whose JSON goes into
-   * the prompt after the specs. A model alone is a session too
-   * (src/server/api.ts resolveSessionRequest).
+   * plugin's canvas, whose JSON goes into the prompt after the specs — sent
+   * as `attachments` under the plugin's id. What a tab bundles alone is a
+   * session too (src/server/api.ts resolveSessionRequest).
    */
-  const sessionBundle = (): { models: string[]; labels: string[] } =>
-    (pluginView && activeTab?.session?.(pluginView.view)) || { models: [], labels: [] };
-  const sessionModels = (): string[] => sessionBundle().models;
+  const sessionBundle = (): {
+    attachments: Record<string, string[]>;
+    labels: string[];
+    count: number;
+  } => {
+    const bundle = pluginView && activeTab ? activeTab.session?.(pluginView.view) : null;
+    return bundle && activeTab
+      ? { attachments: { [activeTab.id]: bundle.refs }, labels: bundle.labels, count: bundle.refs.length }
+      : { attachments: {}, labels: [], count: 0 };
+  };
 
   /** "2 whole specs and 3 scenarios from 1 spec" — the button and the name
       dialog both say what a session would run over. */
@@ -2050,7 +2057,7 @@ export function App() {
   };
 
   const selectionLabel = describeSelection(sessionFiles());
-  const sessionCount = specSelection.size + sessionModels().length;
+  const sessionCount = specSelection.size + sessionBundle().count;
 
   /** The target the next session dialog opens on. */
   const sessionTarget = resolveCodeGenTarget(
@@ -2073,7 +2080,7 @@ export function App() {
   const copySessionPrompt = async (
     name: string,
     files: { fileName: string; scenarios?: ScenarioPick[] }[],
-    models: string[],
+    attachments: Record<string, string[]>,
   ) => {
     setSessionRunning(true);
     setSessionNotice(`Building the prompt for "${name}"…`);
@@ -2081,7 +2088,7 @@ export function App() {
       const res = await fetch("/api/agent/session/prompt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, files, models }),
+        body: JSON.stringify({ name, files, attachments }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -2110,12 +2117,12 @@ export function App() {
   // second tab.
   const aiSessionDialog = (): {
     files: ReturnType<typeof sessionFiles>;
-    models: string[];
+    bundle: ReturnType<typeof sessionBundle>;
     only: CodeGenTarget;
     dialog: PromptOptions;
   } => {
     const files = sessionFiles();
-    const models = sessionModels();
+    const bundle = sessionBundle();
     // With a code repo named in project-settings.json the session runs
     // there, and the dialog says so — the folder is the session's whole
     // context, so it must not come as a surprise.
@@ -2198,16 +2205,17 @@ export function App() {
       agentChoices.length > 0
         ? { ...dialog, choicesLabel: "Run in", choices, initialChoice: sessionTarget }
         : { ...dialog, confirmLabel: "Copy prompt" };
-    if (files.length === 0 && models.length === 0) delete opts.hint;
-    return { files, models, only, dialog: opts };
+    if (files.length === 0 && bundle.count === 0) delete opts.hint;
+    return { files, bundle, only, dialog: opts };
   };
 
   /** The AI tab was confirmed: copy the prompt, or run the session where it was told to. */
   const runAiSession = async (sessionName: string, choice: string | null) => {
-    const { files, models, only } = aiSessionDialog();
-    if ((files.length === 0 && models.length === 0) || sessionRunning) return;
+    const { files, bundle, only } = aiSessionDialog();
+    if ((files.length === 0 && bundle.count === 0) || sessionRunning) return;
+    const { attachments } = bundle;
     if (choice === null || choice === CLIPBOARD_TARGET) {
-      await copySessionPrompt(sessionName, files, models);
+      await copySessionPrompt(sessionName, files, attachments);
       return;
     }
     const target = readCodeGenTarget(choice) ?? only;
@@ -2223,7 +2231,7 @@ export function App() {
       const res = await fetch("/api/agent/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: sessionName, files, models, target }),
+        body: JSON.stringify({ name: sessionName, files, attachments, target }),
       });
       const data = await res.json();
       if (res.ok && target === "desktop") {

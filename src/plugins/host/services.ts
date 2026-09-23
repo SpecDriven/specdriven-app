@@ -1,11 +1,14 @@
 // The host half's extension points (roadmap/plugin-architecture.md
 // "Extension points"): the route table, the shell paths, the sync tick's
-// drift hook and data-repo access, each a service on the kernel context and
-// each registration a disposer. api.ts registers the core rows first, so
-// core routes match before a plugin's.
+// drift hook, data-repo access, the search scopes and a code gen session's
+// prompt sections, each a service on the kernel context and each
+// registration a disposer. api.ts registers the core rows first, so core
+// routes match before a plugin's.
 
 import type { Disposer } from "../kernel";
+import type { SessionSection } from "../../server/agent";
 import type { Handler, Params } from "../../server/http";
+import type { SearchSource } from "../../server/search";
 
 export interface ApiMatch {
   handler: Handler;
@@ -35,6 +38,52 @@ export interface SyncHooks {
   drift(fn: (dir: string) => Promise<string | void>): Disposer;
   /** The tick's side: every hook in registration order. */
   run(dir: string): Promise<string[]>;
+  /**
+   * A top-level folder of the data repo the plugin owns: the specs-folder
+   * migration (src/server/migrate.ts) never takes a `.feature.md` in it
+   * for a stray spec.
+   */
+  reserve(folder: string): Disposer;
+  /** The folders reserved now. */
+  reserved(): string[];
+  /**
+   * Hear which features the specs-folder migration moved (old path to new),
+   * to rewrite a plugin file that names them.
+   */
+  moved(fn: (dir: string, moved: ReadonlyMap<string, string>) => Promise<void>): Disposer;
+  /** The migration's side: every hook in registration order. */
+  runMoved(dir: string, moved: ReadonlyMap<string, string>): Promise<void>;
+}
+
+/**
+ * The search scopes beyond the specs and the special folders
+ * (src/server/search.ts): `GET /api/search?scope=<name>` searches the
+ * plugin's files, one hit per file — the Models tab's palette searches the
+ * models this way.
+ */
+export interface SearchScopes {
+  add(scope: string, source: SearchSource): Disposer;
+}
+
+/**
+ * What a code gen session bundles beyond the specs (src/server/agent.ts
+ * buildSessionPrompt). A tab names what is open on it (the client's
+ * `TabPlugin.session`) and the request carries those names under the
+ * plugin's id; every contributor is asked, with its own names — none when
+ * the session came from elsewhere — and the session's spec files, and
+ * answers with prompt sections and any specs to take on whole.
+ */
+export interface SessionContributor {
+  (
+    dir: string,
+    request: { refs: string[]; specFiles: string[] },
+  ): Promise<{ sections: SessionSection[]; features: string[] }>;
+}
+
+export interface SessionParts {
+  add(id: string, contributor: SessionContributor): Disposer;
+  /** The contributors, by plugin id, in registration order. */
+  entries(): [string, SessionContributor][];
 }
 
 export interface DataAccess {
@@ -53,7 +102,15 @@ declare module "../kernel" {
     shell: ShellPaths;
     sync: SyncHooks;
     data: DataAccess;
+    search: SearchScopes;
+    sessions: SessionParts;
   }
+}
+
+/** Remove one entry from a list, if it is still there. */
+function drop<T>(list: T[], item: T): void {
+  const i = list.indexOf(item);
+  if (i >= 0) list.splice(i, 1);
 }
 
 export function createRouteRegistry(): RouteRegistry {
@@ -134,13 +191,12 @@ export function createShellPaths(): ShellPaths {
 
 export function createSyncHooks(): SyncHooks {
   const hooks: ((dir: string) => Promise<string | void>)[] = [];
+  const folders: string[] = [];
+  const movedHooks: ((dir: string, moved: ReadonlyMap<string, string>) => Promise<void>)[] = [];
   return {
     drift(fn) {
       hooks.push(fn);
-      return () => {
-        const i = hooks.indexOf(fn);
-        if (i >= 0) hooks.splice(i, 1);
-      };
+      return () => drop(hooks, fn);
     },
     async run(dir) {
       const lines: string[] = [];
@@ -149,6 +205,34 @@ export function createSyncHooks(): SyncHooks {
         if (line) lines.push(line);
       }
       return lines;
+    },
+    reserve(folder) {
+      folders.push(folder);
+      return () => drop(folders, folder);
+    },
+    reserved() {
+      return [...new Set(folders)];
+    },
+    moved(fn) {
+      movedHooks.push(fn);
+      return () => drop(movedHooks, fn);
+    },
+    async runMoved(dir, moved) {
+      for (const hook of [...movedHooks]) await hook(dir, moved);
+    },
+  };
+}
+
+export function createSessionParts(): SessionParts {
+  const rows: [string, SessionContributor][] = [];
+  return {
+    add(id, contributor) {
+      const row: [string, SessionContributor] = [id, contributor];
+      rows.push(row);
+      return () => drop(rows, row);
+    },
+    entries() {
+      return [...rows];
     },
   };
 }

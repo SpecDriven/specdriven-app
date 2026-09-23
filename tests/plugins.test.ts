@@ -5,8 +5,10 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { handleApi, matchApi } from "../src/server/api";
-import { pluginStates, shell, sync, syncPlugins } from "../src/plugins/host/loader";
-import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { host, pluginStates, sessionParts, shell, sync, syncPlugins } from "../src/plugins/host/loader";
+import { builtinManifests, profileManifests } from "../src/plugins/builtin/manifests";
+import { isSearchScope } from "../src/server/search";
+import { buildSessionPrompt } from "../src/server/agent";
 import { hasLegacyKeys, legacyFields, readProfile, withPlugin, writeProfile } from "../src/plugins/profile";
 import { version as appVersion } from "../package.json";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
@@ -44,7 +46,6 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
     row("roadmap", false),
     row("tasks", false),
     row("issues", false),
-    row("models", false),
     row("tests", false),
   ]);
   expect(pluginStates().map((p) => [p.displayName, p.description])).toEqual([
@@ -52,7 +53,6 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
     ["Roadmap", "Markdown roadmap pages on their own tab"],
     ["Tasks", "Tasks to assign, tick off and put on the calendar"],
     ["GitHub issues", "The code repo's GitHub issues on their own tab"],
-    ["Event models", "Event Models drawn on a canvas, sliced into specs"],
     ["Test management", "Test cases, plans and runs on their own tab"],
   ]);
 
@@ -100,7 +100,6 @@ test("a settings file from before plugins is read as the matching profile", () =
     tasks: false,
     notebook: true,
     issues: false,
-    models: false,
     testing: true,
   });
   // Writing the profile drops the legacy switches and keeps the section's
@@ -133,7 +132,6 @@ test("the profile's order is the tab order, and an id nothing provides is report
     ["roadmap", false, false, true],
     ["tasks", false, false, true],
     ["issues", false, false, true],
-    ["models", false, false, true],
   ]);
   expect(pluginStates()[1]!.error).toMatch(/No installed plugin has this id/);
   expect(matchApi("GET", "/api/tests")).not.toBeNull();
@@ -237,69 +235,73 @@ test("the Issues tab registers only while the store knows a GitHub repo", async 
   }
 });
 
-test("the Models switch mounts the canvas's routes and the folder's drift pass", async () => {
-  await syncPlugins({ models: false });
-  expect(matchApi("GET", "/api/models")).toBeNull();
-  expect(matchApi("POST", "/api/models/m%2Fa.model.json/slices/s1/feature")).toBeNull();
-  expect(shell.matches("/models/shop/cart")).toBe(true);
-
+// The Event Models left the tree for the marketplace (the `models` plugin
+// of SpecDriven/plugins): the old switch still reads as the plugin's id, and
+// Settings → Plugins names it and says to install it.
+test("the retired Models switch lists the plugin, which reports as not installed", async () => {
+  expect(readProfile({ models: true }, profileManifests)).toEqual({
+    enabled: ["notebook", "models"],
+    migrated: true,
+  });
+  expect(readProfile({ models: true }, builtinManifests).enabled).toEqual(["notebook"]);
   await syncPlugins({ models: true });
-  expect(matchApi("GET", "/api/models")).not.toBeNull();
-  expect(matchApi("GET", "/api/models/models%2Fcart.model.json/export")!.params).toEqual({
-    file: "models/cart.model.json",
-  });
-  expect(matchApi("POST", "/api/models/m%2Fa.model.json/slices/s1/feature")!.params).toEqual({
-    file: "m/a.model.json",
-    slice: "s1",
-  });
-
-  await syncPlugins({ models: false });
-  expect(matchApi("PUT", "/api/models/models%2Fcart.model.json")).toBeNull();
+  const row = pluginStates().find((p) => p.id === "models")!;
+  expect(row).toMatchObject({ displayName: "Event models", installed: false, enabled: true, active: false });
+  expect(row.error).toMatch(/install it from the marketplace/);
+  expect(matchApi("GET", "/api/models")).toBeNull();
 });
 
-test("the Models tab opens its first model, and a feature page crumbs back to it", async () => {
-  // The listing is the one fetch the plugin makes on mount; answered here.
-  const realFetch = globalThis.fetch;
-  let listed: unknown[] = [];
-  globalThis.fetch = (async () => Response.json({ models: listed })) as unknown as typeof fetch;
-  try {
-    await syncClientPlugins([{ id: "models", enabled: true }]);
-    const tab = tabs.get("models")!;
-    expect(tab).toBeDefined();
-    // An empty folder: the bare url resolves to nothing, so it goes home and
-    // the tab has no rail icon or chord.
-    expect(tabReachable(tab)).toBe(false);
-    const bare = matchPluginRoute("/models")!;
-    expect(bare.view).toEqual({ fileName: null });
-    expect(tab.route.resolve!(bare.view)).toBeNull();
+// What a plugin with files of its own asks of the core: a search scope, a
+// part of the code gen session's prompt, a reserved folder and word of the
+// features the specs-folder migration moved.
+test("a plugin's search scope, session part and migration hooks come and go with it", async () => {
+  const moves: [string, string][] = [];
+  const scope = host.plugin({
+    name: "fixture",
+    inject: ["search", "sessions", "sync"],
+    apply(ctx) {
+      ctx.effect(() =>
+        ctx.need("search").add("fixture", {
+          kind: "thing",
+          files: async () => [],
+          document: () => null,
+        }),
+      );
+      ctx.effect(() =>
+        ctx.need("sessions").add("fixture", async (_dir, { refs, specFiles }) => ({
+          sections: refs.map((ref) => ({
+            heading: `Thing: ${ref}`,
+            noun: { one: "Thing", many: "Things" },
+            lines: [`with ${specFiles.length} spec(s)`],
+          })),
+          features: [],
+        })),
+      );
+      ctx.effect(() => ctx.need("sync").reserve("things"));
+      ctx.effect(() =>
+        ctx.need("sync").moved(async (_dir, moved) => {
+          moves.push(...moved);
+        }),
+      );
+    },
+  });
+  await scope.ready;
+  expect(isSearchScope("fixture")).toBe(true);
+  expect(sync.reserved()).toContain("things");
+  expect(sessionParts.entries().map(([id]) => id)).toContain("fixture");
+  const contribute = sessionParts.entries().find(([id]) => id === "fixture")![1];
+  const { sections } = await contribute("/data", { refs: ["t1"], specFiles: [] });
+  expect(buildSessionPrompt("s", [], undefined, sections)).toBe(
+    "SpecDriven code gen session: s\n\nImplement the following Thing.\n" +
+      "Work in the current directory and exit when done.\n\n## Thing: t1\n\nwith 0 spec(s)\n",
+  );
+  await sync.runMoved("/data", new Map([["a.feature.md", "specs/a.feature.md"]]));
+  expect(moves).toEqual([["a.feature.md", "specs/a.feature.md"]]);
 
-    listed = [
-      {
-        fileName: "models/cart.model.json",
-        name: "Cart",
-        links: [{ slice: "Add item", feature: "specs/cart.feature.md" }],
-      },
-    ];
-    await client.serial("data/changed");
-    expect(tabReachable(tab)).toBe(true);
-    expect(tab.route.resolve!(bare.view)).toEqual({ fileName: "models/cart.model.json" });
-    expect(tab.route.title({ fileName: "models/cart.model.json" })).toBe("Cart");
-
-    const crumbs = tab.featureCrumbs!("specs/cart.feature.md");
-    expect(crumbs.map((c) => [c.title, tab.route.path(c.view)])).toEqual([
-      ["Open the Event Model “Cart” — slice “Add item”", "/models/cart"],
-    ]);
-    expect(tab.featureCrumbs!("specs/other.feature.md")).toEqual([]);
-    expect(tab.session!({ fileName: "models/cart.model.json" })).toEqual({
-      models: ["models/cart.model.json"],
-      labels: ["the model “Cart”"],
-    });
-
-    await syncClientPlugins([]);
-    expect(tabs.get("models")).toBeUndefined();
-  } finally {
-    globalThis.fetch = realFetch;
-  }
+  await scope.dispose();
+  expect(isSearchScope("fixture")).toBe(false);
+  expect(sync.reserved()).not.toContain("things");
+  expect(sessionParts.entries().map(([id]) => id)).not.toContain("fixture");
 });
 
 // The special folders (src/plugins/builtin/pages): three plugins from one

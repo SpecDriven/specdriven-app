@@ -4,15 +4,16 @@
 // 1. migrateToSpecsFolder — features under `specs/` (src/server/walk.ts).
 //    Repos written before the spec tree got its own folder keep `.feature.md`
 //    files at the root and in arbitrary subfolders, sitting beside the
-//    reserved `roadmap/`, `tasks/` and `models/`. Only `specs/` is scanned
-//    now, so such a repo would open empty. Three things move together, or
-//    the repo is left inconsistent: the `.feature.md` files themselves,
-//    their Automerge doc directories — the system of record, so a feature
-//    that loses its document loses every scenario id, every draft-only
-//    scenario and its whole merge history — and the feature paths stored
-//    inside `models/**/*.model.json` `links`, which are how an Event Model's
-//    slice finds the spec it generated. All of it lands in one commit, as
-//    renames, so the history follows the files.
+//    reserved `roadmap/` and `tasks/` and the folders plugins own (the
+//    Event Models' `models/`). Only `specs/` is scanned now, so such a repo
+//    would open empty. The `.feature.md` files and their Automerge doc
+//    directories move together, or the repo is left inconsistent — the
+//    documents are the system of record, so a feature that loses its
+//    document loses every scenario id, every draft-only scenario and its
+//    whole merge history — in one commit, as renames, so the history
+//    follows the files. A plugin whose files name features (an Event
+//    Model's slices link the spec they generated) is told of the moves and
+//    rewrites its own files, which ride the tick's next commit.
 //
 // 2. migrateAutomergeLayout — the store's mirrored layout
 //    (specs/datastore/automerge-store.feature.md "Storage layout"). The
@@ -36,17 +37,14 @@ import {
   LEGACY_KIND_ROOTS,
   TESTING_DOC_NAME,
   docDirRel,
-  modelDocDirRel,
+  fileDocDirRel,
   pageDocDirRel,
   testingDocDirRel,
-  type DocKind,
+  type LegacyKindRoot,
 } from "./automerge/store";
-import { directoryExists, fileExists, readTextFile, writeTextFile } from "./fsx";
+import { directoryExists, fileExists } from "./fsx";
 import { commitAndPush, moveAndPush } from "./git";
 import type { PathMove } from "./git/backend";
-import { isModelsFolderPath, MODELS_FOLDER, modelFiles } from "./models";
-import { parseModelFile, serializeModelFile } from "./eventModel/serialize";
-import type { ModelFile } from "./eventModel/types";
 import { isPageFolderPath } from "./pages";
 import { getLogger, withSpan } from "./telemetry";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath } from "./walk";
@@ -64,11 +62,22 @@ function legacyFeatureDocDir(fileName: string): string {
 }
 
 /**
- * Feature files outside the spec tree, repo-relative. The reserved folders are
- * skipped: a `.feature.md` under `roadmap/` or `models/` is somebody's page or
- * export, not a spec that belongs in the tree.
+ * What the specs-folder migration asks of the plugins (src/plugins/host/
+ * services.ts SyncHooks): the top-level folders they own, left alone, and
+ * a hook told of the features that moved — the Event Models plugin
+ * rewrites the slice links that name them.
  */
-async function strayFeatures(dataDir: string, rel = ""): Promise<string[]> {
+export interface MigrationHooks {
+  reserved?: readonly string[];
+  moved?: (dataDir: string, moved: ReadonlyMap<string, string>) => Promise<unknown>;
+}
+
+/**
+ * Feature files outside the spec tree, repo-relative. The reserved folders are
+ * skipped: a `.feature.md` under `roadmap/` or a plugin's folder is somebody's
+ * page or export, not a spec that belongs in the tree.
+ */
+async function strayFeatures(dataDir: string, reserved: readonly string[], rel = ""): Promise<string[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(rel ? `${dataDir}/${rel}` : dataDir, { withFileTypes: true });
@@ -79,62 +88,22 @@ async function strayFeatures(dataDir: string, rel = ""): Promise<string[]> {
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
     const path = rel ? `${rel}/${entry.name}` : entry.name;
-    if (isSpecsFolderPath(path) || isPageFolderPath(path) || isModelsFolderPath(path)) continue;
-    if (entry.isDirectory()) out.push(...(await strayFeatures(dataDir, path)));
+    if (isSpecsFolderPath(path) || isPageFolderPath(path) || reserved.includes(path)) continue;
+    if (entry.isDirectory()) out.push(...(await strayFeatures(dataDir, reserved, path)));
     else if (isFeatureFile(entry.name)) out.push(path);
   }
   return out;
 }
 
 /**
- * Rewrite the feature paths an Event Model's slices point at. Returns the
- * model files that changed, so they join the migration commit.
- */
-async function relinkModels(dataDir: string, moved: Map<string, string>): Promise<string[]> {
-  const changed: string[] = [];
-  for (const fileName of await modelFiles(dataDir, MODELS_FOLDER)) {
-    const text = await readTextFile(`${dataDir}/${fileName}`);
-    if (text === null) continue;
-    let model: ModelFile;
-    try {
-      model = parseModelFile(text);
-    } catch {
-      // A model we cannot parse is left exactly as it is: the migration must
-      // not turn a corrupt file into a differently corrupt one.
-      log.warn(`skipped unparseable model during migration: ${fileName}`);
-      continue;
-    }
-    let touched = false;
-    const links: ModelFile["links"] = {};
-    for (const [sliceId, link] of Object.entries(model.links ?? {})) {
-      // A slice with no feature yet, or one naming a spec that did not move,
-      // is copied across untouched.
-      const to = link.feature === undefined ? undefined : moved.get(link.feature);
-      if (to === undefined) {
-        links[sliceId] = link;
-        continue;
-      }
-      links[sliceId] = { ...link, feature: to };
-      touched = true;
-    }
-    if (!touched) continue;
-    // Written through the model serializer, so the file keeps its canonical
-    // key order rather than whatever a hand-rolled stringify would emit.
-    await writeTextFile(`${dataDir}/${fileName}`, serializeModelFile({ ...model, links }));
-    changed.push(fileName);
-  }
-  return changed;
-}
-
-/**
- * Move any features outside `specs/` into it, with their documents and the
- * model links that name them, in one commit. A no-op — and silent — for a repo
- * that is already migrated, which is every tick after the first.
+ * Move any features outside `specs/` into it, with their documents, in one
+ * commit, and tell the plugins where each went. A no-op — and silent — for a
+ * repo that is already migrated, which is every tick after the first.
  *
  * Returns how many features moved.
  */
-export async function migrateToSpecsFolder(dataDir: string): Promise<number> {
-  const stray = await strayFeatures(dataDir);
+export async function migrateToSpecsFolder(dataDir: string, hooks: MigrationHooks = {}): Promise<number> {
+  const stray = await strayFeatures(dataDir, hooks.reserved ?? []);
   if (stray.length === 0) return 0;
   return withSpan(
     "migrate.specs_folder",
@@ -157,7 +126,6 @@ export async function migrateToSpecsFolder(dataDir: string): Promise<number> {
         }
       }
       if (moves.length === 0) return 0;
-      const relinked = await relinkModels(dataDir, moved);
       // moveAndPush takes the first move as its subject and commits the rest
       // alongside it, so the whole migration is one commit of renames.
       const [first, ...rest] = moves;
@@ -168,10 +136,10 @@ export async function migrateToSpecsFolder(dataDir: string): Promise<number> {
         `Move features under ${SPECS_FOLDER}/`,
         rest,
       );
-      // The rewritten model files are a content change, not a rename, so they
-      // ride the sync tick's own commit rather than this one.
+      // What the plugins rewrite in their own files is a content change, not
+      // a rename, so it rides the sync tick's own commit rather than this one.
+      await hooks.moved?.(dataDir, moved);
       log.info(`moved ${moved.size} feature(s) under ${SPECS_FOLDER}/`, {
-        "migrate.models_relinked": relinked.length,
         "git.pushed": sync.pushed,
       });
       return moved.size;
@@ -207,7 +175,7 @@ async function legacyDocDirs(dataDir: string, root: string, rel = ""): Promise<{
 }
 
 /** Where a document filed under an old root belongs now; null for one to leave alone. */
-function mirroredDocDir(kind: DocKind, fileName: string): string | null {
+function mirroredDocDir(kind: LegacyKindRoot, fileName: string): string | null {
   switch (kind) {
     case "features":
       // A feature outside `specs/` is migrateToSpecsFolder's to move first.
@@ -215,7 +183,8 @@ function mirroredDocDir(kind: DocKind, fileName: string): string | null {
     case "docs":
       return pageDocDirRel(fileName);
     case "models":
-      return isModelsFolderPath(fileName) ? modelDocDirRel(fileName) : null;
+      // The Event Model documents, which the Models plugin keeps now.
+      return fileName.startsWith("models/") ? fileDocDirRel(fileName) : null;
     case "testing":
       return fileName === TESTING_DOC_NAME ? testingDocDirRel() : null;
   }
@@ -259,7 +228,7 @@ async function hasNoFiles(path: string): Promise<boolean> {
  * Returns how many documents moved.
  */
 export async function migrateAutomergeLayout(dataDir: string): Promise<number> {
-  const present: DocKind[] = [];
+  const present: LegacyKindRoot[] = [];
   for (const kind of LEGACY_KIND_ROOTS) {
     if (await directoryExists(`${dataDir}/${AUTOMERGE_ROOT}/${kind}`)) present.push(kind);
   }

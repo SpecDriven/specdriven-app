@@ -1,5 +1,6 @@
 // What the page publishes for plugin bundles (roadmap/plugin-architecture.md
-// "One React"): the app's own React, ReactDOM and JSX runtime under
+// "One React"): the app's own React, ReactDOM, JSX runtime and building
+// blocks (src/plugins/sdk/client.ts, `@specdriven/client`) under
 // `window.__specdriven.modules`, which the shims a plugin's browser half is
 // built with (src/plugins/host/build.ts) re-export. One React on the page,
 // so a plugin's components share the app's hooks, context and renderer.
@@ -10,6 +11,7 @@ import * as ReactDOM from "react-dom";
 import * as ReactDOMClient from "react-dom/client";
 import * as jsxRuntime from "react/jsx-runtime";
 import * as jsxDevRuntime from "react/jsx-dev-runtime";
+import * as client from "../sdk/client";
 import { version } from "../../../package.json";
 import { SDK_GLOBAL, type SharedModule } from "../shared";
 
@@ -33,6 +35,7 @@ export function publishSdk(): PluginSdk {
       "react-dom/client": ReactDOMClient,
       "react/jsx-runtime": jsxRuntime,
       "react/jsx-dev-runtime": jsxDevRuntime,
+      "@specdriven/client": client,
     },
   };
   g[SDK_GLOBAL] = sdk;

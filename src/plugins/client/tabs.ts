@@ -118,10 +118,12 @@ export interface TabPlugin<V = unknown> {
   featureCrumbs?(fileName: string): { label: ReactNode; title: string; view: V }[];
   /**
    * What a code gen session started while the view is open bundles beyond
-   * the picked specs: model files for the prompt, and how the session dialog
-   * names each. Null when the view bundles nothing.
+   * the picked specs: names the plugin's host half turns into prompt
+   * sections (src/plugins/host/services.ts SessionParts) — the Event
+   * Models plugin's model file — and how the session dialog names each.
+   * Null when the view bundles nothing.
    */
-  session?(view: V): { models: string[]; labels: string[] } | null;
+  session?(view: V): { refs: string[]; labels: string[] } | null;
   /**
    * The name the command palette's Recent list shows for a view that was
    * open, or null for a view not worth remembering. Absent, the tab's views
