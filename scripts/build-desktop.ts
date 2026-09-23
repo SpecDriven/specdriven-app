@@ -6,6 +6,9 @@
  *   bun run build:desktop --mac      release/SpecDriven-<version>-arm64.dmg (+ zip)
  *   bun run build:desktop --linux    release/SpecDriven-<version>-<arch>.AppImage (+ deb)
  *   bun run build:desktop --all      both
+ *   bun run build:desktop --local    only what runs here: this machine's
+ *                                    platform and architecture, as the
+ *                                    AppImage (Linux) or .dmg (macOS)
  *
  * Three steps: bundle the frontend into static files (served over the
  * app:// protocol), bundle the Electron main process, then hand both to
@@ -73,6 +76,30 @@ export function selectPlatforms(args: string[], osPlatform: string): Platform[] 
   return selected;
 }
 
+/** What `--local` packages: the one installer install.sh starts or opens. */
+const LOCAL_TARGET: Record<Platform, string> = { linux: "AppImage", mac: "dmg" };
+
+/** electron-builder's architecture flag for a `process.arch`. */
+export function archFlag(osArch: string): string {
+  if (osArch === "x64" || osArch === "arm64") return `--${osArch}`;
+  if (osArch === "arm") return "--armv7l";
+  throw new Error(`no desktop build for the ${osArch} architecture`);
+}
+
+/**
+ * The electron-builder arguments. A release build takes the targets and
+ * architectures in package.json; `--local` narrows that to the host's own
+ * architecture and runnable installer. That keeps install.sh off the .deb,
+ * whose fpm runs a bundled Ruby that needs libcrypt.so.1 — which Arch and
+ * other non-Debian distros lack — and off cross-architecture builds nobody
+ * on that machine will start.
+ */
+export function electronBuilderArgs(platforms: Platform[], local: boolean, osArch: string): string[] {
+  if (!local) return platforms.map((p) => `--${p}`);
+  const [platform] = platforms;
+  return [`--${platform}`, LOCAL_TARGET[platform!], archFlag(osArch)];
+}
+
 /**
  * The first two steps — the renderer bundle and the main-process bundle —
  * which is all a local launch needs (scripts/crash-test-desktop.ts runs them
@@ -91,22 +118,28 @@ export async function bundleDesktop(): Promise<void> {
   await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
 }
 
-async function build(platforms: Platform[]): Promise<void> {
+async function build(builderArgs: string[]): Promise<void> {
   await bundleDesktop();
 
-  console.log(`Packaging with electron-builder (${platforms.join(", ")})…`);
-  await $`bunx electron-builder ${platforms.map((p) => `--${p}`)}`;
+  console.log(`Packaging with electron-builder (${builderArgs.join(" ")})…`);
+  await $`bunx electron-builder ${builderArgs}`;
 
   console.log("Done — artifacts in release/");
 }
 
 if (import.meta.main) {
-  let platforms: Platform[];
+  const args = process.argv.slice(2);
+  const local = args.includes("--local");
+  let builderArgs: string[];
   try {
-    platforms = selectPlatforms(process.argv.slice(2), process.platform);
+    const platforms = selectPlatforms(args.filter((a) => a !== "--local"), process.platform);
+    if (local && (platforms.length !== 1 || platforms[0] !== hostPlatform(process.platform))) {
+      throw new Error("--local builds only this machine's platform");
+    }
+    builderArgs = electronBuilderArgs(platforms, local, process.arch);
   } catch (e) {
     console.error(`build:desktop: ${(e as Error).message}`);
     process.exit(1);
   }
-  await build(platforms);
+  await build(builderArgs);
 }
