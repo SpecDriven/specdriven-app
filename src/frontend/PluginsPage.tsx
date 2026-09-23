@@ -7,8 +7,9 @@
 // files in the data folder stay. An id in the profile that no plugin
 // provides is reported here and otherwise ignored — or, for a module that
 // moved to the marketplace (the Event Models), found there to install.
-// Below them, the folders plugins load from and the marketplaces — neither
-// in the hosted demo.
+// Below them, the folders plugins load from and the marketplaces — the
+// hosted demo shows the marketplaces alone, to browse: it installed its
+// marketplace plugins itself when it started.
 
 import { useState } from "react";
 import { ChevronDown, ChevronUp, Settings } from "lucide-react";
@@ -61,12 +62,8 @@ export function PluginsPage(props: PluginsPageProps) {
   const sections = [
     { id: "plugins-on", title: "In the sidebar" },
     ...(off.length > 0 ? [{ id: "plugins-off", title: "Switched off" }] : []),
-    ...(demo
-      ? []
-      : [
-          { id: "plugins-folders", title: "Plugin folders" },
-          { id: "plugins-marketplaces", title: "Marketplaces" },
-        ]),
+    ...(demo ? [] : [{ id: "plugins-folders", title: "Plugin folders" }]),
+    { id: "plugins-marketplaces", title: "Marketplaces" },
   ];
 
   const row = (plugin: PluginStatus, rank: number | null) => {
@@ -282,24 +279,23 @@ export function PluginsPage(props: PluginsPageProps) {
       )}
       {/* The marketplaces (specs/app/plugins.feature.md "The marketplace is
           a git repository with an index"): browse, install with consent,
-          update, remove — not in the demo. */}
-      {!demo && (
-        <PageSection
-          id="plugins-marketplaces"
-          title="Marketplaces"
-          hint="Git repositories with a marketplace.json, read through the app's git engine. A plugin installed from one is pinned to the ref the index names and runs with the app's own rights; nothing updates on its own."
-        >
-          <PluginMarketplace
-            marketplaces={props.marketplaces}
-            plugins={plugins}
-            wanted={wanted}
-            patchSettings={props.patchSettings}
-            prompt={props.prompt}
-            confirm={props.confirm}
-            onChanged={props.onChanged}
-          />
-        </PageSection>
-      )}
+          update, remove — in the demo, browse alone. */}
+      <PageSection
+        id="plugins-marketplaces"
+        title="Marketplaces"
+        hint="Git repositories with a marketplace.json, read through the app's git engine. A plugin installed from one is pinned to the ref the index names and runs with the app's own rights; nothing updates on its own."
+      >
+        <PluginMarketplace
+          marketplaces={props.marketplaces}
+          plugins={plugins}
+          wanted={wanted}
+          readOnly={demo}
+          patchSettings={props.patchSettings}
+          prompt={props.prompt}
+          confirm={props.confirm}
+          onChanged={props.onChanged}
+        />
+      </PageSection>
       {props.error && <p className="error settings-error">{props.error}</p>}
     </AppPageLayout>
   );
