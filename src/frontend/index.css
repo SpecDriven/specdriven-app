@@ -1220,6 +1220,8 @@ button.link:disabled {
 .dialog input,
 .dialog select,
 .dialog textarea,
+.app-page input,
+.app-page select,
 .scenario-pane input,
 .scenario-pane select,
 .scenario-pane textarea {
@@ -1235,6 +1237,8 @@ button.link:disabled {
 .dialog input:focus,
 .dialog select:focus,
 .dialog textarea:focus,
+.app-page input:focus,
+.app-page select:focus,
 .scenario-pane input:focus,
 .scenario-pane select:focus,
 .scenario-pane textarea:focus,
@@ -2759,7 +2763,7 @@ button.table-add:hover {
   height: 1.3rem;
 }
 
-.dialog .switch input[type="checkbox"] {
+.switch input[type="checkbox"] {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2807,33 +2811,7 @@ button.table-add:hover {
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* macOS-style settings dialog (specs/ui.spec.md "Settings"): grouped rows on
-   a muted ground, label left and control right, each control saving itself
-   the moment it changes — no Save button. */
-.dialog.settings-dialog {
-  background: var(--surface-1);
-  gap: 0.85rem;
-  padding-top: 0;
-}
-
-/* Title bar with the ✕, sticky so closing never needs a scroll back up. */
-.settings-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  /* The padding + negative margin let the background cover the flex gap, so
-     rows scrolling under the header can't peek through it. */
-  padding: 1.4rem 0 0.85rem;
-  margin-bottom: -0.85rem;
-  background: var(--surface-1);
-}
-
 /* Small round close control in the top-right corner, macOS-window style. */
-.settings-close,
 .excalidraw-close {
   display: flex;
   align-items: center;
@@ -2852,13 +2830,11 @@ button.table-add:hover {
   transition: background 120ms ease, color 120ms ease;
 }
 
-.settings-close:hover,
 .excalidraw-close:hover {
   background: var(--border-strong);
   color: var(--text-1);
 }
 
-.settings-close:focus-visible,
 .excalidraw-close:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--ring);
@@ -2937,7 +2913,7 @@ button.table-add:hover {
   padding: 0 0.9rem;
 }
 
-.dialog .settings-row {
+.settings-row {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -2953,6 +2929,8 @@ button.table-add:hover {
 .settings-row-label {
   display: flex;
   flex: 1;
+  /* A long path in a row shrinks to its ellipsis, not past the pane. */
+  min-width: 0;
   flex-direction: column;
   gap: 0.2rem;
   font-size: 0.86rem;
@@ -2983,25 +2961,10 @@ button.table-add:hover {
   min-width: 0;
 }
 
-/* Settings → Plugins (specs/app/plugins.feature.md): a titled group whose
-   rows are the profile's plugins in tab order, each with its name, where it
-   came from and its version, a line on what it adds, the arrows that move
-   it, and its switch. */
-.settings-group-title {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin: 0;
-  padding: 0.7rem 0 0.5rem;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.settings-group-title + .settings-row,
-.plugin-row + .plugin-row {
-  border-top: 1px solid var(--border);
-}
+/* The Plugins page (specs/app/plugins.feature.md): rows of the profile's
+   plugins in tab order, each with its name, where it came from and its
+   version, a line on what it adds, the arrows that move it, and its
+   switch. */
 
 .plugin-row-name {
   display: flex;
@@ -3068,6 +3031,7 @@ button.table-add:hover {
 }
 
 .plugin-source-list code {
+  min-width: 0;
   font-size: 0.75rem;
   color: var(--text-2);
   overflow: hidden;
@@ -3095,30 +3059,13 @@ button.table-add:hover {
 
 /* The GitHub account block stacks its own rows but still reads as one row
    of the group it sits in. */
-.dialog .settings-row.auth-section {
+.settings-row.auth-section {
   flex-direction: column;
   align-items: stretch;
   gap: 0.4rem;
 }
 
-/* The "esc to exit" note pinned to the bottom of the Settings dialog. */
-.settings-footnote {
-  text-align: center;
-  color: var(--text-3);
-}
-
-.settings-footnote kbd {
-  padding: 0.05rem 0.35rem;
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 0.3rem;
-  background: var(--surface-2);
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-2);
-}
-
-/* A server-rejected change surfaces here, pinned so the scrolling dialog
+/* A server-rejected change surfaces here, pinned so the scrolling page
    can't hide it. */
 .settings-error {
   position: sticky;
@@ -3128,6 +3075,199 @@ button.table-add:hover {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   box-shadow: var(--shadow-sm);
+}
+
+/* ---- App pages (specs/user-info-settings.feature.md "open Settings",
+   "open Plugins"): Settings and Plugins hold the editor pane rather than a
+   dialog. The header is the pane's usual bar; below it one scrolling body
+   with the section list on the left — sticky, following the scroll — and
+   the sections in a readable column beside it. A narrow pane folds the
+   list into a row of links above the sections. ---- */
+.app-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  container-type: inline-size;
+}
+
+.app-page-title {
+  margin: 0;
+}
+
+/* The page's name is short: the ✕ stays beside it however narrow the pane,
+   against the wrapping a long trail gets on a small screen. */
+.app-page .page-header {
+  flex-wrap: nowrap;
+}
+
+.app-page .page-header .crumbs {
+  flex: 1 1 auto;
+}
+
+.app-page-status {
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the rows' focus rings at the edges. */
+  padding: 3px 3px 3rem;
+  margin: -3px;
+}
+
+.app-page-columns {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 46rem);
+  justify-content: center;
+  gap: 2.5rem;
+}
+
+.app-page-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.app-page-nav-item,
+.app-page-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.app-page-nav-item:hover,
+.app-page-nav-link:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.app-page-nav-item.active {
+  background: var(--hover);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.app-page-nav-item:focus-visible,
+.app-page-nav-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* The other app page, set apart under the sections. */
+.app-page-nav-aside {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.app-page-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  min-width: 0;
+}
+
+.page-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  scroll-margin-top: 0.25rem;
+}
+
+.page-section-head h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+}
+
+.page-section-hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* The page has the width a dialog lacked: hints run longer before wrapping. */
+.app-page .settings-row-hint {
+  max-width: 34rem;
+}
+
+.page-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+
+@container (max-width: 44rem) {
+  .app-page-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+
+  .app-page-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .app-page-nav-aside {
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: none;
+  }
+
+  .app-page-status {
+    display: none;
+  }
+}
+
+/* Plugins on, in tab order: the place each holds after Specs. */
+.plugin-row-rank {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Where a plugin from a folder lives. */
+.plugin-row-dir {
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* External links (specs/external-links/project-management-jira-linear-etc.
@@ -4652,11 +4792,7 @@ aside header .collapse-btn {
     resize: none;
   }
 
-  .settings-header {
-    padding-top: 1rem;
-  }
-
-  .dialog .settings-row {
+  .settings-row {
     flex-wrap: wrap;
   }
 
@@ -4743,7 +4879,6 @@ aside header .collapse-btn {
   .roadmap-add,
   .repo-edit,
   .repo-recent-toggle,
-  .settings-close,
   aside.rail .rail-btn,
   aside.rail .rail-link {
     min-width: 2.25rem;
@@ -4781,8 +4916,7 @@ aside header .collapse-btn {
   .sidebar-search-btn kbd,
   .palette-foot,
   .menu-item .keys,
-  .palette-item .keys,
-  .settings-footnote:has(kbd) {
+  .palette-item .keys {
     display: none;
   }
 }
@@ -7643,7 +7777,7 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   cursor: not-allowed;
 }
 
-/* Settings → Plugins → Marketplaces: each index under the configured list,
+/* Plugins → Marketplaces: each index under the configured list,
    its plugins as rows with Install, Update or Remove beside them. */
 .plugin-market {
   margin-top: 0.5rem;

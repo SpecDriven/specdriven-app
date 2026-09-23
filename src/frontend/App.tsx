@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -30,7 +30,6 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  ChevronUp,
   ChevronRight,
   Ellipsis,
   Pencil,
@@ -51,6 +50,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   PanelRight,
+  Puzzle,
   Settings,
   Sun,
   Ticket,
@@ -82,7 +82,8 @@ import {
 import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
-import { PluginMarketplace } from "./PluginMarketplace";
+import { AppPageLayout, PageSection } from "./AppPage";
+import { PluginsPage } from "./PluginsPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -129,14 +130,17 @@ import {
 import type { LinkDraft } from "./externallinks";
 import { ScenarioTable } from "./ScenarioTable";
 import {
+  appPagePath,
   desktopLink,
   featurePath,
+  matchAppPage,
   pagePath,
   parseRoute,
   repoDisplayName,
   resolveScenario,
   scenarioPath,
 } from "./route";
+import type { AppPage } from "./route";
 import {
   addTestLink,
   canSetTestLink,
@@ -1068,7 +1072,14 @@ export function App() {
   // Live sync (specs/automerge-store.spec.md): optional websocket sync
   // server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * The app's own page holding the editor pane — Settings or Plugins
+   * (specs/user-info-settings.feature.md "open Settings", "open Plugins") —
+   * or null. Like a plugin's view it owns the pane and its url.
+   */
+  const [appPage, setAppPage] = useState<AppPage | null>(null);
+  /** Whether opening the page pushed a history entry that closing can pop. */
+  const appPagePushed = useRef(false);
   const [settingsDraft, setSettingsDraft] = useState(String(DEFAULT_AUTOSYNC_SECONDS));
   /** The autosync switch: off saves a frequency of 0, which stops the reload. */
   const [settingsAutosyncOnDraft, setSettingsAutosyncOnDraft] = useState(true);
@@ -1429,7 +1440,6 @@ export function App() {
   // specs/ui.spec.md "Dialogs": Tab stays inside the foreground dialog. The
   // editor pane is part of the page, not a dialog — Tab reaches the sidebar
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
-  const settingsTrapRef = useFocusTrap(settingsOpen);
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
@@ -1455,9 +1465,10 @@ export function App() {
   // must not leave the retired url behind for Back to land on.
   useEffect(() => {
     if (loading || needsRepo) return;
-    // A plugin's view owns its url (openPluginView pushes it); with no
-    // feature selected this effect would otherwise rewrite it to `/`.
-    if (pluginView) return;
+    // A plugin's view owns its url (openPluginView pushes it), and so does
+    // an app page; with no feature selected this effect would otherwise
+    // rewrite it to `/`.
+    if (pluginView || appPage) return;
     const url = pagePath(selected, paneScenario);
     const opening = paneScenario !== null && !panePushed.current;
     panePushed.current = paneScenario !== null;
@@ -1468,7 +1479,7 @@ export function App() {
     const fromLink = parseRoute(location.pathname).scenario !== undefined;
     if (opening && !fromLink) history.pushState(null, "", url);
     else history.replaceState(null, "", url);
-  }, [loading, needsRepo, selected, paneScenario, pluginView]);
+  }, [loading, needsRepo, selected, paneScenario, pluginView, appPage]);
 
   // Window title follows what is open (specs/navigation.spec.md) — chat and
   // email link previews show it.
@@ -1479,7 +1490,9 @@ export function App() {
     // A plugin's view — an open roadmap page or task, say — names the window
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
-    const base = pluginView && activeTab
+    const base = appPage
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : "Plugins"}`
+      : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
         ? "SpecDriven"
@@ -1490,7 +1503,7 @@ export function App() {
     // left while the person works elsewhere. This effect is the title's
     // only writer.
     document.title = clock ? `${clock} · ${base}` : base;
-  }, [selected, feature, paneScenario, pluginView, activeTab, tabsTick, clock]);
+  }, [selected, feature, paneScenario, pluginView, appPage, activeTab, tabsTick, clock]);
 
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
@@ -1610,6 +1623,7 @@ export function App() {
         // this folder's; the plugins reload their stores below, on the
         // data/changed event.
         setPluginView(null);
+        setAppPage(null);
         // Nor its entity fields: the next editor to open reads the new
         // folder's code repo.
         entityFields.reset();
@@ -1671,8 +1685,9 @@ export function App() {
       editorRef.current.close();
       // Opening a feature leaves the open plugin view — a page saves what
       // its editor still holds as it unmounts, the same courtesy the README
-      // editor gets.
+      // editor gets. An app page — Settings, Plugins — leaves too.
       setPluginView(null);
+      setAppPage(null);
       // A new feature shows up in the tree, so the sidebar turns to the Specs
       // tab; a same-file refresh (sync, cron) leaves the tab where it is.
       if (file !== selected) selectSidebarTab("specs");
@@ -1741,6 +1756,7 @@ export function App() {
   const goHome = () => {
     editorRef.current.close();
     setPluginView(null);
+    setAppPage(null);
     setSelectedFolder(null);
     setSelected(null);
     setFeature(null);
@@ -1768,6 +1784,7 @@ export function App() {
     setSelectedScenario(null);
     setSelectedFolder(null);
     selectSidebarTab(tab);
+    setAppPage(null);
     setPluginView({ tab, view });
     // A url that is not the view's own (`/models` opening the first model)
     // canonicalises in place, so a reload reopens the same view.
@@ -1781,6 +1798,46 @@ export function App() {
   /** A tab's navigate callback, bound to its id. */
   const navigateIn = (tab: string) => (view: unknown, opts?: { push?: boolean }) =>
     openPluginView(tab, view, opts);
+
+  /**
+   * Open Settings or Plugins in the editor pane (specs/user-info-settings.
+   * feature.md "open Settings", "open Plugins") — a page, not a dialog, so
+   * it has the pane's room. What was open leaves the way it does for a
+   * plugin's view, saving what its editor holds, and the page takes its own
+   * url. Going from one app page to the other rewrites the url in place, so
+   * closing either returns to what was open before both.
+   */
+  const openAppPage = (page: AppPage, opts: { push?: boolean } = { push: true }) => {
+    editorRef.current.close();
+    setPluginView(null);
+    setSelected(null);
+    setFeature(null);
+    setSelectedScenario(null);
+    setSelectedFolder(null);
+    setDrawerOpen(false);
+    setSettingsError(null);
+    const path = appPagePath(page);
+    if (location.pathname !== path) {
+      if (opts.push && !appPage) {
+        history.pushState(null, "", path);
+        appPagePushed.current = true;
+      } else {
+        history.replaceState(null, "", path);
+      }
+    }
+    setAppPage(page);
+  };
+  const openSettings = () => openAppPage("settings");
+  const openPlugins = () => openAppPage("plugins");
+  /** ✕ or ESC: back to what was open, or home after a deep link. */
+  const closeAppPage = () => {
+    if (appPagePushed.current) {
+      appPagePushed.current = false;
+      history.back();
+    } else {
+      goHome();
+    }
+  };
 
   // A plugin switched off takes its open view with it: the pane leaves and
   // the app goes home (specs/app/plugins.feature.md "Turning a plugin off
@@ -1817,6 +1874,15 @@ export function App() {
   /** Derive the view from a url (initial load, popstate, after repo setup). */
   const openFromLocation = async (pathname = location.pathname) => {
     const route = parseRoute(pathname);
+    // The app's own pages first, so no plugin can claim their urls.
+    const page = matchAppPage(pathname);
+    if (page) {
+      openAppPage(page, { push: false });
+      return;
+    }
+    // Back out of an app page: the entry it pushed is gone.
+    appPagePushed.current = false;
+    setAppPage(null);
     // A plugin's url first (specs/app/plugins.feature.md "Plugin urls serve
     // the app shell"): the mounted tabs each know their own. With the plugin
     // off nothing matches, and the url reads as home below.
@@ -2883,7 +2949,13 @@ export function App() {
     .join("")
     .toUpperCase();
 
-  const openSettings = () => {
+  // The Settings page's fields start from what is saved each time it opens
+  // — after the render that opened it, so a deep link to /settings reads
+  // the state the boot just loaded. A layout effect, so the fields never
+  // paint with their defaults first.
+  const settingsShown = appPage === "settings";
+  useLayoutEffect(() => {
+    if (!settingsShown) return;
     // A stored 0 means autosync is off; the field keeps a usable frequency so
     // switching it back on needs no typing.
     setSettingsAutosyncOnDraft(reloadSeconds > 0);
@@ -2907,8 +2979,8 @@ export function App() {
     setSettingsSyncOnDraft(syncServerUrl !== null);
     setSettingsError(null);
     setAuthStatus(null);
-    setSettingsOpen(true);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsShown]);
 
   // Browser sign-in (specs/git-operations.spec.md "connect to GitHub via the
   // browser"): the server hands back GitHub's authorize url, the browser
@@ -2960,12 +3032,12 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!settingsOpen) {
+    if (!settingsShown) {
       setDeviceFlow(null);
       setWebConnecting(false);
       setAuthStatus(null);
     }
-  }, [settingsOpen]);
+  }, [settingsShown]);
 
   // While the browser tab is with GitHub, poll for the callback's outcome.
   useEffect(() => {
@@ -4082,7 +4154,6 @@ export function App() {
   // same list. Single keys stay quiet while a dialog or menu is open and
   // while typing in a field; ESC works everywhere.
   const dialogOpen =
-    settingsOpen ||
     userInfoOpen ||
     foldersOpen ||
     switching !== null ||
@@ -4198,7 +4269,8 @@ export function App() {
   // then the editor pane — its way back, leaving the scenario autosaved
   // (specs/editor/spec-editor.feature.md "Spec editor pane") — unless the
   // key came from the sidebar, which stays reachable beside the pane; then
-  // a selected folder (specs/folders.spec.md). A field keeps its own ESC.
+  // an app page — Settings, Plugins — the same way; then a selected folder
+  // (specs/folders.spec.md). A field keeps its own ESC.
   const closeTopmost = (e: KeyboardEvent): void | false => {
     if (sessionError !== null) return setSessionError(null);
     if (startDialog) return setStartDialog(false);
@@ -4208,7 +4280,6 @@ export function App() {
       dismissConflict();
       return;
     }
-    if (settingsOpen) return setSettingsOpen(false);
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -4218,6 +4289,12 @@ export function App() {
     const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
     if (editing && !fromSidebar) {
       editorRef.current.back();
+      return;
+    }
+    if (appPage && !fromSidebar) {
+      // A field on the page saves on blur; leave it first so it does.
+      if (e.target instanceof HTMLElement) e.target.blur();
+      closeAppPage();
       return;
     }
     if (isTypingTarget(e.target)) return false;
@@ -4301,6 +4378,15 @@ export function App() {
       when: () => !quiet,
       palette: () => !quietBehindPalette,
       run: () => openSettings(),
+    },
+    {
+      id: "plugins",
+      keys: "g p",
+      label: "Plugins",
+      group: "Navigate",
+      when: () => !quiet,
+      palette: () => !quietBehindPalette,
+      run: () => openPlugins(),
     },
     {
       id: "theme",
@@ -4564,6 +4650,7 @@ export function App() {
         ]
       : []),
     shortcutAction("settings", <Settings size={14} />),
+    shortcutAction("plugins", <Puzzle size={14} />),
     shortcutAction(
       "sidebar",
       compact ? (
@@ -4929,6 +5016,626 @@ export function App() {
   const editingDeletable =
     savedEntry !== null && (savedEntry.status !== "published" || deletePublished);
   const hasProposed = feature?.scenarios.some((s) => s.status === "proposed") ?? false;
+
+  // Settings (specs/ui/ui.feature.md "Settings", specs/user-info-settings.
+  // feature.md "open Settings"): a page in the editor pane with the room a
+  // dialog lacked — the sections listed on the left, each a titled group of
+  // label-left, control-right rows. Every control saves itself the moment it
+  // changes (macOS style), so there is no Save button; the ✕ or ESC goes
+  // back. The plugins have their own page, linked under the sections.
+  const renderSettingsPage = () => (
+    <AppPageLayout
+      title="Settings"
+      sections={[
+        { id: "settings-general", title: "General" },
+        ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
+        { id: "settings-editor", title: "Specs" },
+        { id: "settings-project", title: "Project management" },
+        { id: "settings-workflow", title: "Workflow" },
+        ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
+      ]}
+      onClose={closeAppPage}
+      actions={<span className="app-page-status">Saved to .specdriven/settings.json as you change it</span>}
+      aside={
+        <button type="button" className="app-page-nav-link" onClick={openPlugins}>
+          <Puzzle size={13} aria-hidden="true" /> Plugins
+        </button>
+      }
+    >
+      <PageSection
+        id="settings-general"
+        title="General"
+        hint="How the app looks and which editing aids it offers. These are remembered on this device, not in the settings file."
+      >
+        {/* Appearance (specs/ui.spec.md "Settings"): applied right away
+            and remembered on this device, not in the settings file. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Appearance
+            <span className="settings-row-hint">
+              Applied immediately and remembered on this device.
+            </span>
+          </span>
+          <select
+            value={theme}
+            onChange={(e) => {
+              const pref = e.target.value as ThemePref;
+              setTheme(pref);
+              applyThemePref(pref);
+            }}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
+            on this device like the theme (src/frontend/VimEditor.tsx).
+            Hidden in the demo, which pins it off — modal editing is a
+            trap for a visitor who did not ask for it. */}
+        {!demo && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Vim mode
+            <span className="settings-row-hint">
+              Adds a Vim tab to every Markdown editor: modal editing with Vim&apos;s
+              keys and a status line for : commands. Esc stays inside the editor.
+              Remembered on this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={vimMode}
+              onChange={(e) => applyVimPref(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
+        {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
+            a diagram button in every Markdown editor's toolbar, remembered
+            on this device. The demo keeps the row and starts it on
+            (src/frontend/excalidrawPref.ts). */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Excalidraw diagrams
+            <span className="settings-row-hint">
+              Adds a diagram button to every Markdown editor&apos;s toolbar: draw in
+              Excalidraw and the drawing is embedded as an SVG image in the data repo.
+              Remembered on this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={excalidrawOn}
+              onChange={(e) => applyExcalidrawPref(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* The Pomodoro (specs/app/pomodoro.feature.md): off by default —
+            a timer nobody asked for is a row of sidebar taken from the
+            work. Turning it on opens the bar, so the switch shows what
+            it just switched on (src/frontend/pomodoroPref.ts). */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Pomodoro timer
+            <span className="settings-row-hint">
+              Times your own work in pomodoros: a timer icon in the sidebar header
+              that opens the bar beneath it, the <kbd>p</kbd> key, and the command
+              palette. Close the bar and the icon keeps the clock. Remembered on
+              this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={pomodoroOn}
+              onChange={(e) => {
+                applyPomodoroEnabled(e.target.checked);
+                if (e.target.checked) applyPomodoroShown(true);
+              }}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+      </PageSection>
+      {/* Demo mode has nothing to sync with: the whole autosync/live
+          sync group hides — the server refuses the changes anyway. */}
+      {!demo && (
+      <PageSection
+        id="settings-sync"
+        title="Sync"
+        hint="How the data repo is pulled and pushed, and whether running apps share edits live."
+      >
+        {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
+            default; off stores a frequency of 0, which stops the reload. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Autosync
+            <span className="settings-row-hint">
+              {settingsAutosyncOnDraft
+                ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
+                : "Autosync is off: the data repo is only pulled and pushed when you publish."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsAutosyncOnDraft}
+              onChange={(e) => void toggleAutosync(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsAutosyncOnDraft && (
+          <label className="settings-row">
+            <span className="settings-row-label">Autosync frequency (seconds)</span>
+            <input
+              type="number"
+              min={1}
+              value={settingsDraft}
+              onChange={(e) => setSettingsDraft(e.target.value)}
+              onBlur={() => void commitAutosyncSeconds()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </label>
+        )}
+        {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
+            accelerator on top of git, with an explicit privacy warning. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Live sync server (optional)
+            <span className="settings-row-hint">
+              Syncs edits between running apps in near-real time over websocket; git
+              remains the source of record. On a public server such as
+              wss://sync.automerge.org, anyone who has a document&apos;s id can read
+              that document — leave it off to keep specs in the git repo only.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsSyncOnDraft}
+              onChange={(e) => void toggleLiveSync(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsSyncOnDraft && (
+          <div className="settings-row">
+            <input
+              type="text"
+              aria-label="Live sync server url"
+              value={settingsSyncDraft}
+              onChange={(e) => setSettingsSyncDraft(e.target.value)}
+              onBlur={() => void commitSyncUrl()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+              placeholder="wss://sync.automerge.org"
+            />
+          </div>
+        )}
+      </PageSection>
+      )}
+      <PageSection
+        id="settings-editor"
+        title="Specs"
+        hint="How the scenario editor saves and how scenarios read in the feature list."
+      >
+        {/* Editor autosave (specs/editor-autosave.feature.md): the open
+            editor saves itself at this interval. There is no off switch —
+            only how often, at least 3 seconds. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Autosave interval (seconds)
+            <span className="settings-row-hint">
+              An open scenario editor saves itself this often, so an unsaved edit is
+              never more than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds;
+              the default is {DEFAULT_AUTOSAVE_SECONDS}.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={MIN_AUTOSAVE_SECONDS}
+            value={settingsAutosaveDraft}
+            onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
+            onBlur={() => void commitAutosaveSeconds()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Scenario preview lines
+            <span className="settings-row-hint">
+              How many lines of the rendered Markdown body each scenario shows in the
+              list.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={settingsLinesDraft}
+            onChange={(e) => setSettingsLinesDraft(e.target.value)}
+            onBlur={() => void commitPreviewLines()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+        {/* specs/traceability.spec.md: the test-links table is optional,
+            controlled here; default ON. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Show links to automated tests
+            <span className="settings-row-hint">
+              Each scenario ends with a table of GitHub links to its automated tests,
+              when it has any.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsTestLinksDraft}
+              onChange={(e) => void toggleTestLinks(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* specs/traceability.feature.md "Open test in idea": a click on
+            a test link runs `idea --line <n> <file>` on the file in the
+            code repo instead of opening GitHub; default OFF. */}
+        {settingsTestLinksDraft && (
+          <label className="settings-row">
+            <span className="settings-row-label">
+              Open test links in IntelliJ IDEA
+              <span className="settings-row-hint">
+                {canOpenInIdea
+                  ? "A click on a test link opens the file at its line in IntelliJ IDEA, from the project's code repo, instead of on GitHub."
+                  : "Needs idea on PATH. On a Mac: "}
+                {!canOpenInIdea && (
+                  <code>
+                    ln -s &quot;/Applications/IntelliJ IDEA.app/Contents/MacOS/idea&quot;
+                    /usr/local/bin/idea
+                  </code>
+                )}
+              </span>
+            </span>
+            <span className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={settingsOpenInIdeaDraft}
+                onChange={(e) => void toggleOpenInIdea(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden="true" />
+            </span>
+          </label>
+        )}
+      </PageSection>
+      <PageSection
+        id="settings-project"
+        title="Project management"
+        hint="Links from features and scenarios to the tickets tracking them."
+      >
+        {/* Project management (specs/external-links/project-management-
+            jira-linear-etc.feature.md): the master switch for tickets;
+            default ON. Off, no feature or scenario shows or asks for
+            one. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Project management
+            <span className="settings-row-hint">
+              {settingsProjectManagementDraft
+                ? "Features and scenarios carry a link to the ticket tracking them; the editors ask for the ticket's url."
+                : "Ticket links are off: nothing in the app shows or asks for one. Links already recorded are kept."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsProjectManagementDraft}
+              onChange={(e) => void toggleProjectManagement(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {settingsProjectManagementDraft && (
+          <>
+            {/* The tool chosen here is the `<program>` of every new
+                link, which is why the editors need only the url. */}
+            <label className="settings-row">
+              <span className="settings-row-label">
+                Project management tool
+                <span className="settings-row-hint">
+                  Where the tickets live. Its name is what a link shows —{" "}
+                  <code>{settingsToolDraft.trim() || DEFAULT_PROJECT_MANAGEMENT_TOOL}:ABC-123</code>.
+                </span>
+              </span>
+              <span className="settings-tool">
+                <select
+                  aria-label="Project management tool"
+                  value={
+                    PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim())
+                      ? settingsToolDraft.trim()
+                      : "Other"
+                  }
+                  onChange={(e) => void changeTool(e.target.value === "Other" ? "" : e.target.value)}
+                >
+                  {PROJECT_MANAGEMENT_TOOLS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
+                {!PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim()) && (
+                  <input
+                    className="settings-tool-name"
+                    value={settingsToolDraft}
+                    placeholder="Tool name"
+                    aria-label="Project management tool name"
+                    spellCheck={false}
+                    onChange={(e) => void changeTool(e.target.value)}
+                  />
+                )}
+              </span>
+            </label>
+            {/* specs/external-links/project-management-jira-linear-etc.
+                feature.md "Publishing links into projected feature (.md)
+                files": the ticket links go into the markdown only while
+                this is on; default ON. */}
+            <label className="settings-row">
+              <span className="settings-row-label">
+                Publish external links
+                <span className="settings-row-hint">
+                  Write each feature's and scenario's ticket link (Jira, Linear…) into the
+                  .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
+                  keeps the links in the app only.
+                </span>
+              </span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={settingsPublishLinksDraft}
+                  onChange={(e) => void toggleExternalLinks(e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+          </>
+        )}
+      </PageSection>
+      <PageSection
+        id="settings-workflow"
+        title="Workflow"
+        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete them."
+      >
+        {/* Code gen (specs/agents/claude.spec.md): off takes the selection
+            checkboxes and Start session away, and the server refuses a
+            session, so no spec can reach Claude — neither the CLI nor
+            Claude Code Desktop. Hidden in demo mode, where it is pinned
+            off (no Claude to hand specs to). */}
+        {!demo && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Code generation
+            <span className="settings-row-hint">
+              {settingsCodeGenDraft
+                ? "Specs and scenarios can be selected and handed to a coding agent — a new session in Claude Code Desktop, or a chat in the app's own coding agent pane — which implements them in the data repo."
+                : "Code generation is off: no selection checkboxes, and sessions are refused."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsCodeGenDraft}
+              onChange={(e) => void toggleCodeGen(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
+        {/* Feature assignment (src/server/members.ts): opt-in — with
+            the switch off the feature page offers no "Assigned"
+            dropdown, and nothing already assigned is rewritten. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Assign features to project members
+            <span className="settings-row-hint">
+              {settingsAssignmentsDraft
+                ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
+                : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsAssignmentsDraft}
+              onChange={(e) => void toggleAssignments(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* Google Calendar (specs/app/tasks.feature.md "Add task to
+            Google Calendar"): opt-in — a calendar chip on every task
+            that estimates it and opens a prefilled event. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Google Calendar
+            <span className="settings-row-hint">
+              {settingsGoogleCalendarDraft
+                ? "An Add to calendar button on every task: an estimate of the time it takes, proposed by Claude when the CLI is on PATH, and a prefilled Google Calendar event. Nothing is sent to Google until you confirm the event there."
+                : "Tasks have no calendar button."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsGoogleCalendarDraft}
+              onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        {/* Deleting published scenarios
+            (specs/editor/spec-editor.feature.md "Delete Published
+            Spec"): opt-in — with the switch off published scenarios
+            stay immutable and the editor offers no Delete for them. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Allow deleting published specs
+            <span className="settings-row-hint">
+              {settingsDeletePublishedDraft
+                ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
+                : "Published scenarios are immutable and cannot be deleted."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsDeletePublishedDraft}
+              onChange={(e) => void toggleDeletePublished(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+      </PageSection>
+      {/* Git engine (specs/git-operations.spec.md): which one carries
+          the operations out and who supplies GitHub credentials.
+          Hidden in demo mode along with the sign-in — the demo
+          dataset never syncs with GitHub. */}
+      {!demo && (
+      <PageSection
+        id="settings-git"
+        title="Git & GitHub"
+        hint="Which git carries the syncing and publishing out, and the GitHub account it uses."
+      >
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Git engine
+            <span className="settings-row-hint">
+              {gitEngineEffective === "gh"
+                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
+                : gitEngineEffective === "js"
+                  ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
+                  : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
+            </span>
+          </span>
+          <select
+            value={settingsEngineDraft}
+            onChange={(e) => void pickGitEngine(e.target.value)}
+          >
+            <option value="auto">
+              Automatic — GitHub CLI when installed (recommended)
+            </option>
+            <option value="gh" disabled={!gh?.available}>
+              GitHub CLI (gh){gh?.available ? "" : " — not installed"}
+            </option>
+            <option value="cli" disabled={!cliGitAvailable}>
+              System git{cliGitAvailable ? "" : " — not installed"}
+            </option>
+            {/* Bundled with the app, so never disabled. */}
+            <option value="js">Built-in (no git needed)</option>
+          </select>
+        </label>
+        {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
+            when that engine is in effect, else the device flow. */}
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub account</span>
+          {gh?.available && (
+            <p className="hint">
+              {gh.signedIn ? (
+                <>
+                  GitHub CLI signed in
+                  {gh.login ? (
+                    <>
+                      {" "}
+                      as <strong>{gh.login}</strong>
+                    </>
+                  ) : null}
+                  .
+                </>
+              ) : (
+                <>
+                  GitHub CLI installed but signed out — run <code>gh auth login</code>,
+                  then reopen Settings.
+                </>
+              )}
+            </p>
+          )}
+          {auth?.signedIn ? (
+            <div className="auth-row">
+              <span>
+                Signed in as <strong>{auth.login}</strong>
+              </span>
+              <button className="secondary" onClick={signOutGitHub}>
+                Sign out
+              </button>
+            </div>
+          ) : deviceFlow ? (
+            <div className="auth-device">
+              <p>
+                Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
+                <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
+                  {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
+                </a>
+              </p>
+              <p className="hint">Waiting for GitHub…</p>
+            </div>
+          ) : webConnecting ? (
+            <div className="auth-device">
+              <p>Finish signing in to GitHub in your browser, then come back here.</p>
+              <p className="hint">Waiting for GitHub…</p>
+              <button className="secondary" onClick={() => setWebConnecting(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="auth-row">
+              {/* Browser OAuth needs an http(s) callback; the desktop
+                  app:// pages offer the device code only. */}
+              {canConnectViaBrowser && (
+                <button className="secondary" onClick={connectGitHub}>
+                  Connect to GitHub
+                </button>
+              )}
+              <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
+                {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
+              </button>
+            </div>
+          )}
+          {authStatus && <p className="error">{authStatus}</p>}
+          <p className="hint">
+            Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
+            sign-in on the system git and built-in ones. Local folders work without
+            either.
+          </p>
+        </div>
+      </PageSection>
+      )}
+      {settingsError && <p className="error settings-error">{settingsError}</p>}
+    </AppPageLayout>
+  );
 
   return (
     <main
@@ -5538,7 +6245,7 @@ export function App() {
             />
           ))}
         {/* specs/user-info-settings.spec.md: the lower left corner shows the
-            current user; its menu holds User info and Settings. */}
+            current user; its menu holds User info, Settings and Plugins. */}
         <div className="user-corner">
           <Menu
             open={userMenuOpen}
@@ -5564,6 +6271,16 @@ export function App() {
                 onSelect: () => {
                   setDrawerOpen(false);
                   openSettings();
+                },
+              },
+              {
+                id: "plugins",
+                label: "Plugins",
+                icon: <Puzzle size={13} />,
+                keys: "g p",
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openPlugins();
                 },
               },
             ]}
@@ -5632,9 +6349,33 @@ export function App() {
         {/* A render error in one view shows a note with a way back, never a
             blank window; the key follows the page so navigating resets it. */}
         <ErrorBoundary
-          key={selected ?? pluginViewKey ?? "home"}
+          key={appPage ?? selected ?? pluginViewKey ?? "home"}
         >
-        {editing && selected && feature ? (
+        {appPage === "settings" ? (
+          renderSettingsPage()
+        ) : appPage === "plugins" ? (
+          /* Plugins (specs/app/plugins.feature.md): its own page, opened
+             from the user menu — the plugins on in tab order, the ones off,
+             the folders they load from and the marketplaces. */
+          <PluginsPage
+            plugins={plugins}
+            loadErrors={pluginLoadErrors}
+            hasIssuesRepo={Boolean(issuesRepo)}
+            demo={demo}
+            sources={pluginSources}
+            marketplaces={pluginMarketplaces}
+            error={settingsError}
+            setEnabled={setPluginEnabled}
+            move={movePlugin}
+            patchSettings={patchSettings}
+            prompt={prompt}
+            confirm={confirm}
+            browseFolder={canChooseFolder ? chooseFolderNative : undefined}
+            onChanged={refreshPlugins}
+            onOpenSettings={openSettings}
+            onClose={closeAppPage}
+          />
+        ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
              beside it — with a bar on top and one scrolling column below. */
@@ -6773,803 +7514,6 @@ export function App() {
                 {resolving === "draft" ? "Publishing…" : "Publish manual edit"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
-      {settingsOpen && (
-        <div className="dialog-backdrop" onClick={() => setSettingsOpen(false)}>
-          <div
-            className="dialog settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Settings"
-            ref={settingsTrapRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* macOS-style: every control saves itself the moment it changes,
-                so there is no Save button — the ✕, ESC or a click outside
-                closes. The header sticks so the ✕ stays reachable while the
-                dialog scrolls. */}
-            <div className="settings-header">
-              <h3>Settings</h3>
-              <button
-                className="settings-close"
-                aria-label="Close settings"
-                onClick={() => setSettingsOpen(false)}
-              >
-                <X size={14} aria-hidden="true" />
-              </button>
-            </div>
-            <section className="settings-group">
-              {/* Appearance (specs/ui.spec.md "Settings"): applied right away
-                  and remembered on this device, not in the settings file. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Appearance
-                  <span className="settings-row-hint">
-                    Applied immediately and remembered on this device.
-                  </span>
-                </span>
-                <select
-                  autoFocus
-                  value={theme}
-                  onChange={(e) => {
-                    const pref = e.target.value as ThemePref;
-                    setTheme(pref);
-                    applyThemePref(pref);
-                  }}
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-              </label>
-              {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
-                  on this device like the theme (src/frontend/VimEditor.tsx).
-                  Hidden in the demo, which pins it off — modal editing is a
-                  trap for a visitor who did not ask for it. */}
-              {!demo && (
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Vim mode
-                  <span className="settings-row-hint">
-                    Adds a Vim tab to every Markdown editor: modal editing with Vim&apos;s
-                    keys and a status line for : commands. Esc stays inside the editor.
-                    Remembered on this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={vimMode}
-                    onChange={(e) => applyVimPref(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              )}
-              {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
-                  a diagram button in every Markdown editor's toolbar, remembered
-                  on this device. The demo keeps the row and starts it on
-                  (src/frontend/excalidrawPref.ts). */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Excalidraw diagrams
-                  <span className="settings-row-hint">
-                    Adds a diagram button to every Markdown editor&apos;s toolbar: draw in
-                    Excalidraw and the drawing is embedded as an SVG image in the data repo.
-                    Remembered on this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={excalidrawOn}
-                    onChange={(e) => applyExcalidrawPref(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* The Pomodoro (specs/app/pomodoro.feature.md): off by default —
-                  a timer nobody asked for is a row of sidebar taken from the
-                  work. Turning it on opens the bar, so the switch shows what
-                  it just switched on (src/frontend/pomodoroPref.ts). */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Pomodoro timer
-                  <span className="settings-row-hint">
-                    Times your own work in pomodoros: a timer icon in the sidebar header
-                    that opens the bar beneath it, the <kbd>p</kbd> key, and the command
-                    palette. Close the bar and the icon keeps the clock. Remembered on
-                    this device.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={pomodoroOn}
-                    onChange={(e) => {
-                      applyPomodoroEnabled(e.target.checked);
-                      if (e.target.checked) applyPomodoroShown(true);
-                    }}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-            </section>
-            {/* Demo mode has nothing to sync with: the whole autosync/live
-                sync group hides — the server refuses the changes anyway. */}
-            {!demo && (
-            <section className="settings-group">
-              {/* Autosync (specs/ui.spec.md "Settings"): the switch is on by
-                  default; off stores a frequency of 0, which stops the reload. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Autosync
-                  <span className="settings-row-hint">
-                    {settingsAutosyncOnDraft
-                      ? "The data repo is git-pulled automatically at this interval, and locally saved scenarios are pushed."
-                      : "Autosync is off: the data repo is only pulled and pushed when you publish."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsAutosyncOnDraft}
-                    onChange={(e) => void toggleAutosync(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsAutosyncOnDraft && (
-                <label className="settings-row">
-                  <span className="settings-row-label">Autosync frequency (seconds)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={settingsDraft}
-                    onChange={(e) => setSettingsDraft(e.target.value)}
-                    onBlur={() => void commitAutosyncSeconds()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                  />
-                </label>
-              )}
-              {/* Live sync (specs/automerge-store.spec.md): opt-in websocket
-                  accelerator on top of git, with an explicit privacy warning. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Live sync server (optional)
-                  <span className="settings-row-hint">
-                    Syncs edits between running apps in near-real time over websocket; git
-                    remains the source of record. On a public server such as
-                    wss://sync.automerge.org, anyone who has a document&apos;s id can read
-                    that document — leave it off to keep specs in the git repo only.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsSyncOnDraft}
-                    onChange={(e) => void toggleLiveSync(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsSyncOnDraft && (
-                <div className="settings-row">
-                  <input
-                    type="text"
-                    aria-label="Live sync server url"
-                    value={settingsSyncDraft}
-                    onChange={(e) => setSettingsSyncDraft(e.target.value)}
-                    onBlur={() => void commitSyncUrl()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                    placeholder="wss://sync.automerge.org"
-                  />
-                </div>
-              )}
-            </section>
-            )}
-            <section className="settings-group">
-              {/* Editor autosave (specs/editor-autosave.feature.md): the open
-                  editor saves itself at this interval. There is no off switch —
-                  only how often, at least 3 seconds. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Autosave interval (seconds)
-                  <span className="settings-row-hint">
-                    An open scenario editor saves itself this often, so an unsaved edit is
-                    never more than a few seconds old. Minimum {MIN_AUTOSAVE_SECONDS} seconds;
-                    the default is {DEFAULT_AUTOSAVE_SECONDS}.
-                  </span>
-                </span>
-                <input
-                  type="number"
-                  min={MIN_AUTOSAVE_SECONDS}
-                  value={settingsAutosaveDraft}
-                  onChange={(e) => setSettingsAutosaveDraft(e.target.value)}
-                  onBlur={() => void commitAutosaveSeconds()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                />
-              </label>
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Scenario preview lines
-                  <span className="settings-row-hint">
-                    How many lines of the rendered Markdown body each scenario shows in the
-                    list.
-                  </span>
-                </span>
-                <input
-                  type="number"
-                  min={1}
-                  value={settingsLinesDraft}
-                  onChange={(e) => setSettingsLinesDraft(e.target.value)}
-                  onBlur={() => void commitPreviewLines()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                />
-              </label>
-              {/* specs/traceability.spec.md: the test-links table is optional,
-                  controlled here; default ON. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Show links to automated tests
-                  <span className="settings-row-hint">
-                    Each scenario ends with a table of GitHub links to its automated tests,
-                    when it has any.
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsTestLinksDraft}
-                    onChange={(e) => void toggleTestLinks(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* specs/traceability.feature.md "Open test in idea": a click on
-                  a test link runs `idea --line <n> <file>` on the file in the
-                  code repo instead of opening GitHub; default OFF. */}
-              {settingsTestLinksDraft && (
-                <label className="settings-row">
-                  <span className="settings-row-label">
-                    Open test links in IntelliJ IDEA
-                    <span className="settings-row-hint">
-                      {canOpenInIdea
-                        ? "A click on a test link opens the file at its line in IntelliJ IDEA, from the project's code repo, instead of on GitHub."
-                        : "Needs idea on PATH. On a Mac: "}
-                      {!canOpenInIdea && (
-                        <code>
-                          ln -s &quot;/Applications/IntelliJ IDEA.app/Contents/MacOS/idea&quot;
-                          /usr/local/bin/idea
-                        </code>
-                      )}
-                    </span>
-                  </span>
-                  <span className="switch">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      checked={settingsOpenInIdeaDraft}
-                      onChange={(e) => void toggleOpenInIdea(e.target.checked)}
-                    />
-                    <span className="switch-track" aria-hidden="true" />
-                  </span>
-                </label>
-              )}
-              {/* Project management (specs/external-links/project-management-
-                  jira-linear-etc.feature.md): the master switch for tickets;
-                  default ON. Off, no feature or scenario shows or asks for
-                  one. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Project management
-                  <span className="settings-row-hint">
-                    {settingsProjectManagementDraft
-                      ? "Features and scenarios carry a link to the ticket tracking them; the editors ask for the ticket's url."
-                      : "Ticket links are off: nothing in the app shows or asks for one. Links already recorded are kept."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsProjectManagementDraft}
-                    onChange={(e) => void toggleProjectManagement(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {settingsProjectManagementDraft && (
-                <>
-                  {/* The tool chosen here is the `<program>` of every new
-                      link, which is why the editors need only the url. */}
-                  <label className="settings-row">
-                    <span className="settings-row-label">
-                      Project management tool
-                      <span className="settings-row-hint">
-                        Where the tickets live. Its name is what a link shows —{" "}
-                        <code>{settingsToolDraft.trim() || DEFAULT_PROJECT_MANAGEMENT_TOOL}:ABC-123</code>.
-                      </span>
-                    </span>
-                    <span className="settings-tool">
-                      <select
-                        aria-label="Project management tool"
-                        value={
-                          PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim())
-                            ? settingsToolDraft.trim()
-                            : "Other"
-                        }
-                        onChange={(e) => void changeTool(e.target.value === "Other" ? "" : e.target.value)}
-                      >
-                        {PROJECT_MANAGEMENT_TOOLS.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                        <option value="Other">Other</option>
-                      </select>
-                      {!PROJECT_MANAGEMENT_TOOLS.includes(settingsToolDraft.trim()) && (
-                        <input
-                          className="settings-tool-name"
-                          value={settingsToolDraft}
-                          placeholder="Tool name"
-                          aria-label="Project management tool name"
-                          spellCheck={false}
-                          onChange={(e) => void changeTool(e.target.value)}
-                        />
-                      )}
-                    </span>
-                  </label>
-                  {/* specs/external-links/project-management-jira-linear-etc.
-                      feature.md "Publishing links into projected feature (.md)
-                      files": the ticket links go into the markdown only while
-                      this is on; default ON. */}
-                  <label className="settings-row">
-                    <span className="settings-row-label">
-                      Publish external links
-                      <span className="settings-row-hint">
-                        Write each feature's and scenario's ticket link (Jira, Linear…) into the
-                        .feature.md as <code>[Jira:ABC-123](url)</code>, so it shows on GitHub. Off
-                        keeps the links in the app only.
-                      </span>
-                    </span>
-                    <span className="switch">
-                      <input
-                        type="checkbox"
-                        role="switch"
-                        checked={settingsPublishLinksDraft}
-                        onChange={(e) => void toggleExternalLinks(e.target.checked)}
-                      />
-                      <span className="switch-track" aria-hidden="true" />
-                    </span>
-                  </label>
-                </>
-              )}
-            </section>
-            <section className="settings-group">
-              {/* Code gen (specs/agents/claude.spec.md): off takes the selection
-                  checkboxes and Start session away, and the server refuses a
-                  session, so no spec can reach Claude — neither the CLI nor
-                  Claude Code Desktop. Hidden in demo mode, where it is pinned
-                  off (no Claude to hand specs to). */}
-              {!demo && (
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Code generation
-                  <span className="settings-row-hint">
-                    {settingsCodeGenDraft
-                      ? "Specs and scenarios can be selected and handed to a coding agent — a new session in Claude Code Desktop, or a chat in the app's own coding agent pane — which implements them in the data repo."
-                      : "Code generation is off: no selection checkboxes, and sessions are refused."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsCodeGenDraft}
-                    onChange={(e) => void toggleCodeGen(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              )}
-              {/* Feature assignment (src/server/members.ts): opt-in — with
-                  the switch off the feature page offers no "Assigned"
-                  dropdown, and nothing already assigned is rewritten. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Assign features to project members
-                  <span className="settings-row-hint">
-                    {settingsAssignmentsDraft
-                      ? "The feature page offers an “Assigned” dropdown of the members listed in the data folder's project-settings.json."
-                      : "Features are not assigned to anyone; any assignment already in a feature file stays there."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsAssignmentsDraft}
-                    onChange={(e) => void toggleAssignments(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Google Calendar (specs/app/tasks.feature.md "Add task to
-                  Google Calendar"): opt-in — a calendar chip on every task
-                  that estimates it and opens a prefilled event. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Google Calendar
-                  <span className="settings-row-hint">
-                    {settingsGoogleCalendarDraft
-                      ? "An Add to calendar button on every task: an estimate of the time it takes, proposed by Claude when the CLI is on PATH, and a prefilled Google Calendar event. Nothing is sent to Google until you confirm the event there."
-                      : "Tasks have no calendar button."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsGoogleCalendarDraft}
-                    onChange={(e) => void toggleGoogleCalendar(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Deleting published scenarios
-                  (specs/editor/spec-editor.feature.md "Delete Published
-                  Spec"): opt-in — with the switch off published scenarios
-                  stay immutable and the editor offers no Delete for them. */}
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Allow deleting published specs
-                  <span className="settings-row-hint">
-                    {settingsDeletePublishedDraft
-                      ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
-                      : "Published scenarios are immutable and cannot be deleted."}
-                  </span>
-                </span>
-                <span className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={settingsDeletePublishedDraft}
-                    onChange={(e) => void toggleDeletePublished(e.target.checked)}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </span>
-              </label>
-              {/* Git engine (specs/git-operations.spec.md): which one carries
-                  the operations out and who supplies GitHub credentials.
-                  Hidden in demo mode along with the sign-in — the demo
-                  dataset never syncs with GitHub. */}
-              {!demo && (
-                <>
-              <label className="settings-row">
-                <span className="settings-row-label">
-                  Git engine
-                  <span className="settings-row-hint">
-                    {gitEngineEffective === "gh"
-                      ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
-                      : gitEngineEffective === "js"
-                        ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
-                        : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
-                  </span>
-                </span>
-                <select
-                  value={settingsEngineDraft}
-                  onChange={(e) => void pickGitEngine(e.target.value)}
-                >
-                  <option value="auto">
-                    Automatic — GitHub CLI when installed (recommended)
-                  </option>
-                  <option value="gh" disabled={!gh?.available}>
-                    GitHub CLI (gh){gh?.available ? "" : " — not installed"}
-                  </option>
-                  <option value="cli" disabled={!cliGitAvailable}>
-                    System git{cliGitAvailable ? "" : " — not installed"}
-                  </option>
-                  {/* Bundled with the app, so never disabled. */}
-                  <option value="js">Built-in (no git needed)</option>
-                </select>
-              </label>
-              {/* GitHub sign-in (specs/git-operations.spec.md): the gh account
-                  when that engine is in effect, else the device flow. */}
-              <div className="settings-row auth-section">
-                <span className="auth-title">GitHub account</span>
-                {gh?.available && (
-                  <p className="hint">
-                    {gh.signedIn ? (
-                      <>
-                        GitHub CLI signed in
-                        {gh.login ? (
-                          <>
-                            {" "}
-                            as <strong>{gh.login}</strong>
-                          </>
-                        ) : null}
-                        .
-                      </>
-                    ) : (
-                      <>
-                        GitHub CLI installed but signed out — run <code>gh auth login</code>,
-                        then reopen this dialog.
-                      </>
-                    )}
-                  </p>
-                )}
-                {auth?.signedIn ? (
-                  <div className="auth-row">
-                    <span>
-                      Signed in as <strong>{auth.login}</strong>
-                    </span>
-                    <button className="secondary" onClick={signOutGitHub}>
-                      Sign out
-                    </button>
-                  </div>
-                ) : deviceFlow ? (
-                  <div className="auth-device">
-                    <p>
-                      Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
-                      <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
-                        {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
-                      </a>
-                    </p>
-                    <p className="hint">Waiting for GitHub…</p>
-                  </div>
-                ) : webConnecting ? (
-                  <div className="auth-device">
-                    <p>Finish signing in to GitHub in your browser, then come back here.</p>
-                    <p className="hint">Waiting for GitHub…</p>
-                    <button className="secondary" onClick={() => setWebConnecting(false)}>
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div className="auth-row">
-                    {/* Browser OAuth needs an http(s) callback; the desktop
-                        app:// pages offer the device code only. */}
-                    {canConnectViaBrowser && (
-                      <button className="secondary" onClick={connectGitHub}>
-                        Connect to GitHub
-                      </button>
-                    )}
-                    <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
-                      {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
-                    </button>
-                  </div>
-                )}
-                {authStatus && <p className="error">{authStatus}</p>}
-                <p className="hint">
-                  Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
-                  sign-in on the system git and built-in ones. Local folders work without
-                  either.
-                </p>
-              </div>
-                </>
-              )}
-            </section>
-            {/* Plugins (specs/app/plugins.feature.md "A built-in module is a
-                plugin like any other"): every module the app has, built-in
-                or not, with its switch, its version and a line saying what
-                it adds — the profile's entries first, in tab order, which
-                the arrows change. Off, a plugin's tab, routes and shortcuts
-                are gone and its files in the data folder stay. An id in the
-                profile that no plugin provides is reported here and
-                otherwise ignored. */}
-            <section className="settings-group settings-plugins" aria-label="Plugins">
-              <p className="settings-group-title">
-                Plugins
-                <span className="settings-row-hint">
-                  Each adds a sidebar tab; on, in this order after Specs. Switching one off takes its tab,
-                  shortcuts and routes away and leaves its files in the data folder alone.
-                </span>
-              </p>
-              {plugins.map((plugin, i) => {
-                const enabledCount = plugins.filter((p) => p.enabled).length;
-                const name = plugin.displayName ?? plugin.id;
-                const installed = plugin.installed !== false;
-                // Where it came from is the one thing that tells a built-in
-                // from a plugin loaded from a folder.
-                const origin =
-                  plugin.builtin
-                    ? "Built-in"
-                    : !installed
-                      ? "Not installed"
-                      : plugin.source === "repo"
-                        ? "Data folder"
-                        : plugin.source === "path"
-                          ? "Linked folder"
-                          : plugin.install
-                            ? `Marketplace ${plugin.install.marketplace}`
-                            : "Installed";
-                const untrusted = installed && plugin.trusted === false;
-                const loadError = pluginLoadErrors.get(plugin.id);
-                // The Issues plugin's tab needs a GitHub code repo besides its
-                // switch (specs/app/github-issues.feature.md).
-                const note =
-                  plugin.id === "issues" && plugin.enabled && !issuesRepo
-                    ? "The data folder's project-settings.json names no GitHub code repo yet, so the tab stays hidden until it does."
-                    : null;
-                return (
-                  <div className="settings-row plugin-row" key={plugin.id} data-plugin={plugin.id}>
-                    <span className="settings-row-label">
-                      <span className="plugin-row-name">
-                        {name}
-                        <span className="plugin-row-meta" title={plugin.dir}>
-                          {origin}
-                          {plugin.version ? ` · v${plugin.version}` : ""}
-                        </span>
-                      </span>
-                      {plugin.description && (
-                        <span className="settings-row-hint">{plugin.description}</span>
-                      )}
-                      {note && <span className="settings-row-hint">{note}</span>}
-                      {untrusted && (
-                        <span className="settings-row-hint">
-                          This plugin came with the data folder, which is pulled from GitHub. It runs
-                          with the app's own rights once trusted
-                          {plugin.permissions?.length ? ` and asks for ${plugin.permissions.join(", ")}` : ""}.
-                        </span>
-                      )}
-                      {plugin.error && (
-                        <span className="settings-row-hint plugin-row-error" role="alert">
-                          {plugin.error}
-                        </span>
-                      )}
-                      {loadError && !plugin.error && (
-                        <span className="settings-row-hint plugin-row-error" role="alert">
-                          {loadError}
-                        </span>
-                      )}
-                    </span>
-                    {plugin.enabled && installed && (
-                      <span className="plugin-row-order">
-                        <button
-                          type="button"
-                          className="plugin-row-move"
-                          aria-label={`Move ${name} up`}
-                          title="Move up"
-                          disabled={i === 0}
-                          onClick={() => void movePlugin(plugin.id, -1)}
-                        >
-                          <ChevronUp size={14} aria-hidden="true" />
-                        </button>
-                        <button
-                          type="button"
-                          className="plugin-row-move"
-                          aria-label={`Move ${name} down`}
-                          title="Move down"
-                          disabled={i >= enabledCount - 1}
-                          onClick={() => void movePlugin(plugin.id, 1)}
-                        >
-                          <ChevronDown size={14} aria-hidden="true" />
-                        </button>
-                      </span>
-                    )}
-                    {untrusted ? (
-                      <button
-                        type="button"
-                        className="link"
-                        onClick={() => void patchSettings({ plugins: { trust: plugin.dir } })}
-                      >
-                        Trust and load
-                      </button>
-                    ) : installed ? (
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          role="switch"
-                          aria-label={name}
-                          checked={plugin.enabled}
-                          onChange={(e) => void setPluginEnabled(plugin.id, e.target.checked)}
-                        />
-                        <span className="switch-track" aria-hidden="true" />
-                      </label>
-                    ) : (
-                      <button
-                        type="button"
-                        className="link"
-                        onClick={() => void setPluginEnabled(plugin.id, false)}
-                      >
-                        Remove from list
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              {/* The explicit plugin folders (specs/app/plugins.feature.md "A
-                  plugin loads from a local folder"): the vibe-coded plugin
-                  under development, linked by path — `specdriven plugin link`
-                  does the same. Not in the demo, whose host is shared. */}
-              {!demo && (
-                <div className="settings-row plugin-sources" data-testid="plugin-sources">
-                  <span className="settings-row-label">
-                    <span>Plugin folders</span>
-                    <span className="settings-row-hint">
-                      Folders with a plugin's package.json, loaded besides ~/.specdriven/plugins and the
-                      data folder's .specdriven/plugins. A TypeScript plugin is built here and rebuilt as
-                      you edit it.
-                    </span>
-                    {pluginSources.length > 0 && (
-                      <ul className="plugin-source-list">
-                        {pluginSources.map((path) => (
-                          <li key={path}>
-                            <code title={path}>{path}</code>
-                            <button
-                              type="button"
-                              className="link"
-                              aria-label={`Unlink ${path}`}
-                              onClick={() =>
-                                void patchSettings({
-                                  plugins: { sources: pluginSources.filter((p) => p !== path) },
-                                })
-                              }
-                            >
-                              Unlink
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={async () => {
-                      const path = await prompt({
-                        title: "Link a plugin folder",
-                        hint: "The absolute path of a folder holding the plugin's package.json.",
-                        placeholder: "/Users/me/dev/my-plugin",
-                        confirmLabel: "Link",
-                        browse: canChooseFolder ? chooseFolderNative : undefined,
-                      });
-                      const clean = path?.trim();
-                      if (clean) void patchSettings({ plugins: { sources: [...pluginSources, clean] } });
-                    }}
-                  >
-                    Add folder…
-                  </button>
-                </div>
-              )}
-              {/* The marketplaces (specs/app/plugins.feature.md "The marketplace
-                  is a git repository with an index"): browse, install with
-                  consent, update, remove — not in the demo. */}
-              {!demo && (
-                <PluginMarketplace
-                  marketplaces={pluginMarketplaces}
-                  plugins={plugins}
-                  patchSettings={patchSettings}
-                  prompt={prompt}
-                  confirm={confirm}
-                  onChanged={refreshPlugins}
-                />
-              )}
-            </section>
-            <p className="hint settings-footnote">
-              Changes are saved to .specdriven/settings.json as you make them.
-            </p>
-            <p className="hint settings-footnote">
-              <kbd>esc</kbd> to exit
-            </p>
-            {settingsError && <p className="error settings-error">{settingsError}</p>}
           </div>
         </div>
       )}

@@ -156,3 +156,25 @@ export function resolveScenario(scenarios: Scenario[], ref: ScenarioRef): number
   });
   return best;
 }
+
+/**
+ * The app's own pages (specs/user-info-settings.feature.md "open Settings",
+ * "open Plugins"): Settings and Plugins take the editor pane the way a
+ * feature does, each at its own url, so Back leaves them and a reload
+ * reopens them. They are checked before the plugins' urls, so no plugin can
+ * claim them.
+ */
+export type AppPage = "settings" | "plugins";
+
+export const APP_PAGES: readonly AppPage[] = ["settings", "plugins"];
+
+export function appPagePath(page: AppPage): string {
+  return `/${page}`;
+}
+
+/** The app page a url names — `/settings`, `/plugins/` — or null. */
+export function matchAppPage(pathname: string): AppPage | null {
+  const segs = pathname.split("/").filter(Boolean);
+  if (segs.length !== 1) return null;
+  return APP_PAGES.find((p) => p === segs[0]) ?? null;
+}

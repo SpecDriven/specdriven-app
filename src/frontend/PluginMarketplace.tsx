@@ -1,4 +1,4 @@
-// Settings → Plugins → Marketplaces (specs/app/plugins.feature.md "The
+// Plugins → Marketplaces (specs/app/plugins.feature.md "The
 // marketplace is a git repository with an index", "A plugin from the
 // marketplace is installed with consent"): the git urls this machine reads,
 // each cloned or pulled through the app's git engine when the list is
@@ -164,12 +164,11 @@ export function PluginMarketplace({ marketplaces, plugins, patchSettings, prompt
   return (
     <div className="settings-row plugin-marketplaces" data-testid="plugin-marketplaces">
       <span className="settings-row-label">
-        <span>Marketplaces</span>
-        <span className="settings-row-hint">
-          Git repositories with a marketplace.json, read through the app's git engine. A plugin installed
-          from one is pinned to the ref the index names and runs with the app's own rights; nothing updates
-          on its own.
-        </span>
+        {/* The page's section says what a marketplace is; this row lists them. */}
+        <span>Configured</span>
+        {marketplaces.length === 0 && (
+          <span className="settings-row-hint">None — add the git url of one to browse its plugins.</span>
+        )}
         {marketplaces.length > 0 && (
           <ul className="plugin-source-list">
             {marketplaces.map((m) => (
