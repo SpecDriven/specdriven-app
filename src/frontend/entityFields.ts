@@ -3,7 +3,7 @@
 // editor offers after `@` + Tab, read from GET /api/entity-fields — the
 // Java classes and CDS entities in the project's code repo (src/server/
 // entities.ts). Module-level state behind useSyncExternalStore, like the
-// models store (src/frontend/eventModel/models.ts); loaded when an editor
+// issues store (src/frontend/issues.ts); loaded when an editor
 // opens, forgotten when the data folder changes.
 //
 // The text helpers below are pure so the completion can be tested without

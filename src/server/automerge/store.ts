@@ -8,7 +8,8 @@
 //   roadmap/<name>.md/                the special folders' plain markdown
 //   tasks/<name>.md/                  pages (specs/app/roadmap.feature.md,
 //   notebook/<name>.md/               tasks.feature.md, engineering-notebook)
-//   event-models/<path>.model.json/   the Event Model documents
+//   <folder>/<path>/                  a plugin's per-file documents (the
+//                                     Event Models' under event-models/)
 //   test-management/project/          the test management module's one doc
 //
 // and inside each of those directories:
@@ -34,12 +35,10 @@ import { join } from "node:path";
 import { readTextFile } from "../fsx";
 import { getLogger, withSpan } from "../telemetry";
 import {
-  MODEL_SCHEMA_VERSION,
   PAGE_SCHEMA_VERSION,
   SCHEMA_VERSION,
   TESTING_SCHEMA_VERSION,
   type FeatureDoc,
-  type ModelDoc,
   type PageDoc,
   type SpecEntry,
   type SpecType,
@@ -155,15 +154,15 @@ function migrated(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
  * The kinds of document the store holds: `features` for the `.feature.md`
  * documents, `docs` for the plain markdown pages of the special folders —
  * the roadmap's (specs/app/roadmap.feature.md), the tasks'
- * (specs/app/tasks.feature.md) and the notebook's — `models` for the Event
- * Model documents (roadmap/support-event-modeling.md), one per
- * `models/<slug>.model.json`, projected to canonical JSON, and `testing` for
- * the test management module's one document (specs/app/tests.feature.md),
- * which has no markdown side at all — the chunks are the only copy. The kind
- * says which schema a document follows; where it lives on disk follows from
- * its file name alone (docDirRel and friends below).
+ * (specs/app/tasks.feature.md) and the notebook's — and a plugin's per-file
+ * documents (the file-doc functions below, src/plugins/sdk/host.ts), and
+ * `testing` for the test management module's one document
+ * (specs/app/tests.feature.md), which has no markdown side at all — the
+ * chunks are the only copy. The kind says which schema a document follows;
+ * where it lives on disk follows from its file name alone (docDirRel and
+ * friends below).
  */
-export type DocKind = "features" | "docs" | "testing" | "models";
+export type DocKind = "features" | "docs" | "testing";
 
 /** The store's root, relative to the data repo. */
 export const AUTOMERGE_ROOT = ".specdriven/automerge";
@@ -172,8 +171,10 @@ export const AUTOMERGE_ROOT = ".specdriven/automerge";
  * A document's directory is its source file's repo-relative path with the
  * first folder mapped through this table, so the store mirrors the data
  * repo's own top level: `specs/`, `roadmap/`, `tasks/` and `notebook/` keep
- * their names and `models/` reads as `event-models/`. A source folder the
- * table does not know keeps its name too (a hand-made page folder, say).
+ * their names and `models/` reads as `event-models/` — the Event Models
+ * plugin's folder, renamed because `models/` was an old per-kind root below
+ * (LEGACY_KIND_ROOTS). A source folder the table does not know keeps its
+ * name too (a hand-made page folder, or a plugin's).
  */
 const DOC_FOLDERS: Record<string, string> = {
   specs: "specs",
@@ -183,8 +184,12 @@ const DOC_FOLDERS: Record<string, string> = {
   models: "event-models",
 };
 
-/** The old, per-kind roots (`features/`, `docs/`, ...) that migrate.ts lifts. */
-export const LEGACY_KIND_ROOTS: readonly DocKind[] = ["features", "docs", "models", "testing"];
+/**
+ * The old, per-kind roots (`features/`, `docs/`, ...) that migrate.ts lifts.
+ * `models` held the Event Model documents, which a plugin keeps now.
+ */
+export const LEGACY_KIND_ROOTS = ["features", "docs", "models", "testing"] as const;
+export type LegacyKindRoot = (typeof LEGACY_KIND_ROOTS)[number];
 
 /** The store's folder for a source folder of the data repo. */
 export function storeFolderFor(sourceFolder: string): string {
@@ -221,8 +226,8 @@ export function pageDocDirRel(fileName: string): string {
   return dirRel(fileName);
 }
 
-/** Repo-relative path of a model's doc directory, for git pathspecs. */
-export function modelDocDirRel(fileName: string): string {
+/** Repo-relative path of a plugin file's doc directory, for git pathspecs. */
+export function fileDocDirRel(fileName: string): string {
   return dirRel(fileName);
 }
 
@@ -260,9 +265,9 @@ export async function hasPageDoc(dataDir: string, fileName: string): Promise<boo
   return hasDoc(dataDir, "docs", fileName);
 }
 
-/** True when the model has a doc directory with at least one chunk. */
-export async function hasModelDoc(dataDir: string, fileName: string): Promise<boolean> {
-  return hasDoc(dataDir, "models", fileName);
+/** True when a plugin's file has a doc directory with at least one chunk. */
+export async function hasFileDoc(dataDir: string, fileName: string): Promise<boolean> {
+  return hasDoc(dataDir, "docs", fileName);
 }
 
 /** True once the data repo holds the test management document. */
@@ -357,12 +362,16 @@ export async function loadPageDoc(
   return loadDoc<PageDoc>(dataDir, "docs", fileName);
 }
 
-/** Load a model's document (roadmap/support-event-modeling.md). */
-export async function loadModelDoc(
+/**
+ * Load the document a plugin keeps for one file of the data repo — the
+ * Event Models plugin's, one per model. The plugin owns the schema; the
+ * store only keeps the chunks.
+ */
+export async function loadFileDoc<T>(
   dataDir: string,
   fileName: string,
-): Promise<LoadedDoc<ModelDoc> | null> {
-  return loadDoc<ModelDoc>(dataDir, "models", fileName);
+): Promise<LoadedDoc<T> | null> {
+  return loadDoc<T>(dataDir, "docs", fileName);
 }
 
 /**
@@ -414,12 +423,12 @@ export async function createPageDoc(
   return createDoc(dataDir, "docs", fileName, doc);
 }
 
-export async function createModelDoc(
+export async function createFileDoc<T extends { id: string }>(
   dataDir: string,
   fileName: string,
-  doc: A.Doc<ModelDoc>,
-): Promise<LoadedDoc<ModelDoc>> {
-  return createDoc(dataDir, "models", fileName, doc);
+  doc: A.Doc<T>,
+): Promise<LoadedDoc<T>> {
+  return createDoc(dataDir, "docs", fileName, doc);
 }
 
 export async function createTestingDoc(
@@ -477,13 +486,13 @@ export async function savePageDoc(
   return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
 }
 
-export async function saveModelDoc(
+export async function saveFileDoc<T>(
   dataDir: string,
   fileName: string,
-  doc: A.Doc<ModelDoc>,
+  doc: A.Doc<T>,
   sinceHeads: A.Heads,
 ): Promise<void> {
-  return saveDoc(dataDir, "models", fileName, doc, sinceHeads);
+  return saveDoc(dataDir, "docs", fileName, doc, sinceHeads);
 }
 
 export async function saveTestingDoc(
@@ -541,9 +550,9 @@ export async function removePageDoc(dataDir: string, fileName: string): Promise<
   log.debug(`removed document for ${fileName}`);
 }
 
-/** Remove a model's document directory (the model was deleted). */
-export async function removeModelDoc(dataDir: string, fileName: string): Promise<void> {
-  await rm(kindDir(dataDir, "models", fileName), { recursive: true, force: true });
+/** Remove a plugin file's document directory (the file was deleted). */
+export async function removeFileDoc(dataDir: string, fileName: string): Promise<void> {
+  await rm(kindDir(dataDir, "docs", fileName), { recursive: true, force: true });
   log.debug(`removed document for ${fileName}`);
 }
 
@@ -592,9 +601,9 @@ export async function listPageDocs(dataDir: string, folder: string): Promise<str
   return listDocs(dataDir, "docs", folder, ".md");
 }
 
-/** Every model that has a document — the doc side of models.ts listing. */
-export async function listModelDocs(dataDir: string): Promise<string[]> {
-  return listDocs(dataDir, "models", "models", ".model.json");
+/** Every file of a plugin's folder, by suffix, that has a document. */
+export async function listFileDocs(dataDir: string, folder: string, suffix: string): Promise<string[]> {
+  return listDocs(dataDir, "docs", folder, suffix);
 }
 
 /** Mint an empty feature document with a fresh identity. */
@@ -615,10 +624,16 @@ export function newPageDoc(init: Omit<PageDoc, "schemaVersion" | "id">): A.Doc<P
   });
 }
 
-/** Mint a model document with a fresh identity. */
-export function newModelDoc(init: Omit<ModelDoc, "schemaVersion" | "id">): A.Doc<ModelDoc> {
-  return A.from<ModelDoc>({
-    schemaVersion: MODEL_SCHEMA_VERSION,
+/**
+ * Mint a plugin's document with a fresh identity: the plugin's own fields,
+ * its schema version, and the `id` every peer shares through `docid`.
+ */
+export function newFileDoc<T extends Record<string, unknown>>(
+  schemaVersion: number,
+  init: T,
+): A.Doc<T & { schemaVersion: number; id: string }> {
+  return A.from<T & { schemaVersion: number; id: string }>({
+    schemaVersion,
     id: randomUUID(),
     ...init,
   });

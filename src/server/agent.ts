@@ -44,19 +44,18 @@ export interface SpecInput {
 }
 
 /**
- * An Event Model bundled into the session (roadmap/support-event-modeling.md):
- * the map the specs belong to, so the agent sees the slices, their cards
- * and arrows alongside the scenarios — the model open on the Models tab
- * when the session started, or one whose slice links a selected spec.
+ * What a plugin bundles into the session after the specs
+ * (src/plugins/host/services.ts SessionParts) — the Event Models plugin's
+ * model, the map the specs belong to: the model open on its tab when the
+ * session started, or one whose slice links a selected spec.
  */
-export interface ModelInput {
-  /** Repo-relative file, e.g. `models/cart.model.json`. */
-  fileName: string;
-  name: string;
-  /** The slices in model order, each with the spec holding its scenarios. */
-  slices: { title: string; feature?: string }[];
-  /** The schema's half of the model — Event Modeling JSON — as text. */
-  json: string;
+export interface SessionSection {
+  /** After `## `, e.g. `Event Model: models/cart.model.json`. */
+  heading: string;
+  /** What the prompt asks to implement when the session has no specs. */
+  noun: { one: string; many: string };
+  /** The section's body, verbatim. */
+  lines: string[];
 }
 
 /**
@@ -83,19 +82,20 @@ export type Runner = (cmd: string, args: string[], options?: RunOptions) => Prom
 /**
  * The generated prompt: the session name, the instruction, then every
  * selected spec verbatim under a heading that names its file — and after
- * the specs, every Event Model that goes with them, as its slices' map and
- * its JSON.
+ * the specs, whatever the plugins bundle with them (an Event Model, as its
+ * slices' map and its JSON).
  */
 export function buildSessionPrompt(
   name: string,
   specs: SpecInput[],
   place?: SessionPlace,
-  models: ModelInput[] = [],
+  sections: SessionSection[] = [],
 ): string {
+  const noun = sections[0]?.noun ?? { one: "specification", many: "specifications" };
   const what =
     specs.length > 0
       ? `Implement the following ${specs.length === 1 ? "specification" : "specifications"}.`
-      : `Implement the following Event ${models.length === 1 ? "Model" : "Models"}.`;
+      : `Implement the following ${sections.length === 1 ? noun.one : noun.many}.`;
   const lines = [`SpecDriven code gen session: ${name}`, "", what, "Work in the current directory and exit when done."];
   // With a code repo, the session runs away from the specs; say where they
   // are, and that the code — not the specs — is what to change.
@@ -108,30 +108,10 @@ export function buildSessionPrompt(
     const heading = `## Spec: ${spec.fileName}${spec.partial ? " (selected scenarios only)" : ""}`;
     lines.push("", heading, "", spec.content.trimEnd());
   }
-  for (const model of models) {
-    lines.push("", `## Event Model: ${model.fileName}`, "", ...modelSection(model, specs.length > 0));
+  for (const section of sections) {
+    lines.push("", `## ${section.heading}`, "", ...section.lines);
   }
   return lines.join("\n") + "\n";
-}
-
-/**
- * How a model reads in the prompt: what it is, which spec holds each
- * slice's scenarios, then the JSON. The map comes first so an agent can
- * place every spec in it before reading the cards.
- */
-function modelSection(model: ModelInput, withSpecs: boolean): string[] {
-  const lines = [
-    `The Event Model "${model.name}"${withSpecs ? " the specifications above belong to" : ""}: ` +
-      "a timeline of screens, commands, events and read models in swimlanes, cut into vertical " +
-      "slices (eventmodeling.org), as Event Modeling JSON. Its slices, and the specification that " +
-      "holds each one's scenarios:",
-  ];
-  for (const slice of model.slices) {
-    lines.push(`- ${slice.title}${slice.feature ? ` → ${slice.feature}` : " — no specification yet"}`);
-  }
-  if (model.slices.length === 0) lines.push("- (no slices yet)");
-  lines.push("", "```json", model.json.trimEnd(), "```");
-  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,8 +327,8 @@ export interface DesktopLaunchOptions {
   id?: string;
   /** Default: now. */
   now?: Date;
-  /** The Event Models bundled after the specs (buildSessionPrompt). */
-  models?: ModelInput[];
+  /** What the plugins bundle after the specs (buildSessionPrompt). */
+  sections?: SessionSection[];
 }
 
 /**
@@ -369,7 +349,7 @@ export async function launchDesktopSession(
   const runner = options.runner ?? desktopRunner ?? run;
   const sessionDir = join(options.sessionsDir, id);
   const promptPath = join(sessionDir, "prompt.md");
-  await writeTextFile(promptPath, buildSessionPrompt(name, specs, where, options.models ?? []));
+  await writeTextFile(promptPath, buildSessionPrompt(name, specs, where, options.sections ?? []));
   const record: SessionRecord = {
     id,
     name,

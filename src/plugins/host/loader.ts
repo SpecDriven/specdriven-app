@@ -20,9 +20,13 @@ import type { PluginManifest } from "../manifest";
 import type { InstallRecord } from "../marketplace";
 import { PROFILE_KEY, readProfile, writeProfile } from "../profile";
 import { builtinHostPlugins } from "../builtin/host";
-import { builtinManifests } from "../builtin/manifests";
+import { builtinManifests, profileManifests, retiredManifest } from "../builtin/manifests";
+import * as hostSdk from "../sdk/host";
+import { SDK_GLOBAL } from "../shared";
+import { addSearchScope } from "../../server/search";
 import {
   createRouteRegistry,
+  createSessionParts,
   createShellPaths,
   createSyncHooks,
   type DataAccess,
@@ -43,9 +47,22 @@ export const host = new Context();
 export const routes = createRouteRegistry();
 export const shell = createShellPaths();
 export const sync = createSyncHooks();
+export const sessionParts = createSessionParts();
 host.provide("routes", routes);
 host.provide("shell", shell);
 host.provide("sync", sync);
+host.provide("search", { add: addSearchScope });
+host.provide("sessions", sessionParts);
+
+// `@specdriven/host` for the plugins' host halves: their builds point the
+// specifier at a shim over this global (src/plugins/host/build.ts), so a
+// plugin shares the server's modules — Automerge, the store, git — rather
+// than bundling copies. Published before any plugin is imported.
+{
+  const g = globalThis as unknown as Record<string, { modules?: Record<string, unknown> } | undefined>;
+  const sdk = (g[SDK_GLOBAL] ??= { modules: {} });
+  sdk.modules = { ...sdk.modules, "@specdriven/host": hostSdk };
+}
 
 // A module's urls serve the shell whether it is on or off (a deep link to a
 // switched-off tab lands in the app and goes home there), so the prefixes
@@ -171,7 +188,7 @@ export function syncPlugins(
   const run = turn.then(async () => {
     lastOptions = options;
     const section = profileSection(state);
-    let { enabled } = readProfile(state, builtinManifests);
+    let { enabled } = readProfile(state, profileManifests);
 
     if (options.sources) {
       const found = await discoverPlugins({
@@ -194,7 +211,7 @@ export function syncPlugins(
         changed = true;
       }
       if (changed) {
-        writeProfile(state, enabled, builtinManifests);
+        writeProfile(state, enabled, profileManifests);
         (state[PROFILE_KEY] as Record<string, unknown>).seen = seen;
         await options.persist?.(state);
       }
@@ -250,10 +267,13 @@ export function pluginStates(): PluginState[] {
     } else if (entry) {
       rows.push(externalState(entry, true));
     } else {
+      // A built-in that moved to the marketplace (the Event Models) is
+      // named as it was, and Settings → Plugins offers to install it.
+      const retired = retiredManifest(id);
       rows.push({
         id,
-        displayName: id,
-        description: "",
+        displayName: retired?.displayName ?? id,
+        description: retired?.description ?? "",
         version: "",
         builtin: false,
         source: "path",
@@ -261,7 +281,9 @@ export function pluginStates(): PluginState[] {
         trusted: true,
         enabled: true,
         active: false,
-        error: "No installed plugin has this id; it is listed in the profile and ignored.",
+        error: retired
+          ? "No longer built in: install it from the marketplace to bring its tab back."
+          : "No installed plugin has this id; it is listed in the profile and ignored.",
       });
     }
   }
@@ -473,7 +495,11 @@ async function mountExternal(entry: External): Promise<void> {
  */
 async function ensureBuilt(entry: External): Promise<Built> {
   const manifest = entry.manifest!;
-  const buildable = canBuild() && !!manifest.src && !!(manifest.src.host || manifest.src.client);
+  // A marketplace install ships `dist/` and comes without its dependencies,
+  // so it loads what it ships; building from `src` is for a plugin under
+  // development (roadmap/plugin-architecture.md "Building").
+  const buildable =
+    canBuild() && !entry.install && !!manifest.src && !!(manifest.src.host || manifest.src.client);
   const inputs: string[] = ["package.json"];
   if (buildable) {
     for (const file of [manifest.src!.host, manifest.src!.client]) {
