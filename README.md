@@ -193,6 +193,7 @@ bun run build:desktop           # this machine's platform
 bun run build:desktop --mac     # dmg + zip
 bun run build:desktop --linux   # AppImage + deb, x64 and arm64
 bun run build:desktop --all     # both
+bun run build:desktop --local   # this machine's arch only: AppImage on Linux, dmg on macOS
 ```
 
 | platform | artifacts in `release/` |
@@ -213,6 +214,11 @@ spec links launch or focus the installed app. Builds are unsigned for now:
 first launch needs Gatekeeper approval on macOS, and the `.deb` is installed
 with `sudo apt install ./specdriven_<version>_amd64.deb` (the AppImage just
 needs `chmod +x`).
+
+`--local` is what [install.sh](install.sh) runs. It skips the `.deb`, whose
+packager (fpm) runs a bundled Ruby that needs `libcrypt.so.1` — missing on
+Arch and other non-Debian distros unless `libxcrypt-compat` is installed — and
+the other architecture, which nobody on that machine would start.
 
 To check that a build actually starts — and starts again — run the restart
 crash test:
@@ -298,7 +304,7 @@ follows the redirect from the releases page's `latest` to find the newest
 from that release, verifies the checksum, unpacks the zip to
 `~/.specdriven/app/specdriven-<version>`, points `~/.specdriven/app/current`
 at it, keeps the verified zip and its checksum alongside, then `bun install`s
-the dependencies, runs `bun run build:desktop`, and starts what
+the dependencies, runs `bun run build:desktop --local`, and starts what
 electron-builder leaves beside the installer — the `.app` on macOS, the
 `.AppImage` on Linux, which it makes executable first and starts only when
 there is a display to start it on
