@@ -10,8 +10,9 @@ export const roadmapManifest: PluginManifest = {
   api: "1",
   displayName: "Roadmap",
   description: "Markdown roadmap pages on their own tab",
-  // The historical settings key; off unless turned on.
-  switch: { key: "roadmap", default: false },
+  // Off unless turned on; `roadmap` was its switch before the profile.
+  defaultEnabled: false,
+  legacyKey: "roadmap",
   paths: ["/roadmap"],
 };
 
@@ -20,7 +21,8 @@ export const tasksManifest: PluginManifest = {
   api: "1",
   displayName: "Tasks",
   description: "Tasks to assign, tick off and put on the calendar",
-  switch: { key: "tasks", default: false },
+  defaultEnabled: false,
+  legacyKey: "tasks",
   paths: ["/tasks"],
 };
 
@@ -29,7 +31,8 @@ export const notebookManifest: PluginManifest = {
   api: "1",
   displayName: "Engineering notebook",
   description: "A shared, dated log of observations and decisions",
-  // The one module that starts on: an absent key means on.
-  switch: { key: "notebook", default: true },
+  // The one module that starts on: a profile that never named it has it.
+  defaultEnabled: true,
+  legacyKey: "notebook",
   paths: ["/notebook"],
 };

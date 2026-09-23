@@ -8,7 +8,8 @@ export const manifest: PluginManifest = {
   api: "1",
   displayName: "GitHub issues",
   description: "The code repo's GitHub issues on their own tab",
-  // The historical settings key; off unless turned on.
-  switch: { key: "issues", default: false },
+  // Off unless turned on; `issues` was its switch before the profile.
+  defaultEnabled: false,
+  legacyKey: "issues",
   paths: ["/issues"],
 };

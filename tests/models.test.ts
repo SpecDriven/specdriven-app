@@ -32,12 +32,17 @@ import {
 } from "../src/server/models";
 import { syncDataDir } from "../src/server/reload";
 import { searchModels, resetSearchCache } from "../src/server/search";
-import { normalizeModels } from "../src/server/state";
 import { parseRoute } from "../src/frontend/route";
 import { modelLink, modelsPath, parseModelsRoute } from "../src/plugins/builtin/models/route";
 import "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { builtinManifests } from "../src/plugins/builtin/manifests";
+import { readProfile } from "../src/plugins/profile";
+
+/** The legacy `models` switch, read as the profile reads it (src/plugins/profile.ts). */
+const normalizeModels = (value: unknown): boolean =>
+  readProfile(value === undefined ? {} : { models: value }, builtinManifests).enabled.includes("models");
 
 let root: string;
 
