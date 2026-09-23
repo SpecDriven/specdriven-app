@@ -9,11 +9,8 @@
 //   /features/<feature>                             feature page
 //   /features/<feature>/scenarios/<scenario>        latest version of the scenario
 //   /features/<feature>/scenarios/<scenario>/v<N>   exactly version N
-//   /issues                                         GitHub issues (specs/app/github-issues.feature.md)
-//   /issues/new                                     the new-issue form
-//   /issues/<number>                                one issue
 //
-// A plugin's views (`/tests`, specs/app/plugins.feature.md) are parsed by the
+// A plugin's views (`/tests`, `/issues`, specs/app/plugins.feature.md) are parsed by the
 // plugin itself, before this; App asks the mounted tabs first.
 //
 // <feature> is the file path *within the spec tree* minus `.feature.md`, and
@@ -61,12 +58,7 @@ export interface Route {
    * `models/cart.model.json`.
    */
   model?: string;
-  /** A view of the GitHub issues module (specs/app/github-issues.feature.md). */
-  issues?: IssuesRoute;
 }
-
-/** The GitHub issues module's views: the list, the new-issue form, or one issue. */
-export type IssuesRoute = { kind: "list" } | { kind: "new" } | { kind: "issue"; number: number };
 
 const VERSION_SEG = /^v([1-9]\d*)$/;
 
@@ -81,14 +73,6 @@ function decode(segment: string): string {
 
 export function parseRoute(pathname: string): Route {
   const segs = pathname.split("/").filter(Boolean).map(decode);
-  // GitHub issues: `/issues` is the list, `/issues/new` the form, and a
-  // number opens that issue. Anything else under `/issues` is the list.
-  if (segs[0] === "issues") {
-    if (segs[1] === "new" && !segs[2]) return { issues: { kind: "new" } };
-    const number = segs[1] && /^[1-9]\d*$/.test(segs[1]) && !segs[2] ? Number(segs[1]) : null;
-    if (number !== null) return { issues: { kind: "issue", number } };
-    return { issues: { kind: "list" } };
-  }
   // A roadmap page or a task is a plain path under the folder it lives in; a
   // hand-typed link may carry the `.md` suffix already. The folder on its own
   // names the tab, and opens the first page it lists.
@@ -187,18 +171,6 @@ export function pageLink(fileName: string): string {
   const folder = pageFolderOf(fileName);
   const stem = fileName.slice(folder.length + 1).replace(/\.md$/, "");
   return `/${folder}/${stem.split("/").map(encodeURIComponent).join("/")}`;
-}
-
-/** The url of a GitHub issues view — the inverse of parseRoute's `issues`. */
-export function issuesPath(view: IssuesRoute): string {
-  switch (view.kind) {
-    case "list":
-      return "/issues";
-    case "new":
-      return "/issues/new";
-    case "issue":
-      return `/issues/${view.number}`;
-  }
 }
 
 export function featurePath(fileName: string): string {

@@ -30,7 +30,7 @@ import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
-import { issuesPath, type IssuesRoute } from "./route";
+import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 import { formatWhen } from "./testing";
 import {
   issues,

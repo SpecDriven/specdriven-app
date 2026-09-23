@@ -22,19 +22,28 @@ export interface PluginStatus {
   enabled: boolean;
 }
 
+/** What every browser half is configured with. */
+export interface ClientConfig {
+  /** Demo mode (src/server/demo.ts): read-only modules, no writes offered. */
+  demo: boolean;
+}
+
 /**
  * Bring the mounted client halves in line with what the server reports.
  * Resolves once every newly mounted plugin has applied — loaded its store —
  * so a deep link that follows finds the data there.
  */
-export function syncClientPlugins(plugins: PluginStatus[] | undefined): Promise<void> {
+export function syncClientPlugins(
+  plugins: PluginStatus[] | undefined,
+  config: ClientConfig = { demo: false },
+): Promise<void> {
   const run = turn.then(async () => {
     const enabled = new Set((plugins ?? []).filter((p) => p.enabled).map((p) => p.id));
     for (const { manifest, plugin } of builtinClientPlugins) {
       const want = enabled.has(manifest.id);
       const have = mounted.get(manifest.id);
       if (want && !have) {
-        const scope = client.plugin(plugin);
+        const scope = client.plugin(plugin, config);
         mounted.set(manifest.id, scope);
         await scope.ready;
       } else if (!want && have) {

@@ -7,8 +7,8 @@ import {
   resolveScenario,
   pageLink,
   scenarioPath,
-  issuesPath,
 } from "../src/frontend/route";
+import { issuesPath, parseIssuesRoute } from "../src/plugins/builtin/issues/route";
 import { parseTestsRoute, testsPath } from "../src/plugins/builtin/tests/route";
 import type { Scenario } from "../src/server/parser";
 
@@ -59,18 +59,21 @@ describe("parseRoute", () => {
 
   // GitHub issues (specs/app/github-issues.feature.md): the list, the
   // new-issue form, and one issue by number.
+  // Parsed by the plugin (src/plugins/builtin/issues/route.ts); to the core
+  // router the urls are home until the mounted tab claims them.
   test("issues routes", () => {
-    expect(parseRoute("/issues")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/new")).toEqual({ issues: { kind: "new" } });
-    expect(parseRoute("/issues/12")).toEqual({ issues: { kind: "issue", number: 12 } });
+    expect(parseIssuesRoute("/issues")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/new")).toEqual({ kind: "new" });
+    expect(parseIssuesRoute("/issues/12")).toEqual({ kind: "issue", number: 12 });
     // Anything else under /issues is the list, not home.
-    expect(parseRoute("/issues/0")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/abc")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issues/12/extra")).toEqual({ issues: { kind: "list" } });
-    expect(parseRoute("/issuesx")).toEqual({});
+    expect(parseIssuesRoute("/issues/0")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/abc")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issues/12/extra")).toEqual({ kind: "list" });
+    expect(parseIssuesRoute("/issuesx")).toBeNull();
+    expect(parseRoute("/issues/12")).toEqual({});
     for (const view of [{ kind: "list" as const }, { kind: "new" as const }, { kind: "issue" as const, number: 7 }]) {
-      expect(parseRoute(issuesPath(view))).toEqual({ issues: view });
+      expect(parseIssuesRoute(issuesPath(view))).toEqual(view);
     }
     expect(issuesPath({ kind: "issue", number: 7 })).toBe("/issues/7");
   });
