@@ -16,7 +16,9 @@
 // only in their descriptor.
 
 import { mkdir, readdir, stat } from "node:fs/promises";
+import { threeWayPage } from "./automerge/merge";
 import {
+  docToPage,
   importPageDoc,
   isPageProjectionOf,
   projectPage,
@@ -406,15 +408,29 @@ export async function importPageDrift(dataDir: string, kind: PageFolder): Promis
  * Feed a page's markdown into its document — reconciled as CRDT operations,
  * or imported whole for a page that has none yet — and return the projection
  * the file must now hold (features.ts absorbIntoDoc).
+ *
+ * The file is about to be overwritten with the projection, so an external
+ * edit the sync tick has not absorbed yet (importPageDrift) is absorbed here
+ * first and the text folded in on top of it (threeWayPage) — otherwise the
+ * write would drop it from the file, the document and git without a trace,
+ * the same hole absorbIntoDoc closes for `.feature.md` files.
  */
 async function absorb(dataDir: string, fileName: string, text: string): Promise<string> {
-  const page = parsePage(text);
+  let page = parsePage(text);
   const loaded = await loadPageDoc(dataDir, fileName);
   if (loaded === null) {
     const created = await createPageDoc(dataDir, fileName, importPageDoc(page));
     return projectPage(created.doc);
   }
-  const next = reconcilePage(loaded.doc, page);
+  let doc = loaded.doc;
+  const disk = await readTextFile(`${dataDir}/${fileName}`);
+  if (disk !== null && !isPageProjectionOf(disk, doc)) {
+    const absorbed = reconcilePage(doc, parsePage(disk));
+    page = threeWayPage(docToPage(doc), page, docToPage(absorbed));
+    doc = absorbed;
+    log.info(`absorbed drifted ${fileName} into its document before writing over it`);
+  }
+  const next = reconcilePage(doc, page);
   await savePageDoc(dataDir, fileName, next, loaded.heads);
   return projectPage(next);
 }

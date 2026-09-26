@@ -2,10 +2,11 @@
 // markdown pages above the feature folders, shown only while the Roadmap
 // setting is on, created when it is, and committed by the sync tick.
 
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, describe, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { projectPage } from "../src/server/automerge/page";
 import { loadPageDoc, pageDocDirRel } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
 import { parsePage, serializePage } from "../src/server/parser";
@@ -194,6 +195,40 @@ test("a page is assigned to a project member", async () => {
   expect(cleared.assigned).toBeUndefined();
   expect(await Bun.file(join(root, fileName)).text()).not.toContain("Assigned");
   expect((await loadPageDoc(root, fileName))?.doc.assigned).toBeUndefined();
+});
+
+// An edit made to the file on disk is only absorbed into the document on the
+// next sync tick; an editor save landing first must not write over it — the
+// same rule features.ts absorbIntoDoc uses for `.feature.md` files.
+describe("a page save racing an unsynced disk edit", () => {
+  const file = "roadmap/pricing.md";
+
+  beforeEach(async () => {
+    await mkdir(join(root, ROADMAP_FOLDER), { recursive: true });
+    await writeFile(join(root, file), "# Pricing\n\nOriginal.\n");
+    await importPageDrift(root, ROADMAP);
+  });
+
+  test("keeps the disk edit alongside the save", async () => {
+    await writeFile(join(root, file), "# Pricing\n\nOriginal.\n\nFrom disk.\n");
+    const saved = await savePage(root, ROADMAP, file, "# Pricing\n\nOriginal, edited here.\n");
+
+    const md = (await Bun.file(join(root, file)).text()) as string;
+    expect(md).toContain("From disk.");
+    expect(md).toContain("edited here");
+    expect(saved.content).toBe(md);
+    expect(projectPage((await loadPageDoc(root, file))!.doc)).toBe(md);
+    expect(await importPageDrift(root, ROADMAP)).toBe("");
+  });
+
+  test("an editor that already holds the disk edit saves it once", async () => {
+    const onDisk = "# Pricing\n\nOriginal.\n\nFrom disk.\n";
+    await writeFile(join(root, file), onDisk);
+    const saved = await savePage(root, ROADMAP, file, onDisk);
+    expect(saved.content).toContain("From disk.");
+    expect(saved.content.match(/From disk\./g)?.length).toBe(1);
+    expect(await Bun.file(join(root, file)).text()).toBe(saved.content);
+  });
 });
 
 test("an externally edited page is absorbed into its document", async () => {
