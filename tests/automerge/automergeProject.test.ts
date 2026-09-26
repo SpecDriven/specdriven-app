@@ -98,6 +98,13 @@ test("reconcile refuses to demote a published scenario", () => {
   );
 });
 
+test("only a forced reconcile may demote a published scenario", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const target = parseFeature(SAMPLE.replace("@v2 [published]", "@v2 [proposed]"));
+  const next = reconcile(doc, target, { force: true });
+  expect(next.specs.find((e) => e.name === "Declined Quote")!.status).toBe("proposed");
+});
+
 test("tests links on a published scenario may still change", () => {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
   const target = parseFeature(SAMPLE);
