@@ -3245,6 +3245,273 @@ button.table-add:hover {
   }
 }
 
+/* Observability (src/frontend/ObservabilityPage.tsx): a log wants the
+   pane's width, not a reading column — the page widens its content, keeps
+   the section list, and lays the entries out as dense monospace lines. */
+
+.app-page.wide .app-page-columns {
+  grid-template-columns: 11rem minmax(0, 80rem);
+}
+
+.settings-group.log-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.log-search {
+  flex: 1 1 14rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  color: var(--text-3);
+}
+
+.log-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.log-toolbar select {
+  max-width: 12rem;
+}
+
+.log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-toolbar .spin {
+  animation: sync-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .log-toolbar .spin {
+    animation: none;
+  }
+}
+
+.log-status {
+  margin: 0;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+}
+
+.log-error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.71875rem;
+  line-height: 1.5;
+}
+
+.log-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.25rem 0.75rem;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.log-row + .log-row {
+  border-top: 1px solid var(--border);
+}
+
+.log-row-line {
+  display: grid;
+  grid-template-columns: 0.75rem 6.5rem 3.4rem minmax(4rem, 8rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.log-row-line:hover {
+  background: var(--hover);
+}
+
+.log-row-line:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+
+.log-row-caret {
+  align-self: start;
+  margin-top: 0.3em;
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+
+.log-row.open .log-row-caret {
+  transform: rotate(90deg);
+}
+
+.log-time {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.log-component {
+  color: var(--accent-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.log-attr {
+  color: var(--text-2);
+}
+
+.log-list mark {
+  padding: 0;
+  border-radius: 2px;
+  background: var(--accent-mark);
+  color: inherit;
+}
+
+.log-level {
+  display: inline-block;
+  padding: 0 0.3rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+.log-level-debug {
+  color: var(--text-3);
+  background: var(--hover);
+}
+
+.log-level-info {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.log-level-warn {
+  color: var(--status-proposed);
+  background: color-mix(in srgb, var(--status-proposed) 14%, transparent);
+}
+
+.log-level-error {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+}
+
+.log-row-error .log-row-line {
+  background: var(--danger-bg);
+}
+
+.log-row-debug .log-message {
+  color: var(--text-2);
+}
+
+.log-row-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem 0.6rem 2rem;
+}
+
+.log-attrs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 1rem;
+  margin: 0;
+  width: 100%;
+}
+
+.log-attrs-row {
+  display: contents;
+}
+
+.log-attrs dt {
+  color: var(--text-2);
+}
+
+.log-attrs dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-copy,
+.log-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--font-sans);
+}
+
+.log-more {
+  margin: 0.4rem 0.75rem 0.7rem;
+  align-self: flex-start;
+}
+
+.log-component-name {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+@container (max-width: 44rem) {
+  .app-page.wide .app-page-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .log-row-line {
+    grid-template-columns: 0.75rem auto auto minmax(0, 1fr);
+  }
+
+  .log-row-line .log-message {
+    grid-column: 2 / -1;
+  }
+}
+
 /* Plugins on, in tab order: the place each holds after Specs. */
 .plugin-row-rank {
   flex: none;

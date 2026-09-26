@@ -21,10 +21,13 @@ export function AppPageLayout({
   sections,
   actions,
   aside,
+  className,
   onClose,
   children,
 }: {
   title: string;
+  /** Extra classes on the page — `wide` gives the content column more room. */
+  className?: string;
   /** The sections in page order, for the nav; hidden ones left out. */
   sections: PageSectionRef[];
   /** Extra header controls, left of the ✕. */
@@ -45,7 +48,10 @@ export function AppPageLayout({
     const body = bodyRef.current;
     if (!body) return;
     const list = ids ? ids.split(" ") : [];
-    if (body.scrollTop + body.clientHeight >= body.scrollHeight - 2) {
+    // Only a body that scrolls has a bottom to reach — one still loading its
+    // content would otherwise start on the last section.
+    const scrolls = body.scrollHeight > body.clientHeight + 2;
+    if (scrolls && body.scrollTop + body.clientHeight >= body.scrollHeight - 2) {
       setActive(list[list.length - 1] ?? null);
       return;
     }
@@ -68,7 +74,7 @@ export function AppPageLayout({
   };
 
   return (
-    <div className="app-page" role="region" aria-label={title}>
+    <div className={`app-page${className ? ` ${className}` : ""}`} role="region" aria-label={title}>
       <header className="editor-bar page-header">
         <Breadcrumbs items={[]} tail={<h1 className="crumb current plain app-page-title">{title}</h1>} />
         <div className="editor-actions page-actions">

@@ -140,6 +140,17 @@ line to its trace. `SPECDRIVEN_LOG_DIR` moves the directory,
 (default 5) tune rotation, and `SPECDRIVEN_LOG_FILE=0` turns file logging
 off.
 
+**Observability** in the user menu (or `g o`, at `/observability`) browses
+those files in the app, newest first. You can search them as text or as a
+regular expression, filter by level and component, and use Follow to watch
+new entries arrive. With the file sink off, it shows the latest 2000 entries
+kept in memory. The same page sets the log verbosity: a default minimum level
+plus per-component overrides. An entry below its level is written nowhere
+(not the file, the console or OTEL). Changes apply at once and are saved to
+the settings file (`logLevel`, `logLevels`). `SPECDRIVEN_LOG_LEVEL` sets the
+starting level when nothing is saved (default `debug`, everything). The page
+is not offered in the hosted demo.
+
 ## Tests
 
 ```sh
