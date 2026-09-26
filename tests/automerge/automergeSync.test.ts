@@ -4,11 +4,12 @@
 // need the conflict dialog. Also: markdown-only edits (older app versions,
 // GitHub) are absorbed, published tampering is repaired, deletions win.
 
-import { test, expect, beforeEach, afterEach } from "bun:test";
+import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { importDrift } from "../../src/server/automerge/driftSync";
 import { projectFeature } from "../../src/server/automerge/project";
 import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
 import { conflictedFiles } from "../../src/server/git";
@@ -163,6 +164,74 @@ test("drift that tampers with a published scenario is repaired from the doc", as
   expect(await readFeature(a, "specs/seed.feature.md")).toBe(published!);
   await syncDataDir(b); // the repair propagates back
   expect(await readFeature(b, "specs/seed.feature.md")).toBe(published!);
+});
+
+// A status change is the back door around the body check: demoted to draft,
+// a published scenario drops out of the projection (and git); demoted to
+// proposed, its body is open to the next drift pass, which can then publish
+// the rewrite under the same version. The drift pass refuses both.
+describe("drift that demotes a published scenario is repaired from the doc", () => {
+  const FILE = "specs/billing.feature.md";
+  const PUBLISHED = `# Billing
+
+## Monthly plan @v1 [published]
+
+- **Given** a policy on the monthly plan
+- **Then** a premium is collected each month
+
+## Refund @v1 [published]
+
+- **Given** a cancelled policy
+- **Then** the unearned premium is refunded
+`;
+
+  /** A data dir whose feature has been imported into its document. */
+  async function imported(): Promise<string> {
+    const dir = join(root, "data");
+    await Bun.write(join(dir, FILE), PUBLISHED);
+    await importDrift(dir);
+    const projection = await readFeature(dir, FILE);
+    expect(projection).toContain("## Monthly plan @v1 [published]");
+    return dir;
+  }
+
+  async function expectRepaired(dir: string, projection: string) {
+    const summary = await importDrift(dir);
+    expect(summary).toContain("repaired 1 file(s)");
+    expect(summary).not.toContain("absorbed");
+    expect(await readFeature(dir, FILE)).toBe(projection);
+    const doc = (await loadFeatureDoc(dir, FILE))!.doc;
+    expect(doc.specs.map((e) => e.status)).toEqual(["published", "published"]);
+    expect(projectFeature(doc)).toBe(projection);
+  }
+
+  test("published to draft", async () => {
+    const dir = await imported();
+    const projection = (await readFeature(dir, FILE))!;
+    await Bun.write(join(dir, FILE), projection.replace("## Monthly plan @v1 [published]", "## Monthly plan @v1 [draft]"));
+    await expectRepaired(dir, projection);
+  });
+
+  test("published to proposed", async () => {
+    const dir = await imported();
+    const projection = (await readFeature(dir, FILE))!;
+    await Bun.write(join(dir, FILE), projection.replace("## Refund @v1 [published]", "## Refund @v1 [proposed]"));
+    await expectRepaired(dir, projection);
+  });
+
+  test("demote, edit, then republish under the same version", async () => {
+    const dir = await imported();
+    const projection = (await readFeature(dir, FILE))!;
+    await Bun.write(join(dir, FILE), projection.replace("## Refund @v1 [published]", "## Refund @v1 [proposed]"));
+    await expectRepaired(dir, projection);
+    await Bun.write(
+      join(dir, FILE),
+      projection.replace("the unearned premium is refunded", "nothing is refunded"),
+    );
+    await expectRepaired(dir, projection);
+    const doc = (await loadFeatureDoc(dir, FILE))!.doc;
+    expect(doc.specs.find((e) => e.name === "Refund")!.body).toContain("the unearned premium is refunded");
+  });
 });
 
 test("an external feature deletion also drops the document", async () => {

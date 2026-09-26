@@ -190,6 +190,19 @@ test("saveFeature keeps published scenarios immutable", async () => {
   ).rejects.toThrow("immutable");
 });
 
+// A status change is the back door: demoted, a published scenario leaves the
+// projection (draft) or unlocks its body for the next save (proposed).
+test("saveFeature refuses to demote a published scenario", async () => {
+  await createFeature(root, "Quote");
+  await publishFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nold body\n");
+  for (const status of ["draft", "proposed"]) {
+    await expect(
+      saveFeature(root, "specs/quote.feature.md", `# Quote\n\n## Basic @v1 [${status}]\n\nold body\n`),
+    ).rejects.toThrow("immutable");
+  }
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [published]");
+});
+
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");

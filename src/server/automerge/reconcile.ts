@@ -67,7 +67,9 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
 /**
  * The published-immutability invariant (specs/ui.spec.md), stated on the doc:
  * every published scenario must survive reconciliation under its (name,
- * version) identity with its body intact. Same rule and message as
+ * version) identity, still published, with its body intact — a demotion to
+ * proposed or draft would otherwise unlock the body for the next edit, or
+ * drop the scenario from the projection. Same rule and message as
  * assertPublishedUnchanged in features.ts, checked here so a drifted markdown
  * file can never rewrite published history through the reconciliation door.
  */
@@ -75,7 +77,7 @@ function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
   for (const entry of doc.specs) {
     if (entry.status !== "published") continue;
     const match = target.scenarios.find((s) => sameScenario(entry, s));
-    if (!match || match.body !== entry.body) {
+    if (!match || match.status !== "published" || match.body !== entry.body) {
       throw new Error(`Scenario "${entry.name}" @v${entry.version} is published and immutable`);
     }
   }

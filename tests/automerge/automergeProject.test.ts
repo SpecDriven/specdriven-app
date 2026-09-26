@@ -84,6 +84,21 @@ test("reconcile refuses to drop a published scenario", () => {
   expect(() => reconcile(doc, target)).toThrow(/published and immutable/);
 });
 
+test("reconcile refuses to demote a published scenario", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  for (const status of ["draft", "proposed"]) {
+    const target = parseFeature(SAMPLE.replace("@v2 [published]", `@v2 [${status}]`));
+    expect(() => reconcile(doc, target)).toThrow(/published and immutable/);
+  }
+});
+
+test("only a forced reconcile may demote a published scenario", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const target = parseFeature(SAMPLE.replace("@v2 [published]", "@v2 [proposed]"));
+  const next = reconcile(doc, target, { force: true });
+  expect(next.specs.find((e) => e.name === "Declined Quote")!.status).toBe("proposed");
+});
+
 test("tests links on a published scenario may still change", () => {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
   const target = parseFeature(SAMPLE);

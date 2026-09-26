@@ -725,7 +725,8 @@ export async function resolveFeatureConflict(
 /**
  * specs/ui.spec.md: "If a scenario is already published, then it is
  * immutable." A published scenario (same name and version) must survive a
- * publish with its body intact; adding a new version alongside it is fine.
+ * publish still published and with its body intact; adding a new version
+ * alongside it is fine.
  */
 async function assertPublishedUnchanged(dataDir: string, fileName: string, next: string) {
   const existingText = await readFeature(dataDir, fileName);
@@ -735,7 +736,7 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
   for (const old of before.scenarios) {
     if (old.status !== "published") continue;
     const match = after.scenarios.find((s) => s.name === old.name && s.version === old.version);
-    if (!match || match.body !== old.body) {
+    if (!match || match.status !== "published" || match.body !== old.body) {
       throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);
     }
   }
