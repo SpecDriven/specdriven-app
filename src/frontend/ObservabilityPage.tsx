@@ -1,9 +1,9 @@
 // Observability: its own page in the editor pane, opened from the user menu
-// like Settings and Plugins. The app's own log, newest first — searched as
-// text or a regular expression, narrowed to a level and a component, and
-// followed live — and the verbosity that decides what gets written: a
-// default level and per-component overrides, applied at once and kept in
-// the settings file (src/server/logs.ts).
+// like Settings and Plugins, with two tabs. Logs: the app's own log, newest
+// first — searched as text or a regular expression, narrowed to a level and
+// a component, and followed live. Verbosity: what gets written — a default
+// level and per-component overrides, applied at once and kept in the
+// settings file (src/server/logs.ts).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -27,6 +27,10 @@ import {
   type LogPage,
   type LogSettings,
 } from "./observability";
+
+const LOGS_TAB = "observability-logs";
+const VERBOSITY_TAB = "observability-verbosity";
+type ObservabilityTab = typeof LOGS_TAB | typeof VERBOSITY_TAB;
 
 /** How often the list refreshes while following. */
 const FOLLOW_MS = 3000;
@@ -267,6 +271,7 @@ export function ObservabilityPage({ onClose, fetcher, copyText }: ObservabilityP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [follow, setFollow] = useState(false);
+  const [tab, setTab] = useState<ObservabilityTab>(LOGS_TAB);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -312,11 +317,20 @@ export function ObservabilityPage({ onClose, fetcher, copyText }: ObservabilityP
     return () => clearTimeout(t);
   }, [draft, filter.q]);
 
+  // Following pauses while the log is out of sight.
   useEffect(() => {
-    if (!follow) return;
+    if (!follow || tab !== LOGS_TAB) return;
     const t = setInterval(() => void load(filter), FOLLOW_MS);
     return () => clearInterval(t);
-  }, [follow, filter, load]);
+  }, [follow, filter, load, tab]);
+
+  // Back on the log after changing the verbosity: show what is there now.
+  const shownTab = useRef(tab);
+  useEffect(() => {
+    if (tab === LOGS_TAB && shownTab.current !== LOGS_TAB) void load(filter);
+    shownTab.current = tab;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const changeVerbosity = async (change: { level?: LogLevel; components?: Record<string, LogLevel> }) => {
     setSavingVerbosity(true);
@@ -369,114 +383,119 @@ export function ObservabilityPage({ onClose, fetcher, copyText }: ObservabilityP
       title="Observability"
       className="wide"
       sections={[
-        { id: "observability-logs", title: "Logs" },
-        { id: "observability-verbosity", title: "Verbosity" },
+        { id: LOGS_TAB, title: "Logs" },
+        { id: VERBOSITY_TAB, title: "Verbosity" },
       ]}
+      tabs={{ active: tab, onSelect: (id) => setTab(id as ObservabilityTab) }}
       onClose={onClose}
     >
-      <PageSection id="observability-logs" title="Logs" hint={sourceHint} className="log-panel">
-        <div className="log-toolbar" role="search">
-          <label className="log-search">
-            <Search size={13} aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search logs"
-              placeholder={filter.regex ? "Regular expression" : "Search logs"}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") update({ q: draft });
-              }}
+      {tab === LOGS_TAB ? (
+        <PageSection id={LOGS_TAB} title="Logs" hint={sourceHint} className="log-panel" panel>
+          <div className="log-toolbar" role="search">
+            <label className="log-search">
+              <Search size={13} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search logs"
+                placeholder={filter.regex ? "Regular expression" : "Search logs"}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") update({ q: draft });
+                }}
+              />
+            </label>
+            <label className="log-toggle">
+              <input type="checkbox" checked={filter.regex} onChange={(e) => update({ regex: e.target.checked })} />
+              Regex
+            </label>
+            <select aria-label="Level" value={filter.level} onChange={(e) => update({ level: e.target.value as LogLevel })}>
+              {LOG_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {minimumLabel(l)}
+                </option>
+              ))}
+            </select>
+            <select aria-label="Component" value={filter.component} onChange={(e) => update({ component: e.target.value })}>
+              <option value="">All components</option>
+              {components.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <label className="log-toggle">
+              <span className="switch">
+                <input type="checkbox" role="switch" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+              Follow
+            </label>
+            <button
+              type="button"
+              className="ibtn"
+              aria-label="Refresh logs"
+              title="Refresh"
+              onClick={() => void load(filter)}
+            >
+              <RefreshCw size={14} aria-hidden="true" className={loading ? "spin" : undefined} />
+            </button>
+          </div>
+          {error && (
+            <p className="log-error" role="alert">
+              {error}
+            </p>
+          )}
+          <p className="log-status" aria-live="polite">
+            {page === null
+              ? "Loading…"
+              : entries.length === 0
+                ? filtered
+                  ? "No entries match."
+                  : "Nothing logged yet."
+                : `${entries.length}${page.more ? "+" : ""} ${entries.length === 1 ? "entry" : "entries"}, newest first`}
+          </p>
+          {entries.length > 0 && (
+            <LogList
+              entries={entries}
+              pattern={pattern}
+              openKey={openKey}
+              setOpenKey={setOpenKey}
+              copiedKey={copiedKey}
+              onCopy={(key, entry) => void copy(key, entry)}
             />
-          </label>
-          <label className="log-toggle">
-            <input type="checkbox" checked={filter.regex} onChange={(e) => update({ regex: e.target.checked })} />
-            Regex
-          </label>
-          <select aria-label="Level" value={filter.level} onChange={(e) => update({ level: e.target.value as LogLevel })}>
-            {LOG_LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {minimumLabel(l)}
-              </option>
-            ))}
-          </select>
-          <select aria-label="Component" value={filter.component} onChange={(e) => update({ component: e.target.value })}>
-            <option value="">All components</option>
-            {components.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-          <label className="log-toggle">
-            <span className="switch">
-              <input type="checkbox" role="switch" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-              <span className="switch-track" aria-hidden="true" />
-            </span>
-            Follow
-          </label>
-          <button
-            type="button"
-            className="ibtn"
-            aria-label="Refresh logs"
-            title="Refresh"
-            onClick={() => void load(filter)}
-          >
-            <RefreshCw size={14} aria-hidden="true" className={loading ? "spin" : undefined} />
-          </button>
-        </div>
-        {error && (
-          <p className="log-error" role="alert">
-            {error}
-          </p>
-        )}
-        <p className="log-status" aria-live="polite">
-          {page === null
-            ? "Loading…"
-            : entries.length === 0
-              ? filtered
-                ? "No entries match."
-                : "Nothing logged yet."
-              : `${entries.length}${page.more ? "+" : ""} ${entries.length === 1 ? "entry" : "entries"}, newest first`}
-        </p>
-        {entries.length > 0 && (
-          <LogList
-            entries={entries}
-            pattern={pattern}
-            openKey={openKey}
-            setOpenKey={setOpenKey}
-            copiedKey={copiedKey}
-            onCopy={(key, entry) => void copy(key, entry)}
-          />
-        )}
-        {page?.more && (
-          <button type="button" className="link log-more" onClick={() => setFilter((f) => ({ ...f, limit: f.limit + PAGE_SIZE }))}>
-            Load older entries
-          </button>
-        )}
-      </PageSection>
-      <PageSection
-        id="observability-verbosity"
-        title="Verbosity"
-        hint={
-          <>
-            Entries below a component's level are not written anywhere — not to the log file, the console or
-            OpenTelemetry{settings?.otel ? " (exporting now)" : ""}. Changes apply at once and are kept for the next
-            start.
-          </>
-        }
-      >
-        {verbosityError && (
-          <p className="log-error settings-row" role="alert">
-            {verbosityError}
-          </p>
-        )}
-        {settings ? (
-          <VerbosityRows settings={settings} saving={savingVerbosity} onChange={(c) => void changeVerbosity(c)} />
-        ) : (
-          !verbosityError && <p className="page-empty settings-row">Loading…</p>
-        )}
-      </PageSection>
+          )}
+          {page?.more && (
+            <button type="button" className="link log-more" onClick={() => setFilter((f) => ({ ...f, limit: f.limit + PAGE_SIZE }))}>
+              Load older entries
+            </button>
+          )}
+        </PageSection>
+      ) : (
+        <PageSection
+          id={VERBOSITY_TAB}
+          title="Verbosity"
+          panel
+          hint={
+            <>
+              Entries below a component's level are not written anywhere — not to the log file, the console or
+              OpenTelemetry{settings?.otel ? " (exporting now)" : ""}. Changes apply at once and are kept for the next
+              start.
+            </>
+          }
+        >
+          {verbosityError && (
+            <p className="log-error settings-row" role="alert">
+              {verbosityError}
+            </p>
+          )}
+          {settings ? (
+            <VerbosityRows settings={settings} saving={savingVerbosity} onChange={(c) => void changeVerbosity(c)} />
+          ) : (
+            !verbosityError && <p className="page-empty settings-row">Loading…</p>
+          )}
+        </PageSection>
+      )}
     </AppPageLayout>
   );
 }

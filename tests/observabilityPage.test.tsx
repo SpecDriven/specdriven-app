@@ -145,12 +145,21 @@ describe("markup", () => {
   });
 });
 
+/** The handlers React gave an element. */
+function reactProps(el: Element): Record<string, (e: unknown) => void> {
+  const key = Object.keys(el).find((k) => k.startsWith("__reactProps$"))!;
+  return (el as unknown as Record<string, Record<string, (e: unknown) => void>>)[key]!;
+}
+
 /** Type into a field: its value, then the onChange React gave it. */
 function type(field: HTMLInputElement, value: string) {
   field.value = value;
-  const key = Object.keys(field).find((k) => k.startsWith("__reactProps$"))!;
-  const props = (field as unknown as Record<string, { onChange(e: unknown): void }>)[key]!;
-  props.onChange({ target: field, currentTarget: field });
+  reactProps(field).onChange!({ target: field, currentTarget: field });
+}
+
+/** Click through the onClick React gave the element. */
+function click(el: Element) {
+  reactProps(el).onClick!({ target: el, currentTarget: el, preventDefault() {} });
 }
 
 describe("the page", () => {
@@ -191,6 +200,21 @@ describe("the page", () => {
     expect(messages()).toEqual(["fetched"]);
     expect(container.querySelector(".log-message mark")?.textContent).toBe("fetched");
 
+    // Logs and Verbosity are tabs: one shows at a time.
+    const tabs = () => [...container.querySelectorAll('[role="tab"]')].map((t) => [t.textContent, t.getAttribute("aria-selected")]);
+    expect(tabs()).toEqual([
+      ["Logs", "true"],
+      ["Verbosity", "false"],
+    ]);
+    expect(container.querySelector('select[aria-label="Default level"]')).toBeNull();
+    await act(async () => click(container.querySelector("#observability-verbosity-tab")!));
+    expect(tabs()).toEqual([
+      ["Logs", "false"],
+      ["Verbosity", "true"],
+    ]);
+    expect(container.querySelector('[role="tabpanel"]')!.id).toBe("observability-verbosity");
+    expect(container.querySelector(".log-list")).toBeNull();
+
     // The default level goes to the server and the answer is shown.
     const level = container.querySelector('select[aria-label="Default level"]') as unknown as HTMLSelectElement;
     await act(async () => {
@@ -203,6 +227,13 @@ describe("the page", () => {
     expect(JSON.parse(String(put!.init!.body))).toEqual({ level: "warn" });
     expect((container.querySelector('select[aria-label="Default level"]') as unknown as HTMLSelectElement).value).toBe("warn");
 
+    // Back on the log, it is read again, with the search kept.
+    const before = calls.length;
+    await act(async () => click(container.querySelector("#observability-logs-tab")!));
+    await flush();
+    expect(calls.slice(before).map((c) => c.url)).toEqual(["/api/logs?q=fetched&limit=500"]);
+    expect((container.querySelector('input[aria-label="Search logs"]') as unknown as HTMLInputElement).value).toBe("fetched");
+
     await act(async () => root.unmount());
     container.remove();
   });
@@ -214,8 +245,10 @@ describe("the page", () => {
     const root = createRoot(container);
     await act(async () => root.render(<ObservabilityPage onClose={() => {}} fetcher={fetcher} />));
     await flush();
-    const alerts = [...container.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
-    expect(alerts).toContain("Logs are not available in demo mode");
+    const alerts = () => [...container.querySelectorAll('[role="alert"]')].map((a) => a.textContent);
+    expect(alerts()).toContain("Logs are not available in demo mode");
+    await act(async () => click(container.querySelector("#observability-verbosity-tab")!));
+    expect(alerts()).toContain("Logs are not available in demo mode");
     await act(async () => root.unmount());
     container.remove();
   });

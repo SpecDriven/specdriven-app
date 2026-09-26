@@ -3139,6 +3139,13 @@ button.table-add:hover {
   gap: 1px;
 }
 
+/* A tabbed page's nav (AppPageLayout `tabs`): the same items, as a tab list. */
+.app-page-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .app-page-nav-item,
 .app-page-nav-link {
   display: flex;
@@ -3229,6 +3236,12 @@ button.table-add:hover {
 
   .app-page-nav {
     position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  .app-page-tabs {
     flex-direction: row;
     flex-wrap: wrap;
     gap: 0.2rem;
