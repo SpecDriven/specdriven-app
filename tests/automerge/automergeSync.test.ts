@@ -9,6 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { importDrift } from "../../src/server/automerge/driftSync";
 import { projectFeature } from "../../src/server/automerge/project";
 import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
 import { conflictedFiles } from "../../src/server/git";
@@ -185,6 +186,33 @@ test("drift that demotes a published scenario is repaired from the doc", async (
     await syncDataDir(b);
     expect(await readFeature(b, "specs/seed.feature.md")).toBe(published);
   }
+});
+
+// The two-step way around the body check, run by the drift pass alone:
+// demote to proposed, then rewrite the body and publish it again as v1. The
+// demotion is refused and repaired, so the rewrite still meets a published v1.
+test("drift that demotes, edits, then republishes is repaired from the doc", async () => {
+  const file = "specs/billing.feature.md";
+  const dir = join(root, "data");
+  await Bun.write(
+    join(dir, file),
+    "# Billing\n\n## Refund @v1 [published]\n\n- **Given** a cancelled policy\n" +
+      "- **Then** the unearned premium is refunded\n",
+  );
+  await importDrift(dir);
+  const published = (await readFeature(dir, file))!;
+  expect(published).toContain("## Refund @v1 [published]");
+
+  await Bun.write(join(dir, file), published.replace("[published]", "[proposed]"));
+  expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents");
+  expect(await readFeature(dir, file)).toBe(published);
+
+  await Bun.write(join(dir, file), published.replace("the unearned premium is refunded", "nothing is refunded"));
+  expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents");
+  expect(await readFeature(dir, file)).toBe(published);
+  const entry = (await loadFeatureDoc(dir, file))!.doc.specs[0]!;
+  expect(entry.status).toBe("published");
+  expect(entry.body).toContain("the unearned premium is refunded");
 });
 
 test("an external feature deletion also drops the document", async () => {
