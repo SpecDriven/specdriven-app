@@ -30,6 +30,14 @@
 //   SPECDRIVEN_LOG_MAX_FILES  files kept including the current, default 5
 //   SPECDRIVEN_LOG_FILE=0     turns file logging off
 //
+// Verbosity is adjustable while the app runs (the Observability page,
+// src/frontend/ObservabilityPage.tsx): a global minimum level plus
+// per-component overrides. An entry below its component's level goes to no
+// sink at all. SPECDRIVEN_LOG_LEVEL sets the starting global level (default
+// debug, i.e. everything); the saved settings replace it at startup. The
+// latest entries are also kept in memory, so the page has something to show
+// when the file sink is off.
+//
 // Pure-JS dependencies only — like the automerge store, this runs under both
 // Bun and Electron's Node runtime.
 
@@ -257,7 +265,15 @@ export interface ComponentLogger {
   error(message: string, attributes?: Attributes): void;
 }
 
-type Level = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
+type Level = LogLevel;
+
+/** Least to most severe. */
+export const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"];
+
+export function isLogLevel(v: unknown): v is LogLevel {
+  return typeof v === "string" && (LOG_LEVELS as readonly string[]).includes(v);
+}
 
 const SEVERITY: Record<Level, SeverityNumber> = {
   debug: SeverityNumber.DEBUG,
@@ -396,6 +412,111 @@ function fileLine(
   return `${head} ${message}${formatAttributes(attributes, { stacks: true })}${traceSuffix()}`;
 }
 
+// ---------------------------------------------------------------------------
+// Verbosity, the in-memory tail and where the entries can be read back — all
+// on globalThis for the same hot-reload reason as the running pipeline.
+
+export interface LogVerbosity {
+  /** The minimum level for components without an override. */
+  level: LogLevel;
+  /** Per-component minimum levels, overriding `level`. */
+  components: Record<string, LogLevel>;
+}
+
+const VERBOSITY = Symbol.for("specdriven.telemetry.verbosity");
+const COMPONENTS = Symbol.for("specdriven.telemetry.components");
+const MEMORY = Symbol.for("specdriven.telemetry.memory");
+
+/** Lines kept in memory, newest last. */
+export const MEMORY_LOG_LINES = 2000;
+
+function envLogLevel(): LogLevel {
+  const v = (process.env.SPECDRIVEN_LOG_LEVEL || "").trim().toLowerCase();
+  return isLogLevel(v) ? v : "debug";
+}
+
+function verbosityState(): LogVerbosity {
+  const flags = globalThis as Record<symbol, unknown>;
+  flags[VERBOSITY] ??= { level: envLogLevel(), components: {} };
+  return flags[VERBOSITY] as LogVerbosity;
+}
+
+/** The current verbosity, a copy. */
+export function logVerbosity(): LogVerbosity {
+  const v = verbosityState();
+  return { level: v.level, components: { ...v.components } };
+}
+
+/**
+ * Change the verbosity: `level` replaces the global minimum, `components`
+ * replaces the whole override map. Invalid levels are dropped, not applied.
+ */
+export function setLogVerbosity(change: { level?: unknown; components?: unknown }): LogVerbosity {
+  const v = verbosityState();
+  if (isLogLevel(change.level)) v.level = change.level;
+  if (change.components && typeof change.components === "object" && !Array.isArray(change.components)) {
+    v.components = Object.fromEntries(
+      Object.entries(change.components as Record<string, unknown>).filter(
+        (entry): entry is [string, LogLevel] => entry[0] !== "" && isLogLevel(entry[1]),
+      ),
+    );
+  }
+  return logVerbosity();
+}
+
+/** Back to SPECDRIVEN_LOG_LEVEL (or debug) with no overrides — for tests. */
+export function resetLogVerbosity(): void {
+  (globalThis as Record<symbol, unknown>)[VERBOSITY] = { level: envLogLevel(), components: {} };
+}
+
+/** The minimum level an entry of this component needs to be recorded. */
+export function effectiveLogLevel(component: string): LogLevel {
+  const v = verbosityState();
+  return v.components[component] ?? v.level;
+}
+
+function knownComponents(): Set<string> {
+  const flags = globalThis as Record<symbol, unknown>;
+  flags[COMPONENTS] ??= new Set<string>();
+  return flags[COMPONENTS] as Set<string>;
+}
+
+/** Every component a logger was created for, sorted. */
+export function logComponents(): string[] {
+  return [...knownComponents()].sort();
+}
+
+function memoryLines(): string[] {
+  const flags = globalThis as Record<symbol, unknown>;
+  flags[MEMORY] ??= [];
+  return flags[MEMORY] as string[];
+}
+
+function rememberLine(line: string): void {
+  const lines = memoryLines();
+  lines.push(line);
+  if (lines.length > MEMORY_LOG_LINES) lines.splice(0, lines.length - MEMORY_LOG_LINES);
+}
+
+/** Where recorded entries can be read back from. */
+export type LogSource =
+  | { kind: "file"; dir: string; /** Newest first: specdriven.log, .1, … */ files: string[] }
+  | { kind: "memory"; /** Oldest first. */ lines: readonly string[] };
+
+/**
+ * The log files while the file sink is writing, else the in-memory tail —
+ * the same line format either way.
+ */
+export function logSource(): LogSource {
+  const dir = logDir();
+  if (!fileLoggingEnabled() || brokenDirs.has(dir)) return { kind: "memory", lines: [...memoryLines()] };
+  const file = join(dir, LOG_FILE);
+  const files = [file];
+  const maxFiles = envInt("SPECDRIVEN_LOG_MAX_FILES", DEFAULT_LOG_MAX_FILES);
+  for (let i = 1; i < maxFiles; i++) files.push(`${file}.${i}`);
+  return { kind: "file", dir, files };
+}
+
 /** api-logs getLogger is documented as non-trivial; fetch each once. */
 const otelLoggers = new Map<string, OtelLogger>();
 
@@ -413,11 +534,15 @@ function otelLogger(component: string): OtelLogger {
  * existing console output already is ("[reload] …", "[netsync] …").
  */
 export function getLogger(component: string): ComponentLogger {
+  knownComponents().add(component);
   const emit = (level: Level, message: string, attributes?: Attributes) => {
+    if (LOG_LEVELS.indexOf(level) < LOG_LEVELS.indexOf(effectiveLogLevel(component))) return;
     if (level !== "debug" || debugToConsole()) {
       CONSOLE[level](`[${component}] ${message}${formatAttributes(attributes)}`);
     }
-    writeLogLine(fileLine(level, component, message, attributes));
+    const line = fileLine(level, component, message, attributes);
+    rememberLine(line);
+    writeLogLine(line);
     otelLogger(component).emit({
       severityNumber: SEVERITY[level],
       severityText: level.toUpperCase(),
