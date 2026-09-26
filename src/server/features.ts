@@ -1,9 +1,10 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
-import { threeWayFeature } from "./automerge/merge";
+import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
 import {
+  assertPublishedKept,
   importFeatureDoc,
   reconcile,
   removeDraftScenario,
@@ -488,13 +489,54 @@ export async function saveFeature(
   scenario?: ScenarioTarget,
 ): Promise<SaveResult> {
   const name = safe(fileName);
-  const proposed = markProposed(content);
+  let proposed = markProposed(content);
   assertFeatureText(name, proposed);
+  proposed = await foldDiskEdit(dataDir, name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
   const written = await writeFeatureFile(dataDir, name, proposed, scenario);
   // Hand the drafts (and the ids) back with the file content, or the client
   // would see the scenario it just saved vanish.
   return { status: "saved", ...(await featureView(dataDir, name, written)), message: "saved locally" };
+}
+
+/**
+ * Fold an edit made to the `.feature.md` on disk — by hand, by an agent, by a
+ * git checkout — that the reload cron has not absorbed into the document yet
+ * (driftSync.ts importDrift) into a save's text. The save is otherwise
+ * reconciled against the document alone and its projection written over the
+ * file, so a disk edit landing between two sync ticks would be silently lost.
+ *
+ * The merge base is the document's projection: what the file held before the
+ * disk edit. A disk edit that tampers with a published scenario is not folded
+ * in — the drift pass refuses it and repairs the file from the document — and
+ * one that changed the same text the editor did is refused with an error
+ * rather than guessed at (threeWayFeatureStrict), so nothing is dropped
+ * silently either way.
+ */
+async function foldDiskEdit(dataDir: string, fileName: string, text: string): Promise<string> {
+  const onDisk = await readFeature(dataDir, fileName);
+  if (onDisk === null || featureTextError(onDisk) !== null) return text;
+  const loaded = await loadFeatureDoc(dataDir, fileName);
+  if (loaded === null || isProjectionOf(onDisk, loaded.doc)) return text;
+  const theirs = parseFeature(onDisk);
+  try {
+    assertPublishedKept(loaded.doc, theirs);
+  } catch {
+    return text;
+  }
+  const merged = threeWayFeatureStrict(
+    parseFeature(projectFeature(loaded.doc)),
+    parseFeature(text),
+    theirs,
+  );
+  if (!merged.ok) {
+    throw new Error(
+      `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
+        `the disk edit is kept; reopen the feature to pick it up`,
+    );
+  }
+  log.info(`folded an unsynced disk edit of ${fileName} into a save`);
+  return serializeFeature(merged.feature);
 }
 
 /**
@@ -725,7 +767,8 @@ export async function resolveFeatureConflict(
 /**
  * specs/ui.spec.md: "If a scenario is already published, then it is
  * immutable." A published scenario (same name and version) must survive a
- * publish with its body intact; adding a new version alongside it is fine.
+ * publish still published and with its body intact; adding a new version
+ * alongside it is fine.
  */
 async function assertPublishedUnchanged(dataDir: string, fileName: string, next: string) {
   const existingText = await readFeature(dataDir, fileName);
@@ -735,7 +778,7 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
   for (const old of before.scenarios) {
     if (old.status !== "published") continue;
     const match = after.scenarios.find((s) => s.name === old.name && s.version === old.version);
-    if (!match || match.body !== old.body) {
+    if (!match || match.status !== "published" || match.body !== old.body) {
       throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);
     }
   }

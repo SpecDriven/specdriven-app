@@ -190,6 +190,70 @@ test("saveFeature keeps published scenarios immutable", async () => {
   ).rejects.toThrow("immutable");
 });
 
+test("saveFeature refuses to demote a published scenario", async () => {
+  await createFeature(root, "Quote");
+  await publishFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nold body\n");
+  for (const status of ["proposed", "draft"]) {
+    expect(
+      saveFeature(root, "specs/quote.feature.md", `# Quote\n\n## Basic @v1 [${status}]\n\nold body\n`),
+    ).rejects.toThrow("immutable");
+  }
+});
+
+// An edit made to the file on disk is only absorbed into the document on the
+// next sync tick; an editor save landing first must not write over it.
+describe("a save racing an unsynced disk edit", () => {
+  const file = "specs/race.feature.md";
+  const seed = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
+
+  beforeEach(async () => {
+    await createFeature(root, "Race", seed);
+  });
+
+  test("keeps the disk edit alongside the save", async () => {
+    await Bun.write(
+      join(root, file),
+      "# Race\n\ndescribed on disk\n\n## Hello @v1 [proposed]\n\n- **Given** x\n\n" +
+        "## Disk only @v1 [proposed]\n\n- **Given** from disk\n",
+    );
+    const saved = await saveFeature(root, file, "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x edited here\n");
+
+    const md = (await readFeature(root, file))!;
+    expect(md).toContain("described on disk");
+    expect(md).toContain("x edited here");
+    expect(md).toContain("## Disk only @v1 [proposed]");
+    expect(saved.content).toBe(md);
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(md);
+  });
+
+  test("an editor that already holds the disk edit saves it once", async () => {
+    const onDisk = seed.replace("- **Given** x", "- **Given** x\n- **And** y");
+    await Bun.write(join(root, file), onDisk);
+    await saveFeature(root, file, onDisk);
+    expect(await readFeature(root, file)).toBe(onDisk);
+  });
+
+  test("refuses a save that changed the same text as the disk edit", async () => {
+    const onDisk = seed.replace("- **Given** x", "- **Given** x from disk");
+    await Bun.write(join(root, file), onDisk);
+    expect(
+      saveFeature(root, file, seed.replace("- **Given** x", "- **Given** x from the editor")),
+    ).rejects.toThrow("edited on disk");
+    expect(await readFeature(root, file)).toBe(onDisk);
+  });
+
+  test("does not fold in a disk edit that tampers with a published scenario", async () => {
+    await publishFeature(root, file, seed);
+    const published = (await readFeature(root, file))!;
+    await Bun.write(join(root, file), published.replace("- **Given** x", "- **Given** tampered"));
+    const withNew = `${published}\n## New @v1 [proposed]\n\n- **Given** z\n`;
+    // The save's published-immutability check reads the file, so the save is
+    // refused; the drift pass then repairs the file from the document.
+    expect(saveFeature(root, file, withNew)).rejects.toThrow("immutable");
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(published);
+  });
+});
+
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");

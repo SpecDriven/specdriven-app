@@ -165,6 +165,28 @@ test("drift that tampers with a published scenario is repaired from the doc", as
   expect(await readFeature(b, "specs/seed.feature.md")).toBe(published!);
 });
 
+test("drift that demotes a published scenario is repaired from the doc", async () => {
+  const { a, b } = await seededClones();
+  await publishFeature(a, "specs/seed.feature.md", (await readFeature(a, "specs/seed.feature.md"))!);
+  await syncDataDir(a);
+  await syncDataDir(b);
+  const published = (await readFeature(a, "specs/seed.feature.md"))!;
+
+  // Demoted to a draft the scenario would drop out of the markdown; demoted to
+  // proposed its body could then be rewritten and published again as v1.
+  for (const status of ["draft", "proposed"]) {
+    await Bun.write(join(b, "specs/seed.feature.md"), published.replace("[published]", `[${status}]`));
+    await git(b, "commit", "-qam", `demote to ${status}`);
+    await git(b, "push");
+
+    await syncDataDir(a);
+    expect(await readFeature(a, "specs/seed.feature.md")).toBe(published);
+    expect((await loadFeatureDoc(a, "specs/seed.feature.md"))!.doc.specs[0]!.status).toBe("published");
+    await syncDataDir(b);
+    expect(await readFeature(b, "specs/seed.feature.md")).toBe(published);
+  }
+});
+
 test("an external feature deletion also drops the document", async () => {
   const { a, b } = await seededClones();
 
