@@ -84,6 +84,20 @@ test("reconcile refuses to drop a published scenario", () => {
   expect(() => reconcile(doc, target)).toThrow(/published and immutable/);
 });
 
+// A status marker edited down is the two-step way around the body check: a
+// demoted scenario is free to change (or, as a doc-only draft, to drop out of
+// the markdown) and to be published again under the same version.
+test("reconcile refuses to demote a published scenario", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  for (const status of ["proposed", "draft"]) {
+    const demoted = parseFeature(SAMPLE.replace("@v2 [published]", `@v2 [${status}]`));
+    expect(() => reconcile(doc, demoted)).toThrow(/published and immutable/);
+  }
+  expect(docToFeature(doc).scenarios.find((s) => s.name === "Declined Quote")!.status).toBe(
+    "published",
+  );
+});
+
 test("tests links on a published scenario may still change", () => {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
   const target = parseFeature(SAMPLE);

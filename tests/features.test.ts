@@ -191,6 +191,70 @@ test("saveFeature keeps published scenarios immutable", async () => {
   ).rejects.toThrow("immutable");
 });
 
+test("saveFeature refuses to demote a published scenario", async () => {
+  await createFeature(root, "Quote");
+  await publishFeature(root, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nold body\n");
+  for (const status of ["proposed", "draft"]) {
+    expect(
+      saveFeature(root, "specs/quote.feature.md", `# Quote\n\n## Basic @v1 [${status}]\n\nold body\n`),
+    ).rejects.toThrow("immutable");
+  }
+});
+
+// An edit made to the file on disk is only absorbed into the document on the
+// next sync tick; an editor save landing first must not write over it.
+describe("a save racing an unsynced disk edit", () => {
+  const file = "specs/race.feature.md";
+  const seed = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
+
+  beforeEach(async () => {
+    await createFeature(root, "Race", seed);
+  });
+
+  test("keeps the disk edit alongside the save", async () => {
+    await Bun.write(
+      join(root, file),
+      "# Race\n\ndescribed on disk\n\n## Hello @v1 [proposed]\n\n- **Given** x\n\n" +
+        "## Disk only @v1 [proposed]\n\n- **Given** from disk\n",
+    );
+    const saved = await saveFeature(root, file, "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x edited here\n");
+
+    const md = (await readFeature(root, file))!;
+    expect(md).toContain("described on disk");
+    expect(md).toContain("x edited here");
+    expect(md).toContain("## Disk only @v1 [proposed]");
+    expect(saved.content).toBe(md);
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(md);
+  });
+
+  test("an editor that already holds the disk edit saves it once", async () => {
+    const onDisk = seed.replace("- **Given** x", "- **Given** x\n- **And** y");
+    await Bun.write(join(root, file), onDisk);
+    await saveFeature(root, file, onDisk);
+    expect(await readFeature(root, file)).toBe(onDisk);
+  });
+
+  test("refuses a save that changed the same text as the disk edit", async () => {
+    const onDisk = seed.replace("- **Given** x", "- **Given** x from disk");
+    await Bun.write(join(root, file), onDisk);
+    expect(
+      saveFeature(root, file, seed.replace("- **Given** x", "- **Given** x from the editor")),
+    ).rejects.toThrow("edited on disk");
+    expect(await readFeature(root, file)).toBe(onDisk);
+  });
+
+  test("does not fold in a disk edit that tampers with a published scenario", async () => {
+    await publishFeature(root, file, seed);
+    const published = (await readFeature(root, file))!;
+    await Bun.write(join(root, file), published.replace("- **Given** x", "- **Given** tampered"));
+    const withNew = `${published}\n## New @v1 [proposed]\n\n- **Given** z\n`;
+    // The save's published-immutability check reads the file, so the save is
+    // refused; the drift pass then repairs the file from the document.
+    expect(saveFeature(root, file, withNew)).rejects.toThrow("immutable");
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(published);
+  });
+});
+
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");
@@ -728,17 +792,19 @@ describe("doc/markdown lockstep", () => {
   });
 });
 
-// An editor save overwrites the file with the document's projection. A file
-// edited on disk since the last sync tick (importDrift) is absorbed first and
-// the save folded in on top, so neither side's edit is dropped unseen.
-describe("a save over a file edited on disk since the last sync tick", () => {
+// Every write overwrites the file with the document's projection, not just
+// the editor's save (which folds the disk edit in itself — "a save racing an
+// unsynced disk edit" above): a file edited on disk since the last sync tick
+// (importDrift) is absorbed first and the write folded in on top, by the same
+// rule, so no path drops a disk edit unseen.
+describe("a write over a file edited on disk since the last sync tick", () => {
   const file = "specs/billing/race.feature.md";
   const start = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
 
-  const seed = async (text = start) => {
-    await Bun.write(join(root, file), text);
+  const seed = async () => {
+    await Bun.write(join(root, file), start);
     await importDrift(root);
-    expect(await readFeature(root, file)).toBe(text);
+    expect(await readFeature(root, file)).toBe(start);
   };
 
   const inLockstep = async () => {
@@ -749,76 +815,25 @@ describe("a save over a file edited on disk since the last sync tick", () => {
     return md;
   };
 
-  test("keeps the disk edits and applies the editor's change on top", async () => {
+  test("a publish keeps the disk edit alongside what it publishes", async () => {
     await seed();
-    await Bun.write(
-      join(root, file),
+    await Bun.write(join(root, file), start + "\n## Disk-only @v1 [proposed]\n\nfrom disk\n");
+    const result = await publishFeature(root, file, start, { name: "Hello", version: 1 });
+    expect(result.status).toBe("published");
+    expect(await inLockstep()).toBe(
       "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
-        "## Hello @v1 [proposed]\n\n- **Given** x\n- **Then** y\n",
+        "## Hello @v1 [published]\n\n- **Given** x\n",
     );
-    const saved = await saveFeature(
-      root,
-      file,
-      "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x edited in UI\n",
-    );
-    expect(saved.parsed.scenarios.map((s) => s.name)).toEqual(["Disk-only", "Hello"]);
-    expect(saved.parsed.scenarios[0]!.body).toBe("from disk");
-    // Both edits land at the end of the same body; they merge character by
-    // character, like two concurrent in-app edits, so both survive.
-    const hello = saved.parsed.scenarios[1]!.body;
-    expect(hello).toContain(" edited in UI");
-    expect(hello).toContain("- **Then** y");
-    expect(await inLockstep()).toBe(saved.content);
   });
 
-  test("an edit away from the disk edit merges cleanly", async () => {
+  test("a publish that changed the same text as the disk edit is refused", async () => {
     await seed();
-    await Bun.write(join(root, file), start + "- **Then** y\n");
-    const saved = await saveFeature(
-      root,
-      file,
-      "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** a changed x\n",
-    );
-    const expected = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** a changed x\n- **Then** y\n";
-    expect(saved.content).toBe(expected);
-    expect(await inLockstep()).toBe(expected);
-  });
-
-  test("an editor that loaded the drifted file saves as is, without doubling the drift", async () => {
-    await seed();
-    const drifted =
-      "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
-      "## Hello @v1 [proposed]\n\n- **Given** x\n- **Then** y\n";
-    await Bun.write(join(root, file), drifted);
-    expect(await readFeatureForEditor(root, file)).toBe(drifted);
-    const edited = drifted.replace("from disk", "from disk, then the UI");
-    expect((await saveFeature(root, file, edited)).content).toBe(edited);
-    expect(await inLockstep()).toBe(edited);
-  });
-
-  test("a scenario deleted on disk but edited in the editor is kept", async () => {
-    await seed(start + "\n## Other @v1 [proposed]\n\nother\n");
-    await Bun.write(join(root, file), start);
-    const saved = await saveFeature(
-      root,
-      file,
-      start + "\n## Other @v1 [proposed]\n\nother, edited\n",
-    );
-    expect(saved.content).toBe(start + "\n## Other @v1 [proposed]\n\nother, edited\n");
-    await inLockstep();
-  });
-
-  test("disk edits to a published scenario are refused, as on the sync tick", async () => {
-    const published = "# Race\n\n## Hello @v1 [published]\n\n- **Given** x\n";
-    await seed(published);
-    await Bun.write(join(root, file), published.replace("x", "tampered"));
-    const next = published + "\n## New @v1 [proposed]\n\nnew\n";
-    // The immutability gate compares against the file, so the editor's text
-    // must be refused there first — and the doc and the file stay unharmed.
-    await expect(saveFeature(root, file, next)).rejects.toThrow("immutable");
-    expect(await importDrift(root)).toContain("repaired 1");
-    expect((await saveFeature(root, file, next)).content).toBe(next);
-    await inLockstep();
+    const onDisk = start.replace("- **Given** x", "- **Given** x from disk");
+    await Bun.write(join(root, file), onDisk);
+    await expect(
+      publishFeature(root, file, start.replace("- **Given** x", "- **Given** x from the editor")),
+    ).rejects.toThrow("edited on disk");
+    expect(await readFeature(root, file)).toBe(onDisk);
   });
 
   test("a disk edit that no longer parses refuses the save instead of overwriting it", async () => {

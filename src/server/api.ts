@@ -127,7 +127,8 @@ import {
 import { startNetSyncClient } from "./automerge/netsync";
 import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
-import { errorAttributes, getLogger } from "./telemetry";
+import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
+import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { version as appVersion } from "../../package.json";
 import { isAbsolute } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
@@ -241,6 +242,8 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
 /** Apply the persisted settings a server run starts from. */
 export async function applyStartupState(): Promise<void> {
   const state = await readState(getAppRoot());
+  // Log verbosity saved from the Observability page, before anything below logs.
+  setLogVerbosity(savedVerbosity(state));
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
   // Git engine (specs/git-operations.spec.md): the GitHub CLI when this
   // machine has one, or whichever engine Settings names — decided before the
@@ -1813,6 +1816,10 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/plugins/:id", market.deletePlugin],
   ["POST", "/api/choose-folder", postChooseFolder],
   ["POST", "/api/reload", postReload],
+  // Observability (src/server/logs.ts): the app's own log, and its verbosity.
+  ["GET", "/api/logs", getLogs],
+  ["GET", "/api/logs/settings", getLogSettings],
+  ["PUT", "/api/logs/settings", putLogSettings],
   ["POST", "/api/auth/github/start", unlessDemo(postAuthStart)],
   ["POST", "/api/auth/github/poll", unlessDemo(postAuthPoll)],
   ["POST", "/api/auth/github/web/start", unlessDemo(postAuthWebStart)],

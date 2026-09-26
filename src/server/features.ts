@@ -2,9 +2,10 @@ import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
-import { threeWayFeature } from "./automerge/merge";
+import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
 import {
+  assertPublishedKept,
   importFeatureDoc,
   reconcile,
   removeDraftScenario,
@@ -490,13 +491,54 @@ export async function saveFeature(
   scenario?: ScenarioTarget,
 ): Promise<SaveResult> {
   const name = safe(fileName);
-  const proposed = markProposed(content);
+  let proposed = markProposed(content);
   assertFeatureText(name, proposed);
+  proposed = await foldDiskEdit(dataDir, name, proposed);
   await assertPublishedUnchanged(dataDir, name, proposed);
   const written = await writeFeatureFile(dataDir, name, proposed, scenario);
   // Hand the drafts (and the ids) back with the file content, or the client
   // would see the scenario it just saved vanish.
   return { status: "saved", ...(await featureView(dataDir, name, written)), message: "saved locally" };
+}
+
+/**
+ * Fold an edit made to the `.feature.md` on disk — by hand, by an agent, by a
+ * git checkout — that the reload cron has not absorbed into the document yet
+ * (driftSync.ts importDrift) into a save's text. The save is otherwise
+ * reconciled against the document alone and its projection written over the
+ * file, so a disk edit landing between two sync ticks would be silently lost.
+ *
+ * The merge base is the document's projection: what the file held before the
+ * disk edit. A disk edit that tampers with a published scenario is not folded
+ * in — the drift pass refuses it and repairs the file from the document — and
+ * one that changed the same text the editor did is refused with an error
+ * rather than guessed at (threeWayFeatureStrict), so nothing is dropped
+ * silently either way.
+ */
+async function foldDiskEdit(dataDir: string, fileName: string, text: string): Promise<string> {
+  const onDisk = await readFeature(dataDir, fileName);
+  if (onDisk === null || featureTextError(onDisk) !== null) return text;
+  const loaded = await loadFeatureDoc(dataDir, fileName);
+  if (loaded === null || isProjectionOf(onDisk, loaded.doc)) return text;
+  const theirs = parseFeature(onDisk);
+  try {
+    assertPublishedKept(loaded.doc, theirs);
+  } catch {
+    return text;
+  }
+  const merged = threeWayFeatureStrict(
+    parseFeature(projectFeature(loaded.doc)),
+    parseFeature(text),
+    theirs,
+  );
+  if (!merged.ok) {
+    throw new Error(
+      `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
+        `the disk edit is kept; reopen the feature to pick it up`,
+    );
+  }
+  log.info(`folded an unsynced disk edit of ${fileName} into a save`);
+  return serializeFeature(merged.feature);
 }
 
 /**
@@ -731,7 +773,8 @@ export async function resolveFeatureConflict(
 /**
  * specs/ui.spec.md: "If a scenario is already published, then it is
  * immutable." A published scenario (same name and version) must survive a
- * publish with its body intact; adding a new version alongside it is fine.
+ * publish still published and with its body intact; adding a new version
+ * alongside it is fine.
  */
 async function assertPublishedUnchanged(dataDir: string, fileName: string, next: string) {
   const existingText = await readFeature(dataDir, fileName);
@@ -741,7 +784,7 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
   for (const old of before.scenarios) {
     if (old.status !== "published") continue;
     const match = after.scenarios.find((s) => s.name === old.name && s.version === old.version);
-    if (!match || match.body !== old.body) {
+    if (!match || match.status !== "published" || match.body !== old.body) {
       throw new Error(`Scenario "${old.name}" @v${old.version} is published and immutable`);
     }
   }
@@ -816,17 +859,16 @@ async function absorbIntoDoc(
 
 /**
  * Absorb a file that drifted since the last sync tick into the document, by
- * the drift pass's own rules (absorbDrift), and fold the edit being written
- * in on top of it. The edit came from somewhere that read the feature before
- * the drift — then it is merged three-way against the document as it was, so
- * both sides' changes survive — or after it, from the drifted file itself
- * (an editor opened inside the tick), when it already carries the drift and
- * stands as is. Which base it came from is judged by which one the edit is
- * closer to, erring toward the three-way merge: that one can only ever keep
- * too much, never lose anything.
+ * the drift pass's own rules (absorbDrift), and fold the text being written
+ * in on top of it — the backstop behind saveFeature's foldDiskEdit for every
+ * write, a publish or a rename included. The rule is foldDiskEdit's: merged
+ * three-way against the document as it was, and refused rather than guessed
+ * at where both sides changed the same text (threeWayFeatureStrict). A text
+ * that already carries the drift (foldDiskEdit ran, or it was read from the
+ * drifted file) merges to itself.
  *
  * Markdown that does not parse as a feature cannot be absorbed; rather than
- * overwrite it the save is refused, so whoever is mid-edit on disk can finish.
+ * overwrite it the write is refused, so whoever is mid-edit on disk can finish.
  */
 function foldDrift(
   fileName: string,
@@ -845,30 +887,15 @@ function foldDrift(
     log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(absorbed.refused));
     return { doc, feature: edit };
   }
-  const before = docToFeature(doc);
-  const after = docToFeature(absorbed.doc);
-  log.info(`absorbed drifted ${fileName} into its document before saving over it`);
-  if (lineDistance(edit, after) < lineDistance(edit, before)) {
-    return { doc: absorbed.doc, feature: edit };
+  const merged = threeWayFeatureStrict(docToFeature(doc), edit, docToFeature(absorbed.doc));
+  if (!merged.ok) {
+    throw new Error(
+      `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
+        `the disk edit is kept; reopen the feature to pick it up`,
+    );
   }
-  const merged = threeWayFeature(before, edit, after, { keepEdited: true });
-  // keepEdited leaves the merge nothing to refuse.
-  return { doc: absorbed.doc, feature: merged.ok ? merged.feature : edit };
-}
-
-/**
- * How far apart two features read, as the lines one has that the other has
- * not (counted with multiplicity, order ignored) — a cheap stand-in for a
- * diff, good enough to tell which of two versions an edit started from.
- */
-function lineDistance(a: Feature, b: Feature): number {
-  const lines = (f: Feature) => serializeFeature(f).split("\n");
-  const counts = new Map<string, number>();
-  for (const line of lines(a)) counts.set(line, (counts.get(line) ?? 0) + 1);
-  for (const line of lines(b)) counts.set(line, (counts.get(line) ?? 0) - 1);
-  let distance = 0;
-  for (const n of counts.values()) distance += Math.abs(n);
-  return distance;
+  log.info(`absorbed drifted ${fileName} into its document before writing over it`);
+  return { doc: absorbed.doc, feature: merged.feature };
 }
 
 /**
