@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
-import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
+import type * as A from "@automerge/automerge";
+import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
 import {
@@ -19,7 +20,8 @@ import {
   saveFeatureDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
-import { getLogger, withSpan } from "./telemetry";
+import { errorAttributes, getLogger, withSpan } from "./telemetry";
+import type { FeatureDoc } from "./automerge/schema";
 import {
   pull,
   theirsVersion,
@@ -754,7 +756,11 @@ export async function resolveFeatureConflict(
   assertFeatureText(name, resolved);
   // The human chose this resolution, so it overrides the doc's published
   // state (force) — the same authority a hand-edited merge has today.
-  const projection = await absorbIntoDoc(dataDir, name, resolved, { force: true, scenario });
+  const projection = await absorbIntoDoc(dataDir, name, resolved, {
+    force: true,
+    scenario,
+    drift: false,
+  });
   const sync = await gitResolve(
     dataDir,
     name,
@@ -813,25 +819,83 @@ async function writeFeatureFile(
  * the published-immutability gate for an explicit human conflict resolution;
  * `scenario` carries the editor's document id for the scenario it is saving
  * (reconcile).
+ *
+ * The file is about to be overwritten with the projection, so an external
+ * edit the sync tick has not absorbed yet (importDrift) is absorbed here
+ * first and the text folded in on top of it (foldDrift) — otherwise the
+ * write would drop it from the file, the document and git without a trace.
+ * `drift: false` skips that for a conflict resolution, whose file holds
+ * merge markers rather than anyone's edit.
  */
 async function absorbIntoDoc(
   dataDir: string,
   fileName: string,
   text: string,
-  { force = false, scenario }: { force?: boolean; scenario?: ScenarioTarget } = {},
+  {
+    force = false,
+    scenario,
+    drift = true,
+  }: { force?: boolean; scenario?: ScenarioTarget; drift?: boolean } = {},
 ): Promise<string> {
   return withSpan("automerge.absorb_edit", { "specdriven.file": fileName }, async (span) => {
-    const feature = parseFeature(text);
+    let feature = parseFeature(text);
     const loaded = await loadFeatureDoc(dataDir, fileName);
     if (loaded === null) {
       span.setAttribute("automerge.imported", true);
       const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
       return projectFeature(created.doc);
     }
-    const next = reconcile(loaded.doc, feature, { force, scenario });
+    let doc = loaded.doc;
+    const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
+    if (disk !== null && !isProjectionOf(disk, doc)) {
+      span.setAttribute("automerge.drift_folded", true);
+      ({ doc, feature } = foldDrift(fileName, doc, disk, feature));
+    }
+    const next = reconcile(doc, feature, { force, scenario });
     await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
     return projectFeature(next);
   });
+}
+
+/**
+ * Absorb a file that drifted since the last sync tick into the document, by
+ * the drift pass's own rules (absorbDrift), and fold the text being written
+ * in on top of it — the backstop behind saveFeature's foldDiskEdit for every
+ * write, a publish or a rename included. The rule is foldDiskEdit's: merged
+ * three-way against the document as it was, and refused rather than guessed
+ * at where both sides changed the same text (threeWayFeatureStrict). A text
+ * that already carries the drift (foldDiskEdit ran, or it was read from the
+ * drifted file) merges to itself.
+ *
+ * Markdown that does not parse as a feature cannot be absorbed; rather than
+ * overwrite it the write is refused, so whoever is mid-edit on disk can finish.
+ */
+function foldDrift(
+  fileName: string,
+  doc: A.Doc<FeatureDoc>,
+  disk: string,
+  edit: Feature,
+): { doc: A.Doc<FeatureDoc>; feature: Feature } {
+  const problem = featureTextError(disk);
+  if (problem) {
+    throw new Error(`${fileName} was changed on disk and no longer parses (${problem}) — fix it before saving`);
+  }
+  const absorbed = absorbDrift(doc, disk);
+  if (absorbed.refused !== undefined) {
+    // The drift tampered with a published scenario: the document wins, as on
+    // the sync tick, and the write about to happen repairs the file.
+    log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(absorbed.refused));
+    return { doc, feature: edit };
+  }
+  const merged = threeWayFeatureStrict(docToFeature(doc), edit, docToFeature(absorbed.doc));
+  if (!merged.ok) {
+    throw new Error(
+      `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
+        `the disk edit is kept; reopen the feature to pick it up`,
+    );
+  }
+  log.info(`absorbed drifted ${fileName} into its document before writing over it`);
+  return { doc: absorbed.doc, feature: merged.feature };
 }
 
 /**

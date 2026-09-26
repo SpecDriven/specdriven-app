@@ -18,6 +18,7 @@ import {
   resolveFeatureConflict,
   slugify,
 } from "../src/server/features";
+import { importDrift } from "../src/server/automerge/driftSync";
 import { projectFeature } from "../src/server/automerge/project";
 import { loadFeatureDoc } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
@@ -788,5 +789,60 @@ describe("doc/markdown lockstep", () => {
     const file = await createFeature(root, "Quote");
     await deleteFeature(root, file);
     expect(await loadFeatureDoc(root, file)).toBeNull();
+  });
+});
+
+// Every write overwrites the file with the document's projection, not just
+// the editor's save (which folds the disk edit in itself — "a save racing an
+// unsynced disk edit" above): a file edited on disk since the last sync tick
+// (importDrift) is absorbed first and the write folded in on top, by the same
+// rule, so no path drops a disk edit unseen.
+describe("a write over a file edited on disk since the last sync tick", () => {
+  const file = "specs/billing/race.feature.md";
+  const start = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
+
+  const seed = async () => {
+    await Bun.write(join(root, file), start);
+    await importDrift(root);
+    expect(await readFeature(root, file)).toBe(start);
+  };
+
+  const inLockstep = async () => {
+    const md = (await readFeature(root, file))!;
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(md);
+    // Nothing is left over for the next tick to absorb — or to lose.
+    expect(await importDrift(root)).toBe("");
+    return md;
+  };
+
+  test("a publish keeps the disk edit alongside what it publishes", async () => {
+    await seed();
+    await Bun.write(join(root, file), start + "\n## Disk-only @v1 [proposed]\n\nfrom disk\n");
+    const result = await publishFeature(root, file, start, { name: "Hello", version: 1 });
+    expect(result.status).toBe("published");
+    expect(await inLockstep()).toBe(
+      "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
+        "## Hello @v1 [published]\n\n- **Given** x\n",
+    );
+  });
+
+  test("a publish that changed the same text as the disk edit is refused", async () => {
+    await seed();
+    const onDisk = start.replace("- **Given** x", "- **Given** x from disk");
+    await Bun.write(join(root, file), onDisk);
+    await expect(
+      publishFeature(root, file, start.replace("- **Given** x", "- **Given** x from the editor")),
+    ).rejects.toThrow("edited on disk");
+    expect(await readFeature(root, file)).toBe(onDisk);
+  });
+
+  test("a disk edit that no longer parses refuses the save instead of overwriting it", async () => {
+    await seed();
+    const broken = "junk above the heading\n" + start;
+    await Bun.write(join(root, file), broken);
+    await expect(
+      saveFeature(root, file, "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** z\n"),
+    ).rejects.toThrow("changed on disk");
+    expect(await readFeature(root, file)).toBe(broken);
   });
 });
