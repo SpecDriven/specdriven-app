@@ -193,3 +193,35 @@ function sameScenario(a: Scenario, b: Scenario): boolean {
     linkKey(a.link) === linkKey(b.link)
   );
 }
+
+/**
+ * threeWayFeature for a save that races an unabsorbed disk edit (features.ts
+ * saveFeature). There the base is only a guess — the editor may have loaded
+ * the feature before the disk edit or after it — and mergeText cannot tell
+ * the two apart: replaying an edit the editor already holds on top of it
+ * writes the same text twice. So a text both sides changed, to different
+ * values, is a conflict here rather than a character merge; every other
+ * field merges as threeWayFeature does, and none of them can double up.
+ */
+export function threeWayFeatureStrict(
+  base: Feature,
+  ours: Feature,
+  theirs: Feature,
+): ThreeWayResult {
+  const clash = (b: string, o: string, t: string) => o !== b && t !== b && o !== t;
+  if (clash(base.name, ours.name, theirs.name)) {
+    return { ok: false, conflict: "the feature name was changed on both sides" };
+  }
+  if (clash(base.description, ours.description, theirs.description)) {
+    return { ok: false, conflict: "the feature description was changed on both sides" };
+  }
+  const b = byKey(base);
+  const t = byKey(theirs);
+  for (const s of ours.scenarios) {
+    const other = t.get(key(s));
+    if (other && clash(b.get(key(s))?.body ?? "", s.body, other.body)) {
+      return { ok: false, conflict: `scenario ${key(s)} was changed on both sides` };
+    }
+  }
+  return threeWayFeature(base, ours, theirs);
+}
