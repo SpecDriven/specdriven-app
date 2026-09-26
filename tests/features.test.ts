@@ -18,6 +18,7 @@ import {
   resolveFeatureConflict,
   slugify,
 } from "../src/server/features";
+import { importDrift } from "../src/server/automerge/driftSync";
 import { projectFeature } from "../src/server/automerge/project";
 import { loadFeatureDoc } from "../src/server/automerge/store";
 import { setGitEngine } from "../src/server/git";
@@ -724,5 +725,109 @@ describe("doc/markdown lockstep", () => {
     const file = await createFeature(root, "Quote");
     await deleteFeature(root, file);
     expect(await loadFeatureDoc(root, file)).toBeNull();
+  });
+});
+
+// An editor save overwrites the file with the document's projection. A file
+// edited on disk since the last sync tick (importDrift) is absorbed first and
+// the save folded in on top, so neither side's edit is dropped unseen.
+describe("a save over a file edited on disk since the last sync tick", () => {
+  const file = "specs/billing/race.feature.md";
+  const start = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
+
+  const seed = async (text = start) => {
+    await Bun.write(join(root, file), text);
+    await importDrift(root);
+    expect(await readFeature(root, file)).toBe(text);
+  };
+
+  const inLockstep = async () => {
+    const md = (await readFeature(root, file))!;
+    expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(md);
+    // Nothing is left over for the next tick to absorb — or to lose.
+    expect(await importDrift(root)).toBe("");
+    return md;
+  };
+
+  test("keeps the disk edits and applies the editor's change on top", async () => {
+    await seed();
+    await Bun.write(
+      join(root, file),
+      "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
+        "## Hello @v1 [proposed]\n\n- **Given** x\n- **Then** y\n",
+    );
+    const saved = await saveFeature(
+      root,
+      file,
+      "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x edited in UI\n",
+    );
+    expect(saved.parsed.scenarios.map((s) => s.name)).toEqual(["Disk-only", "Hello"]);
+    expect(saved.parsed.scenarios[0]!.body).toBe("from disk");
+    // Both edits land at the end of the same body; they merge character by
+    // character, like two concurrent in-app edits, so both survive.
+    const hello = saved.parsed.scenarios[1]!.body;
+    expect(hello).toContain(" edited in UI");
+    expect(hello).toContain("- **Then** y");
+    expect(await inLockstep()).toBe(saved.content);
+  });
+
+  test("an edit away from the disk edit merges cleanly", async () => {
+    await seed();
+    await Bun.write(join(root, file), start + "- **Then** y\n");
+    const saved = await saveFeature(
+      root,
+      file,
+      "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** a changed x\n",
+    );
+    const expected = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** a changed x\n- **Then** y\n";
+    expect(saved.content).toBe(expected);
+    expect(await inLockstep()).toBe(expected);
+  });
+
+  test("an editor that loaded the drifted file saves as is, without doubling the drift", async () => {
+    await seed();
+    const drifted =
+      "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
+      "## Hello @v1 [proposed]\n\n- **Given** x\n- **Then** y\n";
+    await Bun.write(join(root, file), drifted);
+    expect(await readFeatureForEditor(root, file)).toBe(drifted);
+    const edited = drifted.replace("from disk", "from disk, then the UI");
+    expect((await saveFeature(root, file, edited)).content).toBe(edited);
+    expect(await inLockstep()).toBe(edited);
+  });
+
+  test("a scenario deleted on disk but edited in the editor is kept", async () => {
+    await seed(start + "\n## Other @v1 [proposed]\n\nother\n");
+    await Bun.write(join(root, file), start);
+    const saved = await saveFeature(
+      root,
+      file,
+      start + "\n## Other @v1 [proposed]\n\nother, edited\n",
+    );
+    expect(saved.content).toBe(start + "\n## Other @v1 [proposed]\n\nother, edited\n");
+    await inLockstep();
+  });
+
+  test("disk edits to a published scenario are refused, as on the sync tick", async () => {
+    const published = "# Race\n\n## Hello @v1 [published]\n\n- **Given** x\n";
+    await seed(published);
+    await Bun.write(join(root, file), published.replace("x", "tampered"));
+    const next = published + "\n## New @v1 [proposed]\n\nnew\n";
+    // The immutability gate compares against the file, so the editor's text
+    // must be refused there first — and the doc and the file stay unharmed.
+    await expect(saveFeature(root, file, next)).rejects.toThrow("immutable");
+    expect(await importDrift(root)).toContain("repaired 1");
+    expect((await saveFeature(root, file, next)).content).toBe(next);
+    await inLockstep();
+  });
+
+  test("a disk edit that no longer parses refuses the save instead of overwriting it", async () => {
+    await seed();
+    const broken = "junk above the heading\n" + start;
+    await Bun.write(join(root, file), broken);
+    await expect(
+      saveFeature(root, file, "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** z\n"),
+    ).rejects.toThrow("changed on disk");
+    expect(await readFeature(root, file)).toBe(broken);
   });
 });

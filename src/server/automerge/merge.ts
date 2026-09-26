@@ -129,11 +129,15 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
  * mergeText); structure merges per scenario. What still needs a human — one
  * side deleting a scenario the other edited — is a conflict, reported instead
  * of guessed at, and the existing resolution UI takes over as it does today.
+ * With `keepEdited` there is no human to ask (an autosave folding in a file
+ * that drifted underneath it), so the edit wins over the deletion: the
+ * scenario stays, and nothing anyone wrote is lost.
  */
 export function threeWayFeature(
   base: Feature,
   ours: Feature,
   theirs: Feature,
+  { keepEdited = false }: { keepEdited?: boolean } = {},
 ): ThreeWayResult {
   const name = mergeText(base.name, ours.name, theirs.name);
   const description = mergeText(base.description, ours.description, theirs.description);
@@ -153,6 +157,8 @@ export function threeWayFeature(
         scenarios.push(inOurs); // we added it
       } else if (sameScenario(inOurs, inBase)) {
         // they deleted it and we left it alone: the deletion stands
+      } else if (keepEdited) {
+        scenarios.push(inOurs);
       } else {
         return { ok: false, conflict: `scenario ${k} was edited here and deleted there` };
       }
@@ -161,6 +167,8 @@ export function threeWayFeature(
         scenarios.push(inTheirs); // they added it
       } else if (sameScenario(inTheirs, inBase)) {
         // we deleted it and they left it alone: the deletion stands
+      } else if (keepEdited) {
+        scenarios.push(inTheirs);
       } else {
         return { ok: false, conflict: `scenario ${k} was deleted here and edited there` };
       }

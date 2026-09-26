@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
-import { autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
+import type * as A from "@automerge/automerge";
+import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature } from "./automerge/merge";
 import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
 import {
@@ -18,7 +19,8 @@ import {
   saveFeatureDoc,
 } from "./automerge/store";
 import { fileExists, readTextFile, writeTextFile } from "./fsx";
-import { getLogger, withSpan } from "./telemetry";
+import { errorAttributes, getLogger, withSpan } from "./telemetry";
+import type { FeatureDoc } from "./automerge/schema";
 import {
   pull,
   theirsVersion,
@@ -712,7 +714,11 @@ export async function resolveFeatureConflict(
   assertFeatureText(name, resolved);
   // The human chose this resolution, so it overrides the doc's published
   // state (force) — the same authority a hand-edited merge has today.
-  const projection = await absorbIntoDoc(dataDir, name, resolved, { force: true, scenario });
+  const projection = await absorbIntoDoc(dataDir, name, resolved, {
+    force: true,
+    scenario,
+    drift: false,
+  });
   const sync = await gitResolve(
     dataDir,
     name,
@@ -770,25 +776,99 @@ async function writeFeatureFile(
  * the published-immutability gate for an explicit human conflict resolution;
  * `scenario` carries the editor's document id for the scenario it is saving
  * (reconcile).
+ *
+ * The file is about to be overwritten with the projection, so an external
+ * edit the sync tick has not absorbed yet (importDrift) is absorbed here
+ * first and the text folded in on top of it (foldDrift) — otherwise the
+ * write would drop it from the file, the document and git without a trace.
+ * `drift: false` skips that for a conflict resolution, whose file holds
+ * merge markers rather than anyone's edit.
  */
 async function absorbIntoDoc(
   dataDir: string,
   fileName: string,
   text: string,
-  { force = false, scenario }: { force?: boolean; scenario?: ScenarioTarget } = {},
+  {
+    force = false,
+    scenario,
+    drift = true,
+  }: { force?: boolean; scenario?: ScenarioTarget; drift?: boolean } = {},
 ): Promise<string> {
   return withSpan("automerge.absorb_edit", { "specdriven.file": fileName }, async (span) => {
-    const feature = parseFeature(text);
+    let feature = parseFeature(text);
     const loaded = await loadFeatureDoc(dataDir, fileName);
     if (loaded === null) {
       span.setAttribute("automerge.imported", true);
       const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
       return projectFeature(created.doc);
     }
-    const next = reconcile(loaded.doc, feature, { force, scenario });
+    let doc = loaded.doc;
+    const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
+    if (disk !== null && !isProjectionOf(disk, doc)) {
+      span.setAttribute("automerge.drift_folded", true);
+      ({ doc, feature } = foldDrift(fileName, doc, disk, feature));
+    }
+    const next = reconcile(doc, feature, { force, scenario });
     await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
     return projectFeature(next);
   });
+}
+
+/**
+ * Absorb a file that drifted since the last sync tick into the document, by
+ * the drift pass's own rules (absorbDrift), and fold the edit being written
+ * in on top of it. The edit came from somewhere that read the feature before
+ * the drift — then it is merged three-way against the document as it was, so
+ * both sides' changes survive — or after it, from the drifted file itself
+ * (an editor opened inside the tick), when it already carries the drift and
+ * stands as is. Which base it came from is judged by which one the edit is
+ * closer to, erring toward the three-way merge: that one can only ever keep
+ * too much, never lose anything.
+ *
+ * Markdown that does not parse as a feature cannot be absorbed; rather than
+ * overwrite it the save is refused, so whoever is mid-edit on disk can finish.
+ */
+function foldDrift(
+  fileName: string,
+  doc: A.Doc<FeatureDoc>,
+  disk: string,
+  edit: Feature,
+): { doc: A.Doc<FeatureDoc>; feature: Feature } {
+  const problem = featureTextError(disk);
+  if (problem) {
+    throw new Error(`${fileName} was changed on disk and no longer parses (${problem}) — fix it before saving`);
+  }
+  const absorbed = absorbDrift(doc, disk);
+  if (absorbed.refused !== undefined) {
+    // The drift tampered with a published scenario: the document wins, as on
+    // the sync tick, and the write about to happen repairs the file.
+    log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(absorbed.refused));
+    return { doc, feature: edit };
+  }
+  const before = docToFeature(doc);
+  const after = docToFeature(absorbed.doc);
+  log.info(`absorbed drifted ${fileName} into its document before saving over it`);
+  if (lineDistance(edit, after) < lineDistance(edit, before)) {
+    return { doc: absorbed.doc, feature: edit };
+  }
+  const merged = threeWayFeature(before, edit, after, { keepEdited: true });
+  // keepEdited leaves the merge nothing to refuse.
+  return { doc: absorbed.doc, feature: merged.ok ? merged.feature : edit };
+}
+
+/**
+ * How far apart two features read, as the lines one has that the other has
+ * not (counted with multiplicity, order ignored) — a cheap stand-in for a
+ * diff, good enough to tell which of two versions an edit started from.
+ */
+function lineDistance(a: Feature, b: Feature): number {
+  const lines = (f: Feature) => serializeFeature(f).split("\n");
+  const counts = new Map<string, number>();
+  for (const line of lines(a)) counts.set(line, (counts.get(line) ?? 0) + 1);
+  for (const line of lines(b)) counts.set(line, (counts.get(line) ?? 0) - 1);
+  let distance = 0;
+  for (const n of counts.values()) distance += Math.abs(n);
+  return distance;
 }
 
 /**
