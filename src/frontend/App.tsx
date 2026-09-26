@@ -27,6 +27,7 @@ import type { CurrentUser } from "../server/user";
 import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
+  Activity,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -84,6 +85,7 @@ import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
+import { ObservabilityPage } from "./ObservabilityPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -1491,7 +1493,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : "Plugins"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -1829,6 +1831,7 @@ export function App() {
   };
   const openSettings = () => openAppPage("settings");
   const openPlugins = () => openAppPage("plugins");
+  const openObservability = () => openAppPage("observability");
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -4397,6 +4400,17 @@ export function App() {
       run: () => openPlugins(),
     },
     {
+      // Observability (src/frontend/ObservabilityPage.tsx): the app's own
+      // logs. The hosted demo has none to show a visitor.
+      id: "observability",
+      keys: "g o",
+      label: "Observability",
+      group: "Navigate",
+      when: () => !quiet && !demo,
+      palette: () => !quietBehindPalette && !demo,
+      run: () => openObservability(),
+    },
+    {
       id: "theme",
       keys: "mod+shift+l",
       label: "Cycle the theme",
@@ -4659,6 +4673,7 @@ export function App() {
       : []),
     shortcutAction("settings", <Settings size={14} />),
     shortcutAction("plugins", <Puzzle size={14} />),
+    shortcutAction("observability", <Activity size={14} />),
     shortcutAction(
       "sidebar",
       compact ? (
@@ -6291,6 +6306,22 @@ export function App() {
                   openPlugins();
                 },
               },
+              // The app's own logs and their verbosity; the hosted demo's
+              // server logs are not a visitor's to read.
+              ...(demo
+                ? []
+                : [
+                    {
+                      id: "observability",
+                      label: "Observability",
+                      icon: <Activity size={13} />,
+                      keys: "g o",
+                      onSelect: () => {
+                        setDrawerOpen(false);
+                        openObservability();
+                      },
+                    },
+                  ]),
             ]}
           />
           <button
@@ -6383,6 +6414,10 @@ export function App() {
             onOpenSettings={openSettings}
             onClose={closeAppPage}
           />
+        ) : appPage === "observability" ? (
+          /* Observability: browse and search the app's own logs, and set
+             how verbose they are. */
+          <ObservabilityPage onClose={closeAppPage} copyText={copyText} />
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays

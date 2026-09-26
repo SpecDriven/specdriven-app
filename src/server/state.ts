@@ -136,6 +136,13 @@ export interface SpecDrivenState {
   /** @deprecated See `roadmap`. */
   issues?: boolean;
   /**
+   * Log verbosity (the Observability page, src/server/logs.ts): the least
+   * severe level written, and per-component overrides of it. Absent means
+   * SPECDRIVEN_LOG_LEVEL, else everything (debug).
+   */
+  logLevel?: "debug" | "info" | "warn" | "error";
+  logLevels?: Record<string, "debug" | "info" | "warn" | "error">;
+  /**
    * Optional websocket sync server for near-real-time document sync
    * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
    * or empty means OFF — git stays the only transport. On a public server,
