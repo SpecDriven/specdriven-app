@@ -16,6 +16,7 @@
 //   rewritten to the doc's projection. Drift that would tamper with a
 //   published scenario is refused and the file repaired from the doc.
 
+import type * as A from "@automerge/automerge";
 import { fileExists, readTextFile, writeTextFile } from "../fsx";
 import {
   conflictedFiles,
@@ -31,6 +32,7 @@ import { threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature } from "./project";
 import { importFeatureDoc, reconcile } from "./reconcile";
+import type { FeatureDoc } from "./schema";
 import {
   AUTOMERGE_ROOT,
   createFeatureDoc,
@@ -248,18 +250,16 @@ export async function importDrift(dataDir: string): Promise<string> {
       // A file in the document's other form — external links written by a
       // peer whose setting differs — is not drift (project.ts).
       if (isProjectionOf(text, loaded.doc)) continue;
-      try {
-        const next = reconcile(loaded.doc, parseFeature(text));
-        await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
-        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(next));
+      const drift = absorbDrift(loaded.doc, text);
+      if (drift.refused === undefined) {
+        await saveFeatureDoc(dataDir, fileName, drift.doc, loaded.heads);
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(drift.doc));
         absorbed++;
         log.debug(`absorbed drifted ${fileName} into its document`);
-      } catch (e) {
-        // The drifted markdown tampered with a published scenario: the document
-        // wins, and the file is repaired to its projection.
+      } else {
         await writeTextFile(`${dataDir}/${fileName}`, projectFeature(loaded.doc));
         repaired++;
-        log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(e));
+        log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(drift.refused));
       }
     }
     // A document whose markdown is gone was deleted externally: the markdown
@@ -285,6 +285,25 @@ export async function importDrift(dataDir: string): Promise<string> {
     if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
     return parts.join("; ");
   });
+}
+
+/**
+ * The drift pass's rule for one drifted `.feature.md`, shared with the
+ * editor's save (features.ts absorbIntoDoc), which absorbs a file that
+ * drifted since the last tick before it writes over it: the markdown is
+ * reconciled into the document — unless it tampered with a published
+ * scenario, when the document wins (`refused` says why) and the caller
+ * repairs the file to its projection.
+ */
+export function absorbDrift(
+  doc: A.Doc<FeatureDoc>,
+  text: string,
+): { doc: A.Doc<FeatureDoc>; refused?: unknown } {
+  try {
+    return { doc: reconcile(doc, parseFeature(text)) };
+  } catch (e) {
+    return { doc, refused: e };
+  }
 }
 
 /** True while a merge with unresolved conflicts is in progress. */
