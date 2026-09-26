@@ -27,7 +27,9 @@ import type {
 import { WebSocketClientAdapter } from "@automerge/automerge-repo-network-websocket";
 import { join } from "node:path";
 import { readTextFile, writeTextFile } from "../fsx";
-import { projectFeature } from "./project";
+import { featureTextError } from "../parser";
+import { absorbDrift } from "./driftSync";
+import { isProjectionOf, projectFeature } from "./project";
 import type { FeatureDoc } from "./schema";
 import { docDir, listFeatureDocs, loadFeatureDoc, onDocSaved, saveFeatureDoc } from "./store";
 import { errorAttributes, getLogger, withSpan } from "../telemetry";
@@ -97,7 +99,35 @@ export async function startNetSync(
     if (fileName === null || writing.has(fileName)) return;
     const disk = await loadFeatureDoc(dataDir, fileName);
     if (disk === null) return;
-    const merged = A.merge(A.clone(disk.doc), A.clone(networkDoc));
+    // The projection is about to be written over the file, so a local disk
+    // edit the sync tick has not absorbed yet is folded in first — the same
+    // rule absorbIntoDoc uses. Without it a peer's save would drop the edit
+    // from the file, the document and git, and importDrift would then skip
+    // the file (it is a projection again) so the loss is permanent.
+    let localDoc = disk.doc;
+    const fileText = await readTextFile(join(dataDir, fileName));
+    if (fileText !== null) {
+      const problem = featureTextError(fileText);
+      if (problem !== null) {
+        log.warn(
+          `not absorbing remote operations into ${fileName}: it no longer parses (${problem})`,
+        );
+        return;
+      }
+      if (!isProjectionOf(fileText, localDoc)) {
+        const drifted = absorbDrift(localDoc, fileText);
+        if (drifted.refused === undefined) {
+          localDoc = drifted.doc;
+          log.info(`absorbed a local disk edit of ${fileName} before applying remote operations`);
+        } else {
+          log.warn(
+            `refused local drift on ${fileName}; remote operations will repair it`,
+            errorAttributes(drifted.refused),
+          );
+        }
+      }
+    }
+    const merged = A.merge(A.clone(localDoc), A.clone(networkDoc));
     if (A.getHeads(merged).join() === disk.heads.join()) return; // nothing new
     await withSpan("netsync.absorb_remote", { "specdriven.file": fileName }, async () => {
       writing.add(fileName);
