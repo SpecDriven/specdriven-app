@@ -41,6 +41,8 @@ const routes = () => ({
   // Settings", "open Plugins") take the editor pane at their own urls.
   "/settings": index,
   "/plugins": index,
+  // Observability (src/frontend/ObservabilityPage.tsx): the app's own logs.
+  "/observability": index,
   // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
   // app shell") — the special folders' pages among them: each module
   // behind the kernel names its prefix in its manifest, on or off, so a
