@@ -15,7 +15,9 @@
 // start the demo installs the ones DEMO_MARKETPLACE_PLUGINS names — the
 // Event Models — from the SpecDriven marketplace into its own home, the way
 // Install does, and the profile lists them after the built-ins. Visitors
-// browse the marketplace but cannot install, update or remove anything.
+// browse the marketplace but cannot install, update or remove anything,
+// and cannot add a marketplace or a local plugin folder (PUT /api/state
+// refuses those keys — Browse clones each marketplace source).
 
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";

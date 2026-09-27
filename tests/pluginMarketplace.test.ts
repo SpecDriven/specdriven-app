@@ -460,6 +460,18 @@ test("the hosted demo browses the marketplaces, never refreshed, and changes not
     expect(status).toBe(403);
     expect(body.error).toMatch(/demo/);
   }
+
+  // Browse clones each marketplace `source`. A visitor who could add one
+  // would make the demo server fetch an arbitrary URL.
+  const before = (await json(await api("GET", "/api/state"))).body.pluginMarketplaces;
+  const put = await json(
+    await api("PUT", "/api/state", {
+      plugins: { marketplaces: [{ name: "evil", source: "http://127.0.0.1:9/probe.git" }] },
+    }),
+  );
+  expect(put.status).toBe(403);
+  expect(put.body.error).toMatch(/demo/);
+  expect((await json(await api("GET", "/api/state"))).body.pluginMarketplaces).toEqual(before);
 });
 
 test("the hosted demo installs the Event Models from the marketplace at start and lists them on", async () => {

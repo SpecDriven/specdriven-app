@@ -246,6 +246,9 @@ test("the data directory, git engine and sync server are pinned (403)", async ()
     { dataRepo: join(root, "elsewhere") },
     { gitEngine: "cli" },
     { syncServerUrl: "wss://sync.example.com" },
+    { plugins: { marketplaces: [{ name: "evil", source: "http://127.0.0.1:9/probe.git" }] } },
+    { plugins: { sources: [join(root, "plugin")] } },
+    { plugins: { trust: join(root, "plugin") } },
   ]) {
     const res = await api("/api/state", {
       method: "PUT",

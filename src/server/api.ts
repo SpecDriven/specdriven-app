@@ -524,7 +524,12 @@ const putState: Handler = async (req) => {
   }
   // Demo mode: the ephemeral dataset is the only one on offer — the data
   // directory, git engine and sync server are pinned (same server-side 403
-  // pattern as postDeletePublished / postAgentSession).
+  // pattern as postDeletePublished / postAgentSession). Plugin marketplaces
+  // and local sources are pinned too: Browse clones each marketplace's
+  // `source` through the app's git engine, so a visitor who could name one
+  // would make the demo server fetch an arbitrary URL (or load a plugin from
+  // an arbitrary folder). The UI already hides those controls; this is the
+  // server-side lock.
   if (
     isDemoMode() &&
     (body.dataRepo !== undefined ||
@@ -533,6 +538,17 @@ const putState: Handler = async (req) => {
       body.syncServerUrl !== undefined)
   ) {
     return json({ error: "changing the data directory is disabled in demo mode" }, 403);
+  }
+  if (
+    isDemoMode() &&
+    body.plugins !== undefined &&
+    typeof body.plugins === "object" &&
+    body.plugins !== null &&
+    (body.plugins.marketplaces !== undefined ||
+      body.plugins.sources !== undefined ||
+      body.plugins.trust !== undefined)
+  ) {
+    return json({ error: "configuring plugin marketplaces and sources is disabled in demo mode" }, 403);
   }
   const state = await readState(getAppRoot());
   // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"
