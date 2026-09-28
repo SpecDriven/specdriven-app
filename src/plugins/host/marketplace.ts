@@ -293,9 +293,9 @@ async function installedDir(id: string): Promise<string | null> {
 /**
  * Fetch the ref the index names now for an installed plugin and put the
  * folder at it: a git source is fetched and checked out in place (and put
- * back where it was when the new manifest is refused), a subdirectory is
- * copied afresh from the refreshed marketplace and swapped in. Answers the
- * new record.
+ * back where it was when the new copy is refused — a bad manifest or a
+ * symlink that leaves the folder), a subdirectory is copied afresh from
+ * the refreshed marketplace and swapped in. Answers the new record.
  */
 export async function updatePlugin(
   id: string,
@@ -319,13 +319,23 @@ export async function updatePlugin(
     let commit: string;
     if (subdirectorySource(row.source) === null) {
       commit = row.ref ? await checkoutRef(known.dir, row.ref) : await pullDefault(known.dir);
-      const found = await readPluginFolder(known.dir, "home", appVersion);
-      const problem = !found ? "the plugin has no package.json" : found.error ?? (found.manifest!.id !== id ? `the update's manifest names "${found.manifest!.id}", not "${id}"` : null);
-      if (problem) {
+      try {
+        const found = await readPluginFolder(known.dir, "home", appVersion);
+        const problem = !found
+          ? "the plugin has no package.json"
+          : (found.error ??
+            (found.manifest!.id !== id
+              ? `the update's manifest names "${found.manifest!.id}", not "${id}"`
+              : null));
+        if (problem) throw new Error(problem);
+        await refuseEscapingSymlinks(known.dir);
+      } catch (e) {
+        // Checkout is in place: a refusal must not leave the new tree on
+        // disk. The loader does not re-check symlinks on rescan, so a
+        // rejected commit would otherwise mount after the next restart.
         if (record.commit) await checkoutRef(known.dir, record.commit).catch(() => {});
-        throw new Error(problem);
+        throw e;
       }
-      await refuseEscapingSymlinks(known.dir);
     } else {
       const staging = stagingDir(record.name);
       await rm(staging, { recursive: true, force: true });

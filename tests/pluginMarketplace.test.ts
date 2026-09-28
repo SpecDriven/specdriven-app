@@ -11,7 +11,7 @@
 
 import { $ } from "bun";
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, matchApi } from "../src/server/api";
@@ -396,6 +396,44 @@ for (const engine of ["cli", "js"] as GitEngine[]) {
     expect(row("remote")).toBeUndefined();
     expect((await profile()).enabled).toEqual([]);
     expect((await profile()).seen ?? []).toEqual([]);
+  });
+}
+
+for (const engine of ["cli", "js"] as GitEngine[]) {
+  test(`a git-url update whose symlink leaves the folder is refused and put back (${engine} engine)`, async () => {
+    const repo = join(work, "remote-plugin");
+    await pluginRepo(repo, "remote", "1.0.0");
+    const market = join(work, "market");
+    await marketplaceRepo(market, [{ name: "remote", source: repo, ref: "v1.0.0", version: "1.0.0" }]);
+    await boot([{ name: "local", source: market }]);
+    setGitEngine(engine);
+
+    const done = await json(await api("POST", "/api/plugins/install", { marketplace: "local", name: "remote", step: "confirm" }));
+    expect(done.status).toBe(200);
+    const v1 = (await git(repo, "rev-parse", "v1.0.0")).stdout.toString().trim();
+    expect(done.body.plugin.install.commit).toBe(v1);
+    expect(await (await api("GET", "/api/remote"))!.json()).toEqual({ version: "1.0.0" });
+
+    // Upstream ships a valid manifest plus a symlink out of the plugin folder.
+    await pluginFolder(repo, "remote", "1.1.0");
+    // Relative, so the bundled git engine will materialise it; it still
+    // resolves outside the plugin folder, which Install and Update refuse.
+    await symlink("..", join(repo, "outside"));
+    await git(repo, "add", "-A");
+    await git(repo, "commit", "-q", "-m", "v1.1.0");
+    await git(repo, "tag", "v1.1.0");
+    await marketplaceRepo(market, [{ name: "remote", source: repo, ref: "v1.1.0", version: "1.1.0" }]);
+
+    const refused = await json(await api("POST", "/api/plugins/remote/update"));
+    expect(refused.status).toBe(400);
+    // System git checks out then the marketplace refuses; the bundled engine
+    // refuses the checkout itself. Either way the install must stay at v1.
+    expect(refused.body.error).toMatch(/symlink that leaves its folder|unsafe target/);
+    expect((await git(join(pluginsHome(), "remote"), "rev-parse", "HEAD")).stdout.toString().trim()).toBe(v1);
+    expect(await (await api("GET", "/api/remote"))!.json()).toEqual({ version: "1.0.0" });
+    const record = JSON.parse(await readFile(join(pluginsHome(), "remote", INSTALL_RECORD_FILE), "utf8"));
+    expect(record.commit).toBe(v1);
+    expect(record.version).toBe("1.0.0");
   });
 }
 
