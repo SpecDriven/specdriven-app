@@ -778,6 +778,30 @@ describe("doc/markdown lockstep", () => {
     await lockstep(moved.fileName);
   });
 
+  test("a save after a move does not recreate the retired path", async () => {
+    const file = await createFeature(root, "Quote");
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    await createFolder(root, "billing");
+    const moved = await moveFeature(root, file, "billing");
+    await expect(
+      saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nstale editor\n"),
+    ).rejects.toThrow("Feature file not found");
+    expect(await readFeature(root, file)).toBeNull();
+    expect(await loadFeatureDoc(root, file)).toBeNull();
+    expect(await readFeature(root, moved.fileName)).toContain("body");
+  });
+
+  test("a save after a file rename does not recreate the old name", async () => {
+    const file = await createFeature(root, "Quote");
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    const renamed = await renameFeatureFile(root, file, "quotation");
+    await expect(
+      saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nstale editor\n"),
+    ).rejects.toThrow("Feature file not found");
+    expect(await readFeature(root, file)).toBeNull();
+    expect(await readFeature(root, renamed.fileName)).toContain("body");
+  });
+
   test("renaming a feature file moves its doc directory along", async () => {
     const file = await createFeature(root, "Quote");
     const renamed = await renameFeatureFile(root, file, "quotation");
