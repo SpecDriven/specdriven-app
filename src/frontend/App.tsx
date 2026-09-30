@@ -2819,15 +2819,20 @@ export function App() {
       const res = await fetch("/api/readme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, from: readmeSaved.current ?? "" }),
       });
+      const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
       if (res.ok) {
         if (session === readmeSession.current) {
-          readmeSaved.current = content;
+          // A disk edit folded in can make the file differ from what went
+          // out; show that if the buffer has not moved on, so the next tick
+          // does not treat the fold as a new edit of its own.
+          const written = typeof data.content === "string" ? data.content : content;
+          readmeSaved.current = written;
+          if (readmeText.current === content) setReadme(written);
           markSaved();
         }
       } else {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
         toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
       }
     } catch (e) {

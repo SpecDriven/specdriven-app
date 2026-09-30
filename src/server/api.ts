@@ -972,14 +972,16 @@ const getFeatures = withDataDir(async (dir) => {
 // existing specs folder selected"): the home view opens it in an editor.
 const getReadme = withDataDir(async (dir) => json(await readReadme(dir)));
 
-// The README editor's autosave: a plain local write — the reload cron commits
+// The README editor's autosave: a local write — the reload cron commits
 // and pushes it, like a saved scenario (specs/editor-autosave.feature.md
-// "Autosave Saves Locally").
+// "Autosave Saves Locally"). `from` is the last loaded/saved text so a
+// disk edit the dirty editor has not shown is folded in, not overwritten.
 const putReadme = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => null)) as { content?: unknown } | null;
+  const body = (await req.json().catch(() => null)) as { content?: unknown; from?: unknown } | null;
   if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
+  const from = typeof body.from === "string" ? body.from : undefined;
   try {
-    return json(await writeReadme(dir, body.content));
+    return json(await writeReadme(dir, body.content, from));
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

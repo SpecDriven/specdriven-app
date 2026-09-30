@@ -32,7 +32,7 @@ function byKey(f: Feature): Map<string, Scenario> {
  * merge as CRDT operations. Overlapping edits both apply — the same outcome
  * concurrent in-app edits get — instead of surfacing a line conflict.
  */
-function mergeText(base: string, ours: string, theirs: string): string {
+export function mergeText(base: string, ours: string, theirs: string): string {
   if (theirs === base || theirs === ours) return ours;
   if (ours === base) return theirs;
   const root = A.from<{ t: string }>({ t: base });
