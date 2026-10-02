@@ -47,6 +47,7 @@ bun install
 
 ```sh
 bun run dev            # bun --hot src/index.ts — HMR on, restarts on change
+bun run dev:debug      # under Bun's inspector, no --hot (see "Debugging" below)
 bun run start          # no hot reload
 bun run dev:electron   # desktop shell; expects `bun run dev` in another terminal
 ```
@@ -55,6 +56,25 @@ The server listens on <http://localhost:3000>; set `PORT` to move it. Setting
 `NODE_ENV=production` disables HMR and serves the pre-bundled frontend, which is
 what the compiled binary does. `dev:electron` points the desktop window at the
 running dev server, so edits hot-reload inside the desktop shell too.
+
+### Debugging
+
+The server code runs on two runtimes, each with its own debugger:
+
+- **Web app (Bun):** `bun run dev:debug` starts the server under Bun's
+  inspector (no `--hot`, which fights with breakpoints) and prints a
+  `https://debug.bun.sh/#…` link to debug it from the browser. The VS Code Bun
+  extension (`oven.bun-vscode`) can launch or attach too. Bun speaks the WebKit
+  inspector protocol, so Chrome DevTools and `chrome://inspect` cannot attach.
+- **Desktop app (Electron main process, Node):** in an unpackaged run
+  (`bun run dev:electron`), the **Debug → Main-Process Debugger…** menu opens
+  Node's inspector on `127.0.0.1:9229` (or a free port if that one is taken)
+  and offers its urls to copy. Attach from `chrome://inspect`, a VS Code
+  `"type": "node"` attach configuration, or paste the DevTools url into
+  Chrome. A paused breakpoint freezes the window until you resume. Packaged
+  builds have no Debug menu.
+- **Frontend:** the browser's DevTools, or **Debug → Toggle Window DevTools**
+  in the desktop app.
 
 On first start the app asks for a data repo, because no settings file names one
 yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; it

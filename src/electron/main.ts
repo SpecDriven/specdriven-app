@@ -3,8 +3,20 @@
 // app:// protocol — no localhost port is opened. In development
 // (ELECTRON_DEV=1) it loads the running Bun dev server instead, for HMR.
 
-import { app, BrowserWindow, dialog, nativeTheme, protocol, screen, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  Menu,
+  nativeTheme,
+  protocol,
+  screen,
+  session,
+  shell,
+} from "electron";
 import { readFile } from "node:fs/promises";
+import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { endAllChatSessions } from "../server/agentChat";
@@ -13,6 +25,7 @@ import { setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { DESKTOP_SCHEME } from "../frontend/route";
+import { startInspector, devtoolsUrl } from "./debugger";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
 import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
@@ -264,6 +277,71 @@ function createWindow(): void {
   void win.loadURL(DEV_URL ? `${DEV_URL}${entryPath}` : `${APP_ORIGIN}${entryPath}`);
 }
 
+/**
+ * Development builds only: Electron's default menu plus a Debug menu that
+ * starts and stops the main-process inspector (src/electron/debugger.ts).
+ * A packaged app keeps the default menu and never opens a debug port.
+ */
+function installDebugMenu(): void {
+  const setRunning = (running: boolean) => {
+    const stop = Menu.getApplicationMenu()?.getMenuItemById("debugger-stop");
+    if (stop) stop.enabled = running;
+  };
+  const start = async () => {
+    const url = startInspector(inspector);
+    if (!url) {
+      dialog.showErrorBox("Debugger", "Could not open an inspector port on 127.0.0.1.");
+      return;
+    }
+    setRunning(true);
+    const opts: Electron.MessageBoxOptions = {
+      type: "info",
+      title: "Debugger",
+      message: `Main-process debugger listening on ${url}`,
+      detail:
+        "Attach from chrome://inspect, a VS Code \"node\" attach configuration, " +
+        "or paste the DevTools url into Chrome. A paused breakpoint freezes this " +
+        "window until you resume: the main process drives it.",
+      buttons: ["Copy DevTools URL", "Copy WebSocket URL", "Close"],
+      defaultId: 0,
+      cancelId: 2,
+    };
+    const { response } = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, opts)
+      : await dialog.showMessageBox(opts);
+    if (response === 0) clipboard.writeText(devtoolsUrl(url));
+    if (response === 1) clipboard.writeText(url);
+  };
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
+      { role: "fileMenu" },
+      { role: "editMenu" },
+      { role: "viewMenu" },
+      { role: "windowMenu" },
+      {
+        label: "Debug",
+        submenu: [
+          // Starts the inspector, or shows the url of the one already
+          // running (a launch with --inspect).
+          { label: "Main-Process Debugger…", click: () => void start() },
+          {
+            id: "debugger-stop",
+            label: "Stop Main-Process Debugger",
+            enabled: Boolean(inspector.url()),
+            click: () => {
+              inspector.close();
+              setRunning(false);
+            },
+          },
+          { type: "separator" },
+          { role: "toggleDevTools", label: "Toggle Window DevTools" },
+        ],
+      },
+    ]),
+  );
+}
+
 // One main window (specs/desktop-app.spec.md "Window"): a second launch
 // focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -308,6 +386,7 @@ if (!app.requestSingleInstanceLock()) {
           : await dialog.showOpenDialog(opts);
       return picked.canceled ? null : (picked.filePaths[0] ?? null);
     });
+    if (!app.isPackaged) installDebugMenu();
     await applyStartupState();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
     pendingDeepLink ??= deepLinkFromArgv(process.argv);
