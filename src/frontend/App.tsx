@@ -427,6 +427,48 @@ export function withScenario(feature: Feature, at: number | null, s: Scenario): 
 }
 
 /**
+ * The version a scenario takes in `feature` when its version is derived
+ * (specs/ui.spec.md): one past the highest version already carrying that
+ * name, or 1 when the name is new; `ignoreIndex` leaves its own entry out.
+ */
+export function nextVersionIn(
+  feature: Feature | null,
+  name: string,
+  ignoreIndex?: number,
+): number {
+  const versions = (feature?.scenarios ?? [])
+    .filter((s, i) => i !== ignoreIndex && s.name.trim() === name.trim())
+    .map((s) => s.version);
+  return versions.length ? Math.max(...versions) + 1 : 1;
+}
+
+/**
+ * Where the editor's scenario sits on the server: the feature a save was
+ * answered with, the scenario's index in it and its document id. A save
+ * queued behind another places itself here rather than where the render
+ * that queued it thought the scenario was.
+ */
+export type Placement = { feature: Feature; index: number | null; id?: string };
+
+/**
+ * The editor's scenario written into the feature at `placement`: over the
+ * entry found there (or appended when there is none), adopting the document
+ * id a save gave it. A `derived` version (a new scenario) is re-derived
+ * against that feature with its own entry left out, or it would bump past
+ * itself.
+ */
+export function placeScenario(
+  draft: Scenario,
+  { feature, index, id }: Placement,
+  derived: boolean,
+): { s: Scenario; next: Feature } {
+  const version =
+    derived || index === null ? nextVersionIn(feature, draft.name, index ?? undefined) : draft.version;
+  const s: Scenario = { ...draft, version, id: draft.id ?? id };
+  return { s, next: withScenario(feature, index, s) };
+}
+
+/**
  * Whether a click on a scenario card landed on one of its controls — a
  * button, a checkbox, the ticket link, a test link — rather than on the card
  * itself. The title link counts as the card: clicking it highlights, and
@@ -930,7 +972,8 @@ export function App() {
   // the data folder per request, so the late PUT would write this scenario
   // into the folder that comes next.
   const autosaved = useRef<string | null>(null);
-  const autosaveInFlight = useRef(false);
+  /** The tick still saving, resolving to where it left the scenario — null when none is away. */
+  const autosaveInFlight = useRef<Promise<Placement> | null>(null);
   const scenarioSaveQueue = useRef(createPromiseQueue());
   /** The editor pane's title field, so a tick can see whether the name is
       still being typed (specs/editor-autosave.feature.md). Null once the
@@ -1388,7 +1431,7 @@ export function App() {
     autosaved.current = editing
       ? scenarioSignature(editing.scenario, editing.scenario.version)
       : null;
-    autosaveInFlight.current = false;
+    autosaveInFlight.current = null;
     // The delete that closed the dialog may still be in flight, but with no
     // dialog open there is no tick for the flag to hold back.
     deletingScenario.current = false;
@@ -2599,12 +2642,8 @@ export function App() {
    * one past the highest version already carrying that name, or 1 when the
    * name is new. Editing an existing entry keeps the version it was given.
    */
-  const nextVersionFor = (name: string, ignoreIndex?: number) => {
-    const versions = (feature?.scenarios ?? [])
-      .filter((s, i) => i !== ignoreIndex && s.name.trim() === name.trim())
-      .map((s) => s.version);
-    return versions.length ? Math.max(...versions) + 1 : 1;
-  };
+  const nextVersionFor = (name: string, ignoreIndex?: number) =>
+    nextVersionIn(feature, name, ignoreIndex);
 
   /** The version the open dialog will save under; shown read-only in the dialog.
       A new scenario autosave has already placed in the feature keeps deriving
@@ -2621,29 +2660,41 @@ export function App() {
    * (marked [proposed], so no data is lost); the server's reload cron commits
    * and pushes it. `close` false is the autosave path
    * (specs/editor-autosave.feature.md): the pane stays open and follows its
-   * scenario into the saved feature. Reports whether the save landed.
+   * scenario into the saved feature. Resolves to whether the save landed and
+   * where it left the scenario; null when there is nothing to save.
    */
-  const commitScenario = async (
+  const saveScenario = (
     tests: string[],
     close: boolean,
     // Propose (specs/editor/spec-editor.feature.md) is the explicit action
     // that advances the editor's draft; every other save keeps the status.
     status?: Scenario["status"],
-  ): Promise<boolean> => {
-    if (!editing || !feature || !selected) return false;
-    const s = { ...editing.scenario, status: status ?? editing.scenario.status, version: draftVersion, tests };
+  ): Promise<{ ok: boolean; placed: Placement }> | null => {
+    if (!editing || !feature || !selected) return null;
+    const draft = { ...editing.scenario, status: status ?? editing.scenario.status, tests };
+    const derived = editing.isNew === true;
     // Where this scenario sits in the feature: the entry the editor opened
-    // on, or the one a previous autosave placed — never appended twice.
-    const next = withScenario(feature, editing.index, s);
-    setFeature(next);
+    // on, or the one a previous save placed — never appended twice. While a
+    // tick is still away that is wherever the tick lands it, not what this
+    // render knows: its index and (for a new scenario) its missing document
+    // id predate that save, so placing by them would append the scenario a
+    // second time, or write over the neighbour a rename re-sorted into its
+    // old slot.
+    const ahead = autosaveInFlight.current;
+    const known: Placement = { feature, index: editing.index, id: draft.id };
+    const place = (at: Placement) => placeScenario(draft, at, derived);
+    if (!ahead) setFeature(place(known).next);
     if (close) setEditing(null);
     const session = editorSession.current;
     const file = selected;
     setSaving(true);
-    // Through the queue so a folder switch can wait for this PUT — and so a
-    // Propose that meets a tick already away cannot last-write-wins the
-    // older snapshot over the newer one.
+    // Through the queue so a folder switch can wait for this PUT, and so
+    // a save meeting a tick already away goes out after it, from where it
+    // landed.
     return scenarioSaveQueue.current.run(async () => {
+      const base = ahead ? await ahead : known;
+      const { s, next } = place(base);
+      if (ahead && selectedRef.current === file) setFeature(next);
       const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -2676,8 +2727,8 @@ export function App() {
         // The entry's document id comes back with it: a new scenario adopts it
         // here, and every later save names the entry by it.
         const moved = cardOfScenario(saved.scenarios, s);
+        const id = moved === null ? undefined : saved.scenarios[moved]!.id;
         if (!close && session === editorSession.current) {
-          const id = moved === null ? undefined : saved.scenarios[moved]!.id;
           setEditing((prev) =>
             prev === null
               ? null
@@ -2694,16 +2745,22 @@ export function App() {
         // nothing left to publish.
         if (stillHere) markSaved();
         else setSaving(false);
-        return true;
+        return { ok: true, placed: { feature: saved, index: moved, id } };
       }
       setSaving(false);
       if (stillHere) {
         setDirty(true);
         toast.error(data.error ?? "Save failed");
       }
-      return false;
+      // Nothing landed: the scenario is still where this save found it.
+      return { ok: false, placed: base };
     });
   };
+  const commitScenario = async (
+    tests: string[],
+    close: boolean,
+    status?: Scenario["status"],
+  ): Promise<boolean> => (await saveScenario(tests, close, status))?.ok ?? false;
 
   /**
    * A url still sitting in the add field or an open ✎ row rides along with
@@ -2791,16 +2848,25 @@ export function App() {
     if (!editing.scenario.name.trim()) return;
     const signature = scenarioSignature(editing.scenario, draftVersion);
     if (signature === autosaved.current) return;
-    autosaveInFlight.current = true;
     const session = editorSession.current;
+    const before: Placement = { feature, index: editing.index, id: editing.scenario.id };
+    const run = saveScenario(editing.scenario.tests, false);
+    if (!run) return;
+    // A save that meets this tick still away (the pane's parting save,
+    // Propose) waits for it and places itself where it landed.
+    const placed = run.then(
+      (r) => r.placed,
+      () => before,
+    );
+    autosaveInFlight.current = placed;
     try {
       // Only a landed save may mark the content saved — a failed one is
       // retried by the next tick, and reported on the banner meanwhile. A
       // save that lands after the dialog closed belongs to nothing.
-      const ok = await commitScenario(editing.scenario.tests, false);
+      const { ok } = await run;
       if (ok && session === editorSession.current) autosaved.current = signature;
     } finally {
-      autosaveInFlight.current = false;
+      if (autosaveInFlight.current === placed) autosaveInFlight.current = null;
     }
   };
 
@@ -3794,8 +3860,8 @@ export function App() {
    * nothing; Delete is the way to take a draft back out. One last save
    * catches what was typed since the previous tick — the test-link fields
    * included — so the state left behind is the pane's latest. Started before the editor state clears so it saves
-   * under this editor session; while a tick is still in flight that tick's
-   * save is the autosaved state to leave. Returns the save when one went out.
+   * under this editor session; while a tick is still in flight the parting
+   * save follows it, placed where it lands. Returns the save when one went out.
    */
   const closeEditor = (): Promise<boolean> | null => {
     let saving: Promise<boolean> | null = null;
