@@ -163,11 +163,13 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
 
       // The page editor's autosave: a local write through the page's
       // document — the reload cron commits and pushes it, like a saved
-      // scenario.
+      // scenario. `base` is the text the editor edited, so what the page
+      // gained since it was loaded is merged in rather than written over.
       add("PUT", `${base}/:file`, async (dir, req, params) => {
-        const b = await body<{ content?: unknown }>(req);
+        const b = await body<{ content?: unknown; base?: unknown }>(req);
         if (typeof b?.content !== "string") return json({ error: "content is required" }, 400);
-        return json(await savePage(dir, kind, params.file ?? "", b.content));
+        const from = typeof b.base === "string" ? b.base : undefined;
+        return json(await savePage(dir, kind, params.file ?? "", b.content, from));
       });
 
       // Renaming a page (specs/app/roadmap.feature.md): the `# heading` and
