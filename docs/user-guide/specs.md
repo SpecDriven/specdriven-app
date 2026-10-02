@@ -86,18 +86,24 @@ Above the tree:
   searches feature names, descriptions, scenario names and bodies (prefix and
   fuzzy matches, names ranked above bodies) and lists every command the app
   offers. Choosing a search result opens the feature or scenario.
-- **+ New folder** creates a folder inside the selected folder. A name with
-  `/` in it nests: `billing/renewals`.
-- **+ New feature** creates a feature file. Type `folder/name` to create it
-  inside a folder. The new feature opens with its description editor ready.
-- **Start AI Session** and the **Selected:** line below it belong to
-  [AI sessions](ai-sessions.md) and only appear while **Code generation** is
-  on in Settings.
+- The **Features** heading above the tree carries the tree's actions as
+  icons, after the **Filter** chip. Hover over one to see its name.
+  - **New folder** (a folder with a +) creates a folder inside the selected
+    folder. A name with `/` in it nests: `billing/renewals`.
+  - **New feature** (a page with a +, shortcut `c`) creates a feature file.
+    Type `folder/name` to create it inside a folder. The new feature opens
+    with its description editor ready.
+  - **Start session** (a play button with a spark) and the **Selected:** line
+    under the heading belong to [AI sessions](ai-sessions.md). While specs
+    are checked, the button is highlighted and shows how many.
+
+  With a folder selected, the New folder and New feature tooltips name the
+  folder the new item goes into.
 
 The tree:
 
 - **Folders** open and close with the disclosure triangle. Clicking a folder
-  selects it, which is where `+ New folder` and `+ New feature` create things;
+  selects it, which is where **New folder** and **New feature** create things;
   `Esc` deselects. A folder's ✕ deletes it, and only an empty folder can be
   deleted.
 - **Features** show a publish ring: a filled arc for the share of scenarios
@@ -109,8 +115,9 @@ The tree:
   and pushed.
 - The **Filter** chip narrows the tree by **Status** (Any status, Draft,
   Proposed, Published) and, when assignments are on, by **Assignee**. Active
-  filters show as chips you can clear one by one. On a feature page the same
-  filter hides scenario cards that do not match, and the page says so.
+  filters show as chips on a row under the heading, and you can clear them one
+  by one. On a feature page the same filter hides scenario cards that do not
+  match, and the page says so.
 
 An empty data folder shows `No feature files yet`.
 

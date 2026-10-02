@@ -34,7 +34,6 @@ import {
   ChevronRight,
   Ellipsis,
   Pencil,
-  Play,
   Timer,
   Plus,
   RefreshCw,
@@ -62,6 +61,7 @@ import {
   Bot,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
+import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
 import { Popover } from "./Popover";
@@ -4606,8 +4606,8 @@ export function App() {
   ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
   const listing = selected ? features.find((f) => f.fileName === selected) : undefined;
   const paletteActions: PaletteItem[] = [
-    shortcutAction("create", <Plus size={14} />),
-    action("new-folder", "New folder", <FolderInput size={14} />, () => void createFolder()),
+    shortcutAction("create", onFeaturePage ? <Plus size={14} /> : <NewFeatureIcon size={14} />),
+    action("new-folder", "New folder", <NewFolderIcon size={14} />, () => void createFolder()),
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
     ...(selected && feature
@@ -4628,7 +4628,7 @@ export function App() {
         ]
       : []),
     ...(codeGen && specSelection.size > 0 && !sessionRunning
-      ? [action("session", "Start AI Session", <Play size={14} />, () => startSession())]
+      ? [action("session", "Start AI Session", <StartSessionIcon size={14} />, () => startSession())]
       : []),
     // Off in Settings: the Pomodoro is not part of this app, so the palette
     // does not offer it either (src/frontend/pomodoroPref.ts).
@@ -6079,41 +6079,6 @@ export function App() {
           id="side-panel-specs"
           aria-labelledby={pluginTabs.length > 0 ? "side-tab-specs" : undefined}
         >
-        <div className="sidebar-actions">
-          <button onClick={createFolder}>+ New folder</button>
-          <button onClick={createFeature}>+ New feature</button>
-        </div>
-        {/* Code gen session (specs/agents/claude.spec.md): check whole specs
-            here or single scenarios on their cards, then Start session asks
-            for a name and where to run. The Settings switch takes it all
-            away. Timing your own work is the Pomodoro at the foot of the
-            sidebar (specs/app/pomodoro.feature.md), not a kind of session. */}
-        <div className="sidebar-actions">
-          <button
-            onClick={() => startSession()}
-            disabled={sessionRunning}
-            title={
-              codeGen && sessionCount > 0
-                ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
-                : "Start an AI session"
-            }
-          >
-            {sessionRunning ? (
-              "Session running…"
-            ) : (
-              <>
-                <Play size={12} aria-hidden="true" /> Start session…
-                {codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}
-              </>
-            )}
-          </button>
-        </div>
-        {/* What a session would run over, so a scenario checked on a card
-            two clicks away is still visible from here. */}
-        {codeGen && selectionLabel && !sessionRunning && (
-          <p className="session-notice">Selected: {selectionLabel}</p>
-        )}
-        {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
         {/* A load that failed every retry offers the manual one: without it
             the sidebar would sit empty until the next page load, and with
             the cron refresh off (reloadFrequencySeconds 0) nothing else asks. */}
@@ -6126,31 +6091,11 @@ export function App() {
           </p>
         )}
         {/* The Features section head carries the filter: by status, by
-            assignee. Active filters show as chips that clear on click. */}
+            assignee. Active filters show as chips that clear on click, on a
+            row of their own under the head so they never crowd its icons. */}
         <div className="section-head">
           Features
           <span className="filter-anchor">
-            {filter.status && (
-              <button
-                type="button"
-                className="chip on"
-                aria-label={`Clear the ${filter.status} filter`}
-                onClick={() => setFilter((f) => ({ ...f, status: null }))}
-              >
-                <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
-                <X size={11} aria-hidden="true" />
-              </button>
-            )}
-            {filter.assignee && (
-              <button
-                type="button"
-                className="chip on"
-                aria-label="Clear the assignee filter"
-                onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
-              >
-                {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
-              </button>
-            )}
             <Tooltip label="Filter features">
               <button
                 type="button"
@@ -6219,7 +6164,92 @@ export function App() {
               ]}
             />
           </span>
+          {/* The tree's actions (src/frontend/ActionIcons.tsx) sit on its
+              head rather than in rows of their own. New folder and New
+              feature create inside the clicked folder, and their tooltips
+              name it. Code gen session (specs/agents/claude.spec.md): check
+              whole specs in the tree or single scenarios on their cards,
+              then Start session asks for a name and where to run; the
+              count of checked specs rides on its button. Timing your own
+              work is the Pomodoro at the foot of the sidebar
+              (specs/app/pomodoro.feature.md), not a kind of session. */}
+          <span className="head-actions">
+            <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
+              <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
+                <NewFolderIcon size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip
+              label={selectedFolder ? `New feature in "${selectedFolder}"` : "New feature"}
+              keys="c"
+            >
+              <button type="button" className="ibtn" aria-label="New feature" onClick={createFeature}>
+                <NewFeatureIcon size={15} />
+              </button>
+            </Tooltip>
+            <Tooltip
+              label={
+                sessionRunning
+                  ? "Session running…"
+                  : codeGen && sessionCount > 0
+                    ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
+                    : "Start an AI session"
+              }
+            >
+              <button
+                type="button"
+                className={`ibtn session-btn${codeGen && specSelection.size > 0 ? " armed" : ""}${
+                  sessionRunning ? " running" : ""
+                }`}
+                aria-label={
+                  sessionRunning
+                    ? "Session running…"
+                    : `Start session…${codeGen && specSelection.size > 0 ? ` (${specSelection.size})` : ""}`
+                }
+                onClick={() => startSession()}
+                disabled={sessionRunning}
+              >
+                <StartSessionIcon size={15} />
+                {codeGen && specSelection.size > 0 && !sessionRunning && (
+                  <span className="action-count" aria-hidden="true">
+                    {specSelection.size}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+          </span>
         </div>
+        {(filter.status || filter.assignee) && (
+          <div className="filter-chips">
+            {filter.status && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label={`Clear the ${filter.status} filter`}
+                onClick={() => setFilter((f) => ({ ...f, status: null }))}
+              >
+                <StatusIcon status={filter.status} size={12} /> {filter.status}{" "}
+                <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            {filter.assignee && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label="Clear the assignee filter"
+                onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
+              >
+                {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
+        {/* What a session would run over, so a scenario checked on a card
+            two clicks away is still visible from here. */}
+        {codeGen && selectionLabel && !sessionRunning && (
+          <p className="session-notice">Selected: {selectionLabel}</p>
+        )}
+        {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
         {/* Folder tree (specs/folders.spec.md): folders are drop targets
             for drag-moving features; the tree background is the top level. */}
         {(
@@ -6881,7 +6911,7 @@ export function App() {
                             {
                               id: "session",
                               label: "Start AI Session",
-                              icon: <Play size={13} />,
+                              icon: <StartSessionIcon size={13} />,
                               disabled: sessionRunning || specSelection.size === 0,
                               onSelect: () => void startSession(),
                             },
