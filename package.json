@@ -14,6 +14,7 @@
   ],
   "scripts": {
     "dev": "bun --hot src/index.ts",
+    "dev:debug": "bun --inspect src/index.ts",
     "start": "bun src/index.ts",
     "demo": "DEMO_MODE=1 bun src/index.ts",
     "build": "bun scripts/build.ts",
