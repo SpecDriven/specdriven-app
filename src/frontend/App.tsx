@@ -924,8 +924,14 @@ export function App() {
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
+  // Scenario PUTs share a queue with the description editor's reason: a
+  // folder switch must wait for a tick already on its way. A boolean
+  // in-flight flag would make that wait a no-op, and the server resolves
+  // the data folder per request, so the late PUT would write this scenario
+  // into the folder that comes next.
   const autosaved = useRef<string | null>(null);
   const autosaveInFlight = useRef(false);
+  const scenarioSaveQueue = useRef(createPromiseQueue());
   /** The editor pane's title field, so a tick can see whether the name is
       still being typed (specs/editor-autosave.feature.md). Null once the
       scenario is published, when the name is no longer editable. */
@@ -973,7 +979,7 @@ export function App() {
   const readmeText = useRef<string | null>(null);
   readmeText.current = readme;
   const readmeSaved = useRef<string | null>(null);
-  const readmeInFlight = useRef(false);
+  const readmeSaveQueue = useRef(createPromiseQueue());
   /** Bumped per README load, so a save landing after a repo switch stamps nothing. */
   const readmeSession = useRef(0);
   // Test links (specs/traceability.spec.md): the table of automated-test
@@ -1585,12 +1591,16 @@ export function App() {
     setSwitching({ folder: next, step: "saving" });
     // A README edit belongs to the repo it was typed in: land it there before
     // the switch, and empty the editor so no tick writes it into the new one.
-    // The same for an open scenario editor: its last save lands in this repo
-    // (specs/editor/spec-editor.feature.md "Spec editor pane").
+    // Await the queue after the tick — a boolean in-flight flag would make
+    // the tick a no-op while a PUT is already away, and that PUT would then
+    // land in the folder that comes next (the server re-reads dataRepo per
+    // request). The same for an open scenario editor.
     await readmeTick.current();
+    await readmeSaveQueue.current.idle();
     readmeText.current = null;
     setReadme(null);
     await editorRef.current.close();
+    await scenarioSaveQueue.current.idle();
     // So does whatever a plugin's view holds — an open roadmap page or an
     // Event Model's canvas, say:
     // its last save goes out there, and the plugin seals the view on its way
@@ -2628,65 +2638,71 @@ export function App() {
     setFeature(next);
     if (close) setEditing(null);
     const session = editorSession.current;
+    const file = selected;
     setSaving(true);
-    const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      // The scenario goes out with its document id, so a retyped title or a
-      // re-derived version renames the saved entry instead of leaving a draft
-      // behind under its old name.
-      body: JSON.stringify({
-        content: serializeFeature(next),
-        save: true,
-        scenario: scenarioTarget(s),
-      }),
-    });
-    const data = await res.json();
-    // The user may have moved on while the save was away — navigating from
-    // the sidebar leaves the editor pane with this last save
-    // (specs/editor/spec-editor.feature.md "Spec editor pane") — and then
-    // its result belongs to nothing on screen.
-    const stillHere = selectedRef.current === selected;
-    if (res.ok) {
-      const saved = featureFromResponse(data, selected);
+    // Through the queue so a folder switch can wait for this PUT — and so a
+    // Propose that meets a tick already away cannot last-write-wins the
+    // older snapshot over the newer one.
+    return scenarioSaveQueue.current.run(async () => {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        // The scenario goes out with its document id, so a retyped title or a
+        // re-derived version renames the saved entry instead of leaving a draft
+        // behind under its old name.
+        body: JSON.stringify({
+          content: serializeFeature(next),
+          save: true,
+          scenario: scenarioTarget(s),
+        }),
+      });
+      const data = await res.json();
+      // The user may have moved on while the save was away — navigating from
+      // the sidebar leaves the editor pane with this last save
+      // (specs/editor/spec-editor.feature.md "Spec editor pane") — and then
+      // its result belongs to nothing on screen.
+      const stillHere = selectedRef.current === file;
+      if (res.ok) {
+        const saved = featureFromResponse(data, file);
+        if (stillHere) {
+          setFeature(saved);
+          setDirty(false);
+        }
+        // The feature comes back in canonical order, so a renamed scenario has
+        // moved: a still-open editor has to find its scenario again, and an
+        // explicit save that closed the editor lands on its card. Not finding
+        // it (the entry was dropped underneath us) leaves the editor new, so
+        // the next save re-adds the work rather than overwriting a neighbour.
+        // The entry's document id comes back with it: a new scenario adopts it
+        // here, and every later save names the entry by it.
+        const moved = cardOfScenario(saved.scenarios, s);
+        if (!close && session === editorSession.current) {
+          const id = moved === null ? undefined : saved.scenarios[moved]!.id;
+          setEditing((prev) =>
+            prev === null
+              ? null
+              : {
+                  ...prev,
+                  index: moved,
+                  scenario: id === undefined ? prev.scenario : { ...prev.scenario, id },
+                },
+          );
+        }
+        if (close && stillHere) setSelectedScenario(moved);
+        // A published scenario's editor can only have changed its links — test
+        // links (specs/traceability.spec.md) and its ticket link — so there is
+        // nothing left to publish.
+        if (stillHere) markSaved();
+        else setSaving(false);
+        return true;
+      }
+      setSaving(false);
       if (stillHere) {
-        setFeature(saved);
-        setDirty(false);
+        setDirty(true);
+        toast.error(data.error ?? "Save failed");
       }
-      // The feature comes back in canonical order, so a renamed scenario has
-      // moved: a still-open editor has to find its scenario again, and an
-      // explicit save that closed the editor lands on its card. Not finding
-      // it (the entry was dropped underneath us) leaves the editor new, so
-      // the next save re-adds the work rather than overwriting a neighbour.
-      // The entry's document id comes back with it: a new scenario adopts it
-      // here, and every later save names the entry by it.
-      const moved = cardOfScenario(saved.scenarios, s);
-      if (!close && session === editorSession.current) {
-        const id = moved === null ? undefined : saved.scenarios[moved]!.id;
-        setEditing((prev) =>
-          prev === null
-            ? null
-            : {
-                ...prev,
-                index: moved,
-                scenario: id === undefined ? prev.scenario : { ...prev.scenario, id },
-              },
-        );
-      }
-      if (close && stillHere) setSelectedScenario(moved);
-      // A published scenario's editor can only have changed its links — test
-      // links (specs/traceability.spec.md) and its ticket link — so there is
-      // nothing left to publish.
-      if (stillHere) markSaved();
-      else setSaving(false);
-      return true;
-    }
-    setSaving(false);
-    if (stillHere) {
-      setDirty(true);
-      toast.error(data.error ?? "Save failed");
-    }
-    return false;
+      return false;
+    });
   };
 
   /**
@@ -2811,31 +2827,33 @@ export function App() {
   const autosaveReadme = async () => {
     const content = readmeText.current;
     if (content === null || content === readmeSaved.current) return;
-    if (readmeInFlight.current) return; // the previous tick is still saving
-    readmeInFlight.current = true;
-    setSaving(true);
     const session = readmeSession.current;
-    try {
-      const res = await fetch("/api/readme", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      });
-      if (res.ok) {
-        if (session === readmeSession.current) {
-          readmeSaved.current = content;
-          markSaved();
+    await readmeSaveQueue.current.run(async () => {
+      // A tick queued ahead of this one may already have landed these words.
+      const toWrite = readmeText.current;
+      if (toWrite === null || toWrite === readmeSaved.current) return;
+      setSaving(true);
+      try {
+        const res = await fetch("/api/readme", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: toWrite }),
+        });
+        if (res.ok) {
+          if (session === readmeSession.current) {
+            readmeSaved.current = toWrite;
+            markSaved();
+          }
+        } else {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
         }
-      } else {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
+      } catch (e) {
+        toast.error(`README.md not saved: ${(e as Error).message} — will retry.`);
+      } finally {
+        setSaving(false);
       }
-    } catch (e) {
-      toast.error(`README.md not saved: ${(e as Error).message} — will retry.`);
-    } finally {
-      readmeInFlight.current = false;
-      setSaving(false);
-    }
+    });
   };
   const readmeTick = useRef(autosaveReadme);
   useEffect(() => {
@@ -3784,7 +3802,6 @@ export function App() {
     if (
       editing &&
       editing.scenario.name.trim() && // no name, nothing to be saved under
-      !autosaveInFlight.current &&
       !deletingScenario.current
     ) {
       // A url still sitting in the add field or in an open ✎ row joins the
