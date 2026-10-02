@@ -171,6 +171,11 @@ test("a remote absorb keeps a local disk edit the sync tick has not absorbed", a
   // The disk edit is in the document now — the next tick must not see leftover drift,
   // and must not be the only thing that could have recovered it.
   expect(await importDrift(b)).toBe("");
+  // And it travels on to A over the network, not only through git.
+  await until(
+    async () => (await readFeature(a, FILE))?.includes("## Disk only @v1 [proposed]") ?? false,
+    "B's disk edit to arrive at A",
+  );
 });
 
 test("a peer that starts after the edit still catches up", async () => {

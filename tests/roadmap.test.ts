@@ -25,6 +25,7 @@ import {
   isPageFolderPath,
   listPages,
   readPage,
+  renamePageFile,
   savePage,
 } from "../src/server/pages";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
@@ -211,7 +212,14 @@ describe("a page save racing an unsynced disk edit", () => {
 
   test("keeps the disk edit alongside the save", async () => {
     await writeFile(join(root, file), "# Pricing\n\nOriginal.\n\nFrom disk.\n");
-    const saved = await savePage(root, ROADMAP, file, "# Pricing\n\nOriginal, edited here.\n");
+    // The editor loaded the page before the disk edit; that is its base.
+    const saved = await savePage(
+      root,
+      ROADMAP,
+      file,
+      "# Pricing\n\nOriginal, edited here.\n",
+      "# Pricing\n\nOriginal.\n",
+    );
 
     const md = (await Bun.file(join(root, file)).text()) as string;
     expect(md).toContain("From disk.");
@@ -228,6 +236,50 @@ describe("a page save racing an unsynced disk edit", () => {
     expect(saved.content).toContain("From disk.");
     expect(saved.content.match(/From disk\./g)?.length).toBe(1);
     expect(await Bun.file(join(root, file)).text()).toBe(saved.content);
+  });
+
+  // The page view reads the file, so an editor opened after the disk edit
+  // holds it: merging it in again would write it twice.
+  test("an editor opened after the disk edit and typing on saves it once", async () => {
+    const onDisk = "# Pricing\n\nOriginal.\n\nFrom disk.\n";
+    await writeFile(join(root, file), onDisk);
+    const opened = (await readPage(root, ROADMAP, file))!.content;
+    const saved = await savePage(
+      root,
+      ROADMAP,
+      file,
+      opened.replace("Original.", "Original, edited here."),
+      opened,
+    );
+    expect(saved.content).toBe("# Pricing\n\nOriginal, edited here.\n\nFrom disk.\n");
+  });
+
+  // The editor keeps its own buffer after a save; its next save must not
+  // take the folded disk edit back out.
+  test("the editor's next autosave keeps the folded disk edit", async () => {
+    const loaded = "# Pricing\n\nOriginal.\n";
+    await writeFile(join(root, file), "# Pricing\n\nOriginal.\n\nFrom disk.\n");
+    const first = "# Pricing\n\nOriginal, edited here.\n";
+    await savePage(root, ROADMAP, file, first, loaded);
+    const second = await savePage(root, ROADMAP, file, "# Pricing\n\nOriginal, edited here twice.\n", first);
+    expect(second.content).toBe("# Pricing\n\nOriginal, edited here twice.\n\nFrom disk.\n");
+  });
+
+  test("a rename keeps the heading it was given when the heading drifted", async () => {
+    await writeFile(join(root, file), "# Pricing tiers\n\nOriginal.\n");
+    const renamed = await renamePageFile(root, ROADMAP, file, "Plans");
+    expect(renamed.fileName).toBe("roadmap/plans.md");
+    expect(await Bun.file(join(root, "roadmap/plans.md")).text()).toBe("# Plans\n\nOriginal.\n");
+  });
+
+  // With no base the merge can only guess, so text changed on both sides is
+  // refused rather than merged into a possible duplicate.
+  test("a save with no base refuses text changed on both sides", async () => {
+    await writeFile(join(root, file), "# Pricing\n\nOriginal.\n\nFrom disk.\n");
+    await expect(savePage(root, ROADMAP, file, "# Pricing\n\nOriginal, edited here.\n")).rejects.toThrow(
+      "edited on disk and here at the same time",
+    );
+    expect(await Bun.file(join(root, file)).text()).toBe("# Pricing\n\nOriginal.\n\nFrom disk.\n");
   });
 });
 

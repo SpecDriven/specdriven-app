@@ -105,6 +105,7 @@ export async function startNetSync(
     // from the file, the document and git, and importDrift would then skip
     // the file (it is a projection again) so the loss is permanent.
     let localDoc = disk.doc;
+    let absorbedLocal = false;
     const fileText = await readTextFile(join(dataDir, fileName));
     if (fileText !== null) {
       const problem = featureTextError(fileText);
@@ -118,6 +119,7 @@ export async function startNetSync(
         const drifted = absorbDrift(localDoc, fileText);
         if (drifted.refused === undefined) {
           localDoc = drifted.doc;
+          absorbedLocal = true;
           log.info(`absorbed a local disk edit of ${fileName} before applying remote operations`);
         } else {
           log.warn(
@@ -139,6 +141,10 @@ export async function startNetSync(
         writing.delete(fileName);
       }
     });
+    // The save above is muted (writing), so the local disk edit it absorbed
+    // would otherwise reach peers only through git: hand it to the network.
+    // The change this fires here finds nothing new.
+    if (absorbedLocal) handles.get(docId)?.update((d) => A.merge(d, A.clone(merged)));
   }
 
   /** Announce a feature's document, or push its latest disk state. */
