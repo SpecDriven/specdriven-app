@@ -131,7 +131,7 @@ export async function relinkEntries(
     const body = relinkBody(page.body, from, url);
     if (supersedes === page.supersedes && body === page.body) continue;
     const next = { ...page, body, ...(supersedes ? { supersedes } : {}) };
-    await savePage(dataDir, NOTEBOOK, entry.fileName, serializePage(next));
+    await savePage(dataDir, NOTEBOOK, entry.fileName, serializePage(next), current.content);
     changed.push(entry.fileName);
   }
   return changed;
@@ -202,5 +202,11 @@ async function rewrite(
 ): Promise<PageView> {
   const current = await readPage(dataDir, NOTEBOOK, fileName);
   if (current === null) throw new Error(`Notebook entry not found: ${fileName}`);
-  return savePage(dataDir, NOTEBOOK, fileName, serializePage(change(parsePage(current.content))));
+  return savePage(
+    dataDir,
+    NOTEBOOK,
+    fileName,
+    serializePage(change(parsePage(current.content))),
+    current.content,
+  );
 }
