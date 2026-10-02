@@ -223,7 +223,9 @@ export function PagePane({
         const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          // What this buffer was edited from, so the server keeps what the
+          // page gained since (a disk edit, a sync) instead of writing over it.
+          body: JSON.stringify({ content, base: saved.current }),
         });
         const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
         if (!res.ok) {
@@ -298,7 +300,7 @@ export function PagePane({
           const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: next }),
+            body: JSON.stringify({ content: next, base: saved.current }),
           });
           const data = (await res.json().catch(() => ({}))) as PageListing & {
             content?: string;
