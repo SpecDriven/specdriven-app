@@ -437,4 +437,4 @@ commercial and production use, is permitted, and you may change and
 distribute the software; using it to provide a product that competes with
 specdriven.app is restricted. Read [LICENSE.md](LICENSE.md) and
 [NOTICE.md](NOTICE.md). For anything beyond that, contact
-hello@specdriven.app.
+info@specdriven.app.
