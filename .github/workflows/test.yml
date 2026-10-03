@@ -42,5 +42,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # GHSA-ch52-4w7c-c8xp (http-cache-semantics <=4.2.0) has no patched
+      # release. It reaches us only through electron-builder's @electron/get@3
+      # → got → cacheable-request, a build-time downloader of Electron
+      # binaries that sets no shared cache, so the cross-user disclosure
+      # doesn't apply. @electron/get@5 drops got, but electron-builder passes
+      # it got-only proxy/TLS options, so it can't be overridden. Drop this
+      # ignore once electron-builder moves off @electron/get@3 or a fix ships.
       - name: Audit dependencies
-        run: bun audit
+        run: bun audit --ignore GHSA-ch52-4w7c-c8xp
