@@ -305,8 +305,10 @@ The app addresses specs with stable URLs — useful for cross-referencing:
 | `/features/<path>/scenarios/<slug>/v<N>` | Exactly version N — the permalink form. |
 | `/roadmap/<page>` | Roadmap page (path minus `.md`). |
 
-The desktop app registers the `specdriven://` scheme over the same paths for
-links shared outside the app. Two quirks: the first `scenarios` segment with
+The desktop app registers the `specdriven://` scheme for links shared outside
+the app: the spec folder's name, then the same path
+(`specdriven://specs-insurance/features/billing/basic-quote`). Opening one
+switches to that folder first. Two quirks: the first `scenarios` segment with
 something after it splits feature from scenario, so a folder literally named
 `scenarios` is unreachable; and when two scenario names slugify identically,
 the link resolves to the first in the file's (sorted) order.

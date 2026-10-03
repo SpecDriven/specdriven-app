@@ -71,6 +71,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { createPromiseQueue } from "./promiseQueue";
 export { createPromiseQueue };
 
+import { setShareRepo, shareUrl } from "./shareLink";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -133,7 +134,6 @@ import type { LinkDraft } from "./externallinks";
 import { ScenarioTable } from "./ScenarioTable";
 import {
   appPagePath,
-  desktopLink,
   featurePath,
   matchAppPage,
   pagePath,
@@ -141,6 +141,7 @@ import {
   repoDisplayName,
   resolveScenario,
   scenarioPath,
+  splitRepoPath,
 } from "./route";
 import type { AppPage } from "./route";
 import {
@@ -826,12 +827,45 @@ export async function fetchListing(
   return { error: lastError, attempts };
 }
 
+/** Whether a url names a view: an app page, a plugin's view or a feature. */
+function routesSomewhere(pathname: string): boolean {
+  return Boolean(matchAppPage(pathname) || matchPluginRoute(pathname) || parseRoute(pathname).feature);
+}
+
+/** Decode a path segment; a malformed escape is kept as-is rather than thrown. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
   // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
   // data folders used before, most recent first, up to 10 — what the ▾
   // beside the folder name drops down.
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  /**
+   * The same two, for a link that names its spec folder
+   * (`specdriven://<folder>/...`): openFromLocation runs from closures older
+   * than either state — the boot effect's, the popstate listener's — so it
+   * reads them here.
+   */
+  const reposRef = useRef<{ open: string | null; recent: string[] }>({ open: null, recent: [] });
+  /**
+   * Take the open folder and the recent list from an /api/state answer. The
+   * open folder is also the one "Copy link" names (src/frontend/shareLink.ts).
+   */
+  const applyRepos = (state: { dataRepo?: string | null; recentDataRepos?: unknown }) => {
+    const open = state.dataRepo ?? null;
+    const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
+    reposRef.current = { open, recent };
+    setShareRepo(open);
+    setDataRepo(open);
+    setRecentRepos(recent);
+  };
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
@@ -1280,8 +1314,7 @@ export function App() {
       // boot=1 marks the page-load fetch: in demo mode the server reseeds the
       // pristine dataset on it, so a refresh reopens on the default data.
       const state = await (await fetch("/api/state?boot=1")).json();
-      setDataRepo(state.dataRepo);
-      setRecentRepos(Array.isArray(state.recentDataRepos) ? state.recentDataRepos : []);
+      applyRepos(state);
       setNeedsRepo(state.needsDataRepo);
       if (typeof state.reloadFrequencySeconds === "number") {
         setReloadSeconds(state.reloadFrequencySeconds);
@@ -1571,8 +1604,7 @@ export function App() {
       });
       const state = await res.json();
       if (res.ok) {
-        setDataRepo(state.dataRepo);
-        setRecentRepos(state.recentDataRepos ?? []);
+        applyRepos(state);
         setNeedsRepo(false);
         // A freshly picked folder opens on its README, like a start does
         // (specs/app-startup.feature.md "A newly picked data folder opens on
@@ -1624,9 +1656,11 @@ export function App() {
   };
 
   // Switch to another data dir — typed into the prompt above or picked from
-  // the recent folder list (specs/ui/ui.feature.md "Recent folder list").
-  const switchRepo = async (next: string) => {
-    if (!next || next === dataRepo) return;
+  // the recent folder list (specs/ui/ui.feature.md "Recent folder list"), or
+  // named by a link (`specdriven://<folder>/...`), which then opens `entryPath`
+  // in it rather than its README.
+  const switchRepo = async (next: string, entryPath?: string) => {
+    if (!next || next === reposRef.current.open) return;
     setSettingRepo(true);
     // The switch is modal (specs/app/spec-folders.feature.md "Switch spec
     // folder"): the dialog names the folder and the step, and everything
@@ -1669,8 +1703,7 @@ export function App() {
       const state = await res.json();
       if (res.ok) {
         setSwitching({ folder: next, step: "loading" });
-        setDataRepo(state.dataRepo);
-        setRecentRepos(state.recentDataRepos ?? []);
+        applyRepos(state);
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
@@ -1695,6 +1728,10 @@ export function App() {
             client.serial("data/changed"),
           ),
         ]);
+        if (entryPath && entryPath !== "/") {
+          history.replaceState(null, "", entryPath);
+          await openFromLocationRef.current(entryPath);
+        }
       } else {
         toast.error(state.error ?? "Could not use this directory");
       }
@@ -1716,7 +1753,7 @@ export function App() {
         body: JSON.stringify({ forgetDataRepo: repo }),
       });
       const state = await res.json();
-      if (res.ok) setRecentRepos(state.recentDataRepos ?? []);
+      if (res.ok) applyRepos({ dataRepo: reposRef.current.open, recentDataRepos: state.recentDataRepos });
       else toast.error(state.error ?? "Could not remove this folder");
     } finally {
       setSettingRepo(false);
@@ -1928,7 +1965,33 @@ export function App() {
   }, [loading, demo, refreshPlugins]);
 
   /** Derive the view from a url (initial load, popstate, after repo setup). */
-  const openFromLocation = async (pathname = location.pathname) => {
+  const openFromLocation = async (pathname = location.pathname): Promise<void> => {
+    // A link from outside names its spec folder first
+    // (`specdriven://specs-insurance/tasks/ship`): the window's url drops it
+    // — the folder on screen is the app's state, not the url's — and a
+    // folder other than the open one is switched to, which then opens the
+    // rest of the path there.
+    const { open, recent } = reposRef.current;
+    const linked = splitRepoPath(pathname, open ? [open, ...recent] : recent);
+    if (linked.repo) {
+      pathname = linked.path;
+      history.replaceState(history.state, "", pathname);
+      if (linked.repo !== open) {
+        await switchRepo(linked.repo, pathname);
+        return;
+      }
+    } else if (!routesSomewhere(pathname)) {
+      // Not a path the app knows, but one once its first segment is gone: a
+      // link to a folder this machine has never opened.
+      const [first, ...rest] = pathname.split("/").filter(Boolean);
+      if (first && rest.length > 0 && routesSomewhere(`/${rest.join("/")}`)) {
+        toast.error(
+          `This link is for the spec folder “${decodeSegment(first)}”, which isn't in your folder list. Open that folder, then follow the link again.`,
+        );
+        pathname = "/";
+        history.replaceState(history.state, "", pathname);
+      }
+    }
     const route = parseRoute(pathname);
     // The app's own pages first, so no plugin can claim their urls.
     const page = matchAppPage(pathname);
@@ -2619,9 +2682,10 @@ export function App() {
   // "Copy link" (specs/navigation.spec.md "share a link"): absolute url on
   // the clipboard; the pressed control's label flips to "Copied" for 2 sec.
   // The desktop app's own origin (app://specdriven) means nothing outside its
-  // window, so there the shared url is the registered specdriven:// scheme.
+  // window, so there the shared url is the registered specdriven:// scheme,
+  // which names the open spec folder (src/frontend/shareLink.ts).
   const copyLink = async (path: string) => {
-    const url = location.protocol === "app:" ? desktopLink(path) : location.origin + path;
+    const url = shareUrl(path);
     if (!(await copyText(url))) {
       toast.error("Could not copy the link to the clipboard.");
       return;
