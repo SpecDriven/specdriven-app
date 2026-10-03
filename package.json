@@ -158,6 +158,7 @@
     "lodash-es": "^4.18.1",
     "@automerge/automerge": "^3.5.0",
     "@codemirror/state": "^6.7.6",
-    "@codemirror/view": "^6.43.13"
+    "@codemirror/view": "^6.43.13",
+    "sass": "^1.105.1"
   }
 }
