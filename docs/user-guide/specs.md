@@ -310,8 +310,12 @@ Every page has a stable url:
 `<feature>` is the file path without `.feature.md`, folders included;
 `<scenario>` is the scenario name in lower case with hyphens. **Copy link**
 on a feature page, a card or the editor puts the url on the clipboard. In the
-desktop app the same paths work as `specdriven://` links, so a url pasted into
-a ticket opens the app.
+desktop app the link is a `specdriven://` url that names the spec folder
+first, then the same path — `specdriven://specs-insurance/features/quotes`,
+`specdriven://specs-insurance/tasks/<task>` — so a url pasted into a ticket
+opens the app on that folder, switching to it when another one is open. The
+folder is matched by name against the folders in your folder list; a link
+without one opens in the folder that is open.
 
 A url whose feature or scenario has been deleted opens the nearest page with
 a note saying what was not found.

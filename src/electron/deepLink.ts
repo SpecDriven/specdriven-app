@@ -1,16 +1,20 @@
 // Links that arrive from outside the app (specs/navigation.spec.md "links
 // from outside the app"): the OS hands the desktop shell a `specdriven://`
-// url, which carries the same paths the window already routes on. Pure url
-// logic, kept out of main.ts so it runs under bun test.
+// url, which carries the same paths the window already routes on — after the
+// spec folder's name (`specdriven://specs-insurance/tasks/ship`), which the
+// window reads off and switches to (src/frontend/route.ts splitRepoPath).
+// Pure url logic, kept out of main.ts so it runs under bun test.
 
 import { DESKTOP_SCHEME } from "../frontend/route";
 
 /**
  * App path for a `specdriven://` url, or null when it isn't one.
  *
- * `specdriven://features/quotes` parses `features` as the url *host*, so the
- * app path is host + pathname; the three-slash form `specdriven:///features/
- * quotes` has an empty host and carries the whole path. Query and fragment
+ * `specdriven://specs-insurance/features/quotes` parses the folder name as
+ * the url *host*, so the app path is host + pathname
+ * (`/specs-insurance/features/quotes`); the three-slash form
+ * `specdriven:///features/quotes` has an empty host and carries the whole
+ * path. Query and fragment
  * are dropped — parseRoute only reads the path.
  */
 export function parseDesktopLink(raw: string): string | null {
