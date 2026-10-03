@@ -203,12 +203,15 @@ test.skipIf(process.platform === "linux")("the app watches a plugin under develo
   const before = row("hello")!.rev;
   await new Promise((r) => setTimeout(r, 150));
   await fixture(dir, "hello", { greeting: "watched" });
+  // The row's revision moves as soon as the build lands, a beat before the
+  // remount has the new route answering: wait for the route itself.
+  const greeting = async () => ((await (await get("/api/hello"))?.json()) as { greeting?: string } | undefined)?.greeting;
   const deadline = Date.now() + 5000;
-  while (row("hello")!.rev === before && Date.now() < deadline) {
+  while ((await greeting()) !== "watched" && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 100));
   }
   expect(row("hello")!.rev).not.toBe(before);
-  expect(await (await get("/api/hello"))!.json()).toEqual({ greeting: "watched" });
+  expect(await greeting()).toBe("watched");
 });
 
 test("switching a folder plugin off unwinds its routes, and on mounts it again", async () => {
