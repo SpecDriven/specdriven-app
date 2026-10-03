@@ -430,11 +430,11 @@ PMs publish spec versions; developers own the tests.
 
 ## License
 
-specdriven.app Community Edition is source-available under the
-[SpecDriven Source Available License 1.0](LICENSE.md) (SSAL-1.0). You may
-run it inside your own organization for any purpose, including commercial
-use, and modify it by hand or with an AI coding assistant. You may not offer
-it to third parties as a hosted or managed service, build a competing product
-with it, circumvent license-key or edition restrictions, or publish its source
-(or your modifications) on any public code hosting service. For anything
-beyond that, contact hello@specdriven.app.
+specdriven.app is source-available under the unmodified
+[PolyForm Perimeter 1.0.1](https://polyformproject.org/licenses/perimeter/1.0.1)
+license, not unrestricted open source. Internal business use, including
+commercial and production use, is permitted, and you may change and
+distribute the software; using it to provide a product that competes with
+specdriven.app is restricted. Read [LICENSE.md](LICENSE.md) and
+[NOTICE.md](NOTICE.md). For anything beyond that, contact
+info@specdriven.app.
