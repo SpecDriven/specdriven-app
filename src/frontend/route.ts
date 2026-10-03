@@ -84,9 +84,44 @@ export function parseRoute(pathname: string): Route {
  */
 export const DESKTOP_SCHEME = "specdriven";
 
-/** `/features/quotes` -> `specdriven://features/quotes`. */
-export function desktopLink(path: string): string {
-  return `${DESKTOP_SCHEME}://${path.replace(/^\/+/, "")}`;
+/**
+ * `/features/quotes` -> `specdriven://<repo>/features/quotes`. A link leaves
+ * the window, where nothing says which spec folder it belongs to, so it
+ * names the folder first — `repo` is the data repo as configured (a path or
+ * a GitHub url), shortened to its display name. Without one the link is the
+ * bare path, the shape links had before they carried the folder.
+ */
+export function desktopLink(path: string, repo?: string | null): string {
+  const rest = path.replace(/^\/+/, "");
+  const name = repo ? repoDisplayName(repo) : "";
+  if (!name) return `${DESKTOP_SCHEME}://${rest}`;
+  return `${DESKTOP_SCHEME}://${encodeURIComponent(name)}${rest ? `/${rest}` : ""}`;
+}
+
+/** An app path split into the spec folder a desktop link names and the rest. */
+export interface RepoPath {
+  /** The configured data repo the first segment names, or null for none. */
+  repo: string | null;
+  path: string;
+}
+
+/**
+ * Read the spec folder off the front of a desktop link's path
+ * (`/specs-insurance/tasks/ship` -> `specs-insurance`, `/tasks/ship`). The
+ * first segment names a folder when it is the display name of one of
+ * `repos` — the folders this machine knows, the open one first so it wins a
+ * name two folders share. Case is ignored: some url parsers lowercase a
+ * host. Anything else is a path from before links carried the folder, and
+ * is returned as is.
+ */
+export function splitRepoPath(pathname: string, repos: readonly string[]): RepoPath {
+  const segs = pathname.split("/").filter(Boolean);
+  const first = segs[0];
+  if (!first) return { repo: null, path: pathname };
+  const name = decode(first).toLowerCase();
+  const repo = repos.find((r) => repoDisplayName(r).toLowerCase() === name);
+  if (!repo) return { repo: null, path: pathname };
+  return { repo, path: `/${segs.slice(1).join("/")}` };
 }
 
 /**

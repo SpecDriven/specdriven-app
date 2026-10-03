@@ -28,6 +28,7 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { renderMarkdown } from "./markdown";
+import { shareUrl } from "./shareLink";
 import { toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
@@ -83,7 +84,7 @@ export async function reopenIssueFlow(issue: Issue): Promise<void> {
 
 async function copyIssuesLink(view: IssuesRoute): Promise<void> {
   const path = issuesPath(view);
-  const url = location.protocol === "app:" ? `specdriven://${path.replace(/^\/+/, "")}` : location.origin + path;
+  const url = shareUrl(path);
   try {
     await navigator.clipboard.writeText(url);
     toast.success("Link copied.");

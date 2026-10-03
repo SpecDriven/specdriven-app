@@ -45,7 +45,7 @@ import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
 import { EntryKindChip, dayOf, entryGroups, entryKindOf } from "../notebook";
 import { createPromiseQueue } from "../promiseQueue";
-import { desktopLink } from "../route";
+import { shareUrl } from "../shareLink";
 import {
   pageGroups,
   pageListingMetaEqual,
@@ -463,7 +463,7 @@ export function PagePane({
     const minutes = parseEstimate(estimateText);
     const start = fromLocalInput(startLocal);
     if (minutes === null || start === null) return null;
-    const shared = location.protocol === "app:" ? desktopLink(link) : location.origin + link;
+    const shared = shareUrl(link);
     const body = parsePage(text).body.trim();
     const excerpt = body.length > 300 ? `${body.slice(0, 300)}…` : body;
     return googleCalendarUrl({
