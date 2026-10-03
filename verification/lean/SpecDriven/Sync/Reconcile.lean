@@ -106,38 +106,54 @@ def plan (entries : List SpecEntry) (target : Feature) (scenario : Option Scenar
 def assignLinkOps (before after : Option ExternalLink) (mk : Option ExternalLink → Op) : List Op :=
   if linkKey before == linkKey after then [] else [mk after]
 
-/-- The `A.change` block of `reconcile`, given the plan: the ops it issues
-and the document afterwards. Updates first, removals in descending index
-order skipping drafts, additions last. -/
+/-- One entry after the update pass: the entry and the ops that moved it to
+its claimed target, or the entry untouched. -/
+def updateEntry (p : Plan) (i : Nat) (e : SpecEntry) : SpecEntry × List Op :=
+  match p.at? i with
+  | none => (e, [])
+  | some m =>
+    let ops :=
+      (if e.name != m.name then [Op.entryUpdateName i m.name] else []) ++
+      (if e.version != m.version then [Op.entrySetVersion i m.version] else []) ++
+      (if e.status != m.status then [Op.entrySetStatus i m.status] else []) ++
+      (if e.body != m.body then [Op.entryUpdateBody i m.body] else []) ++
+      (if e.tests != m.tests then [Op.entrySetTests i m.tests] else []) ++
+      assignLinkOps e.link m.link (Op.entrySetLink i)
+    ({ e with name := m.name, version := m.version, status := m.status, body := m.body,
+              tests := m.tests, link := m.link }, ops)
+
+def updatedSpecs (p : Plan) (specs : List SpecEntry) : List (SpecEntry × List Op) :=
+  (enumerate specs).map fun (i, e) => updateEntry p i e
+
+/-- The entries that survive: claimed ones (updated) and unclaimed drafts. -/
+def keptSpecs (p : Plan) (specs : List SpecEntry) : List SpecEntry :=
+  ((enumerate (updatedSpecs p specs)).filter fun (i, x) => p.has i || x.1.status == .draft).map (·.2.1)
+
+/-- The indices removed, in descending order. -/
+def deletedIdx (p : Plan) (specs : List SpecEntry) : List Nat :=
+  (((enumerate specs).filter fun (i, e) => !p.has i && e.status != .draft).map (·.1)).reverse
+
+/-- The target scenarios nobody claimed, as new entries. -/
+def addedSpecs (fresh : Nat → String) (target : Feature) (p : Plan) : List SpecEntry :=
+  (enumerate (target.scenarios.filter fun s => !p.isMatched s)).map fun (i, s) => newEntry (fresh i) s
+
+/-- The `A.change` block of `reconcile`, given the plan: the document
+afterwards and the ops it issued. Updates first, removals in descending
+index order skipping drafts, additions last. -/
 def applyPlan (fresh : Nat → String) (d : FeatureDoc) (target : Feature) (p : Plan) :
     FeatureDoc × List Op :=
   let nameOps := if d.name != target.name then [Op.updateName target.name] else []
   let descOps := if d.description != target.description then [Op.updateDescription target.description] else []
   let linkOps := assignLinkOps d.link target.link Op.setLink
-  let assignedOps :=
-    if (d.assigned.getD "") != (target.assigned.getD "") then [Op.setAssigned target.assigned] else []
-  let updated : List (SpecEntry × List Op) := (enumerate d.specs).map fun (i, e) =>
-    match p.at? i with
-    | none => (e, [])
-    | some m =>
-      let ops :=
-        (if e.name != m.name then [Op.entryUpdateName i m.name] else []) ++
-        (if e.version != m.version then [Op.entrySetVersion i m.version] else []) ++
-        (if e.status != m.status then [Op.entrySetStatus i m.status] else []) ++
-        (if e.body != m.body then [Op.entryUpdateBody i m.body] else []) ++
-        (if e.tests != m.tests then [Op.entrySetTests i m.tests] else []) ++
-        assignLinkOps e.link m.link (Op.entrySetLink i)
-      ({ e with name := m.name, version := m.version, status := m.status, body := m.body,
-                tests := m.tests, link := m.link }, ops)
-  let updateOps := updated.foldl (fun acc (_, ops) => acc ++ ops) []
-  let kept := ((enumerate updated).filter fun (i, e, _) => p.has i || e.status == .draft).map (·.2.1)
-  let deleteOps := (((enumerate d.specs).filter fun (i, e) => !p.has i && e.status != .draft).map (·.1)).reverse.map Op.deleteAt
-  let additions := target.scenarios.filter (fun s => !p.isMatched s)
-  let added := (enumerate additions).map fun (i, s) => newEntry (fresh i) s
+  let assignedChanged := (d.assigned.getD "") != (target.assigned.getD "")
+  let assignedOps := if assignedChanged then [Op.setAssigned target.assigned] else []
+  let updateOps := (updatedSpecs p d.specs).foldl (fun acc x => acc ++ x.2) []
+  let added := addedSpecs fresh target p
   ({ d with name := target.name, description := target.description, link := target.link,
-            assigned := match target.assigned with | some "" => none | a => a,
-            specs := kept ++ added },
-   nameOps ++ descOps ++ linkOps ++ assignedOps ++ updateOps ++ deleteOps ++ added.map Op.push)
+            assigned := if assignedChanged then (match target.assigned with | some "" => none | a => a) else d.assigned,
+            specs := keptSpecs p d.specs ++ added },
+   nameOps ++ descOps ++ linkOps ++ assignedOps ++ updateOps ++
+     (deletedIdx p d.specs).map Op.deleteAt ++ added.map Op.push)
 
 /-- `reconcile` in reconcile.ts. -/
 def reconcile (fresh : Nat → String) (d : FeatureDoc) (target : Feature)

@@ -1,4 +1,14 @@
 import SpecDriven.Sync.Schema
 import SpecDriven.Sync.Projection
+import SpecDriven.Sync.Crdt
+import SpecDriven.Sync.Git
 import SpecDriven.Sync.Merge
 import SpecDriven.Sync.Reconcile
+import SpecDriven.Sync.Store
+import SpecDriven.Sync.Protocol
+import SpecDriven.Sync.Theorems.Merge
+import SpecDriven.Sync.Theorems.Store
+import SpecDriven.Sync.Theorems.Reconcile
+import SpecDriven.Sync.Theorems.Protocol
+import SpecDriven.Sync.Theorems.Hypotheses
+import SpecDriven.Sync.Theorems.Open

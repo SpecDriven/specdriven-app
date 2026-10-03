@@ -1,0 +1,171 @@
+// Traces from the Lean verification of the sync core
+// (verification/lean/SpecDriven/Sync/Theorems/Hypotheses.lean, REPORT.md):
+// hypotheses H1 and H2 of docs/lean-sync-verification-prompt.md, played
+// against the real implementation over real git transport. Each `failing`
+// test documents a confirmed weakness and flips to a failure when it is
+// fixed; the plain tests pin the behaviour the model proved.
+
+import { test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { importDrift } from "../../src/server/automerge/driftSync";
+import { projectFeature } from "../../src/server/automerge/project";
+import * as A from "@automerge/automerge";
+import { importFeatureDoc, reconcile } from "../../src/server/automerge/reconcile";
+import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
+import { parseFeature } from "../../src/server/parser";
+import { conflictedFiles } from "../../src/server/git";
+import { syncDataDir } from "../../src/server/reload";
+import { git, stopServers, twoClones } from "../helpers/fixtures";
+
+let root: string;
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), "specdriven-leanhyp-"));
+});
+
+afterEach(async () => {
+  stopServers();
+  await rm(root, { recursive: true, force: true });
+});
+
+const FILE = "specs/seed.feature.md";
+const ONE = "# Seed\n\n## Story @v1 [proposed]\n\n- line one\n- line two\n";
+const TWO =
+  "# Seed\n\n## Alpha @v1 [proposed]\n\n- alpha one\n- alpha two\n\n## Beta @v1 [proposed]\n\n- beta one\n- beta two\n";
+
+/** Both clones with the seed feature imported into one shared document. */
+async function seededClones(seed: string) {
+  const clones = await twoClones(root, { [FILE]: seed });
+  await syncDataDir(clones.a);
+  await syncDataDir(clones.b);
+  return clones;
+}
+
+async function settle(dir: string) {
+  await syncDataDir(dir);
+  await syncDataDir(dir);
+}
+
+/** A markdown-only commit on origin, as a GitHub PR merge would leave it. */
+async function pushMarkdownOnly(dir: string, text: string, message: string) {
+  await Bun.write(join(dir, FILE), text);
+  await git(dir, "add", FILE);
+  await git(dir, "commit", "-m", message);
+  await git(dir, "push");
+}
+
+// H1 Mixed-origin conflict. B saves Alpha through the app (operations in
+// chunk files) and, in the same push, hand-edits Beta (no operations). A's
+// concurrent save makes the pull conflict on the markdown; `autoResolveOne`
+// sees that operations arrived, skips the three-way merge and re-projects
+// the merged document — which never saw the hand edit. The drift pass then
+// finds the file equal to its projection, so nothing ever absorbs it.
+// Lean: Hypotheses.lean `H1_hand_edit_dropped`.
+test.failing("H1: a hand edit riding a push with operations is dropped by the ops-arrived resolution", async () => {
+  const { a, b } = await seededClones(TWO);
+
+  const viaApp = TWO.replace("- alpha one", "- alpha one, from B's app");
+  await saveFeature(b, FILE, viaApp);
+  const handEdited = viaApp.replace("- beta one", "- beta one, hand-edited on B");
+  await Bun.write(join(b, FILE), handEdited);
+  await git(b, "add", "-A");
+  await git(b, "commit", "-m", "app save plus hand edit");
+  await git(b, "push");
+
+  await saveFeature(a, FILE, TWO.replace("- alpha two", "- alpha two, from A"));
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+  await syncDataDir(b);
+  await syncDataDir(a);
+
+  const mdA = (await readFeature(a, FILE))!;
+  expect(mdA).toBe((await readFeature(b, FILE))!);
+  expect(mdA).toContain("from B's app");
+  expect(mdA).toContain("from A");
+  // The spec: "markdown edited outside the app" is absorbed. This edit is gone
+  // on both peers and in both documents.
+  expect(mdA).toContain("hand-edited on B");
+});
+
+// H2 Concurrent absorb duplicates text, then self-heals. Both peers absorb
+// the same markdown-only edit before either pushes; each mints its own
+// updateText splice for the same insertion, and the merged document holds
+// the insertion twice. The file is identical on both sides, so the pull is
+// clean, the doubled document is not a projection of it, and the drift pass
+// drives the document back to the file. Lean: `H2_doubled`, `H2_heals`.
+test("H2: concurrent absorbs double the text in the document, and the next drift pass heals it", async () => {
+  const { a, b } = await seededClones(ONE);
+
+  await pushMarkdownOnly(b, ONE.replace("- line two", "- line two, edited on GitHub"), "PR merge");
+  await git(a, "pull");
+  await importDrift(a); // absorbs: operations on A, not yet pushed
+  await importDrift(b); // absorbs: a second, concurrent set of operations on B
+
+  await syncDataDir(a); // commits and pushes A's chunks
+  // B's chunks and A's meet, without the drift pass that a tick would run
+  // right after the pull: the merged document holds the insertion twice.
+  await git(b, "add", "-A");
+  await git(b, "commit", "-m", "B's absorb");
+  await git(b, "pull", "--no-rebase");
+  const merged = (await loadFeatureDoc(b, FILE))!.doc;
+  expect(merged.specs[0]!.body).toBe("- line one\n- line two, edited on GitHub, edited on GitHub");
+  expect(await readFeature(b, FILE)).toBe(ONE.replace("- line two", "- line two, edited on GitHub"));
+
+  await syncDataDir(b); // the drift pass: the file is not a projection, absorb
+  await syncDataDir(a);
+  const docA = (await loadFeatureDoc(a, FILE))!.doc;
+  const docB = (await loadFeatureDoc(b, FILE))!.doc;
+  expect(docA.specs[0]!.body).toBe("- line one\n- line two, edited on GitHub");
+  expect(docB.specs[0]!.body).toBe(docA.specs[0]!.body);
+  expect(projectFeature(docA)).toBe((await readFeature(a, FILE))!);
+});
+
+// H2, the case the heal cannot reach. Between the two absorbs A publishes
+// the scenario. B's pull merges A's operations (published, body once) with
+// B's own absorb (body once): the document holds the insertion twice and is
+// published. The file carries the body once, so the drift pass tries to
+// absorb — and `assertPublishedKept` refuses, because the file's body differs
+// from the published entry's doubled body. The file is "repaired" to the
+// doubled projection, committed and pushed: the duplication is permanent.
+// Lean: Hypotheses.lean `H2_publish_locks_duplicate`.
+test.failing("H2: a publish between two concurrent absorbs makes the doubled text permanent", async () => {
+  const { a, b } = await seededClones(ONE);
+
+  await pushMarkdownOnly(b, ONE.replace("- line two", "- line two, edited on GitHub"), "PR merge");
+  await git(a, "pull");
+  await importDrift(a);
+  await importDrift(b);
+
+  await publishFeature(a, FILE, (await readFeature(a, FILE))!); // A: published, body once, pushed
+  await settle(b); // B: merges, then the drift pass refuses and repairs from the doubled doc
+  await syncDataDir(a);
+
+  const docA = (await loadFeatureDoc(a, FILE))!.doc;
+  const docB = (await loadFeatureDoc(b, FILE))!.doc;
+  expect(docA.specs[0]!.status).toBe("published");
+  expect(docB.specs[0]!.body).toBe(docA.specs[0]!.body);
+  expect(docA.specs[0]!.body).toBe("- line one\n- line two, edited on GitHub");
+  expect(await readFeature(a, FILE)).toBe((await readFeature(b, FILE))!);
+});
+
+// H4 Same-body claim mis-match. Two empty-bodied scenarios `a` and `b`; the
+// markdown now holds only `c`. Nothing in the markdown says whether `a` or
+// `b` was renamed, and the body pass attaches `c` to the first unclaimed
+// entry: `a`'s identity continues as `c` and `b`'s entry is removed. An
+// editor save carries the renamed entry's id and lands on the right one
+// (Lean T14). Lean: Hypotheses.lean `H4_markdown_picks_first`,
+// `H4_hint_picks_named`.
+test("H4: a markdown-only rename of one of two same-body scenarios lands on the first entry", () => {
+  const doc = importFeatureDoc(parseFeature("# F\n\n## a @v1 [proposed]\n\n## b @v1 [proposed]\n"));
+  const [a, b] = doc.specs.map((e) => e.id);
+  const renamed = parseFeature("# F\n\n## c @v1 [proposed]\n");
+
+  const fromMarkdown = reconcile(doc, renamed);
+  expect(fromMarkdown.specs.map((e) => [e.name, e.id])).toEqual([["c", a]]);
+
+  const fromEditor = reconcile(A.clone(doc), renamed, { scenario: { name: "c", version: 1, id: b } });
+  expect(fromEditor.specs.map((e) => [e.name, e.id])).toEqual([["c", b]]);
+});

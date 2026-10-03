@@ -12,8 +12,11 @@ never reach markdown (`id`, `prs`) are `Option`s on `Scenario`, as in
 namespace SpecDriven.Sync
 
 /-- `Array.prototype.entries`-style enumeration: (index, element) pairs. -/
-def enumerate {α : Type} (l : List α) : List (Nat × α) :=
-  l.zipIdx.map fun (a, i) => (i, a)
+def enumerateFrom {α : Type} : Nat → List α → List (Nat × α)
+  | _, [] => []
+  | n, a :: l => (n, a) :: enumerateFrom (n + 1) l
+
+def enumerate {α : Type} (l : List α) : List (Nat × α) := enumerateFrom 0 l
 
 /-- `ScenarioStatus` in parser.ts. -/
 inductive Status where
