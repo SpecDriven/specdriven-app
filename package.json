@@ -52,6 +52,7 @@
       "dist/**/*",
       "package.json",
       "LICENSE.md",
+      "NOTICE.md",
       "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
     ],
     "protocols": [
