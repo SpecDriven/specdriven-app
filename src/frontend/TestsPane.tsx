@@ -31,6 +31,7 @@ import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { Popover } from "./Popover";
 import { StatusIcon } from "./StatusIcon";
+import { shareUrl } from "./shareLink";
 import { SaveIndicator, toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { isTypingTarget } from "./shortcuts";
@@ -182,7 +183,7 @@ async function deleteRunFlow(run: TestPlanExecution, confirm: Confirm, go: Navig
 /** Absolute url for "Copy link" — the same rule as the app's copyLink. */
 async function copyTestsLink(view: TestsRoute): Promise<void> {
   const path = testsPath(view);
-  const url = location.protocol === "app:" ? `specdriven://${path.replace(/^\/+/, "")}` : location.origin + path;
+  const url = shareUrl(path);
   try {
     await navigator.clipboard.writeText(url);
     toast.success("Link copied.");
