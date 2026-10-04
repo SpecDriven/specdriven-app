@@ -10,6 +10,7 @@ import index from "./index.html";
 import { applyStartupState, handleApi } from "./server/api";
 import { shell } from "./plugins/host/loader";
 import { installDemoPlugins, isDemoMode, setupDemo } from "./server/demo";
+import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
 import { initTelemetry } from "./server/telemetry";
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
@@ -51,13 +52,23 @@ const routes = () => ({
   // are reloaded below when that happens.
   ...Object.fromEntries(shell.prefixes().flatMap((p) => [[p, index], [`${p}/*`, index]])),
 });
+// Every request the route table sees passes the trust-boundary check first
+// (src/server/requestGuard.ts): Host names this machine, writes come from
+// the app's own origin and carry JSON or a file upload.
+const extraHosts = allowedHosts();
 const fetch = async (req: Request) =>
-  (await handleApi(req)) ?? new Response("Not Found", { status: 404 });
+  rejectRequest(req, extraHosts) ??
+  (await handleApi(req)) ??
+  new Response("Not Found", { status: 404 });
 
 const server = Bun.serve({
   // 3000 unless PORT says otherwise — the compiled binary is a single file
   // someone may run alongside a dev server on the same machine.
   port: Number(process.env.PORT) || 3000,
+  // Loopback only unless SPECDRIVEN_HOST says otherwise: the API has no
+  // login, so it must not be reachable from the network (the demo image
+  // sets 0.0.0.0).
+  hostname: listenHostname(),
   // Bun idles a connection out after 10s by default, which is short for the
   // git clone/push and sync requests this server handles.
   idleTimeout: 60,
@@ -74,4 +85,7 @@ const server = Bun.serve({
 // shell there too, without a restart.
 shell.subscribe(() => server.reload({ routes: routes(), fetch }));
 
-console.log(`SpecDriven running at ${server.url}`);
+// Bound to 127.0.0.1 Bun reports that address; say localhost, the name the
+// docs use (it resolves to the same loopback).
+const shown = server.hostname === "127.0.0.1" ? `http://localhost:${server.port}/` : server.url;
+console.log(`SpecDriven running at ${shown}`);
