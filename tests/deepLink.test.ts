@@ -3,7 +3,9 @@ import { deepLinkFromArgv, parseDesktopLink } from "../src/electron/deepLink";
 import {
   desktopLink,
   featurePath,
-  isBuiltinRoute,
+  isLinkEntry,
+  linkEntry,
+  matchAppPage,
   parseRoute,
   scenarioPath,
   splitRepoPath,
@@ -130,47 +132,73 @@ describe("links that name their spec folder", () => {
     expect(splitRepoPath("/specs-insurance", repos)).toEqual({ repo: insurance, path: "/" });
   });
 
+  /**
+   * What App's routesSomewhere answers in a window with the tasks folder's
+   * plugin mounted — and no other plugin, like a folder whose own plugins
+   * are not loaded yet.
+   */
+  const routes = (path: string) =>
+    Boolean(matchAppPage(path) || parsePageRoute("tasks", path) || parseRoute(path).feature);
+
   test("a folder named after a route does not steal that route", () => {
     const features = "/Users/me/code/features";
     const tasks = "/Users/me/code/tasks";
     const settings = "/Users/me/code/settings";
     const named = [features, tasks, settings];
-    expect(splitRepoPath("/features/quotes", named)).toEqual({
+    expect(splitRepoPath("/features/quotes", named, routes)).toEqual({
       repo: null,
       path: "/features/quotes",
     });
-    expect(splitRepoPath("/features/quotes/scenarios/esc/v1", named)).toEqual({
+    expect(splitRepoPath("/features/quotes/scenarios/esc/v1", named, routes)).toEqual({
       repo: null,
       path: "/features/quotes/scenarios/esc/v1",
     });
-    expect(splitRepoPath("/tasks/ship", named)).toEqual({ repo: null, path: "/tasks/ship" });
-    expect(splitRepoPath("/settings", named)).toEqual({ repo: null, path: "/settings" });
-    // A second pass after switchRepo used to strip again: the remaining
-    // `/features/quotes` still starts with the folder's name.
-    expect(splitRepoPath("/features/quotes", [features])).toEqual({
-      repo: null,
-      path: "/features/quotes",
-    });
+    expect(splitRepoPath("/tasks/ship", named, routes)).toEqual({ repo: null, path: "/tasks/ship" });
+    expect(splitRepoPath("/settings", named, routes)).toEqual({ repo: null, path: "/settings" });
   });
 
   test("a named-folder link still splits when the rest is a route", () => {
     const features = "/Users/me/code/features";
-    expect(splitRepoPath("/specs-insurance/features/quotes", [...repos, features])).toEqual({
+    expect(splitRepoPath("/specs-insurance/features/quotes", [...repos, features], routes)).toEqual({
       repo: insurance,
       path: "/features/quotes",
     });
-    expect(splitRepoPath("/specs-insurance/tasks/ship", repos)).toEqual({
+    expect(splitRepoPath("/specs-insurance/tasks/ship", repos, routes)).toEqual({
       repo: insurance,
       path: "/tasks/ship",
     });
   });
 
+  test("a folder named after a route still takes a link into it", () => {
+    const tasks = "/Users/me/code/tasks";
+    expect(splitRepoPath("/tasks/features/quotes", [tasks], routes)).toEqual({
+      repo: tasks,
+      path: "/features/quotes",
+    });
+  });
+
   test("a folder-only link to a folder named features still opens that folder", () => {
     const features = "/Users/me/code/features";
-    expect(splitRepoPath("/features", [features])).toEqual({ repo: features, path: "/" });
-    expect(isBuiltinRoute("/features")).toBe(false);
-    expect(isBuiltinRoute("/features/quotes")).toBe(true);
-    expect(isBuiltinRoute("/tasks/ship")).toBe(true);
+    expect(splitRepoPath("/features", [features], routes)).toEqual({ repo: features, path: "/" });
+  });
+
+  test("a link to a view of a plugin this window has not mounted still names its folder", () => {
+    // The folder's own plugin (its .specdriven/plugins) loads only once the
+    // folder is open, so nothing here routes the rest — the switch must
+    // happen anyway, and the view opens there.
+    expect(splitRepoPath("/specs-insurance/event-storming/board", repos, routes)).toEqual({
+      repo: insurance,
+      path: "/event-storming/board",
+    });
+  });
+
+  test("a link carries a flag the window's own urls never do", () => {
+    const entry = linkEntry("/specs-insurance/features/quotes");
+    const url = new URL(entry, "app://specdriven");
+    expect(url.pathname).toBe("/specs-insurance/features/quotes");
+    expect(isLinkEntry(url.search)).toBe(true);
+    expect(isLinkEntry("")).toBe(false);
+    expect(isLinkEntry("?q=link")).toBe(false);
   });
 });
 

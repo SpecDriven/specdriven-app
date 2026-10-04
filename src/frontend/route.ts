@@ -85,6 +85,25 @@ export function parseRoute(pathname: string): Route {
 export const DESKTOP_SCHEME = "specdriven";
 
 /**
+ * Query flag the desktop shell puts on a path that came from a
+ * `specdriven://` link (src/electron/main.ts openDeepLink). Such a path may
+ * name its spec folder first; the window's own urls — a reload, Back — never
+ * do, so only a flagged path is read for one (splitRepoPath). The app drops
+ * the flag as soon as it has read it.
+ */
+export const LINK_PARAM = "link";
+
+/** `/specs-insurance/tasks/ship` -> `/specs-insurance/tasks/ship?link`. */
+export function linkEntry(path: string): string {
+  return `${path}?${LINK_PARAM}`;
+}
+
+/** Whether a url's query (`location.search`) marks it as a link from outside. */
+export function isLinkEntry(search: string): boolean {
+  return new URLSearchParams(search).has(LINK_PARAM);
+}
+
+/**
  * `/features/quotes` -> `specdriven://<repo>/features/quotes`. A link leaves
  * the window, where nothing says which spec folder it belongs to, so it
  * names the folder first — `repo` is the data repo as configured (a path or
@@ -114,20 +133,20 @@ export interface RepoPath {
  * host. Anything else is a path from before links carried the folder, and
  * is returned as is.
  *
- * A path that already names a view is never a folder prefix — even when a
- * folder's display name is the same word. `/features/quotes` while a folder
- * is named "features", or `/tasks/ship` while one is named "tasks", must
- * stay the view; stripping would leave `/quotes` / `/ship`, miss, and a
- * second pass after switchRepo would strip again. `isRoute` covers a
- * mounted custom plugin; built-in prefixes are always reserved.
+ * Only a link from outside may name its folder (see `LINK_PARAM`); the
+ * window's own urls never do. Links without a folder are still about
+ * (`specdriven://features/quotes`), so when a folder shares its name with a
+ * route word the path is read as that route if `isRoute` says it names a
+ * view and the rest would not — `/features/quotes` stays a feature even with
+ * a folder named "features", while `/features` alone, `/tasks/features/
+ * quotes` and a folder's own plugin view (not mounted in this window yet)
+ * still split.
  */
 export function splitRepoPath(
   pathname: string,
   repos: readonly string[],
   isRoute?: (path: string) => boolean,
 ): RepoPath {
-  const routed = (path: string) => isBuiltinRoute(path) || Boolean(isRoute?.(path));
-  if (routed(pathname)) return { repo: null, path: pathname };
   const segs = pathname.split("/").filter(Boolean);
   const first = segs[0];
   if (!first) return { repo: null, path: pathname };
@@ -135,10 +154,7 @@ export function splitRepoPath(
   const repo = repos.find((r) => repoDisplayName(r).toLowerCase() === name);
   if (!repo) return { repo: null, path: pathname };
   const rest = `/${segs.slice(1).join("/")}`;
-  // Only consume the folder when the rest is a view (or home). A first
-  // segment that matches a folder but leaves a non-route (`/features` →
-  // `/quotes`) was never a folder-prefixed link.
-  if (rest !== "/" && !routed(rest)) return { repo: null, path: pathname };
+  if (isRoute && isRoute(pathname) && !isRoute(rest)) return { repo: null, path: pathname };
   return { repo, path: rest };
 }
 
@@ -230,29 +246,4 @@ export function matchAppPage(pathname: string): AppPage | null {
   const segs = pathname.split("/").filter(Boolean);
   if (segs.length !== 1) return null;
   return APP_PAGES.find((p) => p === segs[0]) ?? null;
-}
-
-/**
- * Url prefixes the built-in plugins own (`/tasks`, `/tests`, …). A folder
- * whose display name is one of these must not steal those urls.
- */
-const BUILTIN_PLUGIN_PREFIXES = new Set([
-  "roadmap",
-  "tasks",
-  "notebook",
-  "tests",
-  "issues",
-  "models",
-]);
-
-/**
- * True when the path already names a view without a spec-folder prefix:
- * a feature, an app page, or a built-in plugin tab. `/features` alone is
- * not a view (parseRoute needs a feature name), so a folder named
- * "features" can still be the target of a folder-only link.
- */
-export function isBuiltinRoute(pathname: string): boolean {
-  if (matchAppPage(pathname) || parseRoute(pathname).feature) return true;
-  const first = pathname.split("/").filter(Boolean)[0];
-  return Boolean(first && BUILTIN_PLUGIN_PREFIXES.has(decode(first).toLowerCase()));
 }
