@@ -24,7 +24,7 @@ import { applyStartupState, handleApi } from "../server/api";
 import { setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
-import { DESKTOP_SCHEME } from "../frontend/route";
+import { DESKTOP_SCHEME, linkEntry } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
 import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
@@ -168,9 +168,10 @@ function openDeepLink(path: string): void {
   target.focus();
   const jump = () => {
     // JSON.stringify keeps a hostile url from breaking out of the string
-    // literal; from there the renderer routes it like any other popstate.
+    // literal; from there the renderer routes it like any other popstate —
+    // flagged as a link, so it may name its spec folder (linkEntry).
     void target.webContents.executeJavaScript(
-      `history.pushState(null, "", ${JSON.stringify(path)});` +
+      `history.pushState(null, "", ${JSON.stringify(linkEntry(path))});` +
         `dispatchEvent(new PopStateEvent("popstate"));`,
     );
   };
@@ -271,8 +272,9 @@ function createWindow(): void {
   });
 
   // A link that arrived before the window existed becomes its entry url —
-  // App.tsx resolves it on boot like any other deep link.
-  const entryPath = pendingDeepLink ?? "/";
+  // App.tsx resolves it on boot like any other deep link, flagged so it may
+  // name its spec folder (linkEntry).
+  const entryPath = pendingDeepLink ? linkEntry(pendingDeepLink) : "/";
   pendingDeepLink = null;
   void win.loadURL(DEV_URL ? `${DEV_URL}${entryPath}` : `${APP_ORIGIN}${entryPath}`);
 }
