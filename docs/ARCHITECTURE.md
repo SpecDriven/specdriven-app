@@ -28,6 +28,48 @@ Users that have read/write access to the repo that stores data.
 `.specdriven/settings.json`, in the project root or in `$HOME`
 (specs/app-start.spec.md)
 
+## Local trust boundary
+
+The API has no login of its own: it serves whoever owns the machine, with
+that person's git credentials and agent CLIs. Behind it sit routes that
+write the data repo (which then auto-pushes to GitHub), change settings,
+install plugins and start coding agents — up to `bypassPermissions` — that
+run commands. So the web server (`src/index.ts`) treats everything beyond
+the machine's own user as untrusted:
+
+- **Loopback only.** `Bun.serve` binds `127.0.0.1` (Bun's default is every
+  interface). `SPECDRIVEN_HOST` opens it up — not plain `HOST`, which shells
+  set to the machine's name.
+- **Every request passes `rejectRequest`** (`src/server/requestGuard.ts`)
+  before the route table, plugin routes included:
+  - *Host* must be a loopback name (`localhost`, `127.0.0.1`, `[::1]`,
+    `*.localhost`, any port) or listed in `SPECDRIVEN_ALLOWED_HOSTS`
+    (comma-separated; `*` turns the check off). This stops DNS rebinding,
+    where a hostile domain re-pointed at 127.0.0.1 would otherwise read and
+    drive the API as same-origin. → 403
+  - *Origin* on a POST/PUT/DELETE must have the request's own host (the
+    scheme is not compared, so a TLS-terminating proxy works). Without an
+    Origin, `Sec-Fetch-Site: cross-site` is refused; a request with neither
+    header is a non-browser client (curl, a script) and passes. This stops
+    any other website open in the same browser from posting to localhost.
+    → 403
+  - *Content-Type* of a write body must be `application/json` or
+    `multipart/form-data` (image upload). Handlers parse JSON whatever the
+    header says, and text/plain or form posts are the kinds a browser sends
+    cross-origin without a CORS preflight; this backs up the Origin check.
+    Body-less writes need no type. → 415
+- **The desktop app is outside it.** Electron serves the same `handleApi`
+  over its own `app://` scheme, which no web page can reach, so the guard
+  sits in the web server's `fetch`, not in `handleApi`.
+- **The demo image** (`Dockerfile`) sets `SPECDRIVEN_HOST=0.0.0.0` and
+  `SPECDRIVEN_ALLOWED_HOSTS=*`: it must answer on its public interface under
+  whatever domain the platform assigns, and its dataset is a throwaway copy.
+  The Origin and Content-Type checks still apply.
+
+What it does not cover: other processes and accounts on the same machine
+can still reach loopback. A per-launch token in a `SameSite=Strict` cookie
+would close that if the app ever runs on shared hosts.
+
 # Integration with AI coding agents
 
 "Start session" builds one prompt from the selected specs and hands it to an
