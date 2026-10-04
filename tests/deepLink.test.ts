@@ -3,6 +3,7 @@ import { deepLinkFromArgv, parseDesktopLink } from "../src/electron/deepLink";
 import {
   desktopLink,
   featurePath,
+  isBuiltinRoute,
   parseRoute,
   scenarioPath,
   splitRepoPath,
@@ -127,6 +128,49 @@ describe("links that name their spec folder", () => {
 
   test("a link to the folder alone is its home", () => {
     expect(splitRepoPath("/specs-insurance", repos)).toEqual({ repo: insurance, path: "/" });
+  });
+
+  test("a folder named after a route does not steal that route", () => {
+    const features = "/Users/me/code/features";
+    const tasks = "/Users/me/code/tasks";
+    const settings = "/Users/me/code/settings";
+    const named = [features, tasks, settings];
+    expect(splitRepoPath("/features/quotes", named)).toEqual({
+      repo: null,
+      path: "/features/quotes",
+    });
+    expect(splitRepoPath("/features/quotes/scenarios/esc/v1", named)).toEqual({
+      repo: null,
+      path: "/features/quotes/scenarios/esc/v1",
+    });
+    expect(splitRepoPath("/tasks/ship", named)).toEqual({ repo: null, path: "/tasks/ship" });
+    expect(splitRepoPath("/settings", named)).toEqual({ repo: null, path: "/settings" });
+    // A second pass after switchRepo used to strip again: the remaining
+    // `/features/quotes` still starts with the folder's name.
+    expect(splitRepoPath("/features/quotes", [features])).toEqual({
+      repo: null,
+      path: "/features/quotes",
+    });
+  });
+
+  test("a named-folder link still splits when the rest is a route", () => {
+    const features = "/Users/me/code/features";
+    expect(splitRepoPath("/specs-insurance/features/quotes", [...repos, features])).toEqual({
+      repo: insurance,
+      path: "/features/quotes",
+    });
+    expect(splitRepoPath("/specs-insurance/tasks/ship", repos)).toEqual({
+      repo: insurance,
+      path: "/tasks/ship",
+    });
+  });
+
+  test("a folder-only link to a folder named features still opens that folder", () => {
+    const features = "/Users/me/code/features";
+    expect(splitRepoPath("/features", [features])).toEqual({ repo: features, path: "/" });
+    expect(isBuiltinRoute("/features")).toBe(false);
+    expect(isBuiltinRoute("/features/quotes")).toBe(true);
+    expect(isBuiltinRoute("/tasks/ship")).toBe(true);
   });
 });
 

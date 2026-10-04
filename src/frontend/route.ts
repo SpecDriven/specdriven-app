@@ -113,15 +113,33 @@ export interface RepoPath {
  * name two folders share. Case is ignored: some url parsers lowercase a
  * host. Anything else is a path from before links carried the folder, and
  * is returned as is.
+ *
+ * A path that already names a view is never a folder prefix — even when a
+ * folder's display name is the same word. `/features/quotes` while a folder
+ * is named "features", or `/tasks/ship` while one is named "tasks", must
+ * stay the view; stripping would leave `/quotes` / `/ship`, miss, and a
+ * second pass after switchRepo would strip again. `isRoute` covers a
+ * mounted custom plugin; built-in prefixes are always reserved.
  */
-export function splitRepoPath(pathname: string, repos: readonly string[]): RepoPath {
+export function splitRepoPath(
+  pathname: string,
+  repos: readonly string[],
+  isRoute?: (path: string) => boolean,
+): RepoPath {
+  const routed = (path: string) => isBuiltinRoute(path) || Boolean(isRoute?.(path));
+  if (routed(pathname)) return { repo: null, path: pathname };
   const segs = pathname.split("/").filter(Boolean);
   const first = segs[0];
   if (!first) return { repo: null, path: pathname };
   const name = decode(first).toLowerCase();
   const repo = repos.find((r) => repoDisplayName(r).toLowerCase() === name);
   if (!repo) return { repo: null, path: pathname };
-  return { repo, path: `/${segs.slice(1).join("/")}` };
+  const rest = `/${segs.slice(1).join("/")}`;
+  // Only consume the folder when the rest is a view (or home). A first
+  // segment that matches a folder but leaves a non-route (`/features` →
+  // `/quotes`) was never a folder-prefixed link.
+  if (rest !== "/" && !routed(rest)) return { repo: null, path: pathname };
+  return { repo, path: rest };
 }
 
 /**
@@ -212,4 +230,29 @@ export function matchAppPage(pathname: string): AppPage | null {
   const segs = pathname.split("/").filter(Boolean);
   if (segs.length !== 1) return null;
   return APP_PAGES.find((p) => p === segs[0]) ?? null;
+}
+
+/**
+ * Url prefixes the built-in plugins own (`/tasks`, `/tests`, …). A folder
+ * whose display name is one of these must not steal those urls.
+ */
+const BUILTIN_PLUGIN_PREFIXES = new Set([
+  "roadmap",
+  "tasks",
+  "notebook",
+  "tests",
+  "issues",
+  "models",
+]);
+
+/**
+ * True when the path already names a view without a spec-folder prefix:
+ * a feature, an app page, or a built-in plugin tab. `/features` alone is
+ * not a view (parseRoute needs a feature name), so a folder named
+ * "features" can still be the target of a folder-only link.
+ */
+export function isBuiltinRoute(pathname: string): boolean {
+  if (matchAppPage(pathname) || parseRoute(pathname).feature) return true;
+  const first = pathname.split("/").filter(Boolean)[0];
+  return Boolean(first && BUILTIN_PLUGIN_PREFIXES.has(decode(first).toLowerCase()));
 }

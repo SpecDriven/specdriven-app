@@ -1972,7 +1972,11 @@ export function App() {
     // folder other than the open one is switched to, which then opens the
     // rest of the path there.
     const { open, recent } = reposRef.current;
-    const linked = splitRepoPath(pathname, open ? [open, ...recent] : recent);
+    const linked = splitRepoPath(
+      pathname,
+      open ? [open, ...recent] : recent,
+      routesSomewhere,
+    );
     if (linked.repo) {
       pathname = linked.path;
       history.replaceState(history.state, "", pathname);
