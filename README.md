@@ -52,7 +52,12 @@ bun run start          # no hot reload
 bun run dev:electron   # desktop shell; expects `bun run dev` in another terminal
 ```
 
-The server listens on <http://localhost:3000>; set `PORT` to move it. Setting
+The server listens on <http://localhost:3000>, loopback only; set `PORT` to
+move it. The API has no login, so it refuses requests from other machines,
+from other websites open in your browser, and for host names that are not
+this machine — see "Local trust boundary" in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for `SPECDRIVEN_HOST` and
+`SPECDRIVEN_ALLOWED_HOSTS`, which open it up for a deployment. Setting
 `NODE_ENV=production` disables HMR and serves the pre-bundled frontend, which is
 what the compiled binary does. `dev:electron` points the desktop window at the
 running dev server, so edits hot-reload inside the desktop shell too.
