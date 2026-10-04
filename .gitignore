@@ -8,3 +8,4 @@ data-sample
 dist
 release
 /.env
+.carbon
