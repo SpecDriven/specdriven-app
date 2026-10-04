@@ -263,6 +263,37 @@ test("the data directory, git engine and sync server are pinned (403)", async ()
   expect(ok.status).toBe(200);
 });
 
+test("plugin folders, trust and marketplaces are pinned (403); switching plugins still saves", async () => {
+  const folder = join(root, "visitor-plugin");
+  for (const plugins of [
+    { sources: [folder] },
+    { trust: folder },
+    { marketplaces: [{ name: "visitor", source: folder }] },
+    { enabled: ["notebook"], sources: [folder] },
+  ]) {
+    const res = await api("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plugins }),
+    });
+    expect(`${JSON.stringify(plugins)} → ${res.status}`).toBe(`${JSON.stringify(plugins)} → 403`);
+  }
+  const section = ((await readState(root)) as { plugins?: Record<string, unknown> })
+    .plugins ?? {};
+  expect(section.sources).toBeUndefined();
+  expect(section.trusted).toBeUndefined();
+  expect(section.marketplaces).toBeUndefined();
+
+  // A visitor still switches and reorders the plugins on offer.
+  const enabled = (section.enabled as string[]).filter((id) => id !== "notebook");
+  const ok = await api("/api/state", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plugins: { enabled } }),
+  });
+  expect(ok.status).toBe(200);
+});
+
 test("GitHub sign-in routes refuse in demo mode", async () => {
   for (const [method, path] of [
     ["POST", "/api/auth/github/start"],
