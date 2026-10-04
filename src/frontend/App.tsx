@@ -135,6 +135,7 @@ import { ScenarioTable } from "./ScenarioTable";
 import {
   appPagePath,
   featurePath,
+  isLinkEntry,
   matchAppPage,
   pagePath,
   parseRoute,
@@ -1594,6 +1595,7 @@ export function App() {
     // effect would rewrite a deep link before we get to honor it
     // (specs/navigation.spec.md "deep link before a data repo is configured").
     const entryPath = location.pathname;
+    const entryLink = isLinkEntry(location.search);
     setSettingRepo(true);
     setRepoError(null);
     try {
@@ -1616,7 +1618,7 @@ export function App() {
           loadReadme(),
           syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
         ]);
-        await openFromLocation(entryPath);
+        await openFromLocation(entryPath, entryLink);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
       }
@@ -1730,7 +1732,9 @@ export function App() {
         ]);
         if (entryPath && entryPath !== "/") {
           history.replaceState(null, "", entryPath);
-          await openFromLocationRef.current(entryPath);
+          // Already read off the link: a folder named like its first segment
+          // must not take it a second time.
+          await openFromLocationRef.current(entryPath, false);
         }
       } else {
         toast.error(state.error ?? "Could not use this directory");
@@ -1964,32 +1968,45 @@ export function App() {
     return watchPluginChanges(() => void refreshPlugins());
   }, [loading, demo, refreshPlugins]);
 
-  /** Derive the view from a url (initial load, popstate, after repo setup). */
-  const openFromLocation = async (pathname = location.pathname): Promise<void> => {
+  /**
+   * Derive the view from a url (initial load, popstate, after repo setup).
+   * `link` says the path came from outside the window (src/electron/main.ts
+   * flags it, route.ts LINK_PARAM): only then may it name a spec folder.
+   */
+  const openFromLocation = async (
+    pathname = location.pathname,
+    link = isLinkEntry(location.search),
+  ): Promise<void> => {
     // A link from outside names its spec folder first
     // (`specdriven://specs-insurance/tasks/ship`): the window's url drops it
     // — the folder on screen is the app's state, not the url's — and a
     // folder other than the open one is switched to, which then opens the
-    // rest of the path there.
-    const { open, recent } = reposRef.current;
-    const linked = splitRepoPath(pathname, open ? [open, ...recent] : recent);
-    if (linked.repo) {
-      pathname = linked.path;
+    // rest of the path there. The window's own url — a reload, Back — never
+    // names a folder, so a folder called "features" or "tasks" can't take
+    // its first segment there.
+    if (link) {
+      // Drop the flag too, so Back to this entry is not a link again.
       history.replaceState(history.state, "", pathname);
-      if (linked.repo !== open) {
-        await switchRepo(linked.repo, pathname);
-        return;
-      }
-    } else if (!routesSomewhere(pathname)) {
-      // Not a path the app knows, but one once its first segment is gone: a
-      // link to a folder this machine has never opened.
-      const [first, ...rest] = pathname.split("/").filter(Boolean);
-      if (first && rest.length > 0 && routesSomewhere(`/${rest.join("/")}`)) {
-        toast.error(
-          `This link is for the spec folder “${decodeSegment(first)}”, which isn't in your folder list. Open that folder, then follow the link again.`,
-        );
-        pathname = "/";
+      const { open, recent } = reposRef.current;
+      const linked = splitRepoPath(pathname, open ? [open, ...recent] : recent, routesSomewhere);
+      if (linked.repo) {
+        pathname = linked.path;
         history.replaceState(history.state, "", pathname);
+        if (linked.repo !== open) {
+          await switchRepo(linked.repo, pathname);
+          return;
+        }
+      } else if (!routesSomewhere(pathname)) {
+        // Not a path the app knows, but one once its first segment is gone: a
+        // link to a folder this machine has never opened.
+        const [first, ...rest] = pathname.split("/").filter(Boolean);
+        if (first && rest.length > 0 && routesSomewhere(`/${rest.join("/")}`)) {
+          toast.error(
+            `This link is for the spec folder “${decodeSegment(first)}”, which isn't in your folder list. Open that folder, then follow the link again.`,
+          );
+          pathname = "/";
+          history.replaceState(history.state, "", pathname);
+        }
       }
     }
     const route = parseRoute(pathname);
