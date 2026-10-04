@@ -351,12 +351,14 @@ async function currentDataDir(): Promise<string | null> {
  * plugin found for the first time added to the profile and stored. The
  * demo's folders are its own home's alone — what it installed from the
  * marketplace at start (demo.ts installDemoPlugins); its dataset is
- * ephemeral, so the data folder's plugins are not read there.
+ * ephemeral, so the data folder's plugins are not read there, and neither
+ * are the profile's explicit folders — its host is shared.
  */
 async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   const raw = state as Record<string, unknown>;
   return syncPlugins(raw, {
     sources: true,
+    paths: !isDemoMode(),
     dataDir: isDemoMode() ? null : await currentDataDir(),
     persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
@@ -533,6 +535,19 @@ const putState: Handler = async (req) => {
       body.syncServerUrl !== undefined)
   ) {
     return json({ error: "changing the data directory is disabled in demo mode" }, 403);
+  }
+  // The plugins' sources are pinned too: a visitor may switch and reorder
+  // plugins, but a folder, a trust grant or a marketplace would have the
+  // shared host build and run code a visitor chose.
+  if (
+    isDemoMode() &&
+    body.plugins &&
+    typeof body.plugins === "object" &&
+    (body.plugins.sources !== undefined ||
+      body.plugins.trust !== undefined ||
+      body.plugins.marketplaces !== undefined)
+  ) {
+    return json({ error: "plugin folders and marketplaces cannot be changed in demo mode" }, 403);
   }
   const state = await readState(getAppRoot());
   // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"

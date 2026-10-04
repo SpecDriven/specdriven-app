@@ -306,6 +306,19 @@ test("a plugin under the data repo asks for trust before its first load", async 
   expect(await (await get("/api/team"))!.json()).toEqual({ greeting: "hello" });
 });
 
+test("the profile's explicit folders are not read with paths off, as in the hosted demo", async () => {
+  const dir = await fixture(join(repo, "linked"), "linked");
+  const state: Record<string, unknown> = { plugins: { enabled: ["linked"], sources: [{ path: dir }] } };
+  await syncPlugins(state, { sources: true, dataDir: null, paths: false });
+  expect(row("linked")?.installed ?? false).toBe(false);
+  expect(matchApi("GET", "/api/linked")).toBeNull();
+
+  // With paths on — everywhere but the demo — the same folder loads.
+  await syncPlugins(state, { sources: true, dataDir: null });
+  expect(row("linked")).toMatchObject({ source: "path", dir, active: true });
+  expect(matchApi("GET", "/api/linked")).not.toBeNull();
+});
+
 test("a plugin that fails to load fails alone", async () => {
   await fixture(join(pluginsHome(), "hello"), "hello");
   await fixture(join(pluginsHome(), "broken"), "broken", { throws: "boom at apply" });
