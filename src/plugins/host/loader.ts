@@ -157,10 +157,14 @@ let lastOptions: SyncOptions = {};
 export interface SyncOptions {
   /**
    * Look for plugins in the folders too — `~/.specdriven/plugins`, the data
-   * repo's `.specdriven/plugins`, the profile's `sources`. Off by default,
-   * and off in the hosted demo.
+   * repo's `.specdriven/plugins`, the profile's `sources`. Off by default.
    */
   sources?: boolean;
+  /**
+   * Read the profile's `sources` paths when scanning. On by default; off
+   * in the hosted demo, whose plugins are its home folder's alone.
+   */
+  paths?: boolean;
   /** The data repo, for its own plugins folder; null when none is configured. */
   dataDir?: string | null;
   /**
@@ -193,7 +197,7 @@ export function syncPlugins(
     if (options.sources) {
       const found = await discoverPlugins({
         dataDir: options.dataDir ?? null,
-        paths: sourcePaths(section),
+        paths: options.paths === false ? [] : sourcePaths(section),
         appVersion,
       });
       const trusted = stringList(section.trusted);
