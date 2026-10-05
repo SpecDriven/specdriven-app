@@ -243,7 +243,7 @@ describe("the GitHub API", () => {
   test("creating an issue posts its title and body", async () => {
     await signIn();
     answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(10, { title: "Crash on save", body: "Steps…" }) };
-    const issue = await createIssue(REPO, { title: "  Crash on save ", body: "Steps…" });
+    const issue = await createIssue(REPO, { title: "  Crash   on save ", body: "\nSteps…\n\n" });
     expect(issue.number).toBe(10);
     expect(seen[0]!.body).toEqual({ title: "Crash on save", body: "Steps…" });
     // A blank body is left out rather than sent as an empty description.

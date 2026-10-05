@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { PullRequestLink } from "../server/parser";
 import type { PullRequestLookup } from "../server/pullRequests";
 import { isPullRequestUrl, parsePullRequestUrl, pullRequestLabel } from "../server/pullRequests";
+import { cleanLine } from "../server/text";
 
 /** The list of pull requests on a card or in a popover: `#n title`, each a link. */
 export function PullRequestList({ prs, className }: { prs: PullRequestLink[]; className?: string }) {
@@ -93,7 +94,7 @@ export function PullRequestField({
 
   const add = () => {
     if (!canAddPullRequest(prs, url)) return;
-    void onChange([...prs, { url: url.trim(), title: title.trim() }]);
+    void onChange([...prs, { url: url.trim(), title: cleanLine(title) }]);
     setUrl("");
     setTitle("");
     titleTyped.current = false;

@@ -71,7 +71,7 @@ async function scaffold(args: string[], io: CliIo): Promise<number> {
     io.error(`"${id}" is not a plugin id: lowercase letters, digits, ".", "_", "-", optionally @scope/.`);
     return 2;
   }
-  const dir = resolve(dirArg ?? id.replace(/^@[^/]+\//, ""));
+  const dir = resolve(dirArg?.trim() || id.replace(/^@[^/]+\//, ""));
   const existing = await readdir(dir).catch(() => null);
   if (existing && existing.length > 0) {
     io.error(`${dir} exists and is not empty.`);
@@ -273,7 +273,7 @@ export default {
 // ---- build ------------------------------------------------------------------
 
 async function build(args: string[], io: CliIo): Promise<number> {
-  const dir = resolve(args[0] ?? ".");
+  const dir = resolve(args[0]?.trim() || ".");
   if (!canBuild()) {
     io.error("Building needs Bun: run this with the specdriven binary or `bun src/index.ts plugin build`.");
     return 1;
@@ -309,7 +309,7 @@ async function build(args: string[], io: CliIo): Promise<number> {
 // ---- link -------------------------------------------------------------------
 
 async function link(args: string[], io: CliIo): Promise<number> {
-  const dir = resolve(args[0] ?? ".");
+  const dir = resolve(args[0]?.trim() || ".");
   const raw = JSON.parse(await readFile(join(dir, "package.json"), "utf8")) as unknown;
   const manifest = parsePackageManifest(raw, appVersion);
   const root = getAppRoot();

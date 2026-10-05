@@ -84,6 +84,7 @@ import {
 import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
+import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
@@ -400,7 +401,18 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  */
 export function scenarioSignature(s: Scenario, version: number): string {
   // The name as a save writes it: a stray space is nothing new to save.
-  return JSON.stringify([s.name.trim(), version, s.status, s.body, s.tests, s.link ?? null]);
+  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null]);
+}
+
+/**
+ * The name a save writes for the scenario (specs/ui/ui.feature.md
+ * "User-entered text is cleaned up"): trimmed with inner runs of spaces
+ * collapsed — except a published scenario's, which is immutable and only
+ * saves for its test links, so its heading is kept verbatim (a changed one
+ * would read as a rename the document must refuse).
+ */
+export function savedScenarioName(s: Pick<Scenario, "name" | "status">): string {
+  return s.status === "published" ? s.name.trim() : cleanLine(s.name);
 }
 
 /**
@@ -440,7 +452,7 @@ export function nextVersionIn(
   ignoreIndex?: number,
 ): number {
   const versions = (feature?.scenarios ?? [])
-    .filter((s, i) => i !== ignoreIndex && s.name.trim() === name.trim())
+    .filter((s, i) => i !== ignoreIndex && cleanLine(s.name) === cleanLine(name))
     .map((s) => s.version);
   return versions.length ? Math.max(...versions) + 1 : 1;
 }
@@ -468,9 +480,10 @@ export function placeScenario(
   const version =
     derived || index === null ? nextVersionIn(feature, draft.name, index ?? undefined) : draft.version;
   // The name goes out trimmed, as the server parses every heading
-  // (parser.ts SCENARIO_RE): the scenario the save lands is then the one
-  // this save names, and the editor finds it again (landedScenario).
-  const s: Scenario = { ...draft, name: draft.name.trim(), version, id: draft.id ?? id };
+  // (parser.ts SCENARIO_RE), and with inner runs of spaces collapsed
+  // (savedScenarioName): the scenario the save lands is then the one this
+  // save names, and the editor finds it again (landedScenario).
+  const s: Scenario = { ...draft, name: savedScenarioName(draft), version, id: draft.id ?? id };
   return { s, next: withScenario(feature, index, s) };
 }
 
@@ -499,10 +512,10 @@ export function cardOfScenario(
   scenarios: readonly Scenario[],
   s: { name: string; version: number },
 ): number | null {
-  // Names compare trimmed, as headings parse (parser.ts SCENARIO_RE) and
+  // Names compare cleaned, as a save writes them (savedScenarioName) and
   // as nextVersionIn counts them.
-  const name = s.name.trim();
-  const i = scenarios.findIndex((sc) => sc.name.trim() === name && sc.version === s.version);
+  const name = cleanLine(s.name);
+  const i = scenarios.findIndex((sc) => cleanLine(sc.name) === name && sc.version === s.version);
   return i === -1 ? null : i;
 }
 
@@ -2134,10 +2147,11 @@ export function App() {
       confirmLabel: "Create feature",
     });
     if (!input) return;
+    const name = cleanSegments(input);
     const res = await fetch("/api/features", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: parent ? `${parent}/${input}` : input }),
+      body: JSON.stringify({ name: parent ? `${parent}/${name}` : name }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2484,10 +2498,11 @@ export function App() {
       confirmLabel: "Create folder",
     });
     if (!input) return;
+    const path = cleanSegments(input);
     const res = await fetch("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: parent ? `${parent}/${input}` : input }),
+      body: JSON.stringify({ path: parent ? `${parent}/${path}` : path }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2572,7 +2587,7 @@ export function App() {
   // feature's url) stays the same.
   const renameSelected = async () => {
     if (!selected || renameDraft === null) return;
-    const target = renameDraft.trim();
+    const target = cleanLine(renameDraft);
     const currentName = feature ? feature.name || titleFromFileName(selected) : "";
     if (!target || target === currentName) {
       setRenameDraft(null);
@@ -2616,11 +2631,11 @@ export function App() {
       initial: fileStem(fileName),
       confirmLabel: "Rename",
     });
-    if (!stem || stem.trim() === fileStem(fileName)) return;
+    if (!stem || cleanLine(stem) === fileStem(fileName)) return;
     const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stem }),
+      body: JSON.stringify({ stem: cleanLine(stem) }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2954,7 +2969,7 @@ export function App() {
     if (!editing) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const name = editing.scenario.name.trim();
+    const name = savedScenarioName(editing.scenario);
     const version = draftVersion;
     if (await commitScenario(tests, true, "proposed")) {
       toast.success(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
@@ -2974,7 +2989,7 @@ export function App() {
     if (!editing || !feature || !selected) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const s = { ...editing.scenario, name: editing.scenario.name.trim(), version: draftVersion, tests };
+    const s = { ...editing.scenario, name: savedScenarioName(editing.scenario), version: draftVersion, tests };
     const next = withScenario(feature, editing.index, s);
     setFeature(next);
     setEditing(null);
@@ -3524,7 +3539,7 @@ export function App() {
   const changeTool = async (name: string) => {
     setSettingsToolDraft(name);
     if (!name.trim()) return;
-    await patchSettings({ projectManagementTool: name });
+    await patchSettings({ projectManagementTool: cleanLine(name) });
   };
 
   // Publish external links (specs/external-links/project-management-jira-
@@ -4588,11 +4603,11 @@ export function App() {
       placeholder: "Scenario name",
       confirmLabel: "Create",
     });
-    if (!name?.trim()) return;
+    if (!name || !cleanLine(name)) return;
     setEditing({
       index: null,
       isNew: true,
-      scenario: { name: name.trim(), version: 1, status: "draft", body: "", tests: [] },
+      scenario: { name: cleanLine(name), version: 1, status: "draft", body: "", tests: [] },
     });
   };
   // specs/ui.spec.md "Select scenarios via up and down keys": the highlight

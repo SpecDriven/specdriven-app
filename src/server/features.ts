@@ -49,6 +49,7 @@ import type {
   ScenarioStatus,
   ScenarioTarget,
 } from "./parser";
+import { cleanLine } from "./text";
 
 export { slugify } from "./parser";
 export type { ScenarioTarget } from "./parser";
@@ -281,7 +282,7 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
  * client lists folders with it) but never doubled.
  */
 export async function createFeature(dataDir: string, name: string, text?: string): Promise<string> {
-  const segments = name.split("/").map((s) => s.trim());
+  const segments = name.split("/").map(cleanLine);
   const featureName = segments.pop() ?? "";
   if (!featureName) throw new Error("Feature name is required");
   const within = segments.map(slugify).filter(Boolean);
@@ -385,7 +386,7 @@ export async function renameFeature(
   newName: string,
 ): Promise<{ fileName: string; name: string; message: string }> {
   const file = safe(fileName);
-  const name = newName.trim();
+  const name = cleanLine(newName);
   if (!name) throw new Error("Feature name is required");
   const current = await readFeature(dataDir, file);
   if (current === null) throw new Error(`Feature file not found: ${file}`);
@@ -942,7 +943,7 @@ function safe(fileName: string): string {
  * thinks in tree-relative terms and one echoing back a listed path both work.
  */
 function safeFolder(path: string): string {
-  const trimmed = path.replace(/^\/+|\/+$/g, "");
+  const trimmed = path.trim().replace(/^\/+|\/+$/g, "");
   if (!trimmed) return SPECS_FOLDER;
   const segments = trimmed.split("/");
   if (segments.some(badSegment)) throw new Error(`Invalid folder path: ${path}`);

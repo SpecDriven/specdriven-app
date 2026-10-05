@@ -69,6 +69,10 @@ test("spec references are validated and de-duplicated", () => {
     { fileName: "specs/a.feature.md" },
     { fileName: "specs/a.feature.md", scenario: { name: "Basic", version: 2 } },
   ]);
+  // Trimmed only: a reference must still find a heading that kept inner spaces.
+  expect(parseSpecRefs([{ fileName: " specs/a.feature.md ", scenario: { name: " Basic  Quote ", version: 1 } }])).toEqual([
+    { fileName: "specs/a.feature.md", scenario: { name: "Basic  Quote", version: 1 } },
+  ]);
   expect(refKey({ fileName: "specs/a.feature.md", scenario: { name: "Basic", version: 2 } })).toBe(
     "specs/a.feature.md#Basic@v2",
   );
@@ -76,7 +80,7 @@ test("spec references are validated and de-duplicated", () => {
 
 test("a test case is created, edited and deleted through the document", async () => {
   const c = await createCase(root, {
-    title: " Quote totals ",
+    title: " Quote   totals ",
     refs: [{ fileName: "specs/billing/quotes.feature.md", scenario: { name: "Basic Quote", version: 1 } }],
   });
   expect(c.title).toBe("Quote totals");
@@ -85,7 +89,7 @@ test("a test case is created, edited and deleted through the document", async ()
   expect(c.refs).toHaveLength(1);
   expect(await hasTestingDoc(root)).toBe(true);
 
-  const edited = await updateCase(root, c.id, { body: "1. Open a quote\n2. Check the total", priority: "high" });
+  const edited = await updateCase(root, c.id, { body: "\n1. Open a quote\n2. Check the total  \n\n", priority: "high" });
   expect(edited.body).toBe("1. Open a quote\n2. Check the total");
   expect(edited.priority).toBe("high");
   expect(edited.refs).toEqual(c.refs);
@@ -146,7 +150,7 @@ test("an execution snapshots the plan and records one result per case", async ()
   await updatePlan(root, plan.id, { caseIds: [b.id] });
   expect((await readTesting(root)).executions[0]!.caseIds).toEqual([a.id, b.id]);
 
-  const passed = await setResult(root, run.id, a.id, { status: "passed", comment: "ok", by: "Ada" });
+  const passed = await setResult(root, run.id, a.id, { status: "passed", comment: "  ok ", by: "Ada" });
   expect(passed.results[a.id]).toMatchObject({ status: "passed", comment: "ok", by: "Ada" });
   expect(passed.results[a.id]!.at).toBeDefined();
   // A status change without a comment keeps the comment.

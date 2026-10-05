@@ -7,6 +7,7 @@
 // apart from the dialog so the rules can be tested without a DOM.
 
 import { formatTestRef, isTestLink, isTestName, parseTestRef, testLine } from "../server/parser";
+import { cleanLine } from "../server/text";
 
 /** The two fields of a row being added or edited. */
 export interface TestDraft {
@@ -39,7 +40,7 @@ export function testLinkUrl(ref: string): string {
 /** Why `draft` may not take a row, or null when it may. */
 export function testLinkProblem(tests: string[], index: number | null, draft: TestDraft): string | null {
   const url = draft.url.trim();
-  const name = draft.name.trim();
+  const name = cleanLine(draft.name);
   if (!isTestLink(url)) return `Not a GitHub url: "${url}"`;
   if (testLine(url) === null) return `Needs a line anchor, like …/MyTest.java#L32: ${url}`;
   if (name && !isTestName(name)) return `A test name cannot contain ":" or "]": "${name}"`;
@@ -71,7 +72,7 @@ export function canSetTestLink(tests: string[], index: number | null, draft: Tes
 
 /** The entry a draft is stored as. */
 function entryOf(draft: TestDraft): string {
-  const name = draft.name.trim();
+  const name = cleanLine(draft.name);
   return formatTestRef(name ? { url: draft.url.trim(), name } : { url: draft.url.trim() });
 }
 
