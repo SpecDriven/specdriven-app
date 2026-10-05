@@ -4,7 +4,7 @@
 // file and comes to the client through /api/state.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
@@ -241,4 +241,54 @@ test("the open folder cannot be removed from the list — switch away first", as
     }),
   ))!;
   expect(blank.status).toBe(400);
+});
+
+// Switch spec folder (specs/app/spec-folders.feature.md): a path that names
+// no folder is refused — a typo must not make a new, empty one — and the
+// client asks before it sends createDataRepo to make it.
+
+function putState(body: unknown) {
+  return handleApi(
+    new Request("http://localhost/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  ) as Promise<Response>;
+}
+
+test("a missing folder is refused with a 404, nothing made, the open folder kept", async () => {
+  const a = await dataFolder("a");
+  await applyStartupState();
+  await pickFolder(a);
+  const missing = join(root, "typo");
+
+  const res = await putState({ dataRepo: missing });
+  expect(res.status).toBe(404);
+  expect(await res.json()).toEqual({ error: `No folder at ${missing}`, missing: true, path: missing });
+  expect(await stat(missing).catch(() => null)).toBeNull();
+  const state = await getState();
+  expect(state.dataRepo).toBe(a);
+  expect(state.recentDataRepos).toEqual([a]);
+});
+
+test("createDataRepo makes the missing folder and opens it", async () => {
+  await applyStartupState();
+  const fresh = join(root, "new", "specs-folder");
+
+  const res = await putState({ dataRepo: fresh, createDataRepo: true });
+  expect(res.status).toBe(200);
+  expect((await stat(fresh)).isDirectory()).toBe(true);
+  expect((await res.json()).recentDataRepos).toEqual([fresh]);
+});
+
+test("a path to a file is not a folder to open, even with createDataRepo", async () => {
+  await applyStartupState();
+  const file = join(root, "notes.txt");
+  await Bun.write(file, "hello\n");
+
+  const res = await putState({ dataRepo: file, createDataRepo: true });
+  expect(res.status).toBe(400);
+  expect((await res.json()).error).toBe(`Not a folder: ${file}`);
+  expect(await Bun.file(file).text()).toBe("hello\n");
 });

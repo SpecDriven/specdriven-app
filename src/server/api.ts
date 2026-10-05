@@ -27,7 +27,7 @@ import {
   MIN_AUTOSAVE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import { resolveDataRepo } from "./repo";
+import { ensureDataRepoFolder, MissingDataRepoError, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
@@ -461,6 +461,8 @@ const getState: Handler = async (req) => {
 const putState: Handler = async (req) => {
   const body = (await req.json()) as {
     dataRepo?: string;
+    /** Make the picked folder when it does not exist yet — the user agreed. */
+    createDataRepo?: boolean;
     forgetDataRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
@@ -580,7 +582,13 @@ const putState: Handler = async (req) => {
     // data GH repo").
     try {
       pickedDir = await resolveDataRepo(dataRepo, getAppRoot());
+      // A path that names no folder is refused rather than made — unless
+      // the client asked first (specs/app/spec-folders.feature.md).
+      await ensureDataRepoFolder(pickedDir, body.createDataRepo === true);
     } catch (e) {
+      if (e instanceof MissingDataRepoError) {
+        return json({ error: e.message, missing: true, path: e.dir }, 404);
+      }
       return json({ error: (e as Error).message }, 400);
     }
     state.dataRepo = dataRepo;
