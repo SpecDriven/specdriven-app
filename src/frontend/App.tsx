@@ -1627,6 +1627,35 @@ export function App() {
     document.title = clock ? `${clock} · ${base}` : base;
   }, [selected, feature, paneScenario, pluginView, appPage, activeTab, tabsTick, clock]);
 
+  // PUT a picked data folder. A path that names no folder is refused by the
+  // server (specs/app/spec-folders.feature.md): ask before making it, then
+  // ask again with the user's go-ahead. `asking` brackets the question, so a
+  // switch can step its modal aside while the confirm is up.
+  const putDataRepo = async (
+    repo: string,
+    asking?: (open: boolean) => void,
+  ): Promise<{ res: Response; state: any } | null> => {
+    const put = async (create: boolean) => {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(create ? { dataRepo: repo, createDataRepo: true } : { dataRepo: repo }),
+      });
+      return { res, state: await res.json() };
+    };
+    const first = await put(false);
+    if (first.res.ok || !first.state.missing) return first;
+    asking?.(true);
+    const ok = await confirm({
+      title: "Create folder?",
+      body: `There is no folder at ${first.state.path ?? repo}. Create it as a new, empty spec folder?`,
+      confirmLabel: "Create folder",
+      danger: false,
+    });
+    asking?.(false);
+    return ok ? put(true) : null;
+  };
+
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
     // effect would rewrite a deep link before we get to honor it
@@ -1636,12 +1665,9 @@ export function App() {
     setSettingRepo(true);
     setRepoError(null);
     try {
-      const res = await fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataRepo: repo }),
-      });
-      const state = await res.json();
+      const put = await putDataRepo(repo);
+      if (!put) return;
+      const { res, state } = put;
       if (res.ok) {
         applyRepos(state);
         setNeedsRepo(false);
@@ -1734,12 +1760,15 @@ export function App() {
     setDescEdit(null);
     try {
       setSwitching({ folder: next, step: "opening" });
-      const res = await fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataRepo: next }),
-      });
-      const state = await res.json();
+      const put = await putDataRepo(next, (asking) =>
+        setSwitching(asking ? null : { folder: next, step: "opening" }),
+      );
+      // Declined to create a missing folder: the current one stays open.
+      if (!put) {
+        await loadReadme();
+        return;
+      }
+      const { res, state } = put;
       if (res.ok) {
         setSwitching({ folder: next, step: "loading" });
         applyRepos(state);
@@ -1775,6 +1804,9 @@ export function App() {
         }
       } else {
         toast.error(state.error ?? "Could not use this directory");
+        // The README was emptied for the switch; the folder stays, so it
+        // comes back.
+        await loadReadme();
       }
     } finally {
       setSwitching(null);
