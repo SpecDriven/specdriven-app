@@ -7296,6 +7296,15 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   color: var(--text-1);
 }
 
+/* The name keeps to one line; the path beside it gives way first. */
+.switch-target strong {
+  flex-shrink: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .switch-target svg {
   align-self: center;
   flex-shrink: 0;

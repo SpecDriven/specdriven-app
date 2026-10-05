@@ -54,6 +54,8 @@ export interface ConfirmOptions {
   title: string;
   body?: string;
   confirmLabel?: string;
+  /** False for a confirm that makes rather than destroys — a plain button. */
+  danger?: boolean;
 }
 
 type Request =
@@ -260,7 +262,7 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
               <button className="secondary" onClick={cancel}>
                 Cancel
               </button>
-              <button className="danger-solid" onClick={confirm}>
+              <button className={request.opts.danger === false ? undefined : "danger-solid"} onClick={confirm}>
                 {request.opts.confirmLabel ?? "Delete"}
               </button>
             </div>
