@@ -24,6 +24,7 @@ import { githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
 import type { PullRequestState } from "./pullRequests";
+import { cleanLine, cleanText } from "./text";
 
 export type { GitHubRepo };
 
@@ -369,7 +370,7 @@ export async function listComments(repo: GitHubRepo, number: number): Promise<Is
 
 /** A title is the one thing an issue must have. */
 function requireTitle(value: unknown): string {
-  const title = typeof value === "string" ? value.trim() : "";
+  const title = typeof value === "string" ? cleanLine(value) : "";
   if (!title) throw new GitHubError("An issue needs a title", 400);
   return title;
 }
@@ -379,7 +380,7 @@ export async function createIssue(
   input: { title?: unknown; body?: unknown },
 ): Promise<Issue> {
   const payload: { title: string; body?: string } = { title: requireTitle(input.title) };
-  if (typeof input.body === "string" && input.body.trim()) payload.body = input.body;
+  if (typeof input.body === "string" && input.body.trim()) payload.body = cleanText(input.body);
   return toIssue(await github<RawIssue>(`${repoPath(repo)}/issues`, { method: "POST", json: payload }));
 }
 
@@ -397,7 +398,7 @@ export async function updateIssue(
   if (input.title !== undefined) payload.title = requireTitle(input.title);
   if (input.body !== undefined) {
     if (typeof input.body !== "string") throw new GitHubError("body must be a string", 400);
-    payload.body = input.body;
+    payload.body = cleanText(input.body);
   }
   if (input.state !== undefined) {
     if (input.state !== "open" && input.state !== "closed") {
@@ -419,8 +420,8 @@ export async function updateIssue(
 }
 
 export async function addComment(repo: GitHubRepo, number: number, body: unknown): Promise<IssueComment> {
-  const text = typeof body === "string" ? body.trim() : "";
-  if (!text) throw new GitHubError("A comment needs some text", 400);
+  const text = typeof body === "string" ? cleanText(body) : "";
+  if (!text.trim()) throw new GitHubError("A comment needs some text", 400);
   return toComment(
     await github<RawComment>(`${repoPath(repo)}/issues/${number}/comments`, {
       method: "POST",

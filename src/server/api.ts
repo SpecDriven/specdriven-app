@@ -118,6 +118,7 @@ import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import type { PullRequestLookup } from "./pullRequests";
 import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
 import { fieldChoices, scanEntities } from "./entities";
+import { cleanLine } from "./text";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
@@ -669,7 +670,7 @@ const putState: Handler = async (req) => {
     if (typeof body.projectManagementTool !== "string") {
       return json({ error: "projectManagementTool must be a string" }, 400);
     }
-    const tool = body.projectManagementTool.trim();
+    const tool = cleanLine(body.projectManagementTool);
     // The name becomes the `<program>` of `[Jira:ABC-123](url)`, so it must
     // survive that form — the same rule the link fields enforce.
     if (!tool || /[:[\]]/.test(tool)) {
@@ -757,22 +758,25 @@ const putState: Handler = async (req) => {
     // The explicit plugin folders (specs/app/plugins.feature.md "A plugin
     // loads from a local folder"): absolute paths, taken whole.
     if (sources !== undefined) {
-      if (!Array.isArray(sources) || !sources.every((p) => typeof p === "string" && isAbsolute(p))) {
+      // Trimmed only — a folder name may hold inner spaces.
+      const paths = Array.isArray(sources) ? sources.map((p) => (typeof p === "string" ? p.trim() : p)) : null;
+      if (!paths || !paths.every((p) => typeof p === "string" && isAbsolute(p))) {
         return json({ error: "plugins.sources must be a list of absolute folder paths" }, 400);
       }
       const section = profileSection(state);
-      const unique = sources.filter((p, i) => sources.indexOf(p) === i);
+      const unique = paths.filter((p, i) => paths.indexOf(p) === i);
       (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, sources: unique.map((path) => ({ path })) };
     }
     // A plugin under the data repo is trusted once, by its folder, before
     // its first load — the repo is pulled from GitHub.
     if (trust !== undefined) {
-      if (typeof trust !== "string" || !isAbsolute(trust)) {
+      const folder = typeof trust === "string" ? trust.trim() : "";
+      if (!isAbsolute(folder)) {
         return json({ error: "plugins.trust must be an absolute folder path" }, 400);
       }
       const section = profileSection(state);
       const trusted = Array.isArray(section.trusted) ? section.trusted.filter((t) => typeof t === "string") : [];
-      if (!trusted.includes(trust)) trusted.push(trust);
+      if (!trusted.includes(folder)) trusted.push(folder);
       (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, trusted };
     }
     // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
@@ -1113,7 +1117,7 @@ const postDeleteDraft = withDataDir(async (dir, req, params) => {
   if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
     return json({ error: "scenario needs a name and a version" }, 400);
   }
-  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  const target: ScenarioTarget = { name: body.scenario.name.trim(), version: body.scenario.version };
   try {
     return json(await deleteDraftScenario(dir, params.file!, target));
   } catch (e) {
@@ -1140,7 +1144,7 @@ const putPullRequests = withDataDir(async (dir, req, params) => {
     if (typeof name !== "string" || typeof version !== "number") {
       return json({ error: "scenario needs a name and a version" }, 400);
     }
-    target = { name, version, ...(typeof id === "string" ? { id } : {}) };
+    target = { name: name.trim(), version, ...(typeof id === "string" ? { id } : {}) };
   }
   try {
     return json(await savePullRequests(dir, params.file!, target, prs));
@@ -1162,7 +1166,7 @@ const postDeletePublished = withDataDir(async (dir, req, params) => {
   if (typeof body.scenario?.name !== "string" || typeof body.scenario.version !== "number") {
     return json({ error: "scenario needs a name and a version" }, 400);
   }
-  const target: ScenarioTarget = { name: body.scenario.name, version: body.scenario.version };
+  const target: ScenarioTarget = { name: body.scenario.name.trim(), version: body.scenario.version };
   try {
     return json(await deletePublishedScenario(dir, params.file!, target));
   } catch (e) {
@@ -1292,7 +1296,7 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
     const { fileName, scenarios } = (entry ?? {}) as { fileName?: unknown; scenarios?: unknown };
     if (typeof fileName !== "string") return null;
     if (scenarios === undefined) {
-      files.push({ fileName });
+      files.push({ fileName: fileName.trim() });
       continue;
     }
     if (!Array.isArray(scenarios) || scenarios.length === 0) return null;
@@ -1302,9 +1306,9 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
       if (typeof name !== "string" || !Number.isInteger(version) || (version as number) < 1) {
         return null;
       }
-      picks.push({ name, version: version as number });
+      picks.push({ name: name.trim(), version: version as number });
     }
-    files.push({ fileName, scenarios: picks });
+    files.push({ fileName: fileName.trim(), scenarios: picks });
   }
   return files;
 }
@@ -1346,7 +1350,7 @@ async function resolveSessionRequest(
   if (!normalizeCodeGen(state.codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const name = typeof body.name === "string" ? cleanLine(body.name) : "";
   if (!name) return json({ error: "name is required" }, 400);
   const attachments = parseSessionAttachments(body.attachments);
   if (attachments === null) {
@@ -1530,7 +1534,7 @@ const postAgentChat = withDataDir(async (dir, req) => {
   if (agent === null) return json({ error: `agent must be ${CHAT_AGENT_LIST}` }, 400);
   const place = await agentPanePlace(dir, agent);
   if (place instanceof Response) return place;
-  const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Coding agent session";
+  const name = (typeof body.name === "string" && cleanLine(body.name)) || "Coding agent session";
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt : undefined;
   let permissionMode: ReturnType<typeof normalizePermissionMode> = null;
   if (body.permissionMode !== undefined) {

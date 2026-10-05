@@ -39,6 +39,7 @@ export type {
   TestPlan,
   TestPlanExecution,
 } from "./automerge/schema";
+import { cleanLine, cleanText } from "./text";
 
 const log = getLogger("testing");
 
@@ -75,13 +76,15 @@ export function parseSpecRefs(value: unknown): SpecRef[] | null {
   for (const entry of value) {
     const { fileName, scenario } = (entry ?? {}) as { fileName?: unknown; scenario?: unknown };
     if (typeof fileName !== "string" || !fileName.trim()) return null;
-    let ref: SpecRef = { fileName };
+    let ref: SpecRef = { fileName: fileName.trim() };
     if (scenario !== undefined && scenario !== null) {
       const { name, version } = (scenario ?? {}) as { name?: unknown; version?: unknown };
       if (typeof name !== "string" || !Number.isInteger(version) || (version as number) < 1) {
         return null;
       }
-      ref = { fileName, scenario: { name, version: version as number } };
+      // Trimmed only: a reference names an existing feature and scenario,
+      // and must still match one whose heading kept inner spaces.
+      ref = { fileName: fileName.trim(), scenario: { name: name.trim(), version: version as number } };
     }
     const key = refKey(ref);
     if (seen.has(key)) continue;
@@ -166,7 +169,7 @@ function requireExecution(d: TestingDoc, id: string): TestPlanExecution {
 }
 
 function requiredName(value: unknown, what: string): string {
-  const name = typeof value === "string" ? value.trim() : "";
+  const name = typeof value === "string" ? cleanLine(value) : "";
   if (!name) throw new Error(`${what} is required`);
   return name;
 }
@@ -226,7 +229,7 @@ function caseFields(input: CaseInput): {
   if (input.title !== undefined) out.title = requiredName(input.title, "Test case title");
   if (input.body !== undefined) {
     if (typeof input.body !== "string") throw new Error("body must be a string");
-    out.body = input.body;
+    out.body = cleanText(input.body);
   }
   if (input.priority !== undefined) {
     if (!isPriority(input.priority)) {
@@ -319,7 +322,7 @@ function planFields(input: PlanInput): {
   if (input.name !== undefined) out.name = requiredName(input.name, "Test plan name");
   if (input.description !== undefined) {
     if (typeof input.description !== "string") throw new Error("description must be a string");
-    out.description = input.description;
+    out.description = cleanText(input.description);
   }
   if (input.caseIds !== undefined) {
     if (!Array.isArray(input.caseIds) || input.caseIds.some((x) => typeof x !== "string")) {
@@ -466,7 +469,7 @@ export async function setResult(
     const previous = e.results[caseId];
     const result: CaseResult = {
       status,
-      comment: (input.comment as string | undefined) ?? previous?.comment ?? "",
+      comment: input.comment !== undefined ? cleanLine(input.comment as string) : (previous?.comment ?? ""),
       at: now,
     };
     if (input.by) result.by = input.by;

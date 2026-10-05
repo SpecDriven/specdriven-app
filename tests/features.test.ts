@@ -127,6 +127,15 @@ test("renameFeature only touches the heading, adding one when missing", async ()
   expect(await readFeature(root, "specs/bare.feature.md")).toBe("# Named Now\n\njust text\n");
 });
 
+// specs/ui/ui.feature.md "User-entered text is cleaned up".
+test("a feature's typed name is saved cleaned", async () => {
+  const fileName = await createFeature(root, " billing / Quote   Policy ");
+  expect(fileName).toBe("specs/billing/quote-policy.feature.md");
+  expect(await readFeature(root, fileName)).toBe("# Quote Policy\n");
+  const renamed = await renameFeature(root, fileName, "  Quote \t Policy  v2 ");
+  expect(renamed.name).toBe("Quote Policy v2");
+});
+
 test("renameFeature refuses missing files and empty names", async () => {
   await createFeature(root, "One");
   expect(renameFeature(root, "specs/ghost.feature.md", "Spirit")).rejects.toThrow("not found");

@@ -133,6 +133,9 @@ describe("a pull request url", () => {
       PR1,
       { url: "https://x.example/1", title: "" },
     ]);
+    expect(validPullRequests([{ url: PR1.url, title: "  Fix   totals " }])).toEqual([
+      { url: PR1.url, title: "Fix totals" },
+    ]);
     expect(validPullRequests([{ url: "javascript:alert(1)", title: "" }])).toBeNull();
     expect(validPullRequests([{ url: PR1.url, title: 3 }])).toBeNull();
     expect(validPullRequests("nope")).toBeNull();

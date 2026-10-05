@@ -9,6 +9,7 @@ import {
   landedScenario,
   nextVersionIn,
   placeScenario,
+  savedScenarioName,
   scenarioSignature,
 } from "../src/frontend/App";
 import { projectFeature } from "../src/server/automerge/project";
@@ -115,4 +116,28 @@ test("a placed scenario goes out under its trimmed name", () => {
   const { s, next } = placeScenario(sc(" New ", 1, { id: "e" }), { feature, index: 0 }, false);
   expect(s.name).toBe("New");
   expect(next.scenarios.map((x) => x.name)).toEqual(["New"]);
+});
+
+// specs/ui/ui.feature.md "User-entered text is cleaned up".
+describe("a scenario name is saved cleaned", () => {
+  test("inner runs of spaces collapse, as the name goes out", () => {
+    const feature: Feature = { name: "F", description: "", scenarios: [sc("Old", 1, { id: "e" })] };
+    const { s } = placeScenario(sc(" Rate   quote ", 1, { id: "e" }), { feature, index: 0 }, false);
+    expect(s.name).toBe("Rate quote");
+    expect(scenarioSignature(sc("Rate   quote", 1), 1)).toBe(scenarioSignature(sc("Rate quote", 1), 1));
+  });
+
+  test("a published scenario keeps its heading verbatim", () => {
+    const legacy = sc("Rate  quote", 1, { status: "published" });
+    expect(savedScenarioName(legacy)).toBe("Rate  quote");
+    const feature: Feature = { name: "F", description: "", scenarios: [legacy] };
+    const { s } = placeScenario({ ...legacy, tests: ["x"] }, { feature, index: 0 }, false);
+    expect(s.name).toBe("Rate  quote");
+  });
+
+  test("versions count names as they are saved", () => {
+    const feature: Feature = { name: "F", description: "", scenarios: [sc("Rate  quote", 1)] };
+    expect(nextVersionIn(feature, "Rate quote")).toBe(2);
+    expect(cardOfScenario(feature.scenarios, { name: "Rate quote", version: 1 })).toBe(0);
+  });
 });
