@@ -181,7 +181,10 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
   const confirm = () => {
     if (request.kind === "prompt" && !draft.trim()) return;
     close();
-    if (request.kind === "prompt") request.resolve({ text: draft, choice });
+    // Trimmed for every caller (specs/ui/ui.feature.md "User-entered text is
+    // cleaned up"); only trimmed, as a prompt also takes paths and urls —
+    // one asking for a name cleans it further (cleanLine).
+    if (request.kind === "prompt") request.resolve({ text: draft.trim(), choice });
     else request.resolve(true);
   };
 

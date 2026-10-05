@@ -3,6 +3,7 @@
 // that reads a pull request from GitHub and by the editor's field.
 
 import type { PullRequestLink } from "./parser";
+import { cleanLine } from "./text";
 
 /** A GitHub pull request url, taken apart. */
 export interface PullRequestRef {
@@ -77,7 +78,7 @@ export function validPullRequests(input: unknown): PullRequestLink[] | null {
     const { url, title } = row as { url?: unknown; title?: unknown };
     if (typeof url !== "string" || !isPullRequestUrl(url)) return null;
     if (title !== undefined && typeof title !== "string") return null;
-    out.push({ url: url.trim(), title: (title ?? "").trim() });
+    out.push({ url: url.trim(), title: cleanLine(title ?? "") });
   }
   return out;
 }

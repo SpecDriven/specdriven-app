@@ -6,6 +6,7 @@
 // DOM-free so the rules can be tested on their own.
 
 import { isExternalLink } from "../server/parser";
+import { cleanLine } from "../server/text";
 import type { ExternalLink } from "../server/parser";
 
 /** The three fields as typed, before they make a link. */
@@ -43,7 +44,7 @@ export interface ResolvedLink {
  * rather than being dropped or written half-done.
  */
 export function resolveLinkDraft(draft: LinkDraft): ResolvedLink {
-  const program = draft.program.trim();
+  const program = cleanLine(draft.program);
   const ticket = draft.ticket.trim();
   const url = draft.url.trim();
   if (!program && !ticket && !url) return { link: null };
