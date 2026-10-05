@@ -630,6 +630,39 @@ aside header h1 {
   font-size: 0.75rem;
 }
 
+/* The scenario's row: its link, then its menu (Delete) at the end, the
+   same quiet affordance the feature row has. The hover fill is the row's, so
+   the menu button sits inside it. */
+.tree-scenario-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+
+.tree-scenario-row:hover {
+  background: var(--hover);
+}
+
+.tree-scenario-row > a.tree-scenario {
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-scenario-row:has(> a.tree-scenario.active) {
+  background: var(--accent-soft);
+}
+
+/* The row carries the fill, so the link inside it does not add its own. */
+.tree .tree-scenario-row > a.tree-scenario:hover,
+.tree .tree-scenario-row > a.tree-scenario.active {
+  background: transparent;
+}
+
+.tree-scenario-row .tree-menu-btn {
+  padding: 0.1rem 0.45rem;
+}
+
 /* Long scenario names truncate rather than widening the sidebar; the version
    stays visible at the end of the row. */
 .tree a.tree-scenario .tree-scenario-name {
@@ -806,6 +839,8 @@ a.page-entry.done {
 
 .tree-row:hover .tree-menu-btn,
 .tree-row:focus-within .tree-menu-btn,
+.tree-scenario-row:hover .tree-menu-btn,
+.tree-scenario-row:focus-within .tree-menu-btn,
 .tree-menu-btn[aria-expanded="true"] {
   opacity: 1;
 }
