@@ -399,7 +399,8 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  * the version the dialog will save it as rather than the one on the object.
  */
 export function scenarioSignature(s: Scenario, version: number): string {
-  return JSON.stringify([s.name, version, s.status, s.body, s.tests, s.link ?? null]);
+  // The name as a save writes it: a stray space is nothing new to save.
+  return JSON.stringify([s.name.trim(), version, s.status, s.body, s.tests, s.link ?? null]);
 }
 
 /**
@@ -466,7 +467,10 @@ export function placeScenario(
 ): { s: Scenario; next: Feature } {
   const version =
     derived || index === null ? nextVersionIn(feature, draft.name, index ?? undefined) : draft.version;
-  const s: Scenario = { ...draft, version, id: draft.id ?? id };
+  // The name goes out trimmed, as the server parses every heading
+  // (parser.ts SCENARIO_RE): the scenario the save lands is then the one
+  // this save names, and the editor finds it again (landedScenario).
+  const s: Scenario = { ...draft, name: draft.name.trim(), version, id: draft.id ?? id };
   return { s, next: withScenario(feature, index, s) };
 }
 
@@ -495,7 +499,29 @@ export function cardOfScenario(
   scenarios: readonly Scenario[],
   s: { name: string; version: number },
 ): number | null {
-  const i = scenarios.findIndex((sc) => sc.name === s.name && sc.version === s.version);
+  // Names compare trimmed, as headings parse (parser.ts SCENARIO_RE) and
+  // as nextVersionIn counts them.
+  const name = s.name.trim();
+  const i = scenarios.findIndex((sc) => sc.name.trim() === name && sc.version === s.version);
+  return i === -1 ? null : i;
+}
+
+/**
+ * Where a landed save left the editor's scenario (issue #173): its entry by
+ * identity, else the entry carrying its document id. Losing it would leave
+ * the editor new, deriving the next version for its name on the next tick
+ * and appending the scenario again — on every tick after that too. Only a
+ * scenario whose id is gone from the feature as well is lost: the entry was
+ * dropped underneath the editor, and the next save re-adds the work.
+ */
+export function landedScenario(
+  scenarios: readonly Scenario[],
+  s: { name: string; version: number },
+  id: string | undefined,
+): number | null {
+  const card = cardOfScenario(scenarios, s);
+  if (card !== null || id === undefined) return card;
+  const i = scenarios.findIndex((sc) => sc.id === id);
   return i === -1 ? null : i;
 }
 
@@ -2802,12 +2828,13 @@ export function App() {
         }
         // The feature comes back in canonical order, so a renamed scenario has
         // moved: a still-open editor has to find its scenario again, and an
-        // explicit save that closed the editor lands on its card. Not finding
-        // it (the entry was dropped underneath us) leaves the editor new, so
+        // explicit save that closed the editor lands on its card — by its
+        // identity, else by its document id (landedScenario). Not finding it
+        // (the entry was dropped underneath us) leaves the editor new, so
         // the next save re-adds the work rather than overwriting a neighbour.
         // The entry's document id comes back with it: a new scenario adopts it
         // here, and every later save names the entry by it.
-        const moved = cardOfScenario(saved.scenarios, s);
+        const moved = landedScenario(saved.scenarios, s, s.id);
         const id = moved === null ? undefined : saved.scenarios[moved]!.id;
         if (!close && session === editorSession.current) {
           setEditing((prev) =>
@@ -2900,7 +2927,7 @@ export function App() {
     if (!editing || !feature || !selected) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const s = { ...editing.scenario, version: draftVersion, tests };
+    const s = { ...editing.scenario, name: editing.scenario.name.trim(), version: draftVersion, tests };
     const next = withScenario(feature, editing.index, s);
     setFeature(next);
     setEditing(null);

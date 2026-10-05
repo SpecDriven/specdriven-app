@@ -293,6 +293,21 @@ test("a scenario claimed by its document id is renamed in place even with a new 
   expect(projectFeature(next)).toBe(serializeFeature(parseFeature(SAMPLE)));
 });
 
+// The editor may name the scenario with a stray space (issue #173): the
+// target's headings parse trimmed, and the claim matches them the same way,
+// so the entry is still renamed in place rather than filed a second time.
+test("an id claim with a stray space in the name still renames in place", () => {
+  const withDraft = parseFeature(SAMPLE + "\n## Idea @v1 [proposed]\n\nsketch\n");
+  const doc = reconcile(importFeatureDoc(parseFeature(SAMPLE)), withDraft);
+  const id = doc.specs.find((s) => s.name === "Idea")!.id;
+  const renamed = parseFeature(SAMPLE + "\n## Better Idea @v1 [proposed]\n\nsketch, written out\n");
+  const next = reconcile(doc, renamed, { scenario: { id, name: "Better Idea ", version: 1 } });
+  const ideas = next.specs.filter((s) => s.name.includes("Idea"));
+  expect(ideas.map((s) => [s.name, s.version, s.body, s.id])).toEqual([
+    ["Better Idea", 1, "sketch, written out", id],
+  ]);
+});
+
 // The claim also covers a version re-derived from the new name, and the
 // publish of that entry in the same save — the dialog's Publish.
 test("the id claim may change the version and the status at once", () => {
