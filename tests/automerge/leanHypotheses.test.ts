@@ -1,10 +1,10 @@
 // Traces from the Lean verification of the sync core
 // (verification/lean/SpecDriven/Sync/Theorems/Hypotheses.lean, REPORT.md):
 // hypotheses H1 and H2 of docs/lean-sync-verification-prompt.md, played
-// against the real implementation over real git transport. A `failing` test
-// documents a confirmed weakness and flips to a failure when it is fixed;
-// the plain tests pin the behaviour the model proved. The published case of
-// H2 was such a weakness until publishing started recording the body
+// against the real implementation over real git transport. H1's mixed-origin
+// drop is fixed in production (`driftSync.ts` folds theirs with `ours`
+// overlap); the Lean model still describes the old skip. The published case
+// of H2 was a weakness until publishing started recording the body
 // (schema.ts `publishedBody`); its test now pins the heal.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
@@ -60,14 +60,15 @@ async function pushMarkdownOnly(dir: string, text: string, message: string) {
   await git(dir, "push");
 }
 
-// H1 Mixed-origin conflict. B saves Alpha through the app (operations in
-// chunk files) and, in the same push, hand-edits Beta (no operations). A's
-// concurrent save makes the pull conflict on the markdown; `autoResolveOne`
-// sees that operations arrived, skips the three-way merge and re-projects
-// the merged document — which never saw the hand edit. The drift pass then
-// finds the file equal to its projection, so nothing ever absorbs it.
-// Lean: Hypotheses.lean `H1_hand_edit_dropped`.
-test.failing("H1: a hand edit riding a push with operations is dropped by the ops-arrived resolution", async () => {
+// H1 Mixed-origin conflict (fixed). B saves Alpha through the app (operations
+// in chunk files) and, in the same push, hand-edits Beta (no operations). A's
+// concurrent save makes the pull conflict on the markdown. `autoResolveOne`
+// used to see that operations arrived, skip the three-way merge and re-project
+// the merged document — which never saw the hand edit. It now folds theirs
+// with overlapping text kept from the document, so Alpha holds both app edits
+// and Beta takes the hand edit. Lean: Hypotheses.lean still models the old
+// skip (`H1_resolution_ignores_theirs`); the production path is this test.
+test("H1: a hand edit riding a push with operations is absorbed by the ops-arrived resolution", async () => {
   const { a, b } = await seededClones(TWO);
 
   const viaApp = TWO.replace("- alpha one", "- alpha one, from B's app");
@@ -88,8 +89,6 @@ test.failing("H1: a hand edit riding a push with operations is dropped by the op
   expect(mdA).toBe((await readFeature(b, FILE))!);
   expect(mdA).toContain("from B's app");
   expect(mdA).toContain("from A");
-  // The spec: "markdown edited outside the app" is absorbed. This edit is gone
-  // on both peers and in both documents.
   expect(mdA).toContain("hand-edited on B");
 });
 

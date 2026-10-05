@@ -109,29 +109,37 @@ model mirrors it (`SpecEntry.publishedBody`, `effectiveBody`,
 
 ## 2. Disproved
 
-### H1 Mixed-origin conflict — confirmed
+### H1 Mixed-origin conflict — confirmed in the model, fixed in production
 
-Lean: `H1_resolution_ignores_theirs` (the ops-arrived resolution does not
-depend on the markdown that arrived), `H1_never_absorbed` (the resolution
+Lean: `H1_resolution_ignores_theirs` (the model's ops-arrived resolution does
+not depend on the markdown that arrived), `H1_never_absorbed` (the model
 leaves the file equal to the projection, so no later drift pass sees the
-edit). Test: `tests/automerge/leanHypotheses.test.ts`, "H1: a hand edit
-riding a push with operations is dropped by the ops-arrived resolution"
-(`test.failing`: passes because the trace fails).
+edit). Those theorems still hold of `Protocol.lean` `autoResolveOne`, which
+skips the three-way when `opsArrived`. Production no longer skips:
+`driftSync.ts` always folds theirs, with overlapping text kept from the
+merged document (`merge.ts` `ours`) so a character merge cannot splice an
+insertion the CRDT already applied, and fields still at the merge base taken
+from theirs. Test: `tests/automerge/leanHypotheses.test.ts`, "H1: a hand edit
+riding a push with operations is absorbed by the ops-arrived resolution".
 
 1. A and B share a feature with scenarios Alpha and Beta.
 2. B saves Alpha through the app (chunk files written) and, before any
    tick, hand-edits Beta in the same file; B commits both and pushes.
 3. A saves Alpha through the app (an adjacent line) and ticks twice.
-4. A's pull conflicts on the markdown. `theirsBroughtChunks` is true, so
-   `autoResolveOne` skips the three-way merge and writes
-   `projectFeature(mergedDoc)`: Alpha holds both app edits, Beta is as it
-   was. The hand edit is gone from the working tree.
-5. The drift pass finds the file equal to the projection. A commits and
-   pushes the resolution; B pulls it. The hand edit is gone on both peers
-   and in both documents, with no dialog and no log line.
+4. A's pull conflicts on the markdown. `theirsBroughtChunks` is true. The
+   fold keeps Alpha from the merged document (both app edits) and takes
+   Beta from theirs (the hand edit).
+5. A commits and pushes the resolution; B pulls it. Both peers and both
+   documents hold the hand edit.
 
-Violates: "markdown edited outside the app" is absorbed into the document
-(specs/app/sync, the drift pass) — here it is discarded.
+The same fold applies to pages (`autoResolvePage`). A remaining caveat,
+true of `ours` overlap: a hand edit of a field the CRDT also changed is
+kept from the document, not merged character-level — so a further body
+edit on the same scenario as an in-app save in that push is still dropped.
+The confirmed defect was a *different* scenario (or page metadata field)
+riding the same commit.
+
+The Lean model is not restated here; T20 still proves the old skip.
 
 ### H2 Concurrent absorb duplicates text — confirmed, and fixed for the published case
 

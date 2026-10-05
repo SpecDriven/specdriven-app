@@ -6,15 +6,16 @@ import SpecDriven.Sync.Theorems.Store
 # Hypotheses H1–H5
 
 Each hypothesis of `docs/lean-sync-verification-prompt.md` as the model sees
-it. H1 is a confirmed defect; the published case of H2 was one until
-publishing started recording the body (`SpecEntry.publishedBody`), and is
-now a heal. Both traces run against the implementation in
+it. H1 is a confirmed defect of this model; production absorbs the mixed-origin
+hand edit (`driftSync.ts` `ours` overlap). The published case of H2 was a
+defect until publishing started recording the body (`SpecEntry.publishedBody`),
+and is now a heal. Both traces run against the implementation in
 `tests/automerge/leanHypotheses.test.ts`.
 -/
 
 namespace SpecDriven.Sync
 
-/-! ## H1 Mixed-origin conflict — confirmed -/
+/-! ## H1 Mixed-origin conflict — confirmed in the model; fixed in production -/
 
 /-- **H1 (confirmed).** When operations arrived with the pull and no lineage
 race is on, the resolution does not depend on the markdown that arrived: a

@@ -20,6 +20,20 @@ export type ThreeWayResult =
   | { ok: true; feature: Feature }
   | { ok: false; conflict: string };
 
+/**
+ * How `mergeText` treats a field both sides changed to different values.
+ *
+ * - `merge` (default): character-level CRDT merge — the markdown-only
+ *   fallback, when theirs has no operations in the document yet.
+ * - `ours`: keep ours. Used when operations already arrived: ours is the
+ *   merged document, which already holds their in-app edits, and running
+ *   `merge` on top of that would splice the same insertion twice
+ *   (notebook.test.ts "a merged entry holds each side's edit exactly once").
+ *   Unchanged-on-ours fields still take theirs, which is how a hand edit
+ *   riding the same push is absorbed (Lean H1).
+ */
+export type TextOverlap = "merge" | "ours";
+
 const key = (s: Scenario) => `${s.name}@v${s.version}`;
 
 function byKey(f: Feature): Map<string, Scenario> {
@@ -31,10 +45,17 @@ function byKey(f: Feature): Map<string, Scenario> {
  * both sides' rewrites replay as updateText edits on forks of the base and
  * merge as CRDT operations. Overlapping edits both apply — the same outcome
  * concurrent in-app edits get — instead of surfacing a line conflict.
+ * `overlap: "ours"` skips that replay and keeps ours (see TextOverlap).
  */
-function mergeText(base: string, ours: string, theirs: string): string {
+function mergeText(
+  base: string,
+  ours: string,
+  theirs: string,
+  overlap: TextOverlap = "merge",
+): string {
   if (theirs === base || theirs === ours) return ours;
   if (ours === base) return theirs;
+  if (overlap === "ours") return ours;
   const root = A.from<{ t: string }>({ t: base });
   const oursDoc = A.change(A.clone(root), (d) => A.updateText(d, ["t"], ours));
   const theirsDoc = A.change(A.clone(root), (d) => A.updateText(d, ["t"], theirs));
@@ -53,6 +74,7 @@ export function threeWayPage(
   base: MarkdownPage,
   ours: MarkdownPage,
   theirs: MarkdownPage,
+  overlap: TextOverlap = "merge",
 ): MarkdownPage {
   const pick = <T>(b: T | undefined, o: T | undefined, t: T | undefined, same: (x?: T, y?: T) => boolean): T | undefined =>
     !same(t, b) && same(o, b) ? t : o;
@@ -62,8 +84,8 @@ export function threeWayPage(
   const eqLink = (x?: Supersedes, y?: Supersedes) =>
     (x?.title ?? "") === (y?.title ?? "") && (x?.url ?? "") === (y?.url ?? "");
   const merged: MarkdownPage = {
-    name: mergeText(base.name, ours.name, theirs.name),
-    body: mergeText(base.body, ours.body, theirs.body),
+    name: mergeText(base.name, ours.name, theirs.name, overlap),
+    body: mergeText(base.body, ours.body, theirs.body, overlap),
   };
   const assigned = pick(base.assigned, ours.assigned, theirs.assigned, eq);
   const estimate = pick(base.estimate, ours.estimate, theirs.estimate, eqNum);
@@ -126,7 +148,12 @@ function mergeLink(
 }
 
 /** Merge one scenario present on both sides. */
-function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
+function mergeScenario(
+  base: Scenario | undefined,
+  ours: Scenario,
+  theirs: Scenario,
+  overlap: TextOverlap = "merge",
+): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
   const tests =
     theirs.tests.join("\n") !== baseTests && ours.tests.join("\n") === baseTests
@@ -139,7 +166,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     // status is a one-way latch: the side further along the lifecycle wins,
     // so a concurrent publish (or propose) on either side sticks.
     status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
-    body: mergeText(base?.body ?? "", ours.body, theirs.body),
+    body: mergeText(base?.body ?? "", ours.body, theirs.body, overlap),
     tests: [...tests],
     ...(link ? { link } : {}),
   };
@@ -155,9 +182,10 @@ export function threeWayFeature(
   base: Feature,
   ours: Feature,
   theirs: Feature,
+  overlap: TextOverlap = "merge",
 ): ThreeWayResult {
-  const name = mergeText(base.name, ours.name, theirs.name);
-  const description = mergeText(base.description, ours.description, theirs.description);
+  const name = mergeText(base.name, ours.name, theirs.name, overlap);
+  const description = mergeText(base.description, ours.description, theirs.description, overlap);
 
   const b = byKey(base);
   const o = byKey(ours);
@@ -168,7 +196,7 @@ export function threeWayFeature(
     const inOurs = o.get(k);
     const inTheirs = t.get(k);
     if (inOurs && inTheirs) {
-      scenarios.push(mergeScenario(inBase, inOurs, inTheirs));
+      scenarios.push(mergeScenario(inBase, inOurs, inTheirs, overlap));
     } else if (inOurs && !inTheirs) {
       if (!inBase) {
         scenarios.push(inOurs); // we added it

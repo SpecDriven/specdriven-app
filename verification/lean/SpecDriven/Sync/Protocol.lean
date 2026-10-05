@@ -38,7 +38,10 @@ def EMPTY : Feature := { name := "", description := "", scenarios := [] }
 
 /-- `autoResolveOne` for a conflicted `.feature.md` that has a document:
 the resolved document and the markdown written as the resolution, or why
-the path was left to the dialog. -/
+the path was left to the dialog. Production (`driftSync.ts`) always folds
+theirs; when `opsArrived` it keeps overlapping text from the document so a
+character merge cannot duplicate CRDT text. This model still skips that
+fold (T20, H1). -/
 def autoResolveOne (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl : Pulled) :
     Except String (FeatureDoc × Feature) := do
   let some theirs := pl.theirs | throw "deleted on one side"
