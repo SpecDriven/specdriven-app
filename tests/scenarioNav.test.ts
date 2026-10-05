@@ -7,7 +7,7 @@
 // reload cron, while a save lands in the open feature first. Which of the two
 // a row reads from is what `scenarioRows` decides.
 import { describe, expect, test } from "bun:test";
-import { scenarioRows } from "../src/frontend/tree";
+import { scenarioRows, withOpenScenarios } from "../src/frontend/tree";
 import type { FeatureListing } from "../src/server/features";
 import type { Feature, Scenario } from "../src/server/parser";
 
@@ -91,5 +91,48 @@ describe("the scenarios a feature's outline expands to", () => {
     expect(scenarioRows(nav, nav.fileName, live)).toEqual([
       { name: "open a feature link", version: 1, status: "proposed" },
     ]);
+  });
+});
+
+// A scenario deleted in the open feature came back in the tree as soon as
+// another feature was opened: the tree then read the left feature from the
+// listing, which had not refreshed since. What the open feature holds is
+// written into its listing entry, so leaving it changes no rows.
+describe("the listing keeps what the open feature holds", () => {
+  const all = [nav, other];
+
+  test("a scenario deleted in the open feature stays gone once it is left", () => {
+    const live = openFeature([sc("open a feature link", 1), sc("share a link", 2, "published")]);
+    const next = withOpenScenarios(all, nav.fileName, live);
+    // Another feature is opened: the left one reads from the listing now.
+    expect(scenarioRows(next[0]!, other.fileName, null).map((s) => s.name)).toEqual([
+      "open a feature link",
+      "share a link",
+    ]);
+    expect(next[1]).toBe(other);
+  });
+
+  test("a rename and a new version carry over the same way", () => {
+    const live = openFeature([sc("renamed in the pane", 1), sc("share a link", 3)]);
+    expect(withOpenScenarios(all, nav.fileName, live)[0]!.scenarios).toEqual([
+      { name: "renamed in the pane", version: 1, status: "proposed" },
+      { name: "share a link", version: 3, status: "proposed" },
+    ]);
+  });
+
+  test("a draft stays out, as the server's listing leaves it out", () => {
+    const live = openFeature([sc("open a feature link", 1), sc("a new draft", 1, "draft")]);
+    expect(withOpenScenarios(all, nav.fileName, live)[0]!.scenarios).toEqual([
+      { name: "open a feature link", version: 1, status: "proposed" },
+    ]);
+  });
+
+  test("an entry that already agrees leaves the listing as it is", () => {
+    const live = openFeature(nav.scenarios.map((s) => ({ ...sc(s.name, s.version, s.status), body: "b" })));
+    expect(withOpenScenarios(all, nav.fileName, live)).toBe(all);
+  });
+
+  test("a file the listing does not hold yet leaves it as it is", () => {
+    expect(withOpenScenarios(all, "specs/new.feature.md", openFeature([sc("x", 1)]))).toBe(all);
   });
 });
