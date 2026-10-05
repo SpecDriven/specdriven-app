@@ -12,11 +12,12 @@ import {
   threeWayFeature,
   threeWayFeatureStrict,
 } from "../../src/server/automerge/merge";
-import { assertPublishedKept, reconcile } from "../../src/server/automerge/reconcile";
+import * as A from "@automerge/automerge";
+import { assertPublishedKept, healPublished, reconcile } from "../../src/server/automerge/reconcile";
 import { docToFeature, projectFeature } from "../../src/server/automerge/project";
 import { newFeatureDoc } from "../../src/server/automerge/store";
 import { parseFeature, type Feature, type Scenario, type ScenarioStatus } from "../../src/server/parser";
-import type { SpecEntry } from "../../src/server/automerge/schema";
+import { type FeatureDoc, snapshotOf, type SpecEntry } from "../../src/server/automerge/schema";
 
 void _unused;
 
@@ -136,28 +137,65 @@ const jsonFeature = (f: Feature) => ({
   name: f.name, description: f.description, scenarios: f.scenarios.map(jsonScenario),
   link: link(f.link), prs: f.prs ?? null, assigned: f.assigned ?? null,
 });
-const jsonEntry = (e: SpecEntry, addedIds: Set<string>) => ({
+// The recorded published body is an Automerge ImmutableString in a document
+// and a plain string in generated input; `snapshotOf` reads both.
+type PlainEntry = Omit<SpecEntry, "publishedBody"> & { publishedBody?: string };
+type PlainInit = Omit<FeatureDoc, "schemaVersion" | "id" | "specs"> & { specs: PlainEntry[] };
+type DocInit = Omit<FeatureDoc, "schemaVersion" | "id">;
+
+const jsonEntry = (e: PlainEntry | SpecEntry, addedIds: Set<string>) => ({
   id: addedIds.has(e.id) ? "*" : e.id, type: e.type.toLowerCase(), name: e.name, version: e.version,
-  status: e.status, body: e.body, tests: [...e.tests], link: link(e.link), prs: e.prs ? [...e.prs] : null,
+  status: e.status, body: e.body, publishedBody: snapshotOf(e) ?? null,
+  tests: [...e.tests], link: link(e.link), prs: e.prs ? [...e.prs] : null,
 });
 
-function docInit(f: Feature): Omit<import("../../src/server/automerge/schema").FeatureDoc, "schemaVersion" | "id"> {
+// A published entry is one of: legacy (published before the key existed, no
+// recorded body), stamped (recorded body is the live body), or untidy (a CRDT
+// merge left the live body different from the recorded one — H2). An
+// unpublished entry occasionally carries a stale record a demotion should
+// clear.
+function docInit(f: Feature): PlainInit {
   return {
     name: f.name,
     description: f.description,
-    specs: f.scenarios.map((s, i) => ({
-      id: `e${i}`, type: "Scenario", name: s.name, version: s.version, status: s.status,
-      body: s.body, tests: [...s.tests], ...(s.link ? { link: { ...s.link } } : {}),
-    })),
+    specs: f.scenarios.map((s, i) => {
+      let body = s.body;
+      let publishedBody: string | undefined;
+      if (s.status === "published") {
+        const r = next();
+        if (r < 0.4) publishedBody = s.body;
+        else if (r < 0.7) {
+          publishedBody = s.body;
+          body = pick(BODIES.filter((b) => b !== s.body));
+        }
+      } else if (chance(0.1)) publishedBody = pick(BODIES);
+      return {
+        id: `e${i}`, type: "Scenario", name: s.name, version: s.version, status: s.status,
+        body, ...(publishedBody !== undefined ? { publishedBody } : {}),
+        tests: [...s.tests], ...(s.link ? { link: { ...s.link } } : {}),
+      };
+    }),
     ...(f.link ? { link: { ...f.link } } : {}),
     ...(f.assigned ? { assigned: f.assigned } : {}),
   };
 }
 
-function jsonDoc(init: ReturnType<typeof docInit>) {
+// `structuredClone` would turn an ImmutableString into a plain `{ val }` map,
+// so the input stays plain and is wrapped after cloning.
+function wrapSnapshots(init: PlainInit): DocInit {
+  return {
+    ...init,
+    specs: init.specs.map(({ publishedBody, ...e }) => ({
+      ...e,
+      ...(publishedBody !== undefined ? { publishedBody: new A.ImmutableString(publishedBody) } : {}),
+    })),
+  };
+}
+
+function jsonDoc(init: PlainInit) {
   return {
     schemaVersion: 3, id: "doc", name: init.name, description: init.description,
-    specs: init.specs.map((e) => jsonEntry(e as SpecEntry, new Set())),
+    specs: init.specs.map((e) => jsonEntry(e, new Set())),
     link: link(init.link), prs: null, assigned: init.assigned ?? null,
   };
 }
@@ -185,7 +223,10 @@ function reconcileVectors() {
   for (let i = 0; i < N; i++) {
     const before = feature({ drafts: true });
     const init = docInit(before);
-    const doc = newFeatureDoc(structuredClone(init));
+    const doc = newFeatureDoc(wrapSnapshots(structuredClone(init)));
+    // The drift pass heals before it absorbs; the checker compares the healed
+    // entries too. A clone, since Automerge refuses a second change on `doc`.
+    const healed = healPublished(A.clone(doc)).specs.map((e) => jsonEntry(e, new Set()));
     // The target is usually a descendant of the projection (what a drift or
     // a save looks like), sometimes an unrelated feature.
     const target = chance(0.8) ? descend(parseFeature(projectFeature(doc))) : feature();
@@ -219,7 +260,7 @@ function reconcileVectors() {
     out.push({
       doc: jsonDoc(init), target: jsonFeature(target), force,
       scenario: scenario ? { id: scenario.id ?? null, name: scenario.name, version: scenario.version } : null,
-      publishedKept: kept, result,
+      publishedKept: kept, healed, result,
     });
   }
   return out;

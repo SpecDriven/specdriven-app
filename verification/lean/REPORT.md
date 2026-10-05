@@ -2,8 +2,12 @@
 
 Lean 4.34.1, core only (no Mathlib). `lake build` passes; `sorry` appears
 only in `SpecDriven/Sync/Theorems/Open.lean`. The differential test replays
-750 vectors through the model with zero mismatches. Nothing under `src/`
-changed. Theorem ids and informal statements are those of
+750 vectors through the model with zero mismatches. One finding led to a
+change under `src/`: the published case of H2 (section 2) is fixed by
+recording the body a scenario is published with (`schema.ts`
+`publishedBody`) and holding, rendering and healing the entry to it; the
+model mirrors it (`SpecEntry.publishedBody`, `effectiveBody`,
+`healPublished`). Theorem ids and informal statements are those of
 `docs/lean-sync-verification-prompt.md`; Lean names live under
 `SpecDriven/Sync/Theorems/`.
 
@@ -38,7 +42,10 @@ changed. Theorem ids and informal statements are those of
   one of the three inputs. `T9_assigned`, `T9_done`, `T9_kind`,
   `T9_supersedes`, `T9_body_theirs_unchanged`.
 - **T10** With `force` false and `reconcile` returning ok, every published
-  entry survives with the same id, name, version, status and body.
+  entry survives with the same id, name, version and status, and with the
+  body it was published with: its live `body` becomes that recorded body
+  (the gate holds the file to `effectiveBody`, so a live text a merge
+  doubled is healed here, not kept) and the recorded body is unchanged.
   `T10_published_kept`, through `T10_published_claimed`, `keyPass_claims`
   (the key pass claims an entry whose key the target carries),
   `idClaim_start` (the editor's claim leaves such an entry claimed by its
@@ -60,15 +67,20 @@ changed. Theorem ids and informal statements are those of
   once, naming only target scenarios and valid indices. `T15_plan_inv`.
 - **T16** The drift pass leaves every feature `Consistent` (file is a
   projection of its document, or both absent, or the file malformed), and a
-  second pass with no new input is the identity. `T16_consistent`,
-  `T16_idempotent`.
+  second pass with no new input is the identity. The pass now heals every
+  published entry's live body to its recorded one before it looks at the
+  file; the projection reads the recorded body, so the heal is invisible to
+  `isProjectionOf` (`isProjectionOf_heal`), and every document the pass
+  writes is already healed (`importDriftOne_healed`), which is what makes
+  the second pass the identity. `T16_consistent`, `T16_idempotent`.
 - **T17** While a merge is in progress the tick is the resolve pass alone.
   `T17_no_drift_while_merging`.
 - **T18** A feature whose file is gone loses its document and the file is
   not recreated. `T18_deleted`.
-- **T19** A refused absorb leaves the document unchanged and rewrites the
-  file to the document's projection. `T19_refused_unchanged`,
-  `T19_refused_repairs`.
+- **T19** A refused absorb leaves the document unchanged beyond the heal
+  that precedes every absorb, and rewrites the file to the document's
+  projection — the recorded published bodies, which the heal does not move
+  (`projectFeature_heal`). `T19_refused_unchanged`, `T19_refused_repairs`.
 - **T20** With operations arrived and no lineage race, the conflicted file
   resolves to the merged document's projection, and two peers holding the
   same merged document write the same bytes. `T20_ops_arrived`,
@@ -90,7 +102,7 @@ changed. Theorem ids and informal statements are those of
   `H3_second_pull_converges`. Caveat: that merged document is the CRDT
   merge of two different `updateText` splices on the same field, so the
   converged text can carry a fragment twice (H2's duplication); the drift
-  pass heals it unless the scenario is published (section 2, H2).
+  pass heals it, published or not (section 2, H2).
 - **H5** (refuted) A chunk built on an older head arriving after this peer
   compacted loads to the same document, and closure survives: no peer sees
   a document missing the lagging change. `H5_no_change_lost`, `H5_closed`.
@@ -121,17 +133,29 @@ riding a push with operations is dropped by the ops-arrived resolution"
 Violates: "markdown edited outside the app" is absorbed into the document
 (specs/app/sync, the drift pass) — here it is discarded.
 
-### H2 Concurrent absorb duplicates text — confirmed when a publish intervenes
+### H2 Concurrent absorb duplicates text — confirmed, and fixed for the published case
 
 Lean: `H2_doubled` (the merged field is longer than the text both peers
-absorbed), `H2_heals` (an unpublished entry is claimed by its key and takes
-the file's body back), `H2_name_description_heal`,
-`H2_publish_blocks_heal` (a published doubled entry fails the gate against
-the single-bodied file), `H2_publish_locks_duplicate` (the refused absorb
-repairs the file to the doubled projection). Tests: same file, "H2:
-concurrent absorbs double the text in the document, and the next drift pass
-heals it" (passes: the heal) and "H2: a publish between two concurrent
-absorbs makes the doubled text permanent" (`test.failing`).
+absorbed), `H2_heals` (an entry claimed by its key takes the file's body
+back), `H2_name_description_heal`, `H2_tamper_refused` (a file whose
+scenario carries a published entry's key but not its recorded body fails
+the gate), `H2_publish_gate_passes` (a published entry recording `b` passes
+the gate against a file carrying `b`, whatever its live body reads),
+`H2_publish_heals` (and the absorb heals it), `H2_publish_heals_on_tick`
+(the drift pass on the doubled-but-published document heals its live body
+and leaves the file alone). Tests: same file, "H2: concurrent absorbs
+double the text in the document, and the next drift pass heals it" and "H2:
+a publish between two concurrent absorbs heals to the published body" —
+the second was `test.failing` until the fix below.
+
+The duplication itself is inherent: two actors running `updateText` to the
+same longer text on two forks merge to a longer text (axiom
+`Text.concurrent_update_grows`), and the design already relies on the drift
+pass to heal it. What was broken is that publishing recorded nothing: the
+gate could only compare the file to the current live text, so it could not
+tell a merge artifact (file right, document wrong) from tampering (document
+right, file wrong), assumed tampering, and locked the artifact in. The trace
+that did so (steps 1–5 unchanged; the old step 6 follows):
 
 1. A and B share a feature with one proposed scenario.
 2. A markdown-only commit (a merged PR) changes the scenario body on origin.
@@ -140,18 +164,57 @@ absorbs makes the doubled text permanent" (`test.failing`).
 4. A publishes the scenario (status published, body once) and pushes.
 5. B ticks: its chunks and A's merge. The document holds the insertion twice
    and is published; the file (A's) holds it once.
-6. B's drift pass: not a projection, so `absorbDrift` runs
+6. (Before the fix.) B's drift pass: not a projection, so `absorbDrift` ran
    `assertPublishedKept`: same key, published, body differs — refused. The
-   file is rewritten to the doubled projection, committed and pushed. A
-   pulls it. Both documents and both files now read "- line two, edited on
-   GitHub, edited on GitHub", published, with no path back.
+   file was rewritten to the doubled projection, committed and pushed; A
+   pulled it. Both documents and both files read "- line two, edited on
+   GitHub, edited on GitHub", published, with no path back. Violated:
+   "published scenarios stay immutable" — the published body was not the
+   one that was published.
 
-Without step 4 the next drift pass heals (the plain H2 test): the doubled
-entry is claimed by its key and takes the file's body. Name and description
-always heal (`H2_name_description_heal`).
+**The fix.** Publishing records the body: `SpecEntry.publishedBody`, an
+Automerge `ImmutableString` (a `str` scalar set whole, last writer wins,
+never spliced), stamped whenever `reconcile` matches an entry to a published
+target scenario and by `newEntry` for a scenario imported published, cleared
+when a forced resolution demotes the entry. A published entry's
+`effectiveBody` is its recorded body when it has one, its live `body`
+otherwise (entries published before the key existed, stamped by their first
+reconcile). The gate compares the file to `effectiveBody`; the projection
+renders `effectiveBody`; and `importDrift` runs `healPublished` first,
+before any look at the file, driving each published entry's live `body`
+back to its recorded one. Step 6 now reads: B's file (A's) carries the
+recorded body, so it is a projection of B's document; the pass heals the
+live text, saves the heal, and writes nothing to the file
+(`H2_publish_heals_on_tick`). Without step 4 the next drift pass heals as
+before (`H2_heals`). Name and description always heal
+(`H2_name_description_heal`).
 
-Violates: "published scenarios stay immutable" — the published body is not
-the one that was published.
+Heal-first, rather than inside the absorb, is what bounds the mixed-version
+case: a peer on an older build still renders the doubled live text and
+pushes a doubled file; here that file is drift against the recorded body,
+refused and repaired, and the heal saved in the same tick reaches the old
+peer, whose live text then reads single and whose file is then a
+projection. Without the heal the two peers would rewrite the file against
+each other every tick.
+
+Caveats of the fix, all noted in the code:
+
+- Already-locked duplicates (a published body doubled before this change)
+  are not repaired: their recorded body, stamped lazily, is the doubled
+  live text. Repair is the forced conflict-resolution door, or a new
+  version. The fix prevents new ones.
+- Two peers publishing the same scenario concurrently with different bodies
+  used to merge character-level into a text nobody wrote; now one recorded
+  body wins, the same one on every peer, and the heal removes the other's
+  text from the live field.
+- The live text and the recorded body are two representations of one body,
+  equal except between a merge and the next drift pass; neither the file
+  nor the API nor the editor ever sees the live one while the entry is
+  published. Concurrent heals from different merged states can
+  over-delete and re-insert in the live text until a pull aligns the peers;
+  invisible, since the projection is the recorded body.
+- A legacy published entry's first reconcile issues one
+  `entrySetPublishedBody` op; T13 is restated for stamped documents.
 
 ### H4 Same-body claim mis-match — confirmed for markdown-only edits
 
@@ -188,7 +251,9 @@ All in `SpecDriven/Sync/Theorems/Open.lean`, each with `sorry`.
   kept-then-added entries equals `sortScenarios target`, over
   `List.mergeSort` without Mathlib.
 - **T13 `T13_fixpoint`** — `reconcile d (parseFeature (projectFeature d))`
-  issues no operation. Blocked on the same closure: each non-draft entry is
+  issues no operation, for a `Stamped` document (every published entry
+  records its body; a legacy entry's first pass issues the one stamp op).
+  Blocked on the same closure: each non-draft entry is
   claimed by `entryToScenario` of itself (for which `updateEntry` is
   `[]`), no draft is claimed, nothing is added or deleted, and the
   name/description/link/assigned comparisons are reflexive. Every piece is a

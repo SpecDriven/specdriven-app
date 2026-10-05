@@ -49,6 +49,7 @@ structure ReconcileVector where
   force : Bool
   scenario : Option ScenarioTarget
   publishedKept : Bool
+  healed : Option (List SpecEntry) := none
   result : ReconcileResult
   deriving FromJson
 
@@ -90,6 +91,10 @@ def checkReconcile (file : String) : IO Nat := do
     if kept != v.publishedKept then
       bad := bad + 1
       IO.println s!"{file}[{i}]: publishedKept model={kept} ts={v.publishedKept}"
+    if let some hs := v.healed then
+      if (healPublished v.doc).specs != hs then
+        bad := bad + 1
+        IO.println s!"{file}[{i}]: healPublished differs\n  model: {repr (healPublished v.doc).specs}\n  ts:    {repr hs}"
     let got := reconcile (fun _ => "*") v.doc v.target v.force v.scenario
     match got, v.result.ok with
     | .ok (d, _), true =>
