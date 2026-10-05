@@ -3862,6 +3862,30 @@ export function App() {
     );
 
   /**
+   * The confirmation a scenario delete asks for. A published scenario gets
+   * the Danger Zone wording and a Confirm button
+   * (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
+   * published, immutable content, deletable only because Settings says so.
+   */
+  const confirmScenarioDelete = ({ name, version, status }: ScenarioRow) =>
+    confirm(
+      status === "published"
+        ? {
+            title: "Danger Zone!",
+            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
+            confirmLabel: "Confirm",
+          }
+        : {
+            title: "Delete scenario",
+            body:
+              status === "draft"
+                ? `Delete the draft "${name}" v${version}?`
+                : `Delete "${name}" v${version}?`,
+            confirmLabel: "Delete scenario",
+          },
+    );
+
+  /**
    * Delete the dialog's scenario (specs/ui.spec.md "Scenario editor"),
    * after a confirmation. Three removals, by what the scenario is: a
    * [proposed] one is saved out of the feature like any other edit; a draft —
@@ -3882,25 +3906,7 @@ export function App() {
     // From here on autosave stands down: a tick landing while the
     // confirmation is up could re-sort the feature under `idx`.
     deletingScenario.current = true;
-    // A published scenario gets the Danger Zone wording and a Confirm button
-    // (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
-    // published, immutable content, deletable only because Settings says so.
-    const ok = await confirm(
-      saved.status === "published"
-        ? {
-            title: "Danger Zone!",
-            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
-            confirmLabel: "Confirm",
-          }
-        : {
-            title: "Delete scenario",
-            body:
-              saved.status === "draft"
-                ? `Delete the draft "${name}" v${version}?`
-                : `Delete "${name}" v${version}?`,
-            confirmLabel: "Delete scenario",
-          },
-    );
+    const ok = await confirmScenarioDelete(saved);
     if (!ok) {
       deletingScenario.current = false;
       return;
@@ -4093,6 +4099,67 @@ export function App() {
     });
   };
 
+  /**
+   * Delete from a scenario's menu in the sidebar tree
+   * (specs/navigation.feature.md "Scenario navigation"): the
+   * same removal the editor pane's Delete makes, by what the scenario is,
+   * for any feature in the tree — not only the open one. A pane open on that
+   * very scenario takes the pane's own Delete. A pane open on another
+   * scenario of the same feature is left first, autosaving like any
+   * navigation away, since the removal re-indexes the feature under it.
+   */
+  const deleteTreeScenario = async (file: string, s: ScenarioRow) => {
+    const same = (x: { name: string; version: number }) =>
+      x.name === s.name && x.version === s.version;
+    if (file === selected && savedEntry !== null && same(savedEntry)) {
+      await deleteScenario();
+      return;
+    }
+    if (!(await confirmScenarioDelete(s))) return;
+    if (file === selected && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    const url = `/api/features/${encodeURIComponent(file)}`;
+    let res: Response;
+    if (s.status === "draft" || s.status === "published") {
+      res = await fetch(`${url}/${s.status === "draft" ? "delete-draft" : "delete-published"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
+      });
+    } else {
+      // A [proposed] scenario is saved out of the feature, from the server's
+      // copy: the feature may not be the open one.
+      const got = await fetch(url);
+      if (!got.ok) {
+        toast.error("Delete failed");
+        return;
+      }
+      const current = featureFromResponse(await got.json(), file);
+      const next: Feature = { ...current, scenarios: current.scenarios.filter((x) => !same(x)) };
+      res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Delete failed");
+      return;
+    }
+    // Every route answers with the editor's view of the feature.
+    if (selectedRef.current === file) {
+      setFeature(featureFromResponse(data, file));
+      setSelectedScenario(null);
+      markSaved();
+    }
+    await loadFeatures();
+    toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
+  };
+
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => {
     const entry = specSelection.get(f.fileName);
@@ -4251,25 +4318,64 @@ export function App() {
                 paneScenario !== null &&
                 paneScenario.name === s.name &&
                 paneScenario.version === s.version;
+              // Its menu (specs/navigation.feature.md "Scenario
+              // navigation"): Delete, offered on the same terms as the
+              // editor pane's — a published scenario only while Settings
+              // allows it.
+              const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
+              const deletable = s.status !== "published" || deletePublished;
               return (
-                <a
-                  key={`${s.name}-v${s.version}`}
-                  href={scenarioPath(f.fileName, s)}
-                  className={`tree-scenario${here ? " active" : ""}`}
-                  role="treeitem"
-                  aria-level={depth + 2}
-                  aria-current={here ? "page" : undefined}
-                  /* Line up just past the feature's twisty: the codegen
-                     checkbox, when on, already carries the depth indent for
-                     the whole row, so it is not added twice. */
-                  style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
-                  title={`${s.name} v${s.version}`}
-                  onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
-                >
-                  <StatusIcon status={s.status} size={12} />
-                  <span className="tree-scenario-name">{s.name}</span>
-                  <span className="version">v{s.version}</span>
-                </a>
+                <div key={`${s.name}-v${s.version}`} className="tree-scenario-row">
+                  <a
+                    href={scenarioPath(f.fileName, s)}
+                    className={`tree-scenario${here ? " active" : ""}`}
+                    role="treeitem"
+                    aria-level={depth + 2}
+                    aria-current={here ? "page" : undefined}
+                    /* Line up just past the feature's twisty: the codegen
+                       checkbox, when on, already carries the depth indent for
+                       the whole row, so it is not added twice. */
+                    style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
+                    title={`${s.name} v${s.version}`}
+                    onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
+                  >
+                    <StatusIcon status={s.status} size={12} />
+                    <span className="tree-scenario-name">{s.name}</span>
+                    <span className="version">v{s.version}</span>
+                  </a>
+                  {deletable && (
+                    <span className="tree-row-menu">
+                      <Tooltip label="More actions">
+                        <button
+                          type="button"
+                          className="tree-menu-btn"
+                          aria-label={`Menu for ${s.name} v${s.version}`}
+                          aria-haspopup="menu"
+                          aria-expanded={treeMenu === menuKey}
+                          onClick={() => setTreeMenu((m) => (m === menuKey ? null : menuKey))}
+                        >
+                          <Ellipsis size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                      <Menu
+                        open={treeMenu === menuKey}
+                        onClose={() => setTreeMenu(null)}
+                        label={`Menu for ${s.name} v${s.version}`}
+                        className="tree-menu"
+                        containerSelector=".tree-row-menu"
+                        items={[
+                          {
+                            id: "delete",
+                            label: "Delete",
+                            icon: <Trash2 size={13} />,
+                            danger: true,
+                            onSelect: () => void deleteTreeScenario(f.fileName, s),
+                          },
+                        ]}
+                      />
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>
