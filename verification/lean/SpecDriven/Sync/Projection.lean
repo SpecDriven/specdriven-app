@@ -50,7 +50,7 @@ def parseFeature (text : Feature) : Feature :=
 
 /-- `docToFeature` in project.ts. -/
 def entryToScenario (e : SpecEntry) : Scenario :=
-  { name := e.name, version := e.version, status := e.status, body := e.body,
+  { name := e.name, version := e.version, status := e.status, body := e.effectiveBody,
     tests := e.tests, id := none, link := e.link, prs := e.prs }
 
 def docToFeature (d : FeatureDoc) : Feature :=

@@ -26,6 +26,7 @@ inductive Op where
   | entryUpdateName (i : Nat) (new : String)
   | entrySetVersion (i : Nat) (v : Nat)
   | entrySetStatus (i : Nat) (s : Status)
+  | entrySetPublishedBody (i : Nat) (b : Option String)
   | entryUpdateBody (i : Nat) (new : String)
   | entrySetTests (i : Nat) (tests : List String)
   | entrySetLink (i : Nat) (link : Option ExternalLink)
@@ -36,7 +37,8 @@ inductive Op where
 /-- `newEntry` in reconcile.ts. -/
 def newEntry (id : String) (s : Scenario) : SpecEntry :=
   { id := id, type := .scenario, name := s.name, version := s.version, status := s.status,
-    body := s.body, tests := s.tests, link := s.link, prs := none }
+    body := s.body, publishedBody := if s.status == .published then some s.body else none,
+    tests := s.tests, link := s.link, prs := none }
 
 /-- `importFeatureDoc` in reconcile.ts, with the identity the store mints. -/
 def importFeatureDoc (docId : String) (fresh : Nat → String) (f : Feature) : FeatureDoc :=
@@ -51,12 +53,13 @@ def samePickS (s : Scenario) (p : ScenarioPick) : Bool :=
   s.name == p.name && s.version == p.version
 
 /-- `assertPublishedKept`: every published entry survives under its key,
-still published, body intact. -/
+still published, body intact — the body as published (`effectiveBody`), not
+the live text a merge may have doubled. -/
 def publishedKept (d : FeatureDoc) (target : Feature) : Bool :=
   d.specs.all fun e =>
     e.status != .published ||
     match target.scenarios.find? (fun s => samePickS s ⟨e.name, e.version⟩) with
-    | some s => s.status == .published && s.body == e.body
+    | some s => s.status == .published && s.body == e.effectiveBody
     | none => false
 
 /-- The match plan: entry index ↦ target scenario, computed exactly as the
@@ -100,7 +103,7 @@ def idClaim (entries : List SpecEntry) (target : Feature) (scenario : Option Sce
 def plan (entries : List SpecEntry) (target : Feature) (scenario : Option ScenarioTarget) : Plan :=
   let p := idClaim entries target scenario {}
   let p := claimPass entries target (fun s e => samePickE e ⟨s.name, s.version⟩) p
-  claimPass entries target (fun s e => s.body == e.body) p
+  claimPass entries target (fun s e => s.body == e.effectiveBody) p
 
 /-- `assignLink` in reconcile.ts. -/
 def assignLinkOps (before after : Option ExternalLink) (mk : Option ExternalLink → Op) : List Op :=
@@ -112,15 +115,19 @@ def updateEntry (p : Plan) (i : Nat) (e : SpecEntry) : SpecEntry × List Op :=
   match p.at? i with
   | none => (e, [])
   | some m =>
+    -- The recorded body follows the target: a published match freezes the
+    -- target's body, any other status clears it.
+    let snap := if m.status == .published then some m.body else none
     let ops :=
       (if e.name != m.name then [Op.entryUpdateName i m.name] else []) ++
       (if e.version != m.version then [Op.entrySetVersion i m.version] else []) ++
       (if e.status != m.status then [Op.entrySetStatus i m.status] else []) ++
+      (if e.publishedBody != snap then [Op.entrySetPublishedBody i snap] else []) ++
       (if e.body != m.body then [Op.entryUpdateBody i m.body] else []) ++
       (if e.tests != m.tests then [Op.entrySetTests i m.tests] else []) ++
       assignLinkOps e.link m.link (Op.entrySetLink i)
     ({ e with name := m.name, version := m.version, status := m.status, body := m.body,
-              tests := m.tests, link := m.link }, ops)
+              publishedBody := snap, tests := m.tests, link := m.link }, ops)
 
 def updatedSpecs (p : Plan) (specs : List SpecEntry) : List (SpecEntry × List Op) :=
   (enumerate specs).map fun (i, e) => updateEntry p i e
@@ -169,6 +176,19 @@ def removeDraftScenario (d : FeatureDoc) (target : ScenarioPick) : Option Featur
   match (enumerate d.specs).find? (fun (_, e) => e.status == .draft && samePickE e target) with
   | none => none
   | some (i, _) => some { d with specs := d.specs.eraseIdx i }
+
+/-- One entry after `healPublished`: a published entry's live body driven back
+to its recorded one; every other entry untouched. -/
+def healEntry (e : SpecEntry) : SpecEntry :=
+  match e.status, e.publishedBody with
+  | .published, some b => { e with body := b }
+  | _, _ => e
+
+/-- `healPublished` in reconcile.ts: the document with every published entry's
+live text back at its recorded body. The TypeScript mints a change only when
+some entry was stale; here the value is the same either way. -/
+def healPublished (d : FeatureDoc) : FeatureDoc :=
+  { d with specs := d.specs.map healEntry }
 
 /-- `absorbDrift` in driftSync.ts: reconcile, or refuse and keep the doc. -/
 def absorbDrift (fresh : Nat → String) (d : FeatureDoc) (text : Feature) :

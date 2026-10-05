@@ -65,8 +65,10 @@ def autoResolveOne (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl 
 /-- The `docid` branch of `autoResolveOne`: the loaded document's id wins. -/
 def resolveDocid (doc : FeatureDoc) : String := doc.id
 
-/-- `importDrift` for one feature: import, skip, absorb or repair; then the
-second loop drops the document of a feature whose file is gone. -/
+/-- `importDrift` for one feature: heal, then import, skip, absorb or repair;
+then the second loop drops the document of a feature whose file is gone. The
+heal runs first, before any look at the file, so a peer still holding a
+doubled live text pulls the heal and stops rewriting the file. -/
 def importDriftOne (fresh : Nat → String) (docId : String) (links : Bool) (s : PeerFeature) :
     PeerFeature :=
   match s.file with
@@ -78,7 +80,8 @@ def importDriftOne (fresh : Nat → String) (docId : String) (links : Bool) (s :
       let d := importFeatureDoc docId fresh (parseFeature text)
       { doc := some d, file := .text (projectFeature d links) }
     | some d =>
-      if isProjectionOf text d then s
+      let d := healPublished d
+      if isProjectionOf text d then { doc := some d, file := .text text }
       else
         let (d', _refused) := absorbDrift fresh d text
         { doc := some d', file := .text (projectFeature d' links) }

@@ -14,7 +14,10 @@
 //   GitHub edit, an old-version peer's push, or a feature that predates its
 //   document — is absorbed (or first imported) into the doc, and the file is
 //   rewritten to the doc's projection. Drift that would tamper with a
-//   published scenario is refused and the file repaired from the doc.
+//   published scenario is refused and the file repaired from the doc. The
+//   pass first heals every published spec whose live text a CRDT merge left
+//   different from its recorded published body (schema.ts publishedBody), so
+//   that artifact is never mistaken for tampering and never reaches a file.
 
 import type * as A from "@automerge/automerge";
 import { fileExists, readTextFile, writeTextFile } from "../fsx";
@@ -31,7 +34,7 @@ import { isPageFile, isPageFolderPath } from "../pages";
 import { threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature } from "./project";
-import { importFeatureDoc, reconcile } from "./reconcile";
+import { healPublished, importFeatureDoc, reconcile } from "./reconcile";
 import type { FeatureDoc } from "./schema";
 import {
   AUTOMERGE_ROOT,
@@ -234,6 +237,7 @@ export async function importDrift(dataDir: string): Promise<string> {
     let imported = 0;
     let absorbed = 0;
     let repaired = 0;
+    let healed = 0;
     for (const fileName of files) {
       const text = await readTextFile(`${dataDir}/${fileName}`);
       // Unreadable or malformed markdown never reaches the document.
@@ -247,17 +251,32 @@ export async function importDrift(dataDir: string): Promise<string> {
         log.debug(`imported ${fileName} into a document`);
         continue;
       }
+      // A published spec whose live text a merge left doubled is tidied
+      // first, before any look at the file, so a peer still holding the
+      // doubled text (one running an older build, or one that merged the
+      // same two absorbs) pulls the heal and stops rewriting the file
+      // (reconcile.ts healPublished). Saved below with whatever else the
+      // file brings; saveDoc writes nothing when the heal minted no change.
+      const doc = healPublished(loaded.doc);
+      if (doc !== loaded.doc) {
+        healed++;
+        log.debug(`healed published text in ${fileName}`);
+      }
       // A file in the document's other form — external links written by a
       // peer whose setting differs — is not drift (project.ts).
-      if (isProjectionOf(text, loaded.doc)) continue;
-      const drift = absorbDrift(loaded.doc, text);
+      if (isProjectionOf(text, doc)) {
+        await saveFeatureDoc(dataDir, fileName, doc, loaded.heads);
+        continue;
+      }
+      const drift = absorbDrift(doc, text);
       if (drift.refused === undefined) {
         await saveFeatureDoc(dataDir, fileName, drift.doc, loaded.heads);
         await writeTextFile(`${dataDir}/${fileName}`, projectFeature(drift.doc));
         absorbed++;
         log.debug(`absorbed drifted ${fileName} into its document`);
       } else {
-        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(loaded.doc));
+        await saveFeatureDoc(dataDir, fileName, doc, loaded.heads);
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(doc));
         repaired++;
         log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(drift.refused));
       }
@@ -276,12 +295,14 @@ export async function importDrift(dataDir: string): Promise<string> {
       "sync.imported": imported,
       "sync.absorbed": absorbed,
       "sync.repaired": repaired,
+      "sync.healed": healed,
       "sync.removed": removed,
     });
     const parts = [];
     if (imported > 0) parts.push(`imported ${imported} feature(s) into documents`);
     if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited file(s)`);
     if (repaired > 0) parts.push(`repaired ${repaired} file(s) from their documents`);
+    if (healed > 0) parts.push(`healed ${healed} published scenario(s)`);
     if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
     return parts.join("; ");
   });
