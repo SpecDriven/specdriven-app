@@ -7,6 +7,7 @@
 // handles (parser.ts `Scenario.id`) and hands them back on a save, so a
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
+import type { ImmutableString } from "@automerge/automerge";
 import type { EntryKind, ExternalLink, PullRequestLink, ScenarioStatus } from "../parser";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
@@ -34,6 +35,21 @@ export type SpecEntry = {
   status: ScenarioStatus;
   /** Spec markdown (tests section excluded) — collaborative text. */
   body: string;
+  /**
+   * The body as it read when the entry became published — what every peer
+   * renders and is held to while it stays published (`effectiveBody`). A
+   * scalar set whole and never spliced, so concurrent publishes resolve to
+   * one text the same way on every peer, and a merge artifact in the live
+   * `body` (two peers absorbing the same markdown edit into it, H2 in
+   * verification/lean/REPORT.md) can neither pass the published gate nor
+   * leak into the file: the drift pass drives `body` back to it
+   * (reconcile.ts `healPublished`). Absent on entries published before the
+   * key existed — held to `body` until their next reconcile stamps them —
+   * and cleared when a forced resolution demotes the entry. Automerge
+   * stores it as a `str` scalar (one op, last writer wins) and hands it
+   * back as an `ImmutableString`: read it through `snapshotOf`, never `===`.
+   */
+  publishedBody?: ImmutableString;
   /** GitHub urls of the automated tests covering this spec. */
   tests: string[];
   /**
@@ -53,6 +69,27 @@ export type SpecEntry = {
    */
   prs?: PullRequestLink[];
 };
+
+/** The recorded published body as a plain string, or undefined when the entry
+    carries none. Tolerates a plain string (fresh `A.from` input, test data). */
+export function snapshotOf(e: { publishedBody?: ImmutableString | string }): string | undefined {
+  const v = e.publishedBody;
+  if (v === undefined || v === null) return undefined;
+  return typeof v === "string" ? v : v.val;
+}
+
+/** The body a reader is shown and a file is held to: the recorded published
+    body while the entry is published and carries one, the live text
+    otherwise. */
+export function effectiveBody(e: {
+  status: ScenarioStatus;
+  body: string;
+  publishedBody?: ImmutableString | string;
+}): string {
+  if (e.status !== "published") return e.body;
+  const snap = snapshotOf(e);
+  return snap === undefined ? e.body : snap;
+}
 
 export type FeatureDoc = {
   schemaVersion: number;

@@ -163,6 +163,33 @@ test("compaction folds change files into one snapshot that still loads", async (
   expect(loaded!.doc.specs[0]!.body).toContain("0 ");
 });
 
+// The recorded published body (schema.ts publishedBody) is an Automerge
+// ImmutableString — a `str` scalar, not collaborative text — and must come
+// back as one through saves, compaction and reload.
+test("a recorded published body survives saves, compaction and reload as an immutable string", async () => {
+  let { doc, heads } = await createFeatureDoc(root, FILE, sampleDoc());
+  const published = A.change(A.clone(doc), (d) => {
+    d.specs[0]!.status = "published";
+    d.specs[0]!.publishedBody = new A.ImmutableString(d.specs[0]!.body);
+  });
+  await saveFeatureDoc(root, FILE, published, heads);
+  for (let i = 0; i < 13; i++) {
+    const loaded = (await loadFeatureDoc(root, FILE))!;
+    doc = loaded.doc;
+    heads = loaded.heads;
+    const next = A.change(A.clone(doc), (d) => {
+      A.splice(d, ["specs", 0, "body"], 0, 0, `${i} `);
+    });
+    await saveFeatureDoc(root, FILE, next, heads);
+  }
+  const files = await readdir(docDir(root, FILE));
+  expect(files.filter((f) => f.startsWith("snapshot-")).length).toBe(1);
+  const entry = (await loadFeatureDoc(root, FILE))!.doc.specs[0]!;
+  expect(A.isImmutableString(entry.publishedBody)).toBe(true);
+  expect(entry.publishedBody!.val).toBe("- **Given** an account\n- **Then** a quote");
+  expect(entry.body).toContain("12 ");
+});
+
 test("removeFeatureDoc deletes the directory", async () => {
   await createFeatureDoc(root, FILE, sampleDoc());
   await removeFeatureDoc(root, FILE);
