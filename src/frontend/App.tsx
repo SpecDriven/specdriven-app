@@ -160,7 +160,7 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree, scenarioRows } from "./tree";
+import { buildTree, scenarioRows, withOpenScenarios } from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
@@ -1482,6 +1482,17 @@ export function App() {
     // The ticket-link fields open showing the scenario's link, if any.
     setLinkDraft(linkDraftOf(editing?.scenario.link));
   }, [editingOpen]);
+
+  // The tree reads the open feature's scenarios from its live state, every
+  // other feature's from the listing — which only refreshes on start and on
+  // the reload cron. So whatever the open feature now holds goes into its
+  // listing entry too, or a scenario deleted (or renamed, or added) there
+  // would come back the moment another feature is opened.
+  useEffect(() => {
+    if (!selected || !feature) return;
+    setFeatures((prev) => withOpenScenarios(prev, selected, feature));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature]);
 
   // Autosave measures against what the dialog opened with, so a scenario that
   // is opened and read but not edited is never re-saved
@@ -2825,6 +2836,10 @@ export function App() {
         if (stillHere) {
           setFeature(saved);
           setDirty(false);
+        } else {
+          // Its feature is no longer open, so the tree reads it from the
+          // listing: the save lands there instead.
+          setFeatures((prev) => withOpenScenarios(prev, file, saved));
         }
         // The feature comes back in canonical order, so a renamed scenario has
         // moved: a still-open editor has to find its scenario again, and an
@@ -3936,7 +3951,8 @@ export function App() {
     setSelectedScenario((prev) =>
       prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
     );
-    const url = `/api/features/${encodeURIComponent(selected)}`;
+    const file = selected;
+    const url = `/api/features/${encodeURIComponent(file)}`;
     // Drafts and published scenarios go through their own routes — a draft
     // because the file never held it, a published one because both
     // immutability gates refuse a save without it
@@ -3954,15 +3970,24 @@ export function App() {
             body: JSON.stringify({ content: serializeFeature(next), save: true }),
           });
     const data = await res.json();
+    // Another feature may have been opened while the delete was away — a
+    // published one commits and pushes first — and then the answer is not
+    // the feature on screen: it goes to the listing the tree reads it from.
+    const stillHere = selectedRef.current === file;
     if (res.ok) {
       // Both routes answer with the editor's view of the feature — the file
       // content with the remaining drafts folded back in.
-      setFeature(featureFromResponse(data, selected));
-      setDirty(false);
+      const left = featureFromResponse(data, file);
+      if (stillHere) {
+        setFeature(left);
+        setDirty(false);
+      } else {
+        setFeatures((prev) => withOpenScenarios(prev, file, left));
+      }
       toast.success(done);
       markSaved();
     } else {
-      setDirty(true);
+      if (stillHere) setDirty(true);
       toast.error(data.error ?? "Delete failed");
     }
   };

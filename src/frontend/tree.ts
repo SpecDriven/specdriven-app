@@ -81,3 +81,39 @@ export function scenarioRows(
     open && listing.fileName === openFile ? open.scenarios : listing.scenarios;
   return source.map(({ name, version, status }) => ({ name, version, status }));
 }
+
+/**
+ * The listing with the open feature's scenarios written into its entry, so
+ * the tree shows the same rows once the feature is left as it did while the
+ * feature was open — a scenario deleted, renamed or added there does not come
+ * back, or go missing, until the next listing refresh catches up.
+ *
+ * The entry holds what the server's listing would: the scenarios in the file.
+ * A draft lives only in the feature's document, so it stays out — the next
+ * refresh would only take it out again. The same array comes back when the
+ * entry already agrees, so a state update with it changes nothing.
+ */
+export function withOpenScenarios(
+  listing: FeatureListing[],
+  openFile: string,
+  open: { scenarios: readonly Scenario[] },
+): FeatureListing[] {
+  const at = listing.findIndex((f) => f.fileName === openFile);
+  if (at < 0) return listing;
+  const scenarios = open.scenarios
+    .filter((s) => s.status !== "draft")
+    .map(({ name, version, status }) => ({ name, version, status }));
+  const entry = listing[at]!;
+  const same =
+    entry.scenarios.length === scenarios.length &&
+    entry.scenarios.every(
+      (s, i) =>
+        s.name === scenarios[i]!.name &&
+        s.version === scenarios[i]!.version &&
+        s.status === scenarios[i]!.status,
+    );
+  if (same) return listing;
+  const next = listing.slice();
+  next[at] = { ...entry, scenarios };
+  return next;
+}
