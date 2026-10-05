@@ -1053,7 +1053,9 @@ type ScenarioBody = { name?: unknown; version?: unknown; id?: unknown } | null |
 /** The scenario a body names, or null when the name or version is missing. */
 function scenarioTarget(body: ScenarioBody): ScenarioTarget | null {
   if (typeof body?.name !== "string" || typeof body.version !== "number") return null;
-  const target: ScenarioTarget = { name: body.name, version: body.version };
+  // Trimmed, as every heading parses (parser.ts SCENARIO_RE), so the target
+  // names the scenario the saved text holds.
+  const target: ScenarioTarget = { name: body.name.trim(), version: body.version };
   if (typeof body.id === "string") target.id = body.id;
   return target;
 }
