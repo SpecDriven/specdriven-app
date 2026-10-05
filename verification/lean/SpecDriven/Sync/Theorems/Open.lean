@@ -27,17 +27,27 @@ theorem T12_reaches_target (fresh : Nat → String) (d : FeatureDoc) (target : F
     projectFeature d' true = serializeFeature true (parseFeature target) := by
   sorry
 
-/-- **T13 Projection fixpoint (open).** Reconciling a document with the parse
-of its own projection issues no operation. Blocked on the same key-pass
-closure as T12: after the key pass every non-draft entry is claimed by its
-own scenario (`entryToScenario e`, for which `updateEntry` issues `[]`),
+/-- Every published entry records its body (`SpecEntry.publishedBody`). An
+entry published before the key existed is stamped by its first reconcile —
+one `entrySetPublishedBody` op, once — so the fixpoint below holds only of
+documents already stamped. Every entry `reconcile` writes is (see
+`updateEntry`, `newEntry`). -/
+def Stamped (d : FeatureDoc) : Prop :=
+  ∀ e ∈ d.specs, e.status = .published → e.publishedBody = some e.body
+
+/-- **T13 Projection fixpoint (open).** Reconciling a stamped document with
+the parse of its own projection issues no operation. Blocked on the same
+key-pass closure as T12: after the key pass every non-draft entry is claimed
+by its own scenario (`entryToScenario e`, for which `updateEntry` issues `[]`
+— the entry being stamped and healed, its recorded body is its body),
 every target scenario is matched (so the body pass is the identity and
 `addedSpecs` is empty), and no unclaimed entry is a non-draft (so
 `deletedIdx` is empty). Each piece is a fold invariant in the style of
 `keyPass_fold`; the time ran out before combining them. The differential test
 (`tests/automerge/leanModel.test.ts`) exercises this fixpoint on every vector
 whose target is the document's own projection, with no mismatch. -/
-theorem T13_fixpoint (fresh : Nat → String) (d : FeatureDoc) (hE : EntryKeysUnique d.specs) :
+theorem T13_fixpoint (fresh : Nat → String) (d : FeatureDoc) (hE : EntryKeysUnique d.specs)
+    (_hS : Stamped d) :
     ∃ d', reconcile fresh d (parseFeature (projectFeature d true)) = .ok (d', []) := by
   sorry
 

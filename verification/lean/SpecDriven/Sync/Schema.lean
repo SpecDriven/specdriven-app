@@ -81,10 +81,21 @@ structure SpecEntry where
   version : Nat
   status : Status
   body : String
+  /-- `publishedBody`: the body as it read when the entry became published,
+  a scalar set whole. What a published entry renders and is held to; the live
+  `body` may drift from it by a CRDT merge until the drift pass heals it. -/
+  publishedBody : Option String := none
   tests : List String
   link : Option ExternalLink := none
   prs : Option (List PullRequestLink) := none
   deriving DecidableEq, Repr, Inhabited
+
+/-- `effectiveBody` in schema.ts: the recorded published body while the entry
+is published and carries one, the live text otherwise. -/
+def SpecEntry.effectiveBody (e : SpecEntry) : String :=
+  match e.status, e.publishedBody with
+  | .published, some b => b
+  | _, _ => e.body
 
 /-- `FeatureDoc` in schema.ts. The Automerge wrapper is dropped: this is the
 plain value a document holds; the operations it took to get there are the

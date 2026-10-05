@@ -1,15 +1,18 @@
 // Traces from the Lean verification of the sync core
 // (verification/lean/SpecDriven/Sync/Theorems/Hypotheses.lean, REPORT.md):
 // hypotheses H1 and H2 of docs/lean-sync-verification-prompt.md, played
-// against the real implementation over real git transport. Each `failing`
-// test documents a confirmed weakness and flips to a failure when it is
-// fixed; the plain tests pin the behaviour the model proved.
+// against the real implementation over real git transport. A `failing` test
+// documents a confirmed weakness and flips to a failure when it is fixed;
+// the plain tests pin the behaviour the model proved. The published case of
+// H2 was such a weakness until publishing started recording the body
+// (schema.ts `publishedBody`); its test now pins the heal.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { snapshotOf } from "../../src/server/automerge/schema";
 import { importDrift } from "../../src/server/automerge/driftSync";
 import { projectFeature } from "../../src/server/automerge/project";
 import * as A from "@automerge/automerge";
@@ -123,15 +126,17 @@ test("H2: concurrent absorbs double the text in the document, and the next drift
   expect(projectFeature(docA)).toBe((await readFeature(a, FILE))!);
 });
 
-// H2, the case the heal cannot reach. Between the two absorbs A publishes
-// the scenario. B's pull merges A's operations (published, body once) with
-// B's own absorb (body once): the document holds the insertion twice and is
-// published. The file carries the body once, so the drift pass tries to
-// absorb — and `assertPublishedKept` refuses, because the file's body differs
-// from the published entry's doubled body. The file is "repaired" to the
-// doubled projection, committed and pushed: the duplication is permanent.
-// Lean: Hypotheses.lean `H2_publish_locks_duplicate`.
-test.failing("H2: a publish between two concurrent absorbs makes the doubled text permanent", async () => {
+// H2, the published case (fixed). Between the two absorbs A publishes the
+// scenario, recording the body it publishes. B's pull merges A's operations
+// (published, body once, recorded) with B's own absorb (body once): the live
+// text holds the insertion twice, but the entry is held to and rendered as
+// the recorded body, so the file is a projection, the gate is satisfied, and
+// B's drift pass drives the live text back to the recorded body before it
+// looks at the file. Before the record existed the gate read the doubled
+// live text, refused the single-bodied file and "repaired" it to the doubled
+// projection, locking the duplicate in on every peer.
+// Lean: Hypotheses.lean `H2_publish_heals`, `H2_publish_heals_on_tick`.
+test("H2: a publish between two concurrent absorbs heals to the published body", async () => {
   const { a, b } = await seededClones(ONE);
 
   await pushMarkdownOnly(b, ONE.replace("- line two", "- line two, edited on GitHub"), "PR merge");
@@ -139,13 +144,14 @@ test.failing("H2: a publish between two concurrent absorbs makes the doubled tex
   await importDrift(a);
   await importDrift(b);
 
-  await publishFeature(a, FILE, (await readFeature(a, FILE))!); // A: published, body once, pushed
-  await settle(b); // B: merges, then the drift pass refuses and repairs from the doubled doc
+  await publishFeature(a, FILE, (await readFeature(a, FILE))!); // A: published, body once, recorded, pushed
+  await settle(b); // B: merges (live text doubled), then the drift pass heals it to the recorded body
   await syncDataDir(a);
 
   const docA = (await loadFeatureDoc(a, FILE))!.doc;
   const docB = (await loadFeatureDoc(b, FILE))!.doc;
   expect(docA.specs[0]!.status).toBe("published");
+  expect(snapshotOf(docA.specs[0]!)).toBe("- line one\n- line two, edited on GitHub");
   expect(docB.specs[0]!.body).toBe(docA.specs[0]!.body);
   expect(docA.specs[0]!.body).toBe("- line one\n- line two, edited on GitHub");
   expect(await readFeature(a, FILE)).toBe((await readFeature(b, FILE))!);

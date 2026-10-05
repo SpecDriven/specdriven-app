@@ -16,17 +16,19 @@ bun test tests/automerge/leanHypotheses.test.ts   # H1, H2, H4 against the real 
 ```
 
 `lake build` passes with `sorry` only in `SpecDriven/Sync/Theorems/Open.lean`.
-No file under `src/` was changed.
+The one change the verification led to under `src/` is the fix for H2's
+published case (REPORT.md section 2): `schema.ts` `publishedBody`,
+`effectiveBody`, `reconcile.ts` `healPublished`, mirrored here.
 
 ## Layout
 
 ```
 lakefile.toml, lean-toolchain
 SpecDriven.lean                      library root
-SpecDriven/Sync/Schema.lean          FeatureDoc, SpecEntry, Feature, Scenario, keys
+SpecDriven/Sync/Schema.lean          FeatureDoc, SpecEntry (publishedBody, effectiveBody), Feature, Scenario, keys
 SpecDriven/Sync/Projection.lean      sortScenarios, serializeFeature, parseFeature, projectFeature, isProjectionOf
 SpecDriven/Sync/Merge.lean           mergeText (charMerge opaque), threeWayFeature(Strict), threeWayPage(Strict)
-SpecDriven/Sync/Reconcile.lean       the match plan (id, key, body passes), applyPlan, reconcile, absorbDrift
+SpecDriven/Sync/Reconcile.lean       the match plan (id, key, body passes), applyPlan, reconcile, healPublished, absorbDrift
 SpecDriven/Sync/Crdt.lean            Automerge as change sets: every axiom of the verification
 SpecDriven/Sync/Store.lean           chunks, loadChunks, compactDoc, saveDoc, migrated
 SpecDriven/Sync/Git.lean             Pulled: what a pull delivers; the git assumptions, stated
@@ -71,21 +73,21 @@ Status: **proved** (`lake build`, no `sorry` on its path), **open** (in
 | T7 Three-way identities | `T7_theirs_is_base`, `T7_ours_is_base`, `T7_conflict_iff` | `merge.ts` `threeWayFeature` | — | proved (per key) |
 | T8 Strict refines lenient | `T8_strict_ok`, `T8_strict_conflict`, `T8_page_strict_ok` | `merge.ts` `threeWayFeatureStrict`, `threeWayPageStrict` | — | proved |
 | T9 Pages never conflict | `T9_assigned`, `T9_done`, `T9_kind`, `T9_supersedes`, `T9_body_theirs_unchanged` | `merge.ts` `threeWayPage` | — | proved |
-| T10 Published immutability | `T10_published_kept` (via `T10_published_claimed`, `keyPass_claims`, `idClaim_start`) | `reconcile.ts` `assertPublishedKept`, `reconcile` | published scenarios stay immutable | proved (unique keys on both sides) |
+| T10 Published immutability | `T10_published_kept` (via `T10_published_claimed`, `keyPass_claims`, `idClaim_start`) | `reconcile.ts` `assertPublishedKept`, `reconcile`, `schema.ts` `effectiveBody` | published scenarios stay immutable | proved (unique keys on both sides; the body kept is the recorded published body) |
 | T11 Drafts survive markdown | `T11_draft_kept`, `T11_claimed_keeps_id` | `reconcile.ts` removal loop | draft scenarios live in the document only | proved |
 | T12 Reconcile reaches the target | `T12_reaches_target` | `reconcile.ts` doc comment | — | open |
-| T13 Projection fixpoint | `T13_fixpoint` | `store.ts` `saveDoc` no-op delta | — | open (differential test covers it) |
+| T13 Projection fixpoint | `T13_fixpoint` (for `Stamped` documents) | `store.ts` `saveDoc` no-op delta | — | open (differential test covers it) |
 | T14 Identity stability under rename | `T14_rename_keeps_id` | `reconcile.ts` `scenario?.id` claim | — | proved |
 | T15 Match plan determinism | `T15_plan_inv` (`Plan.Inv`) | `reconcile.ts` `claim`, `matchAt`, `matched` | — | proved |
-| T16 Tick preserves the projection invariant | `T16_consistent`, `T16_idempotent` | `reload.ts` `syncDataDir`, `driftSync.ts` `importDrift`, `isProjectionOf` | markdown edited outside the app | proved |
+| T16 Tick preserves the projection invariant | `T16_consistent`, `T16_idempotent` (via `importDriftOne_healed`, `isProjectionOf_heal`) | `reload.ts` `syncDataDir`, `driftSync.ts` `importDrift` (heal first), `isProjectionOf` | markdown edited outside the app | proved |
 | T17 No absorption during merge | `T17_no_drift_while_merging` | `reload.ts` `mergeInProgress` guard | — | proved |
 | T18 Deletion carries intent | `T18_deleted` | `driftSync.ts` `importDrift` second loop | A feature file deleted outside the app | proved |
-| T19 Refused drift repairs | `T19_refused_unchanged`, `T19_refused_repairs` | `driftSync.ts` `refused` branch | published scenarios stay immutable | proved |
+| T19 Refused drift repairs | `T19_refused_unchanged`, `T19_refused_repairs` (document healed, file repaired to its projection) | `driftSync.ts` `refused` branch | published scenarios stay immutable | proved |
 | T20 Concurrent edits converge | `T20_ops_arrived`, `T20_same_bytes` | `driftSync.ts` `autoResolveOne` ops-arrived branch | two peers edit the same scenario concurrently | proved |
 | T21 Lineage race resolution | `T21_docid`, `T21_both_folds` proved; `T21_survival` | `driftSync.ts` `autoResolveOne`, `featureFileOfDocidPath` | a repo that predates documents | structure proved, survival open |
 | T22 Disk edits are never dropped silently | `T22_trichotomy` | `features.ts` `foldDiskEdit` | — | proved |
 | H1 Mixed-origin conflict | `H1_resolution_ignores_theirs`, `H1_never_absorbed` | `autoResolveOne` `opsArrived` | markdown edited outside the app | **confirmed** — `tests/automerge/leanHypotheses.test.ts` |
-| H2 Concurrent absorb duplicates text | `H2_doubled`, `H2_heals`, `H2_name_description_heal`, `H2_publish_blocks_heal`, `H2_publish_locks_duplicate` | `reconcile.ts` `A.updateText`, `absorbDrift` | published scenarios stay immutable | doubles, heals when unpublished; **confirmed** permanent after a publish |
+| H2 Concurrent absorb duplicates text | `H2_doubled`, `H2_heals`, `H2_name_description_heal`, `H2_tamper_refused`, `H2_publish_gate_passes`, `H2_publish_heals`, `H2_publish_heals_on_tick` | `reconcile.ts` `A.updateText`, `healPublished`, `absorbDrift`, `schema.ts` `publishedBody` | published scenarios stay immutable | doubles, heals published or not; was **confirmed** permanent after a publish, **fixed** by recording the published body |
 | H3 Nondeterministic `mergeText` | `H3_second_pull_converges` | `merge.ts` `mergeText`, `autoResolveOne` | two peers edit the same scenario concurrently | refuted: converges in two more pulls (caveat in REPORT) |
 | H4 Same-body claim mis-match | `H4_markdown_picks_first`, `H4_hint_picks_named` | `reconcile.ts` body `claim` pass | — | **confirmed** for markdown-only edits; editor path correct |
 | H5 Compaction versus a lagging peer | `H5_no_change_lost`, `H5_closed` | `store.ts` `compactDoc`, `loadDoc` pending changes | Storage layout | refuted: safe |

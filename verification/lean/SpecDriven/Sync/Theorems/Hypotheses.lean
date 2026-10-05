@@ -6,8 +6,10 @@ import SpecDriven.Sync.Theorems.Store
 # Hypotheses H1–H5
 
 Each hypothesis of `docs/lean-sync-verification-prompt.md` as the model sees
-it. H1 and the published case of H2 are confirmed defects; their traces run
-against the implementation in `tests/automerge/leanHypotheses.test.ts`.
+it. H1 is a confirmed defect; the published case of H2 was one until
+publishing started recording the body (`SpecEntry.publishedBody`), and is
+now a heal. Both traces run against the implementation in
+`tests/automerge/leanHypotheses.test.ts`.
 -/
 
 namespace SpecDriven.Sync
@@ -27,13 +29,14 @@ theorem H1_resolution_ignores_theirs (seed : Nat) (fresh : Nat → String) (doc 
 
 /-- **H1 (and it never comes back).** The resolution leaves the file equal to
 the document's projection, so the drift pass of this and every later tick
-finds nothing to absorb: the hand edit is gone from every peer. -/
+finds nothing to absorb (it only heals the document's published bodies,
+which the file never sees): the hand edit is gone from every peer. -/
 theorem H1_never_absorbed (fresh : Nat → String) (docId : String) (doc : FeatureDoc) :
     importDriftOne fresh docId true { doc := some doc, file := .text (projectFeature doc true) } =
-      { doc := some doc, file := .text (projectFeature doc true) } := by
-  simp [importDriftOne, isProjectionOf_self]
+      { doc := some (healPublished doc), file := .text (projectFeature doc true) } := by
+  simp [importDriftOne, isProjectionOf_heal, isProjectionOf_self]
 
-/-! ## H2 Concurrent absorb duplicates text — confirmed for published scenarios -/
+/-! ## H2 Concurrent absorb duplicates text — heals, published or not -/
 
 /-- **H2 (the duplication).** Two peers absorbing the same longer text into
 the same field on two forks leave the merged field longer than that text, so
@@ -65,7 +68,7 @@ theorem H2_heals (fresh : Nat → String) (d : FeatureDoc) (target : Feature)
         (idClaim d.specs target none {}).isMatched s = false) :=
     Or.inr ⟨idClaim_inv _ _ _, rfl, rfl⟩
   have hkp := keyPass_claims d.specs target hE hT i e s hi hs hkey _ h0
-  obtain ⟨r, hr⟩ := claimPass_grows d.specs target (fun s e => s.body == e.body)
+  obtain ⟨r, hr⟩ := claimPass_grows d.specs target (fun s e => s.body == e.effectiveBody)
     (claimPass d.specs target keyCand (idClaim d.specs target none {}))
   have hfinal : (plan d.specs target none).at? i = some s := by
     rw [plan_eq]; exact Plan.at?_of_grows _ _ r hr i s hkp
@@ -80,13 +83,15 @@ theorem H2_name_description_heal (fresh : Nat → String) (d : FeatureDoc) (targ
   subst hd'
   exact ⟨rfl, rfl⟩
 
-/-- **H2 (confirmed: a publish in between locks the duplicate in).** When the
-doubled entry is published, the file's single body fails the gate: the same
-key is found, published, with a different body. -/
-theorem H2_publish_blocks_heal (d : FeatureDoc) (target : Feature) (hT : KeysUnique target.scenarios)
+/-- **H2 (what the gate still refuses).** A file whose scenario carries a
+published entry's key, but not the body that entry was published with
+(`effectiveBody`), fails the gate: genuine tampering is refused as before.
+Before the recorded body existed this compared the live text, and the merge
+artifact of two concurrent absorbs failed it too — the confirmed defect. -/
+theorem H2_tamper_refused (d : FeatureDoc) (target : Feature) (hT : KeysUnique target.scenarios)
     (e : SpecEntry) (he : e ∈ d.specs) (hpub : e.status = .published)
     (s : Scenario) (hs : s ∈ target.scenarios) (hkey : s.name = e.name ∧ s.version = e.version)
-    (hbody : s.body ≠ e.body) : publishedKept d target = false := by
+    (hbody : s.body ≠ e.effectiveBody) : publishedKept d target = false := by
   apply Bool.eq_false_iff.mpr
   intro hk
   simp only [publishedKept, List.all_eq_true] at hk
@@ -104,16 +109,62 @@ theorem H2_publish_blocks_heal (d : FeatureDoc) (target : Feature) (hT : KeysUni
     exact hbody hg.2
   · cases hg
 
-/-- **H2 (confirmed, the repair).** With the gate failed the absorb is refused
-and the file is rewritten to the doubled projection — which the tick then
-commits and pushes: the duplicate is permanent on every peer. -/
-theorem H2_publish_locks_duplicate (fresh : Nat → String) (docId : String) (links : Bool)
-    (d : FeatureDoc) (text : Feature) (h : publishedKept d (parseFeature text) = false)
-    (hp : isProjectionOf text d = false) :
-    importDriftOne fresh docId links { doc := some d, file := .text text } =
-      { doc := some d, file := .text (projectFeature d links) } := by
-  apply T19_refused_repairs fresh docId links d text hp
-  simp [absorbDrift, reconcile, h]
+/-- **H2 (fixed: the gate reads the recorded body).** A published entry that
+recorded `b` when it was published passes the gate against a file carrying
+`b` under its key whatever its live `body` reads — doubled by a merge or
+not. Stated on the entry alone. -/
+theorem H2_publish_gate_passes (d : FeatureDoc) (target : Feature) (e : SpecEntry)
+    (hpub : e.status = .published) (b : String) (hsnap : e.publishedBody = some b)
+    (s : Scenario) (hs : target.scenarios.find? (fun s' => samePickS s' ⟨e.name, e.version⟩) = some s)
+    (hsp : s.status = .published) (hsb : s.body = b) :
+    publishedKept { d with specs := [e] } target = true := by
+  simp [publishedKept, hpub, hs, hsp, hsb, SpecEntry.effectiveBody, hsnap]
+
+/-- **H2 (fixed: the absorb heals a published entry too).** With the gate
+passed, a published entry whose live body drifted from its recorded `b` is
+claimed under its key and takes `b` back, still published and still
+recording `b`. A corollary of `H2_heals`, now that publishing no longer
+blocks it: the recorded body enters only through the gate
+(`H2_publish_gate_passes`), not the proof. -/
+theorem H2_publish_heals (fresh : Nat → String) (d : FeatureDoc) (target : Feature)
+    (hE : EntryKeysUnique d.specs) (hT : KeysUnique target.scenarios)
+    (hkept : publishedKept d target = true)
+    (i : Nat) (e : SpecEntry) (hi : d.specs[i]? = some e) (b : String) (_hsnap : e.publishedBody = some b)
+    (s : Scenario) (hs : s ∈ target.scenarios)
+    (hkey : s.name = e.name ∧ s.version = e.version) (hsp : s.status = .published) (hsb : s.body = b) :
+    ∃ d' ops, reconcile fresh d target = .ok (d', ops) ∧
+      ∃ e' ∈ d'.specs, e'.id = e.id ∧ e'.body = b ∧ e'.status = .published ∧ e'.publishedBody = some b := by
+  refine ⟨(applyPlan fresh d target (plan d.specs target none)).1,
+    (applyPlan fresh d target (plan d.specs target none)).2, by simp [reconcile, hkept], ?_⟩
+  have h0 : (idClaim d.specs target none {}).at? i = some s ∨
+      (Plan.Inv d.specs target (idClaim d.specs target none {}) ∧
+        (idClaim d.specs target none {}).has i = false ∧
+        (idClaim d.specs target none {}).isMatched s = false) :=
+    Or.inr ⟨idClaim_inv _ _ _, rfl, rfl⟩
+  have hkp := keyPass_claims d.specs target hE hT i e s hi hs hkey _ h0
+  obtain ⟨r, hr⟩ := claimPass_grows d.specs target (fun s e => s.body == e.effectiveBody)
+    (claimPass d.specs target keyCand (idClaim d.specs target none {}))
+  have hfinal : (plan d.specs target none).at? i = some s := by
+    rw [plan_eq]; exact Plan.at?_of_grows _ _ r hr i s hkp
+  refine ⟨_, T11_claimed_keeps_id fresh d target _ i e s hi hfinal, rfl, hsb, hsp, ?_⟩
+  simp [hsp, hsb]
+
+/-- **H2 (fixed: the tick heals it).** The trace of REPORT.md §2 after step 5:
+peer B's document holds the published entry with its recorded body `b` and
+a live body a merge left different, and its file — peer A's, pushed with
+the publish — is the document's projection, because the projection renders
+`b`. The drift pass then heals the document's live body to `b` and leaves the
+file alone; nothing is refused, nothing is repaired, and what is saved is the
+heal. -/
+theorem H2_publish_heals_on_tick (fresh : Nat → String) (docId : String) (links : Bool) (d : FeatureDoc)
+    (i : Nat) (e : SpecEntry) (hi : d.specs[i]? = some e) (hpub : e.status = .published)
+    (b : String) (hsnap : e.publishedBody = some b) :
+    importDriftOne fresh docId links { doc := some d, file := .text (projectFeature d links) } =
+      { doc := some (healPublished d), file := .text (projectFeature d links) } ∧
+    (healPublished d).specs[i]? = some { e with body := b } := by
+  constructor
+  · simp [importDriftOne, isProjectionOf_heal, isProjectionOf_self]
+  · simp [healPublished, List.getElem?_map, hi, healEntry, hpub, hsnap]
 
 /-! ## H3 Nondeterministic `mergeText` — converges on the next pull -/
 

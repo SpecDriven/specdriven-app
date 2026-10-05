@@ -7,7 +7,8 @@ import { test, expect } from "bun:test";
 import * as A from "@automerge/automerge";
 import { parseFeature, serializeFeature } from "../../src/server/parser";
 import { docToFeature, projectFeature } from "../../src/server/automerge/project";
-import { importFeatureDoc, reconcile } from "../../src/server/automerge/reconcile";
+import { healPublished, importFeatureDoc, reconcile } from "../../src/server/automerge/reconcile";
+import { snapshotOf } from "../../src/server/automerge/schema";
 
 const SAMPLE = `# Quote Policy
 
@@ -103,6 +104,102 @@ test("only a forced reconcile may demote a published scenario", () => {
   const target = parseFeature(SAMPLE.replace("@v2 [published]", "@v2 [proposed]"));
   const next = reconcile(doc, target, { force: true });
   expect(next.specs.find((e) => e.name === "Declined Quote")!.status).toBe("proposed");
+});
+
+// Publishing records the body (schema.ts publishedBody), as a scalar rather
+// than collaborative text, so concurrent publishes resolve to one body.
+test("publishing records the body as an immutable string", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const published = doc.specs.find((e) => e.name === "Declined Quote")!;
+  expect(A.isImmutableString(published.publishedBody)).toBe(true);
+  expect(snapshotOf(published)).toBe(published.body);
+  expect(doc.specs.find((e) => e.name === "Basic Quote")!.publishedBody).toBeUndefined();
+
+  const next = reconcile(doc, parseFeature(SAMPLE.replace("@v1 [proposed]", "@v1 [published]")));
+  const basic = next.specs.find((e) => e.name === "Basic Quote")!;
+  expect(A.isImmutableString(basic.publishedBody)).toBe(true);
+  expect(snapshotOf(basic)).toBe(basic.body);
+});
+
+// H2 in verification/lean/REPORT.md: two peers absorbing the same markdown
+// edit each splice it in, and the CRDT merge keeps both copies. The entry is
+// held to and rendered as its recorded body, so the merged file still reads
+// as a projection, the gate still passes, and the live text heals.
+function doubled() {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const i = doc.specs.findIndex((e) => e.name === "Declined Quote");
+  const merged = A.change(doc, (d) => {
+    A.splice(d, ["specs", i, "body"], d.specs[i]!.body.length, 0, "\n- **Then** the quote is declined");
+  });
+  expect(merged.specs[i]!.body).not.toBe(snapshotOf(merged.specs[i]!));
+  return { merged, i };
+}
+
+test("a published spec projects its recorded body, not a live text a merge doubled", () => {
+  const { merged, i } = doubled();
+  expect(projectFeature(merged)).toBe(serializeFeature(parseFeature(SAMPLE)));
+  expect(docToFeature(merged).scenarios.find((s) => s.name === "Declined Quote")!.body).toBe(
+    snapshotOf(merged.specs[i]!)!,
+  );
+});
+
+test("reconciling a doubled published spec against its own projection heals it", () => {
+  const { merged, i } = doubled();
+  const next = reconcile(merged, parseFeature(projectFeature(merged)));
+  expect(next.specs[i]!.body).toBe(snapshotOf(merged.specs[i]!)!);
+  expect(next.specs[i]!.status).toBe("published");
+  expect(snapshotOf(next.specs[i]!)).toBe(snapshotOf(merged.specs[i]!));
+});
+
+test("healPublished drives a doubled live body back and is otherwise a no-op", () => {
+  const { merged, i } = doubled();
+  const healed = healPublished(merged);
+  expect(healed.specs[i]!.body).toBe(snapshotOf(merged.specs[i]!)!);
+  expect(projectFeature(healed)).toBe(projectFeature(merged));
+  // Tidy already: the very same doc comes back, nothing minted.
+  expect(healPublished(healed)).toBe(healed);
+  const tidy = importFeatureDoc(parseFeature(SAMPLE));
+  expect(healPublished(tidy)).toBe(tidy);
+});
+
+test("a changed body still fails the gate on a doubled published spec", () => {
+  const { merged } = doubled();
+  const tampered = parseFeature(SAMPLE.replace("the quote is declined", "the quote is accepted"));
+  expect(() => reconcile(merged, tampered)).toThrow(/published and immutable/);
+});
+
+test("a forced reconcile re-records a changed published body and a demotion clears the record", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const rewritten = reconcile(
+    A.clone(doc),
+    parseFeature(SAMPLE.replace("the quote is declined", "the quote is accepted")),
+    { force: true },
+  );
+  const entry = rewritten.specs.find((e) => e.name === "Declined Quote")!;
+  expect(entry.body).toContain("the quote is accepted");
+  expect(snapshotOf(entry)).toBe(entry.body);
+
+  const demoted = reconcile(A.clone(doc), parseFeature(SAMPLE.replace("@v2 [published]", "@v2 [proposed]")), {
+    force: true,
+  });
+  expect(demoted.specs.find((e) => e.name === "Declined Quote")!.publishedBody).toBeUndefined();
+});
+
+// An entry published before the key existed is held to its live body until
+// its first reconcile records it — one op, once.
+test("a published entry without a recorded body is stamped by its first reconcile", () => {
+  const doc = importFeatureDoc(parseFeature(SAMPLE));
+  const legacy = A.change(doc, (d) => {
+    delete d.specs.find((e) => e.name === "Declined Quote")!.publishedBody;
+  });
+  expect(snapshotOf(legacy.specs.find((e) => e.name === "Declined Quote")!)).toBeUndefined();
+  expect(healPublished(legacy)).toBe(legacy);
+
+  const once = reconcile(legacy, parseFeature(projectFeature(legacy)));
+  const stamped = once.specs.find((e) => e.name === "Declined Quote")!;
+  expect(snapshotOf(stamped)).toBe(stamped.body);
+  const twice = reconcile(once, parseFeature(projectFeature(once)));
+  expect(A.getHeads(twice)).toEqual(A.getHeads(once));
 });
 
 test("tests links on a published scenario may still change", () => {

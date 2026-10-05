@@ -209,7 +209,9 @@ theorem updateEntry_none (p : Plan) (i : Nat) (e : SpecEntry) (h : p.at? i = non
 
 theorem updateEntry_some (p : Plan) (i : Nat) (e : SpecEntry) (m : Scenario) (h : p.at? i = some m) :
     (updateEntry p i e).1 = { e with name := m.name, version := m.version, status := m.status,
-                                      body := m.body, tests := m.tests, link := m.link } := by
+                                      body := m.body,
+                                      publishedBody := if m.status == .published then some m.body else none,
+                                      tests := m.tests, link := m.link } := by
   simp [updateEntry, h]
 
 theorem updatedSpecs_getElem? (p : Plan) (specs : List SpecEntry) (i : Nat) :
@@ -251,6 +253,7 @@ place, keeping its identity". -/
 theorem T11_claimed_keeps_id (fresh : Nat → String) (d : FeatureDoc) (target : Feature) (p : Plan)
     (i : Nat) (e : SpecEntry) (m : Scenario) (hi : d.specs[i]? = some e) (hm : p.at? i = some m) :
     { e with name := m.name, version := m.version, status := m.status, body := m.body,
+             publishedBody := if m.status == .published then some m.body else none,
              tests := m.tests, link := m.link } ∈ (applyPlan fresh d target p).1.specs := by
   simp only [applyPlan, List.mem_append]
   left
@@ -267,7 +270,10 @@ def KeysUnique (l : List Scenario) : Prop :=
 /-- **T10 Published immutability (claimed form).** With the gate passed and
 unique target keys, a published entry claimed under its own key is claimed by
 the scenario the gate checked: published, body intact. The entry survives
-with id, name, version, status and body unchanged. Anchor:
+with id, name, version and status unchanged, its live body now the body it
+was published with (`effectiveBody` — the gate holds the file to that, not to
+a live text a merge may have doubled), and that recorded body unchanged, so
+the rendered body never moves. Anchor:
 `assertPublishedKept`, `reconcile`. Spec: "published scenarios stay
 immutable". `T10_published_kept` below discharges the "claimed under its own
 key" premise from the key pass. -/
@@ -277,7 +283,8 @@ theorem T10_published_claimed (fresh : Nat → String) (d : FeatureDoc) (target 
     (hpub : e.status = .published) (hm : p.at? i = some m)
     (hkey : m.name = e.name ∧ m.version = e.version) (hkept : publishedKept d target = true) :
     ∃ e' ∈ (applyPlan fresh d target p).1.specs,
-      e'.id = e.id ∧ e'.name = e.name ∧ e'.version = e.version ∧ e'.status = .published ∧ e'.body = e.body := by
+      e'.id = e.id ∧ e'.name = e.name ∧ e'.version = e.version ∧ e'.status = .published ∧
+        e'.body = e.effectiveBody ∧ e'.effectiveBody = e.effectiveBody := by
   have hmem := T11_claimed_keeps_id fresh d target p i e m hi hm
   simp only [publishedKept, List.all_eq_true] at hkept
   have he : e ∈ d.specs := List.mem_of_getElem? hi
@@ -292,7 +299,8 @@ theorem T10_published_claimed (fresh : Nat → String) (d : FeatureDoc) (target 
     have hms : m = s := hT m hmmem s hsmem (by simp [Scenario.key, hkey, hsp])
     subst hms
     simp only [Bool.and_eq_true, beq_iff_eq] at hg
-    exact ⟨_, hmem, rfl, hkey.1, hkey.2, hg.1, hg.2⟩
+    refine ⟨_, hmem, rfl, hkey.1, hkey.2, hg.1, hg.2, ?_⟩
+    simp [SpecEntry.effectiveBody, hg.1, hg.2]
   · cases hg
 
 
@@ -341,7 +349,7 @@ abbrev keyCand (s : Scenario) (e : SpecEntry) : Bool := samePickE e ⟨s.name, s
 
 theorem plan_eq (entries : List SpecEntry) (target : Feature) (scenario : Option ScenarioTarget) :
     plan entries target scenario =
-      claimPass entries target (fun s e => s.body == e.body)
+      claimPass entries target (fun s e => s.body == e.effectiveBody)
         (claimPass entries target keyCand (idClaim entries target scenario {})) := rfl
 
 /-- A key-pass step on another entry leaves `i` unclaimed and `s` unmatched. -/
@@ -572,7 +580,7 @@ theorem reconcile_ok (fresh : Nat → String) (d : FeatureDoc) (target : Feature
 
 /-- **T10 Published immutability.** When `reconcile` returns without error
 (`force` false), every published entry of the document survives with its
-id, name, version, status and body, provided keys are unique on both sides
+id, name, version, status and published body, provided keys are unique on both sides
 (two entries with one key cannot both claim the single target scenario, and
 the gate accepts them both: see REPORT.md). Anchor: `assertPublishedKept`,
 `reconcile`. Spec: "published scenarios stay immutable". -/
@@ -582,14 +590,15 @@ theorem T10_published_kept (fresh : Nat → String) (d : FeatureDoc) (target : F
     (hr : reconcile fresh d target false scenario = .ok (d', ops))
     (e : SpecEntry) (he : e ∈ d.specs) (hpub : e.status = .published) :
     ∃ e' ∈ d'.specs,
-      e'.id = e.id ∧ e'.name = e.name ∧ e'.version = e.version ∧ e'.status = .published ∧ e'.body = e.body := by
+      e'.id = e.id ∧ e'.name = e.name ∧ e'.version = e.version ∧ e'.status = .published ∧
+        e'.body = e.effectiveBody ∧ e'.effectiveBody = e.effectiveBody := by
   obtain ⟨hkept, hd'⟩ := reconcile_ok fresh d target scenario d' ops hr
   subst hd'
   obtain ⟨i, hi⟩ := List.getElem?_of_mem he
   obtain ⟨s, hs, hkey⟩ := publishedKept_key d target hkept e he hpub
   have hstart := idClaim_start d.specs target scenario hT i e s hi hs hkey hpub
   have hkp := keyPass_claims d.specs target hE hT i e s hi hs hkey _ hstart
-  obtain ⟨r, hr'⟩ := claimPass_grows d.specs target (fun s e => s.body == e.body)
+  obtain ⟨r, hr'⟩ := claimPass_grows d.specs target (fun s e => s.body == e.effectiveBody)
     (claimPass d.specs target keyCand (idClaim d.specs target scenario {}))
   have hfinal : (plan d.specs target scenario).at? i = some s := by
     rw [plan_eq]; exact Plan.at?_of_grows _ _ r hr' i s hkp
@@ -638,7 +647,7 @@ theorem T14_rename_keeps_id (fresh : Nat → String) (d : FeatureDoc) (target : 
     rw [hid]; simp [Plan.at?]
   obtain ⟨r1, hr1⟩ := claimPass_grows d.specs target keyCand (idClaim d.specs target (some ⟨pick, some id⟩) {})
   have h1 := Plan.at?_of_grows _ _ r1 hr1 i s'' h0
-  obtain ⟨r2, hr2⟩ := claimPass_grows d.specs target (fun s e => s.body == e.body)
+  obtain ⟨r2, hr2⟩ := claimPass_grows d.specs target (fun s e => s.body == e.effectiveBody)
     (claimPass d.specs target keyCand (idClaim d.specs target (some ⟨pick, some id⟩) {}))
   have h2 : (plan d.specs target (some ⟨pick, some id⟩)).at? i = some s'' := by
     rw [plan_eq]; exact Plan.at?_of_grows _ _ r2 hr2 i s'' h1
