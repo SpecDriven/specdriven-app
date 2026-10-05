@@ -26,6 +26,7 @@ import { Menu, type MenuItem } from "./Menu";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
+import { cleanLine, cleanText } from "../server/text";
 import {
   AGENT_LABEL,
   agentChat,
@@ -326,7 +327,7 @@ function EmptyState({
     setBusy(true);
     setError(null);
     try {
-      await agentChat.createSession({ name: name.trim() || defaultSessionName(), agent: picked });
+      await agentChat.createSession({ name: cleanLine(name) || defaultSessionName(), agent: picked });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -596,7 +597,7 @@ function PermissionCard({
   const done = item.resolved;
   const who = AGENT_LABEL[agent];
   const send = (a: Omit<Answer, "requestId">) => onAnswer?.({ requestId: item.requestId, ...a });
-  const deny = () => send({ behavior: "deny", ...(reason.trim() ? { message: reason.trim() } : {}) });
+  const deny = () => send({ behavior: "deny", ...(cleanLine(reason) ? { message: cleanLine(reason) } : {}) });
   return (
     <div className="agent-card" role="group" aria-label={`Permission: ${item.toolName}`}>
       <div className="agent-card-title">
@@ -690,7 +691,7 @@ function QuestionCard({
   // typed text, for what the options did not cover.
   const answers: Record<string, string> = {};
   for (const q of item.questions) {
-    const free = other[q.question]?.trim();
+    const free = cleanLine(other[q.question] ?? "");
     const value = [...(picked[q.question] ?? []), ...(free ? [free] : [])].join(", ");
     if (value) answers[q.question] = value;
   }
@@ -783,8 +784,11 @@ function Composer({ session }: { session: SessionState }) {
   const final = isFinalStatus(status);
   const canSend = status === "idle" && draft.trim().length > 0;
   const send = async () => {
-    const text = draft.trim();
-    if (!text || status !== "idle") return;
+    // Blank lines around the message go; an indented first line (a code
+    // block) keeps its indentation (specs/ui/ui.feature.md "User-entered
+    // text is cleaned up").
+    const text = cleanText(draft);
+    if (!text.trim() || status !== "idle") return;
     setDraft("");
     try {
       await agentChat.send(id, text);

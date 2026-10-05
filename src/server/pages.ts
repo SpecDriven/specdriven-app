@@ -45,6 +45,7 @@ import {
   type Supersedes,
 } from "./parser";
 import { getLogger, withSpan } from "./telemetry";
+import { cleanLine } from "./text";
 
 const log = getLogger("pages");
 
@@ -218,7 +219,7 @@ export async function createPage(
 ): Promise<string> {
   // A flat folder takes the name whole: a `/` in it is part of the title,
   // not a subfolder to make (specs/app/engineering-notebook.feature.md).
-  const segments = kind.flat ? [name.trim()] : name.split("/").map((s) => s.trim());
+  const segments = kind.flat ? [cleanLine(name)] : name.split("/").map(cleanLine);
   const pageName = segments.pop() ?? "";
   if (!pageName) throw new Error(`${capitalize(kind.label)} name is required`);
   const slug = slugify(pageName);
@@ -280,7 +281,7 @@ export async function renamePageFile(
   if (current === null) throw new Error(`${capitalize(kind.label)} not found: ${from}`);
   // A flat folder takes the name whole, as createPage does; a nested page
   // keeps the folder it is in — a rename never re-nests.
-  const segments = kind.flat ? [newName.trim()] : newName.split("/").map((s) => s.trim());
+  const segments = kind.flat ? [cleanLine(newName)] : newName.split("/").map(cleanLine);
   const title = segments.pop() ?? "";
   const slug = slugify(title);
   if (!slug) throw new Error(`${capitalize(kind.label)} name is required`);

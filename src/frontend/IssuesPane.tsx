@@ -33,6 +33,7 @@ import { toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 import { formatWhen } from "./testing";
+import { cleanLine, cleanText } from "../server/text";
 import {
   issues,
   labelStyle,
@@ -58,7 +59,8 @@ function spaClick(e: MouseEvent, go: () => void) {
 
 export async function renameIssueFlow(issue: Issue, prompt: Prompt): Promise<void> {
   const title = await prompt({ title: "Edit the issue title", initial: issue.title, confirmLabel: "Save" });
-  if (title?.trim() && title.trim() !== issue.title) await issues.update(issue.number, { title: title.trim() });
+  const cleaned = cleanLine(title ?? "");
+  if (cleaned && cleaned !== issue.title) await issues.update(issue.number, { title: cleaned });
 }
 
 export async function closeIssueFlow(
@@ -399,7 +401,7 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
   const submit = async () => {
     if (!title.trim() || busy) return;
     setBusy(true);
-    const issue = await issues.create({ title: title.trim(), body });
+    const issue = await issues.create({ title: cleanLine(title), body: cleanText(body) });
     setBusy(false);
     if (issue) {
       toast.success(`Created #${issue.number}.`);
@@ -525,14 +527,14 @@ function IssueDetailView({ issue, comments, repoCrumb, prompt, confirm, onNaviga
   };
   const saveBody = async () => {
     setSaving(true);
-    const saved = await issues.update(issue.number, { body: draft });
+    const saved = await issues.update(issue.number, { body: cleanText(draft) });
     setSaving(false);
     if (saved) setEditing(false);
   };
   const addComment = async () => {
     if (!comment.trim() || commenting) return;
     setCommenting(true);
-    const added = await issues.comment(issue.number, comment.trim());
+    const added = await issues.comment(issue.number, cleanText(comment));
     setCommenting(false);
     if (added) setComment("");
   };
