@@ -209,6 +209,11 @@ Below, in one scrolling column:
   focus), and double-click the handle for the natural size. The width is
   kept in the body as `<img src="…" alt="…" width="…">`, which any markdown
   viewer honours. With **Vim mode** on, a **Vim** tab appears as well.
+  A web link typed as is — `https://abc.com` — is a link: click it in
+  **Preview**, or `⌘`-click it while writing (a plain click there places
+  the caret, so the url stays editable). With the caret in a link, the
+  toolbar's **Open** button opens it too. This works in every markdown
+  editor in the app.
 - **Entity fields**: when the project names a code repo (`code-repo` in
   `project-settings.json`), type `@` and press `Tab` to pick a field of
   one of its data entities — `@firstName`, or `@User.firstName` when two
@@ -361,6 +366,7 @@ tab:
 | `⌘Enter` | Publish all, Propose, or Publish, depending on where you are |
 | `⌘⇧C` | Copy link to this page |
 | `⌘B`, `⌘I`, `⌘K` | Bold, italic, insert a link (in a text editor) |
+| `⌘`-click | Open the web link under the pointer (in a text editor) |
 | `←`, `→` | Resize the sidebar (with the divider focused) |
 
 On Windows and Linux `⌘` is `Ctrl`.
