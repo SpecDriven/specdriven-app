@@ -214,6 +214,9 @@ Below, in one scrolling column:
   the caret, so the url stays editable). With the caret in a link, the
   toolbar's **Open** button opens it too. This works in every markdown
   editor in the app.
+  The two **A** buttons left of **H** make the text bigger or smaller, in
+  every tab. Every markdown editor in the app follows the size, and it is
+  remembered on this device.
 - **Entity fields**: when the project names a code repo (`code-repo` in
   `project-settings.json`), type `@` and press `Tab` to pick a field of
   one of its data entities — `@firstName`, or `@User.firstName` when two

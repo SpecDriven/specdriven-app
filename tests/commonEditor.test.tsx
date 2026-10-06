@@ -1,8 +1,14 @@
-// Automates specs/editor/common-editor.feature.md "web links are clickable":
+// Automates specs/editor/common-editor.feature.md.
+//
+// "web links are clickable":
 // a web link of the format `https://abc.com` typed into an editor is
 // clickable from it. The Preview tab renders it as a link; the Write tab,
 // where a plain click places the caret, opens it on ⌘-click (Ctrl-click off
 // the Mac) and offers an Open button in the toolbar while the caret is in it.
+//
+// "Increase and decrease font size": two buttons next to the Heading button
+// step the text of every editor up and down, on every tab, and the size
+// stays on this device.
 //
 // React needs a DOM to run the Write tab's handlers, so this file borrows one
 // from happy-dom — only the globals React touches, given back afterwards, as
@@ -15,6 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { renderMarkdown } from "../src/frontend/markdown";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import { isOpenLinkClick, webLinkAt, webLinks } from "../src/frontend/weblinks";
+import { FONT_SCALES, stepFontScale } from "../src/frontend/fontSizePref";
 
 const html = (src: string) => renderToStaticMarkup(<>{renderMarkdown(src)}</>);
 const a = (url: string) => `<a href="${url}" target="_blank" rel="noreferrer">${url}</a>`;
@@ -150,6 +157,7 @@ const DOM_GLOBALS = [
   "MutationObserver",
   "requestAnimationFrame",
   "cancelAnimationFrame",
+  "localStorage",
   "IS_REACT_ACT_ENVIRONMENT",
 ] as const;
 
@@ -277,5 +285,118 @@ describe("the Preview tab", () => {
       <MarkdownEditor value="go to https://abc.com" onChange={() => {}} initialTab="preview" />,
     );
     expect(markup).toContain(a("https://abc.com"));
+  });
+});
+
+describe("stepFontScale", () => {
+  test("steps up and down through the sizes, from where an editor starts", () => {
+    expect(stepFontScale(1, 1)).toBe(1.15);
+    expect(stepFontScale(1.15, 1)).toBe(1.3);
+    expect(stepFontScale(1.15, -1)).toBe(1);
+    expect(stepFontScale(1, -1)).toBe(0.85);
+  });
+
+  test("stays put at either end", () => {
+    expect(stepFontScale(FONT_SCALES[0], -1)).toBe(FONT_SCALES[0]);
+    expect(stepFontScale(2, 1)).toBe(2);
+  });
+
+  test("moves a size between steps to the nearest step that way", () => {
+    expect(stepFontScale(1.2, 1)).toBe(1.3);
+    expect(stepFontScale(1.2, -1)).toBe(1.15);
+  });
+});
+
+describe("font size", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+    globalThis.fetch = (async () => new Response("[]")) as unknown as typeof fetch;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = undefined;
+    globalThis.fetch = realFetch;
+    localStorage.clear();
+  });
+
+  function Editor(props: { readOnly?: boolean; initialTab?: "write" | "preview" }) {
+    const [value, setValue] = useState("# Title\n\nSome text");
+    return <MarkdownEditor value={value} onChange={setValue} initialTab="write" {...props} />;
+  }
+
+  async function mount(el: React.ReactElement) {
+    root = createRoot(host!);
+    await act(async () => root!.render(el));
+  }
+
+  const editors = () => [...host!.querySelectorAll<HTMLElement>(".md-editor")];
+  const scale = (editor = editors()[0]!) => editor.style.getPropertyValue("--md-font-scale") || "1";
+  const labels = (editor = editors()[0]!) =>
+    [...editor.querySelectorAll(".md-tools button")].map((b) => b.getAttribute("aria-label"));
+  const button = (name: "Increase" | "Decrease", editor = editors()[0]!) =>
+    editor.querySelector<HTMLButtonElement>(`button[aria-label^="${name} font size"]`)!;
+
+  test("the buttons sit next to the Heading button", async () => {
+    await mount(<Editor />);
+    expect(labels().slice(0, 3)).toEqual([
+      "Decrease font size (100%)",
+      "Increase font size (100%)",
+      "Heading",
+    ]);
+  });
+
+  test("increase makes the text bigger, decrease smaller, and the buttons say the size", async () => {
+    await mount(<Editor />);
+    expect(scale()).toBe("1");
+    act(() => button("Increase").click());
+    expect(scale()).toBe("1.15");
+    expect(button("Increase").getAttribute("aria-label")).toBe("Increase font size (115%)");
+    act(() => button("Decrease").click());
+    act(() => button("Decrease").click());
+    expect(scale()).toBe("0.85");
+  });
+
+  test("a button is disabled at its end of the range", async () => {
+    await mount(<Editor />);
+    act(() => button("Decrease").click());
+    expect(button("Decrease").disabled).toBe(true);
+    expect(button("Increase").disabled).toBe(false);
+    for (let i = 0; i < FONT_SCALES.length; i++) act(() => button("Increase").click());
+    expect(scale()).toBe("2");
+    expect(button("Increase").disabled).toBe(true);
+  });
+
+  test("every open editor follows, and the size is kept for the next one", async () => {
+    await mount(
+      <>
+        <Editor />
+        <Editor initialTab="preview" />
+      </>,
+    );
+    act(() => button("Increase", editors()[0]).click());
+    expect(editors().map((e) => scale(e))).toEqual(["1.15", "1.15"]);
+    act(() => root!.unmount());
+    await mount(<Editor />);
+    expect(scale()).toBe("1.15");
+  });
+
+  test("the Preview tab and a read-only body offer the font size, and nothing else", async () => {
+    await mount(
+      <>
+        <Editor initialTab="preview" />
+        <Editor readOnly />
+      </>,
+    );
+    for (const editor of editors()) {
+      expect(labels(editor)).toEqual(["Decrease font size (100%)", "Increase font size (100%)"]);
+    }
   });
 });
