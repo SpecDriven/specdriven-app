@@ -6,6 +6,7 @@
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { mergeText } from "./automerge/merge";
 import { readTextFile, writeTextFile } from "./fsx";
 
 export const README_FILE = "README.md";
@@ -39,8 +40,29 @@ export async function readReadme(dataDir: string): Promise<ReadmeView> {
   return content === null ? { content: "", exists: false } : { content, exists: true };
 }
 
-/** Write the README as the editor holds it, creating it when missing. */
-export async function writeReadme(dataDir: string, content: string): Promise<ReadmeView> {
-  await writeTextFile(join(dataDir, await readmeFileName(dataDir)), content);
+/**
+ * Write the README as the editor holds it, creating it when missing.
+ *
+ * `expected` is what the editor last loaded or saved — the file's contents
+ * before this edit. A disk edit the reload tick has not shown yet (an agent,
+ * a second editor, a git pull while the buffer is dirty) is folded in
+ * three-way rather than overwritten, the same rule as a feature save racing
+ * unabsorbed drift (features.ts foldDiskEdit). Omit `expected` for a write
+ * that means to replace the file outright. A file gone from disk (deleted,
+ * or renamed away by a pull) is recreated as the editor holds it — folding
+ * against nothing would read as "delete every line" and keep only fragments.
+ */
+export async function writeReadme(
+  dataDir: string,
+  content: string,
+  expected?: string,
+): Promise<ReadmeView> {
+  const name = await readmeFileName(dataDir);
+  const path = join(dataDir, name);
+  if (expected !== undefined) {
+    const onDisk = await readTextFile(path);
+    if (onDisk !== null && onDisk !== expected) content = mergeText(expected, content, onDisk);
+  }
+  await writeTextFile(path, content);
   return { content, exists: true };
 }

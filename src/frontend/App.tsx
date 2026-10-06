@@ -3173,20 +3173,36 @@ export function App() {
       // A tick queued ahead of this one may already have landed these words.
       const toWrite = readmeText.current;
       if (toWrite === null || toWrite === readmeSaved.current) return;
+      // `from` is the text this buffer grew out of, so the server folds in a
+      // disk edit the dirty editor has not shown. Without a base there is
+      // nothing to fold against — a plain write.
+      const from = readmeSaved.current;
       setSaving(true);
       try {
         const res = await fetch("/api/readme", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: toWrite }),
+          body: JSON.stringify(from === null ? { content: toWrite } : { content: toWrite, from }),
         });
+        const data = (await res.json().catch(() => ({}))) as { content?: string; error?: string };
         if (res.ok) {
           if (session === readmeSession.current) {
-            readmeSaved.current = toWrite;
+            // A folded disk edit can make the file differ from what went
+            // out. Show it if the buffer has not moved on, so the next tick
+            // does not treat the fold as a new edit of its own. If it has,
+            // the buffer still grew out of what went out — keep that as the
+            // base, and the next tick folds the disk edit in again rather
+            // than writing over it.
+            const written = typeof data.content === "string" ? data.content : toWrite;
+            if (readmeText.current === toWrite) {
+              readmeSaved.current = written;
+              if (written !== toWrite) setReadme(written);
+            } else {
+              readmeSaved.current = toWrite;
+            }
             markSaved();
           }
         } else {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
           toast.error(`README.md not saved: ${data.error ?? res.statusText} — will retry.`);
         }
       } catch (e) {

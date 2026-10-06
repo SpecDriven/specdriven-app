@@ -3,7 +3,7 @@
 // the folder's README.md in an editor, and the editor's autosaves are plain
 // local writes that the reload cron's sync commits and pushes.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,6 +104,74 @@ test("an autosave writes the README locally, creating it when missing", async ()
   expect(await Bun.file(join(data, "README.md")).text()).toBe("# Fresh\n\nMore.\n");
   expect((await readdir(data)).filter((f) => /readme/i.test(f))).toEqual(["README.md"]);
   expect(await (await getReadme()).json()).toEqual({ content: "# Fresh\n\nMore.\n", exists: true });
+});
+
+// An edit made to README.md on disk is only shown on the next reload tick,
+// and a dirty home editor skips that tick — so an autosave must fold the
+// disk edit in rather than write over it (the feature save's foldDiskEdit).
+describe("a README save racing an unsynced disk edit", () => {
+  const seed = "# Specs\n\nintro\n";
+  let data: string;
+
+  beforeEach(async () => {
+    data = join(root, "data");
+    await Bun.write(join(data, "README.md"), seed);
+    await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+  });
+
+  test("keeps the disk edit alongside the save", async () => {
+    await Bun.write(join(data, "README.md"), "# Specs\n\nintro\n\nfrom disk\n");
+    const res = await putReadme({ from: seed, content: "# Specs\n\nintro edited here\n" });
+    expect(res.status).toBe(200);
+    const written = (await res.json()) as { content: string };
+    expect(written.content).toContain("from disk");
+    expect(written.content).toContain("intro edited here");
+    expect(await Bun.file(join(data, "README.md")).text()).toBe(written.content);
+  });
+
+  test("an editor that already holds the disk edit saves it once", async () => {
+    const onDisk = "# Specs\n\nintro\n\nfrom disk\n";
+    await Bun.write(join(data, "README.md"), onDisk);
+    const res = await putReadme({ from: seed, content: onDisk });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe(onDisk);
+  });
+
+  test("a save with no disk edit writes the buffer", async () => {
+    const res = await putReadme({ from: seed, content: "# Specs\n\nintro\n\nmore\n" });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe("# Specs\n\nintro\n\nmore\n");
+  });
+
+  // The user typed on while the folding save was away, so the editor never
+  // showed the fold. Its next save names what it sent as `from` — not what
+  // came back — and the disk edit is folded in again rather than lost.
+  test("a buffer that moved on during the fold keeps the disk edit", async () => {
+    await Bun.write(join(data, "README.md"), "# Specs\n\nintro\n\nfrom disk\n");
+    const first = "# Specs\n\nintro edited here\n";
+    expect((await putReadme({ from: seed, content: first })).status).toBe(200);
+    const res = await putReadme({ from: first, content: `${first}\nand typed on\n` });
+    expect(res.status).toBe(200);
+    const onDisk = await Bun.file(join(data, "README.md")).text();
+    expect(onDisk).toContain("from disk");
+    expect(onDisk).toContain("intro edited here");
+    expect(onDisk).toContain("and typed on");
+  });
+
+  test("a README gone from disk is recreated as the editor holds it", async () => {
+    await rm(join(data, "README.md"));
+    const content = "# Specs\n\nintro edited here\n";
+    const res = await putReadme({ from: seed, content });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe(content);
+  });
+
+  test("a save without from replaces the file outright", async () => {
+    await Bun.write(join(data, "README.md"), "# Specs\n\nintro\n\nfrom disk\n");
+    const res = await putReadme({ content: "# Replaced\n" });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe("# Replaced\n");
+  });
 });
 
 test("a save without content is refused", async () => {
