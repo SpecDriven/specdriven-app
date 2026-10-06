@@ -58,9 +58,41 @@ export interface ConfirmOptions {
   danger?: boolean;
 }
 
+/**
+ * A choice from a list too long for a radio group — the feature a scenario
+ * moves to (specs/ui/navigation.feature.md "move a scenario to another
+ * feature"): a filter field over a list, picked by click or by the arrow
+ * keys and Enter.
+ */
+export interface PickOptions {
+  title: string;
+  hint?: string;
+  placeholder?: string;
+  options: PickOption[];
+  /** Shown in place of the list when nothing matches the filter. */
+  empty?: string;
+}
+
+export interface PickOption {
+  value: string;
+  label: string;
+  /** Secondary line under the label, e.g. the folder the feature is in. */
+  hint?: string;
+}
+
 type Request =
   | { kind: "prompt"; opts: PromptOptions; resolve: (value: PromptResult | null) => void }
-  | { kind: "confirm"; opts: ConfirmOptions; resolve: (value: boolean) => void };
+  | { kind: "confirm"; opts: ConfirmOptions; resolve: (value: boolean) => void }
+  | { kind: "pick"; opts: PickOptions; resolve: (value: string | null) => void };
+
+/** The options a pick dialog shows for a filter: label or hint contains it. */
+export function filterPickOptions(options: PickOption[], filter: string): PickOption[] {
+  const q = filter.trim().toLowerCase();
+  if (!q) return options;
+  return options.filter(
+    (o) => o.label.toLowerCase().includes(q) || (o.hint ?? "").toLowerCase().includes(q),
+  );
+}
 
 /** The choice a prompt starts on: the initial one if offered, else the first. */
 export function initialChoiceOf(opts: PromptOptions): string | null {
@@ -81,7 +113,8 @@ export function confirmLabelOf(opts: PromptOptions, choice: string | null): stri
  * (null / false on cancel), plus the `modal` element to render and a
  * `modalOpen` flag for keyboard handlers that must idle behind a dialog.
  * `promptWithChoice` is `prompt` for a dialog with a radio group: it
- * resolves the text together with the picked value.
+ * resolves the text together with the picked value. `pick` resolves the
+ * value of the option picked from a list, null on cancel.
  */
 export function useModalPrompts() {
   const [request, setRequest] = useState<Request | null>(null);
@@ -101,12 +134,19 @@ export function useModalPrompts() {
   const confirm = (opts: ConfirmOptions): Promise<boolean> =>
     new Promise((resolve) => open({ kind: "confirm", opts, resolve }));
 
+  const pick = (opts: PickOptions): Promise<string | null> =>
+    new Promise((resolve) => open({ kind: "pick", opts, resolve }));
+
   // Keyed by request so a fresh prompt starts from its own initial draft.
   const modal: ReactNode = request ? (
-    <ModalDialog key={seq} request={request} close={() => setRequest(null)} />
+    request.kind === "pick" ? (
+      <PickDialog key={seq} request={request} close={() => setRequest(null)} />
+    ) : (
+      <ModalDialog key={seq} request={request} close={() => setRequest(null)} />
+    )
   ) : null;
 
-  return { modal, modalOpen: request !== null, prompt, promptWithChoice, confirm };
+  return { modal, modalOpen: request !== null, prompt, promptWithChoice, confirm, pick };
 }
 
 /** The radio group of a prompt with choices — pure, so tests can render it. */
@@ -144,7 +184,13 @@ export function PromptChoices({
   );
 }
 
-function ModalDialog({ request, close }: { request: Request; close: () => void }) {
+function ModalDialog({
+  request,
+  close,
+}: {
+  request: Exclude<Request, { kind: "pick" }>;
+  close: () => void;
+}) {
   const trapRef = useFocusTrap(true);
   const [draft, setDraft] = useState(
     request.kind === "prompt" ? (request.opts.initial ?? "") : "",
@@ -271,6 +317,118 @@ function ModalDialog({ request, close }: { request: Request; close: () => void }
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PickDialog({
+  request,
+  close,
+}: {
+  request: Extract<Request, { kind: "pick" }>;
+  close: () => void;
+}) {
+  const trapRef = useFocusTrap(true);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [filter, setFilter] = useState("");
+  const [active, setActive] = useState(0);
+  const { opts } = request;
+  const shown = filterPickOptions(opts.options, filter);
+  const at = Math.min(active, shown.length - 1);
+
+  // The active row stays in view as the arrow keys walk a long list.
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({
+      block: "nearest",
+    });
+  }, [at, filter]);
+
+  const cancel = () => {
+    close();
+    request.resolve(null);
+  };
+  const choose = (option: PickOption | undefined) => {
+    if (!option) return;
+    close();
+    request.resolve(option.value);
+  };
+
+  return (
+    <div
+      className="dialog-backdrop"
+      onClick={cancel}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          e.preventDefault();
+          cancel();
+        }
+      }}
+    >
+      <div
+        className="dialog modal-dialog pick-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={opts.title}
+        ref={trapRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>{opts.title}</h3>
+        {opts.hint && <p className="hint">{opts.hint}</p>}
+        <form
+          className="modal-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            choose(shown[at]);
+          }}
+        >
+          <input
+            autoFocus
+            value={filter}
+            placeholder={opts.placeholder}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="pick-options"
+            aria-activedescendant={shown[at] ? `pick-option-${at}` : undefined}
+            onChange={(e) => {
+              setFilter(e.target.value);
+              setActive(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const step = e.key === "ArrowDown" ? 1 : -1;
+                setActive(Math.max(0, Math.min(shown.length - 1, at + step)));
+              }
+            }}
+          />
+          {shown.length === 0 ? (
+            <p className="hint pick-empty">{opts.empty ?? "Nothing matches"}</p>
+          ) : (
+            <ul className="pick-options" id="pick-options" role="listbox" ref={listRef}>
+              {shown.map((o, i) => (
+                <li
+                  key={o.value}
+                  id={`pick-option-${i}`}
+                  role="option"
+                  aria-selected={i === at}
+                  className={`pick-option${i === at ? " active" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => choose(o)}
+                >
+                  <span className="pick-label">{o.label}</span>
+                  {o.hint && <span className="hint">{o.hint}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="dialog-actions">
+            <button type="button" className="secondary" onClick={cancel}>
+              Cancel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

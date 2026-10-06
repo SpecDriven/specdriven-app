@@ -58,6 +58,7 @@ import {
   UserRound,
   X,
   ArrowDown,
+  ArrowRightLeft,
   Bot,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
@@ -1320,7 +1321,7 @@ export function App() {
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
-  const { modal, modalOpen, prompt, promptWithChoice, confirm } = useModalPrompts();
+  const { modal, modalOpen, prompt, promptWithChoice, confirm, pick } = useModalPrompts();
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -4232,6 +4233,73 @@ export function App() {
     toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
   };
 
+  /**
+   * Move to… from a scenario's menu in the sidebar tree
+   * (specs/ui/navigation.feature.md "move a scenario to another feature"):
+   * pick another feature, and the server adds the scenario there and takes it
+   * out of this one — whatever it is, as its Delete would. An editor pane open
+   * on either feature is left first, autosaving like any navigation away: its
+   * next save would otherwise write the feature back without the move. A pane
+   * that was on the moved scenario follows it to its new feature.
+   */
+  const moveTreeScenario = async (file: string, s: ScenarioRow) => {
+    const options = features
+      .filter((f) => f.fileName !== file)
+      .map((f) => ({
+        value: f.fileName,
+        label: f.name || titleFromFileName(f.fileName),
+        hint: f.fileName.replace(/^specs\//, ""),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const to = await pick({
+      title: `Move “${s.name}” v${s.version}`,
+      hint:
+        s.status === "published"
+          ? "To another feature — published, so the move is committed and pushed right away."
+          : "To another feature.",
+      placeholder: "Find a feature…",
+      options,
+      empty: options.length === 0 ? "There is no other feature to move it to." : "No feature matches.",
+    });
+    if (to === null) return;
+    const following =
+      file === selected &&
+      paneScenario !== null &&
+      paneScenario.name === s.name &&
+      paneScenario.version === s.version;
+    if ((file === selected || to === selected) && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Move failed");
+      return;
+    }
+    if (following) {
+      await openFeature(to, {
+        push: true,
+        scenario: { slug: slugify(s.name), version: s.version },
+        pane: true,
+      });
+    } else if (selectedRef.current === file) {
+      setFeature(featureFromResponse(data, file));
+      setSelectedScenario(null);
+      markSaved();
+    } else if (selectedRef.current === to) {
+      await openFeature(to);
+    }
+    await loadFeatures();
+    const target = options.find((o) => o.value === to)?.label ?? to;
+    toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
+  };
+
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => {
     const entry = specSelection.get(f.fileName);
@@ -4391,9 +4459,9 @@ export function App() {
                 paneScenario.name === s.name &&
                 paneScenario.version === s.version;
               // Its menu (specs/navigation.feature.md "Scenario
-              // navigation"): Delete, offered on the same terms as the
-              // editor pane's — a published scenario only while Settings
-              // allows it.
+              // navigation"): Move to… and Delete, offered on the same terms
+              // as the editor pane's Delete — a published scenario only while
+              // Settings allows it.
               const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
               const deletable = s.status !== "published" || deletePublished;
               return (
@@ -4436,6 +4504,12 @@ export function App() {
                         className="tree-menu"
                         containerSelector=".tree-row-menu"
                         items={[
+                          {
+                            id: "move",
+                            label: "Move to…",
+                            icon: <ArrowRightLeft size={13} />,
+                            onSelect: () => void moveTreeScenario(f.fileName, s),
+                          },
                           {
                             id: "delete",
                             label: "Delete",
@@ -5816,7 +5890,7 @@ export function App() {
       <PageSection
         id="settings-workflow"
         title="Workflow"
-        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete them."
+        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete or move them."
       >
         {/* Code gen (specs/agents/claude.spec.md): off takes the selection
             checkboxes and Start session away, and the server refuses a
@@ -5888,17 +5962,19 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
-        {/* Deleting published scenarios
+        {/* Deleting or moving published scenarios
             (specs/editor/spec-editor.feature.md "Delete Published
-            Spec"): opt-in — with the switch off published scenarios
-            stay immutable and the editor offers no Delete for them. */}
+            Spec", specs/ui/navigation.feature.md "move a scenario to
+            another feature"): opt-in — with the switch off published
+            scenarios stay immutable and nothing offers to delete or move
+            them. */}
         <label className="settings-row">
           <span className="settings-row-label">
-            Allow deleting published specs
+            Allow deleting or moving published specs
             <span className="settings-row-hint">
               {settingsDeletePublishedDraft
-                ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
-                : "Published scenarios are immutable and cannot be deleted."}
+                ? "Published scenarios can be deleted, behind a Danger Zone confirmation, or moved to another feature. Either change is committed and pushed."
+                : "Published scenarios are immutable and cannot be deleted or moved."}
             </span>
           </span>
           <span className="switch">
