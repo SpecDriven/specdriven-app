@@ -810,6 +810,10 @@ interface Listing {
     swapping the data directory (src/server/demo.ts reseedDemo). */
 export const LOAD_RETRIES = 3;
 export const LOAD_RETRY_MS = 300;
+/** How long the page waits between tries to reach a server that is not answering. */
+export const BOOT_RETRY_MS = 3000;
+/** How long the boot read waits for an answer before it calls the server stuck. */
+export const BOOT_TIMEOUT_MS = 20_000;
 
 /**
  * Fetch the feature listing, retrying the failures that a later try can
@@ -866,6 +870,69 @@ export async function fetchListing(
     if (res.status === 409) break;
   }
   return { error: lastError, attempts };
+}
+
+/** Why the boot-time `/api/state` read failed (specs/ui/app-start.feature.md). */
+export interface BootError {
+  message: string;
+  /**
+   * No answer came back: every try was refused (no server is listening), or
+   * the server took the request and never answered.
+   */
+  unreachable: boolean;
+}
+
+/**
+ * Read `/api/state?boot=1`, the page's first request, retrying the fetches
+ * that threw. In the browser the API lives in a separate `bun run dev`
+ * process; when that process is gone the fetch is refused, and an
+ * unhandled refusal left the boot effect holding the loading skeleton for
+ * good. A failure is returned instead, so the page can say the server
+ * cannot be reached and try again. A server that takes the request and
+ * never answers is reported the same way after BOOT_TIMEOUT_MS. The desktop
+ * app serves the API in process, so this only bites the web app.
+ */
+export async function fetchBootState(
+  fetchImpl: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+  timeoutMs: number = BOOT_TIMEOUT_MS,
+): Promise<{ state: Record<string, any> } | { error: BootError }> {
+  let lastError = "Could not reach the server";
+  const stuck: BootError = {
+    message: `The server did not answer within ${timeoutMs / 1000} s`,
+    unreachable: true,
+  };
+  for (let attempt = 0; attempt < LOAD_RETRIES; attempt += 1) {
+    if (attempt > 0) await sleep(LOAD_RETRY_MS * attempt);
+    const signal = timeoutSignal(timeoutMs);
+    let res: Response;
+    try {
+      res = await fetchImpl("/api/state?boot=1", { signal });
+    } catch (e) {
+      // Waiting longer would only repeat the wait; refusals are worth another go.
+      if (signal?.aborted) return { error: stuck };
+      lastError = (e as Error).message;
+      continue;
+    }
+    // An answer, even an error, is settled: the server is there to say it.
+    let data: Record<string, any> | null = null;
+    try {
+      data = (await res.json()) as Record<string, any>;
+    } catch {
+      if (signal?.aborted) return { error: stuck };
+      // A body that is not JSON — reported below by status.
+    }
+    if (res.ok && data) return { state: data };
+    const message =
+      typeof data?.error === "string" ? data.error : `The server answered ${res.status}`;
+    return { error: { message, unreachable: false } };
+  }
+  return { error: { message: lastError, unreachable: true } };
+}
+
+/** An abort signal that fires after `ms`, where the runtime has AbortSignal.timeout. */
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(ms) : undefined;
 }
 
 /** Whether a url names a view: an app page, a plugin's view or a feature. */
@@ -1366,96 +1433,130 @@ export function App() {
     setReadme(data.content);
   }, []);
 
-  useEffect(() => {
-    (async () => {
+  // Why the page's first read failed (specs/ui/app-start.feature.md "the
+  // server cannot be reached at start"): shown in place of the app, and
+  // retried until the server answers.
+  const [bootError, setBootError] = useState<BootError | null>(null);
+  const booting = useRef(false);
+
+  const boot = useCallback(async () => {
+    // The retry timer and the Retry button can both land here.
+    if (booting.current) return;
+    booting.current = true;
+    try {
       // boot=1 marks the page-load fetch: in demo mode the server reseeds the
       // pristine dataset on it, so a refresh reopens on the default data.
-      const state = await (await fetch("/api/state?boot=1")).json();
-      applyRepos(state);
-      setNeedsRepo(state.needsDataRepo);
-      if (typeof state.reloadFrequencySeconds === "number") {
-        setReloadSeconds(state.reloadFrequencySeconds);
+      const result = await fetchBootState();
+      if ("error" in result) {
+        setBootError(result.error);
+        return;
       }
-      if (typeof state.scenarioPreviewLines === "number") {
-        setPreviewLines(state.scenarioPreviewLines);
+      const { state } = result;
+      try {
+        applyRepos(state);
+        setNeedsRepo(state.needsDataRepo);
+        if (typeof state.reloadFrequencySeconds === "number") {
+          setReloadSeconds(state.reloadFrequencySeconds);
+        }
+        if (typeof state.scenarioPreviewLines === "number") {
+          setPreviewLines(state.scenarioPreviewLines);
+        }
+        if (typeof state.autosaveIntervalSeconds === "number") {
+          setAutosaveSeconds(state.autosaveIntervalSeconds);
+        }
+        if (typeof state.showTestLinks === "boolean") {
+          setShowTestLinks(state.showTestLinks);
+        }
+        setOpenTestsInIdea(state.openTestsInIdea === true);
+        setCanOpenInIdea(Boolean(state.canOpenInIdea));
+        if (typeof state.publishExternalLinks === "boolean") {
+          setPublishExternalLinks(state.publishExternalLinks);
+        }
+        if (typeof state.projectManagement === "boolean") {
+          setProjectManagement(state.projectManagement);
+        }
+        if (typeof state.projectManagementTool === "string") {
+          setProjectManagementTool(state.projectManagementTool);
+        }
+        if (typeof state.codeGen === "boolean") {
+          setCodeGen(state.codeGen);
+        }
+        setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
+        setCanRunAgentPane(Boolean(state.canRunAgentPane));
+        setCanRunPi(Boolean(state.canRunPi));
+        setCanRunCodex(Boolean(state.canRunCodex));
+        agentChat.setAvailable(
+          Boolean(state.canRunAgentPane),
+          Boolean(state.canRunPi),
+          Boolean(state.canRunCodex),
+        );
+        setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
+        if (typeof state.deletePublished === "boolean") {
+          setDeletePublished(state.deletePublished);
+        }
+        if (typeof state.assignments === "boolean") {
+          setAssignments(state.assignments);
+        }
+        setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
+        setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
+        setPluginMarketplaces(Array.isArray(state.pluginMarketplaces) ? state.pluginMarketplaces : []);
+        if (typeof state.googleCalendar === "boolean") {
+          setGoogleCalendarOn(state.googleCalendar);
+        }
+        setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
+        setCanChooseFolder(Boolean(state.canChooseFolder));
+        setDemo(Boolean(state.demo));
+        // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
+        // when this lands drops its Vim tab, and the Settings row hides.
+        setVimDemoMode(Boolean(state.demo));
+        // Excalidraw goes the other way (src/frontend/excalidrawPref.ts): the
+        // demo defaults it on so a visitor finds the diagram button without
+        // first finding Settings. Turning it off there still sticks.
+        setExcalidrawDemoMode(Boolean(state.demo));
+        setAppVersion(typeof state.version === "string" ? state.version : null);
+        setGitEngineState(state.gitEngine ?? null);
+        setGitEngineEffective(state.gitEngineEffective ?? "cli");
+        setCliGitAvailable(Boolean(state.cliGitAvailable));
+        setGh(state.gh ?? null);
+        setAuth(state.auth ?? null);
+        if (state.user) setUser(state.user);
+        if (!state.needsDataRepo) {
+          // The README rides along: a start on the bare url opens on it
+          // (specs/app-startup.feature.md).
+          await Promise.all([
+            loadFeatures(),
+            loadReadme(),
+            // So do the plugins — the special folders' pages, the Tests tab and
+            // its plans — before the deep link below, which may name one of
+            // their views. The demo's modules read but never write
+            // (src/server/demo.ts).
+            syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
+          ]);
+          // Deep link (specs/navigation.spec.md): the entry url picks the view.
+          await openFromLocation();
+        }
+      } catch (e) {
+        // The server answered: a plugin or deep link that failed to open is
+        // logged rather than left holding the loading skeleton.
+        console.error("[boot]", e);
       }
-      if (typeof state.autosaveIntervalSeconds === "number") {
-        setAutosaveSeconds(state.autosaveIntervalSeconds);
-      }
-      if (typeof state.showTestLinks === "boolean") {
-        setShowTestLinks(state.showTestLinks);
-      }
-      setOpenTestsInIdea(state.openTestsInIdea === true);
-      setCanOpenInIdea(Boolean(state.canOpenInIdea));
-      if (typeof state.publishExternalLinks === "boolean") {
-        setPublishExternalLinks(state.publishExternalLinks);
-      }
-      if (typeof state.projectManagement === "boolean") {
-        setProjectManagement(state.projectManagement);
-      }
-      if (typeof state.projectManagementTool === "string") {
-        setProjectManagementTool(state.projectManagementTool);
-      }
-      if (typeof state.codeGen === "boolean") {
-        setCodeGen(state.codeGen);
-      }
-      setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
-      setCanRunAgentPane(Boolean(state.canRunAgentPane));
-      setCanRunPi(Boolean(state.canRunPi));
-      setCanRunCodex(Boolean(state.canRunCodex));
-      agentChat.setAvailable(
-        Boolean(state.canRunAgentPane),
-        Boolean(state.canRunPi),
-        Boolean(state.canRunCodex),
-      );
-      setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
-      if (typeof state.deletePublished === "boolean") {
-        setDeletePublished(state.deletePublished);
-      }
-      if (typeof state.assignments === "boolean") {
-        setAssignments(state.assignments);
-      }
-      setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
-      setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
-      setPluginMarketplaces(Array.isArray(state.pluginMarketplaces) ? state.pluginMarketplaces : []);
-      if (typeof state.googleCalendar === "boolean") {
-        setGoogleCalendarOn(state.googleCalendar);
-      }
-      setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
-      setCanChooseFolder(Boolean(state.canChooseFolder));
-      setDemo(Boolean(state.demo));
-      // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
-      // when this lands drops its Vim tab, and the Settings row hides.
-      setVimDemoMode(Boolean(state.demo));
-      // Excalidraw goes the other way (src/frontend/excalidrawPref.ts): the
-      // demo defaults it on so a visitor finds the diagram button without
-      // first finding Settings. Turning it off there still sticks.
-      setExcalidrawDemoMode(Boolean(state.demo));
-      setAppVersion(typeof state.version === "string" ? state.version : null);
-      setGitEngineState(state.gitEngine ?? null);
-      setGitEngineEffective(state.gitEngineEffective ?? "cli");
-      setCliGitAvailable(Boolean(state.cliGitAvailable));
-      setGh(state.gh ?? null);
-      setAuth(state.auth ?? null);
-      if (state.user) setUser(state.user);
-      if (!state.needsDataRepo) {
-        // The README rides along: a start on the bare url opens on it
-        // (specs/app-startup.feature.md).
-        await Promise.all([
-          loadFeatures(),
-          loadReadme(),
-          // So do the plugins — the special folders' pages, the Tests tab and
-          // its plans — before the deep link below, which may name one of
-          // their views. The demo's modules read but never write
-          // (src/server/demo.ts).
-          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
-        ]);
-        // Deep link (specs/navigation.spec.md): the entry url picks the view.
-        await openFromLocation();
-      }
+      setBootError(null);
+    } finally {
+      booting.current = false;
       setLoading(false);
-    })();
+    }
   }, [loadFeatures, loadReadme]);
+
+  useEffect(() => {
+    void boot();
+  }, [boot]);
+
+  // Each failed try sets a fresh error, which schedules the next one.
+  useEffect(() => {
+    if (!bootError) return;
+    const id = setTimeout(() => void boot(), BOOT_RETRY_MS);
+    return () => clearTimeout(id);
+  }, [bootError, boot]);
 
   // Mirror the server's cron reload (specs/crud-feature.spec.md): refresh the
   // feature list on the same cadence so pulled changes show up, without
@@ -5585,6 +5686,32 @@ export function App() {
         </aside>
         <section className="editor">
           <PageSkeleton cards={3} />
+        </section>
+      </main>
+    );
+
+  // The page's first read failed (specs/ui/app-start.feature.md "the server
+  // cannot be reached at start"): say so, and keep trying in the background.
+  if (bootError)
+    return (
+      <main className="centered">
+        <section className="repo-prompt" role="alert" aria-label="Server unreachable">
+          <h1>SpecDriven</h1>
+          {bootError.unreachable ? (
+            <>
+              <p>Can't reach the SpecDriven server at {location.origin}.</p>
+              <p className="error">{bootError.message}</p>
+              <p>
+                Start or restart it with <code>bun run dev</code>; this page opens on its own once
+                the server answers.
+              </p>
+            </>
+          ) : (
+            <p className="error">{bootError.message}</p>
+          )}
+          <button type="button" onClick={() => void boot()}>
+            Retry now
+          </button>
         </section>
       </main>
     );
