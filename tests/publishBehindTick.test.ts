@@ -112,3 +112,134 @@ describe("a renamed scenario published behind a tick still away", () => {
     expect(next.scenarios[2]!.id).toBe("a");
   });
 });
+
+/**
+ * What the queued publish does once the tick is back, in the shape of
+ * `publishScenario` + `publish` in App.tsx: bail if the path was sealed
+ * while it waited; otherwise PUT to the file it was pinned to, and act on
+ * the answer only if that file is still the one on screen.
+ */
+type Outcome = { status: number; conflict?: boolean };
+async function publishQueued(opts: {
+  file: string;
+  ahead: Promise<Placement> | null;
+  known: Placement;
+  draft: Scenario;
+  queue: ReturnType<typeof createPromiseQueue>;
+  selected: () => string | null;
+  sealed: () => boolean;
+  put: (file: string, next: Feature) => Promise<Outcome>;
+}) {
+  const log: string[] = [];
+  await opts.queue.run(async () => {
+    const base = opts.ahead ? await opts.ahead : opts.known;
+    if (opts.sealed()) return;
+    const { next } = placeScenario(opts.draft, base, false);
+    const res = await opts.put(opts.file, next);
+    const stillHere = opts.selected() === opts.file;
+    if (res.conflict) log.push(stillHere ? "conflict-dialog" : "conflict-toast");
+    else if (res.status === 200) log.push(stillHere ? `open:${opts.file}` : "reload-listing");
+  });
+  return log;
+}
+
+describe("a Publish whose tick comes back after the user moved on", () => {
+  const feature: Feature = { name: "Quote", description: "", scenarios: [sc("Alpha", 1, { id: "a" })] };
+  const draft = sc("Alpha", 1, { id: "a", body: "Given more" });
+  const known: Placement = { feature, index: 0, id: "a" };
+
+  /** A tick on the queue that resolves when `land` is called. */
+  function tickAway(queue: ReturnType<typeof createPromiseQueue>) {
+    let land!: () => void;
+    const gate = new Promise<void>((r) => (land = r));
+    const ahead = queue.run(async (): Promise<Placement> => {
+      await gate;
+      return known;
+    });
+    return { ahead, land };
+  }
+
+  test("still on its feature, it reopens that feature", async () => {
+    const queue = createPromiseQueue();
+    const { ahead, land } = tickAway(queue);
+    const run = publishQueued({
+      file: "quote.feature.md",
+      ahead,
+      known,
+      draft,
+      queue,
+      selected: () => "quote.feature.md",
+      sealed: () => false,
+      put: async () => ({ status: 200 }),
+    });
+    land();
+    expect(await run).toEqual(["open:quote.feature.md"]);
+  });
+
+  test("another feature opened meanwhile: it publishes, but refreshes the listing instead of pulling the user back", async () => {
+    const queue = createPromiseQueue();
+    const { ahead, land } = tickAway(queue);
+    let selected = "quote.feature.md";
+    const puts: string[] = [];
+    const run = publishQueued({
+      file: "quote.feature.md",
+      ahead,
+      known,
+      draft,
+      queue,
+      selected: () => selected,
+      sealed: () => false,
+      put: async (file) => {
+        puts.push(file);
+        return { status: 200 };
+      },
+    });
+    selected = "billing.feature.md";
+    land();
+    expect(await run).toEqual(["reload-listing"]);
+    expect(puts).toEqual(["quote.feature.md"]);
+  });
+
+  test("a conflict for a feature no longer on screen is reported, not opened over the new page", async () => {
+    const queue = createPromiseQueue();
+    const { ahead, land } = tickAway(queue);
+    let selected = "quote.feature.md";
+    const run = publishQueued({
+      file: "quote.feature.md",
+      ahead,
+      known,
+      draft,
+      queue,
+      selected: () => selected,
+      sealed: () => false,
+      put: async () => ({ status: 409, conflict: true }),
+    });
+    selected = "billing.feature.md";
+    land();
+    expect(await run).toEqual(["conflict-toast"]);
+  });
+
+  test("the path sealed while it waited (move, rename-file, delete): nothing goes out", async () => {
+    const queue = createPromiseQueue();
+    const { ahead, land } = tickAway(queue);
+    let sealed = false;
+    const puts: string[] = [];
+    const run = publishQueued({
+      file: "quote.feature.md",
+      ahead,
+      known,
+      draft,
+      queue,
+      selected: () => "quote.feature.md",
+      sealed: () => sealed,
+      put: async (file) => {
+        puts.push(file);
+        return { status: 200 };
+      },
+    });
+    sealed = true;
+    land();
+    expect(await run).toEqual([]);
+    expect(puts).toEqual([]);
+  });
+});
