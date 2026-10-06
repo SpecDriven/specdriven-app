@@ -230,27 +230,40 @@ theorem T19_refused_repairs (fresh : Nat → String) (docId : String) (links : B
   simp only [importDriftOne, isProjectionOf_heal, hp, Bool.false_eq_true, ite_false]
   rw [hu, projectFeature_heal]
 
+/-- Their markdown holds nothing beyond their own document: it is that
+document's projection, or the document could not be rebuilt (`theirDoc`
+`none`), in which case nothing tells a hand edit apart and none is folded. -/
+def NoHandEdit (pl : Pulled) (theirs : Feature) : Prop :=
+  ∀ td, pl.theirDoc = some td → isProjectionOf theirs td = true
+
 /-- **T20 Concurrent edits converge without a dialog.** When the other peer's
-operations arrived with the pull and no lineage race is on, the conflicted
-markdown resolves to the merged document's projection, with the document
-untouched: both peers hold the same merged document (T2), so both write the
-same bytes. Anchor: `autoResolveOne`, the `opsArrived` branch. Spec: "two
-peers edit the same scenario concurrently". -/
+operations arrived with the pull, no lineage race is on and their markdown is
+just their document's projection, the conflicted markdown resolves to the
+merged document's projection, with the document untouched: both peers hold
+the same merged document (T2), so both write the same bytes. Anchor:
+`autoResolveOne`, the `opsArrived` branch. Spec: "two peers edit the same
+scenario concurrently". -/
 theorem T20_ops_arrived (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl : Pulled)
     (theirs : Feature) (ht : pl.theirs = some theirs) (ho : pl.opsArrived = true)
-    (hl : pl.lineageRace = false) :
+    (hl : pl.lineageRace = false) (hn : NoHandEdit pl theirs) :
     autoResolveOne seed fresh doc pl = .ok (doc, projectFeature doc true) := by
-  simp [autoResolveOne, ht, ho, hl]; rfl
+  cases htd : pl.theirDoc with
+  | none => simp [autoResolveOne, ht, ho, hl, htd]; rfl
+  | some td =>
+    have hp := hn td htd
+    simp [autoResolveOne, ht, ho, hl, htd, hp]; rfl
 
 /-- T20, the convergence step: two peers holding the same merged document
 resolve the same conflicted file to the same bytes. -/
 theorem T20_same_bytes (seed seed' : Nat) (fresh fresh' : Nat → String) (doc : FeatureDoc)
     (pl pl' : Pulled) (theirs theirs' : Feature)
     (ht : pl.theirs = some theirs) (ho : pl.opsArrived = true) (hl : pl.lineageRace = false)
-    (ht' : pl'.theirs = some theirs') (ho' : pl'.opsArrived = true) (hl' : pl'.lineageRace = false) :
+    (hn : NoHandEdit pl theirs)
+    (ht' : pl'.theirs = some theirs') (ho' : pl'.opsArrived = true) (hl' : pl'.lineageRace = false)
+    (hn' : NoHandEdit pl' theirs') :
     autoResolveOne seed fresh doc pl = autoResolveOne seed' fresh' doc pl' := by
-  rw [T20_ops_arrived seed fresh doc pl theirs ht ho hl,
-      T20_ops_arrived seed' fresh' doc pl' theirs' ht' ho' hl']
+  rw [T20_ops_arrived seed fresh doc pl theirs ht ho hl hn,
+      T20_ops_arrived seed' fresh' doc pl' theirs' ht' ho' hl' hn']
 
 /-- **T21 Lineage race (structure).** On a lineage race the `docid` path
 resolves to the loaded document's id, and the feature path folds our own

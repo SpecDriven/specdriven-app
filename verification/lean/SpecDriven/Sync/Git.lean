@@ -13,6 +13,9 @@ path as data (`Pulled`), in the terms `autoResolveOne` reads it:
 - `lineageRace`: this feature's `docid` file conflicted in the same merge.
 - `base`, `ours`, `theirs`: `stageVersion` 1, 2 and 3 of the path, parsed
   (`theirsVersion` stands in for stage 3); `none` is "absent on that side".
+- `theirDoc`: the other side's document as its push left it, rebuilt from
+  the chunk files of `MERGE_HEAD` (`theirChunks`, `loadFeatureDocFrom`);
+  `none` when one of them is no longer on disk — our side compacted it away.
 
 Assumptions about git itself, stated here rather than proved:
 
@@ -43,6 +46,7 @@ structure Pulled where
   base : Option Feature
   ours : Option Feature
   theirs : Option Feature
+  theirDoc : Option FeatureDoc := none
   deriving Repr
 
 end SpecDriven.Sync
