@@ -6,31 +6,52 @@ import SpecDriven.Sync.Theorems.Store
 # Hypotheses H1–H5
 
 Each hypothesis of `docs/lean-sync-verification-prompt.md` as the model sees
-it. H1 is a confirmed defect; the published case of H2 was one until
-publishing started recording the body (`SpecEntry.publishedBody`), and is
-now a heal. Both traces run against the implementation in
+it. H1 was a confirmed defect until the ops-arrived resolution started
+folding in what their markdown holds beyond their own document
+(`Pulled.theirDoc`); the published case of H2 was one until publishing
+started recording the body (`SpecEntry.publishedBody`), and is now a heal.
+Both traces run against the implementation in
 `tests/automerge/leanHypotheses.test.ts`.
 -/
 
 namespace SpecDriven.Sync
 
-/-! ## H1 Mixed-origin conflict — confirmed -/
+/-! ## H1 Mixed-origin conflict — fixed by folding against their document -/
 
-/-- **H1 (confirmed).** When operations arrived with the pull and no lineage
-race is on, the resolution does not depend on the markdown that arrived: a
-hand edit riding the same push as an app save is overwritten by the merged
-document's projection. Anchor: `autoResolveOne`, `opsArrived`. -/
-theorem H1_resolution_ignores_theirs (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc)
-    (pl : Pulled) (theirs theirs' : Feature) (ho : pl.opsArrived = true) (hl : pl.lineageRace = false) :
+/-- **H1 (fixed).** When operations arrived with the pull and their markdown
+is not their own document's projection — a hand edit rode the push — the
+resolution folds it in: three-way against their document's projection, so
+that only the hand edit is theirs to merge and nothing the merged document
+already holds replays. It used to re-project the merged document whatever
+arrived, dropping the edit on every peer. Anchor: `autoResolveOne`,
+`opsArrived`, `theirDoc`. -/
+theorem H1_hand_edit_folded (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl : Pulled)
+    (theirs : Feature) (td : FeatureDoc) (ht : pl.theirs = some theirs) (ho : pl.opsArrived = true)
+    (hl : pl.lineageRace = false) (htd : pl.theirDoc = some td) (hp : isProjectionOf theirs td = false)
+    (merged : Feature) (d : FeatureDoc) (ops : List Op)
+    (h1 : threeWayFeature seed (projectFeature td (linked theirs)) (docToFeature doc) theirs = .ok merged)
+    (h2 : reconcile fresh doc merged = .ok (d, ops)) :
+    autoResolveOne seed fresh doc pl = .ok (d, projectFeature d true) := by
+  simp [autoResolveOne, ht, ho, hl, htd, hp, h1, h2, bind, Except.bind, pure, Except.pure]
+
+/-- **H1 (residual).** When their document cannot be rebuilt — our side
+compacted one of its chunks away — the resolution cannot tell a hand edit
+apart and does not depend on the markdown that arrived, as before the fix;
+`driftSync.ts` logs a warning. Anchor: `autoResolveOne`, `theirDoc` `none`. -/
+theorem H1_unrebuilt_ignores_theirs (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc)
+    (pl : Pulled) (theirs theirs' : Feature) (ho : pl.opsArrived = true) (hl : pl.lineageRace = false)
+    (htd : pl.theirDoc = none) :
     autoResolveOne seed fresh doc { pl with theirs := some theirs } =
       autoResolveOne seed fresh doc { pl with theirs := some theirs' } := by
-  rw [T20_ops_arrived seed fresh doc { pl with theirs := some theirs } theirs rfl ho hl,
-      T20_ops_arrived seed fresh doc { pl with theirs := some theirs' } theirs' rfl ho hl]
+  have hn : ∀ f : Feature, NoHandEdit { pl with theirs := some f } f := by
+    intro f t h; simp [htd] at h
+  rw [T20_ops_arrived seed fresh doc { pl with theirs := some theirs } theirs rfl ho hl (hn theirs),
+      T20_ops_arrived seed fresh doc { pl with theirs := some theirs' } theirs' rfl ho hl (hn theirs')]
 
-/-- **H1 (and it never comes back).** The resolution leaves the file equal to
-the document's projection, so the drift pass of this and every later tick
-finds nothing to absorb (it only heals the document's published bodies,
-which the file never sees): the hand edit is gone from every peer. -/
+/-- **H1 (why the residual sticks).** A resolution that leaves the file equal
+to the document's projection gives the drift pass of this and every later
+tick nothing to absorb (it only heals the document's published bodies, which
+the file never sees). -/
 theorem H1_never_absorbed (fresh : Nat → String) (docId : String) (doc : FeatureDoc) :
     importDriftOne fresh docId true { doc := some doc, file := .text (projectFeature doc true) } =
       { doc := some (healPublished doc), file := .text (projectFeature doc true) } := by
@@ -170,7 +191,8 @@ theorem H2_publish_heals_on_tick (fresh : Nat → String) (docId : String) (link
 
 /-- **H3 (refuted as a divergence).** Two peers whose three-way resolutions
 differ in bytes each pushed operations with the resolution. The next pull on
-either side brings the other's operations, so the ops-arrived branch
+either side brings the other's operations, and each side's markdown is its
+own document's projection (`NoHandEdit`), so the ops-arrived branch
 re-projects the merged document on both: byte-identical, whatever `mergeText`
 chose on each side (`seed`) and whatever each side's own bytes were. Two
 further pulls, one per peer, converge them. Caveat (REPORT.md): the merged
@@ -180,9 +202,11 @@ drift pass when nothing is published. -/
 theorem H3_second_pull_converges (seed seed' : Nat) (fresh fresh' : Nat → String) (doc : FeatureDoc)
     (pl pl' : Pulled) (theirs theirs' : Feature)
     (ht : pl.theirs = some theirs) (ho : pl.opsArrived = true) (hl : pl.lineageRace = false)
-    (ht' : pl'.theirs = some theirs') (ho' : pl'.opsArrived = true) (hl' : pl'.lineageRace = false) :
+    (hn : NoHandEdit pl theirs)
+    (ht' : pl'.theirs = some theirs') (ho' : pl'.opsArrived = true) (hl' : pl'.lineageRace = false)
+    (hn' : NoHandEdit pl' theirs') :
     autoResolveOne seed fresh doc pl = autoResolveOne seed' fresh' doc pl' :=
-  T20_same_bytes seed seed' fresh fresh' doc pl pl' theirs theirs' ht ho hl ht' ho' hl'
+  T20_same_bytes seed seed' fresh fresh' doc pl pl' theirs theirs' ht ho hl hn ht' ho' hl' hn'
 
 /-! ## H4 Same-body claim mis-match — confirmed for markdown-only edits -/
 

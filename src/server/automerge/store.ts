@@ -305,9 +305,12 @@ async function loadDoc<T>(
   kind: DocKind,
   fileName: string,
   migrate: (doc: A.Doc<T>) => A.Doc<T> = (doc) => doc,
+  include: (chunk: string) => boolean = () => true,
 ): Promise<LoadedDoc<T> | null> {
   const dir = kindDir(dataDir, kind, fileName);
-  const { snapshots, changes } = await chunkFiles(dir);
+  const all = await chunkFiles(dir);
+  const snapshots = all.snapshots.filter(include);
+  const changes = all.changes.filter(include);
   if (snapshots.length === 0 && changes.length === 0) return null;
 
   let doc: A.Doc<T> | null = null;
@@ -354,12 +357,34 @@ export async function loadFeatureDoc(
   return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated);
 }
 
+/**
+ * Load a feature's document from only the chunk files `include` admits, by
+ * name — one side of a merge, whose chunks the merge left on disk beside the
+ * other side's (driftSync.ts autoResolveOne).
+ */
+export async function loadFeatureDocFrom(
+  dataDir: string,
+  fileName: string,
+  include: (chunk: string) => boolean,
+): Promise<LoadedDoc | null> {
+  return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated, include);
+}
+
 /** Load a page's document (specs/app/roadmap.feature.md, tasks.feature.md). */
 export async function loadPageDoc(
   dataDir: string,
   fileName: string,
 ): Promise<LoadedDoc<PageDoc> | null> {
   return loadDoc<PageDoc>(dataDir, "docs", fileName);
+}
+
+/** loadFeatureDocFrom for a page's document. */
+export async function loadPageDocFrom(
+  dataDir: string,
+  fileName: string,
+  include: (chunk: string) => boolean,
+): Promise<LoadedDoc<PageDoc> | null> {
+  return loadDoc<PageDoc>(dataDir, "docs", fileName, undefined, include);
 }
 
 /**
