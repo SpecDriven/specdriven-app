@@ -4200,7 +4200,18 @@ export function App() {
       return;
     }
     setEditing(null);
-    await removeScenario(idx, saved, `Deleted scenario "${name}" v${version}.`);
+    // An autosave (or description PUT) already on the wire still holds the
+    // scenario. Those writes send a full feature snapshot and are not on this
+    // function's fetch, so they would land after the delete and write it back.
+    // Feature delete already waits (`removeFeature`); this path did not.
+    featureEditorsRetiring.current = true;
+    try {
+      await scenarioSaveQueue.current.idle();
+      await descSaveQueue.current.idle();
+      await removeScenario(idx, saved, `Deleted scenario "${name}" v${version}.`);
+    } finally {
+      featureEditorsRetiring.current = false;
+    }
   };
 
   /**
@@ -4323,6 +4334,27 @@ export function App() {
     setSelectedScenario(cardOfScenario(landed.scenarios, s));
   };
 
+  /**
+   * Wait for every scenario and description PUT already on its way before a
+   * scenario is deleted or moved. Those PUTs send a full feature snapshot, so
+   * a late one would write the scenario back — or, on a Move to… destination,
+   * drop it from both files. Feature delete already drains the same queues
+   * (`removeFeature`); tree Delete / Move to… did not, and they only closed
+   * an editor that was still open, so a parting save from `<` / ESC skipped
+   * the wait.
+   *
+   * `leaveEditor`: close the scenario pane first so its parting save is on
+   * the queue we then wait for — tree Delete/Move of a neighbour of the
+   * open scenario. Do not pass this when Delete is removing the open
+   * scenario itself (`deletingScenario` already blocks a parting save).
+   */
+  const drainFeatureEditorWrites = async (leaveEditor: boolean) => {
+    featureEditorsRetiring.current = true;
+    if (leaveEditor) await closeEditor();
+    await scenarioSaveQueue.current.idle();
+    await descSaveQueue.current.idle();
+  };
+
   // Before a move, rename-file or delete: what the scenario and description
   // editors hold lands on the current path, then `seal` refuses every later
   // write to it — the order switchRepo uses, through the same queues.
@@ -4442,48 +4474,48 @@ export function App() {
       return;
     }
     if (!(await confirmScenarioDelete(s))) return;
-    if (file === selected && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    const url = `/api/features/${encodeURIComponent(file)}`;
-    let res: Response;
-    if (s.status === "draft" || s.status === "published") {
-      res = await fetch(`${url}/${s.status === "draft" ? "delete-draft" : "delete-published"}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
-      });
-    } else {
-      // A [proposed] scenario is saved out of the feature, from the server's
-      // copy: the feature may not be the open one.
-      const got = await fetch(url);
-      if (!got.ok) {
-        toast.error("Delete failed");
+    try {
+      await drainFeatureEditorWrites(file === selected && !!editing);
+      const url = `/api/features/${encodeURIComponent(file)}`;
+      let res: Response;
+      if (s.status === "draft" || s.status === "published") {
+        res = await fetch(`${url}/${s.status === "draft" ? "delete-draft" : "delete-published"}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
+        });
+      } else {
+        // A [proposed] scenario is saved out of the feature, from the server's
+        // copy: the feature may not be the open one.
+        const got = await fetch(url);
+        if (!got.ok) {
+          toast.error("Delete failed");
+          return;
+        }
+        const current = featureFromResponse(await got.json(), file);
+        const next: Feature = { ...current, scenarios: current.scenarios.filter((x) => !same(x)) };
+        res = await fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        });
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Delete failed");
         return;
       }
-      const current = featureFromResponse(await got.json(), file);
-      const next: Feature = { ...current, scenarios: current.scenarios.filter((x) => !same(x)) };
-      res = await fetch(url, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
-      });
+      // Every route answers with the editor's view of the feature.
+      if (selectedRef.current === file) {
+        setFeature(featureFromResponse(data, file));
+        setSelectedScenario(null);
+        markSaved();
+      }
+      await loadFeatures();
+      toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
+    } finally {
+      featureEditorsRetiring.current = false;
     }
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error ?? "Delete failed");
-      return;
-    }
-    // Every route answers with the editor's view of the feature.
-    if (selectedRef.current === file) {
-      setFeature(featureFromResponse(data, file));
-      setSelectedScenario(null);
-      markSaved();
-    }
-    await loadFeatures();
-    toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
   };
 
   /**
@@ -4520,37 +4552,39 @@ export function App() {
       paneScenario !== null &&
       paneScenario.name === s.name &&
       paneScenario.version === s.version;
-    if ((file === selected || to === selected) && editing) {
-      const ahead = autosaveInFlight.current;
-      await closeEditor();
-      await ahead;
-    }
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast.error(data.error ?? "Move failed");
-      return;
-    }
-    if (following) {
-      await openFeature(to, {
-        push: true,
-        scenario: { slug: slugify(s.name), version: s.version },
-        pane: true,
+    try {
+      // Always drain: `<` / ESC / openFeature fire-and-forget closeEditor, so
+      // `editing` may already be null while a PUT of source or dest is away.
+      await drainFeatureEditorWrites((file === selected || to === selected) && !!editing);
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to }),
       });
-    } else if (selectedRef.current === file) {
-      setFeature(featureFromResponse(data, file));
-      setSelectedScenario(null);
-      markSaved();
-    } else if (selectedRef.current === to) {
-      await openFeature(to);
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Move failed");
+        return;
+      }
+      if (following) {
+        await openFeature(to, {
+          push: true,
+          scenario: { slug: slugify(s.name), version: s.version },
+          pane: true,
+        });
+      } else if (selectedRef.current === file) {
+        setFeature(featureFromResponse(data, file));
+        setSelectedScenario(null);
+        markSaved();
+      } else if (selectedRef.current === to) {
+        await openFeature(to);
+      }
+      await loadFeatures();
+      const target = options.find((o) => o.value === to)?.label ?? to;
+      toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
+    } finally {
+      featureEditorsRetiring.current = false;
     }
-    await loadFeatures();
-    const target = options.find((o) => o.value === to)?.label ?? to;
-    toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
   };
 
   /** One sidebar entry per feature; the entry is the drag source. */
