@@ -622,6 +622,29 @@ export async function deletePublishedScenario(
   target: ScenarioTarget,
 ): Promise<SaveResult> {
   const name = safe(fileName);
+  const projection = await removePublished(dataDir, name, target);
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, name),
+    `Delete published scenario: ${target.name} v${target.version} (${name})`,
+  );
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, projection)),
+    message: sync.message,
+  };
+}
+
+/**
+ * Take a published scenario out of a feature, locally — the doc absorbing
+ * the removal with `force` — and return the projection now on disk. The
+ * caller commits and pushes.
+ */
+async function removePublished(
+  dataDir: string,
+  name: string,
+  target: ScenarioTarget,
+): Promise<string> {
   const current = await readFeature(dataDir, name);
   if (current === null) throw new Error(`Feature file not found: ${name}`);
   const feature = parseFeature(current);
@@ -638,16 +661,86 @@ export async function deletePublishedScenario(
   assertFeatureText(name, next);
   const projection = await absorbIntoDoc(dataDir, name, next, { force: true });
   await writeTextFile(`${dataDir}/${name}`, projection);
-  const sync = await commitAndPush(
+  return projection;
+}
+
+/** What moveScenario answers: the source feature's editor view, as a delete
+    answers, plus where the scenario went. */
+export interface MoveScenarioResult extends SaveResult {
+  movedTo: string;
+}
+
+/**
+ * Move a scenario to another feature (specs/ui/navigation.feature.md "move a
+ * scenario to another feature"): it keeps its name, version, status, body,
+ * tests, ticket and pull request links, and leaves the source the way a
+ * Delete of it would. Added to the target before it is taken out of the
+ * source, so a failure part way leaves it in both rather than in neither.
+ *
+ * Drafts and [proposed] scenarios are local writes, committed and pushed by
+ * the reload cron like any save. A [published] one is published content
+ * leaving its feature — the route lets it through only while Settings allows
+ * deleting published scenarios — and both files are committed and pushed
+ * together right away, as a Delete Published Spec is.
+ */
+export async function moveScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+  toFileName: string,
+): Promise<MoveScenarioResult> {
+  const from = safe(fileName);
+  const to = safe(toFileName);
+  if (from === to) throw new Error("The scenario is already in that feature");
+  const source = await readFeatureView(dataDir, from);
+  if (source === null) throw new Error(`Feature file not found: ${from}`);
+  const same = (s: { name: string; version: number }) =>
+    s.name === target.name && s.version === target.version;
+  const moving = source.parsed.scenarios.find(same);
+  if (!moving) throw new Error(`Scenario "${target.name}" @v${target.version} not found`);
+  const dest = await readFeatureView(dataDir, to);
+  if (dest === null) throw new Error(`Feature file not found: ${to}`);
+  if (dest.parsed.scenarios.some(same)) {
+    const destName = dest.parsed.name || titleFromFileName(to);
+    throw new Error(`"${destName}" already has "${target.name}" v${target.version}`);
+  }
+
+  // Into the target: a fresh document entry there (no id — ids belong to the
+  // source's document), then its pull request links, which only the
+  // document holds.
+  const { id: _id, prs, ...carried } = moving;
+  await saveFeature(
     dataDir,
-    await featurePaths(dataDir, name),
-    `Delete published scenario: ${target.name} v${target.version} (${name})`,
+    to,
+    serializeFeature({ ...dest.parsed, scenarios: sortScenarios([...dest.parsed.scenarios, carried]) }),
   );
-  return {
-    status: "saved",
-    ...(await featureView(dataDir, name, projection)),
-    message: sync.message,
-  };
+  if (prs && prs.length > 0) {
+    await savePullRequests(dataDir, to, { name: moving.name, version: moving.version }, prs);
+  }
+
+  // Out of the source, by what the scenario is — as its Delete would.
+  const pick = { name: moving.name, version: moving.version };
+  let view: FeatureView;
+  let message = "moved locally";
+  if (moving.status === "draft") {
+    view = await deleteDraftScenario(dataDir, from, pick);
+  } else if (moving.status === "proposed") {
+    view = await saveFeature(
+      dataDir,
+      from,
+      serializeFeature({ ...source.parsed, scenarios: source.parsed.scenarios.filter((s) => !same(s)) }),
+    );
+  } else {
+    const projection = await removePublished(dataDir, from, pick);
+    const sync = await commitAndPush(
+      dataDir,
+      [...(await featurePaths(dataDir, from)), ...(await featurePaths(dataDir, to))],
+      `Move published scenario: ${moving.name} v${moving.version} (${from} -> ${to})`,
+    );
+    view = await featureView(dataDir, from, projection);
+    message = sync.message;
+  }
+  return { status: "saved", content: view.content, parsed: view.parsed, movedTo: to, message };
 }
 
 /**
