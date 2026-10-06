@@ -9,7 +9,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPageDoc, pageDocDirRel } from "../src/server/automerge/store";
-import { setGitEngine } from "../src/server/git";
+import { conflictedFiles, setGitEngine } from "../src/server/git";
 import { parsePage, serializePage } from "../src/server/parser";
 import { syncDataDir } from "../src/server/reload";
 import "../src/server/api";
@@ -386,6 +386,42 @@ test("a merged entry holds each side's edit exactly once", async () => {
   // Both clones agree, and no conflict markers survived into the file.
   expect(await Bun.file(join(clones.b, fileName)).text()).toBe(text);
   expect(text).not.toContain("<<<<<<<");
+});
+
+// H1 for pages: B saves the body through the app (chunk files) and, in the
+// same push, hand-edits Kind (no operations). A's concurrent body save makes
+// the pull conflict. The ops-arrived path used to skip the three-way and
+// drop the Kind change; it now folds B's markdown in against B's own
+// document's projection, where the Kind change is the only difference.
+test("a hand edit riding a page push with operations is absorbed", async () => {
+  const clones = await twoClones(root);
+  const fileName = await createEntry(clones.a, "Once", "Observation", {
+    date: "2026-09-12",
+    author: "ada",
+  });
+  await syncDataDir(clones.b);
+  const head = "# Once\n\n**Author:** ada\n\n**Date:** 2026-09-12\n\n**Kind:** Observation\n\n";
+  await savePage(clones.b, NOTEBOOK, fileName, `${head}from B's app\n`);
+  await Bun.write(
+    join(clones.b, fileName),
+    `${head.replace("**Kind:** Observation", "**Kind:** Decision")}from B's app\n`,
+  );
+  await git(clones.b, "add", "-A");
+  await git(clones.b, "commit", "-m", "app save plus hand edit");
+  await git(clones.b, "push");
+
+  await savePage(clones.a, NOTEBOOK, fileName, `${head}from A\n`);
+  await syncDataDir(clones.a);
+  await syncDataDir(clones.a);
+  expect(await conflictedFiles(clones.a)).toEqual([]);
+  await syncDataDir(clones.b);
+  await syncDataDir(clones.a);
+
+  const text = await Bun.file(join(clones.a, fileName)).text();
+  expect(await Bun.file(join(clones.b, fileName)).text()).toBe(text);
+  expect(text).toContain("from B's app");
+  expect(text).toContain("from A");
+  expect(parsePage(text).kind).toBe("Decision");
 });
 
 test("today reads yyyy-mm-dd in local time", () => {

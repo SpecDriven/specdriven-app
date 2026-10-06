@@ -36,9 +36,17 @@ structure PeerFeature where
 /-- `EMPTY` in driftSync.ts. -/
 def EMPTY : Feature := { name := "", description := "", scenarios := [] }
 
+/-- Whether their markdown was written with external links — the projection
+form `theirProjection` in driftSync.ts rebuilds it in. -/
+def linked (f : Feature) : Bool :=
+  f.link.isSome || f.scenarios.any (·.link.isSome)
+
 /-- `autoResolveOne` for a conflicted `.feature.md` that has a document:
 the resolved document and the markdown written as the resolution, or why
-the path was left to the dialog. -/
+the path was left to the dialog. When operations arrived, their markdown
+folds in only where it differs from their own document's projection — a
+hand edit riding the push (H1) — so nothing the merged document already
+holds replays (T20). -/
 def autoResolveOne (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl : Pulled) :
     Except String (FeatureDoc × Feature) := do
   let some theirs := pl.theirs | throw "deleted on one side"
@@ -59,7 +67,15 @@ def autoResolveOne (seed : Nat) (fresh : Nat → String) (doc : FeatureDoc) (pl 
       let merged ← threeWayFeature seed base (docToFeature doc1) theirs
       let (d, _) ← reconcile fresh doc1 merged
       pure d
-    else pure doc1
+    else
+      match pl.theirDoc with
+      | some td =>
+        if !isProjectionOf theirs td then do
+          let merged ← threeWayFeature seed (projectFeature td (linked theirs)) (docToFeature doc1) theirs
+          let (d, _) ← reconcile fresh doc1 merged
+          pure d
+        else pure doc1
+      | none => pure doc1
   return (doc2, projectFeature doc2 true)
 
 /-- The `docid` branch of `autoResolveOne`: the loaded document's id wins. -/

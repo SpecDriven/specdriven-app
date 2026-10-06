@@ -1,11 +1,11 @@
 // Traces from the Lean verification of the sync core
 // (verification/lean/SpecDriven/Sync/Theorems/Hypotheses.lean, REPORT.md):
 // hypotheses H1 and H2 of docs/lean-sync-verification-prompt.md, played
-// against the real implementation over real git transport. A `failing` test
-// documents a confirmed weakness and flips to a failure when it is fixed;
-// the plain tests pin the behaviour the model proved. The published case of
-// H2 was such a weakness until publishing started recording the body
-// (schema.ts `publishedBody`); its test now pins the heal.
+// against the real implementation over real git transport. Both were
+// confirmed weaknesses and are fixed: H1 since the ops-arrived resolution
+// folds in what their markdown holds beyond their own document
+// (driftSync.ts `theirChunks`), the published case of H2 since publishing
+// records the body (schema.ts `publishedBody`). Their tests pin the fixes.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -60,14 +60,15 @@ async function pushMarkdownOnly(dir: string, text: string, message: string) {
   await git(dir, "push");
 }
 
-// H1 Mixed-origin conflict. B saves Alpha through the app (operations in
-// chunk files) and, in the same push, hand-edits Beta (no operations). A's
-// concurrent save makes the pull conflict on the markdown; `autoResolveOne`
-// sees that operations arrived, skips the three-way merge and re-projects
-// the merged document — which never saw the hand edit. The drift pass then
-// finds the file equal to its projection, so nothing ever absorbs it.
-// Lean: Hypotheses.lean `H1_hand_edit_dropped`.
-test.failing("H1: a hand edit riding a push with operations is dropped by the ops-arrived resolution", async () => {
+// H1 Mixed-origin conflict (fixed). B saves Alpha through the app (operations
+// in chunk files) and, in the same push, hand-edits Beta (no operations). A's
+// concurrent save makes the pull conflict on the markdown. `autoResolveOne`
+// used to see that operations arrived, skip the three-way merge and re-project
+// the merged document — which never saw the hand edit. It now rebuilds B's
+// document from the chunks B pushed and folds B's markdown in three-way
+// against that document's projection, where the hand edit is the only
+// difference. Lean: Hypotheses.lean `H1_hand_edit_folded`.
+test("H1: a hand edit riding a push with operations is absorbed by the ops-arrived resolution", async () => {
   const { a, b } = await seededClones(TWO);
 
   const viaApp = TWO.replace("- alpha one", "- alpha one, from B's app");
@@ -88,9 +89,75 @@ test.failing("H1: a hand edit riding a push with operations is dropped by the op
   expect(mdA).toBe((await readFeature(b, FILE))!);
   expect(mdA).toContain("from B's app");
   expect(mdA).toContain("from A");
-  // The spec: "markdown edited outside the app" is absorbed. This edit is gone
-  // on both peers and in both documents.
   expect(mdA).toContain("hand-edited on B");
+});
+
+// H1 within one scenario. The hand edit touches the same scenario B also
+// saved through the app in that push, on a line of its own; A's concurrent
+// save makes the pull conflict. Against their document's projection the hand
+// edit is the only change of theirs, so all three edits survive.
+test("H1: a hand edit to the scenario the same push saved through the app is absorbed too", async () => {
+  const { a, b } = await seededClones(TWO);
+
+  const viaApp = TWO.replace("- alpha one", "- alpha one, from B's app");
+  await saveFeature(b, FILE, viaApp);
+  await Bun.write(join(b, FILE), viaApp.replace("- alpha two", "- alpha two, hand-edited on B"));
+  await git(b, "add", "-A");
+  await git(b, "commit", "-m", "app save plus hand edit");
+  await git(b, "push");
+
+  await saveFeature(a, FILE, TWO.replace("- alpha one", "- alpha one, from A"));
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+  await syncDataDir(b);
+  await syncDataDir(a);
+
+  const mdA = (await readFeature(a, FILE))!;
+  expect(mdA).toBe((await readFeature(b, FILE))!);
+  expect(mdA).toContain("from B's app");
+  expect(mdA).toContain("from A");
+  expect(mdA).toContain("hand-edited on B");
+  expect(mdA.match(/from B's app/g)).toHaveLength(1);
+});
+
+// H1 residual. Between B's push and A's pull, A's own saves compact A's
+// document (store.ts compactDoc), deleting chunk files B's side still has:
+// B's document cannot be rebuilt as B pushed it, so a hand edit cannot be
+// told apart from the operations. The resolution falls back to the merged
+// document's projection — no dialog, both peers converge — and logs that
+// the hand edit was not folded in.
+// Lean: Hypotheses.lean `H1_unrebuilt_ignores_theirs`.
+test("H1 residual: when compaction removed their chunks the resolution falls back to the merged document", async () => {
+  const { a, b } = await seededClones(TWO);
+
+  const viaApp = TWO.replace("- alpha one", "- alpha one, from B's app");
+  await saveFeature(b, FILE, viaApp);
+  await Bun.write(join(b, FILE), viaApp.replace("- beta one", "- beta one, hand-edited on B"));
+  await git(b, "add", "-A");
+  await git(b, "commit", "-m", "app save plus hand edit");
+  await git(b, "push");
+
+  for (let i = 1; i <= 12; i++) {
+    await saveFeature(a, FILE, TWO.replace("- alpha two", `- alpha two, from A ${i}`));
+  }
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+  try {
+    await settle(a);
+  } finally {
+    console.warn = warn;
+  }
+  expect(await conflictedFiles(a)).toEqual([]);
+  expect(warnings.some((w) => w.includes("their document could not be rebuilt"))).toBe(true);
+  await syncDataDir(b);
+  await syncDataDir(a);
+
+  const mdA = (await readFeature(a, FILE))!;
+  expect(mdA).toBe((await readFeature(b, FILE))!);
+  expect(mdA).toContain("from B's app");
+  expect(mdA).toContain("from A 12");
+  expect(mdA).not.toContain("hand-edited on B");
 });
 
 // H2 Concurrent absorb duplicates text, then self-heals. Both peers absorb

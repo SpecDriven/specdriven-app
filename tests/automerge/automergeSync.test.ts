@@ -13,7 +13,7 @@ import { importDrift } from "../../src/server/automerge/driftSync";
 import { projectFeature } from "../../src/server/automerge/project";
 import { snapshotOf } from "../../src/server/automerge/schema";
 import * as A from "@automerge/automerge";
-import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
+import { moveScenario, publishFeature, readFeature, saveFeature } from "../../src/server/features";
 import { conflictedFiles } from "../../src/server/git";
 import { syncDataDir } from "../../src/server/reload";
 import { git, stopServers, twoClones } from "../helpers/fixtures";
@@ -298,4 +298,49 @@ test("publish over a concurrent edit merges instead of conflicting", async () =>
 
   await syncDataDir(b);
   expect(await readFeature(b, "specs/seed.feature.md")).toBe(mdA!);
+});
+
+// When the other side's push carried operations, its markdown folds in
+// against its own document's projection, not the git merge base: what that
+// document already holds — here B's body edit — must not read as an edit to
+// a scenario A has since renamed or moved away, or the pull would land in
+// the conflict dialog the operations had already made unnecessary.
+test("a rename racing an in-app edit of the same line merges with no conflict dialog", async () => {
+  const { a, b } = await seededClones();
+
+  await saveFeature(b, "specs/seed.feature.md", SEED.replace("- line two", "- line two, from B"));
+  await syncDataDir(b);
+  const id = (await loadFeatureDoc(a, "specs/seed.feature.md"))!.doc.specs[0]!.id;
+  await saveFeature(
+    a,
+    "specs/seed.feature.md",
+    SEED.replace("## Story @v1", "## Story renamed @v1").replace("- line two", "- line two, from A"),
+    { name: "Story renamed", version: 1, id },
+  );
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+
+  const mdA = (await readFeature(a, "specs/seed.feature.md"))!;
+  expect(mdA).toContain("## Story renamed @v1");
+  expect(mdA).not.toContain("## Story @v1");
+  expect(mdA).toContain("from A");
+  expect(mdA).toContain("from B");
+});
+
+test("a move racing an in-app edit of the moved scenario merges with no conflict dialog", async () => {
+  const other = "specs/other.feature.md";
+  const clones = await twoClones(root, {
+    "specs/seed.feature.md": SEED,
+    [other]: "# Other\n\n## Elsewhere @v1 [proposed]\n\n- x\n",
+  });
+  const { a, b } = clones;
+  await syncDataDir(a);
+  await syncDataDir(b);
+
+  await saveFeature(b, "specs/seed.feature.md", SEED.replace("- line two", "- line two, from B"));
+  await syncDataDir(b);
+  await moveScenario(a, "specs/seed.feature.md", { name: "Story", version: 1 }, other);
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+  expect(await readFeature(a, other)).toContain("## Story @v1");
 });
