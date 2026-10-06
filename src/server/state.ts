@@ -88,7 +88,7 @@ export interface SpecDrivenState {
    * turning the switch back on finds it again.
    */
   assignments?: boolean;
-  /** Allow deleting published scenarios (specs/editor/spec-editor.feature.md
+  /** Allow deleting or moving published scenarios (specs/editor/spec-editor.feature.md
       "Delete Published Spec"); absent means OFF — published scenarios are
       immutable unless this is explicitly turned on. */
   deletePublished?: boolean;

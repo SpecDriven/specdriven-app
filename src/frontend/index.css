@@ -1429,6 +1429,43 @@ button.link:disabled {
   word-break: break-word;
 }
 
+/* A pick dialog (ModalPrompts PickDialog): a filter field over a scrolling
+   list — the feature a scenario moves to. */
+.pick-options {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.pick-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.38rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pick-option.active {
+  background: var(--accent-soft);
+}
+
+.pick-option .pick-label {
+  font-size: 0.86rem;
+  color: var(--text-1);
+}
+
+.pick-option .hint,
+.pick-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
 /* Scenario editor pane (specs/editor/spec-editor.feature.md "Spec editor
    pane"): takes the feature pane's slot — a bar on top, one scrolling column
    below. Part of the page, not a dialog: nothing is dimmed and nothing is
@@ -3034,7 +3071,7 @@ button.table-add:hover {
   height: 1.6rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
