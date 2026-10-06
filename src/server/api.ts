@@ -62,6 +62,7 @@ import {
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
+  moveScenario,
   moveFeature,
   renameFeature,
   renameFeatureFile,
@@ -1174,6 +1175,32 @@ const postDeletePublished = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/ui/navigation.feature.md "move a scenario to another feature": the
+// scenario menu's Move to… — offered on the same terms as its Delete, so a
+// published scenario moves only while Settings allows deleting published
+// ones, enforced here as delete-published enforces it.
+const postMoveScenario = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { scenario?: ScenarioBody; to?: unknown };
+  const target = scenarioTarget(body.scenario);
+  if (!target) return json({ error: "scenario needs a name and a version" }, 400);
+  if (typeof body.to !== "string") return json({ error: "to is required" }, 400);
+  try {
+    const source = await readFeatureView(dir, params.file!);
+    const moving = source?.parsed.scenarios.find(
+      (s) => s.name === target.name && s.version === target.version,
+    );
+    if (
+      moving?.status === "published" &&
+      !normalizeDeletePublished((await readState(getAppRoot())).deletePublished)
+    ) {
+      return json({ error: "Moving published scenarios is switched off in Settings" }, 403);
+    }
+    return json(await moveScenario(dir, params.file!, target, body.to));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/ui.spec.md "Feature entry menu": Delete removes the feature
 // file — a `git rm`, committed and pushed. The client confirms first.
 const deleteFeatureRoute = withDataDir(async (dir, _req, params) => {
@@ -1877,6 +1904,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["PUT", "/api/features/:file/pull-requests", putPullRequests],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
+  ["POST", "/api/features/:file/move-scenario", postMoveScenario],
   ["POST", "/api/agent/session", postAgentSession],
   ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],
   ["POST", "/api/agent/chat", postAgentChat],
