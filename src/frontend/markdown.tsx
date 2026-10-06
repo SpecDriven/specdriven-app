@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { MarkdownImage } from "./MarkdownImage";
 import { TEST_REF_RE, renderTestInEditor } from "./testref";
+import { WEB_URL_RE, webLinkEnd } from "./weblinks";
 
 // Markdown support for the scenario edit dialog (specs/ui.spec.md "Scenario
 // edit dialog"). The preview is built from React elements — never innerHTML —
@@ -9,6 +10,11 @@ import { TEST_REF_RE, renderTestInEditor } from "./testref";
 // Beyond standard markdown the preview knows one house token: `[test:<url>]`
 // or `[test:<name>:<url>]` (specs/external-links/test-traceability.feature.md),
 // shown as a link named after the test — see ./testref.
+//
+// A bare web url — `https://abc.com`, or `<https://abc.com>` as markdown
+// spells an autolink — is a link too (specs/editor/common-editor.feature.md
+// "web links are clickable"), ending where ./weblinks says it ends, so the
+// preview and the source tabs agree on which characters are the link.
 //
 // Images (specs/images.spec.md) have two spellings: `![alt](url)`, what a
 // paste inserts, and `<img src="…" alt="…" width="…">` — the one HTML tag the
@@ -27,6 +33,8 @@ function safeUrl(url: string): string | null {
 const INLINE = new RegExp(
   [
     "(?<tick>`+)(?<code>.+?)\\k<tick>",
+    "<(?<angle>https?://[^\\s<>]+)>",
+    `(?<!\\w)(?<web>${WEB_URL_RE.source})`,
     "(?<bmark>\\*\\*|__)(?<bold>.+?)\\k<bmark>",
     "\\*(?<star>[^*]+?)\\*",
     "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
@@ -132,8 +140,18 @@ function image(ctx: Ctx, key: string, snippet: string, at: number, a: ImageAttrs
   );
 }
 
-/** Inline markdown in `input`, which starts at offset `at` of the source. */
-function parseInline(input: string, keyBase: string, at: number, ctx: Ctx): ReactNode[] {
+/**
+ * Inline markdown in `input`, which starts at offset `at` of the source.
+ * `links` is false inside a link's own text, where a bare url stays text —
+ * a link cannot hold another.
+ */
+function parseInline(
+  input: string,
+  keyBase: string,
+  at: number,
+  ctx: Ctx,
+  links = true,
+): ReactNode[] {
   const out: ReactNode[] = [];
   let rest = input;
   let pos = at; // where `rest` starts in the source
@@ -148,16 +166,42 @@ function parseInline(input: string, keyBase: string, at: number, ctx: Ctx): Reac
     const g = m.groups!;
     const key = `${keyBase}.${k++}`;
     const start = pos + m.index;
+    // How much of the match was read: all of it, but for a bare url, whose
+    // trailing punctuation goes back to the text after it.
+    let used = m[0].length;
     if (g.code !== undefined) {
       out.push(<code key={key}>{g.code}</code>);
+    } else if (g.angle !== undefined) {
+      out.push(
+        links ? (
+          <a key={key} href={g.angle} target="_blank" rel="noreferrer">
+            {g.angle}
+          </a>
+        ) : (
+          m[0]
+        ),
+      );
+    } else if (g.web !== undefined) {
+      const len = webLinkEnd(g.web);
+      used = len || g.web.length;
+      const url = g.web.slice(0, used);
+      out.push(
+        links && len > 0 ? (
+          <a key={key} href={url} target="_blank" rel="noreferrer">
+            {url}
+          </a>
+        ) : (
+          url
+        ),
+      );
     } else if (g.bold !== undefined) {
-      out.push(<strong key={key}>{parseInline(g.bold, key, start + g.bmark!.length, ctx)}</strong>);
+      out.push(<strong key={key}>{parseInline(g.bold, key, start + g.bmark!.length, ctx, links)}</strong>);
     } else if (g.star !== undefined) {
-      out.push(<em key={key}>{parseInline(g.star, key, start + 1, ctx)}</em>);
+      out.push(<em key={key}>{parseInline(g.star, key, start + 1, ctx, links)}</em>);
     } else if (g.under !== undefined) {
-      out.push(<em key={key}>{parseInline(g.under, key, start + 1, ctx)}</em>);
+      out.push(<em key={key}>{parseInline(g.under, key, start + 1, ctx, links)}</em>);
     } else if (g.strike !== undefined) {
-      out.push(<del key={key}>{parseInline(g.strike, key, start + 2, ctx)}</del>);
+      out.push(<del key={key}>{parseInline(g.strike, key, start + 2, ctx, links)}</del>);
     } else if (g.src !== undefined) {
       out.push(image(ctx, key, m[0], start, { src: g.src, alt: g.alt ?? "" }));
     } else if (g.tag !== undefined) {
@@ -178,15 +222,15 @@ function parseInline(input: string, keyBase: string, at: number, ctx: Ctx): Reac
       out.push(
         href ? (
           <a key={key} href={href} target="_blank" rel="noreferrer">
-            {parseInline(g.text!, key, start + 1, ctx)}
+            {parseInline(g.text!, key, start + 1, ctx, false)}
           </a>
         ) : (
-          <span key={key}>{parseInline(g.text!, key, start + 1, ctx)}</span>
+          <span key={key}>{parseInline(g.text!, key, start + 1, ctx, links)}</span>
         ),
       );
     }
-    rest = rest.slice(m.index + m[0].length);
-    pos = start + m[0].length;
+    rest = rest.slice(m.index + used);
+    pos = start + used;
   }
   return out;
 }
