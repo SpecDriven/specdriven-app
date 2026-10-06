@@ -1050,6 +1050,14 @@ export function App() {
   /** The tick still saving, resolving to where it left the scenario — null when none is away. */
   const autosaveInFlight = useRef<Promise<Placement> | null>(null);
   const scenarioSaveQueue = useRef(createPromiseQueue());
+  /**
+   * The feature's path is about to change (move, rename-file) or go away
+   * (delete). `retiring` blocks new autosave ticks while a flush lands;
+   * `sealed` refuses every further write to the retired path — the same
+   * pair a page editor uses (PagesPane flush/seal).
+   */
+  const featureEditorsRetiring = useRef(false);
+  const featureEditorsSealed = useRef(false);
   /** The editor pane's title field, so a tick can see whether the name is
       still being typed (specs/editor-autosave.feature.md). Null once the
       scenario is published, when the name is no longer editable. */
@@ -1059,10 +1067,18 @@ export function App() {
       from the feature (specs/editor/spec-editor.feature.md "Spec editor
       pane"). Kept in a ref so they always run the current ones. `close`
       returns the last save when one went out, for a caller that must order
-      itself after it. */
-  const editorRef = useRef<{ close: () => Promise<boolean> | null; back: () => void }>({
+      itself after it. `flush` / `seal` land and then refuse writes when the
+      file is about to be renamed, moved or deleted. */
+  const editorRef = useRef<{
+    close: () => Promise<boolean> | null;
+    back: () => void;
+    flush: () => Promise<void>;
+    seal: () => void;
+  }>({
     close: () => null,
     back: () => {},
+    flush: async () => {},
+    seal: () => {},
   });
   /** True from the moment Delete is pressed until the removal is away, so no
       tick saves the scenario back while the confirmation is on screen — and
@@ -1862,6 +1878,9 @@ export function App() {
       // here must land on top of, not under. And not before the fetch, or
       // the old feature page would show for the duration of the request.
       editorRef.current.close();
+      // A move / rename-file sealed the editors so the close above could not
+      // PUT the retired path after git-mv. This is a live feature again.
+      unsealFeatureEditors();
       // Opening a feature leaves the open plugin view — a page saves what
       // its editor still holds as it unmounts, the same courtesy the README
       // editor gets. An app page — Settings, Plugins — leaves too.
@@ -1909,6 +1928,7 @@ export function App() {
       // The file is gone — deleted, renamed by the `.feature.md` migration, or
       // a stale deep link. Drop a stale selection rather than re-fetching it
       // on every reload tick; a link or click that misses leaves a note.
+      unsealFeatureEditors();
       if (file === selected) {
         // The file is gone, so an editor open on it has nothing to save into.
         setEditing(null);
@@ -2558,27 +2578,43 @@ export function App() {
   // Drag-move (specs/folders.spec.md): the server does a `git mv` into
   // the target folder, committed and pushed. A selected feature stays
   // selected under its new path — the canonical-url effect follows along.
+  // What the scenario / description editors hold lands on the current path
+  // first, then they seal, so the openFeature close after git-mv cannot PUT
+  // the retired path and recreate the old file.
   const moveTo = async (fileName: string, folder: string) => {
     setDragging(null);
     setDropTarget(null);
-    const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/move`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      await loadFeatures();
-      if (data.fileName !== fileName) {
-        if (selected === fileName) await openFeature(data.fileName);
-        // Undo moves it straight back to where it came from.
-        const from = fileName.includes("/") ? fileName.slice(0, fileName.lastIndexOf("/")) : "";
-        toast.success(`Moved to ${folder || "the top level"} — ${data.message}.`, {
-          action: { label: "Undo", run: () => void moveTo(data.fileName, from) },
-        });
+    const from = fileName.includes("/") ? fileName.slice(0, fileName.lastIndexOf("/")) : "";
+    // A drop on the folder it is already in moves nothing ("already there"):
+    // no need to close the editors over it.
+    const retiring = selected === fileName && folder !== from;
+    if (retiring) {
+      await editorRef.current.flush();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folder }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await loadFeatures();
+        if (data.fileName !== fileName) {
+          if (selected === fileName) await openFeature(data.fileName);
+          // Undo moves it straight back to where it came from.
+          toast.success(`Moved to ${folder || "the top level"} — ${data.message}.`, {
+            action: { label: "Undo", run: () => void moveTo(data.fileName, from) },
+          });
+        }
+      } else {
+        toast.error(data.error ?? "Move failed");
       }
-    } else {
-      toast.error(data.error ?? "Move failed");
+    } finally {
+      // Moved, refused, unchanged or never answered: the seal is over either
+      // way, or the next scenario opened here would silently never save.
+      if (retiring) unsealFeatureEditors();
     }
   };
 
@@ -2633,20 +2669,31 @@ export function App() {
       confirmLabel: "Rename",
     });
     if (!stem || cleanLine(stem) === fileStem(fileName)) return;
-    const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stem: cleanLine(stem) }),
-    });
-    const data = await res.json();
-    if (res.ok) {
-      await loadFeatures();
-      if (data.fileName !== fileName) {
-        if (selected === fileName) await openFeature(data.fileName);
-        toast.success(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
+    // The server slugs the stem, so the name can still come back unchanged;
+    // the finally below lifts the seal then too.
+    const retiring = selected === fileName;
+    if (retiring) {
+      await editorRef.current.flush();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stem: cleanLine(stem) }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await loadFeatures();
+        if (data.fileName !== fileName) {
+          if (selected === fileName) await openFeature(data.fileName);
+          toast.success(`Renamed file to ${fileStem(data.fileName)} — ${data.message}.`);
+        }
+      } else {
+        toast.error(data.error ?? "Rename failed");
       }
-    } else {
-      toast.error(data.error ?? "Rename failed");
+    } finally {
+      if (retiring) unsealFeatureEditors();
     }
   };
 
@@ -2659,22 +2706,36 @@ export function App() {
       confirmLabel: "Delete feature",
     });
     if (!ok) return;
-    const res = await fetch(`/api/features/${encodeURIComponent(f.fileName)}`, {
-      method: "DELETE",
-    });
-    const data = await res.json();
-    if (res.ok) {
-      if (selected === f.fileName) {
-        // An editor open on the deleted feature has nothing left to save into.
-        setEditing(null);
-        setSelected(null);
-        setFeature(null);
-        setSelectedScenario(null);
+    // Seal without a parting save: writing the file back would undo the
+    // delete, the way an open page seals before its DELETE. Saves already
+    // away finish first, or they would recreate the file after git rm.
+    const retiring = selected === f.fileName;
+    if (retiring) {
+      featureEditorsRetiring.current = true;
+      await scenarioSaveQueue.current.idle();
+      await descSaveQueue.current.idle();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(f.fileName)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (selected === f.fileName) {
+          // An editor open on the deleted feature has nothing left to save into.
+          setEditing(null);
+          setSelected(null);
+          setFeature(null);
+          setSelectedScenario(null);
+        }
+        await loadFeatures();
+        toast.success(`Deleted "${f.name}" — ${data.message}.`);
+      } else {
+        toast.error(data.error ?? "Delete failed");
       }
-      await loadFeatures();
-      toast.success(`Deleted "${f.name}" — ${data.message}.`);
-    } else {
-      toast.error(data.error ?? "Delete failed");
+    } finally {
+      if (retiring) unsealFeatureEditors();
     }
   };
 
@@ -2836,6 +2897,7 @@ export function App() {
     // that advances the editor's draft; every other save keeps the status.
     status?: Scenario["status"],
   ): Promise<{ ok: boolean; placed: Placement }> | null => {
+    if (featureEditorsSealed.current) return null;
     if (!editing || !feature || !selected) return null;
     const draft = { ...editing.scenario, status: status ?? editing.scenario.status, tests };
     const derived = editing.isNew === true;
@@ -3007,6 +3069,7 @@ export function App() {
    * join the scenario when the user adds them, or when the pane closes.
    */
   const autosaveScenario = async () => {
+    if (featureEditorsSealed.current || featureEditorsRetiring.current) return;
     if (!editing || !feature || !selected) return;
     if (autosaveInFlight.current) return; // the previous tick is still saving
     if (deletingScenario.current) return; // a delete is being confirmed or sent
@@ -3135,6 +3198,7 @@ export function App() {
    * unchanged and the reload cron commits and pushes it.
    */
   const autosaveDescription = async () => {
+    if (featureEditorsSealed.current) return;
     // `selected` and `feature` come from the closure, not from refs, and that
     // is what makes leaving a feature safe: React runs an effect's cleanup
     // before the effect bodies of the same commit, and the assignment that
@@ -3191,10 +3255,13 @@ export function App() {
   const descOpen = descEdit !== null && descEdit.file === selected;
   useEffect(() => {
     if (!descOpen) return;
-    const id = setInterval(() => void descTick.current(), autosaveSeconds * 1000);
+    const id = setInterval(() => {
+      if (featureEditorsRetiring.current || featureEditorsSealed.current) return;
+      void descTick.current();
+    }, autosaveSeconds * 1000);
     return () => {
       clearInterval(id);
-      void descTick.current();
+      if (!featureEditorsSealed.current) void descTick.current();
       if (descEditRef.current && descEditRef.current.file !== selectedRef.current) setDescEdit(null);
     };
   }, [descOpen, autosaveSeconds]);
@@ -4053,6 +4120,7 @@ export function App() {
   const closeEditor = (): Promise<boolean> | null => {
     let saving: Promise<boolean> | null = null;
     if (
+      !featureEditorsSealed.current &&
       editing &&
       editing.scenario.name.trim() && // no name, nothing to be saved under
       !deletingScenario.current
@@ -4097,10 +4165,37 @@ export function App() {
     setSelectedScenario(cardOfScenario(landed.scenarios, s));
   };
 
+  // Before a move, rename-file or delete: what the scenario and description
+  // editors hold lands on the current path, then `seal` refuses every later
+  // write to it — the order switchRepo uses, through the same queues.
+  const flushFeatureEditors = async () => {
+    if (featureEditorsSealed.current) return;
+    featureEditorsRetiring.current = true;
+    await closeEditor();
+    await scenarioSaveQueue.current.idle();
+    await descTick.current();
+    await descSaveQueue.current.idle();
+  };
+  const sealFeatureEditors = () => {
+    featureEditorsSealed.current = true;
+    featureEditorsRetiring.current = true;
+    editorSession.current += 1;
+    setEditing(null);
+    setDescEdit(null);
+  };
+  const unsealFeatureEditors = () => {
+    featureEditorsSealed.current = false;
+    featureEditorsRetiring.current = false;
+  };
   // ESC and the navigation paths run whichever close/back is current, from
   // listeners and callbacks bound in earlier renders.
   useEffect(() => {
-    editorRef.current = { close: closeEditor, back: backToFeature };
+    editorRef.current = {
+      close: closeEditor,
+      back: backToFeature,
+      flush: flushFeatureEditors,
+      seal: sealFeatureEditors,
+    };
   });
 
   /** Draft the next version of a published scenario as a new, editable scenario. */
