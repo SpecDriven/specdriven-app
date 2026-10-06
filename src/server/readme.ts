@@ -48,7 +48,9 @@ export async function readReadme(dataDir: string): Promise<ReadmeView> {
  * a second editor, a git pull while the buffer is dirty) is folded in
  * three-way rather than overwritten, the same rule as a feature save racing
  * unabsorbed drift (features.ts foldDiskEdit). Omit `expected` for a write
- * that means to replace the file outright.
+ * that means to replace the file outright. A file gone from disk (deleted,
+ * or renamed away by a pull) is recreated as the editor holds it — folding
+ * against nothing would read as "delete every line" and keep only fragments.
  */
 export async function writeReadme(
   dataDir: string,
@@ -59,8 +61,7 @@ export async function writeReadme(
   const path = join(dataDir, name);
   if (expected !== undefined) {
     const onDisk = await readTextFile(path);
-    const disk = onDisk ?? "";
-    if (disk !== expected) content = mergeText(expected, content, disk);
+    if (onDisk !== null && onDisk !== expected) content = mergeText(expected, content, onDisk);
   }
   await writeTextFile(path, content);
   return { content, exists: true };

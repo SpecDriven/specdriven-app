@@ -137,10 +137,40 @@ describe("a README save racing an unsynced disk edit", () => {
     expect(await Bun.file(join(data, "README.md")).text()).toBe(onDisk);
   });
 
-  test("a save that matches the file still writes when from matches", async () => {
+  test("a save with no disk edit writes the buffer", async () => {
     const res = await putReadme({ from: seed, content: "# Specs\n\nintro\n\nmore\n" });
     expect(res.status).toBe(200);
     expect(await Bun.file(join(data, "README.md")).text()).toBe("# Specs\n\nintro\n\nmore\n");
+  });
+
+  // The user typed on while the folding save was away, so the editor never
+  // showed the fold. Its next save names what it sent as `from` — not what
+  // came back — and the disk edit is folded in again rather than lost.
+  test("a buffer that moved on during the fold keeps the disk edit", async () => {
+    await Bun.write(join(data, "README.md"), "# Specs\n\nintro\n\nfrom disk\n");
+    const first = "# Specs\n\nintro edited here\n";
+    expect((await putReadme({ from: seed, content: first })).status).toBe(200);
+    const res = await putReadme({ from: first, content: `${first}\nand typed on\n` });
+    expect(res.status).toBe(200);
+    const onDisk = await Bun.file(join(data, "README.md")).text();
+    expect(onDisk).toContain("from disk");
+    expect(onDisk).toContain("intro edited here");
+    expect(onDisk).toContain("and typed on");
+  });
+
+  test("a README gone from disk is recreated as the editor holds it", async () => {
+    await rm(join(data, "README.md"));
+    const content = "# Specs\n\nintro edited here\n";
+    const res = await putReadme({ from: seed, content });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe(content);
+  });
+
+  test("a save without from replaces the file outright", async () => {
+    await Bun.write(join(data, "README.md"), "# Specs\n\nintro\n\nfrom disk\n");
+    const res = await putReadme({ content: "# Replaced\n" });
+    expect(res.status).toBe(200);
+    expect(await Bun.file(join(data, "README.md")).text()).toBe("# Replaced\n");
   });
 });
 
