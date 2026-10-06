@@ -1,8 +1,9 @@
 import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
+import type { ClipboardEvent, KeyboardEvent, MouseEvent, ReactElement, UIEvent } from "react";
 import {
   Bold,
   Code,
+  ExternalLink,
   Heading,
   Image,
   Italic,
@@ -37,6 +38,7 @@ import type { FieldChoice } from "./entityFields";
 import { anchorVisible, measureOffset, placePopup } from "./caretPosition";
 import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
+import { isOpenLinkClick, openWebLink, webLinkAt } from "./weblinks";
 
 // CodeMirror and the vim extension are only mounted once a Vim tab is shown.
 // Loaded lazily so a bundler that splits can keep them out of the main bundle
@@ -412,6 +414,28 @@ export function MarkdownEditor({
     setComplete(null);
   };
 
+  // Web links (specs/editor/common-editor.feature.md "web links are
+  // clickable"): a plain click in the source places the caret, as it must
+  // for the url to be edited at all, so ⌘-click (Ctrl-click off the Mac)
+  // is what opens one — the gesture code editors use. The click has already
+  // put the caret where it landed; the link is the one around it.
+  const onSourceClick = (e: MouseEvent<HTMLTextAreaElement>) => {
+    if (!isOpenLinkClick(e)) return;
+    const ta = e.currentTarget;
+    if (ta.selectionStart !== ta.selectionEnd) return;
+    const link = webLinkAt(ta.value, ta.selectionStart);
+    if (!link) return;
+    e.preventDefault();
+    openWebLink(link.url);
+  };
+  // The link the caret is in, for the toolbar's Open link button — the
+  // same link a ⌘-click there would open, reachable without knowing the
+  // gesture, and from the keyboard.
+  const caretLink = useMemo(
+    () => (editing && !readOnly ? webLinkAt(value.replaceAll("\r\n", "\n"), caret) : null),
+    [editing, readOnly, value, caret],
+  );
+
   const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
     if (tab === "write" && !readOnly) {
       if (popup) {
@@ -492,6 +516,17 @@ export function MarkdownEditor({
               caretDiagram
                 ? openDiagram.current(caretDiagram.index)
                 : setDiagram({ mode: "new" }),
+          },
+        ]
+      : []),
+    // Only while the caret is in a web link: there is nothing to open otherwise.
+    ...(caretLink
+      ? [
+          {
+            icon: <ExternalLink size={size} />,
+            title: `Open ${caretLink.url}`,
+            keys: "⌘-click",
+            run: () => openWebLink(caretLink.url),
           },
         ]
       : []),
@@ -618,6 +653,7 @@ export function MarkdownEditor({
               onChange(e.target.value);
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            onClick={onSourceClick}
             onScroll={marks || popup ? onScroll : undefined}
             onKeyDown={readOnly ? undefined : onKeyDown}
             onPaste={readOnly ? undefined : onPaste}
@@ -673,6 +709,7 @@ export function MarkdownEditor({
             onPasteFiles={(files) => void addImages(files)}
             onShortcut={onKeyDown}
             onCaretMove={setCaret}
+            onOpenLink={openWebLink}
             completions={fields}
           />
         </Suspense>

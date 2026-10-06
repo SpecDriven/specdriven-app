@@ -1980,6 +1980,13 @@ button.link:disabled {
   background: var(--accent-mark);
 }
 
+/* A web link in the text (specs/editor/common-editor.feature.md): underlined,
+   so it reads as something ⌘-click opens. */
+.md-vim .md-vim-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* The vim status line: the mode, and the : command line while one is typed. */
 .md-vim .cm-editor .cm-panels {
   background: var(--surface-1);
