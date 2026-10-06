@@ -2748,23 +2748,33 @@ export function App() {
   // Publish saves its scenario into the feature and publishes in one motion.
   // The target carries the scenario's document id, so one going out under a
   // new name or version is published as itself, not as a second scenario.
-  const publish = async (scenario?: ScenarioTarget, over?: Feature) => {
+  const publish = async (scenario?: ScenarioTarget, over?: Feature, file = selected) => {
     const content = over ?? feature;
-    if (!selected || !content) return;
+    if (!file || !content) return;
     setPublishing(scenario ? scenarioKey(scenario) : "all");
     try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: serializeFeature(content), scenario }),
       });
       const data = await res.json();
+      // The dialog's Publish can wait behind an autosave tick, long enough
+      // for the user to open another feature. Its answer then belongs to a
+      // feature no longer on screen: reopening it would pull the user back,
+      // and its conflict dialog would resolve against the wrong page.
+      const stillHere = selectedRef.current === file;
       if (res.status === 409 && data.status === "conflict") {
-        setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
-        setConflictDraft(data.ours);
-        toast.info("Merge conflict — choose a resolution below.");
+        if (stillHere) {
+          setConflict({ ours: data.ours, theirs: data.theirs, message: data.message, scenario });
+          setConflictDraft(data.ours);
+          toast.info("Merge conflict — choose a resolution below.");
+        } else {
+          toast.error(`Merge conflict publishing to ${file} — open it and publish again to resolve.`);
+        }
       } else if (res.ok) {
-        await openFeature(selected);
+        if (stillHere) await openFeature(file);
+        else await loadFeatures();
       } else {
         toast.error(data.error ?? "Publish failed");
       }
@@ -3047,19 +3057,50 @@ export function App() {
    * retyped since autosave filed it publishes that draft — renamed — rather
    * than a second scenario beside it. A merge conflict opens the usual
    * resolution dialog.
+   *
+   * Same placement as `saveScenario`: while a tick is still away, this render's
+   * index and (for a new scenario) its missing document id predate that save.
+   * Placing from them would append a second scenario — or write over the
+   * neighbour a rename re-sorted into the old slot — and then publish that.
+   * Through the queue so the publish PUT goes out after the tick, from where
+   * it landed, and so a folder switch can wait for it.
    */
   const publishScenario = async () => {
+    // A move, rename-file or delete has sealed this feature's path: a PUT
+    // would mint the retired file again (tests/featurePathRetire.test.tsx).
+    if (featureEditorsSealed.current) return;
     if (!editing || !feature || !selected) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const s = { ...editing.scenario, name: savedScenarioName(editing.scenario), version: draftVersion, tests };
-    const next = withScenario(feature, editing.index, s);
-    setFeature(next);
+    const draft = { ...editing.scenario, tests };
+    const derived = editing.isNew === true;
+    const ahead = autosaveInFlight.current;
+    const known: Placement = { feature, index: editing.index, id: draft.id };
+    const place = (at: Placement) => placeScenario(draft, at, derived);
+    const shown = place(known);
+    if (!ahead) {
+      setFeature(shown.next);
+      setSelectedScenario(cardOfScenario(shown.next.scenarios, shown.s));
+    }
     setEditing(null);
-    // Back on the feature page, the published scenario's card is the one to
-    // land on (specs/editor/spec-editor.feature.md "Spec editor pane").
-    setSelectedScenario(cardOfScenario(next.scenarios, s));
-    await publish(scenarioTarget(s), next);
+    // Busy from the click, not from when the queue reaches the PUT: the wait
+    // behind a tick would otherwise show nothing and leave Publish enabled.
+    setPublishing(scenarioKey(shown.s));
+    const file = selected;
+    await scenarioSaveQueue.current.run(async () => {
+      const base = ahead ? await ahead : known;
+      // Sealed while it waited: the path is retired, so nothing goes out.
+      if (featureEditorsSealed.current) {
+        setPublishing(null);
+        return;
+      }
+      const { s, next } = place(base);
+      if (ahead && selectedRef.current === file) {
+        setFeature(next);
+        setSelectedScenario(cardOfScenario(next.scenarios, s));
+      }
+      await publish(scenarioTarget(s), next, file);
+    });
   };
 
   /**
