@@ -86,7 +86,7 @@ export const DESKTOP_SCHEME = "specdriven";
 
 /**
  * Query flag the desktop shell puts on a path that came from a
- * `specdriven://` link (src/electron/main.ts openDeepLink). Such a path may
+ * `specdriven://` link (src/electron/linkRouting.ts). Such a path may
  * name its spec folder first; the window's own urls — a reload, Back — never
  * do, so only a flagged path is read for one (splitRepoPath). The app drops
  * the flag as soon as it has read it.
