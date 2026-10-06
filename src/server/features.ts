@@ -492,6 +492,12 @@ export async function saveFeature(
   scenario?: ScenarioTarget,
 ): Promise<SaveResult> {
   const name = safe(fileName);
+  // A save must not mint a feature that is not there: after a git-mv the
+  // editor's last PUT still names the retired path, and absorbIntoDoc would
+  // create the old file and a new Automerge doc beside the moved one.
+  if (!(await fileExists(`${dataDir}/${name}`))) {
+    throw new Error(`Feature file not found: ${name}`);
+  }
   let proposed = markProposed(content);
   assertFeatureText(name, proposed);
   proposed = await foldDiskEdit(dataDir, name, proposed);
@@ -777,6 +783,9 @@ export async function publishFeature(
   scenario?: ScenarioTarget,
 ): Promise<PublishResult> {
   const name = safe(fileName);
+  if (!(await fileExists(`${dataDir}/${name}`))) {
+    throw new Error(`Feature file not found: ${name}`);
+  }
   let published = markForPublish(content, scenario);
   // Checked before the pull: content we would refuse to write must not leave
   // a merge behind for the user to resolve.
