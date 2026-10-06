@@ -630,6 +630,39 @@ aside header h1 {
   font-size: 0.75rem;
 }
 
+/* The scenario's row: its link, then its menu (Delete) at the end, the
+   same quiet affordance the feature row has. The hover fill is the row's, so
+   the menu button sits inside it. */
+.tree-scenario-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+
+.tree-scenario-row:hover {
+  background: var(--hover);
+}
+
+.tree-scenario-row > a.tree-scenario {
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-scenario-row:has(> a.tree-scenario.active) {
+  background: var(--accent-soft);
+}
+
+/* The row carries the fill, so the link inside it does not add its own. */
+.tree .tree-scenario-row > a.tree-scenario:hover,
+.tree .tree-scenario-row > a.tree-scenario.active {
+  background: transparent;
+}
+
+.tree-scenario-row .tree-menu-btn {
+  padding: 0.1rem 0.45rem;
+}
+
 /* Long scenario names truncate rather than widening the sidebar; the version
    stays visible at the end of the row. */
 .tree a.tree-scenario .tree-scenario-name {
@@ -806,6 +839,8 @@ a.page-entry.done {
 
 .tree-row:hover .tree-menu-btn,
 .tree-row:focus-within .tree-menu-btn,
+.tree-scenario-row:hover .tree-menu-btn,
+.tree-scenario-row:focus-within .tree-menu-btn,
 .tree-menu-btn[aria-expanded="true"] {
   opacity: 1;
 }
@@ -1392,6 +1427,43 @@ button.link:disabled {
   font-size: 0.8125rem;
   line-height: 1.5;
   word-break: break-word;
+}
+
+/* A pick dialog (ModalPrompts PickDialog): a filter field over a scrolling
+   list — the feature a scenario moves to. */
+.pick-options {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.pick-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.38rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pick-option.active {
+  background: var(--accent-soft);
+}
+
+.pick-option .pick-label {
+  font-size: 0.86rem;
+  color: var(--text-1);
+}
+
+.pick-option .hint,
+.pick-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
 }
 
 /* Scenario editor pane (specs/editor/spec-editor.feature.md "Spec editor
@@ -2999,7 +3071,7 @@ button.table-add:hover {
   height: 1.6rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -7294,6 +7366,15 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   min-width: 0;
   font-size: 0.8125rem;
   color: var(--text-1);
+}
+
+/* The name keeps to one line; the path beside it gives way first. */
+.switch-target strong {
+  flex-shrink: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .switch-target svg {

@@ -1,6 +1,6 @@
 {
   "name": "specdriven",
-  "version": "0.1.106",
+  "version": "0.1.112",
   "description": "Enterprise spec-driven development workspace",
   "homepage": "https://github.com/SpecDriven/specdriven-app-release",
   "module": "src/index.ts",
@@ -159,6 +159,10 @@
     "@automerge/automerge": "^3.5.0",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
-    "sass": "^1.105.1"
+    "sass": "^1.105.1",
+    "proxy-addr": "^2.0.8",
+    "source-map-js": "^1.2.2",
+    "global-agent": "^4.1.3",
+    "katex": "^0.18.11"
   }
 }

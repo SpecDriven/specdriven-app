@@ -24,9 +24,15 @@ import { applyStartupState, handleApi } from "../server/api";
 import { setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
-import { DESKTOP_SCHEME, linkEntry } from "../frontend/route";
+import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
-import { deepLinkFromArgv, parseDesktopLink } from "./deepLink";
+import { parseDesktopLink } from "./deepLink";
+import {
+  createLinkRouter,
+  navigationTarget,
+  windowOpenTarget,
+  type LinkWindow,
+} from "./linkRouting";
 import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 import {
@@ -142,52 +148,42 @@ async function serveApp(req: Request): Promise<Response> {
 }
 
 /** Anything that leaves the app opens in the default browser. */
-function openExternally(url: string): void {
-  if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+function openInBrowser(url: string): void {
+  void shell.openExternal(url);
 }
 
 let win: BrowserWindow | null = null;
-/** A deep link that arrived before there was a window to show it in. */
-let pendingDeepLink: string | null = null;
+
+function linkWindow(w: BrowserWindow): LinkWindow {
+  return {
+    isMinimized: () => w.isMinimized(),
+    restore: () => w.restore(),
+    focus: () => w.focus(),
+    isLoading: () => w.webContents.isLoadingMainFrame(),
+    afterLoad: (fn) => void w.webContents.once("did-finish-load", fn),
+    run: (script) => void w.webContents.executeJavaScript(script),
+  };
+}
 
 /**
- * Show an app path that came from outside (specs/navigation.spec.md "open a
- * link from outside the app"). With a window up this is the same history jump
- * a sidebar click makes, so back returns to what was on screen; otherwise the
- * path is held and becomes the window's entry url.
+ * Deep links (specs/ui/navigation.feature.md "open a link from outside the
+ * app"): shown in the one window, or held as the entry url of the window
+ * they open when there is none.
  */
-function openDeepLink(path: string): void {
-  if (!win || win.isDestroyed()) {
-    pendingDeepLink = path;
-    // Running with every window closed (macOS): nothing else will open one.
+const links = createLinkRouter({
+  window: () => (win && !win.isDestroyed() ? linkWindow(win) : null),
+  // Running with every window closed (macOS): nothing else will open one.
+  openWindow: () => {
     if (app.isReady()) createWindow();
-    return;
-  }
-  const target = win;
-  if (target.isMinimized()) target.restore();
-  target.focus();
-  const jump = () => {
-    // JSON.stringify keeps a hostile url from breaking out of the string
-    // literal; from there the renderer routes it like any other popstate —
-    // flagged as a link, so it may name its spec folder (linkEntry).
-    void target.webContents.executeJavaScript(
-      `history.pushState(null, "", ${JSON.stringify(linkEntry(path))});` +
-        `dispatchEvent(new PopStateEvent("popstate"));`,
-    );
-  };
-  if (target.webContents.isLoadingMainFrame()) {
-    target.webContents.once("did-finish-load", jump);
-  } else {
-    jump();
-  }
-}
+  },
+});
 
 // macOS delivers deep links here, both while the app runs and on a cold start
 // — registered before whenReady so a launch-by-link isn't missed.
 app.on("open-url", (event, url) => {
   event.preventDefault();
   const path = parseDesktopLink(url);
-  if (path) openDeepLink(path);
+  if (path) links.open(path);
 });
 
 function createWindow(): void {
@@ -257,25 +253,21 @@ function createWindow(): void {
   // A specdriven:// link pasted into a spec body is one of ours: follow it
   // in place rather than handing the OS a link back to this same window.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    const deep = parseDesktopLink(url);
-    if (deep) openDeepLink(deep);
-    else openExternally(url);
+    links.follow(windowOpenTarget(url), openInBrowser);
     return { action: "deny" };
   });
+  const appOrigins = DEV_URL ? [APP_ORIGIN, DEV_URL] : [APP_ORIGIN];
   win.webContents.on("will-navigate", (event, url) => {
-    const inside = url.startsWith(`${APP_ORIGIN}/`) || (DEV_URL && url.startsWith(DEV_URL));
-    if (inside) return;
+    const target = navigationTarget(url, appOrigins);
+    if (target.kind === "inside") return;
     event.preventDefault();
-    const deep = parseDesktopLink(url);
-    if (deep) openDeepLink(deep);
-    else openExternally(url);
+    links.follow(target, openInBrowser);
   });
 
   // A link that arrived before the window existed becomes its entry url —
   // App.tsx resolves it on boot like any other deep link, flagged so it may
   // name its spec folder (linkEntry).
-  const entryPath = pendingDeepLink ? linkEntry(pendingDeepLink) : "/";
-  pendingDeepLink = null;
+  const entryPath = links.takeEntry();
   void win.loadURL(DEV_URL ? `${DEV_URL}${entryPath}` : `${APP_ORIGIN}${entryPath}`);
 }
 
@@ -349,18 +341,9 @@ function installDebugMenu(): void {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", (_event, argv) => {
-    // Windows and Linux deliver a deep link as an argument to the second
-    // launch; macOS sends open-url to the running instance instead.
-    const path = deepLinkFromArgv(argv);
-    if (path) {
-      openDeepLink(path);
-      return;
-    }
-    if (!win) return;
-    if (win.isMinimized()) win.restore();
-    win.focus();
-  });
+  // Windows and Linux deliver a deep link as an argument to the second
+  // launch; macOS sends open-url to the running instance instead.
+  app.on("second-instance", (_event, argv) => links.secondLaunch(argv));
 
   app.whenReady().then(async () => {
     // The renderer only ever loads local content; the one browser
@@ -391,7 +374,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!app.isPackaged) installDebugMenu();
     await applyStartupState();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
-    pendingDeepLink ??= deepLinkFromArgv(process.argv);
+    links.holdLaunchLink(process.argv);
     createWindow();
 
     app.on("activate", () => {

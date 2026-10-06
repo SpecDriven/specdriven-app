@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { PromptChoices, confirmLabelOf, initialChoiceOf } from "./ModalPrompts";
 import type { PromptOptions } from "./ModalPrompts";
 import { useFocusTrap } from "./useFocusTrap";
+import { cleanLine } from "../server/text";
 
 /** Why the dialog's confirm is off, if it is: the gating the button had. */
 export function aiTabState(a: {
@@ -56,7 +57,7 @@ export function AiSessionFields({ dialog, state, onConfirm, onCancel }: AiTabPro
         onSubmit={(e) => {
           e.preventDefault();
           if (!state.enabled || !draft.trim()) return;
-          onConfirm(draft.trim(), choice);
+          onConfirm(cleanLine(draft), choice);
         }}
       >
         <div className="input-row">

@@ -58,6 +58,7 @@ import {
   UserRound,
   X,
   ArrowDown,
+  ArrowRightLeft,
   Bot,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
@@ -84,6 +85,7 @@ import {
 import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { useModalPrompts } from "./ModalPrompts";
+import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
@@ -160,7 +162,7 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree, scenarioRows } from "./tree";
+import { buildTree, scenarioRows, withOpenScenarios } from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
@@ -399,7 +401,19 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  * the version the dialog will save it as rather than the one on the object.
  */
 export function scenarioSignature(s: Scenario, version: number): string {
-  return JSON.stringify([s.name, version, s.status, s.body, s.tests, s.link ?? null]);
+  // The name as a save writes it: a stray space is nothing new to save.
+  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null]);
+}
+
+/**
+ * The name a save writes for the scenario (specs/ui/ui.feature.md
+ * "User-entered text is cleaned up"): trimmed with inner runs of spaces
+ * collapsed — except a published scenario's, which is immutable and only
+ * saves for its test links, so its heading is kept verbatim (a changed one
+ * would read as a rename the document must refuse).
+ */
+export function savedScenarioName(s: Pick<Scenario, "name" | "status">): string {
+  return s.status === "published" ? s.name.trim() : cleanLine(s.name);
 }
 
 /**
@@ -439,7 +453,7 @@ export function nextVersionIn(
   ignoreIndex?: number,
 ): number {
   const versions = (feature?.scenarios ?? [])
-    .filter((s, i) => i !== ignoreIndex && s.name.trim() === name.trim())
+    .filter((s, i) => i !== ignoreIndex && cleanLine(s.name) === cleanLine(name))
     .map((s) => s.version);
   return versions.length ? Math.max(...versions) + 1 : 1;
 }
@@ -466,7 +480,11 @@ export function placeScenario(
 ): { s: Scenario; next: Feature } {
   const version =
     derived || index === null ? nextVersionIn(feature, draft.name, index ?? undefined) : draft.version;
-  const s: Scenario = { ...draft, version, id: draft.id ?? id };
+  // The name goes out trimmed, as the server parses every heading
+  // (parser.ts SCENARIO_RE), and with inner runs of spaces collapsed
+  // (savedScenarioName): the scenario the save lands is then the one this
+  // save names, and the editor finds it again (landedScenario).
+  const s: Scenario = { ...draft, name: savedScenarioName(draft), version, id: draft.id ?? id };
   return { s, next: withScenario(feature, index, s) };
 }
 
@@ -495,7 +513,29 @@ export function cardOfScenario(
   scenarios: readonly Scenario[],
   s: { name: string; version: number },
 ): number | null {
-  const i = scenarios.findIndex((sc) => sc.name === s.name && sc.version === s.version);
+  // Names compare cleaned, as a save writes them (savedScenarioName) and
+  // as nextVersionIn counts them.
+  const name = cleanLine(s.name);
+  const i = scenarios.findIndex((sc) => cleanLine(sc.name) === name && sc.version === s.version);
+  return i === -1 ? null : i;
+}
+
+/**
+ * Where a landed save left the editor's scenario (issue #173): its entry by
+ * identity, else the entry carrying its document id. Losing it would leave
+ * the editor new, deriving the next version for its name on the next tick
+ * and appending the scenario again — on every tick after that too. Only a
+ * scenario whose id is gone from the feature as well is lost: the entry was
+ * dropped underneath the editor, and the next save re-adds the work.
+ */
+export function landedScenario(
+  scenarios: readonly Scenario[],
+  s: { name: string; version: number },
+  id: string | undefined,
+): number | null {
+  const card = cardOfScenario(scenarios, s);
+  if (card !== null || id === undefined) return card;
+  const i = scenarios.findIndex((sc) => sc.id === id);
   return i === -1 ? null : i;
 }
 
@@ -1281,7 +1321,7 @@ export function App() {
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs") — the desktop
   // runtime has no window.prompt (specs/desktop-app.spec.md "Dialogs").
-  const { modal, modalOpen, prompt, promptWithChoice, confirm } = useModalPrompts();
+  const { modal, modalOpen, prompt, promptWithChoice, confirm, pick } = useModalPrompts();
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -1457,6 +1497,17 @@ export function App() {
     setLinkDraft(linkDraftOf(editing?.scenario.link));
   }, [editingOpen]);
 
+  // The tree reads the open feature's scenarios from its live state, every
+  // other feature's from the listing — which only refreshes on start and on
+  // the reload cron. So whatever the open feature now holds goes into its
+  // listing entry too, or a scenario deleted (or renamed, or added) there
+  // would come back the moment another feature is opened.
+  useEffect(() => {
+    if (!selected || !feature) return;
+    setFeatures((prev) => withOpenScenarios(prev, selected, feature));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature]);
+
   // Autosave measures against what the dialog opened with, so a scenario that
   // is opened and read but not edited is never re-saved
   // (specs/editor-autosave.feature.md).
@@ -1590,6 +1641,35 @@ export function App() {
     document.title = clock ? `${clock} · ${base}` : base;
   }, [selected, feature, paneScenario, pluginView, appPage, activeTab, tabsTick, clock]);
 
+  // PUT a picked data folder. A path that names no folder is refused by the
+  // server (specs/app/spec-folders.feature.md): ask before making it, then
+  // ask again with the user's go-ahead. `asking` brackets the question, so a
+  // switch can step its modal aside while the confirm is up.
+  const putDataRepo = async (
+    repo: string,
+    asking?: (open: boolean) => void,
+  ): Promise<{ res: Response; state: any } | null> => {
+    const put = async (create: boolean) => {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(create ? { dataRepo: repo, createDataRepo: true } : { dataRepo: repo }),
+      });
+      return { res, state: await res.json() };
+    };
+    const first = await put(false);
+    if (first.res.ok || !first.state.missing) return first;
+    asking?.(true);
+    const ok = await confirm({
+      title: "Create folder?",
+      body: `There is no folder at ${first.state.path ?? repo}. Create it as a new, empty spec folder?`,
+      confirmLabel: "Create folder",
+      danger: false,
+    });
+    asking?.(false);
+    return ok ? put(true) : null;
+  };
+
   const saveRepo = async (repo: string) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
     // effect would rewrite a deep link before we get to honor it
@@ -1599,12 +1679,9 @@ export function App() {
     setSettingRepo(true);
     setRepoError(null);
     try {
-      const res = await fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataRepo: repo }),
-      });
-      const state = await res.json();
+      const put = await putDataRepo(repo);
+      if (!put) return;
+      const { res, state } = put;
       if (res.ok) {
         applyRepos(state);
         setNeedsRepo(false);
@@ -1697,12 +1774,15 @@ export function App() {
     setDescEdit(null);
     try {
       setSwitching({ folder: next, step: "opening" });
-      const res = await fetch("/api/state", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataRepo: next }),
-      });
-      const state = await res.json();
+      const put = await putDataRepo(next, (asking) =>
+        setSwitching(asking ? null : { folder: next, step: "opening" }),
+      );
+      // Declined to create a missing folder: the current one stays open.
+      if (!put) {
+        await loadReadme();
+        return;
+      }
+      const { res, state } = put;
       if (res.ok) {
         setSwitching({ folder: next, step: "loading" });
         applyRepos(state);
@@ -1738,6 +1818,9 @@ export function App() {
         }
       } else {
         toast.error(state.error ?? "Could not use this directory");
+        // The README was emptied for the switch; the folder stays, so it
+        // comes back.
+        await loadReadme();
       }
     } finally {
       setSwitching(null);
@@ -2065,10 +2148,11 @@ export function App() {
       confirmLabel: "Create feature",
     });
     if (!input) return;
+    const name = cleanSegments(input);
     const res = await fetch("/api/features", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: parent ? `${parent}/${input}` : input }),
+      body: JSON.stringify({ name: parent ? `${parent}/${name}` : name }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2415,10 +2499,11 @@ export function App() {
       confirmLabel: "Create folder",
     });
     if (!input) return;
+    const path = cleanSegments(input);
     const res = await fetch("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: parent ? `${parent}/${input}` : input }),
+      body: JSON.stringify({ path: parent ? `${parent}/${path}` : path }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2503,7 +2588,7 @@ export function App() {
   // feature's url) stays the same.
   const renameSelected = async () => {
     if (!selected || renameDraft === null) return;
-    const target = renameDraft.trim();
+    const target = cleanLine(renameDraft);
     const currentName = feature ? feature.name || titleFromFileName(selected) : "";
     if (!target || target === currentName) {
       setRenameDraft(null);
@@ -2547,11 +2632,11 @@ export function App() {
       initial: fileStem(fileName),
       confirmLabel: "Rename",
     });
-    if (!stem || stem.trim() === fileStem(fileName)) return;
+    if (!stem || cleanLine(stem) === fileStem(fileName)) return;
     const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename-file`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stem }),
+      body: JSON.stringify({ stem: cleanLine(stem) }),
     });
     const data = await res.json();
     if (res.ok) {
@@ -2799,15 +2884,20 @@ export function App() {
         if (stillHere) {
           setFeature(saved);
           setDirty(false);
+        } else {
+          // Its feature is no longer open, so the tree reads it from the
+          // listing: the save lands there instead.
+          setFeatures((prev) => withOpenScenarios(prev, file, saved));
         }
         // The feature comes back in canonical order, so a renamed scenario has
         // moved: a still-open editor has to find its scenario again, and an
-        // explicit save that closed the editor lands on its card. Not finding
-        // it (the entry was dropped underneath us) leaves the editor new, so
+        // explicit save that closed the editor lands on its card — by its
+        // identity, else by its document id (landedScenario). Not finding it
+        // (the entry was dropped underneath us) leaves the editor new, so
         // the next save re-adds the work rather than overwriting a neighbour.
         // The entry's document id comes back with it: a new scenario adopts it
         // here, and every later save names the entry by it.
-        const moved = cardOfScenario(saved.scenarios, s);
+        const moved = landedScenario(saved.scenarios, s, s.id);
         const id = moved === null ? undefined : saved.scenarios[moved]!.id;
         if (!close && session === editorSession.current) {
           setEditing((prev) =>
@@ -2880,7 +2970,7 @@ export function App() {
     if (!editing) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const name = editing.scenario.name.trim();
+    const name = savedScenarioName(editing.scenario);
     const version = draftVersion;
     if (await commitScenario(tests, true, "proposed")) {
       toast.success(`Proposed "${name}" v${version} — publish it from its card, or press Publish All.`);
@@ -2900,7 +2990,7 @@ export function App() {
     if (!editing || !feature || !selected) return;
     const tests = pendingTests();
     if (tests === null) return;
-    const s = { ...editing.scenario, version: draftVersion, tests };
+    const s = { ...editing.scenario, name: savedScenarioName(editing.scenario), version: draftVersion, tests };
     const next = withScenario(feature, editing.index, s);
     setFeature(next);
     setEditing(null);
@@ -3450,7 +3540,7 @@ export function App() {
   const changeTool = async (name: string) => {
     setSettingsToolDraft(name);
     if (!name.trim()) return;
-    await patchSettings({ projectManagementTool: name });
+    await patchSettings({ projectManagementTool: cleanLine(name) });
   };
 
   // Publish external links (specs/external-links/project-management-jira-
@@ -3835,6 +3925,30 @@ export function App() {
     );
 
   /**
+   * The confirmation a scenario delete asks for. A published scenario gets
+   * the Danger Zone wording and a Confirm button
+   * (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
+   * published, immutable content, deletable only because Settings says so.
+   */
+  const confirmScenarioDelete = ({ name, version, status }: ScenarioRow) =>
+    confirm(
+      status === "published"
+        ? {
+            title: "Danger Zone!",
+            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
+            confirmLabel: "Confirm",
+          }
+        : {
+            title: "Delete scenario",
+            body:
+              status === "draft"
+                ? `Delete the draft "${name}" v${version}?`
+                : `Delete "${name}" v${version}?`,
+            confirmLabel: "Delete scenario",
+          },
+    );
+
+  /**
    * Delete the dialog's scenario (specs/ui.spec.md "Scenario editor"),
    * after a confirmation. Three removals, by what the scenario is: a
    * [proposed] one is saved out of the feature like any other edit; a draft —
@@ -3855,25 +3969,7 @@ export function App() {
     // From here on autosave stands down: a tick landing while the
     // confirmation is up could re-sort the feature under `idx`.
     deletingScenario.current = true;
-    // A published scenario gets the Danger Zone wording and a Confirm button
-    // (specs/editor/spec-editor.feature.md "Delete Published Spec") — it is
-    // published, immutable content, deletable only because Settings says so.
-    const ok = await confirm(
-      saved.status === "published"
-        ? {
-            title: "Danger Zone!",
-            body: `Confirm that you want to delete a Published spec — "${name}" v${version}.`,
-            confirmLabel: "Confirm",
-          }
-        : {
-            title: "Delete scenario",
-            body:
-              saved.status === "draft"
-                ? `Delete the draft "${name}" v${version}?`
-                : `Delete "${name}" v${version}?`,
-            confirmLabel: "Delete scenario",
-          },
-    );
+    const ok = await confirmScenarioDelete(saved);
     if (!ok) {
       deletingScenario.current = false;
       return;
@@ -3903,7 +3999,8 @@ export function App() {
     setSelectedScenario((prev) =>
       prev === null || prev === idx ? null : prev > idx ? prev - 1 : prev,
     );
-    const url = `/api/features/${encodeURIComponent(selected)}`;
+    const file = selected;
+    const url = `/api/features/${encodeURIComponent(file)}`;
     // Drafts and published scenarios go through their own routes — a draft
     // because the file never held it, a published one because both
     // immutability gates refuse a save without it
@@ -3921,15 +4018,24 @@ export function App() {
             body: JSON.stringify({ content: serializeFeature(next), save: true }),
           });
     const data = await res.json();
+    // Another feature may have been opened while the delete was away — a
+    // published one commits and pushes first — and then the answer is not
+    // the feature on screen: it goes to the listing the tree reads it from.
+    const stillHere = selectedRef.current === file;
     if (res.ok) {
       // Both routes answer with the editor's view of the feature — the file
       // content with the remaining drafts folded back in.
-      setFeature(featureFromResponse(data, selected));
-      setDirty(false);
+      const left = featureFromResponse(data, file);
+      if (stillHere) {
+        setFeature(left);
+        setDirty(false);
+      } else {
+        setFeatures((prev) => withOpenScenarios(prev, file, left));
+      }
       toast.success(done);
       markSaved();
     } else {
-      setDirty(true);
+      if (stillHere) setDirty(true);
       toast.error(data.error ?? "Delete failed");
     }
   };
@@ -4064,6 +4170,134 @@ export function App() {
       scenario: { slug: slugify(s.name), version: s.version },
       pane: true,
     });
+  };
+
+  /**
+   * Delete from a scenario's menu in the sidebar tree
+   * (specs/navigation.feature.md "Scenario navigation"): the
+   * same removal the editor pane's Delete makes, by what the scenario is,
+   * for any feature in the tree — not only the open one. A pane open on that
+   * very scenario takes the pane's own Delete. A pane open on another
+   * scenario of the same feature is left first, autosaving like any
+   * navigation away, since the removal re-indexes the feature under it.
+   */
+  const deleteTreeScenario = async (file: string, s: ScenarioRow) => {
+    const same = (x: { name: string; version: number }) =>
+      x.name === s.name && x.version === s.version;
+    if (file === selected && savedEntry !== null && same(savedEntry)) {
+      await deleteScenario();
+      return;
+    }
+    if (!(await confirmScenarioDelete(s))) return;
+    if (file === selected && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    const url = `/api/features/${encodeURIComponent(file)}`;
+    let res: Response;
+    if (s.status === "draft" || s.status === "published") {
+      res = await fetch(`${url}/${s.status === "draft" ? "delete-draft" : "delete-published"}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
+      });
+    } else {
+      // A [proposed] scenario is saved out of the feature, from the server's
+      // copy: the feature may not be the open one.
+      const got = await fetch(url);
+      if (!got.ok) {
+        toast.error("Delete failed");
+        return;
+      }
+      const current = featureFromResponse(await got.json(), file);
+      const next: Feature = { ...current, scenarios: current.scenarios.filter((x) => !same(x)) };
+      res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Delete failed");
+      return;
+    }
+    // Every route answers with the editor's view of the feature.
+    if (selectedRef.current === file) {
+      setFeature(featureFromResponse(data, file));
+      setSelectedScenario(null);
+      markSaved();
+    }
+    await loadFeatures();
+    toast.success(`Deleted scenario "${s.name}" v${s.version}.`);
+  };
+
+  /**
+   * Move to… from a scenario's menu in the sidebar tree
+   * (specs/ui/navigation.feature.md "move a scenario to another feature"):
+   * pick another feature, and the server adds the scenario there and takes it
+   * out of this one — whatever it is, as its Delete would. An editor pane open
+   * on either feature is left first, autosaving like any navigation away: its
+   * next save would otherwise write the feature back without the move. A pane
+   * that was on the moved scenario follows it to its new feature.
+   */
+  const moveTreeScenario = async (file: string, s: ScenarioRow) => {
+    const options = features
+      .filter((f) => f.fileName !== file)
+      .map((f) => ({
+        value: f.fileName,
+        label: f.name || titleFromFileName(f.fileName),
+        hint: f.fileName.replace(/^specs\//, ""),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const to = await pick({
+      title: `Move “${s.name}” v${s.version}`,
+      hint:
+        s.status === "published"
+          ? "To another feature — published, so the move is committed and pushed right away."
+          : "To another feature.",
+      placeholder: "Find a feature…",
+      options,
+      empty: options.length === 0 ? "There is no other feature to move it to." : "No feature matches.",
+    });
+    if (to === null) return;
+    const following =
+      file === selected &&
+      paneScenario !== null &&
+      paneScenario.name === s.name &&
+      paneScenario.version === s.version;
+    if ((file === selected || to === selected) && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Move failed");
+      return;
+    }
+    if (following) {
+      await openFeature(to, {
+        push: true,
+        scenario: { slug: slugify(s.name), version: s.version },
+        pane: true,
+      });
+    } else if (selectedRef.current === file) {
+      setFeature(featureFromResponse(data, file));
+      setSelectedScenario(null);
+      markSaved();
+    } else if (selectedRef.current === to) {
+      await openFeature(to);
+    }
+    await loadFeatures();
+    const target = options.find((o) => o.value === to)?.label ?? to;
+    toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
   };
 
   /** One sidebar entry per feature; the entry is the drag source. */
@@ -4224,25 +4458,70 @@ export function App() {
                 paneScenario !== null &&
                 paneScenario.name === s.name &&
                 paneScenario.version === s.version;
+              // Its menu (specs/navigation.feature.md "Scenario
+              // navigation"): Move to… and Delete, offered on the same terms
+              // as the editor pane's Delete — a published scenario only while
+              // Settings allows it.
+              const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
+              const deletable = s.status !== "published" || deletePublished;
               return (
-                <a
-                  key={`${s.name}-v${s.version}`}
-                  href={scenarioPath(f.fileName, s)}
-                  className={`tree-scenario${here ? " active" : ""}`}
-                  role="treeitem"
-                  aria-level={depth + 2}
-                  aria-current={here ? "page" : undefined}
-                  /* Line up just past the feature's twisty: the codegen
-                     checkbox, when on, already carries the depth indent for
-                     the whole row, so it is not added twice. */
-                  style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
-                  title={`${s.name} v${s.version}`}
-                  onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
-                >
-                  <StatusIcon status={s.status} size={12} />
-                  <span className="tree-scenario-name">{s.name}</span>
-                  <span className="version">v{s.version}</span>
-                </a>
+                <div key={`${s.name}-v${s.version}`} className="tree-scenario-row">
+                  <a
+                    href={scenarioPath(f.fileName, s)}
+                    className={`tree-scenario${here ? " active" : ""}`}
+                    role="treeitem"
+                    aria-level={depth + 2}
+                    aria-current={here ? "page" : undefined}
+                    /* Line up just past the feature's twisty: the codegen
+                       checkbox, when on, already carries the depth indent for
+                       the whole row, so it is not added twice. */
+                    style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
+                    title={`${s.name} v${s.version}`}
+                    onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
+                  >
+                    <StatusIcon status={s.status} size={12} />
+                    <span className="tree-scenario-name">{s.name}</span>
+                    <span className="version">v{s.version}</span>
+                  </a>
+                  {deletable && (
+                    <span className="tree-row-menu">
+                      <Tooltip label="More actions">
+                        <button
+                          type="button"
+                          className="tree-menu-btn"
+                          aria-label={`Menu for ${s.name} v${s.version}`}
+                          aria-haspopup="menu"
+                          aria-expanded={treeMenu === menuKey}
+                          onClick={() => setTreeMenu((m) => (m === menuKey ? null : menuKey))}
+                        >
+                          <Ellipsis size={14} aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                      <Menu
+                        open={treeMenu === menuKey}
+                        onClose={() => setTreeMenu(null)}
+                        label={`Menu for ${s.name} v${s.version}`}
+                        className="tree-menu"
+                        containerSelector=".tree-row-menu"
+                        items={[
+                          {
+                            id: "move",
+                            label: "Move to…",
+                            icon: <ArrowRightLeft size={13} />,
+                            onSelect: () => void moveTreeScenario(f.fileName, s),
+                          },
+                          {
+                            id: "delete",
+                            label: "Delete",
+                            icon: <Trash2 size={13} />,
+                            danger: true,
+                            onSelect: () => void deleteTreeScenario(f.fileName, s),
+                          },
+                        ]}
+                      />
+                    </span>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -4398,11 +4677,11 @@ export function App() {
       placeholder: "Scenario name",
       confirmLabel: "Create",
     });
-    if (!name?.trim()) return;
+    if (!name || !cleanLine(name)) return;
     setEditing({
       index: null,
       isNew: true,
-      scenario: { name: name.trim(), version: 1, status: "draft", body: "", tests: [] },
+      scenario: { name: cleanLine(name), version: 1, status: "draft", body: "", tests: [] },
     });
   };
   // specs/ui.spec.md "Select scenarios via up and down keys": the highlight
@@ -5611,7 +5890,7 @@ export function App() {
       <PageSection
         id="settings-workflow"
         title="Workflow"
-        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete them."
+        hint="What the app lets people do with specs: hand them to a coding agent, assign them, schedule them, delete or move them."
       >
         {/* Code gen (specs/agents/claude.spec.md): off takes the selection
             checkboxes and Start session away, and the server refuses a
@@ -5683,17 +5962,19 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
-        {/* Deleting published scenarios
+        {/* Deleting or moving published scenarios
             (specs/editor/spec-editor.feature.md "Delete Published
-            Spec"): opt-in — with the switch off published scenarios
-            stay immutable and the editor offers no Delete for them. */}
+            Spec", specs/ui/navigation.feature.md "move a scenario to
+            another feature"): opt-in — with the switch off published
+            scenarios stay immutable and nothing offers to delete or move
+            them. */}
         <label className="settings-row">
           <span className="settings-row-label">
-            Allow deleting published specs
+            Allow deleting or moving published specs
             <span className="settings-row-hint">
               {settingsDeletePublishedDraft
-                ? "The editor offers Delete on published scenarios, behind a Danger Zone confirmation. The deletion is committed and pushed."
-                : "Published scenarios are immutable and cannot be deleted."}
+                ? "Published scenarios can be deleted, behind a Danger Zone confirmation, or moved to another feature. Either change is committed and pushed."
+                : "Published scenarios are immutable and cannot be deleted or moved."}
             </span>
           </span>
           <span className="switch">

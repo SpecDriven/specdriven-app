@@ -156,7 +156,11 @@ export function reconcile(
     });
   };
   if (scenario?.id) {
-    const { id, name, version } = scenario;
+    // Trimmed, as the target's headings parsed (parser.ts SCENARIO_RE): an
+    // editor name with a stray space must still claim its entry, or the
+    // rename falls to the passes below and a retyped body files it twice.
+    const { id, version } = scenario;
+    const name = scenario.name.trim();
     const at = entries.findIndex((e) => e.id === id);
     const entry = at === -1 ? undefined : entries[at];
     const claimed = target.scenarios.find((s) => sameScenario(s, { name, version }));

@@ -46,6 +46,7 @@ import { Tooltip } from "../Tooltip";
 import { EntryKindChip, dayOf, entryGroups, entryKindOf } from "../notebook";
 import { createPromiseQueue } from "../promiseQueue";
 import { shareUrl } from "../shareLink";
+import { cleanLine } from "../../server/text";
 import {
   pageGroups,
   pageListingMetaEqual,
@@ -843,7 +844,7 @@ export async function newPageFlow(
         }
       : {}),
   });
-  const input = result?.text;
+  const input = cleanLine(result?.text ?? "");
   if (!input) return;
   const res = await fetch(`/api/${tab.folder}`, {
     method: "POST",
@@ -899,14 +900,14 @@ export function PagesSidebar({
       initial: page.name,
       confirmLabel: "Rename",
     });
-    if (!name || name.trim() === page.name) return;
+    if (!name || cleanLine(name) === page.name) return;
     // What the open editor holds lands first, so the rename carries it.
     const open = openPage();
     if (open?.fileName === page.fileName) await open.flush();
     const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}/rename`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() }),
+      body: JSON.stringify({ name: cleanLine(name) }),
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {

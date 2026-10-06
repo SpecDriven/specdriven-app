@@ -4,6 +4,7 @@
 // (../data-insurance), cloning on first use. Plain names/paths keep working
 // as local directories.
 
+import { mkdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { clone, isRepoRoot } from "./git";
 import { remoteUrl } from "./github";
@@ -80,4 +81,25 @@ export async function resolveDataRepo(dataRepo: string, rootDir: string): Promis
     );
   }
   return resolve(rootDir, dataRepo.trim());
+}
+
+/**
+ * Whether a picked data folder is there to open (specs/app/spec-folders.feature.md
+ * "Switch spec folder"): a typo must not quietly make a new, empty folder,
+ * so a missing one is only created when the user said so (`create`).
+ * Throws MissingDataRepoError when it is missing and not to be created, and
+ * a plain Error when the path names something other than a folder.
+ */
+export async function ensureDataRepoFolder(dir: string, create: boolean): Promise<void> {
+  const s = await stat(dir).catch(() => null);
+  if (s?.isDirectory()) return;
+  if (s) throw new Error(`Not a folder: ${dir}`);
+  if (!create) throw new MissingDataRepoError(dir);
+  await mkdir(dir, { recursive: true });
+}
+
+export class MissingDataRepoError extends Error {
+  constructor(readonly dir: string) {
+    super(`No folder at ${dir}`);
+  }
 }
