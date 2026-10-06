@@ -1736,7 +1736,7 @@ button.link:disabled {
   resize: none;
   padding: 0.6rem 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   line-height: 1.55;
 }
 
@@ -1781,7 +1781,7 @@ button.link:disabled {
   overflow: hidden;
   padding: 0.6rem 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   font-weight: 400;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -1887,7 +1887,7 @@ button.link:disabled {
 
 .md-vim .cm-editor .cm-scroller {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   line-height: 1.55;
   padding: 0.6rem 0.75rem;
 }
@@ -2020,6 +2020,40 @@ button.link:disabled {
   min-height: 0;
   overflow: auto;
   padding: 0.6rem 0.9rem;
+}
+
+/* Editor font size (specs/editor/common-editor.feature.md "Increase and
+   decrease font size"): the toolbar's buttons set --md-font-scale on the
+   editor, and every tab's text — the Write and Vim sources, the search-mark
+   mirror behind the textarea, the Preview with its headings — scales by it
+   alike. Unset, it is 1 and the editor reads as it always has. */
+.md-editor .md-preview {
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h1 {
+  font-size: calc(0.9375rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h2,
+.md-editor .md-preview h3 {
+  font-size: calc(0.875rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h4,
+.md-editor .md-preview h5,
+.md-editor .md-preview h6 {
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview pre code {
+  font-size: calc(0.75rem * var(--md-font-scale, 1));
+}
+
+.md-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
 }
 
 .md-preview {
