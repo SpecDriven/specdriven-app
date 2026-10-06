@@ -14,6 +14,11 @@
 // setting is per user, so peers can legitimately disagree on the bytes — a
 // file holding either form is a faithful projection (isProjectionOf), and
 // neither peer rewrites the other's form just to flip the links.
+//
+// A published spec projects the body it was published with (schema.ts
+// `publishedBody`), not its live collaborative text: the two differ only
+// while a merge artifact waits for the drift pass to heal it, and that
+// artifact must never be rendered, written or absorbed.
 
 import type * as A from "@automerge/automerge";
 import {
@@ -23,7 +28,7 @@ import {
   type Feature,
   type PullRequestLink,
 } from "../parser";
-import type { FeatureDoc } from "./schema";
+import { effectiveBody, type FeatureDoc } from "./schema";
 
 export interface ProjectionOptions {
   /** Write external links into the `.feature.md` (Settings, default ON). */
@@ -67,7 +72,9 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
           name: s.name,
           version: s.version,
           status: s.status,
-          body: s.body,
+          // A published spec renders the body it was published with, not
+          // the live text a merge may have doubled (schema.ts publishedBody).
+          body: effectiveBody(s),
           tests: [...s.tests],
         };
         const link = plainLink(s.link);

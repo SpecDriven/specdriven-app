@@ -14,7 +14,7 @@ import type {
   ScenarioPick,
   ScenarioTarget,
 } from "../parser";
-import type { FeatureDoc, SpecEntry } from "./schema";
+import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
 /** Create a document from a parsed feature file (first import). */
@@ -36,6 +36,9 @@ function newEntry(s: Scenario): SpecEntry {
     version: s.version,
     status: s.status,
     body: s.body,
+    // A scenario imported already published records its body (schema.ts
+    // `publishedBody`), the same as one published through reconcile.
+    ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
     tests: [...s.tests],
     ...(s.link ? { link: { ...s.link } } : {}),
   };
@@ -67,7 +70,11 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
 /**
  * The published-immutability invariant (specs/ui.spec.md), stated on the doc:
  * every published scenario must survive reconciliation under its (name,
- * version) identity, still published, with its body intact. A status marker
+ * version) identity, still published, with its body intact — the body as it
+ * was published (`effectiveBody`), not the live collaborative text, which a
+ * CRDT merge of two peers' identical absorbs can leave doubled (H2 in
+ * verification/lean/REPORT.md); that artifact is the doc's to heal
+ * (`healPublished`), never the file's fault. A status marker
  * edited down to [proposed] or [draft] is refused too: the demoted scenario
  * would otherwise be free to change (or, as a doc-only draft, drop out of the
  * markdown) and be published again under the same version. Same rule and
@@ -79,7 +86,7 @@ export function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): vo
   for (const entry of doc.specs) {
     if (entry.status !== "published") continue;
     const match = target.scenarios.find((s) => sameScenario(entry, s));
-    if (!match || match.status !== "published" || match.body !== entry.body) {
+    if (!match || match.status !== "published" || match.body !== effectiveBody(entry)) {
       throw new Error(`Scenario "${entry.name}" @v${entry.version} is published and immutable`);
     }
   }
@@ -122,12 +129,13 @@ export function reconcile(
 ): A.Doc<FeatureDoc> {
   if (!force) assertPublishedKept(doc, target);
 
-  const entries: Scenario[] = doc.specs.map((e) => ({
+  const entries: (Scenario & { publishedBody?: string })[] = doc.specs.map((e) => ({
     id: e.id,
     name: e.name,
     version: e.version,
     status: e.status,
     body: e.body,
+    publishedBody: snapshotOf(e),
     tests: [...e.tests],
     ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
   }));
@@ -148,7 +156,11 @@ export function reconcile(
     });
   };
   if (scenario?.id) {
-    const { id, name, version } = scenario;
+    // Trimmed, as the target's headings parsed (parser.ts SCENARIO_RE): an
+    // editor name with a stray space must still claim its entry, or the
+    // rename falls to the passes below and a retyped body files it twice.
+    const { id, version } = scenario;
+    const name = scenario.name.trim();
     const at = entries.findIndex((e) => e.id === id);
     const entry = at === -1 ? undefined : entries[at];
     const claimed = target.scenarios.find((s) => sameScenario(s, { name, version }));
@@ -161,7 +173,7 @@ export function reconcile(
     }
   }
   claim((s, i) => sameScenario(entries[i]!, s));
-  claim((s, i) => s.body === entries[i]!.body); // rename / version bump
+  claim((s, i) => s.body === effectiveBody(entries[i]!)); // rename / version bump
 
   const additions = target.scenarios.filter((s) => !matched.has(s));
 
@@ -183,6 +195,17 @@ export function reconcile(
       if (entry.name !== match.name) A.updateText(d, ["specs", i, "name"], match.name);
       if (entry.version !== match.version) live.version = match.version;
       if (entry.status !== match.status) live.status = match.status;
+      // The recorded published body follows the target: a published match
+      // freezes the target's body (the gate made it the entry's effective
+      // body unless `force`), any other status clears it. Set whole, so
+      // concurrent publishes resolve to one body and nothing splices it.
+      const snapshot = match.status === "published" ? match.body : undefined;
+      if (entry.publishedBody !== snapshot) {
+        if (snapshot === undefined) delete live.publishedBody;
+        else live.publishedBody = new A.ImmutableString(snapshot);
+      }
+      // Also the heal: a published entry whose live text drifted from its
+      // recorded body is driven back to it here.
       if (entry.body !== match.body) A.updateText(d, ["specs", i, "body"], match.body);
       if (entry.tests.join("\n") !== match.tests.join("\n")) {
         live.tests.splice(0, live.tests.length, ...match.tests);
@@ -193,6 +216,28 @@ export function reconcile(
       if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.specs, i);
     }
     for (const s of additions) d.specs.push(newEntry(s));
+  });
+}
+
+/**
+ * Drive each published entry's live text back to its recorded body. Two
+ * peers absorbing the same markdown edit each splice it in, and the CRDT
+ * merge keeps both copies (H2 in verification/lean/REPORT.md); the file,
+ * the API and the gate already read the recorded body, so this only tidies
+ * the collaborative text so a later demotion or edit starts from what was
+ * published. Returns the doc itself — no change minted, nothing to save —
+ * when every published entry is already tidy.
+ */
+export function healPublished(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
+  const stale: [number, string][] = [];
+  doc.specs.forEach((e, i) => {
+    if (e.status !== "published") return;
+    const snapshot = snapshotOf(e);
+    if (snapshot !== undefined && e.body !== snapshot) stale.push([i, snapshot]);
+  });
+  if (stale.length === 0) return doc;
+  return A.change(doc, (d) => {
+    for (const [i, snapshot] of stale) A.updateText(d, ["specs", i, "body"], snapshot);
   });
 }
 

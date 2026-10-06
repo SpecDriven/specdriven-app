@@ -20,6 +20,7 @@ import type { CompletionContext, CompletionResult } from "@codemirror/autocomple
 import { atQuery, filterChoices } from "./entityFields";
 import type { FieldChoice } from "./entityFields";
 import { termsPattern } from "./highlight";
+import { isOpenLinkClick, webLinkAt, webLinks } from "./weblinks";
 
 // Vim mode (specs/ui.spec.md "Settings"): the Markdown editor's Vim tab is a
 // CodeMirror 6 editor running the Replit vim extension — modal editing with
@@ -57,6 +58,11 @@ interface VimEditorProps {
    * (specs/editor/data-model-integration-in-editor.feature.md).
    */
   completions?: FieldChoice[];
+  /**
+   * A web link ⌘-clicked in the text (specs/editor/common-editor.feature.md
+   * "web links are clickable"): the Write tab's gesture, here too.
+   */
+  onOpenLink?: (url: string) => void;
 }
 
 // Markdown syntax, in the app's own colours (index.css): headings and links
@@ -105,6 +111,39 @@ function highlightTerms(terms: string[]) {
   );
 }
 
+/**
+ * Underlines the web links in the visible text, so a url reads as something
+ * ⌘-click opens (specs/editor/common-editor.feature.md). Found line by line
+ * with the finder the Write and Preview tabs use, so all three agree.
+ */
+const webLinkMarks = (() => {
+  const mark = Decoration.mark({ class: "md-vim-link" });
+  const build = (view: EditorView): DecorationSet => {
+    const ranges: { from: number; to: number }[] = [];
+    const { doc } = view.state;
+    for (const { from, to } of view.visibleRanges) {
+      for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+        const line = doc.line(n);
+        for (const link of webLinks(line.text))
+          ranges.push({ from: line.from + link.start, to: line.from + link.end });
+      }
+    }
+    return Decoration.set(ranges.map((r) => mark.range(r.from, r.to)));
+  };
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      constructor(view: EditorView) {
+        this.decorations = build(view);
+      }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.viewportChanged) this.decorations = build(u.view);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+})();
+
 /** The smallest replacement turning `from` into `to`, so the caret stays put. */
 function minimalChange(from: string, to: string) {
   let start = 0;
@@ -120,14 +159,24 @@ function minimalChange(from: string, to: string) {
 }
 
 export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEditor(
-  { value, onChange, placeholder, highlight, onPasteFiles, onShortcut, onCaretMove, completions },
+  {
+    value,
+    onChange,
+    placeholder,
+    highlight,
+    onPasteFiles,
+    onShortcut,
+    onCaretMove,
+    completions,
+    onOpenLink,
+  },
   ref,
 ) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // The callbacks change every render; the extensions read the latest ones.
-  const latest = useRef({ onChange, onPasteFiles, onShortcut, onCaretMove, completions });
-  latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove, completions };
+  const latest = useRef({ onChange, onPasteFiles, onShortcut, onCaretMove, completions, onOpenLink });
+  latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove, completions, onOpenLink };
   const terms = highlight && highlight.length > 0 ? highlight : null;
   const termsKey = terms?.join(" ") ?? "";
 
@@ -215,6 +264,7 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
           syntaxHighlighting(markdownStyle),
           placeholder ? placeholderExt(placeholder) : [],
           terms ? highlightTerms(terms) : [],
+          webLinkMarks,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           // Nothing else binds Tab, and vim claims no key but Esc and a few
           // Ctrl chords in insert mode, so this is reached at default precedence.
@@ -228,6 +278,20 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
               closeCompletion(u.view);
           }),
           EditorView.domEventHandlers({
+            // ⌘-click on a web link opens it, before CodeMirror (or Vim)
+            // takes the press as a caret move; a plain click still places
+            // the caret, so the url can be edited.
+            mousedown: (e, v) => {
+              if (e.button !== 0 || !isOpenLinkClick(e)) return false;
+              const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+              if (pos === null) return false;
+              const line = v.state.doc.lineAt(pos);
+              const link = webLinkAt(line.text, pos - line.from);
+              if (!link) return false;
+              e.preventDefault();
+              latest.current.onOpenLink?.(link.url);
+              return true;
+            },
             paste: (e) => {
               const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
                 f.type.startsWith("image/"),

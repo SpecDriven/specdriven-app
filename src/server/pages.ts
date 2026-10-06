@@ -16,7 +16,9 @@
 // only in their descriptor.
 
 import { mkdir, readdir, stat } from "node:fs/promises";
+import { threeWayPage, threeWayPageStrict } from "./automerge/merge";
 import {
+  docToPage,
   importPageDoc,
   isPageProjectionOf,
   projectPage,
@@ -43,6 +45,7 @@ import {
   type Supersedes,
 } from "./parser";
 import { getLogger, withSpan } from "./telemetry";
+import { cleanLine } from "./text";
 
 const log = getLogger("pages");
 
@@ -174,16 +177,19 @@ export async function readPage(
 /**
  * Save a page as the editor holds it. Local like a saved scenario — the
  * reload cron commits and pushes it — and through the document, so what lands
- * on disk is the document's projection.
+ * on disk is the document's projection. `base` is the text the content was
+ * edited from, so what the page gained meanwhile is merged in, not dropped
+ * (absorb).
  */
 export async function savePage(
   dataDir: string,
   kind: PageFolder,
   fileName: string,
   content: string,
+  base?: string,
 ): Promise<PageView> {
   const file = safe(kind, fileName);
-  const projection = await absorb(dataDir, file, content);
+  const projection = await absorb(dataDir, file, content, base);
   await writeTextFile(`${dataDir}/${file}`, projection);
   return { ...listing(file, parsePage(projection)), content: projection };
 }
@@ -213,7 +219,7 @@ export async function createPage(
 ): Promise<string> {
   // A flat folder takes the name whole: a `/` in it is part of the title,
   // not a subfolder to make (specs/app/engineering-notebook.feature.md).
-  const segments = kind.flat ? [name.trim()] : name.split("/").map((s) => s.trim());
+  const segments = kind.flat ? [cleanLine(name)] : name.split("/").map(cleanLine);
   const pageName = segments.pop() ?? "";
   if (!pageName) throw new Error(`${capitalize(kind.label)} name is required`);
   const slug = slugify(pageName);
@@ -275,7 +281,7 @@ export async function renamePageFile(
   if (current === null) throw new Error(`${capitalize(kind.label)} not found: ${from}`);
   // A flat folder takes the name whole, as createPage does; a nested page
   // keeps the folder it is in — a rename never re-nests.
-  const segments = kind.flat ? [newName.trim()] : newName.split("/").map((s) => s.trim());
+  const segments = kind.flat ? [cleanLine(newName)] : newName.split("/").map(cleanLine);
   const title = segments.pop() ?? "";
   const slug = slugify(title);
   if (!slug) throw new Error(`${capitalize(kind.label)} name is required`);
@@ -287,7 +293,7 @@ export async function renamePageFile(
   // the title it displays, which slugifies to the name it already has.
   const page = parsePage(current);
   if (page.name !== title) {
-    await savePage(dataDir, kind, from, serializePage({ ...page, name: title }));
+    await savePage(dataDir, kind, from, serializePage({ ...page, name: title }), current);
   }
   if (to === from) return { fileName: from, name: title, message: "file name unchanged" };
   if (await fileExists(`${dataDir}/${to}`)) {
@@ -406,15 +412,55 @@ export async function importPageDrift(dataDir: string, kind: PageFolder): Promis
  * Feed a page's markdown into its document — reconciled as CRDT operations,
  * or imported whole for a page that has none yet — and return the projection
  * the file must now hold (features.ts absorbIntoDoc).
+ *
+ * The file is about to be overwritten with the projection, so an external
+ * edit the sync tick has not absorbed yet (importPageDrift) is absorbed here
+ * first — otherwise the write would drop it from the file, the document and
+ * git without a trace, the same hole absorbIntoDoc closes for `.feature.md`
+ * files.
+ *
+ * `base` is the text the caller edited: what the editor loaded or last saved,
+ * or what a server-side rewrite read. Whatever the document gained since —
+ * that drift, a sync tick, another save — is kept by merging the text in
+ * three-way against it (threeWayPage). With the true base a character merge
+ * cannot write an edit twice. Without one the base is guessed as the
+ * document before the drift, and a text both sides changed is refused
+ * rather than merged (threeWayPageStrict), as for features.
  */
-async function absorb(dataDir: string, fileName: string, text: string): Promise<string> {
-  const page = parsePage(text);
+async function absorb(
+  dataDir: string,
+  fileName: string,
+  text: string,
+  base?: string,
+): Promise<string> {
+  let page = parsePage(text);
   const loaded = await loadPageDoc(dataDir, fileName);
   if (loaded === null) {
     const created = await createPageDoc(dataDir, fileName, importPageDoc(page));
     return projectPage(created.doc);
   }
-  const next = reconcilePage(loaded.doc, page);
+  let doc = loaded.doc;
+  const from = base === undefined ? docToPage(doc) : parsePage(base);
+  const disk = await readTextFile(`${dataDir}/${fileName}`);
+  if (disk !== null && !isPageProjectionOf(disk, doc)) {
+    doc = reconcilePage(doc, parsePage(disk));
+    log.info(`absorbed drifted ${fileName} into its document before writing over it`);
+  }
+  if (serializePage(from) !== projectPage(doc)) {
+    if (base === undefined) {
+      const merged = threeWayPageStrict(from, page, docToPage(doc));
+      if (!merged.ok) {
+        throw new Error(
+          `${fileName} was edited on disk and here at the same time (${merged.conflict}) — ` +
+            `the disk edit is kept; reopen the page to pick it up`,
+        );
+      }
+      page = merged.page;
+    } else {
+      page = threeWayPage(from, page, docToPage(doc));
+    }
+  }
+  const next = reconcilePage(doc, page);
   await savePageDoc(dataDir, fileName, next, loaded.heads);
   return projectPage(next);
 }

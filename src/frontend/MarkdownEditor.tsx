@@ -1,8 +1,11 @@
 import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
+import type { CSSProperties, ClipboardEvent, KeyboardEvent, MouseEvent, ReactElement, UIEvent } from "react";
 import {
+  AArrowDown,
+  AArrowUp,
   Bold,
   Code,
+  ExternalLink,
   Heading,
   Image,
   Italic,
@@ -32,11 +35,13 @@ import { markNodes, markText } from "./highlight";
 import { ImageSizingContext } from "./MarkdownImage";
 import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
+import { FONT_SCALES, applyFontScale, stepFontScale, useFontScale } from "./fontSizePref";
 import { atQuery, entityFields, filterChoices, insertChoice, useEntityFields } from "./entityFields";
 import type { FieldChoice } from "./entityFields";
 import { anchorVisible, measureOffset, placePopup } from "./caretPosition";
 import { useExcalidrawEnabled } from "./excalidrawPref";
 import type { TextSurface } from "./VimEditor";
+import { isOpenLinkClick, openWebLink, webLinkAt } from "./weblinks";
 
 // CodeMirror and the vim extension are only mounted once a Vim tab is shown.
 // Loaded lazily so a bundler that splits can keep them out of the main bundle
@@ -95,6 +100,7 @@ export function MarkdownEditor({
   initialTab,
 }: MarkdownEditorProps) {
   const vimOn = useVimMode();
+  const fontScale = useFontScale();
   const [tab, setTab] = useState<Tab>(
     readOnly || initialTab === "preview" ? "preview" : vimOn ? "vim" : "write",
   );
@@ -412,6 +418,28 @@ export function MarkdownEditor({
     setComplete(null);
   };
 
+  // Web links (specs/editor/common-editor.feature.md "web links are
+  // clickable"): a plain click in the source places the caret, as it must
+  // for the url to be edited at all, so ⌘-click (Ctrl-click off the Mac)
+  // is what opens one — the gesture code editors use. The click has already
+  // put the caret where it landed; the link is the one around it.
+  const onSourceClick = (e: MouseEvent<HTMLTextAreaElement>) => {
+    if (!isOpenLinkClick(e)) return;
+    const ta = e.currentTarget;
+    if (ta.selectionStart !== ta.selectionEnd) return;
+    const link = webLinkAt(ta.value, ta.selectionStart);
+    if (!link) return;
+    e.preventDefault();
+    openWebLink(link.url);
+  };
+  // The link the caret is in, for the toolbar's Open link button — the
+  // same link a ⌘-click there would open, reachable without knowing the
+  // gesture, and from the keyboard.
+  const caretLink = useMemo(
+    () => (editing && !readOnly ? webLinkAt(value.replaceAll("\r\n", "\n"), caret) : null),
+    [editing, readOnly, value, caret],
+  );
+
   const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
     if (tab === "write" && !readOnly) {
       if (popup) {
@@ -464,7 +492,32 @@ export function MarkdownEditor({
   // The toolbar (specs/ui/ui.feature.md "Design system"): icon buttons, each
   // with a tooltip naming the action and, where there is one, its shortcut.
   const size = 14;
-  const tools: { icon: ReactElement; title: string; keys?: string; run: () => void }[] = [
+  type Tool = { id?: string; icon: ReactElement; title: string; keys?: string; disabled?: boolean; run: () => void };
+  // Font size (specs/editor/common-editor.feature.md "Increase and decrease
+  // font size"), next to the Heading button. It changes how the text reads,
+  // not the text, so it is there on every tab — Preview and a read-only
+  // body too — and every editor follows (src/frontend/fontSizePref.ts).
+  // No shortcut: ⌘- and ⌘= already zoom the whole window.
+  const percent = `${Math.round(fontScale * 100)}%`;
+  const fontTools: Tool[] = [
+    {
+      // Keyed apart from the title, which carries the size: a button
+      // re-keyed on every click would lose focus with it.
+      id: "font-down",
+      icon: <AArrowDown size={size} />,
+      title: `Decrease font size (${percent})`,
+      disabled: fontScale <= FONT_SCALES[0],
+      run: () => applyFontScale(stepFontScale(fontScale, -1)),
+    },
+    {
+      id: "font-up",
+      icon: <AArrowUp size={size} />,
+      title: `Increase font size (${percent})`,
+      disabled: fontScale >= FONT_SCALES[FONT_SCALES.length - 1]!,
+      run: () => applyFontScale(stepFontScale(fontScale, 1)),
+    },
+  ];
+  const tools: Tool[] = [
     { icon: <Heading size={size} />, title: "Heading", run: () => apply((t, s, e) => toggleHeading(t, s, e)) },
     { icon: <Bold size={size} />, title: "Bold", keys: "⌘B", run: () => apply((t, s, e) => toggleInline(t, s, e, "**")) },
     { icon: <Italic size={size} />, title: "Italic", keys: "⌘I", run: () => apply((t, s, e) => toggleInline(t, s, e, "*")) },
@@ -495,6 +548,17 @@ export function MarkdownEditor({
           },
         ]
       : []),
+    // Only while the caret is in a web link: there is nothing to open otherwise.
+    ...(caretLink
+      ? [
+          {
+            icon: <ExternalLink size={size} />,
+            title: `Open ${caretLink.url}`,
+            keys: "⌘-click",
+            run: () => openWebLink(caretLink.url),
+          },
+        ]
+      : []),
   ];
 
   // The pane closing gives focus back to the text — once React has taken the
@@ -513,7 +577,10 @@ export function MarkdownEditor({
   const preview = tab === "preview" ? renderMarkdown(value) : null;
 
   return (
-    <div className="md-editor">
+    <div
+      className="md-editor"
+      style={fontScale === 1 ? undefined : ({ "--md-font-scale": fontScale } as CSSProperties)}
+    >
       <div className="md-toolbar">
         <div className="md-tabs" role="tablist">
           <button
@@ -546,19 +613,17 @@ export function MarkdownEditor({
             Preview
           </button>
         </div>
-        {!readOnly && editing && (
-          <div className="md-tools">
-            {uploadError && <span className="md-upload-error">{uploadError}</span>}
-            {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
-            {tools.map((t) => (
-              <Tooltip key={t.title} label={t.title} keys={t.keys}>
-                <button type="button" aria-label={t.title} onClick={t.run}>
-                  {t.icon}
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        )}
+        <div className="md-tools">
+          {uploadError && <span className="md-upload-error">{uploadError}</span>}
+          {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
+          {[...fontTools, ...(!readOnly && editing ? tools : [])].map((t) => (
+            <Tooltip key={t.id ?? t.title} label={t.title} keys={t.keys}>
+              <button type="button" aria-label={t.title} disabled={t.disabled} onClick={t.run}>
+                {t.icon}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
       </div>
       {!readOnly && (
         <input
@@ -618,6 +683,7 @@ export function MarkdownEditor({
               onChange(e.target.value);
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            onClick={onSourceClick}
             onScroll={marks || popup ? onScroll : undefined}
             onKeyDown={readOnly ? undefined : onKeyDown}
             onPaste={readOnly ? undefined : onPaste}
@@ -673,6 +739,7 @@ export function MarkdownEditor({
             onPasteFiles={(files) => void addImages(files)}
             onShortcut={onKeyDown}
             onCaretMove={setCaret}
+            onOpenLink={openWebLink}
             completions={fields}
           />
         </Suspense>

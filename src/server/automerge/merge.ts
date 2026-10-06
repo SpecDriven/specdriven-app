@@ -82,6 +82,27 @@ export function threeWayPage(
   return merged;
 }
 
+/**
+ * threeWayPage for a save whose base is only a guess (pages.ts absorb, when
+ * the caller sends none): as threeWayFeatureStrict, a text both sides changed
+ * to different values is a conflict rather than a character merge, since the
+ * caller may already hold the other side's edit and would get it twice.
+ */
+export function threeWayPageStrict(
+  base: MarkdownPage,
+  ours: MarkdownPage,
+  theirs: MarkdownPage,
+): { ok: true; page: MarkdownPage } | { ok: false; conflict: string } {
+  const clash = (b: string, o: string, t: string) => o !== b && t !== b && o !== t;
+  if (clash(base.name, ours.name, theirs.name)) {
+    return { ok: false, conflict: "the heading was changed on both sides" };
+  }
+  if (clash(base.body, ours.body, theirs.body)) {
+    return { ok: false, conflict: "the text was changed on both sides" };
+  }
+  return { ok: true, page: threeWayPage(base, ours, theirs) };
+}
+
 /** draft → proposed → published: the lifecycle only moves forward. */
 const STATUS_RANK = { draft: 0, proposed: 1, published: 2 } as const;
 

@@ -94,10 +94,13 @@ drop it by hand, untick the boxes, or turn Code generation off and on again.
 
 ## 4. Starting a session
 
-With something selected, press **Start session… (n)** in the sidebar. The
-same command is in the command palette (`⌘K`) as **Start AI Session** and
-in a feature page's **More actions** (⋯) menu. While a session is being
-opened the button reads `Session running…`.
+With something selected, press **Start session** in the sidebar: the
+play-and-spark icon at the right end of the **Features** heading. While specs
+are checked it is highlighted and shows their count, and its tooltip says
+where the session will run and over what. The same command is in the command
+palette (`⌘K`) as **Start AI Session** and in a feature page's **More
+actions** (⋯) menu. While a session is being opened the button is disabled,
+its spark blinks, and its tooltip reads `Session running…`.
 
 The dialog is about AI sessions alone. Timing your own work is the
 [Pomodoro](pomodoro.md), a feature of the app with its own button at the foot

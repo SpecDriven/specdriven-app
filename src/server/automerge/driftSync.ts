@@ -4,7 +4,9 @@
 //   files no longer goes straight to the resolution dialog. Peers on this
 //   app version shipped their edits as chunk files too, which merged cleanly
 //   in the same pull — so the merged document already holds both sides, and
-//   the conflicted markdown is just the projection needing to be rewritten.
+//   the conflicted markdown is just the projection needing to be rewritten,
+//   plus whatever the other side's markdown holds beyond its own document's
+//   projection: a hand edit that rode the same push (Lean H1).
 //   Plain-markdown edits (older app versions, GitHub PRs) have no ops to
 //   merge, so they go through a scenario-level three-way merge against the
 //   git merge base. Only both-sides-edited-the-same-scenario remains a human
@@ -14,9 +16,14 @@
 //   GitHub edit, an old-version peer's push, or a feature that predates its
 //   document — is absorbed (or first imported) into the doc, and the file is
 //   rewritten to the doc's projection. Drift that would tamper with a
-//   published scenario is refused and the file repaired from the doc.
+//   published scenario is refused and the file repaired from the doc. The
+//   pass first heals every published spec whose live text a CRDT merge left
+//   different from its recorded published body (schema.ts publishedBody), so
+//   that artifact is never mistaken for tampering and never reaches a file.
 
 import type * as A from "@automerge/automerge";
+import { readdir } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { fileExists, readTextFile, writeTextFile } from "../fsx";
 import {
   conflictedFiles,
@@ -26,12 +33,12 @@ import {
   stageVersion,
   theirsVersion,
 } from "../git";
-import { featureTextError, parseFeature, parsePage, type MarkdownPage } from "../parser";
+import { featureTextError, parseFeature, parsePage, type Feature, type MarkdownPage } from "../parser";
 import { isPageFile, isPageFolderPath } from "../pages";
 import { threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature } from "./project";
-import { importFeatureDoc, reconcile } from "./reconcile";
+import { healPublished, importFeatureDoc, reconcile } from "./reconcile";
 import type { FeatureDoc } from "./schema";
 import {
   AUTOMERGE_ROOT,
@@ -40,7 +47,9 @@ import {
   featureFileOfDocidPath,
   listFeatureDocs,
   loadFeatureDoc,
+  loadFeatureDocFrom,
   loadPageDoc,
+  loadPageDocFrom,
   pageDocDirRel,
   removeFeatureDoc,
   saveFeatureDoc,
@@ -118,14 +127,48 @@ async function theirsBroughtChunks(dataDir: string, docDir: string): Promise<boo
 }
 
 /**
+ * The chunk files of the other side's document — those of MERGE_HEAD, which
+ * the merge left on disk beside ours — or null when one is not on disk: our
+ * side compacted it away (store.ts compactDoc), so their document cannot be
+ * rebuilt as their push left it.
+ */
+async function theirChunks(dataDir: string, docDir: string): Promise<Set<string> | null> {
+  const chunks = new Set<string>();
+  for (const file of await readdir(join(dataDir, docDir)).catch(() => [])) {
+    if (file.endsWith(".bin") && (await existsIn(dataDir, "MERGE_HEAD", `${docDir}/${file}`))) {
+      chunks.add(file);
+    }
+  }
+  for (const path of await diffNames(dataDir, "HEAD", "MERGE_HEAD", docDir)) {
+    if (!path.endsWith(".bin") || chunks.has(basename(path))) continue;
+    if (await existsIn(dataDir, "MERGE_HEAD", path)) return null;
+  }
+  return chunks;
+}
+
+/**
+ * Their markdown as their own document projected it — the base that leaves
+ * only a hand edit riding the push as theirs to fold in. In the projection
+ * form their file was written in: a peer that does not publish external
+ * links writes none.
+ */
+function theirProjection(doc: A.Doc<FeatureDoc>, theirs: Feature): Feature {
+  const linked = !!theirs.link || theirs.scenarios.some((s) => s.link);
+  return parseFeature(projectFeature(doc, { publishExternalLinks: linked }));
+}
+
+/**
  * Resolve one conflicted path; null on success, else why it was left.
  *
  * For a conflicted `.feature.md` the decision tree is:
  * - The other peer runs this app version (its pull delivered chunk files for
- *   this feature): both sides' markdown is derivative — the merged document
- *   already holds both sides' operations, and its projection is the
- *   resolution. This is the common case, and it merges concurrent edits to
- *   the same scenario at character level.
+ *   this feature): the merged document already holds both sides' operations,
+ *   and its projection is the resolution. This is the common case, and it
+ *   merges concurrent edits to the same scenario at character level. Their
+ *   markdown can still carry a hand edit that rode the same push, which has
+ *   no operations (Lean H1): it folds in three-way against their own
+ *   document's projection, so nothing of theirs that the document already
+ *   holds — an edit, a rename, a move — replays a second time.
  * - The other peer sent only markdown (older app version, GitHub edit): its
  *   changes have no operations to merge, so they fold in through a
  *   scenario-level three-way merge against the git merge base.
@@ -184,6 +227,17 @@ async function autoResolveOne(
       const merged = threeWayFeature(base, docToFeature(doc), parseFeature(theirsText));
       if (!merged.ok) return merged.conflict;
       doc = reconcile(doc, merged.feature);
+    } else {
+      const chunks = await theirChunks(dataDir, docDirRel(path));
+      const own = chunks && (await loadFeatureDocFrom(dataDir, path, (c) => chunks.has(c)));
+      if (!own) {
+        log.warn(`${path}: their document could not be rebuilt; a hand edit in their push is not folded in`);
+      } else if (!isProjectionOf(theirsText, own.doc)) {
+        const theirs = parseFeature(theirsText);
+        const merged = threeWayFeature(theirProjection(own.doc, theirs), docToFeature(doc), theirs);
+        if (!merged.ok) return merged.conflict;
+        doc = reconcile(doc, merged.feature);
+      }
     }
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
@@ -197,7 +251,9 @@ async function autoResolveOne(
  * Resolve a conflicted markdown page; null on success, else why it was left.
  * A page has no scenarios and one projection form, so there is no lineage
  * race to unpick: the merged document is the resolution when the other peer
- * sent operations, and a three-way merge of the markdown when it did not.
+ * sent operations — with a hand edit riding their push folded in against
+ * their own document's projection, as for a feature — and a three-way merge
+ * of the markdown when it did not.
  * The page merge cannot conflict — every field either merges as text or
  * resolves to one side — so this only bails when there is no document to
  * merge into.
@@ -212,8 +268,18 @@ async function autoResolvePage(dataDir: string, path: string): Promise<string | 
 
   let doc = loaded.doc;
   try {
-    if (!(await theirsBroughtChunks(dataDir, pageDocDirRel(path)))) {
+    const docDir = pageDocDirRel(path);
+    if (!(await theirsBroughtChunks(dataDir, docDir))) {
       doc = reconcilePage(doc, threeWayPage(base, docToPage(doc), parsePage(theirsText)));
+    } else {
+      const chunks = await theirChunks(dataDir, docDir);
+      const own = chunks && (await loadPageDocFrom(dataDir, path, (c) => chunks.has(c)));
+      if (!own) {
+        log.warn(`${path}: their document could not be rebuilt; a hand edit in their push is not folded in`);
+      } else if (theirsText !== projectPage(own.doc)) {
+        const theirBase = parsePage(projectPage(own.doc));
+        doc = reconcilePage(doc, threeWayPage(theirBase, docToPage(doc), parsePage(theirsText)));
+      }
     }
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
@@ -234,6 +300,7 @@ export async function importDrift(dataDir: string): Promise<string> {
     let imported = 0;
     let absorbed = 0;
     let repaired = 0;
+    let healed = 0;
     for (const fileName of files) {
       const text = await readTextFile(`${dataDir}/${fileName}`);
       // Unreadable or malformed markdown never reaches the document.
@@ -247,17 +314,32 @@ export async function importDrift(dataDir: string): Promise<string> {
         log.debug(`imported ${fileName} into a document`);
         continue;
       }
+      // A published spec whose live text a merge left doubled is tidied
+      // first, before any look at the file, so a peer still holding the
+      // doubled text (one running an older build, or one that merged the
+      // same two absorbs) pulls the heal and stops rewriting the file
+      // (reconcile.ts healPublished). Saved below with whatever else the
+      // file brings; saveDoc writes nothing when the heal minted no change.
+      const doc = healPublished(loaded.doc);
+      if (doc !== loaded.doc) {
+        healed++;
+        log.debug(`healed published text in ${fileName}`);
+      }
       // A file in the document's other form — external links written by a
       // peer whose setting differs — is not drift (project.ts).
-      if (isProjectionOf(text, loaded.doc)) continue;
-      const drift = absorbDrift(loaded.doc, text);
+      if (isProjectionOf(text, doc)) {
+        await saveFeatureDoc(dataDir, fileName, doc, loaded.heads);
+        continue;
+      }
+      const drift = absorbDrift(doc, text);
       if (drift.refused === undefined) {
         await saveFeatureDoc(dataDir, fileName, drift.doc, loaded.heads);
         await writeTextFile(`${dataDir}/${fileName}`, projectFeature(drift.doc));
         absorbed++;
         log.debug(`absorbed drifted ${fileName} into its document`);
       } else {
-        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(loaded.doc));
+        await saveFeatureDoc(dataDir, fileName, doc, loaded.heads);
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(doc));
         repaired++;
         log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(drift.refused));
       }
@@ -276,12 +358,14 @@ export async function importDrift(dataDir: string): Promise<string> {
       "sync.imported": imported,
       "sync.absorbed": absorbed,
       "sync.repaired": repaired,
+      "sync.healed": healed,
       "sync.removed": removed,
     });
     const parts = [];
     if (imported > 0) parts.push(`imported ${imported} feature(s) into documents`);
     if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited file(s)`);
     if (repaired > 0) parts.push(`repaired ${repaired} file(s) from their documents`);
+    if (healed > 0) parts.push(`healed ${healed} published scenario(s)`);
     if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted features`);
     return parts.join("; ");
   });

@@ -492,8 +492,8 @@ aside header h1 {
 }
 
 /* Code gen session (specs/agents/claude.spec.md): per-spec and per-scenario
-   checkboxes in the tree, and the outcome line under the Start session
-   button. */
+   checkboxes in the tree, and the outcome line under the Features head that
+   carries the Start session button. */
 .tree-check {
   flex: none;
   accent-color: var(--accent);
@@ -503,7 +503,10 @@ aside header h1 {
 .session-notice {
   color: var(--text-2);
   font-size: 0.75rem;
-  margin: 0.3rem 0 0;
+  /* Tucked under the Features head, whose Start session it describes, and
+     lined up with the head's label. */
+  margin: -0.5rem 0 0;
+  padding: 0 0.6rem;
 }
 
 /* CLI output can be long and unbroken — keep the error box scrollable. */
@@ -625,6 +628,39 @@ aside header h1 {
   color: var(--text-2);
   cursor: pointer;
   font-size: 0.75rem;
+}
+
+/* The scenario's row: its link, then its menu (Delete) at the end, the
+   same quiet affordance the feature row has. The hover fill is the row's, so
+   the menu button sits inside it. */
+.tree-scenario-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  border-radius: var(--radius-sm);
+}
+
+.tree-scenario-row:hover {
+  background: var(--hover);
+}
+
+.tree-scenario-row > a.tree-scenario {
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-scenario-row:has(> a.tree-scenario.active) {
+  background: var(--accent-soft);
+}
+
+/* The row carries the fill, so the link inside it does not add its own. */
+.tree .tree-scenario-row > a.tree-scenario:hover,
+.tree .tree-scenario-row > a.tree-scenario.active {
+  background: transparent;
+}
+
+.tree-scenario-row .tree-menu-btn {
+  padding: 0.1rem 0.45rem;
 }
 
 /* Long scenario names truncate rather than widening the sidebar; the version
@@ -803,6 +839,8 @@ a.page-entry.done {
 
 .tree-row:hover .tree-menu-btn,
 .tree-row:focus-within .tree-menu-btn,
+.tree-scenario-row:hover .tree-menu-btn,
+.tree-scenario-row:focus-within .tree-menu-btn,
 .tree-menu-btn[aria-expanded="true"] {
   opacity: 1;
 }
@@ -1391,6 +1429,43 @@ button.link:disabled {
   word-break: break-word;
 }
 
+/* A pick dialog (ModalPrompts PickDialog): a filter field over a scrolling
+   list — the feature a scenario moves to. */
+.pick-options {
+  list-style: none;
+  margin: 0;
+  padding: 0.2rem;
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+.pick-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  padding: 0.38rem 0.55rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.pick-option.active {
+  background: var(--accent-soft);
+}
+
+.pick-option .pick-label {
+  font-size: 0.86rem;
+  color: var(--text-1);
+}
+
+.pick-option .hint,
+.pick-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
 /* Scenario editor pane (specs/editor/spec-editor.feature.md "Spec editor
    pane"): takes the feature pane's slot — a bar on top, one scrolling column
    below. Part of the page, not a dialog: nothing is dimmed and nothing is
@@ -1661,7 +1736,7 @@ button.link:disabled {
   resize: none;
   padding: 0.6rem 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   line-height: 1.55;
 }
 
@@ -1706,7 +1781,7 @@ button.link:disabled {
   overflow: hidden;
   padding: 0.6rem 0.75rem;
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   font-weight: 400;
   line-height: 1.55;
   white-space: pre-wrap;
@@ -1812,7 +1887,7 @@ button.link:disabled {
 
 .md-vim .cm-editor .cm-scroller {
   font-family: var(--font-mono);
-  font-size: 0.8125rem;
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
   line-height: 1.55;
   padding: 0.6rem 0.75rem;
 }
@@ -1905,6 +1980,13 @@ button.link:disabled {
   background: var(--accent-mark);
 }
 
+/* A web link in the text (specs/editor/common-editor.feature.md): underlined,
+   so it reads as something ⌘-click opens. */
+.md-vim .md-vim-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* The vim status line: the mode, and the : command line while one is typed. */
 .md-vim .cm-editor .cm-panels {
   background: var(--surface-1);
@@ -1938,6 +2020,40 @@ button.link:disabled {
   min-height: 0;
   overflow: auto;
   padding: 0.6rem 0.9rem;
+}
+
+/* Editor font size (specs/editor/common-editor.feature.md "Increase and
+   decrease font size"): the toolbar's buttons set --md-font-scale on the
+   editor, and every tab's text — the Write and Vim sources, the search-mark
+   mirror behind the textarea, the Preview with its headings — scales by it
+   alike. Unset, it is 1 and the editor reads as it always has. */
+.md-editor .md-preview {
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h1 {
+  font-size: calc(0.9375rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h2,
+.md-editor .md-preview h3 {
+  font-size: calc(0.875rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview h4,
+.md-editor .md-preview h5,
+.md-editor .md-preview h6 {
+  font-size: calc(0.8125rem * var(--md-font-scale, 1));
+}
+
+.md-editor .md-preview pre code {
+  font-size: calc(0.75rem * var(--md-font-scale, 1));
+}
+
+.md-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
 }
 
 .md-preview {
@@ -2996,7 +3112,7 @@ button.table-add:hover {
   height: 1.6rem;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm, 4px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
@@ -4548,6 +4664,7 @@ aside header .collapse-btn {
 
 /* ---- Section header with the filter ---- */
 .section-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -4560,8 +4677,9 @@ aside header .collapse-btn {
   color: var(--text-3);
 }
 
+/* The Filter menu hangs from the head's right edge, not the chip's: the
+   head's action icons sit to the chip's right. */
 .section-head .filter-anchor {
-  position: relative;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
@@ -4576,10 +4694,89 @@ aside header .collapse-btn {
   text-transform: none;
 }
 
-.section-head .chip.on {
+.section-head .chip.on,
+.filter-chips .chip.on {
   border-color: var(--accent);
   color: var(--accent-strong);
   background: var(--accent-soft);
+}
+
+/* Active filters, on their own row under the head; they wrap rather than
+   push the head's icons out of a narrow sidebar. */
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: -0.5rem;
+  padding: 0 0.35rem 0 0.6rem;
+}
+
+.filter-chips .chip {
+  height: 1.3rem;
+  padding: 0 0.4rem 0 0.35rem;
+  font-size: 0.6875rem;
+}
+
+/* The tree's actions on the Features head (src/frontend/ActionIcons.tsx):
+   New folder, New feature, Start session — icons where two rows of buttons
+   used to be. */
+.head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.05rem;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.head-actions .ibtn {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+/* With specs checked, Start session is the next step: it takes the accent
+   and carries the count, growing to fit it. */
+.head-actions .session-btn.armed {
+  width: auto;
+  min-width: 1.5rem;
+  gap: 0.2rem;
+  padding: 0 0.35rem 0 0.3rem;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.head-actions .session-btn.armed:hover:not(:disabled) {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.action-count {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* While a session runs the button is off and its spark twinkles. */
+.head-actions .session-btn:disabled {
+  cursor: default;
+}
+
+.session-btn.running .spark {
+  transform-origin: 12.75px 3.5px;
+  animation: spark-twinkle 1.2s ease-in-out infinite;
+}
+
+@keyframes spark-twinkle {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-btn.running .spark {
+    animation: none;
+  }
 }
 
 .filter-menu {
@@ -7210,6 +7407,15 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   min-width: 0;
   font-size: 0.8125rem;
   color: var(--text-1);
+}
+
+/* The name keeps to one line; the path beside it gives way first. */
+.switch-target strong {
+  flex-shrink: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .switch-target svg {

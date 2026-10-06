@@ -127,6 +127,15 @@ test("renameFeature only touches the heading, adding one when missing", async ()
   expect(await readFeature(root, "specs/bare.feature.md")).toBe("# Named Now\n\njust text\n");
 });
 
+// specs/ui/ui.feature.md "User-entered text is cleaned up".
+test("a feature's typed name is saved cleaned", async () => {
+  const fileName = await createFeature(root, " billing / Quote   Policy ");
+  expect(fileName).toBe("specs/billing/quote-policy.feature.md");
+  expect(await readFeature(root, fileName)).toBe("# Quote Policy\n");
+  const renamed = await renameFeature(root, fileName, "  Quote \t Policy  v2 ");
+  expect(renamed.name).toBe("Quote Policy v2");
+});
+
 test("renameFeature refuses missing files and empty names", async () => {
   await createFeature(root, "One");
   expect(renameFeature(root, "specs/ghost.feature.md", "Spirit")).rejects.toThrow("not found");
@@ -776,6 +785,30 @@ describe("doc/markdown lockstep", () => {
     const moved = await moveFeature(root, file, "billing");
     expect(await loadFeatureDoc(root, file)).toBeNull();
     await lockstep(moved.fileName);
+  });
+
+  test("a save after a move does not recreate the retired path", async () => {
+    const file = await createFeature(root, "Quote");
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    await createFolder(root, "billing");
+    const moved = await moveFeature(root, file, "billing");
+    await expect(
+      saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nstale editor\n"),
+    ).rejects.toThrow("Feature file not found");
+    expect(await readFeature(root, file)).toBeNull();
+    expect(await loadFeatureDoc(root, file)).toBeNull();
+    expect(await readFeature(root, moved.fileName)).toContain("body");
+  });
+
+  test("a save after a file rename does not recreate the old name", async () => {
+    const file = await createFeature(root, "Quote");
+    await saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nbody\n");
+    const renamed = await renameFeatureFile(root, file, "quotation");
+    await expect(
+      saveFeature(root, file, "# Quote\n\n## Basic @v1\n\nstale editor\n"),
+    ).rejects.toThrow("Feature file not found");
+    expect(await readFeature(root, file)).toBeNull();
+    expect(await readFeature(root, renamed.fileName)).toContain("body");
   });
 
   test("renaming a feature file moves its doc directory along", async () => {

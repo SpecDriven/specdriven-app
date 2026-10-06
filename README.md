@@ -47,14 +47,39 @@ bun install
 
 ```sh
 bun run dev            # bun --hot src/index.ts — HMR on, restarts on change
+bun run dev:debug      # under Bun's inspector, no --hot (see "Debugging" below)
 bun run start          # no hot reload
 bun run dev:electron   # desktop shell; expects `bun run dev` in another terminal
 ```
 
-The server listens on <http://localhost:3000>; set `PORT` to move it. Setting
+The server listens on <http://localhost:3000>, loopback only; set `PORT` to
+move it. The API has no login, so it refuses requests from other machines,
+from other websites open in your browser, and for host names that are not
+this machine — see "Local trust boundary" in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for `SPECDRIVEN_HOST` and
+`SPECDRIVEN_ALLOWED_HOSTS`, which open it up for a deployment. Setting
 `NODE_ENV=production` disables HMR and serves the pre-bundled frontend, which is
 what the compiled binary does. `dev:electron` points the desktop window at the
 running dev server, so edits hot-reload inside the desktop shell too.
+
+### Debugging
+
+The server code runs on two runtimes, each with its own debugger:
+
+- **Web app (Bun):** `bun run dev:debug` starts the server under Bun's
+  inspector (no `--hot`, which fights with breakpoints) and prints a
+  `https://debug.bun.sh/#…` link to debug it from the browser. The VS Code Bun
+  extension (`oven.bun-vscode`) can launch or attach too. Bun speaks the WebKit
+  inspector protocol, so Chrome DevTools and `chrome://inspect` cannot attach.
+- **Desktop app (Electron main process, Node):** in an unpackaged run
+  (`bun run dev:electron`), the **Debug → Main-Process Debugger…** menu opens
+  Node's inspector on `127.0.0.1:9229` (or a free port if that one is taken)
+  and offers its urls to copy. Attach from `chrome://inspect`, a VS Code
+  `"type": "node"` attach configuration, or paste the DevTools url into
+  Chrome. A paused breakpoint freezes the window until you resume. Packaged
+  builds have no Debug menu.
+- **Frontend:** the browser's DevTools, or **Debug → Toggle Window DevTools**
+  in the desktop app.
 
 On first start the app asks for a data repo, because no settings file names one
 yet. Give it a GitHub url like `https://github.com/SpecDriven/data-insurance`; it
@@ -410,11 +435,11 @@ PMs publish spec versions; developers own the tests.
 
 ## License
 
-specdriven.app Community Edition is source-available under the
-[SpecDriven Source Available License 1.0](LICENSE.md) (SSAL-1.0). You may
-run it inside your own organization for any purpose, including commercial
-use, and modify it by hand or with an AI coding assistant. You may not offer
-it to third parties as a hosted or managed service, build a competing product
-with it, circumvent license-key or edition restrictions, or publish its source
-(or your modifications) on any public code hosting service. For anything
-beyond that, contact hello@specdriven.app.
+specdriven.app is source-available under the unmodified
+[PolyForm Perimeter 1.0.1](https://polyformproject.org/licenses/perimeter/1.0.1)
+license, not unrestricted open source. Internal business use, including
+commercial and production use, is permitted, and you may change and
+distribute the software; using it to provide a product that competes with
+specdriven.app is restricted. Read [LICENSE.md](LICENSE.md) and
+[NOTICE.md](NOTICE.md). For anything beyond that, contact
+info@specdriven.app.

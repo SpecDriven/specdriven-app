@@ -86,18 +86,24 @@ Above the tree:
   searches feature names, descriptions, scenario names and bodies (prefix and
   fuzzy matches, names ranked above bodies) and lists every command the app
   offers. Choosing a search result opens the feature or scenario.
-- **+ New folder** creates a folder inside the selected folder. A name with
-  `/` in it nests: `billing/renewals`.
-- **+ New feature** creates a feature file. Type `folder/name` to create it
-  inside a folder. The new feature opens with its description editor ready.
-- **Start AI Session** and the **Selected:** line below it belong to
-  [AI sessions](ai-sessions.md) and only appear while **Code generation** is
-  on in Settings.
+- The **Features** heading above the tree carries the tree's actions as
+  icons, after the **Filter** chip. Hover over one to see its name.
+  - **New folder** (a folder with a +) creates a folder inside the selected
+    folder. A name with `/` in it nests: `billing/renewals`.
+  - **New feature** (a page with a +, shortcut `c`) creates a feature file.
+    Type `folder/name` to create it inside a folder. The new feature opens
+    with its description editor ready.
+  - **Start session** (a play button with a spark) and the **Selected:** line
+    under the heading belong to [AI sessions](ai-sessions.md). While specs
+    are checked, the button is highlighted and shows how many.
+
+  With a folder selected, the New folder and New feature tooltips name the
+  folder the new item goes into.
 
 The tree:
 
 - **Folders** open and close with the disclosure triangle. Clicking a folder
-  selects it, which is where `+ New folder` and `+ New feature` create things;
+  selects it, which is where **New folder** and **New feature** create things;
   `Esc` deselects. A folder's ✕ deletes it, and only an empty folder can be
   deleted.
 - **Features** show a publish ring: a filled arc for the share of scenarios
@@ -109,8 +115,9 @@ The tree:
   and pushed.
 - The **Filter** chip narrows the tree by **Status** (Any status, Draft,
   Proposed, Published) and, when assignments are on, by **Assignee**. Active
-  filters show as chips you can clear one by one. On a feature page the same
-  filter hides scenario cards that do not match, and the page says so.
+  filters show as chips on a row under the heading, and you can clear them one
+  by one. On a feature page the same filter hides scenario cards that do not
+  match, and the page says so.
 
 An empty data folder shows `No feature files yet`.
 
@@ -202,6 +209,14 @@ Below, in one scrolling column:
   focus), and double-click the handle for the natural size. The width is
   kept in the body as `<img src="…" alt="…" width="…">`, which any markdown
   viewer honours. With **Vim mode** on, a **Vim** tab appears as well.
+  A web link typed as is — `https://abc.com` — is a link: click it in
+  **Preview**, or `⌘`-click it while writing (a plain click there places
+  the caret, so the url stays editable). With the caret in a link, the
+  toolbar's **Open** button opens it too. This works in every markdown
+  editor in the app.
+  The two **A** buttons left of **H** make the text bigger or smaller, in
+  every tab. Every markdown editor in the app follows the size, and it is
+  remembered on this device.
 - **Entity fields**: when the project names a code repo (`code-repo` in
   `project-settings.json`), type `@` and press `Tab` to pick a field of
   one of its data entities — `@firstName`, or `@User.firstName` when two
@@ -303,8 +318,12 @@ Every page has a stable url:
 `<feature>` is the file path without `.feature.md`, folders included;
 `<scenario>` is the scenario name in lower case with hyphens. **Copy link**
 on a feature page, a card or the editor puts the url on the clipboard. In the
-desktop app the same paths work as `specdriven://` links, so a url pasted into
-a ticket opens the app.
+desktop app the link is a `specdriven://` url that names the spec folder
+first, then the same path — `specdriven://specs-insurance/features/quotes`,
+`specdriven://specs-insurance/tasks/<task>` — so a url pasted into a ticket
+opens the app on that folder, switching to it when another one is open. The
+folder is matched by name against the folders in your folder list; a link
+without one opens in the folder that is open.
 
 A url whose feature or scenario has been deleted opens the nearest page with
 a note saying what was not found.
@@ -350,6 +369,7 @@ tab:
 | `⌘Enter` | Publish all, Propose, or Publish, depending on where you are |
 | `⌘⇧C` | Copy link to this page |
 | `⌘B`, `⌘I`, `⌘K` | Bold, italic, insert a link (in a text editor) |
+| `⌘`-click | Open the web link under the pointer (in a text editor) |
 | `←`, `→` | Resize the sidebar (with the divider focused) |
 
 On Windows and Linux `⌘` is `Ctrl`.

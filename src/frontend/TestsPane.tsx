@@ -31,6 +31,8 @@ import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { Popover } from "./Popover";
 import { StatusIcon } from "./StatusIcon";
+import { shareUrl } from "./shareLink";
+import { cleanLine, cleanText } from "../server/text";
 import { SaveIndicator, toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { isTypingTarget } from "./shortcuts";
@@ -97,8 +99,8 @@ export async function newPlanFlow(prompt: Prompt, go: Navigate): Promise<void> {
     placeholder: "Release 1.2",
     confirmLabel: "Create",
   });
-  if (!name?.trim()) return;
-  const plan = await testing.createPlan({ name: name.trim() });
+  if (!name || !cleanLine(name)) return;
+  const plan = await testing.createPlan({ name: cleanLine(name) });
   if (plan) go({ kind: "plan", id: plan.id }, { push: true });
 }
 
@@ -109,8 +111,8 @@ export async function newCaseFlow(prompt: Prompt, go: Navigate, planId?: string)
     placeholder: "Quote total includes the discount",
     confirmLabel: "Create",
   });
-  if (!title?.trim()) return;
-  const c = await testing.createCase({ title: title.trim() });
+  if (!title || !cleanLine(title)) return;
+  const c = await testing.createCase({ title: cleanLine(title) });
   if (!c) return;
   if (planId) {
     const plan = testingState().plans.find((p) => p.id === planId);
@@ -121,17 +123,20 @@ export async function newCaseFlow(prompt: Prompt, go: Navigate, planId?: string)
 
 async function renamePlanFlow(plan: TestPlan, prompt: Prompt): Promise<void> {
   const name = await prompt({ title: "Rename test plan", initial: plan.name, confirmLabel: "Rename" });
-  if (name?.trim() && name.trim() !== plan.name) await testing.updatePlan(plan.id, { name: name.trim() });
+  const cleaned = cleanLine(name ?? "");
+  if (cleaned && cleaned !== plan.name) await testing.updatePlan(plan.id, { name: cleaned });
 }
 
 async function renameCaseFlow(c: TestCase, prompt: Prompt): Promise<void> {
   const title = await prompt({ title: "Rename test case", initial: c.title, confirmLabel: "Rename" });
-  if (title?.trim() && title.trim() !== c.title) await testing.updateCase(c.id, { title: title.trim() });
+  const cleaned = cleanLine(title ?? "");
+  if (cleaned && cleaned !== c.title) await testing.updateCase(c.id, { title: cleaned });
 }
 
 async function renameRunFlow(run: TestPlanExecution, prompt: Prompt): Promise<void> {
   const name = await prompt({ title: "Rename run", initial: run.name, confirmLabel: "Rename" });
-  if (name?.trim() && name.trim() !== run.name) await testing.updateExecution(run.id, { name: name.trim() });
+  const cleaned = cleanLine(name ?? "");
+  if (cleaned && cleaned !== run.name) await testing.updateExecution(run.id, { name: cleaned });
 }
 
 async function deletePlanFlow(plan: TestPlan, confirm: Confirm, go: Navigate, open: TestsRoute): Promise<void> {
@@ -182,7 +187,7 @@ async function deleteRunFlow(run: TestPlanExecution, confirm: Confirm, go: Navig
 /** Absolute url for "Copy link" — the same rule as the app's copyLink. */
 async function copyTestsLink(view: TestsRoute): Promise<void> {
   const path = testsPath(view);
-  const url = location.protocol === "app:" ? `specdriven://${path.replace(/^\/+/, "")}` : location.origin + path;
+  const url = shareUrl(path);
   try {
     await navigator.clipboard.writeText(url);
     toast.success("Link copied.");
@@ -387,18 +392,23 @@ function useAutosave(
     setDraft(value);
     setSavedAt(null);
   }
+  // The text is saved cleaned (specs/ui/ui.feature.md "User-entered text is
+  // cleaned up") while `saved` keeps what was typed: compared cleaned, the
+  // server's copy of our own save is not news to adopt — adopting it would
+  // take the newline just typed out from under the caret.
   useEffect(() => {
-    if (draftRef.current === saved.current && value !== saved.current) {
+    const current = cleanText(saved.current);
+    if (cleanText(draftRef.current) === current && cleanText(value) !== current) {
       saved.current = value;
       setDraft(value);
     }
   }, [value]);
   const tick = async () => {
     const text = draftRef.current;
-    if (inFlight.current || text === saved.current) return;
+    if (inFlight.current || cleanText(text) === cleanText(saved.current)) return;
     inFlight.current = true;
     setSaving(true);
-    const ok = await save(text);
+    const ok = await save(cleanText(text));
     inFlight.current = false;
     setSaving(false);
     if (ok !== null) {
@@ -415,7 +425,7 @@ function useAutosave(
       void tickRef.current();
     };
   }, [seconds, key]);
-  const dirty = draft !== saved.current;
+  const dirty = cleanText(draft) !== cleanText(saved.current);
   useEffect(() => {
     testing.setDirty(key, dirty);
     return () => testing.setDirty(key, false);
@@ -1300,7 +1310,7 @@ export function ResultRow({
   }
   const record = (status: ResultStatus, text = comment) => {
     if (readOnly) return;
-    void testing.setResult(run.id, caseId, { status, comment: text });
+    void testing.setResult(run.id, caseId, { status, comment: cleanLine(text) });
   };
   const onKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
     if (readOnly || isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -1357,7 +1367,12 @@ export function ResultRow({
           readOnly={readOnly}
           onChange={(e) => setComment(e.target.value)}
           onBlur={() => {
-            if (comment !== result.comment) record(result.status, comment);
+            // Saved cleaned (specs/ui/ui.feature.md "User-entered text is
+            // cleaned up"): a stray space is no change, and the field shows
+            // what was kept.
+            const cleaned = cleanLine(comment);
+            if (cleaned !== result.comment) record(result.status, cleaned);
+            else setComment(cleaned);
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();

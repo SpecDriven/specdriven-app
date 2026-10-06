@@ -8,10 +8,12 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadFeatureDoc } from "../../src/server/automerge/store";
+import { loadFeatureDoc, saveFeatureDoc } from "../../src/server/automerge/store";
 import { importDrift } from "../../src/server/automerge/driftSync";
 import { projectFeature } from "../../src/server/automerge/project";
-import { publishFeature, readFeature, saveFeature } from "../../src/server/features";
+import { snapshotOf } from "../../src/server/automerge/schema";
+import * as A from "@automerge/automerge";
+import { moveScenario, publishFeature, readFeature, saveFeature } from "../../src/server/features";
 import { conflictedFiles } from "../../src/server/git";
 import { syncDataDir } from "../../src/server/reload";
 import { git, stopServers, twoClones } from "../helpers/fixtures";
@@ -215,6 +217,56 @@ test("drift that demotes, edits, then republishes is repaired from the doc", asy
   expect(entry.body).toContain("the unearned premium is refunded");
 });
 
+// H2 in verification/lean/REPORT.md: a CRDT merge of two peers' identical
+// absorbs leaves a published spec's live text doubled. The spec is held to
+// and rendered as the body it was published with, so a file carrying that
+// body is a projection, and the drift pass heals the live text before it
+// looks at the file. A peer still rendering the doubled text (an older build)
+// pushes a doubled file; that is drift against the recorded body, refused and
+// repaired, with the heal saved in the same tick so the old peer stops.
+async function doubledPublished(dir: string, file: string) {
+  const loaded = (await loadFeatureDoc(dir, file))!;
+  const i = loaded.doc.specs.findIndex((e) => e.status === "published");
+  const merged = A.change(loaded.doc, (d) => {
+    A.splice(d, ["specs", i, "body"], d.specs[i]!.body.length, 0, "\n- line two");
+  });
+  await saveFeatureDoc(dir, file, merged, loaded.heads);
+  return i;
+}
+
+test("a published spec whose live text a merge doubled is healed by the drift pass, file untouched", async () => {
+  const file = "specs/billing.feature.md";
+  const dir = join(root, "data");
+  await Bun.write(join(dir, file), "# Billing\n\n## Refund @v1 [published]\n\n- line one\n- line two\n");
+  await importDrift(dir);
+  const published = (await readFeature(dir, file))!;
+  const i = await doubledPublished(dir, file);
+  expect((await loadFeatureDoc(dir, file))!.doc.specs[i]!.body).toBe("- line one\n- line two\n- line two");
+
+  expect(await importDrift(dir)).toBe("healed 1 published scenario(s)");
+  expect(await readFeature(dir, file)).toBe(published);
+  const entry = (await loadFeatureDoc(dir, file))!.doc.specs[i]!;
+  expect(entry.body).toBe("- line one\n- line two");
+  expect(snapshotOf(entry)).toBe("- line one\n- line two");
+  expect(await importDrift(dir)).toBe("");
+});
+
+test("a file holding the doubled text of a published spec is repaired to the recorded body", async () => {
+  const file = "specs/billing.feature.md";
+  const dir = join(root, "data");
+  await Bun.write(join(dir, file), "# Billing\n\n## Refund @v1 [published]\n\n- line one\n- line two\n");
+  await importDrift(dir);
+  const published = (await readFeature(dir, file))!;
+  const i = await doubledPublished(dir, file);
+  // What a peer on an older build writes: the doubled live text as the file.
+  await Bun.write(join(dir, file), published.replace("- line two\n", "- line two\n- line two\n"));
+
+  expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents; healed 1 published scenario(s)");
+  expect(await readFeature(dir, file)).toBe(published);
+  expect((await loadFeatureDoc(dir, file))!.doc.specs[i]!.body).toBe("- line one\n- line two");
+  expect(await importDrift(dir)).toBe("");
+});
+
 test("an external feature deletion also drops the document", async () => {
   const { a, b } = await seededClones();
 
@@ -246,4 +298,49 @@ test("publish over a concurrent edit merges instead of conflicting", async () =>
 
   await syncDataDir(b);
   expect(await readFeature(b, "specs/seed.feature.md")).toBe(mdA!);
+});
+
+// When the other side's push carried operations, its markdown folds in
+// against its own document's projection, not the git merge base: what that
+// document already holds — here B's body edit — must not read as an edit to
+// a scenario A has since renamed or moved away, or the pull would land in
+// the conflict dialog the operations had already made unnecessary.
+test("a rename racing an in-app edit of the same line merges with no conflict dialog", async () => {
+  const { a, b } = await seededClones();
+
+  await saveFeature(b, "specs/seed.feature.md", SEED.replace("- line two", "- line two, from B"));
+  await syncDataDir(b);
+  const id = (await loadFeatureDoc(a, "specs/seed.feature.md"))!.doc.specs[0]!.id;
+  await saveFeature(
+    a,
+    "specs/seed.feature.md",
+    SEED.replace("## Story @v1", "## Story renamed @v1").replace("- line two", "- line two, from A"),
+    { name: "Story renamed", version: 1, id },
+  );
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+
+  const mdA = (await readFeature(a, "specs/seed.feature.md"))!;
+  expect(mdA).toContain("## Story renamed @v1");
+  expect(mdA).not.toContain("## Story @v1");
+  expect(mdA).toContain("from A");
+  expect(mdA).toContain("from B");
+});
+
+test("a move racing an in-app edit of the moved scenario merges with no conflict dialog", async () => {
+  const other = "specs/other.feature.md";
+  const clones = await twoClones(root, {
+    "specs/seed.feature.md": SEED,
+    [other]: "# Other\n\n## Elsewhere @v1 [proposed]\n\n- x\n",
+  });
+  const { a, b } = clones;
+  await syncDataDir(a);
+  await syncDataDir(b);
+
+  await saveFeature(b, "specs/seed.feature.md", SEED.replace("- line two", "- line two, from B"));
+  await syncDataDir(b);
+  await moveScenario(a, "specs/seed.feature.md", { name: "Story", version: 1 }, other);
+  await settle(a);
+  expect(await conflictedFiles(a)).toEqual([]);
+  expect(await readFeature(a, other)).toContain("## Story @v1");
 });

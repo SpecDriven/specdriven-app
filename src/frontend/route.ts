@@ -84,9 +84,78 @@ export function parseRoute(pathname: string): Route {
  */
 export const DESKTOP_SCHEME = "specdriven";
 
-/** `/features/quotes` -> `specdriven://features/quotes`. */
-export function desktopLink(path: string): string {
-  return `${DESKTOP_SCHEME}://${path.replace(/^\/+/, "")}`;
+/**
+ * Query flag the desktop shell puts on a path that came from a
+ * `specdriven://` link (src/electron/linkRouting.ts). Such a path may
+ * name its spec folder first; the window's own urls — a reload, Back — never
+ * do, so only a flagged path is read for one (splitRepoPath). The app drops
+ * the flag as soon as it has read it.
+ */
+export const LINK_PARAM = "link";
+
+/** `/specs-insurance/tasks/ship` -> `/specs-insurance/tasks/ship?link`. */
+export function linkEntry(path: string): string {
+  return `${path}?${LINK_PARAM}`;
+}
+
+/** Whether a url's query (`location.search`) marks it as a link from outside. */
+export function isLinkEntry(search: string): boolean {
+  return new URLSearchParams(search).has(LINK_PARAM);
+}
+
+/**
+ * `/features/quotes` -> `specdriven://<repo>/features/quotes`. A link leaves
+ * the window, where nothing says which spec folder it belongs to, so it
+ * names the folder first — `repo` is the data repo as configured (a path or
+ * a GitHub url), shortened to its display name. Without one the link is the
+ * bare path, the shape links had before they carried the folder.
+ */
+export function desktopLink(path: string, repo?: string | null): string {
+  const rest = path.replace(/^\/+/, "");
+  const name = repo ? repoDisplayName(repo) : "";
+  if (!name) return `${DESKTOP_SCHEME}://${rest}`;
+  return `${DESKTOP_SCHEME}://${encodeURIComponent(name)}${rest ? `/${rest}` : ""}`;
+}
+
+/** An app path split into the spec folder a desktop link names and the rest. */
+export interface RepoPath {
+  /** The configured data repo the first segment names, or null for none. */
+  repo: string | null;
+  path: string;
+}
+
+/**
+ * Read the spec folder off the front of a desktop link's path
+ * (`/specs-insurance/tasks/ship` -> `specs-insurance`, `/tasks/ship`). The
+ * first segment names a folder when it is the display name of one of
+ * `repos` — the folders this machine knows, the open one first so it wins a
+ * name two folders share. Case is ignored: some url parsers lowercase a
+ * host. Anything else is a path from before links carried the folder, and
+ * is returned as is.
+ *
+ * Only a link from outside may name its folder (see `LINK_PARAM`); the
+ * window's own urls never do. Links without a folder are still about
+ * (`specdriven://features/quotes`), so when a folder shares its name with a
+ * route word the path is read as that route if `isRoute` says it names a
+ * view and the rest would not — `/features/quotes` stays a feature even with
+ * a folder named "features", while `/features` alone, `/tasks/features/
+ * quotes` and a folder's own plugin view (not mounted in this window yet)
+ * still split.
+ */
+export function splitRepoPath(
+  pathname: string,
+  repos: readonly string[],
+  isRoute?: (path: string) => boolean,
+): RepoPath {
+  const segs = pathname.split("/").filter(Boolean);
+  const first = segs[0];
+  if (!first) return { repo: null, path: pathname };
+  const name = decode(first).toLowerCase();
+  const repo = repos.find((r) => repoDisplayName(r).toLowerCase() === name);
+  if (!repo) return { repo: null, path: pathname };
+  const rest = `/${segs.slice(1).join("/")}`;
+  if (isRoute && isRoute(pathname) && !isRoute(rest)) return { repo: null, path: pathname };
+  return { repo, path: rest };
 }
 
 /**

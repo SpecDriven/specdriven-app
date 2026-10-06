@@ -45,7 +45,8 @@ import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
 import { EntryKindChip, dayOf, entryGroups, entryKindOf } from "../notebook";
 import { createPromiseQueue } from "../promiseQueue";
-import { desktopLink } from "../route";
+import { shareUrl } from "../shareLink";
+import { cleanLine } from "../../server/text";
 import {
   pageGroups,
   pageListingMetaEqual,
@@ -223,7 +224,9 @@ export function PagePane({
         const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          // What this buffer was edited from, so the server keeps what the
+          // page gained since (a disk edit, a sync) instead of writing over it.
+          body: JSON.stringify({ content, base: saved.current }),
         });
         const data = (await res.json().catch(() => ({}))) as PageListing & { error?: string };
         if (!res.ok) {
@@ -298,7 +301,7 @@ export function PagePane({
           const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: next }),
+            body: JSON.stringify({ content: next, base: saved.current }),
           });
           const data = (await res.json().catch(() => ({}))) as PageListing & {
             content?: string;
@@ -461,7 +464,7 @@ export function PagePane({
     const minutes = parseEstimate(estimateText);
     const start = fromLocalInput(startLocal);
     if (minutes === null || start === null) return null;
-    const shared = location.protocol === "app:" ? desktopLink(link) : location.origin + link;
+    const shared = shareUrl(link);
     const body = parsePage(text).body.trim();
     const excerpt = body.length > 300 ? `${body.slice(0, 300)}…` : body;
     return googleCalendarUrl({
@@ -841,7 +844,7 @@ export async function newPageFlow(
         }
       : {}),
   });
-  const input = result?.text;
+  const input = cleanLine(result?.text ?? "");
   if (!input) return;
   const res = await fetch(`/api/${tab.folder}`, {
     method: "POST",
@@ -897,14 +900,14 @@ export function PagesSidebar({
       initial: page.name,
       confirmLabel: "Rename",
     });
-    if (!name || name.trim() === page.name) return;
+    if (!name || cleanLine(name) === page.name) return;
     // What the open editor holds lands first, so the rename carries it.
     const open = openPage();
     if (open?.fileName === page.fileName) await open.flush();
     const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}/rename`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim() }),
+      body: JSON.stringify({ name: cleanLine(name) }),
     });
     const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
     if (!res.ok || !data.fileName) {
