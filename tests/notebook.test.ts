@@ -391,7 +391,8 @@ test("a merged entry holds each side's edit exactly once", async () => {
 // H1 for pages: B saves the body through the app (chunk files) and, in the
 // same push, hand-edits Kind (no operations). A's concurrent body save makes
 // the pull conflict. The ops-arrived path used to skip the three-way and
-// drop the Kind change; it now keeps the merged body and takes the metadata.
+// drop the Kind change; it now folds B's markdown in against B's own
+// document's projection, where the Kind change is the only difference.
 test("a hand edit riding a page push with operations is absorbed", async () => {
   const clones = await twoClones(root);
   const fileName = await createEntry(clones.a, "Once", "Observation", {
