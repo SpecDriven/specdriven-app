@@ -9,7 +9,7 @@
 // at once and is saved to the settings file, so the next run starts with it.
 
 import { readFile } from "node:fs/promises";
-import { isDemoMode } from "./demo";
+import { isDemoMode } from "./demoMode";
 import { bodyOf, json, type Handler } from "./http";
 import { getAppRoot } from "./paths";
 import { readState, writeState } from "./state";

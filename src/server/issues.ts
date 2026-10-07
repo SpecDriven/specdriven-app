@@ -18,7 +18,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { getAuth } from "./auth";
-import { DEMO_ISSUES_REPO, isDemoMode } from "./demo";
+import { DEMO_ISSUES_REPO, isDemoMode } from "./demoMode";
 import { ghAvailable, ghToken } from "./git/gh";
 import { githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
