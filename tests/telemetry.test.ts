@@ -22,7 +22,7 @@ import {
   telemetryActive,
   withSpan,
 } from "../src/server/telemetry";
-import { stopServers, twoClones } from "./helpers/fixtures";
+import { installFakeGit } from "./helpers/fakeGit";
 
 const OTEL_ENV = [
   "OTEL_SDK_DISABLED",
@@ -324,14 +324,15 @@ describe("sync instrumentation", () => {
     }
   });
 
+  // The spans are under test, not git: the tick runs on a fake one, whose
+  // pull and push still go through the traced facade.
   test("a sync tick traces pull, drift and push as one trace", async () => {
     const root = await mkdtemp(join(tmpdir(), "specdriven-otel-tick-"));
+    const fakeGit = installFakeGit();
     try {
-      const { a } = await twoClones(root, {
-        "specs/seed.feature.md": "# Seed\n\n## Story @v1 [proposed]\n\n- line\n",
-      });
+      await Bun.write(join(root, "specs/seed.feature.md"), "# Seed\n\n## Story @v1 [proposed]\n\n- line\n");
       const { spans } = startInMemory();
-      await syncDataDir(a);
+      await syncDataDir(root);
       const finished = spans.getFinishedSpans();
       const names = finished.map((s) => s.name);
       expect(names).toContain("sync.tick");
@@ -346,9 +347,11 @@ describe("sync instrumentation", () => {
       }
       expect(tick.attributes["sync.pull.ok"]).toBe(true);
       // The tick imported the seed and pushed the new document chunks.
+      const drift = finished.find((s) => s.name === "sync.import_drift")!;
+      expect(drift.attributes["sync.imported"]).toBe(1);
       expect(tick.attributes["sync.pushed"]).toBe(true);
     } finally {
-      stopServers();
+      fakeGit.restore();
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -32,6 +32,7 @@ import {
 } from "../src/server/pages";
 import { parsePage, serializePage } from "../src/server/parser";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { installFakeGit } from "./helpers/fakeGit";
 import { builtinManifests } from "../src/plugins/builtin/manifests";
 import { readProfile } from "../src/plugins/profile";
 
@@ -75,18 +76,20 @@ test("ensurePageFolder creates the tasks folder once", async () => {
   expect(await Bun.file(join(root, TASKS_FOLDER, "ship-v2.md")).text()).toBe("# Ship v2\n");
 });
 
+// The switch is under test, not git, so the tick runs on a fake one.
 test("a sync tick creates the tasks folder only when the setting is on", async () => {
-  const clones = await twoClones(root);
+  const fakeGit = installFakeGit();
   await syncPlugins({ roadmap: true, tasks: false });
   try {
-    await syncDataDir(clones.a);
-    expect(await exists(join(clones.a, TASKS_FOLDER))).toBe(false);
+    await syncDataDir(root);
+    expect(await exists(join(root, TASKS_FOLDER))).toBe(false);
     await syncPlugins({ roadmap: false, tasks: true });
-    await syncDataDir(clones.a);
+    await syncDataDir(root);
   } finally {
     await syncPlugins({ roadmap: false, tasks: false });
+    fakeGit.restore();
   }
-  expect(await exists(join(clones.a, TASKS_FOLDER))).toBe(true);
+  expect(await exists(join(root, TASKS_FOLDER))).toBe(true);
 });
 
 test("a sync tick commits and pushes every file in the tasks folder", async () => {
