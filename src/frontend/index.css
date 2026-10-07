@@ -7877,3 +7877,19 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .modal-body {
   white-space: pre-line;
 }
+
+/* Claude's login/billing chip in the agent pane header. */
+.agent-account {
+  flex: none;
+  white-space: nowrap;
+}
+.agent-account[data-billing="api"] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.agent-account[data-billing="none"] {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
