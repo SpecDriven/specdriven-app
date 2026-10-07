@@ -28,6 +28,8 @@
 // the server, `bun test` and the desktop shell never pay for it.
 
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
   Options,
@@ -92,6 +94,122 @@ export interface SlashCommandInfo {
   argumentHint: string;
 }
 
+/** How a Claude session is signed in and billed, read from the SDK's
+    accountInfo(). "plan" is a Claude subscription, "api" pay-per-token (an
+    API key, a Console login, a bearer token), "provider" a cloud or gateway
+    backend, "none" nobody. */
+export interface ChatAccount {
+  billing: "plan" | "api" | "provider" | "none";
+  /** Short chip text: "Claude Max", "API billing", "Not logged in". */
+  label: string;
+  /** Tooltip: who is signed in and where the credential came from. */
+  detail: string;
+}
+
+/** What Claude Code's initialize answer says of the login (the SDK's
+    AccountInfo). Claude Code fills `subscriptionType` with a display name
+    ("Claude Max", "Claude Pro", "Claude Team", "Claude Enterprise") only
+    while a claude.ai login is what it uses, and "Claude API" when that
+    login has no plan; `tokenSource` may be the literal "none". */
+export interface AccountInfoLike {
+  email?: string;
+  organization?: string;
+  subscriptionType?: string;
+  tokenSource?: string;
+  apiKeySource?: string;
+  apiProvider?: string;
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  bedrock: "Amazon Bedrock",
+  vertex: "Google Vertex AI",
+  foundry: "Microsoft Foundry",
+  anthropicAws: "Anthropic on AWS",
+  anthropicGoogleCloud: "Anthropic on Google Cloud",
+  mantle: "Mantle",
+  gateway: "Gateway",
+};
+
+// Tokens that come from a claude.ai login (`claude setup-token`, a cloud
+// session's file): a plan, though Claude Code does not say which.
+const OAUTH_TOKEN_SOURCES = new Set([
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+  "CCR_OAUTH_TOKEN_FILE",
+]);
+
+/**
+ * Where Claude Code sends its API calls when something moved them:
+ * ANTHROPIC_BASE_URL from the environment it inherits, overridden by the
+ * `env` block of each settings file it loads (settingSources: user, then
+ * project, then local — the later one wins). Claude Code's account answer
+ * does not say, so the pane reads the same files.
+ */
+export async function claudeBaseUrl(
+  cwd: string,
+  env: Record<string, string | undefined> = process.env,
+  configDir: string = env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
+): Promise<string | undefined> {
+  let url = env.ANTHROPIC_BASE_URL || undefined;
+  for (const file of [
+    join(configDir, "settings.json"),
+    join(cwd, ".claude", "settings.json"),
+    join(cwd, ".claude", "settings.local.json"),
+  ]) {
+    try {
+      const value = JSON.parse(await readFile(file, "utf8"))?.env?.ANTHROPIC_BASE_URL;
+      if (typeof value === "string" && value) url = value;
+    } catch {
+      // Missing or unreadable settings add nothing.
+    }
+  }
+  return url;
+}
+
+const LOCAL_HOSTS = /^(localhost|.*\.localhost|127(\.\d+){3}|\[::1\]|0\.0\.0\.0)$/i;
+
+export function describeAccount(info: AccountInfoLike, baseUrl?: string): ChatAccount {
+  const present = (v?: string) => (v && v !== "none" ? v : undefined);
+  const apiKey = present(info.apiKeySource);
+  const token = present(info.tokenSource);
+  const who = [info.email, info.organization].filter(Boolean).join(" · ");
+  const detailOf = (what: string, source?: string) =>
+    [what, who, source ? `credential: ${source}` : ""].filter(Boolean).join(" · ");
+  if (info.apiProvider && info.apiProvider !== "firstParty") {
+    const name = PROVIDER_LABEL[info.apiProvider] ?? info.apiProvider;
+    return { billing: "provider", label: name, detail: detailOf(`Billed through ${name}`) };
+  }
+  // A moved base URL: every call goes there, whatever the credential, and
+  // a local one is a proxy in front of the API.
+  let endpoint: URL | undefined;
+  try {
+    endpoint = baseUrl ? new URL(baseUrl) : undefined;
+  } catch {
+    // Not a URL Claude Code could use either; judge by the credential.
+  }
+  if (endpoint) {
+    const label = LOCAL_HOSTS.test(endpoint.hostname) ? "PROXY" : endpoint.hostname;
+    return { billing: "api", label: `API:${label}`, detail: `API:${endpoint.host}` };
+  }
+  const plan = present(info.subscriptionType);
+  if (plan && plan !== "Claude API") {
+    return { billing: "plan", label: plan, detail: detailOf("Claude subscription", "claude.ai login") };
+  }
+  if (token && OAUTH_TOKEN_SOURCES.has(token)) {
+    return { billing: "plan", label: "Claude plan", detail: detailOf("Claude subscription token", token) };
+  }
+  // A bearer token sent as is: whoever issued it (a gateway, a proxy)
+  // decides the billing, so the chip names the credential, not a plan.
+  if (!apiKey && token === "ANTHROPIC_AUTH_TOKEN") {
+    return { billing: "api", label: "Auth token", detail: detailOf("Billed by whoever issued the token", token) };
+  }
+  if (apiKey || token || plan) {
+    const source = apiKey ?? token ?? "claude.ai login without a plan";
+    return { billing: "api", label: "API billing", detail: detailOf("Billed per token", source) };
+  }
+  return { billing: "none", label: "Not logged in", detail: "Run claude auth login in a terminal, then start a new session." };
+}
+
 export interface ChatSessionMeta {
   id: string;
   name: string;
@@ -109,6 +227,8 @@ export interface ChatSessionMeta {
       — once it says it. */
   agentSessionId?: string;
   model?: string;
+  /** Claude only: the login and billing source, once known. */
+  account?: ChatAccount;
   /** Pi has none of these: its sessions sit on "bypassPermissions" and
       refuse a change (see setChatPermissionMode). */
   permissionMode: PermissionMode;
@@ -127,6 +247,7 @@ export type ChatEventBody =
       status: ChatStatus;
       agentSessionId?: string;
       model?: string;
+      account?: ChatAccount;
       permissionMode?: PermissionMode;
       tools?: string[];
       commands?: SlashCommandInfo[];
@@ -242,6 +363,8 @@ export interface QueryLike extends AsyncIterable<SDKMessage> {
   interrupt(): Promise<unknown>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   supportedCommands(): Promise<SlashCommand[]>;
+  /** Optional: a fake need not answer it. */
+  accountInfo?(): Promise<AccountInfoLike | undefined>;
 }
 
 export type QueryFactory = (args: {
@@ -538,11 +661,26 @@ async function ready(session: ChatSession): Promise<void> {
   } catch {
     // The names in init will do when it comes.
   }
+  let account: ChatAccount | undefined;
+  try {
+    const [info, baseUrl] = await Promise.all([
+      session.query!.accountInfo?.(),
+      claudeBaseUrl(session.meta.cwd),
+    ]);
+    if (info) account = describeAccount(info, baseUrl);
+  } catch {
+    // Older binaries lack the request; the pane just shows no chip.
+  }
+  if (FINAL.has(session.meta.status)) return;
+  if (account) session.meta.account = account;
   if (session.meta.status === "starting") {
     setStatus(session, session.busy ? "running" : "idle", {
       permissionMode: session.meta.permissionMode,
       commands: session.commands,
+      ...(account ? { account } : {}),
     });
+  } else if (account) {
+    setStatus(session, session.meta.status, { account });
   }
 }
 
