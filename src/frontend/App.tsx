@@ -489,6 +489,24 @@ export function placeScenario(
 }
 
 /**
+ * The feature a queued full-file PUT should write. Description, Assigned,
+ * ticket-link and scenario saves each serialize the whole `.feature.md`, so
+ * a write that captured its snapshot before the PUT ahead of it landed would
+ * last-write-wins the other field. When the open feature is still this file,
+ * start from what that write left in memory; otherwise keep the caller's
+ * snapshot — a cleanup tick after navigation must not stamp the old
+ * description onto the feature opened since.
+ */
+export function featureForWrite(
+  file: string,
+  selected: string | null,
+  latest: Feature | null,
+  captured: Feature,
+): Feature {
+  return selected === file && latest !== null ? latest : captured;
+}
+
+/**
  * Whether a click on a scenario card landed on one of its controls — a
  * button, a checkbox, the ticket link, a test link — rather than on the card
  * itself. The title link counts as the card: clicking it highlights, and
@@ -1081,6 +1099,8 @@ export function App() {
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
+  const featureRef = useRef(feature);
+  featureRef.current = feature;
   /** Draft for the inline file-name editor; null while not editing. */
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -1108,15 +1128,17 @@ export function App() {
   // Editor autosave (specs/editor-autosave.feature.md): the signature of what
   // the open dialog last had saved, and whether a tick is still saving. Refs,
   // because a tick reads them between renders and must not cause one.
-  // Scenario PUTs share a queue with the description editor's reason: a
-  // folder switch must wait for a tick already on its way. A boolean
-  // in-flight flag would make that wait a no-op, and the server resolves
-  // the data folder per request, so the late PUT would write this scenario
-  // into the folder that comes next.
+  // Scenario, description, Assigned and ticket-link PUTs share one queue: each
+  // serializes the whole `.feature.md`, so a late tick must not last-write-wins
+  // a field the write ahead of it just landed. A folder switch waits for the
+  // same queue — a boolean in-flight flag would make that wait a no-op, and
+  // the server resolves the data folder per request, so the late PUT would
+  // write this scenario into the folder that comes next.
   const autosaved = useRef<string | null>(null);
   /** The tick still saving, resolving to where it left the scenario — null when none is away. */
   const autosaveInFlight = useRef<Promise<Placement> | null>(null);
-  const scenarioSaveQueue = useRef(createPromiseQueue());
+  const featureSaveQueue = useRef(createPromiseQueue());
+  const scenarioSaveQueue = featureSaveQueue;
   /**
    * The feature's path is about to change (move, rename-file) or go away
    * (delete). `retiring` blocks new autosave ticks while a flush lands;
@@ -1351,14 +1373,13 @@ export function App() {
   selectedRef.current = selected;
   const descSaved = useRef<string | null>(null);
   /**
-   * Description PUTs go through one queue, so a flush (leaving the feature, or
-   * switching data folder) waits for a tick already on its way and then writes
-   * what the editor still holds — the same reason the page editor and the
-   * model canvas have queues of their own. A boolean in-flight flag would make
-   * that flush a no-op instead, dropping whatever was typed since the tick
-   * started.
+   * Description PUTs share `featureSaveQueue` with scenario / Assigned /
+   * ticket-link writes, so a flush (leaving the feature, or switching data
+   * folder) waits for a tick already on its way and then writes what the
+   * editor still holds. A boolean in-flight flag would make that flush a
+   * no-op instead, dropping whatever was typed since the tick started.
    */
-  const descSaveQueue = useRef(createPromiseQueue());
+  const descSaveQueue = featureSaveQueue;
   // The editor's height, dragged by the strip along its lower boundary. null
   // until a first drag or a stored height: then the CSS third-of-the-window
   // default stands, and follows the window.
@@ -3020,20 +3041,36 @@ export function App() {
     // second time, or write over the neighbour a rename re-sorted into its
     // old slot.
     const ahead = autosaveInFlight.current;
+    const file = selected;
     const known: Placement = { feature, index: editing.index, id: draft.id };
-    const place = (at: Placement) => placeScenario(draft, at, derived);
-    if (!ahead) setFeature(place(known).next);
+    const place = (at: Placement) =>
+      placeScenario(
+        draft,
+        {
+          ...at,
+          feature: featureForWrite(file, selectedRef.current, featureRef.current, at.feature),
+        },
+        derived,
+      );
+    if (!ahead) {
+      const optimistic = place(known).next;
+      featureRef.current = optimistic;
+      setFeature(optimistic);
+    }
     if (close) setEditing(null);
     const session = editorSession.current;
-    const file = selected;
     setSaving(true);
     // Through the queue so a folder switch can wait for this PUT, and so
     // a save meeting a tick already away goes out after it, from where it
-    // landed.
+    // landed — including a description or Assigned write that serialized
+    // the same file.
     return scenarioSaveQueue.current.run(async () => {
       const base = ahead ? await ahead : known;
       const { s, next } = place(base);
-      if (ahead && selectedRef.current === file) setFeature(next);
+      if (ahead && selectedRef.current === file) {
+        featureRef.current = next;
+        setFeature(next);
+      }
       const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -3055,6 +3092,7 @@ export function App() {
       if (res.ok) {
         const saved = featureFromResponse(data, file);
         if (stillHere) {
+          featureRef.current = saved;
           setFeature(saved);
           setDirty(false);
         } else {
@@ -3176,10 +3214,20 @@ export function App() {
     const draft = { ...editing.scenario, tests };
     const derived = editing.isNew === true;
     const ahead = autosaveInFlight.current;
+    const file = selected;
     const known: Placement = { feature, index: editing.index, id: draft.id };
-    const place = (at: Placement) => placeScenario(draft, at, derived);
+    const place = (at: Placement) =>
+      placeScenario(
+        draft,
+        {
+          ...at,
+          feature: featureForWrite(file, selectedRef.current, featureRef.current, at.feature),
+        },
+        derived,
+      );
     const shown = place(known);
     if (!ahead) {
+      featureRef.current = shown.next;
       setFeature(shown.next);
       setSelectedScenario(cardOfScenario(shown.next.scenarios, shown.s));
     }
@@ -3187,7 +3235,6 @@ export function App() {
     // Busy from the click, not from when the queue reaches the PUT: the wait
     // behind a tick would otherwise show nothing and leave Publish enabled.
     setPublishing(scenarioKey(shown.s));
-    const file = selected;
     await scenarioSaveQueue.current.run(async () => {
       const base = ahead ? await ahead : known;
       // Sealed while it waited: the path is retired, so nothing goes out.
@@ -3197,6 +3244,7 @@ export function App() {
       }
       const { s, next } = place(base);
       if (ahead && selectedRef.current === file) {
+        featureRef.current = next;
         setFeature(next);
         setSelectedScenario(cardOfScenario(next.scenarios, s));
       }
@@ -3366,11 +3414,18 @@ export function App() {
     const edit = descEditRef.current;
     if (!edit || !feature || edit.file !== selected) return;
     if (edit.text === descSaved.current) return;
-    const next: Feature = { ...feature, description: edit.text.trim() };
-    const content = serializeFeature(next);
+    const captured = feature;
     await descSaveQueue.current.run(async () => {
       // A tick queued ahead of this one may already have landed these words.
       if (edit.text === descSaved.current) return;
+      // A scenario or Assigned PUT ahead of us on the same queue already
+      // updated the in-memory feature: write the description onto that, not
+      // the snapshot this tick captured, or we would restore stale scenarios.
+      const next: Feature = {
+        ...featureForWrite(edit.file, selectedRef.current, featureRef.current, captured),
+        description: edit.text.trim(),
+      };
+      const content = serializeFeature(next);
       setSaving(true);
       try {
         const res = await fetch(`/api/features/${encodeURIComponent(edit.file)}`, {
@@ -3388,9 +3443,12 @@ export function App() {
           // save was away: then its result belongs to nothing on screen.
           if (descEditRef.current?.file === edit.file) descSaved.current = edit.text;
           if (selectedRef.current === edit.file) {
-            setFeature(
-              featureFromResponse({ content: data.content, parsed: data.parsed }, edit.file),
+            const saved = featureFromResponse(
+              { content: data.content, parsed: data.parsed },
+              edit.file,
             );
+            featureRef.current = saved;
+            setFeature(saved);
             markSaved();
           }
         } else {
@@ -3408,9 +3466,11 @@ export function App() {
     descTick.current = autosaveDescription;
   });
   // Ticks run while the selected feature's description editor is on. Leaving
-  // it — Done, or navigating to another feature or home — saves what was typed
-  // since the last tick, then drops an editor left behind by navigation.
-  const descOpen = descEdit !== null && descEdit.file === selected;
+  // it — Done, opening a scenario, or navigating to another feature or home —
+  // saves what was typed since the last tick, then drops an editor left
+  // behind by navigation. The scenario pane unmounts the description UI but
+  // used to leave this true, so both intervals PUT the whole file at once.
+  const descOpen = descEdit !== null && descEdit.file === selected && editing === null;
   useEffect(() => {
     if (!descOpen) return;
     const id = setInterval(() => {
@@ -3886,29 +3946,38 @@ export function App() {
       setFeatureLinkError(resolved.error);
       return;
     }
-    const { link: _previous, ...rest } = feature;
-    const next: Feature = resolved.link ? { ...rest, link: resolved.link } : rest;
+    const file = selected;
+    const captured = feature;
     setFeatureLinkSaving(true);
     try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      await descSaveQueue.current.run(async () => {
+        const current = featureForWrite(file, selectedRef.current, featureRef.current, captured);
+        const { link: _previous, ...rest } = current;
+        const next: Feature = resolved.link ? { ...rest, link: resolved.link } : rest;
+        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const saved = featureFromResponse(data, file);
+          if (selectedRef.current === file) {
+            featureRef.current = saved;
+            setFeature(saved);
+            setDirty(false);
+            markSaved();
+          }
+          setFeatureLinkDraft(null);
+          toast.success(
+            resolved.link
+              ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
+              : `Ticket link removed — ${data.message}.`,
+          );
+        } else {
+          setFeatureLinkError(data.error ?? "Could not save the ticket link");
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        setFeatureLinkDraft(null);
-        toast.success(
-          resolved.link
-            ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
-            : `Ticket link removed — ${data.message}.`,
-        );
-        markSaved();
-      } else {
-        setFeatureLinkError(data.error ?? "Could not save the ticket link");
-      }
     } catch {
       setFeatureLinkError("Could not save the ticket link — is the server running?");
     } finally {
@@ -3974,28 +4043,41 @@ export function App() {
   const saveAssigned = async (name: string) => {
     if (!feature || !selected) return;
     const assigned = name.trim();
-    if ((feature.assigned ?? "") === assigned) return;
-    const { assigned: _previous, ...rest } = feature;
-    const next: Feature = assigned ? { ...rest, assigned } : rest;
+    const file = selected;
+    // Against the live feature, not this render's snapshot: an Undo toast
+    // holds the saveAssigned from the click that assigned, whose `feature`
+    // still has the previous name.
+    if (selectedRef.current === file && (featureRef.current?.assigned ?? "") === assigned) return;
+    const captured = feature;
     setAssignedSaving(true);
     try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      await descSaveQueue.current.run(async () => {
+        const current = featureForWrite(file, selectedRef.current, featureRef.current, captured);
+        if ((current.assigned ?? "") === assigned) return;
+        const { assigned: previous, ...rest } = current;
+        const next: Feature = assigned ? { ...rest, assigned } : rest;
+        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const saved = featureFromResponse(data, file);
+          if (selectedRef.current === file) {
+            featureRef.current = saved;
+            setFeature(saved);
+            setDirty(false);
+            markSaved();
+          }
+          toast.success(
+            assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
+            { action: { label: "Undo", run: () => void saveAssigned(previous ?? "") } },
+          );
+        } else {
+          toast.error(data.error ?? "Could not save the assignment");
+        }
       });
-      const data = await res.json();
-      if (res.ok) {
-        setFeature(featureFromResponse(data, selected));
-        setDirty(false);
-        toast.success(
-          assigned ? `Assigned to ${assigned} — ${data.message}.` : `Assignment cleared — ${data.message}.`,
-          { action: { label: "Undo", run: () => void saveAssigned(_previous ?? "") } },
-        );
-        markSaved();
-      } else {
-        toast.error(data.error ?? "Could not save the assignment");
-      }
     } catch {
       toast.error("Could not save the assignment — is the server running?");
     } finally {
