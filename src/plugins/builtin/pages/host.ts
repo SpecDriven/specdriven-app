@@ -43,7 +43,7 @@ import { EstimateError, estimateMinutes } from "../../../server/estimate";
 import { parsePage } from "../../../server/parser";
 import { normalizeGoogleCalendar, readState } from "../../../server/state";
 import { getAppRoot } from "../../../server/paths";
-import { isDemoMode } from "../../../server/demo";
+import { isDemoMode } from "../../../server/demoMode";
 
 type DirHandler = (dir: string, req: Request, params: Params) => Response | Promise<Response>;
 

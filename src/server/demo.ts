@@ -29,7 +29,6 @@ import { setQueryFactory } from "./agentChat";
 import { simulatedQuery } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
-import type { GitHubRepo } from "./repo";
 import { resetSearchCache } from "./search";
 import { readState, writeState } from "./state";
 import { builtinManifests } from "../plugins/builtin/manifests";
@@ -40,37 +39,7 @@ import { DEFAULT_MARKETPLACES, type MarketplaceRef } from "../plugins/marketplac
 import { version as appVersion } from "../../package.json";
 import type { SpecDrivenState } from "./state";
 
-export function isDemoMode(): boolean {
-  const v = process.env.DEMO_MODE;
-  return v === "1" || v === "true";
-}
-
-/**
- * The demo's stand-in identity. A public demo has no OS account worth
- * showing — in a container `os.userInfo()` reports whatever uid the process
- * happens to run as — so the User info dialog and the commits the demo
- * writes both name this fixed user instead.
- */
-export const DEMO_USER = {
-  username: "Test User",
-  login: null,
-  name: "Test User",
-  email: "test-user@specdriven.demo",
-} as const;
-
-/**
- * The repository whose issues the demo's Issues tab shows. The demo dataset
- * is a .git-less copy, so no code repo on disk names a remote to read; this
- * public repo stands in, and src/server/issues.ts readIssuesRepo returns it
- * while DEMO_MODE is on. Reads go out anonymously — a visitor is signed in
- * to nothing — so GitHub's anonymous rate limit applies and writes fail with
- * the module's usual "sign in" message.
- */
-export const DEMO_ISSUES_REPO: GitHubRepo = {
-  url: "https://github.com/SpecDriven/specdriven-app-release",
-  owner: "SpecDriven",
-  name: "specdriven-app-release",
-};
+export { DEMO_ISSUES_REPO, DEMO_USER, isDemoMode } from "./demoMode";
 
 /** The pristine snapshot shipped with the app; never written at runtime. */
 function demoSource(): string {
