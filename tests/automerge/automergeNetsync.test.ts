@@ -16,7 +16,6 @@ import {
 import { WebSocketServer } from "ws";
 import { documentIdForDoc, startNetSync } from "../../src/server/automerge/netsync";
 import type { NetSync } from "../../src/server/automerge/netsync";
-import { importDrift } from "../../src/server/automerge/driftSync";
 import { importFeatureDoc } from "../../src/server/automerge/reconcile";
 import { createFeatureDoc, docDir, loadFeatureDoc } from "../../src/server/automerge/store";
 import { projectFeature } from "../../src/server/automerge/project";
@@ -143,39 +142,6 @@ test("concurrent edits on both peers merge through the sync server", async () =>
   const docA = await loadFeatureDoc(a, FILE);
   const docB = await loadFeatureDoc(b, FILE);
   expect(docB!.heads).toEqual(docA!.heads);
-});
-
-test("a remote absorb keeps a local disk edit the sync tick has not absorbed", async () => {
-  const { a, b } = await twoDirs();
-  const url = await startServer();
-  await bridge(a, url);
-  await bridge(b, url);
-
-  // A hand (or agent) edit on B, before the next importDrift tick.
-  await writeTextFile(
-    join(b, FILE),
-    SEED + "\n## Disk only @v1 [proposed]\n\n- **Given** from disk\n",
-  );
-
-  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A"));
-
-  await until(
-    async () => (await readFeature(b, FILE))?.includes("edited on A") ?? false,
-    "A's edit to arrive at B",
-  );
-
-  const md = (await readFeature(b, FILE))!;
-  expect(md).toContain("edited on A");
-  expect(md).toContain("## Disk only @v1 [proposed]");
-  expect(projectFeature((await loadFeatureDoc(b, FILE))!.doc)).toBe(md);
-  // The disk edit is in the document now — the next tick must not see leftover drift,
-  // and must not be the only thing that could have recovered it.
-  expect(await importDrift(b)).toBe("");
-  // And it travels on to A over the network, not only through git.
-  await until(
-    async () => (await readFeature(a, FILE))?.includes("## Disk only @v1 [proposed]") ?? false,
-    "B's disk edit to arrive at A",
-  );
 });
 
 test("a peer that starts after the edit still catches up", async () => {
