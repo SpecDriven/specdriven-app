@@ -577,6 +577,34 @@ test("a code repo named in project-settings.json is where the chat works", async
   expect(fakes).toHaveLength(1);
 });
 
+test("a folder the pane picks is where the chat works, over the code repo", async () => {
+  const code = join(root, "code");
+  const other = join(root, "elsewhere");
+  await mkdir(code);
+  await mkdir(other);
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const res = await api("/api/agent/chat", "POST", { name: "chat", cwd: `${other}/` });
+  expect(res.status).toBe(200);
+  const meta = (await res.json()) as ChatSessionMeta;
+  expect(meta.cwd).toBe(other);
+  expect(fakes[0]!.options.cwd).toBe(other);
+  // The specs still ride along.
+  expect(fakes[0]!.options.additionalDirectories).toEqual([data]);
+
+  // The data repo itself is a plain data-repo session.
+  const back = (await (await api("/api/agent/chat", "POST", { name: "chat", cwd: data })).json()) as ChatSessionMeta;
+  expect(back.cwd).toBe(data);
+  expect(back.codeRepo).toBeUndefined();
+  expect(fakes[1]!.options.additionalDirectories).toBeUndefined();
+
+  const missing = await api("/api/agent/chat", "POST", { name: "chat", cwd: join(root, "nope") });
+  expect(missing.status).toBe(400);
+  expect((await missing.json()).error).toContain("Folder not found");
+  const relative = await api("/api/agent/chat", "POST", { name: "chat", cwd: "code" });
+  expect(relative.status).toBe(400);
+  expect(fakes).toHaveLength(2);
+});
+
 test("Start session can open the generated prompt in the pane", async () => {
   const res = await api("/api/agent/session", "POST", {
     name: "implement quotes",

@@ -13,6 +13,7 @@ import {
   CircleHelp,
   FilePen,
   FileText,
+  FolderOpen,
   Globe,
   PanelRightClose,
   Plus,
@@ -23,6 +24,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { Menu, type MenuItem } from "./Menu";
+import type { PromptOptions } from "./ModalPrompts";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
@@ -41,6 +43,7 @@ import {
   useAgentChat,
   type AgentChatStore,
   type ChatAgent,
+  type ChatSessionMeta,
   type ChatStatus,
   type PermissionMode,
   type Question,
@@ -108,6 +111,8 @@ export function AgentPane({
   demo,
   codeRepo,
   dataRepo,
+  prompt,
+  browseFolder,
   onClose,
 }: {
   compact: boolean;
@@ -115,20 +120,50 @@ export function AgentPane({
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
+  /** The app's path prompt, for "Other folder…"; absent hides that item. */
+  prompt?: (opts: PromptOptions) => Promise<string | null>;
+  /** The native folder chooser, offered as Browse… in that prompt. */
+  browseFolder?: () => Promise<string | null>;
   onClose: () => void;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
+  // Asks for any folder; null when canceled or there is no prompt.
+  const askFolder = prompt
+    ? async (initial: string): Promise<string | null> =>
+        (
+          await prompt({
+            title: "Agent folder",
+            hint: "The absolute path of the folder the coding agent works in.",
+            initial,
+            confirmLabel: "Use this folder",
+            browse: browseFolder,
+          })
+        )?.trim() || null
+    : undefined;
   return (
     <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
-      <AgentHeader store={store} session={session} demo={demo} onClose={onClose} />
+      <AgentHeader
+        store={store}
+        session={session}
+        demo={demo}
+        folders={knownFolders(codeRepo, dataRepo, store.list)}
+        askFolder={askFolder}
+        onClose={onClose}
+      />
       {session ? (
         <>
           <Transcript session={session} />
           <Composer session={session} />
         </>
       ) : (
-        <EmptyState store={store} demo={demo} codeRepo={codeRepo} dataRepo={dataRepo} />
+        <EmptyState
+          store={store}
+          demo={demo}
+          codeRepo={codeRepo}
+          dataRepo={dataRepo}
+          askFolder={askFolder}
+        />
       )}
       {demo && <SimulationWatermark />}
     </aside>
@@ -154,19 +189,37 @@ export function SimulationWatermark() {
   );
 }
 
+/**
+ * The folders the pane offers an agent: the code repo, the data repo, then
+ * every other folder a session here has worked in, newest first.
+ */
+export function knownFolders(
+  codeRepo: string | null,
+  dataRepo: string | null,
+  sessions: readonly ChatSessionMeta[],
+): string[] {
+  const used = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((m) => m.cwd);
+  return [...new Set([codeRepo, dataRepo, ...used].filter((f): f is string => Boolean(f)))];
+}
+
 function AgentHeader({
   store,
   session,
   demo,
+  folders,
+  askFolder,
   onClose,
 }: {
   store: AgentChatStore;
   session: SessionState | null;
   demo: boolean;
+  folders: string[];
+  askFolder?: (initial: string) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [folderOpen, setFolderOpen] = useState(false);
   const meta = session?.meta ?? null;
   const fail = (e: Error) => toast.error(e.message);
   const items: MenuItem[] = [
@@ -219,11 +272,41 @@ function AgentHeader({
         />
       </div>
       {meta && (
-        <Tooltip label={`${AGENT_LABEL[meta.agent]} · ${meta.cwd}`}>
-          <span className="chip muted agent-cwd" tabIndex={0}>
-            {basename(meta.cwd)}
-          </span>
-        </Tooltip>
+        <div className="agent-cwd-picker">
+          <Tooltip label={`${AGENT_LABEL[meta.agent]} · ${meta.cwd}`}>
+            <button
+              type="button"
+              className="chip muted agent-cwd"
+              aria-label={`Folder: ${meta.cwd}`}
+              aria-haspopup="menu"
+              aria-expanded={folderOpen}
+              onClick={() => setFolderOpen((o) => !o)}
+            >
+              {basename(meta.cwd)}
+            </button>
+          </Tooltip>
+          <Menu
+            open={folderOpen}
+            onClose={() => setFolderOpen(false)}
+            label="Folder"
+            heading="Folder · another one starts a new session there"
+            items={folderItems(folders, meta.cwd, askFolder, (cwd) => {
+              if (cwd === meta.cwd) return;
+              // A running agent cannot move: the new folder gets its own
+              // session, same agent and mode, and this one stays listed.
+              void agentChat
+                .createSession({
+                  name: defaultSessionName(),
+                  agent: meta.agent,
+                  cwd,
+                  ...(meta.agent === "pi" ? {} : { permissionMode: meta.permissionMode }),
+                })
+                .catch(fail);
+            })}
+            className="agent-cwd-menu"
+            containerSelector=".agent-cwd-picker"
+          />
+        </div>
       )}
       {meta && (
         <span
@@ -308,6 +391,39 @@ function AgentHeader({
   );
 }
 
+/** The folder menu: each known folder by name over its path, then "Other folder…". */
+export function folderItems(
+  folders: readonly string[],
+  current: string,
+  askFolder: ((initial: string) => Promise<string | null>) | undefined,
+  onSelect: (folder: string) => void,
+): MenuItem[] {
+  const all = folders.includes(current) ? folders : [current, ...folders];
+  return [
+    ...all.map((f) => ({
+      id: `folder:${f}`,
+      label: basename(f),
+      description: f,
+      title: f,
+      checked: f === current,
+      onSelect: () => onSelect(f),
+    })),
+    ...(askFolder
+      ? [
+          {
+            id: "other",
+            label: "Other folder…",
+            icon: <FolderOpen size={14} aria-hidden="true" />,
+            onSelect: () =>
+              void askFolder(current).then((f) => {
+                if (f) onSelect(f);
+              }),
+          },
+        ]
+      : []),
+  ];
+}
+
 /** The mode menu: one item per mode, numbered 1–5, the agent's default badged. */
 export function modeItems(
   agent: ChatAgent,
@@ -337,19 +453,24 @@ function EmptyState({
   demo,
   codeRepo,
   dataRepo,
+  askFolder,
 }: {
   store: AgentChatStore;
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
+  askFolder?: (initial: string) => Promise<string | null>;
 }) {
   const [name, setName] = useState(() => defaultSessionName());
+  /** A folder picked here; null keeps the default (code repo, else data repo). */
+  const [folder, setFolder] = useState<string | null>(null);
   const [agent, setAgent] = useState<ChatAgent>(() =>
     store.available ? "claude" : store.codexAvailable ? "codex" : "pi",
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const workDir = codeRepo ?? dataRepo;
+  const defaultDir = codeRepo ?? dataRepo;
+  const workDir = folder ?? defaultDir;
   if (!store.available && !store.piAvailable && !store.codexAvailable) {
     return (
       <div className="agent-empty">
@@ -372,7 +493,11 @@ function EmptyState({
     setBusy(true);
     setError(null);
     try {
-      await agentChat.createSession({ name: cleanLine(name) || defaultSessionName(), agent: picked });
+      await agentChat.createSession({
+        name: cleanLine(name) || defaultSessionName(),
+        agent: picked,
+        ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -404,7 +529,27 @@ function EmptyState({
             <>
               {" "}
               Works in <span className="agent-workdir">{workDir}</span>
-              {codeRepo ? " — the code repo from project-settings.json." : " — the data repo."}
+              {workDir === codeRepo
+                ? " — the code repo from project-settings.json."
+                : workDir === dataRepo
+                  ? " — the data repo."
+                  : "."}
+            </>
+          )}
+          {askFolder && workDir && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="agent-folder-change"
+                onClick={() =>
+                  void askFolder(workDir).then((f) => {
+                    if (f) setFolder(f);
+                  })
+                }
+              >
+                Change folder…
+              </button>
             </>
           )}
         </p>

@@ -5515,6 +5515,7 @@ aside header .collapse-btn {
 }
 
 .agent-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -5579,13 +5580,38 @@ aside header .collapse-btn {
   max-width: 24rem;
 }
 
+/* Static, so the folder menu hangs off the whole header: the chip sits
+   mid-header and a menu the width of a path would run past the pane. */
+.agent-cwd-picker {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .agent-cwd {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-weight: 400;
+  cursor: pointer;
+}
+
+.agent-cwd:hover {
+  color: var(--text-1);
+}
+
+.agent-cwd-menu {
+  top: calc(100% - 0.25rem);
+  left: 0.5rem;
+  right: 0.5rem;
+  max-width: 28rem;
+}
+
+.agent-cwd-menu .menu-desc {
+  font-family: var(--font-mono);
 }
 
 .agent-dot {
@@ -6133,6 +6159,19 @@ aside header .collapse-btn {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+.agent-folder-change {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-folder-change:hover {
+  text-decoration: underline;
 }
 
 /* One-pane screens: the pane covers the page, above the drawer. */
