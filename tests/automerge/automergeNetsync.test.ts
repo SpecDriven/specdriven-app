@@ -7,21 +7,23 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { cp, mkdtemp, readdir, copyFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Repo } from "@automerge/automerge-repo";
 import {
   WebSocketClientAdapter,
   WebSocketServerAdapter,
 } from "@automerge/automerge-repo-network-websocket";
 import { WebSocketServer } from "ws";
-import { documentIdForDoc, startNetSync } from "../../src/server/automerge/netsync";
+import { documentIdForDoc, repoTransport, startNetSync } from "../../src/server/automerge/netsync";
 import type { NetSync } from "../../src/server/automerge/netsync";
+import { importDrift } from "../../src/server/automerge/driftSync";
 import { importFeatureDoc } from "../../src/server/automerge/reconcile";
 import { createFeatureDoc, docDir, loadFeatureDoc } from "../../src/server/automerge/store";
 import { projectFeature } from "../../src/server/automerge/project";
 import { parseFeature } from "../../src/server/parser";
 import { readFeature, saveFeature } from "../../src/server/features";
 import { writeTextFile } from "../../src/server/fsx";
+import { FakeSyncServer } from "../helpers/fakeSyncServer";
 
 let root: string;
 let wss: WebSocketServer | null = null;
@@ -52,8 +54,11 @@ async function startServer(): Promise<string> {
   return `ws://127.0.0.1:${port}`;
 }
 
-async function bridge(dataDir: string, url: string): Promise<NetSync> {
-  const started = await startNetSync(dataDir, [new WebSocketClientAdapter(url)]);
+/** A bridge to the loopback websocket server, or to a fake one. */
+async function bridge(dataDir: string, to: string | FakeSyncServer): Promise<NetSync> {
+  const transport =
+    typeof to === "string" ? repoTransport([new WebSocketClientAdapter(to)]) : to.transport(basename(dataDir));
+  const started = await startNetSync(dataDir, transport);
   bridges.push(started);
   return started;
 }
@@ -142,6 +147,37 @@ test("concurrent edits on both peers merge through the sync server", async () =>
   const docA = await loadFeatureDoc(a, FILE);
   const docB = await loadFeatureDoc(b, FILE);
   expect(docB!.heads).toEqual(docA!.heads);
+});
+
+test("a remote absorb keeps a local disk edit the sync tick has not absorbed", async () => {
+  // A fake sync server: delivery is awaited with settle(), not polled for
+  // against a deadline, so the outcome can't depend on timing.
+  const { a, b } = await twoDirs();
+  const server = new FakeSyncServer();
+  const peerA = await bridge(a, server);
+  const peerB = await bridge(b, server);
+
+  // A hand (or agent) edit on B, before the next importDrift tick.
+  await writeTextFile(
+    join(b, FILE),
+    SEED + "\n## Disk only @v1 [proposed]\n\n- **Given** from disk\n",
+  );
+
+  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A"));
+  await server.settle(peerA, peerB);
+
+  const md = (await readFeature(b, FILE))!;
+  expect(md).toContain("edited on A");
+  expect(md).toContain("## Disk only @v1 [proposed]");
+  expect(projectFeature((await loadFeatureDoc(b, FILE))!.doc)).toBe(md);
+  // The disk edit is in the document now — the next tick must not see leftover drift,
+  // and must not be the only thing that could have recovered it.
+  expect(await importDrift(b)).toBe("");
+  // B handed the absorbed disk edit to the network, and it reached A that
+  // way, not only through git.
+  const fromB = server.pushes.filter((p) => p.peer === "b");
+  expect(fromB.some((p) => projectFeature(p.doc).includes("## Disk only"))).toBe(true);
+  expect(await readFeature(a, FILE)).toBe(md);
 });
 
 test("a peer that starts after the edit still catches up", async () => {

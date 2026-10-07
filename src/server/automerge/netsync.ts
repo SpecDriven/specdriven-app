@@ -51,24 +51,84 @@ export function documentIdForDoc(uuid: string): DocumentId {
 }
 
 export interface NetSync {
+  /** Resolves once no announce or absorb is in flight. */
+  idle(): Promise<void>;
   stop(): Promise<void>;
+}
+
+/** One feature document as shared on a {@link SyncTransport}. */
+export interface SharedDoc {
+  /** Merge local state into the shared copy; peers receive the new operations. */
+  push(doc: A.Doc<FeatureDoc>): void;
+}
+
+/**
+ * Where the bridge shares documents. Production wraps an automerge-repo Repo
+ * ({@link repoTransport}); tests can pass a double whose delivery they
+ * control (tests/helpers/fakeSyncServer.ts), since the Repo throttles its
+ * sync messages on a timer.
+ */
+export interface SyncTransport {
+  /**
+   * Share a document. `onChange` gets the shared copy after every change to
+   * it, local pushes included, and resolves once the bridge has absorbed it.
+   */
+  share(
+    docId: DocumentId,
+    doc: A.Doc<FeatureDoc>,
+    onChange: (doc: A.Doc<FeatureDoc>) => Promise<void>,
+  ): SharedDoc;
+  shutdown(): Promise<void>;
+}
+
+/** The automerge-repo transport, over the given network adapters. */
+export function repoTransport(adapters: NetworkAdapterInterface[]): SyncTransport {
+  const repo = new Repo({ network: adapters });
+  const handles: DocHandle<FeatureDoc>[] = [];
+  return {
+    share(docId, doc, onChange) {
+      const handle = repo.import<FeatureDoc>(A.save(doc), { docId });
+      handles.push(handle);
+      handle.on("change", ({ doc }) => {
+        if (doc !== undefined) void onChange(doc);
+      });
+      return { push: (local) => handle.update((d) => A.merge(d, A.clone(local))) };
+    },
+    async shutdown() {
+      for (const handle of handles) handle.removeAllListeners("change");
+      await repo.shutdown();
+    },
+  };
 }
 
 /** Start the bridge against wss://… — the production entry point. */
 export async function startNetSyncClient(dataDir: string, serverUrl: string): Promise<NetSync> {
-  return startNetSync(dataDir, [new WebSocketClientAdapter(serverUrl)]);
+  return startNetSync(dataDir, repoTransport([new WebSocketClientAdapter(serverUrl)]));
 }
 
-/** Start the bridge with explicit network adapters (tests use a loopback). */
+/** Start the bridge over an explicit transport (tests use a loopback or a double). */
 export async function startNetSync(
   dataDir: string,
-  adapters: NetworkAdapterInterface[],
+  transport: SyncTransport,
 ): Promise<NetSync> {
-  const repo = new Repo({ network: adapters });
-  const handles = new Map<DocumentId, DocHandle<FeatureDoc>>();
+  const shared = new Map<DocumentId, SharedDoc>();
   const fileNames = new Map<DocumentId, string>();
   /** Files the bridge itself is writing, so its own saves don't loop. */
   const writing = new Set<string>();
+  /** Announces and absorbs not yet finished — what idle() waits for. */
+  const inFlight = new Set<Promise<void>>();
+  let stopped = false;
+
+  /** Track work that never rejects, so idle() and stop() can wait for it. */
+  function track(work: Promise<void>): Promise<void> {
+    inFlight.add(work);
+    void work.finally(() => inFlight.delete(work));
+    return work;
+  }
+
+  async function idle(): Promise<void> {
+    while (inFlight.size > 0) await Promise.all(inFlight);
+  }
 
   /** The feature currently owning a document, resilient to moves/renames. */
   async function fileNameFor(docId: DocumentId): Promise<string | null> {
@@ -144,7 +204,7 @@ export async function startNetSync(
     // The save above is muted (writing), so the local disk edit it absorbed
     // would otherwise reach peers only through git: hand it to the network.
     // The change this fires here finds nothing new.
-    if (absorbedLocal) handles.get(docId)?.update((d) => A.merge(d, A.clone(merged)));
+    if (absorbedLocal) shared.get(docId)?.push(merged);
   }
 
   /** Announce a feature's document, or push its latest disk state. */
@@ -163,29 +223,32 @@ export async function startNetSync(
       return;
     }
     fileNames.set(docId, fileName);
-    const existing = handles.get(docId);
+    const existing = shared.get(docId);
     if (existing) {
       log.debug(`pushed local state of ${fileName} to the sync server`);
-      existing.update((d) => A.merge(d, A.clone(loaded.doc)));
+      existing.push(loaded.doc);
       return;
     }
     log.debug(`announced ${fileName} to the sync server`, { "automerge.doc_id": loaded.docId });
-    const handle = repo.import<FeatureDoc>(A.save(loaded.doc), { docId });
-    handles.set(docId, handle);
-    handle.on("change", ({ doc }) => {
-      if (doc === undefined) return;
-      void absorbRemote(docId, doc).catch((e) => {
-        // A failed absorb is not fatal: git delivers the same operations.
-        log.warn(`failed to absorb remote operations`, errorAttributes(e));
-      });
+    const doc = transport.share(docId, loaded.doc, (networkDoc) => {
+      if (stopped) return Promise.resolve();
+      return track(
+        absorbRemote(docId, networkDoc).catch((e) => {
+          // A failed absorb is not fatal: git delivers the same operations.
+          log.warn(`failed to absorb remote operations`, errorAttributes(e));
+        }),
+      );
     });
+    shared.set(docId, doc);
   }
 
   const unsubscribe = onDocSaved((dir, fileName) => {
     if (dir !== dataDir || writing.has(fileName)) return;
-    void attach(fileName).catch((e) => {
-      log.warn(`failed to announce ${fileName} after a save`, errorAttributes(e));
-    });
+    void track(
+      attach(fileName).catch((e) => {
+        log.warn(`failed to announce ${fileName} after a save`, errorAttributes(e));
+      }),
+    );
   });
 
   return withSpan("netsync.start", { "specdriven.dir": dataDir }, async (span) => {
@@ -197,11 +260,14 @@ export async function startNetSync(
     log.info(`bridging ${fileList.length} feature document(s)`);
 
     return {
+      idle,
       async stop() {
+        stopped = true;
         unsubscribe();
-        for (const handle of handles.values()) handle.removeAllListeners("change");
-        handles.clear();
-        await repo.shutdown();
+        // Let a running absorb finish its write rather than land after stop.
+        await idle();
+        shared.clear();
+        await transport.shutdown();
         log.info("stopped");
       },
     };
