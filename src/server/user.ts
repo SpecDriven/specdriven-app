@@ -1,6 +1,6 @@
 import { userInfo } from "node:os";
 import { getAuth } from "./auth";
-import { DEMO_USER, isDemoMode } from "./demo";
+import { DEMO_USER, isDemoMode } from "./demoMode";
 import { cliGitAvailable, currentEngine, ghAccount } from "./git";
 import { run } from "./run";
 

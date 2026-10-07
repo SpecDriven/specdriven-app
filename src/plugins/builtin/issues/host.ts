@@ -13,7 +13,7 @@
 import type { Context, Plugin } from "../../kernel";
 import type { DataAccess } from "../../host/services";
 import { bodyOf, json, type Handler, type Params } from "../../../server/http";
-import { isDemoMode } from "../../../server/demo";
+import { isDemoMode } from "../../../server/demoMode";
 import { PROJECT_SETTINGS_FILE } from "../../../server/members";
 import {
   GitHubError,
