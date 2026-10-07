@@ -1544,7 +1544,8 @@ async function agentPanePlace(
   // repo still rides along as an extra directory unless it is the folder.
   if (cwd !== undefined) {
     if (!(await directoryExists(cwd))) return json({ error: `Folder not found: ${cwd}` }, 400);
-    return cwd === dir ? { dataRepo: dir } : { dataRepo: dir, codeRepo: cwd };
+    // resolve() drops a trailing slash the open folder may have been typed with.
+    return resolve(cwd) === resolve(dir) ? { dataRepo: dir } : { dataRepo: dir, codeRepo: cwd };
   }
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
