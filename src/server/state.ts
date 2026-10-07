@@ -196,7 +196,14 @@ async function readFrom(path: string): Promise<SpecDrivenState | null> {
   if (!(await isFile(path))) return null;
   try {
     const parsed = JSON.parse(await readFile(path, "utf8"));
-    return typeof parsed === "object" && parsed !== null ? (parsed as SpecDrivenState) : {};
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const state = parsed as SpecDrivenState;
+    // A folder saved before normalizing may still carry its trailing slash.
+    if (typeof state.dataRepo === "string") state.dataRepo = normalizeDataRepo(state.dataRepo);
+    if (Array.isArray(state.recentDataRepos)) {
+      state.recentDataRepos = normalizeRecentDataRepos(state.recentDataRepos);
+    }
+    return state;
   } catch {
     return {};
   }
@@ -371,6 +378,15 @@ export function needsDataRepo(state: SpecDrivenState): boolean {
 // data folders picked before, most recent first, up to 10.
 export const MAX_RECENT_DATA_REPOS = 10;
 
+/**
+ * A data folder as saved: trimmed, without trailing separators, so
+ * "/specs/a/" and "/specs/a" are one folder (and so are a GitHub url with
+ * and without its slash). A root ("/", "C:\") stays.
+ */
+export function normalizeDataRepo(repo: string): string {
+  return repo.trim().replace(/(?<=[^\\/:])[\\/]+$/, "");
+}
+
 /** Cleaned, deduplicated, capped list for a stored value. */
 export function normalizeRecentDataRepos(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -378,7 +394,7 @@ export function normalizeRecentDataRepos(value: unknown): string[] {
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") continue;
-    const repo = entry.trim();
+    const repo = normalizeDataRepo(entry);
     if (!repo || seen.has(repo)) continue;
     seen.add(repo);
     out.push(repo);
@@ -393,7 +409,7 @@ export function normalizeRecentDataRepos(value: unknown): string[] {
  * folder it names.
  */
 export function recentDataRepos(state: SpecDrivenState): string[] {
-  const current = state.dataRepo?.trim();
+  const current = state.dataRepo && normalizeDataRepo(state.dataRepo);
   const stored = normalizeRecentDataRepos(state.recentDataRepos);
   return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
 }
@@ -414,7 +430,7 @@ export function rememberDataRepo(state: SpecDrivenState, repo: string): void {
  * before getting here.
  */
 export function forgetDataRepo(state: SpecDrivenState, repo: string): boolean {
-  const target = repo.trim();
+  const target = normalizeDataRepo(repo);
   const before = normalizeRecentDataRepos(state.recentDataRepos);
   const after = before.filter((entry) => entry !== target);
   state.recentDataRepos = after;
