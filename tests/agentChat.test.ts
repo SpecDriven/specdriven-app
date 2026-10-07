@@ -252,7 +252,8 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
   const { options } = fakes[0]!;
   expect(options.cwd).toBe(data);
   expect(options.includePartialMessages).toBe(true);
-  expect(options.permissionMode).toBe("default");
+  // Claude decides its own permissions until the pane picks another mode.
+  expect(options.permissionMode).toBe("auto");
   // A session like the CLI would open: Claude Code's prompt and settings.
   expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
   expect(options.settingSources).toEqual(["user", "project", "local"]);

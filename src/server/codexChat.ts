@@ -232,7 +232,7 @@ export class CodexClient {
 //
 // Codex has no permission modes but two knobs: an approval policy (when it
 // asks) and a sandbox (what a command may touch without asking). The pane's
-// four modes map onto them so the same select serves every agent.
+// modes map onto them so the same select serves every agent.
 
 export interface CodexPolicy {
   approvalPolicy: "untrusted" | "on-failure" | "on-request" | "never";
@@ -251,6 +251,7 @@ export function codexPolicy(mode: PermissionMode): CodexPolicy {
     case "bypassPermissions":
       return { approvalPolicy: "never", sandbox: "danger-full-access" };
     default:
+      // "default" and "auto": Codex has no classifier, so both ask on request.
       return { approvalPolicy: "on-request", sandbox: "workspace-write" };
   }
 }

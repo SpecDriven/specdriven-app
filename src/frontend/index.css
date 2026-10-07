@@ -3990,6 +3990,44 @@ kbd {
   margin-left: auto;
 }
 
+.menu-heading {
+  padding: 0.3rem 0.5rem 0.2rem;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* A two-line item: the label over a quieter description. */
+.menu-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.menu-text .menu-label {
+  flex: none;
+}
+
+.menu-desc {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-badge {
+  margin-left: 0.3rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3, var(--hover));
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  vertical-align: 0.05em;
+}
+
 .menu-submenu {
   display: flex;
   flex-direction: column;
@@ -5575,17 +5613,45 @@ aside header .collapse-btn {
   background: var(--danger-fg);
 }
 
-.agent-mode {
+.agent-mode-picker {
+  position: relative;
+  display: inline-flex;
   flex: none;
-  max-width: 7.5rem;
+}
+
+.agent-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 9rem;
   height: 1.6rem;
-  padding: 0 0.3rem;
+  padding: 0 0.35rem 0 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-2);
   font: inherit;
   font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-mode:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.agent-mode-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-mode-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: auto;
+  min-width: 17rem;
 }
 
 .agent-mode:focus-visible {

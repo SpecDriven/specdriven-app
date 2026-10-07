@@ -27,6 +27,7 @@ import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
 import { cleanLine, cleanText } from "../server/text";
+import { PERMISSION_MODES, defaultPermissionMode } from "../server/permissionModes";
 import {
   AGENT_LABEL,
   agentChat,
@@ -73,13 +74,22 @@ export function statusLabel(status: ChatStatus, agent: ChatAgent = "claude"): st
   return status === "starting" ? `Starting ${AGENT_LABEL[agent]}…` : STATUS_LABEL[status];
 }
 
+// "default" is the SDK's name for asking every time; the pane calls it
+// Manual and saves "Default" for the mode a new session starts in.
 export const MODE_LABEL: Record<PermissionMode, string> = {
-  default: "Default",
+  auto: "Auto",
+  default: "Manual",
   acceptEdits: "Accept edits",
   plan: "Plan",
   bypassPermissions: "Bypass permissions",
 };
-const MODES: PermissionMode[] = ["default", "acceptEdits", "plan", "bypassPermissions"];
+export const MODE_DESCRIPTION: Record<PermissionMode, string> = {
+  auto: "Claude handles permission decisions",
+  default: "Always ask before making changes",
+  acceptEdits: "Automatically accept all file edits",
+  plan: "Create a plan before making changes",
+  bypassPermissions: "Accepts all permissions",
+};
 
 export interface Answer {
   requestId: string;
@@ -156,6 +166,7 @@ function AgentHeader({
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [modeOpen, setModeOpen] = useState(false);
   const meta = session?.meta ?? null;
   const fail = (e: Error) => toast.error(e.message);
   const items: MenuItem[] = [
@@ -244,22 +255,32 @@ function AgentHeader({
         </Tooltip>
       )}
       {meta && meta.agent !== "pi" && (
-        <select
-          className="agent-mode"
-          aria-label="Permission mode"
-          title="Permission mode"
-          value={meta.permissionMode}
-          disabled={meta.status === "starting" || isFinalStatus(meta.status)}
-          onChange={(e) =>
-            void agentChat.setMode(meta.id, e.target.value as PermissionMode).catch(fail)
-          }
-        >
-          {MODES.map((m) => (
-            <option key={m} value={m}>
-              {MODE_LABEL[m]}
-            </option>
-          ))}
-        </select>
+        <div className="agent-mode-picker">
+          <button
+            type="button"
+            className="agent-mode"
+            aria-label={`Permission mode: ${MODE_LABEL[meta.permissionMode]}`}
+            title="Permission mode"
+            aria-haspopup="menu"
+            aria-expanded={modeOpen}
+            disabled={meta.status === "starting" || isFinalStatus(meta.status)}
+            onClick={() => setModeOpen((o) => !o)}
+          >
+            <span className="agent-mode-name">{MODE_LABEL[meta.permissionMode]}</span>
+            <ChevronDown size={12} aria-hidden="true" />
+          </button>
+          <Menu
+            open={modeOpen}
+            onClose={() => setModeOpen(false)}
+            label="Permission mode"
+            heading="Mode"
+            items={modeItems(meta.agent, meta.permissionMode, (m) =>
+              void agentChat.setMode(meta.id, m).catch(fail),
+            )}
+            className="agent-mode-menu"
+            containerSelector=".agent-mode-picker"
+          />
+        </div>
       )}
       {meta && busy && (
         <Tooltip label="Stop this turn">
@@ -285,6 +306,30 @@ function AgentHeader({
       </Tooltip>
     </div>
   );
+}
+
+/** The mode menu: one item per mode, numbered 1–5, the agent's default badged. */
+export function modeItems(
+  agent: ChatAgent,
+  current: PermissionMode,
+  onSelect: (mode: PermissionMode) => void,
+): MenuItem[] {
+  const start = defaultPermissionMode(agent);
+  return PERMISSION_MODES.map((m, i) => ({
+    id: m,
+    label:
+      m === start ? (
+        <>
+          {MODE_LABEL[m]} <span className="menu-badge">Default</span>
+        </>
+      ) : (
+        MODE_LABEL[m]
+      ),
+    description: MODE_DESCRIPTION[m],
+    keys: String(i + 1),
+    checked: m === current,
+    onSelect: () => onSelect(m),
+  }));
 }
 
 function EmptyState({

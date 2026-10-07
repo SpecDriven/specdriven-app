@@ -9,6 +9,7 @@ import {
   STATUS_LABEL,
   SimulationWatermark,
   TranscriptRow,
+  modeItems,
 } from "../src/frontend/AgentPane";
 import {
   EMPTY_TRANSCRIPT,
@@ -317,7 +318,25 @@ describe("TranscriptRow", () => {
     expect(Object.keys(STATUS_LABEL).sort()).toEqual(
       ["awaiting_input", "ended", "error", "idle", "running", "starting"].sort(),
     );
-    expect(Object.keys(MODE_LABEL).sort()).toEqual(["acceptEdits", "bypassPermissions", "default", "plan"]);
+    expect(Object.keys(MODE_LABEL).sort()).toEqual(["acceptEdits", "auto", "bypassPermissions", "default", "plan"]);
+  });
+
+  test("the mode menu numbers every mode and badges the agent's default", () => {
+    const picked: string[] = [];
+    const claude = modeItems("claude", "plan", (m) => picked.push(m));
+    expect(claude.map((i) => i.id)).toEqual(["auto", "default", "acceptEdits", "plan", "bypassPermissions"]);
+    expect(claude.map((i) => i.keys)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(claude.filter((i) => i.checked).map((i) => i.id)).toEqual(["plan"]);
+    expect(claude.every((i) => typeof i.description === "string")).toBe(true);
+    const label = (items: typeof claude, id: string) =>
+      renderToStaticMarkup(<>{items.find((i) => i.id === id)!.label}</>);
+    expect(label(claude, "auto")).toContain("Default");
+    expect(label(claude, "default")).toBe("Manual");
+    const codex = modeItems("codex", "default", () => {});
+    expect(label(codex, "auto")).toBe("Auto");
+    expect(label(codex, "default")).toContain("Default");
+    claude[0]!.onSelect!();
+    expect(picked).toEqual(["auto"]);
   });
 });
 
