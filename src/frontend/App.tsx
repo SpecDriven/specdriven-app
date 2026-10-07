@@ -8219,6 +8219,8 @@ export function App() {
           demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
+          prompt={prompt}
+          browseFolder={canChooseFolder ? chooseFolderNative : undefined}
           onClose={() => agentChat.closePane()}
         />
       )}

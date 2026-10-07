@@ -3990,6 +3990,44 @@ kbd {
   margin-left: auto;
 }
 
+.menu-heading {
+  padding: 0.3rem 0.5rem 0.2rem;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* A two-line item: the label over a quieter description. */
+.menu-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.menu-text .menu-label {
+  flex: none;
+}
+
+.menu-desc {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-badge {
+  margin-left: 0.3rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3, var(--hover));
+  color: var(--text-2);
+  font-size: 0.6875rem;
+  vertical-align: 0.05em;
+}
+
 .menu-submenu {
   display: flex;
   flex-direction: column;
@@ -5477,6 +5515,7 @@ aside header .collapse-btn {
 }
 
 .agent-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -5541,13 +5580,59 @@ aside header .collapse-btn {
   max-width: 24rem;
 }
 
+/* Static, so the folder menu hangs off the whole header: the chip sits
+   mid-header and a menu the width of a path would run past the pane. */
+.agent-cwd-picker {
+  display: inline-flex;
+  flex: 0 0.4 auto;
+  min-width: 0;
+}
+
 .agent-cwd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-family: var(--font-mono);
   font-weight: 400;
+  cursor: pointer;
+}
+
+/* Never squeezed to just the ▾: a few letters stay, and the session name
+   (which shrinks harder) gives way first. */
+.agent-cwd-name {
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same ▾ as the data folder's recent list: quiet until hovered or open. */
+.agent-cwd-chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+.agent-cwd:hover,
+.agent-cwd[aria-expanded="true"] {
+  color: var(--text-1);
+}
+
+.agent-cwd:hover .agent-cwd-chevron,
+.agent-cwd[aria-expanded="true"] .agent-cwd-chevron {
+  color: var(--text-1);
+}
+
+.agent-cwd-menu {
+  top: calc(100% - 0.25rem);
+  left: 0.5rem;
+  right: 0.5rem;
+  max-width: 28rem;
+}
+
+.agent-cwd-menu .menu-desc {
+  font-family: var(--font-mono);
 }
 
 .agent-dot {
@@ -5575,17 +5660,45 @@ aside header .collapse-btn {
   background: var(--danger-fg);
 }
 
-.agent-mode {
+.agent-mode-picker {
+  position: relative;
+  display: inline-flex;
   flex: none;
-  max-width: 7.5rem;
+}
+
+.agent-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 9rem;
   height: 1.6rem;
-  padding: 0 0.3rem;
+  padding: 0 0.35rem 0 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-2);
   font: inherit;
   font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-mode:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.agent-mode-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-mode-menu {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: auto;
+  min-width: 17rem;
 }
 
 .agent-mode:focus-visible {
@@ -6067,6 +6180,19 @@ aside header .collapse-btn {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
+}
+
+.agent-folder-change {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-folder-change:hover {
+  text-decoration: underline;
 }
 
 /* One-pane screens: the pane covers the page, above the drawer. */

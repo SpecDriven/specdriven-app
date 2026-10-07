@@ -7,7 +7,8 @@ import { Keys } from "./shortcuts";
  * the feature entry's ⋯, the recent folders list and the user corner, and
  * later the property chips. It owns what every menu needs — first item
  * focused on open, ↑/↓ with wrap, Home/End, type-ahead, Enter/Space to
- * choose, ESC or a click outside to close, focus back where it came from —
+ * choose, a top-level item's single-key `keys` (say "1") to choose it
+ * directly, ESC or a click outside to close, focus back where it came from —
  * with `role="menu"` / `menuitem` / `menuitemradio` semantics. Positioning
  * is the caller's (`className`): the menu renders inside its trigger's
  * container, and that container is what counts as "inside" for clicks.
@@ -15,6 +16,8 @@ import { Keys } from "./shortcuts";
 export interface MenuItem {
   id: string;
   label: ReactNode;
+  /** A second, quieter line under the label. */
+  description?: ReactNode;
   icon?: ReactNode;
   /** Shortcut spec, shown as keycaps on the right. */
   keys?: string;
@@ -32,6 +35,7 @@ export function Menu({
   open,
   onClose,
   label,
+  heading,
   items,
   className,
   containerSelector,
@@ -39,6 +43,8 @@ export function Menu({
   open: boolean;
   onClose: () => void;
   label: string;
+  /** A visible title over the items; `label` stays the accessible name. */
+  heading?: string;
   items: MenuItem[];
   className?: string;
   /** Clicks inside an ancestor matching this stay "inside" (the trigger). */
@@ -142,8 +148,16 @@ export function Menu({
         return;
       }
       default: {
-        // Type-ahead: jump to the next item starting with the letter.
         if (e.key.length !== 1 || e.metaKey || e.ctrlKey || e.altKey) return;
+        // An item's own one-key shortcut chooses it outright.
+        const direct = items.find((i) => i.keys === e.key && !i.disabled && i.items === undefined);
+        if (direct) {
+          e.preventDefault();
+          onClose();
+          direct.onSelect?.();
+          return;
+        }
+        // Type-ahead: jump to the next item starting with the letter.
         const list = focusables();
         const from = t ? list.indexOf(t as HTMLButtonElement) : -1;
         const letter = e.key.toLowerCase();
@@ -195,7 +209,14 @@ export function Menu({
               {item.icon}
             </span>
           )}
-          <span className="menu-label">{item.label}</span>
+          {item.description !== undefined ? (
+            <span className="menu-text">
+              <span className="menu-label">{item.label}</span>
+              <span className="menu-desc">{item.description}</span>
+            </span>
+          ) : (
+            <span className="menu-label">{item.label}</span>
+          )}
           {item.keys && <Keys spec={item.keys} />}
           {sub &&
             (isOpen ? (
@@ -221,6 +242,11 @@ export function Menu({
       className={`menu${className ? ` ${className}` : ""}`}
       onKeyDown={onKeyDown}
     >
+      {heading && (
+        <div className="menu-heading" aria-hidden="true">
+          {heading}
+        </div>
+      )}
       {items.map(renderItem)}
     </div>
   );
