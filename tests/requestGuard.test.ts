@@ -146,9 +146,9 @@ describe("over a real socket", () => {
     return server;
   }
 
-  /** Whether a GET reaches the url within a second (a firewall may drop, not refuse). */
-  const reaches = (url: string) =>
-    fetch(url, { signal: AbortSignal.timeout(1000) }).then(
+  /** Whether a GET reaches the url in time (a firewall may drop, not refuse). */
+  const reaches = (url: string, timeoutMs = 1000) =>
+    fetch(url, { signal: AbortSignal.timeout(timeoutMs) }).then(
       () => true,
       () => false,
     );
@@ -169,7 +169,10 @@ describe("over a real socket", () => {
     } finally {
       open.stop(true);
     }
-    expect(await reaches(`http://${lan.address}:${s.port}/api/state`)).toBe(false);
+    // Where a firewall drops rather than refuses, a miss is only ever a
+    // timeout, so it is kept short: the control above shows a server bound to
+    // this address answers in milliseconds.
+    expect(await reaches(`http://${lan.address}:${s.port}/api/state`, 200)).toBe(false);
   });
 
   test("curl-style probes from the security report are refused", async () => {
