@@ -11,6 +11,7 @@ import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/se
 import { setGitEngine } from "../src/server/git";
 import {
   MAX_RECENT_DATA_REPOS,
+  normalizeDataRepo,
   normalizeRecentDataRepos,
   readState,
   recentDataRepos,
@@ -110,6 +111,38 @@ test("the list holds at most 10 folders — the oldest falls off", () => {
 test("a hand-edited list is cleaned: blanks, non-strings and repeats are dropped", () => {
   expect(normalizeRecentDataRepos(["/a", "", " /a ", 3, null, "/b"])).toEqual(["/a", "/b"]);
   expect(normalizeRecentDataRepos("not a list")).toEqual([]);
+});
+
+test("a folder typed with a trailing slash is the same folder without it", () => {
+  expect(normalizeDataRepo(" /specs/a/ ")).toBe("/specs/a");
+  expect(normalizeDataRepo("https://github.com/o/specs/")).toBe("https://github.com/o/specs");
+  expect(normalizeDataRepo("C:\\specs\\a\\")).toBe("C:\\specs\\a");
+  // A root keeps its separator.
+  expect(normalizeDataRepo("/")).toBe("/");
+  expect(normalizeDataRepo("C:\\")).toBe("C:\\");
+  expect(normalizeRecentDataRepos(["/specs/a/", "/specs/a", "/specs/b//"])).toEqual(["/specs/a", "/specs/b"]);
+  expect(recentDataRepos({ dataRepo: "/specs/a/", recentDataRepos: ["/specs/a"] })).toEqual(["/specs/a"]);
+});
+
+test("picking a folder with a trailing slash saves it without one", async () => {
+  const a = await dataFolder("a");
+  await applyStartupState();
+  const state = await pickFolder(`${a}/`);
+  expect(state.dataRepo).toBe(a);
+  expect(state.recentDataRepos).toEqual([a]);
+  const saved = await readState(root);
+  expect(saved.dataRepo).toBe(a);
+  expect(saved.recentDataRepos).toEqual([a]);
+});
+
+test("a settings file saved with a trailing slash reads back without one", async () => {
+  await Bun.write(
+    join(root, ".specdriven", "settings.json"),
+    JSON.stringify({ dataRepo: "/specs/a/", recentDataRepos: ["/specs/a/", "/specs/b", "/specs/a"] }),
+  );
+  const saved = await readState(root);
+  expect(saved.dataRepo).toBe("/specs/a");
+  expect(saved.recentDataRepos).toEqual(["/specs/a", "/specs/b"]);
 });
 
 test("GET /api/state carries the recent folders, the current one first", async () => {
