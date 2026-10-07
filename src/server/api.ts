@@ -22,6 +22,7 @@ import {
   normalizeShowTestLinks,
   normalizeSyncServerUrl,
   forgetDataRepo,
+  normalizeDataRepo,
   recentDataRepos,
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
@@ -578,7 +579,7 @@ const putState: Handler = async (req) => {
   // request leaves the data repo alone.
   let pickedDir: string | null = null;
   if (body.dataRepo !== undefined) {
-    const dataRepo = body.dataRepo.trim();
+    const dataRepo = normalizeDataRepo(body.dataRepo);
     if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
     // Verify access before recording: a GitHub url is cloned on first use
     // (specs/crud-feature.spec.md: "user is verified to have access to the
@@ -606,8 +607,8 @@ const putState: Handler = async (req) => {
     if (typeof body.forgetDataRepo !== "string" || !body.forgetDataRepo.trim()) {
       return json({ error: "forgetDataRepo must be a folder path or url" }, 400);
     }
-    const target = body.forgetDataRepo.trim();
-    if (target === state.dataRepo?.trim()) {
+    const target = normalizeDataRepo(body.forgetDataRepo);
+    if (target === (state.dataRepo && normalizeDataRepo(state.dataRepo))) {
       return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
     }
     forgetDataRepo(state, target);
