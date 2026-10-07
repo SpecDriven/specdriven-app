@@ -127,22 +127,27 @@ test("a local save reaches the other peer over websocket alone", async () => {
   expect(projectFeature(docB2!.doc)).toBe(projectFeature(docB!.doc));
 });
 
+// The merge is under test here, not the websocket (the test above covers
+// that), so this runs on the fake server: settle() replaces polling against
+// a deadline, which timed out under a loaded full-suite run. The edits are
+// made concurrent by construction — each peer edits before it is connected,
+// so neither can have seen the other's — rather than by hoping the real
+// server's throttle holds one back until the other is written.
 test("concurrent edits on both peers merge through the sync server", async () => {
   const { a, b } = await twoDirs();
-  const url = await startServer();
-  await bridge(a, url);
-  await bridge(b, url);
+  const server = new FakeSyncServer();
 
   await saveFeature(a, FILE, SEED.replace("- line one", "- line one, from A"));
   await saveFeature(b, FILE, SEED.replace("- line two", "- line two, from B"));
+  const peerA = await bridge(a, server);
+  const peerB = await bridge(b, server);
+  await server.settle(peerA, peerB);
 
-  const merged = async (dir: string) => {
+  for (const dir of [a, b]) {
     const text = await readFeature(dir, FILE);
-    return (text?.includes("from A") && text.includes("from B")) ?? false;
-  };
-  await until(() => merged(a), "B's edit to arrive at A");
-  await until(() => merged(b), "A's edit to arrive at B");
-
+    expect(text).toContain("from A");
+    expect(text).toContain("from B");
+  }
   expect(await readFeature(a, FILE)).toBe(await readFeature(b, FILE));
   const docA = await loadFeatureDoc(a, FILE);
   const docB = await loadFeatureDoc(b, FILE);
@@ -182,16 +187,15 @@ test("a remote absorb keeps a local disk edit the sync tick has not absorbed", a
 
 test("a peer that starts after the edit still catches up", async () => {
   const { a, b } = await twoDirs();
-  const url = await startServer();
-  await bridge(a, url);
+  const server = new FakeSyncServer();
+  const peerA = await bridge(a, server);
 
   // Peer A edits while B is offline (its bridge not yet started).
   await saveFeature(a, FILE, SEED.replace("- line two", "- line two, while B slept"));
+  await server.settle(peerA);
 
-  await bridge(b, url);
-  await until(
-    async () => (await readFeature(b, FILE))?.includes("while B slept") ?? false,
-    "the earlier edit to reach the late-starting peer",
-  );
+  const peerB = await bridge(b, server);
+  await server.settle(peerA, peerB);
+  expect(await readFeature(b, FILE)).toContain("while B slept");
   expect(await readFeature(b, FILE)).toBe(await readFeature(a, FILE));
 });

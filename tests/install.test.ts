@@ -19,10 +19,10 @@ import {
   readFileSync,
   symlinkSync,
   writeFileSync,
-  chmodSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { cachedExecutable, linkExecutable } from "./helpers/fakeBin";
 
 const INSTALL_SH = join(import.meta.dir, "..", "install.sh");
 const VERSION = "0.1.40";
@@ -50,7 +50,9 @@ const BASE_TOOLS = [
 /**
  * A directory holding exactly the named tools (symlinked from the machine),
  * so a test controls which downloader, unzipper or `bun` the installer sees.
- * Missing optional tools (e.g. sha256sum on macOS) are skipped.
+ * Missing optional tools (e.g. sha256sum on macOS) are skipped. Fakes are
+ * cached executables (helpers/fakeBin.ts): a body must not vary per test,
+ * or every run pays macOS's first-exec scan again.
  */
 function toolbox(names: string[], fakes: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "specdriven-tools-"));
@@ -59,11 +61,7 @@ function toolbox(names: string[], fakes: Record<string, string> = {}): string {
     const real = findTool(name);
     if (real) symlinkSync(real, join(dir, name));
   }
-  for (const [name, body] of Object.entries(fakes)) {
-    const path = join(dir, name);
-    writeFileSync(path, body);
-    chmodSync(path, 0o755);
-  }
+  for (const [name, body] of Object.entries(fakes)) linkExecutable(dir, name, body);
   return dir;
 }
 
@@ -529,13 +527,19 @@ test("the next steps say whether Bun is there to run them", async () => {
 // Bun is therefore offered — and installed only after a yes at the terminal,
 // by Bun's own installer, into the user's own home.
 
+// The bun it installs is a hard link to a cached one rather than a file of its
+// own, which the script would then be the first to run — and pay for
+// (helpers/fakeBin.ts). Home and the cache are both under tmpdir, so the link
+// stays on one filesystem.
+const INSTALLED_BUN = cachedExecutable("#!/bin/sh\necho fake bun\n");
+
 // Bun's installer unpacks into $BUN_INSTALL and touches nothing else. This
 // stand-in does the same, and writes down who ran it: "as the user, not as
 // root" is the whole of what the offer promises.
 const BUN_INSTALLER = `#!/usr/bin/env bash
 set -eu
 mkdir -p "$BUN_INSTALL/bin"
-printf '#!/bin/sh\necho fake bun\n' > "$BUN_INSTALL/bin/bun"
+ln -f ${shellQuote(INSTALLED_BUN)} "$BUN_INSTALL/bin/bun"
 chmod +x "$BUN_INSTALL/bin/bun"
 id -un > "$BUN_INSTALL/installed-by"
 echo "bun was installed to $BUN_INSTALL"
@@ -665,14 +669,24 @@ function shellQuote(path: string): string {
   return `'${path.replace(/'/g, `'\\''`)}'`;
 }
 
-/** A `bun` writing "<cwd> | <args>" to `log`, and running `onBuild` for build:desktop. */
-function fakeBun(log: string, onBuild = ""): string {
-  return `#!/bin/sh
-printf '%s | %s\n' "$(pwd)" "$*" >> ${shellQuote(log)}
+/**
+ * A `bun` writing "<cwd> | <args>" to $FAKE_LOG, and running $FAKE_ON_BUILD
+ * for build:desktop. Both come from the environment so the script is the same
+ * for every test and is cached (see toolbox); fakeRun() sets them.
+ */
+const FAKE_BUN = `#!/bin/sh
+printf '%s | %s\n' "$(pwd)" "$*" >> "$FAKE_LOG"
 case "$*" in
-  "run build:desktop --local") ${onBuild || ":"} ;;
+  "run build:desktop --local") eval "\${FAKE_ON_BUILD:-:}" ;;
 esac
 `;
+
+/** An `open` writing "open | <what>" to $FAKE_LOG. */
+const FAKE_OPEN = `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> "$FAKE_LOG"\n`;
+
+/** The environment FAKE_BUN and FAKE_OPEN read: where to log, and what the build leaves behind. */
+function fakeRun(log: string, onBuild = ""): Record<string, string> {
+  return { FAKE_LOG: log, FAKE_ON_BUILD: onBuild };
 }
 
 function logLines(log: string): string[] {
@@ -708,11 +722,12 @@ test("the run ends with the .dmg opened, and nothing started", async () => {
   // to leave it alone.
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Darwin"),
-    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
-    open: `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> ${shellQuote(log)}\n`,
+    bun: FAKE_BUN,
+    open: FAKE_OPEN,
   });
+  const env = fakeRun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`);
 
-  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools });
+  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools, env });
   expect(stderr).toBe("");
   expect(code).toBe(0);
 
@@ -743,13 +758,17 @@ test("the messages survive a single-byte locale", async () => {
   const dmg = join(target, "release", `SpecDriven-${VERSION}-arm64.dmg`);
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Darwin"),
-    bun: fakeBun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
-    open: `#!/bin/sh\nprintf 'open | %s\\n' "$1" >> ${shellQuote(log)}\n`,
+    bun: FAKE_BUN,
+    open: FAKE_OPEN,
   });
 
   const { stderr, code } = await runInstaller(good.url, home, {
     tools,
-    env: { LC_ALL: "en_US.ISO8859-1", LANG: "en_US.ISO8859-1" },
+    env: {
+      ...fakeRun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`),
+      LC_ALL: "en_US.ISO8859-1",
+      LANG: "en_US.ISO8859-1",
+    },
   });
   expect(stderr).toBe("");
   expect(code).toBe(0);
@@ -765,15 +784,16 @@ test("the run ends with the AppImage made runnable and started", async () => {
   // chmod the script does is the reason it can run at all.
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Linux"),
-    bun: fakeBun(
-      log,
-      `mkdir -p ${shellQuote(join(target, "release"))}\n` +
-        `    printf '#!/bin/sh\\nprintf "appimage | started\\\\n" >> ${shellQuote(log)}\\n' > ${shellQuote(image)}\n` +
-        `    chmod 644 ${shellQuote(image)}`,
-    ),
+    bun: FAKE_BUN,
   });
+  const env = fakeRun(
+    log,
+    `mkdir -p ${shellQuote(join(target, "release"))}\n` +
+      `printf '#!/bin/sh\\nprintf "appimage | started\\\\n" >> ${shellQuote(log)}\\n' > ${shellQuote(image)}\n` +
+      `chmod 644 ${shellQuote(image)}`,
+  );
 
-  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools, env: { DISPLAY: ":0" } });
+  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools, env: { ...env, DISPLAY: ":0" } });
   expect(stderr).toBe("");
   expect(code).toBe(0);
 
@@ -791,11 +811,12 @@ test("with no display the app is built but left unstarted", async () => {
   const image = join(target, "release", `SpecDriven-${VERSION}-x86_64.AppImage`);
   const tools = toolbox(BUILD_TOOLS, {
     uname: fakeUname("Linux"),
-    bun: fakeBun(log, `mkdir -p ${shellQuote(join(target, "release"))} && : > ${shellQuote(image)}`),
+    bun: FAKE_BUN,
   });
+  const env = fakeRun(log, `mkdir -p ${shellQuote(join(target, "release"))} && : > ${shellQuote(image)}`);
 
   // A headless machine: no DISPLAY, no WAYLAND_DISPLAY.
-  const { stdout, code } = await runInstaller(good.url, home, { tools });
+  const { stdout, code } = await runInstaller(good.url, home, { tools, env });
   expect(code).toBe(0);
   expect(stdout).toContain(`No display to start it on. When there is one, run ${image}.`);
   expect(stdout).toContain(`SpecDriven ${VERSION} is built.`);
@@ -806,9 +827,9 @@ test("a build that fails stops the run and says where the checkout is", async ()
   const home = freshHome();
   const log = join(home, "bun.log");
   const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
-  const tools = toolbox(BUILD_TOOLS, { bun: fakeBun(log, "exit 2") });
+  const tools = toolbox(BUILD_TOOLS, { bun: FAKE_BUN });
 
-  const { stderr, code } = await runInstaller(good.url, home, { tools });
+  const { stderr, code } = await runInstaller(good.url, home, { tools, env: fakeRun(log, "exit 2") });
   expect(code).toBe(1);
   expect(stderr).toContain(`\`bun run build:desktop --local\` failed in ${target}`);
   // The verified source is still there to look at or build by hand.

@@ -38,6 +38,7 @@ import {
   today,
 } from "../src/server/notebook";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { installFakeGit } from "./helpers/fakeGit";
 import { builtinManifests } from "../src/plugins/builtin/manifests";
 import { readProfile } from "../src/plugins/profile";
 
@@ -75,19 +76,21 @@ test("the notebook setting is on unless explicitly turned off", () => {
 });
 
 // "no `notebook/` folder is created and nothing is committed until the first
-// entry is written" — the price of a default-on module.
+// entry is written" — the price of a default-on module. What the tick makes
+// is under test, not git, so it runs on a fake one.
 test("a sync tick never creates the notebook folder", async () => {
-  const clones = await twoClones(root);
-  await syncDataDir(clones.a);
-  expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
-  // Even with every folder's plugin mounted, the notebook is not made.
-  await syncPlugins({ roadmap: true, tasks: true, notebook: true });
+  const fakeGit = installFakeGit();
   try {
-    await syncDataDir(clones.a);
+    await syncDataDir(root);
+    expect(await exists(join(root, NOTEBOOK_FOLDER))).toBe(false);
+    // Even with every folder's plugin mounted, the notebook is not made.
+    await syncPlugins({ roadmap: true, tasks: true, notebook: true });
+    await syncDataDir(root);
   } finally {
     await syncPlugins({ roadmap: false, tasks: false });
+    fakeGit.restore();
   }
-  expect(await exists(join(clones.a, NOTEBOOK_FOLDER))).toBe(false);
+  expect(await exists(join(root, NOTEBOOK_FOLDER))).toBe(false);
 });
 
 test("notebook paths are the folder and what is under it", () => {
