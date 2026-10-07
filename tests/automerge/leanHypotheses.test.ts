@@ -233,7 +233,8 @@ test("H2: a publish between two concurrent absorbs heals to the published body",
 // `H4_hint_picks_named`.
 test("H4: a markdown-only rename of one of two same-body scenarios lands on the first entry", () => {
   const doc = importFeatureDoc(parseFeature("# F\n\n## a @v1 [proposed]\n\n## b @v1 [proposed]\n"));
-  const [a, b] = doc.specs.map((e) => e.id);
+  const a = doc.specs[0]!.id;
+  const b = doc.specs[1]!.id;
   const renamed = parseFeature("# F\n\n## c @v1 [proposed]\n");
 
   const fromMarkdown = reconcile(doc, renamed);

@@ -7,19 +7,13 @@
 import { test, expect } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  mergeScenario as _unused,
-  threeWayFeature,
-  threeWayFeatureStrict,
-} from "../../src/server/automerge/merge";
+import { threeWayFeature, threeWayFeatureStrict } from "../../src/server/automerge/merge";
 import * as A from "@automerge/automerge";
 import { assertPublishedKept, healPublished, reconcile } from "../../src/server/automerge/reconcile";
 import { docToFeature, projectFeature } from "../../src/server/automerge/project";
 import { newFeatureDoc } from "../../src/server/automerge/store";
 import { parseFeature, type Feature, type Scenario, type ScenarioStatus } from "../../src/server/parser";
 import { type FeatureDoc, snapshotOf, type SpecEntry } from "../../src/server/automerge/schema";
-
-void _unused;
 
 const LEAN_DIR = join(import.meta.dir, "../../verification/lean");
 const ELAN_BIN = join(process.env.HOME ?? "", ".elan/bin");
