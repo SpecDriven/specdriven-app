@@ -5584,22 +5584,43 @@ aside header .collapse-btn {
    mid-header and a menu the width of a path would run past the pane. */
 .agent-cwd-picker {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 0.4 auto;
   min-width: 0;
 }
 
 .agent-cwd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: var(--font-mono);
   font-weight: 400;
   cursor: pointer;
 }
 
-.agent-cwd:hover {
+/* Never squeezed to just the ▾: a few letters stay, and the session name
+   (which shrinks harder) gives way first. */
+.agent-cwd-name {
+  min-width: 4ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same ▾ as the data folder's recent list: quiet until hovered or open. */
+.agent-cwd-chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+.agent-cwd:hover,
+.agent-cwd[aria-expanded="true"] {
+  color: var(--text-1);
+}
+
+.agent-cwd:hover .agent-cwd-chevron,
+.agent-cwd[aria-expanded="true"] .agent-cwd-chevron {
   color: var(--text-1);
 }
 

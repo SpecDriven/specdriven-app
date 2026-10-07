@@ -282,7 +282,8 @@ function AgentHeader({
               aria-expanded={folderOpen}
               onClick={() => setFolderOpen((o) => !o)}
             >
-              {basename(meta.cwd)}
+              <span className="agent-cwd-name">{basename(meta.cwd)}</span>
+              <ChevronDown size={12} aria-hidden="true" className="agent-cwd-chevron" />
             </button>
           </Tooltip>
           <Menu
