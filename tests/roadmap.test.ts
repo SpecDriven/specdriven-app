@@ -29,6 +29,7 @@ import {
   savePage,
 } from "../src/server/pages";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { installFakeGit } from "./helpers/fakeGit";
 import { builtinManifests } from "../src/plugins/builtin/manifests";
 import { readProfile } from "../src/plugins/profile";
 
@@ -74,18 +75,20 @@ test("ensurePageFolder creates the roadmap folder once", async () => {
   expect(await Bun.file(join(root, ROADMAP_FOLDER, "pricing.md")).text()).toBe("# Pricing\n");
 });
 
+// The switch is under test, not git, so the tick runs on a fake one.
 test("a sync tick creates the folder only when the setting is on", async () => {
-  const clones = await twoClones(root);
-  await syncPlugins({ roadmap: false });
-  await syncDataDir(clones.a);
-  expect(await exists(join(clones.a, ROADMAP_FOLDER))).toBe(false);
-  await syncPlugins({ roadmap: true });
+  const fakeGit = installFakeGit();
   try {
-    await syncDataDir(clones.a);
+    await syncPlugins({ roadmap: false });
+    await syncDataDir(root);
+    expect(await exists(join(root, ROADMAP_FOLDER))).toBe(false);
+    await syncPlugins({ roadmap: true });
+    await syncDataDir(root);
   } finally {
     await syncPlugins({ roadmap: false });
+    fakeGit.restore();
   }
-  expect(await exists(join(clones.a, ROADMAP_FOLDER))).toBe(true);
+  expect(await exists(join(root, ROADMAP_FOLDER))).toBe(true);
 });
 
 // "On Sync, commit all files in this folder."

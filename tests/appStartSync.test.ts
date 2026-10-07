@@ -1,18 +1,23 @@
 // Automates specs/app-start.spec.md "the data repo is pulled on start": the
 // app opens on the latest data, and so does a data folder just picked in the
 // UI — in both cases without the user pressing Sync.
+//
+// What is under test is the order — pull, then read — not git, so the data
+// repo is a folder git is faked for (helpers/fakeGit.ts): its pull delivers
+// a teammate's feature, which only a pull that ran in time can show.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setGitEngine } from "../src/server/git";
 import { writeState } from "../src/server/state";
-import { git, stopServers, twoClones } from "./helpers/fixtures";
+import { installFakeGit, type FakeGit } from "./helpers/fakeGit";
 
 let root: string;
 let home: string;
+let fakeGit: FakeGit | null = null;
 const realRoot = process.env.SPECDRIVEN_ROOT;
 const realHome = process.env.SPECDRIVEN_HOME;
 
@@ -31,7 +36,8 @@ afterEach(async () => {
   // whatever that file records (tests/telemetry.test.ts saw its git span).
   await syncedOnStart();
   reloader.stop();
-  stopServers();
+  fakeGit?.restore();
+  fakeGit = null;
   setGitEngine(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
@@ -44,12 +50,25 @@ afterEach(async () => {
   }
 });
 
-/** Commit a new feature to clone `a` and push it to the shared origin. */
-async function pushFeature(a: string, file: string, content: string) {
-  await Bun.write(join(a, file), content);
-  await git(a, "add", ".");
-  await git(a, "commit", "-m", `add ${file}`);
-  await git(a, "push", "origin", "HEAD:main");
+/**
+ * A clone (as far as the app can tell: it has a .git) whose next pull brings
+ * in `file`, as if a teammate had pushed it. Pulls are recorded in order.
+ */
+async function cloneWithIncoming(file: string, content: string): Promise<string> {
+  const dir = join(root, "data");
+  await Bun.write(join(dir, "specs/seed.feature.md"), "# Seed\n");
+  await mkdir(join(dir, ".git"));
+  fakeGit = installFakeGit({
+    async pull(repoDir) {
+      // A pull takes a moment, as a real one does, so a read that did not
+      // wait for it runs first and misses the file. A read that waits never
+      // sees this delay as anything but a slower pull, so it cannot flake.
+      await Bun.sleep(100);
+      await Bun.write(join(repoDir, file), content);
+      return { ok: true, conflictedFiles: [], message: `Fast-forward: ${file}` };
+    },
+  });
+  return dir;
 }
 
 async function listFeatureFiles(): Promise<string[]> {
@@ -60,10 +79,9 @@ async function listFeatureFiles(): Promise<string[]> {
 }
 
 test("the data repo is pulled on app start, before the first read", async () => {
-  const { a, b } = await twoClones(root);
+  const data = await cloneWithIncoming("specs/quote.feature.md", "# Quote Policy\n");
   // The cron reload is off, so only the app-start pull can bring this in.
-  await writeState({ dataRepo: b, reloadFrequencySeconds: 0 }, root);
-  await pushFeature(a, "specs/quote.feature.md", "# Quote Policy\n");
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
 
   await applyStartupState();
 
@@ -71,22 +89,21 @@ test("the data repo is pulled on app start, before the first read", async () => 
 });
 
 test("picking a data folder pulls it before the client reads it", async () => {
-  const { a, b } = await twoClones(root);
   await writeState({ reloadFrequencySeconds: 0 }, root);
   await applyStartupState();
-  await pushFeature(a, "specs/claim.feature.md", "# Claim\n");
+  const data = await cloneWithIncoming("specs/claim.feature.md", "# Claim\n");
 
   const res = await handleApi(
     new Request("http://localhost/api/state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dataRepo: b }),
+      body: JSON.stringify({ dataRepo: data }),
     }),
   );
   expect(res!.status).toBe(200);
 
   // Pulled by the time the switch is confirmed — the client reads next.
-  expect(await Bun.file(join(b, "specs/claim.feature.md")).exists()).toBe(true);
+  expect(await Bun.file(join(data, "specs/claim.feature.md")).exists()).toBe(true);
   expect(await listFeatureFiles()).toContain("specs/claim.feature.md");
 });
 

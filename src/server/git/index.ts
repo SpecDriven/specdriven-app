@@ -47,12 +47,22 @@ export function currentEngine(): GitEngine {
   return cliGitAvailable() ? "cli" : "js";
 }
 
+// A stand-in backend a test installs in place of every engine, for tests
+// whose subject is not git (tests/helpers/fakeGit.ts). Never set by the app.
+let substitute: GitBackend | null = null;
+
+/** Route every git operation to `standIn` until called with null. For tests only. */
+export function substituteGitBackend(standIn: GitBackend | null): void {
+  substitute = standIn;
+}
+
 /**
  * The backend every operation runs on. An engine explicitly chosen in
  * Settings but no longer installed is an error, not a silent swap to
  * another one.
  */
 function backend(): GitBackend {
+  if (substitute) return substitute;
   switch (currentEngine()) {
     case "js":
       return jsBackend;
