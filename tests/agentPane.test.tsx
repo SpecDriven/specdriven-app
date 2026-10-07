@@ -9,6 +9,9 @@ import {
   STATUS_LABEL,
   SimulationWatermark,
   TranscriptRow,
+  folderItems,
+  knownFolders,
+  modeItems,
 } from "../src/frontend/AgentPane";
 import {
   EMPTY_TRANSCRIPT,
@@ -317,7 +320,46 @@ describe("TranscriptRow", () => {
     expect(Object.keys(STATUS_LABEL).sort()).toEqual(
       ["awaiting_input", "ended", "error", "idle", "running", "starting"].sort(),
     );
-    expect(Object.keys(MODE_LABEL).sort()).toEqual(["acceptEdits", "bypassPermissions", "default", "plan"]);
+    expect(Object.keys(MODE_LABEL).sort()).toEqual(["acceptEdits", "auto", "bypassPermissions", "default", "plan"]);
+  });
+
+  test("the folder menu offers the code repo, the data repo, then folders sessions used", () => {
+    const meta = (cwd: string, startedAt: string) => ({ cwd, startedAt }) as never;
+    const folders = knownFolders("/w/code", "/w/data", [
+      meta("/w/old", "2026-10-01T00:00:00Z"),
+      meta("/w/code", "2026-10-02T00:00:00Z"),
+      meta("/w/new", "2026-10-03T00:00:00Z"),
+    ]);
+    expect(folders).toEqual(["/w/code", "/w/data", "/w/new", "/w/old"]);
+    expect(knownFolders(null, "/w/data", [])).toEqual(["/w/data"]);
+
+    const picked: string[] = [];
+    const items = folderItems(folders, "/w/data", async () => "/w/typed", (f) => picked.push(f));
+    expect(items.map((i) => i.label)).toEqual(["code", "data", "new", "old", "Other folder…"]);
+    expect(items.filter((i) => i.checked).map((i) => i.description)).toEqual(["/w/data"]);
+    items[2]!.onSelect!();
+    expect(picked).toEqual(["/w/new"]);
+    // Without a prompt there is no "Other folder…"; an unlisted current folder leads.
+    const bare = folderItems(["/w/data"], "/w/x", undefined, () => {});
+    expect(bare.map((i) => i.description)).toEqual(["/w/x", "/w/data"]);
+  });
+
+  test("the mode menu numbers every mode and badges the agent's default", () => {
+    const picked: string[] = [];
+    const claude = modeItems("claude", "plan", (m) => picked.push(m));
+    expect(claude.map((i) => i.id)).toEqual(["auto", "default", "acceptEdits", "plan", "bypassPermissions"]);
+    expect(claude.map((i) => i.keys)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(claude.filter((i) => i.checked).map((i) => i.id)).toEqual(["plan"]);
+    expect(claude.every((i) => typeof i.description === "string")).toBe(true);
+    const label = (items: typeof claude, id: string) =>
+      renderToStaticMarkup(<>{items.find((i) => i.id === id)!.label}</>);
+    expect(label(claude, "auto")).toContain("Default");
+    expect(label(claude, "default")).toBe("Manual");
+    const codex = modeItems("codex", "default", () => {});
+    expect(label(codex, "auto")).toBe("Auto");
+    expect(label(codex, "default")).toContain("Default");
+    claude[0]!.onSelect!();
+    expect(picked).toEqual(["auto"]);
   });
 });
 

@@ -613,6 +613,8 @@ export interface CreateSessionOptions {
   agent?: ChatAgent;
   prompt?: string;
   permissionMode?: PermissionMode;
+  /** The folder to work in; absent is the code repo, else the data repo. */
+  cwd?: string;
 }
 
 export const agentChat = {

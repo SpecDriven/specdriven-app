@@ -252,7 +252,8 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
   const { options } = fakes[0]!;
   expect(options.cwd).toBe(data);
   expect(options.includePartialMessages).toBe(true);
-  expect(options.permissionMode).toBe("default");
+  // Claude decides its own permissions until the pane picks another mode.
+  expect(options.permissionMode).toBe("auto");
   // A session like the CLI would open: Claude Code's prompt and settings.
   expect(options.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
   expect(options.settingSources).toEqual(["user", "project", "local"]);
@@ -574,6 +575,34 @@ test("a code repo named in project-settings.json is where the chat works", async
   expect(gone.status).toBe(400);
   expect((await gone.json()).error).toContain("Code repo not found");
   expect(fakes).toHaveLength(1);
+});
+
+test("a folder the pane picks is where the chat works, over the code repo", async () => {
+  const code = join(root, "code");
+  const other = join(root, "elsewhere");
+  await mkdir(code);
+  await mkdir(other);
+  await writeFile(join(data, PROJECT_SETTINGS_FILE), JSON.stringify({ "code-repo": "../code" }));
+  const res = await api("/api/agent/chat", "POST", { name: "chat", cwd: `${other}/` });
+  expect(res.status).toBe(200);
+  const meta = (await res.json()) as ChatSessionMeta;
+  expect(meta.cwd).toBe(other);
+  expect(fakes[0]!.options.cwd).toBe(other);
+  // The specs still ride along.
+  expect(fakes[0]!.options.additionalDirectories).toEqual([data]);
+
+  // The data repo itself is a plain data-repo session.
+  const back = (await (await api("/api/agent/chat", "POST", { name: "chat", cwd: data })).json()) as ChatSessionMeta;
+  expect(back.cwd).toBe(data);
+  expect(back.codeRepo).toBeUndefined();
+  expect(fakes[1]!.options.additionalDirectories).toBeUndefined();
+
+  const missing = await api("/api/agent/chat", "POST", { name: "chat", cwd: join(root, "nope") });
+  expect(missing.status).toBe(400);
+  expect((await missing.json()).error).toContain("Folder not found");
+  const relative = await api("/api/agent/chat", "POST", { name: "chat", cwd: "code" });
+  expect(relative.status).toBe(400);
+  expect(fakes).toHaveLength(2);
 });
 
 test("Start session can open the generated prompt in the pane", async () => {

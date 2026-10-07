@@ -132,7 +132,8 @@ import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { version as appVersion } from "../../package.json";
-import { isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
 import {
   pluginStates,
@@ -1529,12 +1530,22 @@ function missingAgentCli(agent: ChatAgent): Response | null {
 }
 
 /** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
-async function agentPanePlace(dir: string, agent: ChatAgent): Promise<SessionPlace | Response> {
+async function agentPanePlace(
+  dir: string,
+  agent: ChatAgent,
+  cwd?: string,
+): Promise<SessionPlace | Response> {
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
   const missing = missingAgentCli(agent);
   if (missing) return missing;
+  // A folder the pane picked: it stands in for the code repo, so the data
+  // repo still rides along as an extra directory unless it is the folder.
+  if (cwd !== undefined) {
+    if (!(await directoryExists(cwd))) return json({ error: `Folder not found: ${cwd}` }, 400);
+    return cwd === dir ? { dataRepo: dir } : { dataRepo: dir, codeRepo: cwd };
+  }
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
     return json(
@@ -1557,11 +1568,20 @@ const postAgentChat = withDataDir(async (dir, req) => {
     prompt?: unknown;
     permissionMode?: unknown;
     agent?: unknown;
+    cwd?: unknown;
   };
   // Which agent drives the chat; absent is Claude, as it was before Pi.
   const agent = body.agent === undefined ? "claude" : normalizeChatAgent(body.agent);
   if (agent === null) return json({ error: `agent must be ${CHAT_AGENT_LIST}` }, 400);
-  const place = await agentPanePlace(dir, agent);
+  // The folder to work in; absent is the code repo, else the data repo.
+  let cwd: string | undefined;
+  if (body.cwd !== undefined) {
+    const raw = typeof body.cwd === "string" ? body.cwd.trim() : "";
+    const expanded = raw === "~" || raw.startsWith("~/") ? homedir() + raw.slice(1) : raw;
+    if (!isAbsolute(expanded)) return json({ error: "cwd must be an absolute path" }, 400);
+    cwd = resolve(expanded);
+  }
+  const place = await agentPanePlace(dir, agent, cwd);
   if (place instanceof Response) return place;
   const name = (typeof body.name === "string" && cleanLine(body.name)) || "Coding agent session";
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt : undefined;

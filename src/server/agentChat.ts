@@ -69,14 +69,8 @@ export function normalizeChatAgent(value: unknown): ChatAgent | null {
   return (CHAT_AGENTS as readonly unknown[]).includes(value) ? (value as ChatAgent) : null;
 }
 
-/** The permission modes the pane offers; the SDK knows more (dontAsk, auto). */
-export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
-export const PERMISSION_MODES: readonly PermissionMode[] = [
-  "default",
-  "acceptEdits",
-  "plan",
-  "bypassPermissions",
-];
+import { PERMISSION_MODES, defaultPermissionMode, type PermissionMode } from "./permissionModes";
+export { PERMISSION_MODES, defaultPermissionMode, type PermissionMode };
 
 export function normalizePermissionMode(value: unknown): PermissionMode | null {
   return (PERMISSION_MODES as readonly unknown[]).includes(value) ? (value as PermissionMode) : null;
@@ -429,9 +423,10 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   const now = opts.now ?? new Date();
   const cwd = sessionWorkDir(opts.place);
   const agent = opts.agent ?? "claude";
-  // Pi runs its own tools with no gate of any kind; saying "default" would
+  // Pi runs its own tools with no gate of any kind; any other mode would
   // promise a prompt that never comes.
-  const permissionMode = agent === "pi" ? "bypassPermissions" : (opts.permissionMode ?? "default");
+  const permissionMode =
+    agent === "pi" ? "bypassPermissions" : (opts.permissionMode ?? defaultPermissionMode(agent));
   const session: ChatSession = {
     meta: {
       id,
