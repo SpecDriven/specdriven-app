@@ -12,12 +12,14 @@ import { handleApi, reloader } from "../src/server/api";
 import { setClaudeAvailability } from "../src/server/agent";
 import {
   InputQueue,
+  claudeBaseUrl,
+  describeAccount,
   endAllChatSessions,
   getChatEvents,
   mapSdkMessage,
   setQueryFactory,
 } from "../src/server/agentChat";
-import type { ChatEvent, ChatSessionMeta, QueryLike, SlashCommandInfo } from "../src/server/agentChat";
+import type { AccountInfoLike, ChatEvent, ChatSessionMeta, QueryLike, SlashCommandInfo } from "../src/server/agentChat";
 import { createFeature, saveFeature } from "../src/server/features";
 import { PROJECT_SETTINGS_FILE } from "../src/server/members";
 import { readState, writeState } from "../src/server/state";
@@ -70,7 +72,14 @@ class FakeQuery implements QueryLike {
   async supportedCommands() {
     return this.commands;
   }
+  async accountInfo() {
+    return fakeAccount;
+  }
 }
+
+/** What the next FakeQuery says of the login; undefined, as an older
+    Claude Code would. */
+let fakeAccount: AccountInfoLike | undefined;
 
 let root: string;
 let home: string;
@@ -78,14 +87,21 @@ let data: string;
 let fakes: FakeQuery[];
 const realRoot = process.env.SPECDRIVEN_ROOT;
 const realHome = process.env.SPECDRIVEN_HOME;
+// The account chip reads Claude Code's settings; keep the developer's own
+// ~/.claude and shell out of the tests.
+const realClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
+const realBaseUrl = process.env.ANTHROPIC_BASE_URL;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-agent-chat-"));
   home = await mkdtemp(join(tmpdir(), "specdriven-agent-chat-home-"));
   process.env.SPECDRIVEN_ROOT = root;
   process.env.SPECDRIVEN_HOME = home;
+  process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
+  delete process.env.ANTHROPIC_BASE_URL;
   data = join(root, "data");
   fakes = [];
+  fakeAccount = undefined;
   setClaudeAvailability(() => true);
   setQueryFactory(({ prompt, options }) => {
     const fake = new FakeQuery(prompt, options);
@@ -107,6 +123,8 @@ afterEach(async () => {
   for (const [name, value] of [
     ["SPECDRIVEN_ROOT", realRoot],
     ["SPECDRIVEN_HOME", realHome],
+    ["CLAUDE_CONFIG_DIR", realClaudeConfig],
+    ["ANTHROPIC_BASE_URL", realBaseUrl],
   ] as const) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -734,4 +752,91 @@ test("mapSdkMessage keeps only what the pane renders", () => {
     ),
   ).toMatchObject([{ kind: "result", turn: 3, subtype: "error_during_execution", isError: true, text: "boom" }]);
   expect(mapSdkMessage(sdk({ type: "system", subtype: "status", status: "compacting" }), { turn: 1 })).toEqual([]);
+});
+
+test("describeAccount reads Claude Code's account answer", () => {
+  // Shapes Claude Code 2.1.x sends in its initialize answer.
+  expect(describeAccount({ email: "a@b.c", subscriptionType: "Claude Max", apiProvider: "firstParty" })).toMatchObject({
+    billing: "plan",
+    label: "Claude Max",
+  });
+  expect(describeAccount({ tokenSource: "CLAUDE_CODE_OAUTH_TOKEN", apiProvider: "firstParty" }).billing).toBe("plan");
+  expect(describeAccount({ apiKeySource: "ANTHROPIC_API_KEY", apiProvider: "firstParty" }).billing).toBe("api");
+  expect(describeAccount({ apiKeySource: "/login managed key", email: "a@b.c" }).billing).toBe("api");
+  expect(describeAccount({ tokenSource: "ANTHROPIC_AUTH_TOKEN", apiProvider: "firstParty" })).toMatchObject({
+    billing: "api",
+    label: "Auth token",
+  });
+  expect(describeAccount({ tokenSource: "apiKeyHelper" }).billing).toBe("api");
+  expect(describeAccount({ subscriptionType: "Claude API", email: "a@b.c" }).billing).toBe("api");
+  expect(describeAccount({ apiProvider: "bedrock" })).toMatchObject({ billing: "provider", label: "Amazon Bedrock" });
+  // Nobody signed in: Claude Code still sends tokenSource "none".
+  expect(describeAccount({ tokenSource: "none", apiProvider: "firstParty" }).billing).toBe("none");
+  expect(describeAccount({}).billing).toBe("none");
+});
+
+test("a Claude session shows how it is billed once Claude Code says", async () => {
+  fakeAccount = { email: "dev@example.com", subscriptionType: "Claude Max", apiProvider: "firstParty" };
+  const res = await api("/api/agent/chat", "POST", { name: "chat" });
+  const { id } = (await res.json()) as ChatSessionMeta;
+  const snap = await untilStatus(id, "idle");
+  expect(snap.meta.account).toMatchObject({ billing: "plan", label: "Claude Max" });
+  // The pane learns it from the same status event that says "idle".
+  const ready = snap.events.find((e) => e.kind === "status" && e.status === "idle");
+  expect(ready).toMatchObject({ account: { billing: "plan" } });
+});
+
+test("a Claude Code that does not say leaves the session without an account", async () => {
+  const { id } = await idleSession();
+  expect((await snapshot(id)).meta.account).toBeUndefined();
+});
+
+test("describeAccount names a moved base URL, a local one as a proxy", () => {
+  const token = { tokenSource: "ANTHROPIC_AUTH_TOKEN", apiProvider: "firstParty" };
+  expect(describeAccount(token, "http://localhost:6655/anthropic/")).toEqual({
+    billing: "api",
+    label: "API:PROXY",
+    detail: "API:localhost:6655",
+  });
+  expect(describeAccount(token, "http://127.0.0.1:8080").label).toBe("API:PROXY");
+  expect(describeAccount(token, "https://llm.example.com/v1")).toMatchObject({
+    label: "API:llm.example.com",
+    detail: "API:llm.example.com",
+  });
+  // Even over a plan login, the calls go where the base URL says.
+  expect(describeAccount({ subscriptionType: "Claude Max" }, "http://localhost:6655").label).toBe("API:PROXY");
+  // Not a URL: the credential decides.
+  expect(describeAccount(token, "not a url").label).toBe("Auth token");
+  // A cloud provider ignores ANTHROPIC_BASE_URL.
+  expect(describeAccount({ apiProvider: "bedrock" }, "http://localhost:6655").label).toBe("Amazon Bedrock");
+});
+
+test("claudeBaseUrl reads the settings Claude Code loads, the later file winning", async () => {
+  const config = join(home, "claude-config");
+  const cwd = join(root, "work");
+  await mkdir(config, { recursive: true });
+  await mkdir(join(cwd, ".claude"), { recursive: true });
+  expect(await claudeBaseUrl(cwd, {}, config)).toBeUndefined();
+  expect(await claudeBaseUrl(cwd, { ANTHROPIC_BASE_URL: "http://env:1" }, config)).toBe("http://env:1");
+  await writeFile(join(config, "settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://user:2" } }));
+  expect(await claudeBaseUrl(cwd, { ANTHROPIC_BASE_URL: "http://env:1" }, config)).toBe("http://user:2");
+  await writeFile(join(cwd, ".claude", "settings.json"), "{ not json");
+  await writeFile(
+    join(cwd, ".claude", "settings.local.json"),
+    JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://local:3" } }),
+  );
+  expect(await claudeBaseUrl(cwd, {}, config)).toBe("http://local:3");
+});
+
+test("a Claude session behind a local proxy says API:PROXY", async () => {
+  await mkdir(join(home, "claude"), { recursive: true });
+  await writeFile(
+    join(home, "claude", "settings.json"),
+    JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://localhost:6655/anthropic/" } }),
+  );
+  fakeAccount = { tokenSource: "ANTHROPIC_AUTH_TOKEN", apiProvider: "firstParty" };
+  const res = await api("/api/agent/chat", "POST", { name: "chat" });
+  const { id } = (await res.json()) as ChatSessionMeta;
+  const snap = await untilStatus(id, "idle");
+  expect(snap.meta.account).toEqual({ billing: "api", label: "API:PROXY", detail: "API:localhost:6655" });
 });

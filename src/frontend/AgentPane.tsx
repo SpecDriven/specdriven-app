@@ -339,6 +339,20 @@ function AgentHeader({
           </span>
         </Tooltip>
       )}
+      {/* Claude only: whether this session spends a Claude plan or is billed
+          per token, from Claude Code's own account answer. */}
+      {meta?.account && (
+        <Tooltip label={meta.account.detail}>
+          <span
+            className="chip muted agent-account"
+            data-billing={meta.account.billing}
+            tabIndex={0}
+            aria-label={`Billing: ${meta.account.label}`}
+          >
+            {meta.account.label}
+          </span>
+        </Tooltip>
+      )}
       {/* Pi's RPC mode has no permission protocol — it runs its own tools,
           so there is no mode to offer and the pane says as much. */}
       {meta && meta.agent === "pi" && (

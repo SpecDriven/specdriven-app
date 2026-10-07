@@ -512,6 +512,7 @@ function receive(id: string, ev: ChatEvent): void {
     meta.status = ev.status;
     if (ev.agentSessionId) meta.agentSessionId = ev.agentSessionId;
     if (ev.model) meta.model = ev.model;
+    if (ev.account) meta.account = ev.account;
     if (ev.permissionMode) meta.permissionMode = ev.permissionMode;
     if (ev.commands) commands = ev.commands;
     if (isFinalStatus(ev.status)) meta.endedAt = ev.at;
