@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { createGit } from "just-git";
 import type { CredentialProvider, IdentityOverride } from "just-git";
 import { getAuth } from "../auth";
-import { DEMO_USER, isDemoMode } from "../demo";
+import { DEMO_USER, isDemoMode } from "../demoMode";
 import { readTextFile } from "../fsx";
 import type { RunResult } from "../run";
 import type { GitBackend } from "./backend";
