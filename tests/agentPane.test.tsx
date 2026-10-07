@@ -10,6 +10,7 @@ import {
   SimulationWatermark,
   TranscriptRow,
   folderItems,
+  folderPath,
   knownFolders,
   modeItems,
 } from "../src/frontend/AgentPane";
@@ -342,6 +343,18 @@ describe("TranscriptRow", () => {
     // Without a prompt there is no "Other folder…"; an unlisted current folder leads.
     const bare = folderItems(["/w/data"], "/w/x", undefined, () => {});
     expect(bare.map((i) => i.description)).toEqual(["/w/x", "/w/data"]);
+  });
+
+  test("a folder typed with a trailing slash is the same folder as its sessions'", () => {
+    const meta = (cwd: string, startedAt: string) => ({ cwd, startedAt }) as never;
+    const folders = knownFolders("/w/code", "/w/data/", [meta("/w/data", "2026-10-07T00:00:00Z")]);
+    expect(folders).toEqual(["/w/code", "/w/data"]);
+    const items = folderItems(folders, "/w/data/", undefined, () => {});
+    expect(items.map((i) => i.description)).toEqual(["/w/code", "/w/data"]);
+    expect(items.filter((i) => i.checked).map((i) => i.description)).toEqual(["/w/data"]);
+    expect(folderPath("/")).toBe("/");
+    expect(folderPath("C:\\")).toBe("C:\\");
+    expect(folderPath("C:\\w\\data\\")).toBe("C:\\w\\data");
   });
 
   test("the mode menu numbers every mode and badges the agent's default", () => {
