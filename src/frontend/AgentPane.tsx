@@ -106,6 +106,15 @@ function basename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
+/**
+ * A folder without its trailing separators, so "/a/b/" and "/a/b" are one
+ * folder: the open spec folder keeps the slash it was typed with, while a
+ * session's folder comes back resolved. A root ("/", "C:\") stays.
+ */
+export function folderPath(path: string): string {
+  return path.replace(/(?<=[^\\/:])[\\/]+$/, "");
+}
+
 export function AgentPane({
   compact,
   demo,
@@ -199,7 +208,8 @@ export function knownFolders(
   sessions: readonly ChatSessionMeta[],
 ): string[] {
   const used = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((m) => m.cwd);
-  return [...new Set([codeRepo, dataRepo, ...used].filter((f): f is string => Boolean(f)))];
+  const all = [codeRepo, dataRepo, ...used].filter((f): f is string => Boolean(f));
+  return [...new Set(all.map(folderPath))];
 }
 
 function AgentHeader({
@@ -399,6 +409,7 @@ export function folderItems(
   askFolder: ((initial: string) => Promise<string | null>) | undefined,
   onSelect: (folder: string) => void,
 ): MenuItem[] {
+  current = folderPath(current);
   const all = folders.includes(current) ? folders : [current, ...folders];
   return [
     ...all.map((f) => ({
