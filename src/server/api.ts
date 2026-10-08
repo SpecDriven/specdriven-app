@@ -6,6 +6,7 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
@@ -26,6 +27,7 @@ import {
   recentDataRepos,
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
+  DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { ensureDataRepoFolder, MissingDataRepoError, resolveDataRepo } from "./repo";
@@ -394,6 +396,9 @@ async function stateFields(state: SpecDrivenState) {
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
     codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget),
+    // How long a Claude turn behind a proxy waits for the API's first
+    // response in the pane (src/server/agentChat.ts); 0 is no limit.
+    agentFirstResponseSeconds: normalizeAgentFirstResponseSeconds(state.agentFirstResponseSeconds),
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: claudeDesktopAvailable(),
@@ -479,6 +484,7 @@ const putState: Handler = async (req) => {
     publishExternalLinks?: boolean;
     codeGen?: boolean;
     codeGenTarget?: string;
+    agentFirstResponseSeconds?: number;
     deletePublished?: boolean;
     assignments?: boolean;
     /**
@@ -510,6 +516,7 @@ const putState: Handler = async (req) => {
     body.publishExternalLinks === undefined &&
     body.codeGen === undefined &&
     body.codeGenTarget === undefined &&
+    body.agentFirstResponseSeconds === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.plugins === undefined &&
@@ -525,7 +532,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -715,6 +722,18 @@ const putState: Handler = async (req) => {
       return json({ error: `codeGenTarget must be ${CODE_GEN_TARGET_LIST}` }, 400);
     }
     state.codeGenTarget = target;
+  }
+  // The pane's first-response wait for Claude behind a proxy
+  // (specs/agents/agent-pane.feature.md "A Claude turn fails fast when the
+  // API proxy does not answer"): whole seconds, 0 for no limit; the default
+  // is stored as an absent key.
+  if (body.agentFirstResponseSeconds !== undefined) {
+    const n = body.agentFirstResponseSeconds;
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
+      return json({ error: "agentFirstResponseSeconds must be a number >= 0" }, 400);
+    }
+    if (Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS) delete state.agentFirstResponseSeconds;
+    else state.agentFirstResponseSeconds = Math.floor(n);
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — the default OFF is an absent key.
@@ -1484,6 +1503,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
         name,
         agent,
         prompt: buildSessionPrompt(name, specs, place, sections),
+        firstResponseSeconds: await agentFirstResponseSeconds(),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
       return json({ name, id: meta.id, target });
@@ -1558,6 +1578,11 @@ async function agentPanePlace(
   return codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
 }
 
+/** The Settings wait for a Claude turn's first API response behind a proxy. */
+async function agentFirstResponseSeconds(): Promise<number> {
+  return normalizeAgentFirstResponseSeconds((await readState(getAppRoot())).agentFirstResponseSeconds);
+}
+
 /** A ChatError carries its status; anything else is a 500 with its words. */
 function chatError(e: unknown): Response {
   if (e instanceof ChatError) return json({ error: e.message }, e.status);
@@ -1599,6 +1624,7 @@ const postAgentChat = withDataDir(async (dir, req) => {
       agent,
       ...(prompt ? { prompt } : {}),
       ...(permissionMode ? { permissionMode } : {}),
+      firstResponseSeconds: await agentFirstResponseSeconds(),
       sessionsDir: await sessionsDirectory(getAppRoot()),
     });
     return json(meta);
