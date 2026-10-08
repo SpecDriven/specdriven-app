@@ -438,6 +438,16 @@ interface ChatSession {
   piStream: PiStreamContext;
   /** Streaming state for mapCodexNotification. */
   codexStream: CodexStreamContext;
+  /** Claude only: where Claude Code sends its API calls when something
+      moved them (claudeBaseUrl) — a proxy or gateway. */
+  apiBaseUrl?: string;
+  /** Claude only: how long a turn waits for the API's first sign of life
+      behind that proxy; 0 is no limit. */
+  firstResponseMs: number;
+  /** The armed first-response watchdog of the turn under way. */
+  firstResponse: ReturnType<typeof setTimeout> | null;
+  /** Retries Claude Code reported in that turn before anything came back. */
+  apiRetries: number;
 }
 
 // The registry hangs off globalThis: `bun --hot` swaps modules but keeps
@@ -527,6 +537,10 @@ export interface CreateChatOptions {
   /** Sent as the first user message, before the pane says anything. */
   prompt?: string;
   permissionMode?: PermissionMode;
+  /** Claude behind a proxy: seconds a turn waits for the API's first
+      response before the pane stops it (Settings, state.ts
+      agentFirstResponseSeconds); 0 or absent is no limit. */
+  firstResponseSeconds?: number;
   /** <settings dir>/sessions — see sessionsDirectory in agent.ts. */
   sessionsDir: string;
   id?: string;
@@ -582,6 +596,9 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     stream: { messageId: null },
     piStream: newPiStream(),
     codexStream: newCodexStream(),
+    firstResponseMs: Math.max(0, Math.floor((opts.firstResponseSeconds ?? 0) * 1000)),
+    firstResponse: null,
+    apiRetries: 0,
   };
   registry().set(id, session);
   installShutdownHook();
@@ -604,6 +621,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
+  session.apiBaseUrl = await claudeBaseUrl(cwd);
 
   const options: Options = {
     cwd,
@@ -634,11 +652,13 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     session.busy = true;
     session.input.push(userMessage(opts.prompt));
     emit(session, { kind: "user", id: randomUUID(), text: opts.prompt }, now);
+    armFirstResponse(session);
   }
 
   try {
     session.query = await (queryFactory ?? sdkFactory)({ prompt: session.input, options });
   } catch (e) {
+    disarmFirstResponse(session);
     registry().delete(id);
     throw new ChatError(502, `Could not start Claude: ${(e as Error).message}`);
   }
@@ -663,11 +683,8 @@ async function ready(session: ChatSession): Promise<void> {
   }
   let account: ChatAccount | undefined;
   try {
-    const [info, baseUrl] = await Promise.all([
-      session.query!.accountInfo?.(),
-      claudeBaseUrl(session.meta.cwd),
-    ]);
-    if (info) account = describeAccount(info, baseUrl);
+    const info = await session.query!.accountInfo?.();
+    if (info) account = describeAccount(info, session.apiBaseUrl);
   } catch {
     // Older binaries lack the request; the pane just shows no chip.
   }
@@ -709,6 +726,7 @@ async function pump(session: ChatSession): Promise<void> {
 }
 
 function handleMessage(session: ChatSession, msg: SDKMessage): void {
+  noteFirstResponse(session, msg);
   if (msg.type === "system" && msg.subtype === "init") {
     const first = !session.initSeen;
     session.initSeen = true;
@@ -746,6 +764,62 @@ function handleMessage(session: ChatSession, msg: SDKMessage): void {
   if (msg.type === "result") {
     session.busy = false;
     if (!FINAL.has(session.meta.status)) setStatus(session, "idle");
+  }
+}
+
+// --- The first-response watchdog -------------------------------------------
+//
+// With the API behind a proxy (ANTHROPIC_BASE_URL) that is not running,
+// Claude Code retries its first request ten times with growing back-off —
+// minutes of a spinner. The pane gives a turn firstResponseMs to show any
+// sign of the API instead: a streamed event (the API's `ping` keepalives
+// included), a finished message or a result. None by then, and the turn is
+// stopped with a note saying why; the session stays up for the next try.
+
+function armFirstResponse(session: ChatSession): void {
+  disarmFirstResponse(session);
+  session.apiRetries = 0;
+  if (!session.firstResponseMs || !session.apiBaseUrl) return;
+  session.firstResponse = setTimeout(() => void noFirstResponse(session), session.firstResponseMs);
+}
+
+function disarmFirstResponse(session: ChatSession): void {
+  if (session.firstResponse) clearTimeout(session.firstResponse);
+  session.firstResponse = null;
+}
+
+/** Anything the API sent ends the wait; Claude Code's own retries do not. */
+function noteFirstResponse(session: ChatSession, msg: SDKMessage): void {
+  if (!session.firstResponse) return;
+  if (msg.type === "system" && msg.subtype === "api_retry") {
+    session.apiRetries = msg.attempt;
+    return;
+  }
+  if (msg.type === "stream_event" || msg.type === "assistant" || msg.type === "result") {
+    disarmFirstResponse(session);
+  }
+}
+
+async function noFirstResponse(session: ChatSession): Promise<void> {
+  session.firstResponse = null;
+  if (FINAL.has(session.meta.status) || !session.busy || !session.query) return;
+  const seconds = Math.round(session.firstResponseMs / 1000);
+  const retries =
+    session.apiRetries > 0 ? ` after ${session.apiRetries} ${session.apiRetries === 1 ? "retry" : "retries"}` : "";
+  emit(session, {
+    kind: "note",
+    level: "error",
+    code: "api",
+    text:
+      `No response from the API at ${session.apiBaseUrl} within ${seconds}s${retries} — is the proxy running? ` +
+      "The turn was stopped; send it again once the proxy is up. (Settings → Workflow sets this wait.)",
+  });
+  // Claude Code answers the interrupt with the turn's result, which puts
+  // the session back to idle.
+  try {
+    await session.query.interrupt();
+  } catch {
+    // A Claude Code that died meanwhile ends the session through pump.
   }
 }
 
@@ -1406,6 +1480,7 @@ function finish(
   code: "ended" | "spawn_failed" | "interrupted" = "ended",
 ): Promise<void> {
   denyAllPending(session, "ended", "The session has ended");
+  disarmFirstResponse(session);
   session.busy = false;
   emit(session, { kind: "note", level: status === "error" ? "error" : "info", code, text });
   setStatus(session, status);
@@ -1460,7 +1535,10 @@ export function sendChatMessage(id: string, text: string): ChatEvent {
   session.busy = true;
   if (session.codex) void codexTurn(session, trimmed);
   else if (session.pi) session.pi.send({ type: "prompt", message: trimmed });
-  else session.input.push(userMessage(trimmed));
+  else {
+    session.input.push(userMessage(trimmed));
+    armFirstResponse(session);
+  }
   const event = emit(session, { kind: "user", id: randomUUID(), text: trimmed });
   if (session.meta.status === "idle") setStatus(session, "running");
   return event;
@@ -1515,6 +1593,7 @@ export async function interruptChat(id: string): Promise<void> {
     await session.pi.request({ type: "abort" });
     return;
   }
+  disarmFirstResponse(session);
   await session.query!.interrupt();
 }
 

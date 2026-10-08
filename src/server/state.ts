@@ -82,6 +82,14 @@ export interface SpecDrivenState {
    */
   codeGenTarget?: CodeGenTarget;
   /**
+   * How long (seconds) a Claude turn in the coding agent pane waits for the
+   * first sign of the API behind a proxy (specs/agents/agent-pane.feature.md
+   * "A Claude turn fails fast when the API proxy does not answer") before
+   * the pane stops it; 0 waits as long as Claude Code retries. Absent means
+   * the 15 second default.
+   */
+  agentFirstResponseSeconds?: number;
+  /**
    * Offer feature assignment — the "Assigned" dropdown of project members
    * (src/server/members.ts); absent means OFF. Off hides the dropdown; an
    * assignment already written into a `.feature.md` is left alone, so
@@ -233,6 +241,18 @@ export const MIN_AUTOSAVE_SECONDS = 3;
 export function normalizeAutosaveSeconds(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < MIN_AUTOSAVE_SECONDS) return DEFAULT_AUTOSAVE_SECONDS;
+  return Math.floor(n);
+}
+
+// The pane's first-response watchdog (src/server/agentChat.ts): a proxy that
+// is down gets one rather than Claude Code's minutes of retries.
+export const DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
+
+/** Effective first-response wait for a stored value: a whole number of
+    seconds, 0 for "no limit"; anything absent or unusable is the default. */
+export function normalizeAgentFirstResponseSeconds(value: unknown): number {
+  const n = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
   return Math.floor(n);
 }
 
