@@ -13,6 +13,7 @@ import { setClaudeAvailability } from "../src/server/agent";
 import {
   InputQueue,
   claudeBaseUrl,
+  createChatSession,
   describeAccount,
   endAllChatSessions,
   getChatEvents,
@@ -310,8 +311,11 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
 
   // The record sits beside the settings — never in the data repo, which is
   // pushed to git.
-  const record = JSON.parse(
-    await readFile(join(root, ".specdriven", "sessions", meta.id, "session.json"), "utf8"),
+  // The init's write is queued behind the earlier ones; wait for it to land.
+  const record = await until(
+    async () =>
+      JSON.parse(await readFile(join(root, ".specdriven", "sessions", meta.id, "session.json"), "utf8")),
+    (r) => r.agentSessionId === "claude-abc",
   );
   expect(record).toMatchObject({ agent: "pane", cwd: data, dataRepo: data, agentSessionId: "claude-abc" });
   expect(ready.meta.agent).toBe("claude");
@@ -839,4 +843,97 @@ test("a Claude session behind a local proxy says API:PROXY", async () => {
   const { id } = (await res.json()) as ChatSessionMeta;
   const snap = await untilStatus(id, "idle");
   expect(snap.meta.account).toEqual({ billing: "api", label: "API:PROXY", detail: "API:localhost:6655" });
+});
+
+// --- The first-response watchdog (specs/agents/agent-pane.feature.md "A
+// Claude turn fails fast when the API proxy does not answer") ---------------
+
+const apiRetry = (attempt: number) =>
+  sdk({
+    type: "system",
+    subtype: "api_retry",
+    attempt,
+    max_retries: 10,
+    retry_delay_ms: 500,
+    error_status: null,
+    error: "unknown",
+    uuid: `u-retry-${attempt}`,
+    session_id: "claude-1",
+  });
+
+/** A Claude chat with a first-response wait of `seconds`, idle and ready. */
+async function watchedSession(seconds: number): Promise<{ id: string; fake: FakeQuery }> {
+  const meta = await createChatSession({
+    place: { dataRepo: data },
+    name: "chat",
+    firstResponseSeconds: seconds,
+    sessionsDir: join(root, ".specdriven", "sessions"),
+  });
+  const fake = fakes.at(-1)!;
+  fake.emit(init());
+  await untilStatus(meta.id, "idle");
+  return { id: meta.id, fake };
+}
+
+test("a Claude turn behind a proxy that does not answer is stopped after the wait", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  // Claude Code's own retries are no answer from the API.
+  fake.emit(apiRetry(1));
+  fake.emit(apiRetry(2));
+  const snap = await until(
+    () => snapshot(id),
+    (s) => s.events.some((e) => e.kind === "note" && e.level === "error"),
+  );
+  expect(fake.interrupts).toBe(1);
+  const note = snap.events.find((e) => e.kind === "note" && e.level === "error");
+  expect(note).toMatchObject({ code: "api" });
+  expect(note && "text" in note ? note.text : "").toContain(
+    "No response from the API at http://127.0.0.1:9 within 0s after 2 retries",
+  );
+  // Claude Code answers the interrupt with the turn's result; the session
+  // stays up for the next try.
+  fake.emit(result({ subtype: "error_during_execution", is_error: true, errors: [] }));
+  await untilStatus(id, "idle");
+});
+
+test("a Claude turn whose API answers in time is left to run", async () => {
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  const { id, fake } = await watchedSession(0.05);
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "hello" });
+  // Any streamed event counts — the API's `ping` keepalive too.
+  fake.emit(
+    sdk({ type: "stream_event", event: { type: "ping" }, parent_tool_use_id: null, uuid: "u-p", session_id: "claude-1" }),
+  );
+  await Bun.sleep(120);
+  expect(fake.interrupts).toBe(0);
+  expect((await snapshot(id)).meta.status).toBe("running");
+});
+
+test("a Claude turn without a proxy, or with no limit set, has no wait", async () => {
+  const direct = await watchedSession(0.05);
+  await api(`/api/agent/chat/${direct.id}/message`, "POST", { text: "hello" });
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9";
+  const unlimited = await watchedSession(0);
+  await api(`/api/agent/chat/${unlimited.id}/message`, "POST", { text: "hello" });
+  await Bun.sleep(120);
+  expect(direct.fake.interrupts).toBe(0);
+  expect(unlimited.fake.interrupts).toBe(0);
+});
+
+test("the first-response wait is a setting, 15 seconds unless changed", async () => {
+  const read = async () => ((await (await api("/api/state")).json()) as { agentFirstResponseSeconds: number });
+  expect((await read()).agentFirstResponseSeconds).toBe(15);
+  const off = await api("/api/state", "PUT", { agentFirstResponseSeconds: 0 });
+  expect(off.status).toBe(200);
+  expect((await read()).agentFirstResponseSeconds).toBe(0);
+  expect((await readState(root)).agentFirstResponseSeconds).toBe(0);
+  await api("/api/state", "PUT", { agentFirstResponseSeconds: 30.7 });
+  expect((await read()).agentFirstResponseSeconds).toBe(30);
+  // The default is stored as no key at all.
+  await api("/api/state", "PUT", { agentFirstResponseSeconds: 15 });
+  expect("agentFirstResponseSeconds" in (await readState(root))).toBe(false);
+  const bad = await api("/api/state", "PUT", { agentFirstResponseSeconds: -1 });
+  expect(bad.status).toBe(400);
 });

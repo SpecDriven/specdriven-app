@@ -241,6 +241,11 @@ const DEFAULT_AUTOSYNC_SECONDS = 60;
 const DEFAULT_AUTOSAVE_SECONDS = 6;
 const MIN_AUTOSAVE_SECONDS = 3;
 
+// The coding agent pane's wait for the API's first response when Claude goes
+// through a proxy (src/server/agentChat.ts); 0 is no limit. Mirrors
+// DEFAULT_AGENT_FIRST_RESPONSE_SECONDS in src/server/state.ts.
+const DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
+
 // Project management (specs/external-links/project-management-jira-linear-
 // etc.feature.md): the tool tickets live in until Settings names another, and
 // the tools the Settings dropdown offers by name — anything else is typed in
@@ -1170,6 +1175,9 @@ export function App() {
   const [previewLines, setPreviewLines] = useState(8);
   /** How often the open editor saves itself (specs/editor-autosave.feature.md). */
   const [autosaveSeconds, setAutosaveSeconds] = useState(DEFAULT_AUTOSAVE_SECONDS);
+  const [agentFirstResponseSeconds, setAgentFirstResponseSeconds] = useState(
+    DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
+  );
   // The data repo's README.md (specs/app-startup.feature.md "App Starts with
   // existing specs folder selected"): the home view is an editor on it, saved
   // on the same interval as the scenario editor. `readme` is what the editor
@@ -1295,6 +1303,9 @@ export function App() {
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsAutosaveDraft, setSettingsAutosaveDraft] = useState(
     String(DEFAULT_AUTOSAVE_SECONDS),
+  );
+  const [settingsFirstResponseDraft, setSettingsFirstResponseDraft] = useState(
+    String(DEFAULT_AGENT_FIRST_RESPONSE_SECONDS),
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsOpenInIdeaDraft, setSettingsOpenInIdeaDraft] = useState(false);
@@ -1463,6 +1474,9 @@ export function App() {
         }
         if (typeof state.autosaveIntervalSeconds === "number") {
           setAutosaveSeconds(state.autosaveIntervalSeconds);
+        }
+        if (typeof state.agentFirstResponseSeconds === "number") {
+          setAgentFirstResponseSeconds(state.agentFirstResponseSeconds);
         }
         if (typeof state.showTestLinks === "boolean") {
           setShowTestLinks(state.showTestLinks);
@@ -3453,6 +3467,7 @@ export function App() {
     setSettingsDraft(String(reloadSeconds > 0 ? reloadSeconds : DEFAULT_AUTOSYNC_SECONDS));
     setSettingsLinesDraft(String(previewLines));
     setSettingsAutosaveDraft(String(autosaveSeconds));
+    setSettingsFirstResponseDraft(String(agentFirstResponseSeconds));
     // No stored choice is "auto": whichever engine this machine can run.
     setSettingsEngineDraft(
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
@@ -3610,6 +3625,9 @@ export function App() {
     setReloadSeconds(data.reloadFrequencySeconds);
     setPreviewLines(data.scenarioPreviewLines);
     setAutosaveSeconds(data.autosaveIntervalSeconds);
+    if (typeof data.agentFirstResponseSeconds === "number") {
+      setAgentFirstResponseSeconds(data.agentFirstResponseSeconds);
+    }
     setShowTestLinks(data.showTestLinks !== false);
     setOpenTestsInIdea(data.openTestsInIdea === true);
     setCanOpenInIdea(Boolean(data.canOpenInIdea));
@@ -3685,6 +3703,12 @@ export function App() {
     const n = clampDraft(settingsAutosaveDraft, MIN_AUTOSAVE_SECONDS, DEFAULT_AUTOSAVE_SECONDS);
     setSettingsAutosaveDraft(String(n));
     await patchSettings({ autosaveIntervalSeconds: n });
+  };
+
+  const commitFirstResponseSeconds = async () => {
+    const n = clampDraft(settingsFirstResponseDraft, 0, agentFirstResponseSeconds);
+    setSettingsFirstResponseDraft(String(n));
+    await patchSettings({ agentFirstResponseSeconds: n });
   };
 
   const commitPreviewLines = async () => {
@@ -6195,6 +6219,34 @@ export function App() {
             />
             <span className="switch-track" aria-hidden="true" />
           </span>
+        </label>
+        )}
+        {/* The pane's first-response wait (specs/agents/agent-pane.feature.md
+            "A Claude turn fails fast when the API proxy does not answer"):
+            only a Claude whose API goes through a proxy is held to it. */}
+        {!demo && settingsCodeGenDraft && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Claude API proxy timeout (seconds)
+            <span className="settings-row-hint">
+              When Claude Code&apos;s API goes through a proxy (ANTHROPIC_BASE_URL), a turn
+              in the coding agent pane that gets no response from the API in this time is
+              stopped with an error, instead of retrying for minutes while the proxy is
+              down. 0 waits as long as Claude Code retries; the default is{" "}
+              {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the
+              change.
+            </span>
+          </span>
+          <input
+            type="number"
+            min={0}
+            value={settingsFirstResponseDraft}
+            onChange={(e) => setSettingsFirstResponseDraft(e.target.value)}
+            onBlur={() => void commitFirstResponseSeconds()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
         </label>
         )}
         {/* Feature assignment (src/server/members.ts): opt-in — with
