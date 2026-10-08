@@ -15,7 +15,7 @@ import {
 } from "@automerge/automerge-repo-network-websocket";
 import { WebSocketServer } from "ws";
 import { documentIdForDoc, repoTransport, startNetSync } from "../../src/server/automerge/netsync";
-import type { NetSync } from "../../src/server/automerge/netsync";
+import type { NetSync, SyncTransport } from "../../src/server/automerge/netsync";
 import { importDrift } from "../../src/server/automerge/driftSync";
 import { importFeatureDoc } from "../../src/server/automerge/reconcile";
 import { createFeatureDoc, docDir, loadFeatureDoc } from "../../src/server/automerge/store";
@@ -198,4 +198,35 @@ test("a peer that starts after the edit still catches up", async () => {
   await server.settle(peerA, peerB);
   expect(await readFeature(b, FILE)).toContain("while B slept");
   expect(await readFeature(b, FILE)).toBe(await readFeature(a, FILE));
+});
+
+test("stopping waits for an absorb in flight, and absorbs nothing after", async () => {
+  const { a, b } = await twoDirs();
+  // A transport whose deliveries the test makes by hand, so an absorb can be
+  // started and stop() called while it is still writing.
+  let deliver: Parameters<SyncTransport["share"]>[2] | null = null;
+  const transport: SyncTransport = {
+    share: (_docId, _doc, onChange) => {
+      deliver = onChange;
+      return { push: () => {} };
+    },
+    shutdown: async () => {},
+  };
+  const peerB = await startNetSync(b, transport);
+
+  // A's edit, as the network would hand it to B.
+  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A"));
+  const absorbing = deliver!((await loadFeatureDoc(a, FILE))!.doc);
+  await peerB.stop();
+
+  // stop() resolved after the absorb wrote, not before.
+  const atStop = await readFeature(b, FILE);
+  expect(atStop).toContain("edited on A");
+  await absorbing;
+  expect(await readFeature(b, FILE)).toBe(atStop);
+
+  // A delivery after stop() is not absorbed.
+  await saveFeature(a, FILE, SEED.replace("- line two", "- line two, after B stopped"));
+  await deliver!((await loadFeatureDoc(a, FILE))!.doc);
+  expect(await readFeature(b, FILE)).toBe(atStop);
 });
