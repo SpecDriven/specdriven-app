@@ -42,6 +42,8 @@ const routes = () => (isHostedMode() ? {} : shellRoutes());
 
 const shellRoutes = () => ({
   "/": index,
+  // The platform's health check (railway.json), as the gateway answers it.
+  "/healthz": new Response("ok"),
 
   // Deep links (specs/navigation.spec.md): every /features/... url serves
   // the app shell; the client resolves it against /api/features/:file. The
