@@ -1827,6 +1827,9 @@ export function App() {
         // its README") — unless there is a deep link to honor. The plugins —
         // the special folders' pages among them — ride along, as they do on a
         // start with a folder already configured (specs/app/roadmap.feature.md).
+        // Each folder keeps its own plugins (specs/app/plugins.feature.md),
+        // so Settings → Plugins lists this one's.
+        setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
         await Promise.all([
           loadFeatures(),
           loadReadme(),
@@ -1939,6 +1942,9 @@ export function App() {
         // page was open, so the canonical-url effect has no change to react
         // to.
         if (location.pathname !== "/") history.replaceState(null, "", "/");
+        // The new folder's own plugins (specs/app/plugins.feature.md "Each
+        // data folder keeps its own plugins"), on Settings → Plugins too.
+        setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
         // Home is the new folder's README (specs/app-startup.feature.md).
         await Promise.all([
           loadFeatures(),
