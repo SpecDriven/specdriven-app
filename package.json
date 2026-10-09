@@ -17,6 +17,8 @@
     "dev:debug": "bun --inspect src/index.ts",
     "start": "bun src/index.ts",
     "demo": "DEMO_MODE=1 bun src/index.ts",
+    "start:hosted": "bun src/gateway/index.ts",
+    "dev:hosted": "SPECDRIVEN_DATA_DIR=${SPECDRIVEN_DATA_DIR:-.hosted-data} bun src/gateway/index.ts",
     "build": "bun scripts/build.ts",
     "build:all": "bun scripts/build.ts --all",
     "dev:electron": "bun scripts/dev-electron.ts",

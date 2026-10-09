@@ -70,6 +70,14 @@ What it does not cover: other processes and accounts on the same machine
 can still reach loopback. A per-launch token in a `SameSite=Strict` cookie
 would close that if the app ever runs on shared hosts.
 
+- **The hosted gateway** (`src/gateway`, [deployment-railway.md](deployment-railway.md))
+  is the multi-user deployment: it signs people in, applies the same checks
+  to every request, and forwards a signed-in person's requests to their own
+  app server on a private unix socket. That server runs in hosted mode
+  (`SPECDRIVEN_HOSTED=1`, `src/server/hostedMode.ts`), which refuses agents,
+  plugin installs, local paths and everything else that would run code on
+  the shared host.
+
 # Integration with AI coding agents
 
 "Start session" builds one prompt from the selected specs and hands it to an
