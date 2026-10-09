@@ -25,7 +25,7 @@ const config = readConfig();
 // Everything the gateway writes — the database first — is its own alone.
 process.umask(0o077);
 const db = openDatabase(join(config.dataDir, "app.db"));
-const keyring = await loadKeyring(process.env, config.production);
+const keyring = await loadKeyring(process.env, config.production && !config.demo);
 const secrets = new SecretStore(db, keyring);
 const resealed = await secrets.reseal();
 if (resealed) console.log(`re-sealed ${resealed} secrets under the current master key`);
