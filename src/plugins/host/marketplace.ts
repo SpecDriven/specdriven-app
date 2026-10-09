@@ -28,7 +28,7 @@ import {
   type MarketplacePlugin,
   type MarketplaceRef,
 } from "../marketplace";
-import { PROFILE_KEY, readProfile, writeProfile } from "../profile";
+import { PROFILE_KEY, dropPlugin } from "../profile";
 import { externalPlugin, notifyPluginChange, pluginStates, rescanPlugins, type PluginState } from "./loader";
 import { marketplacesHome, pluginsHome, readPluginFolder, safeId } from "./sources";
 
@@ -477,9 +477,9 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       // it — then the folder goes, and only then is it dropped from `seen`
       // (while the folder is there, `seen` is what keeps the loader from
       // adopting it afresh), so a later reinstall goes on again.
+      // Every data folder's list drops it, not just the open one's.
       const state = await deps.readState();
-      const { enabled } = readProfile(state, profileManifests);
-      writeProfile(state, enabled.filter((x) => x !== id), profileManifests);
+      dropPlugin(state, id, profileManifests);
       await deps.persist(state);
       await rescanPlugins();
       const dir = await removePluginFolder(id);

@@ -31,7 +31,6 @@ import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { resetSearchCache } from "./search";
 import { readState, writeState } from "./state";
-import { builtinManifests } from "../plugins/builtin/manifests";
 import { confirmInstall } from "../plugins/host/marketplace";
 import { rescanPlugins } from "../plugins/host/loader";
 import { discoverPlugins } from "../plugins/host/sources";
@@ -78,12 +77,14 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   reloadFrequencySeconds: 0,
   codeGen: true,
   codeGenTarget: "pane",
-  // Every built-in plugin, in load order (specs/app/plugins.feature.md
-  // "The profile lists enabled plugins in tab order"), then the ones the
-  // demo installs from the marketplace: a visitor sees the whole app.
-  // No `marketplaces` key: the default SpecDriven index.
+  // No plugin list: each reseed's fresh data folder shows Specs alone
+  // (specs/app/plugins.feature.md "Each data folder keeps its own plugins"),
+  // and a visitor switches plugins on in Settings → Plugins. The ones the
+  // demo installs from the marketplace count as seen, so the loader lists
+  // them off rather than adopting them. No `marketplaces` key: the default
+  // SpecDriven index.
   plugins: {
-    enabled: [...builtinManifests.map((m) => m.id), ...DEMO_MARKETPLACE_PLUGINS.map((p) => p.id)],
+    seen: DEMO_MARKETPLACE_PLUGINS.map((p) => p.id),
   },
   assignments: true,
   deletePublished: true,
