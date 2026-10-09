@@ -84,6 +84,16 @@ async function bootState() {
   return res.json();
 }
 
+/** A visitor switching plugins on in Settings → Plugins. */
+async function enable(...ids: string[]) {
+  const res = await api("/api/state", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plugins: { enabled: ids } }),
+  });
+  expect(res.status).toBe(200);
+}
+
 /** Every file in dir (relative path → content), demo-data integrity checks. */
 async function snapshot(dir: string): Promise<Map<string, string>> {
   const out = new Map<string, string>();
@@ -117,12 +127,13 @@ test("the coding agent pane is on and is the only target on offer", async () => 
   expect(state.canRunPi).toBe(false);
 });
 
-// Every optional module is on in the demo (src/server/demo.ts
-// DEMO_SETTINGS): a visitor has no reason to guess which switches hide the
-// rest of the app, and the dataset ships content for each.
-test("the roadmap folder is on and lists the dataset's pages", async () => {
+// The demo starts with Specs alone (src/server/demo.ts DEMO_SETTINGS,
+// specs/app/plugins.feature.md "Each data folder keeps its own plugins"); a
+// visitor switches plugins on, and the dataset ships content for each.
+test("a visitor turns the roadmap on and it lists the dataset's pages", async () => {
   const state = await bootState();
-  expect(state.roadmap).toBe(true);
+  expect(state.roadmap).toBe(false);
+  await enable("roadmap");
 
   const { pages } = await (await api("/api/roadmap")).json();
   expect(pages).toEqual([
@@ -134,17 +145,15 @@ test("the roadmap folder is on and lists the dataset's pages", async () => {
   ]);
 });
 
-test("every optional module is on except IntelliJ IDEA", async () => {
+test("Specs alone, and every other optional setting on except IntelliJ IDEA", async () => {
   const state = await bootState();
+  for (const module of ["roadmap", "tasks", "notebook", "testing", "issues"] as const) {
+    expect(`${module}=${state[module]}`).toBe(`${module}=false`);
+  }
   for (const module of [
-    "roadmap",
-    "tasks",
-    "notebook",
-    "testing",
     "assignments",
     "deletePublished",
     "googleCalendar",
-    "issues",
     "showTestLinks",
     "projectManagement",
     "publishExternalLinks",
@@ -155,23 +164,22 @@ test("every optional module is on except IntelliJ IDEA", async () => {
   // visitor's own machine, which a hosted demo cannot and should not do.
   expect(state.openTestsInIdea).toBe(false);
   // The profile behind the module switches (specs/app/plugins.feature.md
-  // "The profile lists enabled plugins in tab order"): every built-in, on,
-  // then the Event Models from the marketplace — listed before the demo has
-  // fetched them (installDemoPlugins, not run here), so not active yet.
+  // "Each data folder keeps its own plugins"): every built-in listed, none
+  // on — the visitor's Settings → Plugins offers them.
   expect(
     (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
   ).toEqual([
-    ["roadmap", true, true],
-    ["tasks", true, true],
-    ["notebook", true, true],
-    ["issues", true, true],
-    ["tests", true, true],
-    ["models", true, false],
+    ["roadmap", false, false],
+    ["tasks", false, false],
+    ["notebook", false, false],
+    ["issues", false, false],
+    ["tests", false, false],
   ]);
 });
 
 test("a roadmap edit lands in the working copy; the snapshot is untouched", async () => {
   const state = await bootState();
+  await enable("roadmap");
   const res = await api(`/api/roadmap/${encodeURIComponent("roadmap/usage-based-auto.md")}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -285,13 +293,17 @@ test("plugin folders, trust and marketplaces are pinned (403); switching plugins
   expect(section.marketplaces).toBeUndefined();
 
   // A visitor still switches and reorders the plugins on offer.
-  const enabled = (section.enabled as string[]).filter((id) => id !== "notebook");
   const ok = await api("/api/state", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plugins: { enabled } }),
+    body: JSON.stringify({ plugins: { enabled: ["tasks", "roadmap"] } }),
   });
   expect(ok.status).toBe(200);
+  const { dataRepo, plugins } = (await readState(root)) as {
+    dataRepo: string;
+    plugins: { repos: Record<string, { enabled: string[] }> };
+  };
+  expect(plugins.repos[dataRepo]!.enabled).toEqual(["tasks", "roadmap"]);
 });
 
 test("GitHub sign-in routes refuse in demo mode", async () => {
@@ -313,6 +325,7 @@ test("GitHub sign-in routes refuse in demo mode", async () => {
 // real issues to show. Writes stay refused — a visitor is signed in to
 // nothing, so every one would be anonymous on someone else's repository.
 test("the demo tracks the release repo's issues and refuses every write", async () => {
+  await enable("issues");
   const { issuesRepo } = await (await api("/api/features")).json();
   expect(issuesRepo).toEqual({
     url: "https://github.com/SpecDriven/specdriven-app-release",

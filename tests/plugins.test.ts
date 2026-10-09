@@ -9,7 +9,15 @@ import { host, pluginStates, sessionParts, shell, sync, syncPlugins } from "../s
 import { builtinManifests, profileManifests } from "../src/plugins/builtin/manifests";
 import { isSearchScope } from "../src/server/search";
 import { buildSessionPrompt } from "../src/server/agent";
-import { hasLegacyKeys, legacyFields, readProfile, withPlugin, writeProfile } from "../src/plugins/profile";
+import {
+  dropPlugin,
+  hasLegacyKeys,
+  legacyFields,
+  migrateProfile,
+  readProfile,
+  withPlugin,
+  writeProfile,
+} from "../src/plugins/profile";
 import { version as appVersion } from "../package.json";
 import { client, matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 import { tabReachable, type TabPlugin } from "../src/plugins/client/tabs";
@@ -74,11 +82,11 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
 });
 
 // The profile (specs/app/plugins.feature.md "The profile lists enabled
-// plugins in tab order"): `plugins.enabled` when the settings have it; a
-// settings file from before plugins is read as the matching list.
+// plugins in tab order"): the open folder's list when the settings have it;
+// a settings file from before plugins is read as the matching list.
 test("a settings file from before plugins is read as the matching profile", () => {
-  // Nothing at all: the manifests' defaults — only the notebook is on.
-  expect(readProfile({}, builtinManifests)).toEqual({ enabled: ["notebook"], migrated: true });
+  // Nothing at all: no plugin — Specs alone.
+  expect(readProfile({}, builtinManifests)).toEqual({ enabled: [], migrated: false });
   // The legacy switches, in load order whatever order the file had them in.
   expect(
     readProfile({ testing: true, notebook: false, roadmap: true, models: "yes" }, builtinManifests),
@@ -102,8 +110,8 @@ test("a settings file from before plugins is read as the matching profile", () =
     issues: false,
     testing: true,
   });
-  // Writing the profile drops the legacy switches and keeps the section's
-  // other keys.
+  // Writing the profile stores it for the open folder, drops the legacy
+  // switches and keeps the section's other keys.
   const file: Record<string, unknown> = {
     dataRepo: "/x",
     testing: true,
@@ -114,7 +122,7 @@ test("a settings file from before plugins is read as the matching profile", () =
   writeProfile(file, ["tests", "roadmap"], builtinManifests);
   expect(file).toEqual({
     dataRepo: "/x",
-    plugins: { sources: [{ path: "/dev/jira" }], enabled: ["tests", "roadmap"] },
+    plugins: { sources: [{ path: "/dev/jira" }], repos: { "/x": { enabled: ["tests", "roadmap"] } } },
   });
   expect(hasLegacyKeys(file, builtinManifests)).toBe(false);
   // A switch edits the list: on appends, off removes, either is idempotent.
@@ -235,6 +243,61 @@ test("the Issues tab registers only while the store knows a GitHub repo", async 
   }
 });
 
+// Each data folder keeps its own plugins (specs/app/plugins.feature.md):
+// one folder may show Specs alone and another every plugin; a folder with
+// no list yet shows Specs alone.
+test("each data folder keeps its own profile; a new one shows Specs alone", () => {
+  const file: Record<string, unknown> = { dataRepo: "/a", plugins: { seen: ["hello"] } };
+  expect(readProfile(file, builtinManifests)).toEqual({ enabled: [], migrated: false });
+  writeProfile(file, ["roadmap", "tasks"], builtinManifests);
+  file.dataRepo = "/b";
+  expect(readProfile(file, builtinManifests).enabled).toEqual([]);
+  writeProfile(file, ["tests"], builtinManifests);
+  file.dataRepo = "/a";
+  expect(readProfile(file, builtinManifests).enabled).toEqual(["roadmap", "tasks"]);
+  expect(file.plugins).toEqual({
+    seen: ["hello"],
+    repos: { "/a": { enabled: ["roadmap", "tasks"] }, "/b": { enabled: ["tests"] } },
+  });
+  // An uninstalled plugin leaves every folder's list.
+  dropPlugin(file, "tests", builtinManifests);
+  expect((file.plugins as { repos: unknown }).repos).toEqual({
+    "/a": { enabled: ["roadmap", "tasks"] },
+    "/b": { enabled: [] },
+  });
+});
+
+// An older file — one device-wide list, or the legacy switches — keeps
+// showing what it showed in every folder it knows; folders picked later
+// start with Specs alone.
+test("an older device-wide list is copied to the folders the file knows", () => {
+  const file: Record<string, unknown> = {
+    dataRepo: "/a",
+    recentDataRepos: ["/a", "/b"],
+    plugins: { enabled: ["tests", "roadmap"], repos: { "/b": { enabled: ["issues"] } }, seen: [] },
+  };
+  expect(migrateProfile(file, builtinManifests)).toBe(true);
+  expect(file.plugins).toEqual({
+    seen: [],
+    repos: { "/a": { enabled: ["tests", "roadmap"] }, "/b": { enabled: ["issues"] } },
+  });
+  expect(migrateProfile(file, builtinManifests)).toBe(false);
+  file.dataRepo = "/c";
+  expect(readProfile(file, builtinManifests).enabled).toEqual([]);
+
+  const legacy: Record<string, unknown> = { dataRepo: "/a", recentDataRepos: ["/b"], testing: true };
+  expect(migrateProfile(legacy, builtinManifests)).toBe(true);
+  expect(legacy).toEqual({
+    dataRepo: "/a",
+    recentDataRepos: ["/b"],
+    plugins: { repos: { "/a": { enabled: ["notebook", "tests"] }, "/b": { enabled: ["notebook", "tests"] } } },
+  });
+  // No folder known yet: the list stays device-wide, the switches still go.
+  const early: Record<string, unknown> = { roadmap: true };
+  expect(migrateProfile(early, builtinManifests)).toBe(true);
+  expect(early).toEqual({ plugins: { enabled: ["roadmap", "notebook"] } });
+});
+
 // The Event Models left the tree for the marketplace (the `models` plugin
 // of SpecDriven/plugins): the old switch still reads as the plugin's id, and
 // Settings → Plugins names it and says to install it.
@@ -243,7 +306,8 @@ test("the retired Models switch lists the plugin, which reports as not installed
     enabled: ["notebook", "models"],
     migrated: true,
   });
-  expect(readProfile({ models: true }, builtinManifests).enabled).toEqual(["notebook"]);
+  // Not a built-in's switch: the file holds no older list of built-ins.
+  expect(readProfile({ models: true }, builtinManifests).enabled).toEqual([]);
   await syncPlugins({ models: true });
   const row = pluginStates().find((p) => p.id === "models")!;
   expect(row).toMatchObject({ displayName: "Event models", installed: false, enabled: true, active: false });

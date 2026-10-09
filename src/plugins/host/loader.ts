@@ -203,9 +203,10 @@ export function syncPlugins(
       const trusted = stringList(section.trusted);
       const seen = stringList(section.seen);
       const adopted = await absorbDiscovered(found, trusted);
-      // A plugin found for the first time goes on, at the end of the tab
-      // order, unless its manifest says it starts off; one switched off
-      // later stays off — `seen` remembers the adoption.
+      // A plugin found for the first time goes on in the open data folder's
+      // list, at the end of the tab order, unless its manifest says it
+      // starts off; one switched off later stays off — `seen`, kept for the
+      // device, remembers the adoption, so other folders list it off.
       let changed = false;
       for (const entry of adopted) {
         if (!entry.manifest || entry.error || !entry.trusted) continue;

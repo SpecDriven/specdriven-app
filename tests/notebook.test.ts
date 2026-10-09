@@ -42,9 +42,12 @@ import { installFakeGit } from "./helpers/fakeGit";
 import { builtinManifests } from "../src/plugins/builtin/manifests";
 import { readProfile } from "../src/plugins/profile";
 
-/** The legacy `notebook` switch, read as the profile reads it (src/plugins/profile.ts). */
+/**
+ * The legacy `notebook` switch in a settings file from before the profile,
+ * read as the profile reads it (src/plugins/profile.ts).
+ */
 const normalizeNotebook = (value: unknown): boolean =>
-  readProfile(value === undefined ? {} : { notebook: value }, builtinManifests).enabled.includes("notebook");
+  readProfile({ notebook: value }, builtinManifests).enabled.includes("notebook");
 
 let root: string;
 

@@ -102,12 +102,19 @@ export interface SpecDrivenState {
   deletePublished?: boolean;
   /**
    * The plugin profile (specs/app/plugins.feature.md "The profile lists
-   * enabled plugins in tab order"): the enabled plugins, in the order their
-   * tabs follow Specs. Absent, the legacy switches below — or, without them,
-   * the manifests' defaults — decide, and the app writes the list back once
-   * (src/plugins/profile.ts). Device-local like the switches it replaces.
+   * enabled plugins in tab order", "Each data folder keeps its own
+   * plugins"): per data folder, the enabled plugins in the order their tabs
+   * follow Specs; a folder without a list shows Specs alone. Device-local
+   * like the switches it replaces (src/plugins/profile.ts).
    */
   plugins?: {
+    /** Each data folder's list, keyed by the folder as `dataRepo` saves it. */
+    repos?: Record<string, { enabled?: string[] }>;
+    /**
+     * @deprecated The device-wide list from before the per-folder ones,
+     * still used while no folder is open. An older file's is copied to the
+     * folders it knows and dropped.
+     */
     enabled?: string[];
     /** Explicit plugin folders, `{ path }` rows. */
     sources?: { path: string }[];
