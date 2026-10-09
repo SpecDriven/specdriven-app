@@ -27,6 +27,7 @@
 
 import { isAbsolute, resolve } from "node:path";
 import { readTextFile } from "./fsx";
+import { isHostedMode } from "./hostedMode";
 
 /** The data repo's project settings file, at its root. */
 export const PROJECT_SETTINGS_FILE = "project-settings.json";
@@ -90,8 +91,13 @@ export function normalizeMembers(value: unknown): ProjectMember[] {
  * resolves against the data repo. Absent, blank or not a string is null.
  * `codeRepo` is accepted beside `code-repo`, since a hand-edited file may
  * well use either spelling.
+ *
+ * A hosted worker (src/server/hostedMode.ts) has no code checkout — its
+ * volume holds data-repo clones alone — and a path a data repo names could
+ * point into another user's folder, so there it is always null.
  */
 export function normalizeCodeRepo(value: unknown, dataDir: string): string | null {
+  if (isHostedMode()) return null;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const entry = value as Record<string, unknown>;
   const raw = entry[CODE_REPO_KEY] ?? entry.codeRepo;

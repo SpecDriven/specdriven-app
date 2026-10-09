@@ -1,0 +1,34 @@
+# Hosted image (docs/deployment-railway.md): the gateway in front of one app
+# server per user. Sign-in, the encrypted secrets and every user's folders
+# live on the volume mounted at /data; nothing else in the image is state.
+#
+# The gateway runs as root: Railway mounts volumes owned by root, and root is
+# what lets the gateway start each user's worker as a uid of its own
+# (setpriv, from util-linux in the base image), owning only that user's
+# folder (src/gateway/workers.ts).
+FROM oven/bun:1.3-slim
+
+# git for the system-git engine; without it the bundled JS engine is used.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+# --production skips devDependencies (electron and friends stay out).
+RUN bun install --frozen-lockfile --production
+
+COPY src ./src
+# The frontend, bundled once for every user: the gateway serves it, so the
+# per-user workers never bundle it themselves (src/gateway/appShell.ts).
+RUN bun build src/index.html --outdir dist/app --production --public-path /_app/
+
+ENV NODE_ENV=production \
+    SPECDRIVEN_DATA_DIR=/data \
+    SPECDRIVEN_LOG_FILE=0 \
+    PORT=3000
+
+EXPOSE 3000
+
+CMD ["bun", "src/gateway/index.ts"]
