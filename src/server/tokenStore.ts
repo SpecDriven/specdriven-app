@@ -76,6 +76,29 @@ export function createFileBackend(fixedPath?: string): TokenBackend {
   };
 }
 
+/** The variable a hosted worker's token arrives in (src/gateway/workers.ts). */
+export const TOKEN_ENV = "SPECDRIVEN_GITHUB_TOKEN_RECORD";
+
+/**
+ * Hosted backend (src/server/hostedMode.ts): the gateway decrypts the user's
+ * token and hands it to their worker in TOKEN_ENV, a TokenRecord as JSON.
+ * Nothing is written to disk, and the worker cannot change the token — the
+ * account page does that, and restarts the worker with the new one.
+ */
+export function createEnvBackend(env: Record<string, string | undefined> = process.env): TokenBackend {
+  const refuse = async () => {
+    throw new Error("The GitHub token is managed on the account page");
+  };
+  return {
+    async load() {
+      const raw = env[TOKEN_ENV];
+      return raw ? parseRecord(raw) : null;
+    },
+    save: refuse,
+    clear: refuse,
+  };
+}
+
 let backend: TokenBackend = createFileBackend();
 let cached: TokenRecord | null | undefined; // undefined = not loaded yet
 

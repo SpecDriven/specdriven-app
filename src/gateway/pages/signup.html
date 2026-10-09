@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Create an account · SpecDriven</title>
+    <link rel="stylesheet" href="./gateway.css" />
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body data-page="signup">
+    <main class="card">
+      <h1 class="brand">SpecDriven</h1>
+      <h2>Create an account</h2>
+      <form id="form" novalidate>
+        <label>Email <input name="email" type="email" autocomplete="email" required autofocus /></label>
+        <p class="hint">We email you a link to choose your password. Sign-up is open to invited addresses only.</p>
+        <p class="error" role="alert" hidden></p>
+        <button type="submit">Email me a link</button>
+      </form>
+      <p class="notice" role="status" hidden></p>
+      <p class="links"><a href="/login">Back to sign in</a></p>
+    </main>
+  </body>
+</html>

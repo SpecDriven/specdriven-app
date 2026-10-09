@@ -1,6 +1,7 @@
 import { userInfo } from "node:os";
 import { getAuth } from "./auth";
 import { DEMO_USER, isDemoMode } from "./demoMode";
+import { isHostedMode } from "./hostedMode";
 import { cliGitAvailable, currentEngine, ghAccount } from "./git";
 import { run } from "./run";
 
@@ -31,7 +32,9 @@ async function gitConfig(key: string): Promise<string | null> {
 export async function getCurrentUser(): Promise<CurrentUser> {
   // The demo has no real user behind it: everyone who opens it is Test User.
   if (isDemoMode()) return { ...DEMO_USER };
-  const username = userInfo().username;
+  // A hosted worker's OS user is the container's; its user is the account
+  // the gateway signed in (src/gateway/workers.ts).
+  const username = (isHostedMode() && process.env.SPECDRIVEN_ACCOUNT_EMAIL) || userInfo().username;
   const auth = await getAuth();
   if (auth) {
     return {

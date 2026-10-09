@@ -60,6 +60,8 @@ import {
   ArrowDown,
   ArrowRightLeft,
   Bot,
+  KeyRound,
+  LogOut,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -995,6 +997,9 @@ export function App() {
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
+  // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
+  // gateway, whose account page holds the GitHub token and agent keys.
+  const [hosted, setHosted] = useState(false);
   // The running app's version, shown beside the user name in demo mode.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const repoInputRef = useRef<HTMLInputElement>(null);
@@ -1520,6 +1525,7 @@ export function App() {
         setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
         setCanChooseFolder(Boolean(state.canChooseFolder));
         setDemo(Boolean(state.demo));
+        setHosted(Boolean(state.hosted));
         // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
         // when this lands drops its Vim tab, and the Settings row hides.
         setVimDemoMode(Boolean(state.demo));
@@ -5752,9 +5758,27 @@ export function App() {
           }}
         >
           <h1>SpecDriven</h1>
-          <p>No spec data directory configured yet. Enter the path to the spec data directory:</p>
+          {hosted ? (
+            // Hosted mode (src/server/hostedMode.ts): a GitHub repository
+            // only, reached with the token from the account page.
+            <>
+              <p>Enter the GitHub url of your specs repository:</p>
+              {!auth?.signedIn && (
+                <p className="hint">
+                  First <a href="/account">add a GitHub token</a> that can read and write it.
+                </p>
+              )}
+            </>
+          ) : (
+            <p>No spec data directory configured yet. Enter the path to the spec data directory:</p>
+          )}
           <div className="input-row">
-            <input ref={repoInputRef} name="repo" placeholder="/path/to/spec-data" autoFocus />
+            <input
+              ref={repoInputRef}
+              name="repo"
+              placeholder={hosted ? "https://github.com/owner/specs" : "/path/to/spec-data"}
+              autoFocus
+            />
             {canChooseFolder && (
               <button type="button" className="browse" onClick={() => void browseIntoRepoInput()}>
                 Browse…
@@ -5762,7 +5786,7 @@ export function App() {
             )}
           </div>
           <button type="submit" disabled={settingRepo}>
-            {settingRepo ? "Checking access…" : "Use this directory"}
+            {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
           </button>
           {repoError && <p className="error">{repoError}</p>}
         </form>
@@ -6323,7 +6347,33 @@ export function App() {
           the operations out and who supplies GitHub credentials.
           Hidden in demo mode along with the sign-in — the demo
           dataset never syncs with GitHub. */}
-      {!demo && (
+      {hosted ? (
+      <PageSection
+        id="settings-git"
+        title="Git & GitHub"
+        hint="The GitHub account the hosted app syncs and publishes with."
+      >
+        {/* Hosted mode: the token is pasted on the gateway's account page,
+            stored encrypted there, and handed to this app on start. */}
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub account</span>
+          <p className="hint">
+            {auth?.signedIn ? (
+              <>
+                Using the token for <strong>{auth.login}</strong> from your account.
+              </>
+            ) : (
+              <>No GitHub token yet — add one to open and publish your specs repository.</>
+            )}
+          </p>
+          <div className="auth-row">
+            <a className="secondary" href="/account">
+              Manage GitHub token and agent keys
+            </a>
+          </div>
+        </div>
+      </PageSection>
+      ) : !demo && (
       <PageSection
         id="settings-git"
         title="Git & GitHub"
@@ -7128,6 +7178,28 @@ export function App() {
                       },
                     },
                   ]),
+              // The hosted gateway's own pages (src/gateway): the account
+              // with its tokens and password, and signing out.
+              ...(hosted
+                ? [
+                    {
+                      id: "account",
+                      label: "Account & tokens",
+                      icon: <KeyRound size={13} />,
+                      onSelect: () => window.location.assign("/account"),
+                    },
+                    {
+                      id: "sign-out",
+                      label: "Sign out",
+                      icon: <LogOut size={13} />,
+                      onSelect: () => {
+                        void fetch("/auth/logout", { method: "POST" }).finally(() =>
+                          window.location.assign("/login"),
+                        );
+                      },
+                    },
+                  ]
+                : []),
             ]}
           />
           <button

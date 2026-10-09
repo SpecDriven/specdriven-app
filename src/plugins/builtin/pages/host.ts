@@ -44,6 +44,7 @@ import { parsePage } from "../../../server/parser";
 import { normalizeGoogleCalendar, readState } from "../../../server/state";
 import { getAppRoot } from "../../../server/paths";
 import { isDemoMode } from "../../../server/demoMode";
+import { HOSTED_REFUSAL, isHostedMode } from "../../../server/hostedMode";
 
 type DirHandler = (dir: string, req: Request, params: Params) => Response | Promise<Response>;
 
@@ -80,6 +81,8 @@ const estimateTask: DirHandler = async (dir, _req, params) => {
   const page = await readPage(dir, TASKS, params.file ?? "");
   if (page === null) return json({ error: "Task not found" }, 404);
   if (isDemoMode()) return json({ minutes: DEMO_ESTIMATE_MINUTES });
+  // The estimate is a one-turn local Claude run; a hosted worker runs none.
+  if (isHostedMode()) return json({ error: HOSTED_REFUSAL }, 403);
   try {
     return json({ minutes: await estimateMinutes(parsePage(page.content), dir) });
   } catch (e) {
