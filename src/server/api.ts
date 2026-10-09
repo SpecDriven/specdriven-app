@@ -30,8 +30,9 @@ import {
   DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import { ensureDataRepoFolder, MissingDataRepoError, resolveDataRepo } from "./repo";
+import { ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
+import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   cliGitAvailable,
@@ -362,8 +363,10 @@ async function currentDataDir(): Promise<string | null> {
  */
 async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   const raw = state as Record<string, unknown>;
+  // A hosted worker shares its container with other users' workers, so it
+  // runs the built-in plugins alone: a plugin folder is code (hostedMode.ts).
   return syncPlugins(raw, {
-    sources: true,
+    sources: !isHostedMode(),
     paths: !isDemoMode(),
     dataDir: isDemoMode() ? null : await currentDataDir(),
     persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
@@ -388,7 +391,7 @@ async function stateFields(state: SpecDrivenState) {
     // Open test links in IntelliJ IDEA (specs/traceability.feature.md "Open
     // test in idea"), and whether `idea` is on PATH so that can work.
     openTestsInIdea: normalizeOpenTestsInIdea(state.openTestsInIdea),
-    canOpenInIdea: ideaAvailable(),
+    canOpenInIdea: !isHostedMode() && ideaAvailable(),
     projectManagement: normalizeProjectManagement(state.projectManagement),
     projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
@@ -401,17 +404,17 @@ async function stateFields(state: SpecDrivenState) {
     agentFirstResponseSeconds: normalizeAgentFirstResponseSeconds(state.agentFirstResponseSeconds),
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
-    canOpenClaudeDesktop: claudeDesktopAvailable(),
+    canOpenClaudeDesktop: !isHostedMode() && claudeDesktopAvailable(),
     // Whether the Claude CLI is on PATH, so a session can run in the app's
     // own coding agent pane (specs/agents/coding-agent-ui.feature.md).
-    canRunAgentPane: claudeAvailable(),
+    canRunAgentPane: !isHostedMode() && claudeAvailable(),
     // Whether the Pi CLI is on PATH, so a session can run in Pi
     // (specs/agents/integration-with-pi-dev-agent.feature.md) — gates the
     // Pi entry of the session dialog's agent choice.
-    canRunPi: piAvailable(),
+    canRunPi: !isHostedMode() && piAvailable(),
     // Whether the Codex CLI is on PATH, so a session can run in Codex
     // (src/server/codexChat.ts) — gates the Codex entry of the same choice.
-    canRunCodex: codexAvailable(),
+    canRunCodex: !isHostedMode() && codexAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     // The plugins (specs/app/plugins.feature.md): the profile's entries in
@@ -433,10 +436,13 @@ async function stateFields(state: SpecDrivenState) {
     recentDataRepos: recentDataRepos(state),
     // Whether the runtime can open a native folder chooser
     // (specs/app-start.spec.md) — gates the Browse… buttons.
-    canChooseFolder: canChooseFolder(),
+    canChooseFolder: !isHostedMode() && canChooseFolder(),
     // Demo mode: the client hides everything that changes or syncs the data
     // directory — the dataset is ephemeral and resets on every page load.
     demo: isDemoMode(),
+    // Hosted mode (src/server/hostedMode.ts): the client sends GitHub
+    // sign-in to the gateway's account page and offers no local agents.
+    hosted: isHostedMode(),
     // The running app's version (package.json). The demo shows it beside the
     // user name, so a public demo says which build is on screen.
     version: appVersion,
@@ -466,6 +472,36 @@ const getState: Handler = async (req) => {
     user: await getCurrentUser(),
   });
 };
+
+/**
+ * What a hosted worker (src/server/hostedMode.ts) refuses to change in
+ * Settings, or null when the request is fine there. The data repo must be a
+ * GitHub url — a local path would reach into the shared container — and the
+ * git engine, plugin folders and sync server are pinned for the same reason.
+ */
+function hostedStateRefusal(body: {
+  dataRepo?: unknown;
+  gitEngine?: unknown;
+  plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
+  syncServerUrl?: unknown;
+}): string | null {
+  if (!isHostedMode()) return null;
+  if (body.dataRepo !== undefined && (typeof body.dataRepo !== "string" || !parseGitHubUrl(body.dataRepo))) {
+    return "The hosted app opens GitHub repositories only — enter a https://github.com/owner/repo url";
+  }
+  if (body.gitEngine === "gh") return "The GitHub CLI engine is not available in the hosted app";
+  if (
+    body.plugins &&
+    typeof body.plugins === "object" &&
+    (body.plugins.sources !== undefined ||
+      body.plugins.trust !== undefined ||
+      body.plugins.marketplaces !== undefined)
+  ) {
+    return "Plugin folders and marketplaces cannot be changed in the hosted app";
+  }
+  if (body.syncServerUrl !== undefined) return "The sync server cannot be changed in the hosted app";
+  return null;
+}
 
 const putState: Handler = async (req) => {
   const body = (await req.json()) as {
@@ -562,6 +598,8 @@ const putState: Handler = async (req) => {
   ) {
     return json({ error: "plugin folders and marketplaces cannot be changed in demo mode" }, 403);
   }
+  const hostedRefusal = hostedStateRefusal(body);
+  if (hostedRefusal) return json({ error: hostedRefusal }, 403);
   const state = await readState(getAppRoot());
   // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"
   // (system git) or "js" (the bundled engine, which needs nothing installed);
@@ -1635,7 +1673,9 @@ const postAgentChat = withDataDir(async (dir, req) => {
 
 const MODE_ERROR = `permissionMode must be one of ${PERMISSION_MODES.join(", ")}`;
 
-const getAgentChats: Handler = () => json({ sessions: listChatSessions() });
+// A hosted worker runs no agents; its pane lists none rather than refusing,
+// so the client's boot-time restore stays quiet (src/server/hostedMode.ts).
+const getAgentChats: Handler = () => json({ sessions: isHostedMode() ? [] : listChatSessions() });
 
 const getAgentChat: Handler = (_req, params) => {
   const meta = getChatSession(params.id!);
@@ -1790,6 +1830,16 @@ const postChooseFolder: Handler = async () => {
   return json({ path: await chooseFolder() });
 };
 
+/**
+ * 403 in a hosted worker (src/server/hostedMode.ts) — routes that run code
+ * on the host, open something on its desktop, or sign in to GitHub, which
+ * the gateway's account page does instead.
+ */
+const unlessHosted =
+  (handler: Handler): Handler =>
+  (req, params) =>
+    isHostedMode() ? json({ error: HOSTED_REFUSAL }, 403) : handler(req, params);
+
 /** 403 in demo mode — routes whose whole point is talking to GitHub. */
 const unlessDemo =
   (handler: Handler): Handler =>
@@ -1917,21 +1967,21 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
-  ["POST", "/api/plugins/install", market.postInstall],
-  ["POST", "/api/plugins/:id/update", market.postUpdate],
-  ["DELETE", "/api/plugins/:id", market.deletePlugin],
-  ["POST", "/api/choose-folder", postChooseFolder],
+  ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],
+  ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
+  ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
+  ["POST", "/api/choose-folder", unlessHosted(postChooseFolder)],
   ["POST", "/api/reload", postReload],
   // Observability (src/server/logs.ts): the app's own log, and its verbosity.
   ["GET", "/api/logs", getLogs],
   ["GET", "/api/logs/settings", getLogSettings],
   ["PUT", "/api/logs/settings", putLogSettings],
-  ["POST", "/api/auth/github/start", unlessDemo(postAuthStart)],
-  ["POST", "/api/auth/github/poll", unlessDemo(postAuthPoll)],
-  ["POST", "/api/auth/github/web/start", unlessDemo(postAuthWebStart)],
-  ["POST", "/api/auth/github/web/poll", unlessDemo(postAuthWebPoll)],
-  ["GET", "/api/auth/github/callback", unlessDemo(getAuthWebCallback)],
-  ["DELETE", "/api/auth/github", unlessDemo(deleteAuth)],
+  ["POST", "/api/auth/github/start", unlessHosted(unlessDemo(postAuthStart))],
+  ["POST", "/api/auth/github/poll", unlessHosted(unlessDemo(postAuthPoll))],
+  ["POST", "/api/auth/github/web/start", unlessHosted(unlessDemo(postAuthWebStart))],
+  ["POST", "/api/auth/github/web/poll", unlessHosted(unlessDemo(postAuthWebPoll))],
+  ["GET", "/api/auth/github/callback", unlessHosted(unlessDemo(getAuthWebCallback))],
+  ["DELETE", "/api/auth/github", unlessHosted(unlessDemo(deleteAuth))],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
   ["POST", "/api/images", postImage],
@@ -1942,7 +1992,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
-  ["POST", "/api/tests/open-in-idea", postOpenTestInIdea],
+  ["POST", "/api/tests/open-in-idea", unlessHosted(postOpenTestInIdea)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
@@ -1955,17 +2005,17 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/features/:file/pull-requests", putPullRequests],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
-  ["POST", "/api/agent/session", postAgentSession],
+  ["POST", "/api/agent/session", unlessHosted(postAgentSession)],
   ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],
-  ["POST", "/api/agent/chat", postAgentChat],
+  ["POST", "/api/agent/chat", unlessHosted(postAgentChat)],
   ["GET", "/api/agent/chat", getAgentChats],
-  ["GET", "/api/agent/chat/:id", getAgentChat],
-  ["GET", "/api/agent/chat/:id/events", getAgentChatEvents],
-  ["POST", "/api/agent/chat/:id/message", postAgentChatMessage],
-  ["POST", "/api/agent/chat/:id/permission", postAgentChatPermission],
-  ["POST", "/api/agent/chat/:id/interrupt", postAgentChatInterrupt],
-  ["PUT", "/api/agent/chat/:id/mode", putAgentChatMode],
-  ["DELETE", "/api/agent/chat/:id", deleteAgentChat],
+  ["GET", "/api/agent/chat/:id", unlessHosted(getAgentChat)],
+  ["GET", "/api/agent/chat/:id/events", unlessHosted(getAgentChatEvents)],
+  ["POST", "/api/agent/chat/:id/message", unlessHosted(postAgentChatMessage)],
+  ["POST", "/api/agent/chat/:id/permission", unlessHosted(postAgentChatPermission)],
+  ["POST", "/api/agent/chat/:id/interrupt", unlessHosted(postAgentChatInterrupt)],
+  ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],
+  ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
   // "/active" before "/:id": the table is first-match.
 ];
 for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);

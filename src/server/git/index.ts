@@ -6,6 +6,7 @@
 // implemented in JavaScript, bundled with the app and always available.
 
 import type { Attributes } from "@opentelemetry/api";
+import { isHostedMode } from "../hostedMode";
 import { getLogger, withSpan } from "../telemetry";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { cliBackend, cliGitAvailable } from "./cli";
@@ -42,6 +43,9 @@ export function setGitEngine(engine: GitEngine | null): void {
  * failing both the bundled engine, which needs neither.
  */
 export function currentEngine(): GitEngine {
+  // A hosted worker (src/server/hostedMode.ts) never uses gh: its
+  // credentials would be the container's, not the signed-in user's.
+  if (isHostedMode()) return chosen === "js" || !cliGitAvailable() ? "js" : "cli";
   if (chosen) return chosen;
   if (ghAvailable()) return "gh";
   return cliGitAvailable() ? "cli" : "js";
