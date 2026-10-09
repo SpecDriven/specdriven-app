@@ -127,9 +127,18 @@ refreshed with `cp -R ../specs-insurance demo-data && rm -rf demo-data/.git`):
 - All state — settings, token file, logs — is confined under the demo root
   (`SPECDRIVEN_HOME` is pointed inside it), away from `~/.specdriven`.
 
-`Dockerfile` + `fly.toml` deploy it as a container (`fly deploy`); everything is
-ephemeral, so no volume is needed. Keep it to one machine — each machine holds
-an independent demo copy.
+`Dockerfile` deploys it as a container; everything is ephemeral, so no volume is
+needed. Keep it to one machine — each machine holds an independent demo copy.
+
+## Hosted (multi-user)
+
+`bun run start:hosted` runs the hosted gateway (`src/gateway`): email and
+password sign-in with password recovery by email (Resend), each user's GitHub
+token and agent API keys encrypted at rest, and one app server per user in its
+own folder. Local agents and plugin installs are off there. `Dockerfile.hosted`
+and `railway.json` deploy it on Railway with a volume at `/data`; see
+[docs/deployment-railway.md](docs/deployment-railway.md). `bun run dev:hosted`
+runs it locally with emails printed to the console.
 
 ## Observability
 
@@ -379,8 +388,8 @@ workflow keeps in step (see "Versioning"). `install.sh` is also attached to
 every release, so
 `https://github.com/SpecDriven/specdriven-app-release/releases/latest/download/install.sh`
 serves the copy that shipped with the latest one. The compiled-binary
-distribution behind `specdriven.app` in
-[roadmap/deployment.md](roadmap/deployment.md) is still to come.
+distribution behind `specdriven.app` is still to come; the hosted multi-user
+setup is in [docs/deployment-railway.md](docs/deployment-railway.md).
 
 ## Layout
 
