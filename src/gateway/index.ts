@@ -13,19 +13,24 @@ import { generateMasterKey, loadKeyring } from "./crypto";
 import { openDatabase } from "./db";
 import { RateLimiter } from "./rateLimit";
 import { SecretStore } from "./secrets";
+import { runDemo } from "./demo";
 import { createGateway } from "./server";
 import { workerIsolation, WorkerPool } from "./workers";
+import { isDemoMode } from "../server/demoMode";
 
 if (process.argv[2] === "genkey") {
   console.log(generateMasterKey());
   process.exit(0);
 }
 
+// A DEMO_MODE service built from this image is the public demo, not the gateway.
+if (isDemoMode()) await runDemo();
+
 const config = readConfig();
 // Everything the gateway writes — the database first — is its own alone.
 process.umask(0o077);
 const db = openDatabase(join(config.dataDir, "app.db"));
-const keyring = await loadKeyring(process.env, config.production && !config.demo);
+const keyring = await loadKeyring(process.env, config.production);
 const secrets = new SecretStore(db, keyring);
 const resealed = await secrets.reseal();
 if (resealed) console.log(`re-sealed ${resealed} secrets under the current master key`);
