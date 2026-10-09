@@ -152,9 +152,10 @@ import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
   PROFILE_KEY,
-  hasLegacyKeys,
   legacyFields,
+  migrateProfile,
   readProfile,
+  sameProfile,
   storedProfile,
   withPlugin,
   writeProfile,
@@ -256,13 +257,11 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
-  // The profile (specs/app/plugins.feature.md "The profile lists enabled
-  // plugins in tab order"): a settings file from before plugins, with the
-  // per-module switches, is read as the matching list once and written back
-  // as `plugins.enabled`, so the file carries the list from here on.
-  const profile = readProfile(state as Record<string, unknown>, profileManifests);
-  if (profile.migrated && hasLegacyKeys(state as Record<string, unknown>, profileManifests)) {
-    writeProfile(state as Record<string, unknown>, profile.enabled, profileManifests);
+  // The profile (specs/app/plugins.feature.md "Each data folder keeps its
+  // own plugins"): an older settings file — the per-module switches, or one
+  // device-wide `plugins.enabled` — is read as that list once and copied to
+  // every data folder the file knows, so each carries its own from here on.
+  if (migrateProfile(state as Record<string, unknown>, profileManifests)) {
     await writeState(state, getAppRoot());
   }
   // The plugins the profile asks for, and the folders' (src/plugins/host/loader.ts).
@@ -640,6 +639,10 @@ const putState: Handler = async (req) => {
       }
       return json({ error: (e as Error).message }, 400);
     }
+    // An older file's device-wide plugin list goes to the folders it already
+    // knows before the switch, so the picked folder, if new, starts with
+    // Specs alone (specs/app/plugins.feature.md).
+    migrateProfile(state as Record<string, unknown>, profileManifests);
     state.dataRepo = dataRepo;
     // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
     // to the front, the oldest past ten falls off.
@@ -793,11 +796,15 @@ const putState: Handler = async (req) => {
     else delete state.assignments;
   }
   // The profile (specs/app/plugins.feature.md "The profile lists enabled
-  // plugins in tab order"): the ordered list of enabled plugins, taken whole
-  // as `plugins.enabled` — or edited one id at a time through the switches it
+  // plugins in tab order"): the open data folder's ordered list of enabled
+  // plugins (a folder just picked above included), taken whole as
+  // `plugins.enabled` — or edited one id at a time through the switches it
   // replaced (`roadmap`, `testing`, …), which stay as aliases for one
-  // release: on appends the id, off removes it. Either way the file carries
-  // the list from here on and the legacy keys go.
+  // release: on appends the id, off removes it. Either way the folder carries
+  // the list from here on and the legacy keys go. A request that leaves the
+  // list as it was writes none, so a folder only opened keeps showing Specs
+  // alone rather than a copy (specs/app/plugins.feature.md "Each data folder
+  // keeps its own plugins").
   const raw = state as Record<string, unknown>;
   const before = readProfile(raw, profileManifests).enabled;
   let enabled = before;
@@ -862,7 +869,9 @@ const putState: Handler = async (req) => {
     }
     enabled = withPlugin(enabled, manifest.id, body[key] as boolean);
   }
-  writeProfile(raw, enabled, profileManifests);
+  if (migrateProfile(raw, profileManifests) || !sameProfile(enabled, before)) {
+    writeProfile(raw, enabled, profileManifests);
+  }
   // The special folders (specs/app/roadmap.feature.md "Create roadmap folder
   // if necessary", specs/app/tasks.feature.md) are made below when their
   // plugin goes on, once the settings are written; a plugin with a folder

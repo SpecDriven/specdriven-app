@@ -5,7 +5,7 @@
 // alias; and `GET /api/state` lists the plugins in the profile's order.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyStartupState, handleApi, matchApi, reloader, syncedOnStart } from "../src/server/api";
@@ -84,16 +84,65 @@ test("a settings file with the old switches is rewritten as the profile on start
   expect([s.testing, s.roadmap, s.notebook, s.tasks]).toEqual([true, true, false, false]);
 });
 
-test("a fresh install gets the defaults without a settings write", async () => {
+test("a fresh install shows Specs alone without a settings write", async () => {
   await applyStartupState();
   await expect(readFile(statePath(root), "utf8")).rejects.toThrow();
   expect((await state()).plugins.map((p) => [p.id, p.enabled])).toEqual([
-    ["notebook", true],
     ["roadmap", false],
     ["tasks", false],
+    ["notebook", false],
     ["issues", false],
     ["tests", false],
   ]);
+});
+
+// Each data folder keeps its own plugins (specs/app/plugins.feature.md): a
+// folder opened for the first time shows Specs alone, and switching folders
+// switches the plugins with them.
+test("each data folder keeps its own plugins, and a new one shows Specs alone", async () => {
+  const a = join(root, "repo-a");
+  const b = join(root, "repo-b");
+  await mkdir(a);
+  await mkdir(b);
+  await writeState({ reloadFrequencySeconds: 0 }, root);
+  await syncPlugins({});
+
+  expect((await put({ dataRepo: a })).status).toBe(200);
+  let res = await put({ plugins: { enabled: ["tests", "issues"] } });
+  expect(((await res.json()) as StateBody).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual([
+    "tests",
+    "issues",
+  ]);
+  expect(matchApi("GET", "/api/tests")).not.toBeNull();
+
+  // A new folder: Specs alone, and nothing written for it until it changes.
+  res = await put({ dataRepo: b });
+  expect(((await res.json()) as StateBody).plugins.filter((p) => p.enabled)).toEqual([]);
+  expect(matchApi("GET", "/api/tests")).toBeNull();
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["tests", "issues"] } } });
+  await put({ testing: true });
+
+  // Back to the first folder: its list, its routes.
+  res = await put({ dataRepo: a });
+  expect(((await res.json()) as StateBody).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual([
+    "tests",
+    "issues",
+  ]);
+  expect(matchApi("GET", "/api/tests")).not.toBeNull();
+  expect((await settingsFile()).plugins).toEqual({
+    repos: { [a]: { enabled: ["tests", "issues"] }, [b]: { enabled: ["tests"] } },
+  });
+});
+
+test("an older device-wide list carries over to the folder that is open", async () => {
+  const a = join(root, "repo-a");
+  await mkdir(a);
+  await writeState({ reloadFrequencySeconds: 0, dataRepo: a, plugins: { enabled: ["roadmap"] } }, root);
+  await applyStartupState();
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["roadmap"] } } });
+  expect(
+    (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
+  ).toEqual(["roadmap"]);
 });
 
 test("PUT /api/state takes the profile whole, or a legacy switch as an alias", async () => {

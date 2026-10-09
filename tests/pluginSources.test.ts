@@ -125,7 +125,7 @@ test("a plugin folder under ~/.specdriven/plugins is found, built, mounted and s
 
   // Found for the first time: on, at the end of the tab order, and stored.
   const profile = state.plugins as { enabled: string[]; seen: string[] };
-  expect(profile.enabled).toEqual(["notebook", "hello"]);
+  expect(profile.enabled).toEqual(["hello"]);
   expect(profile.seen).toEqual(["hello"]);
   expect(persisted).toEqual(state);
 
@@ -255,7 +255,7 @@ test("a manifest the app cannot accept is refused with the reason, and loads not
   await writeFile(join(pluginsHome(), "broken", "package.json").replace("/broken/", "/"), "");
   const state: Record<string, unknown> = {};
   await syncPlugins(state, { sources: true, dataDir: null });
-  expect((state.plugins as { enabled: string[] }).enabled).toEqual(["notebook"]);
+  expect((state.plugins as { enabled: string[] }).enabled).toEqual([]);
   expect(row("future")).toMatchObject({ enabled: false, active: false });
   expect(row("future")!.error).toBe("the plugin needs plugin api 2; this app speaks api 1");
   expect(row("newer")!.error).toMatch(/needs SpecDriven 99\.0\.0 or newer/);
@@ -322,7 +322,7 @@ test("the profile's explicit folders are not read with paths off, as in the host
 test("a plugin that fails to load fails alone", async () => {
   await fixture(join(pluginsHome(), "hello"), "hello");
   await fixture(join(pluginsHome(), "broken"), "broken", { throws: "boom at apply" });
-  const state: Record<string, unknown> = {};
+  const state: Record<string, unknown> = { plugins: { enabled: ["notebook"] } };
   await syncPlugins(state, { sources: true, dataDir: null });
   expect(row("hello")).toMatchObject({ active: true });
   expect(row("broken")).toMatchObject({ enabled: true, active: false, error: "boom at apply" });
