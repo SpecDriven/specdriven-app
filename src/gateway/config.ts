@@ -10,6 +10,8 @@ type Env = Record<string, string | undefined>;
 
 export interface GatewayConfig {
   production: boolean;
+  /** DEMO_MODE: the required hosted-mode variables are not enforced. */
+  demo: boolean;
   port: number;
   /** The volume: the database and every user's folders. */
   dataDir: string;
@@ -26,11 +28,17 @@ export interface GatewayConfig {
   workerEntry: string;
 }
 
+function isDemoMode(env: Env): boolean {
+  const v = env.DEMO_MODE;
+  return v === "1" || v === "true";
+}
+
 export function readConfig(env: Env = process.env): GatewayConfig {
   const production = env.NODE_ENV === "production";
   const publicUrl = env.PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
   const config: GatewayConfig = {
     production,
+    demo: isDemoMode(env),
     port: Number(env.PORT) || 3000,
     dataDir: resolve(env.SPECDRIVEN_DATA_DIR?.trim() || "/data"),
     publicUrl,
@@ -40,7 +48,8 @@ export function readConfig(env: Env = process.env): GatewayConfig {
     workerIdleMinutes: Number(env.SPECDRIVEN_WORKER_IDLE_MINUTES) || 30,
     workerEntry: join(import.meta.dir, "..", "index.ts"),
   };
-  if (production) {
+  // The demo is ephemeral and sends no mail: only hosted mode needs these.
+  if (production && !isDemoMode(env)) {
     const missing: string[] = [];
     if (!publicUrl) missing.push("PUBLIC_URL");
     if (!config.resendApiKey) missing.push("RESEND_API_KEY");
