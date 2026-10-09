@@ -20,6 +20,9 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY src ./src
+# The demo dataset: a DEMO_MODE=1 service built from this image runs the public
+# demo instead of the gateway (src/gateway/demo.ts).
+COPY demo-data ./demo-data
 # The frontend, bundled once for every user: the gateway serves it, so the
 # per-user workers never bundle it themselves (src/gateway/appShell.ts).
 RUN bun build src/index.html --outdir dist/app --production --public-path /_app/

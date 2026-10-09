@@ -136,7 +136,10 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
 ## Deploying on Railway
 
 1. **Create a service from this repository.** `railway.json` points Railway at
-   `Dockerfile.hosted` and the `/healthz` health check.
+   `Dockerfile.hosted` and the `/healthz` health check. It applies to every
+   service built from this repository: a service with `DEMO_MODE=1` runs the
+   public demo from the same image instead of the gateway, needs none of the
+   variables below and no volume (`src/gateway/demo.ts`).
 2. **Add a volume mounted at `/data`.** It holds `app.db` and every user's
    folders. A service with a volume runs as a single replica, and a redeploy
    has a short gap while the volume moves to the new container. That suits a

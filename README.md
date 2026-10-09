@@ -129,6 +129,10 @@ refreshed with `cp -R ../specs-insurance demo-data && rm -rf demo-data/.git`):
 
 `Dockerfile` deploys it as a container; everything is ephemeral, so no volume is
 needed. Keep it to one machine — each machine holds an independent demo copy.
+On Railway, `railway.json` builds every service with `Dockerfile.hosted`: set
+`DEMO_MODE=1` on the demo service and its entry point runs this demo instead of
+the sign-in gateway, with no hosted-mode variables required
+(`src/gateway/demo.ts`).
 
 ## Hosted (multi-user)
 
