@@ -57,7 +57,7 @@ const SEED = {
 // ---- pure rules -----------------------------------------------------------
 
 describe("building a proposal", () => {
-  test("a proposed scenario is always @v1 [proposed], with its body tidied", () => {
+  test("a proposed scenario is always @v1 and proposed, with its body tidied", () => {
     const s = proposedScenario("  Export   as  CSV ", "- Given: x  \r\n- Then: y\n\n");
     expect(s).toEqual({ name: "Export as CSV", version: 1, status: "proposed", body: "- Given: x\n- Then: y", tests: [] });
   });
@@ -379,7 +379,7 @@ describe("the proposals service", () => {
     expect(Buffer.from(db).includes("ada-token")).toBe(false);
   });
 
-  test("a proposed scenario lands on main as [proposed], authored by the visitor and signed in its document", async () => {
+  test("a proposed scenario lands on main as proposed, authored by the visitor and signed in its document", async () => {
     const cookie = await signIn("code-ada");
     const res = await post(scenarioUrl("specs/app/export.feature.md"), cookie, {
       name: "Export as CSV",

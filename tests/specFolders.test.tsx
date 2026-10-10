@@ -45,7 +45,7 @@ describe("FolderSwitchDialog — Switch spec folder", () => {
     expect(html(<FolderSwitchDialog folder="/a" step="loading" />)).toContain('aria-current="step"');
   });
 
-  test("nothing on it can be pressed: no buttons, and it says the rest waits", () => {
+  test("nothing on it can be pressed — no buttons, and it says the rest waits", () => {
     const markup = html(<FolderSwitchDialog folder="/a" step="saving" />);
     expect(markup).not.toContain("<button");
     expect(markup).toContain("Everything else waits until the folder has loaded.");

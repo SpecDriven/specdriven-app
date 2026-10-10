@@ -176,7 +176,7 @@ describe("a Publish whose tick comes back after the user moved on", () => {
     expect(await run).toEqual(["open:quote.feature.md"]);
   });
 
-  test("another feature opened meanwhile: it publishes, but refreshes the listing instead of pulling the user back", async () => {
+  test("another feature opened meanwhile — it publishes, but refreshes the listing instead of pulling the user back", async () => {
     const queue = createPromiseQueue();
     const { ahead, land } = tickAway(queue);
     let selected = "quote.feature.md";
@@ -219,7 +219,7 @@ describe("a Publish whose tick comes back after the user moved on", () => {
     expect(await run).toEqual(["conflict-toast"]);
   });
 
-  test("the path sealed while it waited (move, rename-file, delete): nothing goes out", async () => {
+  test("the path sealed while it waited (move, rename-file, delete) — nothing goes out", async () => {
     const queue = createPromiseQueue();
     const { ahead, land } = tickAway(queue);
     let sealed = false;

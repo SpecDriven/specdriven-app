@@ -62,7 +62,7 @@ jobs:
             echo "install.sh on $RELEASE_REPO is already at $local_sha"
             exit 0
           fi
-          args=(-f "message=Update install.sh from specdriven_app v$VERSION"
+          args=(-f "message=Update install.sh from specdriven-app v$VERSION"
                 -f "content=$(base64 -w0 install.sh)")
           if [ -n "$remote_sha" ]; then
             args+=(-f "sha=$remote_sha")
@@ -75,7 +75,7 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s' \
-            "Source snapshot of SpecDriven/specdriven_app at v$VERSION ($GITHUB_SHA)." \
+            "Source snapshot of SpecDriven/specdriven-app at v$VERSION ($GITHUB_SHA)." \
             "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$RELEASE_REPO/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, verifies it against \`SHASUMS256.txt\`, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
             "**To review the source before it runs:** download \`specdriven-$VERSION-src.zip\`, verify it against \`SHASUMS256.txt\`, and unzip it yourself." \
             "SpecDriven is built with [Bun](https://bun.sh): \`bun install\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
