@@ -145,6 +145,34 @@ test("an older device-wide list carries over to the folder that is open", async 
   ).toEqual(["roadmap"]);
 });
 
+// An app from before per-folder lists showed the manifests' defaults — the
+// Notebook — to a file naming a folder with no list and none of the old
+// switches: someone who never changed a plugin. The folder keeps showing it.
+test("an older file with a folder but no plugin list keeps the Notebook on in that folder", async () => {
+  const a = join(root, "repo-a");
+  await mkdir(a);
+  await writeState({ reloadFrequencySeconds: 0, dataRepo: a }, root);
+  await applyStartupState();
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["notebook"] } } });
+  expect(
+    (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
+  ).toEqual(["notebook"]);
+});
+
+// The file this app writes when it records a folder says it keeps
+// per-folder lists, so a restart never reads it as an older file.
+test("a folder picked in this app still shows Specs alone after a restart", async () => {
+  const a = join(root, "repo-a");
+  await mkdir(a);
+  await writeState({ reloadFrequencySeconds: 0 }, root);
+  await syncPlugins({});
+  expect((await put({ dataRepo: a })).status).toBe(200);
+  expect((await settingsFile()).plugins).toEqual({ repos: {} });
+  await applyStartupState();
+  expect((await state()).plugins.filter((p) => p.enabled)).toEqual([]);
+  expect((await settingsFile()).plugins).toEqual({ repos: {} });
+});
+
 test("PUT /api/state takes the profile whole, or a legacy switch as an alias", async () => {
   await writeState({ reloadFrequencySeconds: 0 }, root);
   await syncPlugins({});
