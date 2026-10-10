@@ -112,14 +112,14 @@ ${formatCreatedBy(ADA)}
 
 // --- the document ------------------------------------------------------------
 
-test("New feature has an author: an import signed by its writer records it at the feature level", () => {
+test("New feature has an author — an import signed by its writer records it at the feature level", () => {
   const doc = importFeatureDoc(parseFeature(PLAIN), ADA);
   expect(doc.createdBy).toBe(ADA);
   expect(doc.updatedBy).toBe(ADA);
   expect(doc.specs[0]!.createdBy).toBe(ADA);
 });
 
-test("new spec has an author: a scenario added by a save is created by whoever saved", () => {
+test("new spec has an author — a scenario added by a save is created by whoever saved", () => {
   const doc = importFeatureDoc(parseFeature(PLAIN), ADA);
   const target = parseFeature(
     `${PLAIN}\n## Decline Quote @v1 [proposed]\n\n- **Then** the quote is declined\n`,
