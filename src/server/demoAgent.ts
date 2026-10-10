@@ -1,4 +1,4 @@
-// Simulated coding agent for demo mode (specs/roadmap/demo.md, "Demo App":
+// Simulated coding agent for demo mode (roadmap/demo.md, "Demo App":
 // "Launch Coding Session is a partial no-op … It may create pretend session
 // output and results"). A public demo has no `claude` on PATH and must never
 // spawn one, but the session is the point of the product — so demo mode fills

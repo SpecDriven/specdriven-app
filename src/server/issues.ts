@@ -7,7 +7,7 @@
 //
 // Which GitHub repository that is comes from the code repo's git config —
 // its `origin` remote — read from disk rather than through a git subprocess,
-// so it works on every git engine (specs/git-operations.spec.md), including
+// so it works on every git engine (git-operations.md), including
 // the bundled JavaScript one on a machine with no git at all.
 //
 // Requests carry the app's own GitHub sign-in token (src/server/tokenStore

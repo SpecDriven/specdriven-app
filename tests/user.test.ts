@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { getCurrentUser } from "../src/server/user";
 import { createFileBackend, saveToken, setTokenBackend } from "../src/server/tokenStore";
 
-// specs/user-info-settings.spec.md: the current user defaults to the OS
+// specs/user-info-settings.feature.md: the current user defaults to the OS
 // user; the commit-author identity rides along for the User info dialog —
 // the signed-in GitHub account, or the system git identity when signed out.
 

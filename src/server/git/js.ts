@@ -1,4 +1,4 @@
-// Bundled git engine (specs/git-operations.spec.md): git implemented in
+// Bundled git engine (git-operations.md): git implemented in
 // JavaScript by just-git, running in this process against the real
 // filesystem. The one engine that needs nothing installed, so it is what the
 // app falls back to on a machine without git.

@@ -63,7 +63,7 @@ export interface ScenarioRow {
 }
 
 /**
- * The scenarios a feature's tree row expands to (specs/navigation.feature.md
+ * The scenarios a feature's tree row expands to (specs/ui/navigation.feature.md
  * "Scenario navigation").
  *
  * The listing carries every feature's scenarios already, so the tree needs no

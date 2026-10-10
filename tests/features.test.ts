@@ -57,7 +57,7 @@ test("createFeature writes a new .feature.md file and lists it", async () => {
   expect(await readFeature(root, fileName)).toBe("# Quote Policy\n");
 });
 
-// specs/ui.spec.md "Main page": the sidebar shows feature names, not file
+// specs/ui/ui.feature.md "Main page": the sidebar shows feature names, not file
 // names — the name comes from the `# <name>` heading, with the file stem as
 // the fallback for files without one.
 test("listFeatures returns display names, falling back to the stem", async () => {
@@ -69,7 +69,7 @@ test("listFeatures returns display names, falling back to the stem", async () =>
   ]);
 });
 
-// Scenario-level code gen selection (specs/agents/claude.spec.md): the
+// Scenario-level code gen selection (specs/agents/claude.feature.md): the
 // listing carries each file's scenario names and versions, so the sidebar
 // can offer them for selection.
 test("listFeatures carries each file's scenario names and versions", async () => {
@@ -300,7 +300,7 @@ test("publishFeature with a scenario target publishes only that scenario", async
   expect(text).toContain("## Extra @v1 [proposed]");
 });
 
-// specs/crud-feature.spec.md "Scenario status": a scenario saved with an
+// crud-feature.md "Scenario status": a scenario saved with an
 // explicit [draft] chip lands in the Automerge document but never in the
 // .feature.md — and the save result / editor read still hand it back, so the
 // client keeps showing it.
@@ -333,7 +333,7 @@ test("saving a feature without its draft leaves the draft in place", async () =>
   expect(result.content).toContain("## Idea @v1 [draft]");
 });
 
-// specs/ui.spec.md "Scenario editor": Delete on a draft removes it from
+// specs/ui/ui.feature.md "Scenario editor": Delete on a draft removes it from
 // the document — the file never held it, and the editor stops showing it.
 test("deleteDraftScenario removes the draft from the document", async () => {
   await createFeature(root, "Quote");
@@ -444,7 +444,7 @@ test("publishFeature with a scenario target is version-specific", async () => {
   expect(text).toContain("## Basic @v2 [published]");
 });
 
-// specs/crud-feature.spec.md "Feature file format": content that is not a
+// crud-feature.md "Feature file format": content that is not a
 // well-formed feature file never reaches the data repo — the file on disk is
 // left exactly as it was, so there is nothing for the next sync to push.
 describe("content is validated before it is written to the data repo", () => {
@@ -505,7 +505,8 @@ test("saving into a plain directory (no standalone git repo) still works", async
   expect(await readFeature(root, "specs/standalone.feature.md")).toBe("# Standalone\n\nedited\n");
 });
 
-// specs/ui.spec.md: "If a scenario is already published, then it is immutable."
+// specs/ui/ui.feature.md: "If a scenario is already published, then it is
+// immutable."
 test("published scenarios are immutable, but new versions may be added", async () => {
   await createFeature(root, "Quote");
   await publishFeature(
@@ -549,9 +550,10 @@ for (const engine of gitEngines()) {
       setGitEngine(engine);
     });
 
-    // specs/ui.spec.md "Main page": the Edit link edits the feature name — the
-    // file's `# <name>` heading — not the file name. The change is committed and
-    // pushed; the other clone sees the new name on pull, at the same file.
+    // specs/ui/ui.feature.md "Main page": the Edit link edits the feature name
+    // — the file's `# <name>` heading — not the file name. The change is
+    // committed and pushed; the other clone sees the new name on pull, at the
+    // same file.
     test("renameFeature rewrites the heading, commits and pushes", async () => {
       const { a, b } = await twoClones(root);
       const result = await renameFeature(a, "specs/seed.feature.md", "Sprout Policy");
@@ -567,7 +569,7 @@ for (const engine of gitEngines()) {
       expect(await readFeature(b, "specs/seed.feature.md")).toBe("# Sprout Policy\n");
     });
 
-    // specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+    // specs/ui/ui.feature.md "Feature entry menu" (File → Rename): renames the
     // underlying file — a `git mv`, committed and pushed; the other clone sees
     // the file under its new name on pull.
     test("renameFeatureFile renames via git mv, commits and pushes", async () => {
@@ -588,8 +590,8 @@ for (const engine of gitEngines()) {
       expect(await readFeature(b, "specs/seed.feature.md")).toBeNull();
     });
 
-    // specs/ui.spec.md "Feature entry menu" (Delete): a `git rm`, committed and
-    // pushed — the other clone loses the file on pull.
+    // specs/ui/ui.feature.md "Feature entry menu" (Delete): a `git rm`,
+    // committed and pushed — the other clone loses the file on pull.
     test("deleteFeature removes the file, commits and pushes", async () => {
       const { a, b } = await twoClones(root);
       const result = await deleteFeature(a, "specs/seed.feature.md");

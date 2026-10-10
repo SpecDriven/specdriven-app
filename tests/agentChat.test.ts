@@ -1,4 +1,4 @@
-// Automates specs/agents/coding-agent-ui.feature.md over the routes: a
+// Automates specs/agents/agent-pane.feature.md over the routes: a
 // coding agent session is a live Claude Code chat the app drives itself.
 // The Claude Agent SDK is swapped for a fake query the test steers from
 // both ends — what Claude "says" and what it asks — so nothing spawns.

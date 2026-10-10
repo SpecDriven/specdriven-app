@@ -43,7 +43,7 @@ function CellInput({ value, onCommit, ...rest }: CellInputProps) {
 
 /**
  * Structured editor for the markdown table in the scenario body
- * (specs/scenario-table.spec.md). Headless TanStack Table provides the
+ * (specs/scenario-table.feature.md). Headless TanStack Table provides the
  * column/row model; cells are plain controlled inputs, and every edit
  * rewrites the table block inside the body text.
  */
@@ -51,7 +51,7 @@ export function ScenarioTable({ body, onChange }: ScenarioTableProps) {
   const tbl = useMemo(() => findTable(body), [body]);
   const vars = useMemo(() => extractVars(body), [body]);
 
-  // specs/scenario-table.spec.md "variable creates a column": a {var} in the
+  // specs/scenario-table.feature.md "variable creates a column": a {var} in the
   // body guarantees a column of that name, creating the table if needed.
   useEffect(() => {
     const missing = vars.filter((v) => !tbl?.columns.includes(v));
@@ -114,7 +114,7 @@ export function ScenarioTable({ body, onChange }: ScenarioTableProps) {
     update({ columns: [...tbl.columns, ""], rows: tbl.rows.map((r) => [...r, ""]) });
 
   // Removing the last column removes the table itself — a zero-column table
-  // has no markdown form (specs/scenario-table.spec.md).
+  // has no markdown form (specs/scenario-table.feature.md).
   const removeColumn = (c: number) =>
     update(
       tbl.columns.length === 1

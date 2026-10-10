@@ -5,7 +5,7 @@ import { isHostedMode } from "./hostedMode";
 import { cliGitAvailable, currentEngine, ghAccount } from "./git";
 import { run } from "./run";
 
-// Current user (specs/user-info-settings.spec.md): by default the user on
+// Current user (specs/user-info-settings.feature.md): by default the user on
 // the OS, plus the identity that authors the app's commits to the data
 // repo — the signed-in GitHub account, the GitHub CLI's account when that
 // engine is in effect, or the system git identity. Reported via /api/state

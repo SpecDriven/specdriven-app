@@ -1,4 +1,4 @@
-// GitHub CLI engine (specs/git-operations.spec.md): the same `git`
+// GitHub CLI engine (git-operations.md): the same `git`
 // subprocesses as the plain engine, with two things taken over by `gh` —
 // GitHub credentials come from gh's own credential helper (the wiring
 // `gh auth setup-git` writes, but per command rather than into the user's

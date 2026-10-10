@@ -1,4 +1,4 @@
-// Git engine facade (specs/git-operations.spec.md). Callers keep one
+// Git engine facade (git-operations.md). Callers keep one
 // function surface; behind it, the Git engine setting picks which engine
 // carries the operation out and who supplies the GitHub credentials. Two
 // engines run the system `git` binary — the GitHub CLI engine adds gh's

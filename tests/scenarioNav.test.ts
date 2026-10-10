@@ -1,4 +1,4 @@
-// Automates specs/navigation.feature.md "Scenario navigation": the sidebar
+// Automates specs/ui/navigation.feature.md "Scenario navigation": the sidebar
 // tree lists a feature's scenarios under it, so a scenario editor pane can
 // switch to another scenario without going back to the feature view.
 //

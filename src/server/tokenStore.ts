@@ -1,4 +1,4 @@
-// Where the GitHub sign-in token lives (specs/git-operations.spec.md). The
+// Where the GitHub sign-in token lives (git-operations.md). The
 // token is deliberately NOT part of settings.json — settings are shareable,
 // the token never is. The default backend is a 0600 JSON file next to the
 // home settings file; the desktop app swaps in an OS-encrypted backend

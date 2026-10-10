@@ -182,7 +182,7 @@ export function PomodoroSettingsDialog({ prefs, running, onSave, onClose }: Pomo
       className="dialog-backdrop"
       onClick={onClose}
       onKeyDown={(e) => {
-        // ESC closes only this dialog (specs/ui.spec.md "Dialogs").
+        // ESC closes only this dialog (specs/ui/ui.feature.md "Dialogs").
         if (e.key === "Escape") {
           e.stopPropagation();
           e.preventDefault();

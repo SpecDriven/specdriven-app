@@ -86,10 +86,11 @@ interface MarkdownEditorProps {
 type Tab = "write" | "vim" | "preview";
 
 /**
- * Embedded markdown editor for the scenario body (specs/ui.spec.md "Scenario
- * edit dialog"): a formatting toolbar over a source textarea, with a rendered
- * Preview tab — and, with Vim mode on in Settings, a Vim tab editing the same
- * text with Vim's keys (src/frontend/VimEditor.tsx).
+ * Embedded markdown editor for the scenario body
+ * (specs/editor/spec-editor.feature.md "Spec editor pane"): a formatting
+ * toolbar over a source textarea, with a rendered Preview tab — and, with Vim
+ * mode on in Settings, a Vim tab editing the same text with Vim's keys
+ * (src/frontend/VimEditor.tsx).
  */
 export function MarkdownEditor({
   value,
@@ -288,7 +289,7 @@ export function MarkdownEditor({
     });
   };
 
-  // Images (specs/images.spec.md): pasted or picked files upload to the data
+  // Images (specs/images.feature.md): pasted or picked files upload to the data
   // repo; each finished upload drops `![alt](/api/images/…)` at the caret.
   const addImages = async (files: File[]) => {
     const images = files.filter((f) => f.type.startsWith("image/"));

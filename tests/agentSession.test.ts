@@ -1,8 +1,8 @@
-// Automates specs/agents/claude.spec.md over the route: POST /api/agent/session
-// takes the session name, the selection and where to run. "desktop" writes
-// the prompt and a session record beside the settings file — never in the
-// data repo — and opens Claude Code Desktop; the remembered "Run in" choice
-// round-trips through the settings file.
+// Automates specs/agents/claude.feature.md over the route: POST
+// /api/agent/session takes the session name, the selection and where to run.
+// "desktop" writes the prompt and a session record beside the settings file —
+// never in the data repo — and opens Claude Code Desktop; the remembered "Run
+// in" choice round-trips through the settings file.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";

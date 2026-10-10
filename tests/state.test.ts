@@ -36,8 +36,8 @@ afterEach(async () => {
   else process.env.SPECDRIVEN_HOME = realHome;
 });
 
-// specs/app-start.spec.md: if the settings file does not contain the name of the
-// last data repo, the user must be asked for one.
+// specs/ui/app-start.feature.md: if the settings file does not contain the
+// name of the last data repo, the user must be asked for one.
 test("missing settings file means the user must be asked for a data repo", async () => {
   const state = await readState(dir);
   expect(needsDataRepo(state)).toBe(true);
@@ -53,8 +53,8 @@ test("a corrupt settings file is treated as empty state", async () => {
   expect(needsDataRepo(await readState(dir))).toBe(true);
 });
 
-// specs/app-start.spec.md "Settings file": ./.specdriven/settings.json first,
-// then ~/.specdriven/settings.json.
+// specs/ui/app-start.feature.md "Settings file": ./.specdriven/settings.json
+// first, then ~/.specdriven/settings.json.
 test("the home settings file is used when the project has none", async () => {
   await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
   const state = await readState(dir);
@@ -68,7 +68,8 @@ test("the project settings file wins over the home settings file", async () => {
   expect((await readState(dir)).dataRepo).toBe("from-project");
 });
 
-// specs/app-start.spec.md: saves go back to whichever settings file was read.
+// specs/ui/app-start.feature.md: saves go back to whichever settings file was
+// read.
 test("settings are saved back to the home settings file when only it exists", async () => {
   await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
   await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
@@ -84,8 +85,8 @@ test("a project settings file keeps saves local and leaves the home settings fil
   expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBeUndefined();
 });
 
-// specs/app-start.spec.md: the pre-settings.json layout still reads, and the
-// next save migrates it.
+// specs/ui/app-start.feature.md: the pre-settings.json layout still reads, and
+// the next save migrates it.
 test("a legacy .specdriven file is read and migrated on the next save", async () => {
   const legacy = join(dir, LEGACY_STATE_FILE);
   await Bun.write(legacy, JSON.stringify({ dataRepo: "legacy" }));
@@ -104,14 +105,15 @@ test("recorded data repo round-trips and suppresses the prompt", async () => {
   expect(needsDataRepo(state)).toBe(false);
 });
 
-// specs/ui.spec.md: Settings (data reload frequency) are saved to the settings file.
+// specs/ui/ui.feature.md: Settings (data reload frequency) are saved to the
+// settings file.
 test("reload frequency round-trips through the settings file", async () => {
   await writeState({ dataRepo: "data", reloadFrequencySeconds: 30 }, dir);
   const state = await readState(dir);
   expect(state.reloadFrequencySeconds).toBe(30);
 });
 
-// specs/git-operations.spec.md: the chosen git engine is a setting in the
+// git-operations.md: the chosen git engine is a setting in the
 // settings file; absent means the default (gh wherever it is installed).
 test("git engine round-trips through the settings file", async () => {
   await writeState({ dataRepo: "data", gitEngine: "cli" }, dir);
@@ -122,8 +124,9 @@ test("git engine round-trips through the settings file", async () => {
   expect((await readState(dir)).gitEngine).toBeUndefined();
 });
 
-// specs/ui.spec.md "Scenario List": the number of Markdown lines rendered per
-// scenario in the list is configurable in Settings and saved to the settings file.
+// specs/ui/ui.feature.md "Scenario List": the number of Markdown lines rendered
+// per scenario in the list is configurable in Settings and saved to the
+// settings file.
 test("scenario preview lines round-trip through the settings file", async () => {
   await writeState({ dataRepo: "data", scenarioPreviewLines: 4 }, dir);
   const state = await readState(dir);
@@ -139,7 +142,7 @@ test("scenario preview lines default to 8 and are at least 1", () => {
   expect(normalizeScenarioPreviewLines(1)).toBe(1);
 });
 
-// Code gen switch (specs/agents/claude.spec.md): on unless switched off, so
+// Code gen switch (specs/agents/claude.feature.md): on unless switched off, so
 // the default is an absent key and only `false` turns it off.
 test("code generation is on unless explicitly switched off", () => {
   expect(normalizeCodeGen(undefined)).toBe(true);

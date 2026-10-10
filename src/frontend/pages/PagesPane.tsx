@@ -170,8 +170,8 @@ export function PagePane({
     if (sealed.current) return;
     if (!res?.ok || typeof data.content !== "string") {
       // Gone — deleted, renamed, or a stale deep link. A missing page says so
-      // the way a missing feature does (specs/navigation.spec.md "link to a
-      // missing feature"); any other failure keeps the server's own message.
+      // the way a missing feature does (specs/ui/navigation.feature.md "link to
+      // a missing feature"); any other failure keeps the server's own message.
       sealed.current = true;
       toast.error(
         res?.status === 404
@@ -557,8 +557,8 @@ export function PagePane({
         <div className="editor-actions page-actions">
           <SaveIndicator saving={saving} savedAt={savedAt} dirty={text !== saved.current} />
           {/* The same "Copy link" the feature name carries
-              (specs/navigation.spec.md "share a link"), for the page's own
-              url (specs/app/tasks.feature.md). */}
+              (specs/ui/navigation.feature.md "share a link"), for the page's
+              own url (specs/app/tasks.feature.md). */}
           <Tooltip label={app.copied === link ? "Copied" : "Copy link"} keys="mod+shift+c">
             <button
               type="button"

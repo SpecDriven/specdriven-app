@@ -19,14 +19,14 @@ function focusable(container: HTMLElement): HTMLElement[] {
 }
 
 // Dialogs can stack — a delete confirmation above the scenario edit dialog
-// (specs/ui.spec.md "Dialogs"). Only the top-most trap may handle Tab, or
+// (specs/ui/ui.feature.md "Dialogs"). Only the top-most trap may handle Tab, or
 // the lower one would keep yanking focus out of the foreground dialog.
 const trapStack: HTMLElement[] = [];
 
 /**
- * specs/ui.spec.md "Dialogs": while a dialog is open, Tab and Shift+Tab only
- * cycle its own fields, wrapping at both ends; focus never reaches the page
- * behind it; and closing the dialog restores focus to whatever opened it.
+ * specs/ui/ui.feature.md "Dialogs": while a dialog is open, Tab and Shift+Tab
+ * only cycle its own fields, wrapping at both ends; focus never reaches the
+ * page behind it; and closing the dialog restores focus to whatever opened it.
  *
  * Returns the ref to attach to the dialog element. Pass open=false when the
  * dialog is closed — the trap installs and tears down with it.

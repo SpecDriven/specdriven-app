@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Builds the desktop app (specs/desktop-app.spec.md "Packaging"):
+ * Builds the desktop app (specs/app/desktop-app.feature.md "Packaging"):
  *
  *   bun run build:desktop            this machine's platform
  *   bun run build:desktop --mac      release/SpecDriven-<version>-arm64.dmg (+ zip)

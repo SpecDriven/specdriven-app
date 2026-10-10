@@ -1,7 +1,7 @@
-// specs/ui.spec.md "Settings": Vim mode is a device-local switch that adds a
-// Vim tab to every Markdown editor. Off, the editor is as it was; on, the tab
-// is there and is the one an editable body opens on; a read-only body has
-// nothing to edit with Vim and never shows it.
+// specs/ui/ui.feature.md "Settings": Vim mode is a device-local switch that
+// adds a Vim tab to every Markdown editor. Off, the editor is as it was; on,
+// the tab is there and is the one an editable body opens on; a read-only body
+// has nothing to edit with Vim and never shows it.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";

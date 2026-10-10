@@ -1,5 +1,6 @@
-// Automates specs/editor-autosave.feature.md: the editor saves itself at an
-// interval, and that interval is a setting — at least 3 seconds, 6 by default.
+// Automates specs/editor/editor-autosave.feature.md: the editor saves itself at
+// an interval, and that interval is a setting — at least 3 seconds, 6 by
+// default.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
