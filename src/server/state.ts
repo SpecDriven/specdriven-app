@@ -1,6 +1,6 @@
 // Local state lives in .specdriven/settings.json — in the project root, or in
-// the user's home directory as a fallback (specs/app-start.spec.md).
-// Per specs/app-start.spec.md: if it doesn't name the last data repo,
+// the user's home directory as a fallback (specs/ui/app-start.feature.md).
+// Per specs/ui/app-start.feature.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
 import { readFile, rename, rm, stat } from "node:fs/promises";
@@ -19,23 +19,26 @@ export interface SpecDrivenState {
   recentDataRepos?: string[];
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
-  /** Max Markdown lines rendered per scenario in the list (specs/ui.spec.md). */
+  /**
+   * Max Markdown lines rendered per scenario in the list
+   * (specs/ui/ui.feature.md).
+   */
   scenarioPreviewLines?: number;
   /**
    * How often (seconds) the open editor saves itself
-   * (specs/editor-autosave.feature.md). At least 3 seconds; absent means the
-   * 6 second default.
+   * (specs/editor/editor-autosave.feature.md). At least 3 seconds; absent means
+   * the 6 second default.
    */
   autosaveIntervalSeconds?: number;
   /**
-   * Git engine (specs/git-operations.spec.md): "gh" authenticates through
+   * Git engine (git-operations.md): "gh" authenticates through
    * the GitHub CLI, "cli" through the app's own sign-in, "js" is the
    * bundled JavaScript git; absent means the default — gh when it is
    * installed, then cli, then js on a machine with no git at all.
    */
   gitEngine?: GitEngine;
   /** Show the test-links table on scenario cards
-      (specs/traceability.spec.md); absent means ON. */
+      (specs/traceability.feature.md); absent means ON. */
   showTestLinks?: boolean;
   /**
    * Open test links in IntelliJ IDEA instead of the browser
@@ -65,14 +68,14 @@ export interface SpecDrivenState {
    * absent means ON. Off keeps the links in the app's documents only.
    */
   publishExternalLinks?: boolean;
-  /** Offer code gen sessions (specs/agents/claude.spec.md); absent means ON.
+  /** Offer code gen sessions (specs/agents/claude.feature.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to a coding agent. */
   codeGen?: boolean;
   /**
    * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
    * opens a new session in Claude Code Desktop, "pane" opens one in the
-   * app's own coding agent pane (specs/agents/coding-agent-ui.feature.md),
+   * app's own coding agent pane (specs/agents/agent-pane.feature.md),
    * "pi" the same pane driven by Pi
    * (specs/agents/integration-with-pi-dev-agent.feature.md), "codex" the
    * same pane driven by Codex (src/server/codexChat.ts). Absent means
@@ -159,9 +162,10 @@ export interface SpecDrivenState {
   logLevels?: Record<string, "debug" | "info" | "warn" | "error">;
   /**
    * Optional websocket sync server for near-real-time document sync
-   * (specs/automerge-store.spec.md), e.g. wss://sync.automerge.org. Absent
-   * or empty means OFF — git stays the only transport. On a public server,
-   * anyone holding a document's id can read that document.
+   * (specs/datastore/automerge-store.feature.md), e.g.
+   * wss://sync.automerge.org. Absent or empty means OFF — git stays the only
+   * transport. On a public server, anyone holding a document's id can read that
+   * document.
    */
   syncServerUrl?: string;
 }
@@ -237,9 +241,9 @@ export function normalizeScenarioPreviewLines(value: unknown): number {
   return Math.floor(n);
 }
 
-// Editor autosave (specs/editor-autosave.feature.md): the interval the open
-// editor is saved at. Autosave is always on — the setting is how often, and
-// the floor keeps a save from firing between two keystrokes.
+// Editor autosave (specs/editor/editor-autosave.feature.md): the interval the
+// open editor is saved at. Autosave is always on — the setting is how often,
+// and the floor keeps a save from firing between two keystrokes.
 export const DEFAULT_AUTOSAVE_SECONDS = 6;
 export const MIN_AUTOSAVE_SECONDS = 3;
 
@@ -264,7 +268,7 @@ export function normalizeAgentFirstResponseSeconds(value: unknown): number {
 }
 
 /** Effective test-links display setting: ON unless explicitly turned off
-    (specs/traceability.spec.md "default is ON"). */
+    (specs/traceability.feature.md "default is ON"). */
 export function normalizeShowTestLinks(value: unknown): boolean {
   return value !== false;
 }
@@ -276,13 +280,13 @@ export function normalizeOpenTestsInIdea(value: unknown): boolean {
 }
 
 /** Effective code gen setting: ON unless explicitly turned off
-    (specs/agents/claude.spec.md). */
+    (specs/agents/claude.feature.md). */
 export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
 }
 
 /** The agents a code gen session can run in (specs/agents/claude.feature.md,
-    specs/agents/coding-agent-ui.feature.md,
+    specs/agents/agent-pane.feature.md,
     specs/agents/integration-with-pi-dev-agent.feature.md; "codex" is the
     same pane driven by Codex, src/server/codexChat.ts). */
 export type CodeGenTarget = "desktop" | "pane" | "pi" | "codex";
@@ -359,7 +363,7 @@ export function normalizeProjectManagementTool(value: unknown): string {
 
 /**
  * The project settings file wins; the home one is the fallback, so one
- * settings file can serve every checkout (specs/app-start.spec.md). A
+ * settings file can serve every checkout (specs/ui/app-start.feature.md). A
  * leftover .specdriven file from the old layout still reads, and is migrated
  * on the next write.
  */

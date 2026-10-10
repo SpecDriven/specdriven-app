@@ -1,4 +1,4 @@
-// Git operation surface (specs/git-operations.spec.md): every git operation
+// Git operation surface (git-operations.md): every git operation
 // the app performs, as one interface with three implementations. Two drive
 // the system `git` binary and differ only in where GitHub credentials come
 // from and how a GitHub repo is cloned — the app's own sign-in (cli.ts) or

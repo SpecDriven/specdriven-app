@@ -1,8 +1,9 @@
-// specs/images.spec.md: an image in an editable Preview carries a handle that
-// sizes it — a slider to the keyboard — and writes the width into the source
-// through the editor's onChange. Read-only bodies and the previews outside an
-// editor (scenario cards, agent output) show the image plain. The dragging
-// itself needs a layout engine; what a key asks for is pure and tested here.
+// specs/images.feature.md: an image in an editable Preview carries a handle
+// that sizes it — a slider to the keyboard — and writes the width into the
+// source through the editor's onChange. Read-only bodies and the previews
+// outside an editor (scenario cards, agent output) show the image plain. The
+// dragging itself needs a layout engine; what a key asks for is pure and tested
+// here.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";

@@ -1,4 +1,4 @@
-// Full-text search over the data repo (specs/search.spec.md): an in-memory
+// Full-text search over the data repo (specs/search.feature.md): an in-memory
 // MiniSearch index over feature names/descriptions and scenario names/bodies,
 // and one more over each special folder's pages — the roadmap's (specs/app
 // /roadmap.feature.md) and the tasks folder's (specs/app/tasks.feature.md) —
@@ -134,7 +134,7 @@ async function buildSpecsIndex(dataDir: string, files: string[]): Promise<MiniSe
       featureName,
     });
     // Every version is its own document: versions are distinct immutable
-    // scenarios (specs/crud-feature.spec.md) and rank independently.
+    // scenarios (crud-feature.md) and rank independently.
     for (const s of feature.scenarios) {
       docs.push({
         id: `S:${fileName}#${s.name}@v${s.version}`,

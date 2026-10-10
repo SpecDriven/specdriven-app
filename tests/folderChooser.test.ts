@@ -1,4 +1,4 @@
-// Automates specs/app-start.spec.md "picking the data directory with the
+// Automates specs/ui/app-start.feature.md "picking the data directory with the
 // native folder chooser": the chooser is pluggable (osascript on a macOS
 // web server, PowerShell on a Windows one, zenity or kdialog on a Linux
 // one, Electron's dialog in the desktop app), one dialog is open at a

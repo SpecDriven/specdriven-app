@@ -1,4 +1,4 @@
-// GitHub token storage for the desktop app (specs/desktop-app.spec.md):
+// GitHub token storage for the desktop app (specs/app/desktop-app.feature.md):
 // Electron safeStorage encrypts with the OS keychain, so the token never
 // sits on disk in plain text. When the OS offers no key store (some Linux
 // setups), the caller falls back to the server's 0600-file backend.

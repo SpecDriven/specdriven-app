@@ -1,8 +1,8 @@
-// "Copy link" urls (specs/navigation.spec.md "share a link"), one rule for
-// every pane: in a browser the page's own url; in the desktop window, whose
+// "Copy link" urls (specs/ui/navigation.feature.md "share a link"), one rule
+// for every pane: in a browser the page's own url; in the desktop window, whose
 // app://specdriven origin means nothing outside it, the registered
-// specdriven:// scheme — which names the open spec folder, so the link opens
-// in that folder on whichever machine follows it.
+// specdriven:// scheme — which names the open spec folder, so the link opens in
+// that folder on whichever machine follows it.
 
 import { desktopLink } from "./route";
 

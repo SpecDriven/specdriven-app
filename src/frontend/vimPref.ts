@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from "react";
 
-// Vim mode (specs/ui.spec.md "Settings"): a switch in Settings adds a Vim tab
-// to every Markdown editor. Like the theme, the choice lives on this device
-// (localStorage), not in the settings file — it is a habit of the person at
-// the keyboard, not a property of the project.
+// Vim mode (specs/ui/ui.feature.md "Settings"): a switch in Settings adds a Vim
+// tab to every Markdown editor. Like the theme, the choice lives on this device
+// (localStorage), not in the settings file — it is a habit of the person at the
+// keyboard, not a property of the project.
 
 const KEY = "sd-vim";
 /** Fired on window when the preference changes, so open editors follow. */

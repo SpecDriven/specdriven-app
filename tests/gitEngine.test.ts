@@ -1,4 +1,4 @@
-// Git engine selection (specs/git-operations.spec.md): the GitHub CLI is the
+// Git engine selection (git-operations.md): the GitHub CLI is the
 // default wherever gh is installed, Settings can force either engine, and an
 // engine whose binary is missing is a clear error rather than a hang. The gh
 // engine itself is exercised against a stub gh on PATH (helpers/binPath.ts),
@@ -125,7 +125,7 @@ test("a clone gh cannot do surfaces as a clone failure", async () => {
   );
 });
 
-// specs/git-operations.spec.md: the gh account authors the data-repo commits.
+// git-operations.md: the gh account authors the data-repo commits.
 test("commits on the gh engine are authored by the gh account", async () => {
   const repo = join(root, "local");
   await $`git init -b main ${repo}`.quiet();
@@ -214,7 +214,7 @@ test("the bundled engine clones, commits and pushes with no git on PATH", async 
   stopServers();
 });
 
-// specs/git-operations.spec.md: the signed-in account authors the commits on
+// git-operations.md: the signed-in account authors the commits on
 // the bundled engine too. Signed out, the repository's own git config does.
 test("with no sign-in the bundled engine leaves the repo's git identity alone", async () => {
   const repo = join(root, "local");

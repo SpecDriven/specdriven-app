@@ -1,7 +1,7 @@
-// In-app prompt/confirm dialogs (specs/ui.spec.md "Dialogs"): promise-based
-// stand-ins for window.prompt / window.confirm. The desktop runtime has no
-// native prompt() at all (specs/desktop-app.spec.md "Dialogs"), and the
-// native boxes never matched the design system anyway.
+// In-app prompt/confirm dialogs (specs/ui/ui.feature.md "Dialogs"):
+// promise-based stand-ins for window.prompt / window.confirm. The desktop
+// runtime has no native prompt() at all (specs/app/desktop-app.feature.md
+// "Dialogs"), and the native boxes never matched the design system anyway.
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -15,9 +15,10 @@ export interface PromptOptions {
   placeholder?: string;
   confirmLabel?: string;
   /**
-   * Native picker (specs/app-start.spec.md "picking the data directory with
-   * the native folder chooser"): shown as a Browse… button beside the input;
-   * a non-null result replaces the draft, null (canceled) leaves it alone.
+   * Native picker (specs/ui/app-start.feature.md "picking the data directory
+   * with the native folder chooser"): shown as a Browse… button beside the
+   * input; a non-null result replaces the draft, null (canceled) leaves it
+   * alone.
    */
   browse?: () => Promise<string | null>;
   browseLabel?: string;
@@ -240,7 +241,7 @@ function ModalDialog({
       onClick={cancel}
       onKeyDown={(e) => {
         // ESC closes only this dialog — never the one it may be stacked on
-        // (specs/ui.spec.md "Dialogs").
+        // (specs/ui/ui.feature.md "Dialogs").
         if (e.key === "Escape") {
           e.stopPropagation();
           e.preventDefault();

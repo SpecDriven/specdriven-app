@@ -1,4 +1,4 @@
-// Automates specs/desktop-app.spec.md "Packaging": which platforms
+// Automates specs/app/desktop-app.feature.md "Packaging": which platforms
 // `bun run build:desktop` packages, and what it refuses to attempt.
 import { test, expect } from "bun:test";
 import { electronBuilderArgs, selectPlatforms } from "../scripts/build-desktop";

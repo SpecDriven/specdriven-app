@@ -33,7 +33,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-// specs/app-start.spec.md: data repo format is a regular gitHub url,
+// specs/ui/app-start.feature.md: data repo format is a regular gitHub url,
 // e.g. https://github.com/SpecDriven/data-insurance.
 test("parses a regular GitHub url", () => {
   expect(parseGitHubUrl("https://github.com/SpecDriven/data-insurance")).toEqual({
@@ -127,7 +127,7 @@ test("ensureClone surfaces clone failures (no access / no such repo)", async () 
   );
 });
 
-// specs/git-operations.spec.md: a data repo url is cloned over smart-HTTP by
+// git-operations.md: a data repo url is cloned over smart-HTTP by
 // the system-git engine, and the clone is where the configured repo resolves.
 test("resolveDataRepo clones a repo url on the system-git engine", async () => {
   await localOrigin("test/origin.git");
@@ -146,7 +146,7 @@ test("resolveDataRepo clones a repo url on the system-git engine", async () => {
   }
 });
 
-// specs/git-operations.spec.md: on the GitHub CLI engine the clone that backs
+// git-operations.md: on the GitHub CLI engine the clone that backs
 // a configured data repo is `gh repo clone`, so it carries gh's credentials.
 test("resolveDataRepo clones through gh on the GitHub CLI engine", async () => {
   const origin = await localOrigin();

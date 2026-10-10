@@ -1,4 +1,4 @@
-// Window geometry for the desktop shell (specs/desktop-app.spec.md
+// Window geometry for the desktop shell (specs/app/desktop-app.feature.md
 // "Window"): the size and position survive a restart, clamped to the
 // minimums the layout needs and to the displays actually present. Pure
 // geometry and parsing, kept out of main.ts so it runs under bun test.

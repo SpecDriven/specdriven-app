@@ -6,7 +6,7 @@ import {
   serializeTable,
 } from "../src/frontend/mdtable";
 
-// specs/scenario-table.spec.md: the widget is a structured view over the
+// specs/scenario-table.feature.md: the widget is a structured view over the
 // markdown table stored in the scenario body.
 
 describe("findTable", () => {

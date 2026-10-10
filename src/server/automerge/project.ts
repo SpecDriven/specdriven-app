@@ -5,8 +5,8 @@
 // `.feature.md`, and git never sees two peers disagree about a merged result.
 //
 // Draft scenarios are the exception: they live in the document only
-// (specs/automerge-store.spec.md), so the projection writes just the
-// published and proposed ones.
+// (specs/datastore/automerge-store.feature.md), so the projection writes just
+// the published and proposed ones.
 //
 // External links (specs/external-links/project-management-jira-linear-etc.
 // feature.md) are the other: they are in the document always, and in the

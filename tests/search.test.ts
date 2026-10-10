@@ -1,4 +1,4 @@
-// Automates specs/search.spec.md: indexed full-text search over the data
+// Automates specs/search.feature.md: indexed full-text search over the data
 // repo's feature files — ranking, prefix/fuzzy matching, snippets, and the
 // stat-fingerprint invalidation that follows external file changes — and the
 // page scopes a special folder's own sidebar tab searches (specs/app/roadmap

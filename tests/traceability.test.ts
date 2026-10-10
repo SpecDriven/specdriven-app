@@ -24,7 +24,7 @@ import {
   updateTestLink,
 } from "../src/frontend/testlinks";
 
-// specs/traceability.spec.md and specs/external-links/test-traceability
+// specs/traceability.feature.md and specs/external-links/test-traceability
 // .feature.md: links to automated tests are stored per scenario as GitHub
 // urls — `[test: <url> ]` or `[test: <name> : <url> ]` lines — displayed at
 // the end of each scenario, and toggled by a user setting that defaults to ON.
@@ -268,7 +268,7 @@ test("an ✎ row opens with the entry's url and name", () => {
 
 // Save folds in what is still sitting in the tests widgets — a url left in
 // the add field or an open ✎ row is never silently dropped, and one that
-// can't join the list blocks the save (specs/traceability.spec.md "the add
+// can't join the list blocks the save (specs/traceability.feature.md "the add
 // field still holds a url when Save is pressed").
 
 test("a url left in the add field rides along with the save, name included", () => {
@@ -343,7 +343,8 @@ test("the label is the test's name, else its file name without repo path or line
   expect(testLinkUrl(URL_A)).toBe(URL_A);
 });
 
-// The display setting is optional with default ON (specs/traceability.spec.md).
+// The display setting is optional with default ON
+// (specs/traceability.feature.md).
 test("showTestLinks defaults to ON and only an explicit false turns it off", () => {
   expect(normalizeShowTestLinks(undefined)).toBe(true);
   expect(normalizeShowTestLinks(true)).toBe(true);

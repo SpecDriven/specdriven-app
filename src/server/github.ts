@@ -1,4 +1,4 @@
-// GitHub endpoints and app identity (specs/git-operations.spec.md). The
+// GitHub endpoints and app identity (git-operations.md). The
 // device-flow client id identifies the SpecDriven GitHub App; it is public
 // by design (device flow needs no secret). The base-url overrides exist so
 // tests can point sign-in and git transport at local stub servers.

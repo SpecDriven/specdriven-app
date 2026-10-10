@@ -1,4 +1,4 @@
-// The data repo's README.md (specs/app-startup.feature.md "App Starts with
+// The data repo's README.md (app-startup.md "App Starts with
 // existing specs folder selected"): the file the app opens on at start, in an
 // editor that saves it at the scenario editor's autosave interval. Saves land
 // in the working tree only; the reload cron's sync commits and pushes them
