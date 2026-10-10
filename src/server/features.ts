@@ -304,9 +304,15 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
  * whose heading is the name.
  *
  * The name is relative to the spec tree: a leading `specs/` is accepted (the
- * client lists folders with it) but never doubled.
+ * client lists folders with it) but never doubled. `message` words the commit
+ * (a spec proposal names its proposer there, src/server/proposals/service.ts).
  */
-export async function createFeature(dataDir: string, name: string, text?: string): Promise<string> {
+export async function createFeature(
+  dataDir: string,
+  name: string,
+  text?: string,
+  message?: (featureName: string) => string,
+): Promise<string> {
   const segments = name.split("/").map(cleanLine);
   const featureName = segments.pop() ?? "";
   if (!featureName) throw new Error("Feature name is required");
@@ -320,7 +326,11 @@ export async function createFeature(dataDir: string, name: string, text?: string
   }
   await mkdir(`${dataDir}/${folder}`, { recursive: true });
   await writeFeatureFile(dataDir, safe(fileName), text ?? `# ${featureName}\n`);
-  await commitAndPush(dataDir, await featurePaths(dataDir, fileName), `Create feature: ${featureName}`);
+  await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, fileName),
+    message ? message(featureName) : `Create feature: ${featureName}`,
+  );
   return fileName;
 }
 

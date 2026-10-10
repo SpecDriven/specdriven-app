@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Propose a spec — SpecDriven</title>
+    <script>
+      // The app's theme choice, if this browser made one there.
+      try {
+        var t = localStorage.getItem("sd-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="./frontend/index.css" />
+    <link rel="stylesheet" href="./frontend/proposals/proposals.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./frontend/proposals/main.tsx"></script>
+  </body>
+</html>
