@@ -101,19 +101,18 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
   a.name === b.name && a.version === b.version;
 
 /**
- * The published-immutability invariant (specs/ui.spec.md), stated on the doc:
- * every published scenario must survive reconciliation under its (name,
- * version) identity, still published, with its body intact — the body as it
- * was published (`effectiveBody`), not the live collaborative text, which a
- * CRDT merge of two peers' identical absorbs can leave doubled (H2 in
+ * The published-immutability invariant (specs/ui/ui.feature.md), stated on the
+ * doc: every published scenario must survive reconciliation under its (name,
+ * version) identity, still published, with its body intact — the body as it was
+ * published (`effectiveBody`), not the live collaborative text, which a CRDT
+ * merge of two peers' identical absorbs can leave doubled (H2 in
  * verification/lean/REPORT.md); that artifact is the doc's to heal
- * (`healPublished`), never the file's fault. A status marker
- * edited down to [proposed] or [draft] is refused too: the demoted scenario
- * would otherwise be free to change (or, as a doc-only draft, drop out of the
- * markdown) and be published again under the same version. Same rule and
- * message as assertPublishedUnchanged in features.ts, checked here so a
- * drifted markdown file can never rewrite published history through the
- * reconciliation door.
+ * (`healPublished`), never the file's fault. A status marker edited down to
+ * [proposed] or [draft] is refused too: the demoted scenario would otherwise be
+ * free to change (or, as a doc-only draft, drop out of the markdown) and be
+ * published again under the same version. Same rule and message as
+ * assertPublishedUnchanged in features.ts, checked here so a drifted markdown
+ * file can never rewrite published history through the reconciliation door.
  */
 export function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
   for (const entry of doc.specs) {
@@ -142,15 +141,15 @@ export function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): vo
  * entry carrying `scenario.id` — the document id the editor read it under
  * (Scenario.id) — is the target scenario with that name and version, whatever
  * its name, version or body were when it was last saved
- * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
- * Twice"). The passes below can only see a rename by an unchanged body, which
- * a title retyped while the body is still being written never has — and a
- * draft left unclaimed that way would linger under its old name while its new
- * self was filed as a second scenario. The claim is skipped when it no longer
- * fits: the id is gone from the doc, the target has no scenario of that name
- * and version, another entry already carries that identity (the identity
+ * (specs/editor/editor-autosave.feature.md "Autosave Never Adds the Same
+ * Scenario Twice"). The passes below can only see a rename by an unchanged
+ * body, which a title retyped while the body is still being written never has —
+ * and a draft left unclaimed that way would linger under its old name while its
+ * new self was filed as a second scenario. The claim is skipped when it no
+ * longer fits: the id is gone from the doc, the target has no scenario of that
+ * name and version, another entry already carries that identity (the identity
  * pass's to claim), or the entry is published — whose identity no editor may
- * move (specs/ui.spec.md: published scenarios are immutable).
+ * move (specs/ui/ui.feature.md: published scenarios are immutable).
  *
  * `force` skips the published-immutability gate — only for an explicit human
  * decision (the conflict-resolution dialog), never for an automated write.

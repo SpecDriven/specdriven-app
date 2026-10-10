@@ -34,7 +34,7 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-// specs/folders.spec.md: feature files anywhere in the tree are listed
+// specs/ui/folders.feature.md: feature files anywhere in the tree are listed
 // with folder-relative paths; hidden directories are not part of the tree.
 test("listFeatures recurses into folders; listFolders sees empty ones", async () => {
   await mkdir(join(root, "specs/billing/sub"), { recursive: true });
@@ -74,7 +74,7 @@ test("createFolder slugifies segments and refuses duplicates", async () => {
   expect(await createFolder(root, "specs/Reports")).toBe("specs/reports");
 });
 
-// specs/folders.spec.md: a `/` in the New feature name creates the
+// specs/ui/folders.feature.md: a `/` in the New feature name creates the
 // feature inside a folder, creating folders as needed.
 test("createFeature places a feature inside a folder via a / path", async () => {
   const fileName = await createFeature(root, "billing/Basic Quote");
@@ -113,7 +113,7 @@ test("moveFeature works in a plain directory (no git repo)", async () => {
   expect(await readFeature(root, "specs/one.feature.md")).toBeNull();
 });
 
-// specs/folders.spec.md: only an empty folder can be deleted — features
+// specs/ui/folders.feature.md: only an empty folder can be deleted — features
 // must be moved out first. Nested empty folders (and macOS .DS_Store junk)
 // don't block deletion.
 test("deleteFolder deletes empty folders only", async () => {
@@ -132,7 +132,7 @@ test("deleteFolder deletes empty folders only", async () => {
   expect(await readFeature(root, "specs/full/one.feature.md")).toBe("# One\n");
 });
 
-// specs/folders.spec.md: the Edit link edits the feature name only — the
+// specs/ui/folders.feature.md: the Edit link edits the feature name only — the
 // file keeps its name and folder.
 test("renameFeature edits the name in place, keeping file and folder", async () => {
   await mkdir(join(root, "billing"));
@@ -170,7 +170,7 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
 });
 
-// The move flow runs on all three git engines (specs/git-operations.spec.md).
+// The move flow runs on all three git engines (git-operations.md).
 for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
     beforeEach(() => {
@@ -178,7 +178,7 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       setGitEngine(engine);
     });
 
-    // specs/folders.spec.md: drag-move is a `git mv` into the target
+    // specs/ui/folders.feature.md: drag-move is a `git mv` into the target
     // directory, committed and pushed — the other clone sees it on pull.
     test("moveFeature moves between folders via git mv, commits and pushes", async () => {
       const { a, b } = await twoClones(root, {

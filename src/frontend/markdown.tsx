@@ -3,9 +3,9 @@ import { MarkdownImage } from "./MarkdownImage";
 import { TEST_REF_RE, renderTestInEditor } from "./testref";
 import { WEB_URL_RE, webLinkEnd } from "./weblinks";
 
-// Markdown support for the scenario edit dialog (specs/ui.spec.md "Scenario
-// edit dialog"). The preview is built from React elements — never innerHTML —
-// so untrusted feature-file content cannot inject markup.
+// Markdown support for the scenario edit dialog (specs/ui/ui.feature.md
+// "Scenario edit dialog"). The preview is built from React elements — never
+// innerHTML — so untrusted feature-file content cannot inject markup.
 //
 // Beyond standard markdown the preview knows one house token: `[test:<url>]`
 // or `[test:<name>:<url>]` (specs/external-links/test-traceability.feature.md),
@@ -16,7 +16,7 @@ import { WEB_URL_RE, webLinkEnd } from "./weblinks";
 // "web links are clickable"), ending where ./weblinks says it ends, so the
 // preview and the source tabs agree on which characters are the link.
 //
-// Images (specs/images.spec.md) have two spellings: `![alt](url)`, what a
+// Images (specs/images.feature.md) have two spellings: `![alt](url)`, what a
 // paste inserts, and `<img src="…" alt="…" width="…">` — the one HTML tag the
 // preview renders, because it is how markdown everywhere sizes an image, and
 // it is what the Preview tab's resize handle writes (setImageWidth). Only
@@ -412,7 +412,7 @@ function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
   return out.length > 0 ? out : null;
 }
 
-// ---- Image sizing (specs/images.spec.md) ----
+// ---- Image sizing (specs/images.feature.md) ----
 
 /**
  * The images in `src` in the order the preview shows them, each with where
@@ -559,7 +559,7 @@ export function toggleHeading(text: string, start: number, end: number, level = 
 }
 
 /**
- * Insert an image reference at the caret (specs/images.spec.md). A non-empty
+ * Insert an image reference at the caret (specs/images.feature.md). A non-empty
  * selection becomes the alt text; the caret lands after the inserted markdown
  * so consecutive pastes line up one after another.
  */

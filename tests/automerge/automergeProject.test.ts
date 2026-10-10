@@ -236,9 +236,9 @@ test("added and removed scenarios reconcile", () => {
   expect(next.specs.some((s) => s.name === "Renewal Quote")).toBe(true);
 });
 
-// Draft scenarios are doc-only (specs/automerge-store.spec.md): they enter
-// the document like any other scenario but the projection leaves them out of
-// the `.feature.md`.
+// Draft scenarios are doc-only (specs/datastore/automerge-store.feature.md):
+// they enter the document like any other scenario but the projection leaves
+// them out of the `.feature.md`.
 test("a draft scenario lands in the doc but stays out of the projection", () => {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
   const target = parseFeature(SAMPLE + "\n## Idea @v1\n\nsketch\n");
@@ -276,10 +276,10 @@ test("a draft promotes to proposed when the markdown claims it", () => {
 });
 
 // The editor names the scenario it is saving by the document's id for it
-// (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
-// Twice"): title and body both retyped since the tick that placed the draft,
-// so the body pass cannot see a rename — the id claim renames the entry in
-// place, and nothing lingers under the old name.
+// (specs/editor/editor-autosave.feature.md "Autosave Never Adds the Same
+// Scenario Twice"): title and body both retyped since the tick that placed the
+// draft, so the body pass cannot see a rename — the id claim renames the entry
+// in place, and nothing lingers under the old name.
 test("a scenario claimed by its document id is renamed in place even with a new body", () => {
   const withDraft = parseFeature(SAMPLE + "\n## Idea @v1\n\nsketch\n");
   const doc = reconcile(importFeatureDoc(parseFeature(SAMPLE)), withDraft);

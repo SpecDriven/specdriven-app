@@ -191,9 +191,9 @@ describe("paths", () => {
   });
 });
 
-// specs/navigation.feature.md "a scenario page carries its own url": the url
-// names the page that is open — a scenario's own while its page is open, the
-// feature's otherwise. A highlighted card is not a page.
+// specs/ui/navigation.feature.md "URL scheme": the url names the page that is
+// open — a scenario's own while its page is open, the feature's otherwise. A
+// highlighted card is not a page.
 describe("pagePath", () => {
   test("no feature open is home", () => {
     expect(pagePath(null, null)).toBe("/");
@@ -248,7 +248,7 @@ describe("resolveScenario", () => {
   });
 });
 
-// Sidebar header (specs/app-start.spec.md): only the data repo's own name
+// Sidebar header (specs/ui/app-start.feature.md): only the data repo's own name
 // shows; parent folders live in the tooltip.
 describe("repoDisplayName", () => {
   test("absolute path shows the last folder", () => {

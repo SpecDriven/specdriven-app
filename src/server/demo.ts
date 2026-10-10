@@ -5,7 +5,7 @@
 // nothing ever talks to GitHub. Each page load reseeds a fresh copy, so a
 // browser refresh returns the demo to the default dataset.
 //
-// Code gen sessions run too, simulated (specs/roadmap/demo.md "Demo App"):
+// Code gen sessions run too, simulated (roadmap/demo.md "Demo App"):
 // setupDemo fills the pane's injection seams so the app reports one agent —
 // Claude in a pane — and drives it with the script in src/server/demoAgent.ts
 // instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so

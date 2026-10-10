@@ -1,4 +1,4 @@
-// Automates specs/agents/coding-agent-ui.feature.md on the client: the
+// Automates specs/agents/agent-pane.feature.md on the client: the
 // transcript is a reduction of the server's events, the "/" popup filters
 // the session's commands, the pane's width stays within bounds, and the
 // rows render what a reader needs. Pure helpers and static markup — no DOM.

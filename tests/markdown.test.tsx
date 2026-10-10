@@ -92,7 +92,7 @@ describe("renderMarkdown", () => {
     expect(out).toContain("<td>2</td>");
   });
 
-  // specs/images.spec.md: `![alt](url)` is what a paste inserts; the sized
+  // specs/images.feature.md: `![alt](url)` is what a paste inserts; the sized
   // form the Preview tab's handle writes is the one HTML tag rendered.
   describe("images", () => {
     test("markdown image", () => {
@@ -138,7 +138,7 @@ describe("renderMarkdown", () => {
   });
 });
 
-// specs/images.spec.md: the preview finds every image and where it sits in
+// specs/images.feature.md: the preview finds every image and where it sits in
 // the source, in the order it shows them — through quotes, tables and
 // formatting, but not inside code, which the preview does not render.
 describe("imageRefs", () => {
@@ -185,7 +185,7 @@ describe("imageRefs", () => {
   });
 });
 
-// specs/images.spec.md: the Preview tab's handle writes the width into the
+// specs/images.feature.md: the Preview tab's handle writes the width into the
 // source as an <img> tag; the natural size puts the markdown form back.
 describe("setImageWidth", () => {
   test("turns the markdown form into a sized tag", () => {
@@ -319,7 +319,7 @@ describe("insertLink", () => {
   });
 });
 
-// specs/images.spec.md: uploads insert `![alt](url)` at the caret.
+// specs/images.feature.md: uploads insert `![alt](url)` at the caret.
 describe("insertImage", () => {
   test("inserts at the caret and leaves the caret after it", () => {
     const r = insertImage("before after", 7, 7, "shot", "/api/images/shot-1a2b3c4d.png");

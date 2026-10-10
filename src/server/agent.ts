@@ -1,4 +1,4 @@
-// Coding agent integration (specs/agents/claude.spec.md): a named code gen
+// Coding agent integration (specs/agents/claude.feature.md): a named code gen
 // session takes the selected specs and builds one prompt from them. The
 // targets: the app's own coding agent pane, driven by Claude, by Pi
 // (specs/agents/integration-with-pi-dev-agent.feature.md) or by Codex
@@ -159,7 +159,7 @@ export function codexAvailable(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Claude Code Desktop (specs/roadmap/start-session-in-claude-code-desktop.md)
+// Claude Code Desktop (roadmap/start-session-in-claude-code-desktop.md)
 //
 // Claude.app registers `claude://`; its router's `code` host has a `/new`
 // route taking `q` (the prompt, sliced to CLAUDE_DESKTOP_PROMPT_MAX chars)
@@ -174,7 +174,7 @@ export const CLAUDE_DESKTOP_PROMPT_MAX = 14336;
 /** The agent recorded in a desktop session's session.json. */
 export const DESKTOP_AGENT = "claude-code-desktop";
 /** The agent recorded for a session run in the app's own coding agent pane
-    (specs/agents/coding-agent-ui.feature.md, src/server/agentChat.ts). */
+    (specs/agents/agent-pane.feature.md, src/server/agentChat.ts). */
 export const PANE_AGENT = "pane";
 /** The same pane, driven by Pi over its RPC mode (src/server/piChat.ts). */
 export const PI_PANE_AGENT = "pi-pane";

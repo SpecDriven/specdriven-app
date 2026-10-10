@@ -1,4 +1,4 @@
-// Markdown tables inside scenario bodies (specs/scenario-table.spec.md).
+// Markdown tables inside scenario bodies (specs/scenario-table.feature.md).
 // The scenario table widget is a structured view over the body text: these
 // helpers find the table, turn it into {columns, rows}, and write it back.
 // The grammar mirrors renderMarkdown's table branch (src/frontend/markdown.tsx)
@@ -99,7 +99,7 @@ export function serializeTable(table: MdTable): string {
 /**
  * Rewrite the body with `table` in place of its current table block; append
  * (separated by a blank line) when the body has none, and remove the block
- * entirely when `table` is null (specs/scenario-table.spec.md: removing the
+ * entirely when `table` is null (specs/scenario-table.feature.md: removing the
  * last column removes the table).
  */
 export function replaceTable(body: string, table: MdTable | null): string {

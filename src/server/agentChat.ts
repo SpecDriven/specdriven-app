@@ -1,4 +1,4 @@
-// Coding agent pane (specs/agents/coding-agent-ui.feature.md): the app drives
+// Coding agent pane (specs/agents/agent-pane.feature.md): the app drives
 // a live coding agent session itself, for developers who have a CLI but not
 // Claude Code Desktop. Two agents share this machinery:
 //

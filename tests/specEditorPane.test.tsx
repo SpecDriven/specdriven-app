@@ -53,9 +53,9 @@ describe("the way back lands on the scenario's card", () => {
   });
 });
 
-// specs/navigation.feature.md "a scenario page carries its own url": the pane
-// is a page, so the url and the window title name the scenario it holds — read
-// through its position in the feature, so a rename follows it.
+// specs/editor/spec-editor.feature.md "Spec editor pane": the pane is a page,
+// so the url and the window title name the scenario it holds — read through
+// its position in the feature, so a rename follows it.
 describe("the scenario the open page names", () => {
   test("a closed pane names nothing — a highlighted card is not a page", () => {
     expect(pageScenario(null, feature.scenarios)).toBeNull();

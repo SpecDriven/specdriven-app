@@ -1,6 +1,7 @@
 // Subprocess + PATH helpers on Node APIs only. The server modules run under
 // both Bun (web server, bun test) and Electron's Node runtime
-// (specs/desktop-app.spec.md), so nothing here may touch Bun.$ or Bun.which.
+// (specs/app/desktop-app.feature.md), so nothing here may touch Bun.$ or
+// Bun.which.
 
 import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";

@@ -1,5 +1,5 @@
-// Automates specs/desktop-app.spec.md "Data locations": the web server is
-// anchored at the working directory with clones in a sibling directory; the
+// Automates specs/app/desktop-app.feature.md "Data locations": the web server
+// is anchored at the working directory with clones in a sibling directory; the
 // desktop app re-bases both via SPECDRIVEN_ROOT / SPECDRIVEN_REPOS_DIR.
 
 import { afterEach, describe, expect, test } from "bun:test";

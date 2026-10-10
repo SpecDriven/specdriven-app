@@ -1,6 +1,6 @@
-// Automates specs/app-start.spec.md "the data repo is pulled on start": the
-// app opens on the latest data, and so does a data folder just picked in the
-// UI — in both cases without the user pressing Sync.
+// Automates specs/ui/app-start.feature.md "the data repo is pulled on start":
+// the app opens on the latest data, and so does a data folder just picked in
+// the UI — in both cases without the user pressing Sync.
 //
 // What is under test is the order — pull, then read — not git, so the data
 // repo is a folder git is faked for (helpers/fakeGit.ts): its pull delivers

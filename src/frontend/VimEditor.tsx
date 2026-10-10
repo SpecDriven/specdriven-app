@@ -22,9 +22,9 @@ import type { FieldChoice } from "./entityFields";
 import { termsPattern } from "./highlight";
 import { isOpenLinkClick, webLinkAt, webLinks } from "./weblinks";
 
-// Vim mode (specs/ui.spec.md "Settings"): the Markdown editor's Vim tab is a
-// CodeMirror 6 editor running the Replit vim extension — modal editing with
-// Vim's keys, a status line showing the mode and taking `:` commands. It
+// Vim mode (specs/ui/ui.feature.md "Settings"): the Markdown editor's Vim tab
+// is a CodeMirror 6 editor running the Replit vim extension — modal editing
+// with Vim's keys, a status line showing the mode and taking `:` commands. It
 // stands in for the Write tab's textarea: same value, same onChange, same
 // toolbar, and the same shortcuts for bold, italic and links.
 
@@ -44,7 +44,7 @@ interface VimEditorProps {
   placeholder?: string;
   /** Search terms to mark in the text (specs/search.feature.md). */
   highlight?: string[] | null;
-  /** Image files pasted into the editor (specs/images.spec.md). */
+  /** Image files pasted into the editor (specs/images.feature.md). */
   onPasteFiles?: (files: File[]) => void;
   /** The formatting shortcuts (⌘B, ⌘I, ⌘K): the same handler the textarea uses. */
   onShortcut?: (e: ReactKeyboardEvent<HTMLElement> | KeyboardEvent) => void;

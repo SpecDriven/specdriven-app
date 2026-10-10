@@ -1,4 +1,4 @@
-// Images embedded in scenario bodies (specs/images.spec.md). Stored as
+// Images embedded in scenario bodies (specs/images.feature.md). Stored as
 // plain files under `.images/` in the data repo — the dot keeps the folder
 // out of the sidebar tree (features.ts walk skips hidden entries) while git
 // tracks and syncs it like any other content. Names are content-addressed

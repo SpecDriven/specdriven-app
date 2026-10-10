@@ -1,10 +1,10 @@
 // A save that meets an autosave tick still on its way — the pane's parting
 // save on close or on a folder switch, Propose, or the dialog's Publish —
-// goes out after that tick (specs/editor-autosave.feature.md "Autosave Never
-// Adds the Same Scenario Twice"). It must be placed where the tick landed
+// goes out after that tick (specs/editor/editor-autosave.feature.md "Autosave
+// Never Adds the Same Scenario Twice"). It must be placed where the tick landed
 // the scenario, not where the render that queued it thought it was: that
-// render's index and (for a new scenario) its missing document id predate
-// the tick's answer. Publish used to skip this and PUT from the render.
+// render's index and (for a new scenario) its missing document id predate the
+// tick's answer. Publish used to skip this and PUT from the render.
 import { describe, expect, test } from "bun:test";
 import { placeScenario, type Placement } from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";

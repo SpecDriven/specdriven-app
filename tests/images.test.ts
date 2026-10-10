@@ -1,4 +1,4 @@
-// Automates specs/images.spec.md: images pasted or uploaded into a scenario
+// Automates specs/images.feature.md: images pasted or uploaded into a scenario
 // land as content-addressed files under `.images/` in the data repo and are
 // served back only under the names storeImage itself generates.
 

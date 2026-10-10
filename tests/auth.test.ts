@@ -1,4 +1,4 @@
-// GitHub sign-in (specs/git-operations.spec.md) — the device flow and the
+// GitHub sign-in (git-operations.md) — the device flow and the
 // browser (web application) flow — against a stub GitHub served on loopback:
 // the state machines, token persistence and the noreply-email fallback — no
 // network, no real GitHub.

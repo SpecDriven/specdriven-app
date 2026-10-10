@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
  * Runs the desktop shell against the live Bun dev server
- * (specs/desktop-app.spec.md):
+ * (specs/app/desktop-app.feature.md):
  *
  *   bun run dev            in one terminal (frontend + API, HMR)
  *   bun run dev:electron   in another

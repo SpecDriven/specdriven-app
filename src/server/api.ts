@@ -1,4 +1,4 @@
-// Runtime-agnostic HTTP API (specs/desktop-app.spec.md): one route table
+// Runtime-agnostic HTTP API (specs/app/desktop-app.feature.md): one route table
 // serves both Bun.serve in web mode and the app:// protocol handler in the
 // desktop app, so handlers speak only the standard Request/Response types.
 
@@ -175,13 +175,13 @@ async function syncTick(run: () => Promise<string>): Promise<void> {
   }
 }
 
-// Cron data reload (specs/crud-feature.spec.md): git pull every n seconds,
+// Cron data reload (crud-feature.md): git pull every n seconds,
 // where n comes from the Settings dialog and is stored in the settings file.
 export const reloader = createReloadScheduler(() => syncTick(() => reloadData(getAppRoot())));
 
-// App start (specs/app-start.spec.md "the data repo is pulled on start"): one
-// sync tick before the app is read, so it opens on the latest data instead of
-// on whatever the last run left behind. Startup itself does not wait on the
+// App start (specs/ui/app-start.feature.md "the data repo is pulled on start"):
+// one sync tick before the app is read, so it opens on the latest data instead
+// of on whatever the last run left behind. Startup itself does not wait on the
 // network — reads of the data repo wait on this handle instead.
 let startupSync: Promise<void> = Promise.resolve();
 
@@ -204,9 +204,10 @@ export function syncedOnStart(): Promise<void> {
   return Promise.race([startupSync, after(STARTUP_SYNC_WAIT_MS)]);
 }
 
-// Optional websocket document sync (specs/automerge-store.spec.md): a bridge
-// between the data repo's chunk store and the sync server named in Settings,
-// running only while one is named. Off by default — git is the transport.
+// Optional websocket document sync
+// (specs/datastore/automerge-store.feature.md): a bridge between the data
+// repo's chunk store and the sync server named in Settings, running only while
+// one is named. Off by default — git is the transport.
 let netSync: NetSync | null = null;
 /** What the running bridge was started with, to skip no-op re-applies. */
 let netSyncKey: string | null = null;
@@ -255,7 +256,7 @@ export async function applyStartupState(): Promise<void> {
   // Log verbosity saved from the Observability page, before anything below logs.
   setLogVerbosity(savedVerbosity(state));
   reloader.set(normalizeReloadSeconds(state.reloadFrequencySeconds));
-  // Git engine (specs/git-operations.spec.md): the GitHub CLI when this
+  // Git engine (git-operations.md): the GitHub CLI when this
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
@@ -274,8 +275,9 @@ export async function applyStartupState(): Promise<void> {
   setProjectionOptions({
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
   });
-  // specs/app-start.spec.md: pull the data repo on start. Not awaited here —
-  // reads wait for it through syncedOnStart(); everything else starts now.
+  // specs/ui/app-start.feature.md: pull the data repo on start. Not awaited
+  // here — reads wait for it through syncedOnStart(); everything else starts
+  // now.
   startupSync = syncTick(() => reloadData(getAppRoot()));
   // Not awaited: resolving the data repo may clone it, and startup must not
   // wait on the network for an optional accelerator.
@@ -284,7 +286,7 @@ export async function applyStartupState(): Promise<void> {
 
 
 /**
- * Git-engine fields for /api/state (specs/git-operations.spec.md): the
+ * Git-engine fields for /api/state (git-operations.md): the
  * engine chosen in Settings (null = default), the engine actually in
  * effect, and which binaries exist — each engine is only offered when its
  * own is installed, which for the bundled one is always.
@@ -323,7 +325,7 @@ async function authFields() {
 /**
  * Resolve the configured data repo (local path or GitHub url, cloned on first
  * use) and hand its local directory to the handler. Nothing reads the repo
- * before the app-start pull has had its turn (specs/app-start.spec.md).
+ * before the app-start pull has had its turn (specs/ui/app-start.feature.md).
  */
 function withDataDir(
   handler: (dir: string, req: Request, params: Params) => Response | Promise<Response>,
@@ -407,7 +409,7 @@ async function stateFields(state: SpecDrivenState) {
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: !isHostedMode() && claudeDesktopAvailable(),
     // Whether the Claude CLI is on PATH, so a session can run in the app's
-    // own coding agent pane (specs/agents/coding-agent-ui.feature.md).
+    // own coding agent pane (specs/agents/agent-pane.feature.md).
     canRunAgentPane: !isHostedMode() && claudeAvailable(),
     // Whether the Pi CLI is on PATH, so a session can run in Pi
     // (specs/agents/integration-with-pi-dev-agent.feature.md) — gates the
@@ -436,7 +438,7 @@ async function stateFields(state: SpecDrivenState) {
     // most recent first, the current folder included, at most 10.
     recentDataRepos: recentDataRepos(state),
     // Whether the runtime can open a native folder chooser
-    // (specs/app-start.spec.md) — gates the Browse… buttons.
+    // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
     // Demo mode: the client hides everything that changes or syncs the data
     // directory — the dataset is ephemeral and resets on every page load.
@@ -455,7 +457,7 @@ async function stateFields(state: SpecDrivenState) {
   };
 }
 
-// App start (specs/app-start.spec.md): the client asks for state; if no
+// App start (specs/ui/app-start.feature.md): the client asks for state; if no
 // data repo is recorded, it prompts the user for one. The repo may be a
 // regular GitHub url (https://github.com/SpecDriven/data-insurance).
 const getState: Handler = async (req) => {
@@ -471,7 +473,7 @@ const getState: Handler = async (req) => {
   await syncHostPlugins(state);
   return json({
     ...(await stateFields(state)),
-    // specs/user-info-settings.spec.md: the OS user by default, with
+    // specs/user-info-settings.feature.md: the OS user by default, with
     // the git identity that authors data-repo commits.
     user: await getCurrentUser(),
   });
@@ -605,7 +607,7 @@ const putState: Handler = async (req) => {
   const hostedRefusal = hostedStateRefusal(body);
   if (hostedRefusal) return json({ error: hostedRefusal }, 403);
   const state = await readState(getAppRoot());
-  // Git engine (specs/git-operations.spec.md): "gh" (GitHub CLI), "cli"
+  // Git engine (git-operations.md): "gh" (GitHub CLI), "cli"
   // (system git) or "js" (the bundled engine, which needs nothing installed);
   // "auto" clears the choice back to the default. Applied before a dataRepo
   // change so a first clone already uses the new engine.
@@ -631,7 +633,7 @@ const putState: Handler = async (req) => {
     const dataRepo = normalizeDataRepo(body.dataRepo);
     if (!dataRepo) return json({ error: "dataRepo is required" }, 400);
     // Verify access before recording: a GitHub url is cloned on first use
-    // (specs/crud-feature.spec.md: "user is verified to have access to the
+    // (crud-feature.md: "user is verified to have access to the
     // data GH repo").
     try {
       pickedDir = await resolveDataRepo(dataRepo, getAppRoot());
@@ -675,7 +677,7 @@ const putState: Handler = async (req) => {
     }
     state.reloadFrequencySeconds = Math.floor(n);
   }
-  // Scenario-list preview length (specs/ui.spec.md "Scenario List").
+  // Scenario-list preview length (specs/ui/ui.feature.md "Scenario List").
   if (body.scenarioPreviewLines !== undefined) {
     const n = body.scenarioPreviewLines;
     if (typeof n !== "number" || !Number.isFinite(n) || n < 1) {
@@ -683,9 +685,9 @@ const putState: Handler = async (req) => {
     }
     state.scenarioPreviewLines = Math.floor(n);
   }
-  // Editor autosave (specs/editor-autosave.feature.md): how often the open
-  // editor saves itself. Autosave cannot be switched off here — only slowed
-  // down — and never below the 3 second floor.
+  // Editor autosave (specs/editor/editor-autosave.feature.md): how often the
+  // open editor saves itself. Autosave cannot be switched off here — only
+  // slowed down — and never below the 3 second floor.
   if (body.autosaveIntervalSeconds !== undefined) {
     const n = body.autosaveIntervalSeconds;
     if (typeof n !== "number" || !Number.isFinite(n) || n < MIN_AUTOSAVE_SECONDS) {
@@ -696,7 +698,7 @@ const putState: Handler = async (req) => {
     }
     state.autosaveIntervalSeconds = Math.floor(n);
   }
-  // Test-links display (specs/traceability.spec.md): optional, default
+  // Test-links display (specs/traceability.feature.md): optional, default
   // ON — the default is stored as an absent key.
   if (body.showTestLinks !== undefined) {
     if (typeof body.showTestLinks !== "boolean") {
@@ -753,7 +755,7 @@ const putState: Handler = async (req) => {
     if (body.publishExternalLinks) delete state.publishExternalLinks;
     else state.publishExternalLinks = false;
   }
-  // Code gen sessions (specs/agents/claude.spec.md): switched off here, the
+  // Code gen sessions (specs/agents/claude.feature.md): switched off here, the
   // app offers no way to run one — the default ON is an absent key.
   if (body.codeGen !== undefined) {
     if (typeof body.codeGen !== "boolean") {
@@ -899,8 +901,8 @@ const putState: Handler = async (req) => {
     if (body.googleCalendar) state.googleCalendar = true;
     else delete state.googleCalendar;
   }
-  // Websocket document sync (specs/automerge-store.spec.md): opt-in, empty
-  // or null turns it off — the default, stored as an absent key.
+  // Websocket document sync (specs/datastore/automerge-store.feature.md):
+  // opt-in, empty or null turns it off — the default, stored as an absent key.
   if (body.syncServerUrl !== undefined) {
     if (body.syncServerUrl !== null && typeof body.syncServerUrl !== "string") {
       return json({ error: "syncServerUrl must be a string or null" }, 400);
@@ -948,10 +950,11 @@ const putState: Handler = async (req) => {
       reloadLog.error((e as Error).message, errorAttributes(e));
     }
   }
-  // specs/app-start.spec.md "changing the data repo": a newly picked folder is
-  // pulled before the response, so the client's first read of it — which
-  // follows this response — already shows the latest data. A pull that fails
-  // is logged and the switch still stands; the folder is configured either way.
+  // specs/ui/app-start.feature.md "changing the data repo": a newly picked
+  // folder is pulled before the response, so the client's first read of it —
+  // which follows this response — already shows the latest data. A pull that
+  // fails is logged and the switch still stands; the folder is configured
+  // either way.
   if (pickedDir) {
     const dir = pickedDir;
     await syncTick(() => syncDataDir(dir));
@@ -960,7 +963,7 @@ const putState: Handler = async (req) => {
   return json(await stateFields(state));
 };
 
-// Sync button (specs/ui.spec.md "Main page"): immediate data reload —
+// Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
 // one reload tick on demand, same as the cron (pull + push saved).
 const postReload: Handler = async () => {
   try {
@@ -973,7 +976,7 @@ const postReload: Handler = async () => {
   }
 };
 
-// GitHub sign-in (specs/git-operations.spec.md): device flow — start
+// GitHub sign-in (git-operations.md): device flow — start
 // returns the code the user enters at github.com/login/device; the client
 // polls until GitHub reports the authorization.
 const postAuthStart: Handler = async () => {
@@ -997,7 +1000,7 @@ const deleteAuth: Handler = async () => {
   return json({ message: "signed out" });
 };
 
-// Browser sign-in (specs/git-operations.spec.md "connect to GitHub via the
+// Browser sign-in (git-operations.md "connect to GitHub via the
 // browser"): start hands back the GitHub authorize url for the browser;
 // GitHub redirects to the callback below; the Settings dialog polls until
 // the outcome arrives. Needs an http(s) origin for GitHub to redirect to —
@@ -1093,18 +1096,18 @@ const putProjectSettings = withDataDir(async (dir, req) => {
   return json({ authorsInMarkdown: settings.authorsInMarkdown });
 });
 
-// Full-text search (specs/search.spec.md): ranked hits over feature
+// Full-text search (specs/search.feature.md): ranked hits over feature
 // names/descriptions and scenario names/bodies, each with a snippet
 // around its first match. An empty query is no results, not an error.
 // `scope=roadmap` or `scope=tasks` searches that folder's pages instead —
 // what the folder's own sidebar tab searches (specs/app/roadmap.feature.md,
 // specs/app/tasks.feature.md).
-// The data repo's README (specs/app-startup.feature.md "App Starts with
+// The data repo's README (app-startup.md "App Starts with
 // existing specs folder selected"): the home view opens it in an editor.
 const getReadme = withDataDir(async (dir) => json(await readReadme(dir)));
 
 // The README editor's autosave: a local write — the reload cron commits
-// and pushes it, like a saved scenario (specs/editor-autosave.feature.md
+// and pushes it, like a saved scenario (specs/editor/editor-autosave.feature.md
 // "Autosave Saves Locally"). `from` is the last loaded/saved text so a
 // disk edit the dirty editor has not shown is folded in, not overwritten.
 const putReadme = withDataDir(async (dir, req) => {
@@ -1151,8 +1154,8 @@ const getFeature = withDataDir(async (dir, _req, params) => {
   // A name readFeature refuses — a legacy `<slug>.feature` still held by
   // an open tab, or a traversal attempt — is "not found", not a 500.
   // The editor view: file content plus the document's draft scenarios,
-  // which are never in the file (specs/automerge-store.spec.md), and the
-  // parsed form carrying each scenario's document id — the identity the
+  // which are never in the file (specs/datastore/automerge-store.feature.md),
+  // and the parsed form carrying each scenario's document id — the identity the
   // editor hands back when it saves.
   let view: FeatureView | null;
   try {
@@ -1184,11 +1187,11 @@ const putFeature = withDataDir(async (dir, req, params) => {
     resolveConflict?: boolean;
     save?: boolean;
     // The scenario this request is about. On a publish: the one scenario to
-    // publish (specs/crud-feature.spec.md "publish each scenario
+    // publish (crud-feature.md "publish each scenario
     // individually"), absent = publish all. On a save: the dialog's scenario.
     // Its document id, when the editor holds one, keeps a scenario saved
     // under a new name or version one scenario rather than two
-    // (specs/editor-autosave.feature.md "Autosave Never Adds the Same
+    // (specs/editor/editor-autosave.feature.md "Autosave Never Adds the Same
     // Scenario Twice").
     scenario?: ScenarioBody;
   };
@@ -1201,7 +1204,7 @@ const putFeature = withDataDir(async (dir, req, params) => {
   }
   try {
     // save: auto-save locally with [proposed] markers; the reload cron
-    // commits and pushes (specs/crud-feature.spec.md).
+    // commits and pushes (crud-feature.md).
     if (body.save) return json(await saveFeature(dir, params.file!, body.content, scenario));
     const result = body.resolveConflict
       ? await resolveFeatureConflict(dir, params.file!, body.content, scenario)
@@ -1212,7 +1215,7 @@ const putFeature = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui.spec.md "Scenario editor" (Delete on a draft): a draft lives
+// specs/ui/ui.feature.md "Scenario editor" (Delete on a draft): a draft lives
 // in the Automerge document only, so it is deleted from the document rather
 // than by saving the feature without it — a save cannot express the absence
 // of something the markdown never held. Proposed scenarios keep going through
@@ -1306,7 +1309,7 @@ const postMoveScenario = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui.spec.md "Feature entry menu": Delete removes the feature
+// specs/ui/ui.feature.md "Feature entry menu": Delete removes the feature
 // file — a `git rm`, committed and pushed. The client confirms first.
 const deleteFeatureRoute = withDataDir(async (dir, _req, params) => {
   try {
@@ -1316,7 +1319,7 @@ const deleteFeatureRoute = withDataDir(async (dir, _req, params) => {
   }
 });
 
-// Folders (specs/folders.spec.md): directories in the data repo that
+// Folders (specs/ui/folders.feature.md): directories in the data repo that
 // hold feature files. Creation is local (git doesn't track empty dirs);
 // deletion only removes empty folders.
 const postFolders = withDataDir(async (dir, req) => {
@@ -1337,7 +1340,7 @@ const deleteFolderRoute = withDataDir(async (dir, _req, params) => {
   }
 });
 
-// Drag-move between folders (specs/folders.spec.md): a `git mv` into
+// Drag-move between folders (specs/ui/folders.feature.md): a `git mv` into
 // the target directory, committed and pushed like a rename.
 const postMove = withDataDir(async (dir, req, params) => {
   const body = (await req.json()) as { folder?: string };
@@ -1348,7 +1351,7 @@ const postMove = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+// specs/ui/ui.feature.md "Feature entry menu" (File → Rename): renames the
 // underlying file — a `git mv`, committed and pushed. Only the stem is
 // taken; the `.feature.md` extension and the folder are kept.
 const postRenameFile = withDataDir(async (dir, req, params) => {
@@ -1360,7 +1363,7 @@ const postRenameFile = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui.spec.md "Main page": the Edit link edits the feature name (the
+// specs/ui/ui.feature.md "Main page": the Edit link edits the feature name (the
 // file's `# <name>` heading), committed and pushed; the file name — and so
 // every link to the feature — never changes here.
 const postRename = withDataDir(async (dir, req, params) => {
@@ -1372,7 +1375,7 @@ const postRename = withDataDir(async (dir, req, params) => {
   }
 });
 
-// Image upload (specs/images.spec.md): the editor posts a pasted or chosen
+// Image upload (specs/images.feature.md): the editor posts a pasted or chosen
 // file as multipart form data; the image lands in the data repo's `.images/`
 // folder, committed and pushed, and the response carries the url the
 // markdown `![...](...)` should reference.
@@ -1451,7 +1454,7 @@ const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm 
 /** The agents as the error message lists them: "claude, pi or codex". */
 const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS.at(-1)}`;
 
-// Code gen session (specs/agents/claude.spec.md): the client sends the
+// Code gen session (specs/agents/claude.feature.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
 // subsets — and where to run; we build one prompt from them and either open
 // it in the app's own coding agent pane or in Claude Code Desktop. A failure
@@ -1570,7 +1573,7 @@ const postAgentSession = withDataDir(async (dir, req) => {
   const target = normalizeCodeGenTarget(body.target);
   if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
   const { name, specs, place, sections } = resolved;
-  // The pane (specs/agents/coding-agent-ui.feature.md): the prompt opens a
+  // The pane (specs/agents/agent-pane.feature.md): the prompt opens a
   // live chat in the app; the client shows it and the conversation goes on.
   // "pane" is that chat with Claude, "pi" the same chat with Pi
   // (specs/agents/integration-with-pi-dev-agent.feature.md), "codex" the
@@ -1617,7 +1620,7 @@ const postAgentSessionPrompt = withDataDir(async (dir, req) => {
 });
 
 // ---------------------------------------------------------------------------
-// Coding agent pane (specs/agents/coding-agent-ui.feature.md): a live Claude
+// Coding agent pane (specs/agents/agent-pane.feature.md): a live Claude
 // Code chat the app drives itself (src/server/agentChat.ts). Creating one
 // needs the data repo — for the code repo its project-settings.json names —
 // so it goes through withDataDir; everything after that addresses a session
@@ -1863,10 +1866,10 @@ const deleteAgentChat: Handler = async (_req, params) => {
   }
 };
 
-// Native folder chooser (specs/app-start.spec.md "picking the data directory
-// with the native folder chooser"): opens the OS dialog on the machine the
-// app runs on. 501 on runtimes with no native chooser — the client hides
-// Browse… then (canChooseFolder in /api/state).
+// Native folder chooser (specs/ui/app-start.feature.md "picking the data
+// directory with the native folder chooser"): opens the OS dialog on the
+// machine the app runs on. 501 on runtimes with no native chooser — the client
+// hides Browse… then (canChooseFolder in /api/state).
 const postChooseFolder: Handler = async () => {
   if (!canChooseFolder()) {
     return json({ error: "no native folder chooser on this runtime" }, 501);

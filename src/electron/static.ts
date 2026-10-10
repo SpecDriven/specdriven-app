@@ -1,6 +1,7 @@
 // Static-file plumbing for the desktop app's internal protocol
-// (specs/desktop-app.spec.md): map url paths to files in the built renderer
-// directory. Pure path logic, kept out of main.ts so it runs under bun test.
+// (specs/app/desktop-app.feature.md): map url paths to files in the built
+// renderer directory. Pure path logic, kept out of main.ts so it runs under bun
+// test.
 
 import { extname, join } from "node:path";
 
@@ -34,7 +35,7 @@ export function mimeType(path: string): string {
  * name a bundled file: bad encoding, empty or dot segments, path
  * separators smuggled into a segment. `/` maps to the shell (index.html);
  * anything the caller can't read falls back to the shell too, which is what
- * SPA deep links (specs/navigation.spec.md) rely on.
+ * SPA deep links (specs/ui/navigation.feature.md) rely on.
  */
 export function staticFilePath(rootDir: string, urlPath: string): string | null {
   let decoded: string;

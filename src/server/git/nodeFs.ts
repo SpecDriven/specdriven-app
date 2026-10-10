@@ -4,7 +4,7 @@
 // its FileSystem interface onto node:fs/promises, one method each.
 //
 // Node APIs only, like every other server module: the same code runs under
-// Bun and under Electron's Node runtime (specs/desktop-app.spec.md).
+// Bun and under Electron's Node runtime (specs/app/desktop-app.feature.md).
 
 import {
   lstat as fsLstat,

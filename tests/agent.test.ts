@@ -1,6 +1,6 @@
-// Automates specs/agents/claude.spec.md: a named code gen session builds
+// Automates specs/agents/claude.feature.md: a named code gen session builds
 // one prompt from the selected specs, for the agent it runs in. And
-// specs/roadmap/start-session-in-claude-code-desktop.md: the prompt opens as
+// roadmap/start-session-in-claude-code-desktop.md: the prompt opens as
 // a new session in Claude Code Desktop — saved to disk, with a short
 // bootstrap prompt in the deep link that titles the session; a failed launch
 // surfaces as an error for the error box.
@@ -74,7 +74,7 @@ describe("buildSessionPrompt", () => {
   });
 });
 
-// Claude Code Desktop (specs/roadmap/start-session-in-claude-code-desktop.md):
+// Claude Code Desktop (roadmap/start-session-in-claude-code-desktop.md):
 // the `q` of the deep link is a short bootstrap — Claude.app slices it, so
 // the specs themselves never travel in the url — and it carries the title
 // instruction, which is how the user's name survives the hand-off.

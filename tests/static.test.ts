@@ -1,5 +1,5 @@
-// Automates specs/desktop-app.spec.md: the app:// protocol serves bundled
-// renderer files by url path, and anything else — deep links included —
+// Automates specs/app/desktop-app.feature.md: the app:// protocol serves
+// bundled renderer files by url path, and anything else — deep links included —
 // falls back to the app shell.
 
 import { describe, expect, test } from "bun:test";

@@ -1,5 +1,5 @@
 // The demo's simulated coding agent (src/server/demoAgent.ts, roadmap spec
-// specs/roadmap/demo.md "Demo App"): with DEMO_MODE on, a code gen session
+// roadmap/demo.md "Demo App"): with DEMO_MODE on, a code gen session
 // starts, plays a scripted Claude Code transcript through the ordinary pane
 // machinery, raises a real permission card, and closes with a result — while
 // spawning nothing and leaving the dataset byte-for-byte as it was.

@@ -116,7 +116,7 @@ test("boot state names the demo — ephemeral folder, no chooser, js git, no cro
   expect(basename(state.dataRepo)).toMatch(/^data-\d+$/);
 });
 
-// Code gen sessions are the demo's point (specs/roadmap/demo.md "Demo App"),
+// Code gen sessions are the demo's point (roadmap/demo.md "Demo App"),
 // but only the simulated pane: the other two targets report unavailable, so
 // the session dialog offers no choice and nothing can reach a real CLI.
 test("the coding agent pane is on and is the only target on offer", async () => {

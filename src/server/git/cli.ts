@@ -1,4 +1,4 @@
-// System-git engine (specs/git-operations.spec.md): every git operation the
+// System-git engine (git-operations.md): every git operation the
 // app performs, run as a `git` subprocess. What separates the two engines is
 // injected per command — credentials and commit identity as `-c` overrides,
 // never written into the repo's own config — so the GitHub CLI engine in
@@ -156,7 +156,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
-   * Per specs/crud-feature.spec.md: before saving, do a `git pull` and merge.
+   * Per crud-feature.md: before saving, do a `git pull` and merge.
    * A repo with no upstream (e.g. the local-only starter setup) counts as ok.
    */
   async function pull(repoDir: string): Promise<PullResult> {
@@ -253,7 +253,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
 
   /**
    * Mark a conflicted file resolved with the given content, complete the merge,
-   * then commit and push (specs/crud-feature.spec.md, "save feature with merge
+   * then commit and push (crud-feature.md, "Publish feature with merge
    * conflict").
    */
   async function resolveConflict(
@@ -280,7 +280,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
-   * Per specs/crud-feature.spec.md ("Scenario is automatically saved locally and
+   * Per crud-feature.md ("Scenario is automatically saved locally and
    * pushed to GitHub"): after the cron git pull, commit and push any locally
    * saved scenarios so no data is lost. Skipped while a merge conflict is being
    * resolved so conflict markers are never auto-committed.
@@ -308,8 +308,8 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
-   * Per specs/folders.spec.md: moving a feature between folders is a `git mv`,
-   * committed and pushed. Outside a standalone git repo the file is simply
+   * Per specs/ui/folders.feature.md: moving a feature between folders is a `git
+   * mv`, committed and pushed. Outside a standalone git repo the file is simply
    * renamed on disk.
    */
   async function moveAndPush(
@@ -343,7 +343,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
-   * Per specs/ui.spec.md "Feature entry menu": deleting a feature is a
+   * Per specs/ui/ui.feature.md "Feature entry menu": deleting a feature is a
    * `git rm`, committed and pushed. Outside a standalone git repo the file is
    * simply removed from disk.
    */
@@ -371,7 +371,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
   }
 
   /**
-   * Per specs/crud-feature.spec.md, saving ends with "do a git commit and push".
+   * Per crud-feature.md, saving ends with "do a git commit and push".
    */
   async function commitAndPush(
     repoDir: string,
