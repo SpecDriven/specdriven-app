@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main ]
 
+# Read-only: the tests and the audit never write to the repository, and a
+# pull request from a fork runs them too.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

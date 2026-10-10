@@ -1,0 +1,34 @@
+name: Close outside pull requests
+
+# We do not accept pull requests from outside the team (CONTRIBUTING.md), so
+# a pull request opened from a fork by someone without write access is closed
+# with a pointer to how to propose specs instead. Branches pushed to this
+# repository by the team are left alone.
+#
+# pull_request_target runs this workflow from the base branch with a token
+# that can write, so it must never check out or run the pull request's code:
+# it only reads the event and calls the API.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.head.repo.full_name != github.repository &&
+      !contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR" --comment "Thank you for taking the time to write this. We are unable to accept pull requests, for security-liability and resource reasons, so we're closing it.
+
+          What we do welcome is specs: a proposed feature or scenario in SpecDriven/specs-specdriven is the most useful thing you can send us. CONTRIBUTING.md (https://github.com/${GH_REPO}/blob/main/CONTRIBUTING.md) says how."
