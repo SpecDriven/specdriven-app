@@ -1,8 +1,20 @@
-Required Notice: Copyright (c) 2026 David Vydra (https://specdriven.app)
+Copyright (c) 2026 David Vydra (https://specdriven.app)
 
-specdriven.app is source-available under the unmodified PolyForm Perimeter
-1.0.1 license (https://polyformproject.org/licenses/perimeter/1.0.1), not
-unrestricted open source. Use inside your company, including commercial and
-production use, is permitted; providing a product that competes with
-specdriven.app is restricted. LICENSE.md controls. No trademark rights are
-granted.
+specdriven.app is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License, version 3 only
+(SPDX: AGPL-3.0-only), as published by the Free Software Foundation.
+LICENSE.md holds the full text.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU Affero General Public License for details.
+
+If you run a modified copy as a network service, the license asks you to
+offer its users the source of your version; set SPECDRIVEN_SOURCE_URL so the
+app's "Source code" link points at it.
+
+No trademark rights are granted. "SpecDriven" and "specdriven.app" are not
+licensed under the AGPL.
+
+We do not accept pull requests; see CONTRIBUTING.md for how to propose specs
+instead.

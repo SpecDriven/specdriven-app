@@ -815,6 +815,27 @@ interface Listing {
   issuesRepo: GitHubRepo | null;
 }
 
+/** The user menu's link to the running build's source
+    (specs/app/open-source-license.feature.md): the app is AGPL-3.0-only, so
+    every copy — the public demo included — offers it. None until the state
+    has named the url. */
+export function sourceCodeMenuItems(
+  url: string | null,
+  open: (url: string) => void = (u) => window.open(u, "_blank", "noreferrer"),
+): MenuItem[] {
+  if (!url) return [];
+  return [
+    {
+      id: "source-code",
+      label: "Source code",
+      description: "AGPL-3.0",
+      icon: <ExternalLink size={13} />,
+      title: url,
+      onSelect: () => open(url),
+    },
+  ];
+}
+
 /** How many times a feature-list load tries before it reports an error, and
     the step it backs off by (1×, 2×, …). Short enough that a real outage
     still surfaces quickly, long enough to outlast a demo-mode reseed
@@ -1007,6 +1028,8 @@ export function App() {
   const [hosted, setHosted] = useState(false);
   // The running app's version, shown beside the user name in demo mode.
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  // Where that version's source lives — the user menu links to it.
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const repoInputRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1544,6 +1567,7 @@ export function App() {
         // first finding Settings. Turning it off there still sticks.
         setExcalidrawDemoMode(Boolean(state.demo));
         setAppVersion(typeof state.version === "string" ? state.version : null);
+        setSourceUrl(typeof state.sourceUrl === "string" ? state.sourceUrl : null);
         setGitEngineState(state.gitEngine ?? null);
         setGitEngineEffective(state.gitEngineEffective ?? "cli");
         setCliGitAvailable(Boolean(state.cliGitAvailable));
@@ -7265,6 +7289,8 @@ export function App() {
                     },
                   ]
                 : []),
+              // The running build's source, which the AGPL asks every copy to offer.
+              ...sourceCodeMenuItems(sourceUrl),
             ]}
           />
           <button
