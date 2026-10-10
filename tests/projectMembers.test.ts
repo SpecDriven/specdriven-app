@@ -143,6 +143,7 @@ describe("project-settings.json", () => {
     expect(await readProjectSettings(root)).toEqual({
       members: [{ name: DANA }],
       codeRepo: join(root, "..", "acme-app"),
+      authorsInMarkdown: false,
     });
   });
 

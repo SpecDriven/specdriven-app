@@ -37,7 +37,7 @@ import { featureTextError, parseFeature, parsePage, type Feature, type MarkdownP
 import { isPageFile, isPageFolderPath } from "../pages";
 import { threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
-import { docToFeature, isProjectionOf, projectFeature } from "./project";
+import { docToFeature, isProjectionOf, projectFeature, projectionFor } from "./project";
 import { healPublished, importFeatureDoc, reconcile } from "./reconcile";
 import type { FeatureDoc } from "./schema";
 import {
@@ -150,11 +150,16 @@ async function theirChunks(dataDir: string, docDir: string): Promise<Set<string>
  * Their markdown as their own document projected it — the base that leaves
  * only a hand edit riding the push as theirs to fold in. In the projection
  * form their file was written in: a peer that does not publish external
- * links writes none.
+ * links writes none, and a repo without `authors-in-markdown` no authorship.
  */
 function theirProjection(doc: A.Doc<FeatureDoc>, theirs: Feature): Feature {
   const linked = !!theirs.link || theirs.scenarios.some((s) => s.link);
-  return parseFeature(projectFeature(doc, { publishExternalLinks: linked }));
+  const authored =
+    !!(theirs.createdBy || theirs.updatedBy) ||
+    theirs.scenarios.some((s) => s.createdBy || s.updatedBy);
+  return parseFeature(
+    projectFeature(doc, { publishExternalLinks: linked, publishAuthors: authored }),
+  );
 }
 
 /**
@@ -243,7 +248,9 @@ async function autoResolveOne(
     return e instanceof Error ? e.message : String(e);
   }
   await saveFeatureDoc(dataDir, path, doc, loaded.heads);
-  await resolveConflict(dataDir, path, projectFeature(doc), [docDirRel(path)]);
+  await resolveConflict(dataDir, path, projectFeature(doc, await projectionFor(dataDir)), [
+    docDirRel(path),
+  ]);
   return null;
 }
 
@@ -297,6 +304,9 @@ async function autoResolvePage(dataDir: string, path: string): Promise<string | 
 export async function importDrift(dataDir: string): Promise<string> {
   return withSpan("sync.import_drift", { "specdriven.dir": dataDir }, async (span) => {
     const files = (await walk(dataDir)).files;
+    // The repo's projection form (authorship in the markdown or not), read
+    // once per pass — the pull this tick follows may just have changed it.
+    const options = await projectionFor(dataDir);
     let imported = 0;
     let absorbed = 0;
     let repaired = 0;
@@ -308,7 +318,7 @@ export async function importDrift(dataDir: string): Promise<string> {
       const loaded = await loadFeatureDoc(dataDir, fileName);
       if (loaded === null) {
         const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(parseFeature(text)));
-        const projection = projectFeature(created.doc);
+        const projection = projectFeature(created.doc, options);
         if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
         imported++;
         log.debug(`imported ${fileName} into a document`);
@@ -334,12 +344,12 @@ export async function importDrift(dataDir: string): Promise<string> {
       const drift = absorbDrift(doc, text);
       if (drift.refused === undefined) {
         await saveFeatureDoc(dataDir, fileName, drift.doc, loaded.heads);
-        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(drift.doc));
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(drift.doc, options));
         absorbed++;
         log.debug(`absorbed drifted ${fileName} into its document`);
       } else {
         await saveFeatureDoc(dataDir, fileName, doc, loaded.heads);
-        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(doc));
+        await writeTextFile(`${dataDir}/${fileName}`, projectFeature(doc, options));
         repaired++;
         log.warn(`refused drift on ${fileName}; repaired from its document`, errorAttributes(drift.refused));
       }

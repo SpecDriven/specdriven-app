@@ -20,6 +20,13 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/search")).toBeNull();
   });
 
+  // The data repo's own settings (specs/app/specs-authorship.feature.md):
+  // `authors-in-markdown` is written with a PUT, read with the listing.
+  test("project settings route matches PUT only", () => {
+    expect(matchApi("PUT", "/api/project-settings")).not.toBeNull();
+    expect(matchApi("GET", "/api/project-settings")).toBeNull();
+  });
+
   // GitHub sign-in routes (specs/git-operations.spec.md): device-flow
   // start and poll, browser-flow start/poll/callback, plus sign-out.
   test("auth routes match by method", () => {

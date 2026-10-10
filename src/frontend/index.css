@@ -7652,6 +7652,14 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   }
 }
 
+/* Authorship (specs/app/specs-authorship.feature.md): who created a
+   scenario and who last changed it, one quiet line at the end of its card. */
+.scenario-authors {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 /* Pull request links (specs/external-links/related-pull-requests.feature.md):
    a "Pull requests" list at the end of a scenario card, after the automated
    tests; the editor pane's and the feature popover's field reuse the test

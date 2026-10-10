@@ -144,6 +144,11 @@ Click a feature in the tree to open it. Across the top:
 Under the header, chips summarise the feature:
 
 - `<n> / <m> published`.
+- The **authorship** chip — `Created by ada · updated by grace` — names who
+  created the feature and who last changed it or any of its scenarios. The
+  name is the GitHub account the app is signed in as (an agent working with
+  its own token shows as that account), else the git user name. Features
+  made before the app kept this show no chip until somebody edits them.
 - The **assignee** chip (`Unassigned` or a member's name) appears when
   **Assign features to project members** is on. Members are the names listed
   in the data folder's `project-settings.json`; the assignment is written
@@ -170,6 +175,9 @@ Each card shows:
   **Scenario preview lines** setting.
 - An **Automated tests** table of links, when the scenario has any and
   **Show links to automated tests** is on.
+- A line saying who **created** the scenario and who **last updated** it.
+  A new version of a published scenario is a new scenario, created by
+  whoever proposed it.
 - **Edit** (`e`) and **More actions** (⋯). The menu offers **Edit**, then
   **Publish** for an unpublished scenario or **New version** for a published
   one, then **Copy link**. Right-clicking a card opens the same menu.
@@ -342,6 +350,7 @@ Open Settings with `⌘,` or `g s`.
 | **Show links to automated tests** | Shows or hides the Automated tests table on cards. Hiding never deletes the links. |
 | **Project management** and **Project management tool** | Whether features and scenarios offer a ticket link, and which tracker it names. |
 | **Publish external links** | Writes ticket links into the `.feature.md` file as markdown links. |
+| **Write authors into feature files** | A setting of the open data folder, not of the device: `"authors-in-markdown": true` in its `project-settings.json`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
 | **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.json`. |
 | **Allow deleting published specs** | Offers Delete on published scenarios, behind the Danger Zone confirmation. |
 | **Git engine** | Which git the app drives: the GitHub CLI, the system `git`, or the built-in engine. |

@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { readTextFile, writeTextFile } from "../fsx";
 import { featureTextError } from "../parser";
 import { absorbDrift } from "./driftSync";
-import { isProjectionOf, projectFeature } from "./project";
+import { isProjectionOf, projectFeature, projectionFor } from "./project";
 import type { FeatureDoc } from "./schema";
 import { docDir, listFeatureDocs, loadFeatureDoc, onDocSaved, saveFeatureDoc } from "./store";
 import { errorAttributes, getLogger, withSpan } from "../telemetry";
@@ -195,7 +195,10 @@ export async function startNetSync(
       writing.add(fileName);
       try {
         await saveFeatureDoc(dataDir, fileName, merged, disk.heads);
-        await writeTextFile(join(dataDir, fileName), projectFeature(merged));
+        await writeTextFile(
+          join(dataDir, fileName),
+          projectFeature(merged, await projectionFor(dataDir)),
+        );
         log.info(`absorbed remote operations into ${fileName}`);
       } finally {
         writing.delete(fileName);
