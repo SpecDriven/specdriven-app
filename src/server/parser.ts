@@ -1,5 +1,5 @@
 // Feature files are markdown, named `<slug>.feature.md`
-// (specs/crud-feature.spec.md):
+// (crud-feature.md):
 //
 //   # <name of the feature>
 //
@@ -12,10 +12,10 @@
 //
 // Only [published] and [proposed] scenarios belong in a `.feature.md` on
 // disk: draft is an internal status that lives in the Automerge document
-// alone (specs/automerge-store.spec.md). The [draft] chip is a wire format
-// between the editor and the server — the projection drops draft scenarios,
-// so the chip never lands in a file. Chipless headings still parse (hand
-// edits may write them) — they enter as drafts, save promotes them to
+// alone (specs/datastore/automerge-store.feature.md). The [draft] chip is a
+// wire format between the editor and the server — the projection drops draft
+// scenarios, so the chip never lands in a file. Chipless headings still parse
+// (hand edits may write them) — they enter as drafts, save promotes them to
 // [proposed], and the projection leaves whatever stays draft out of the file.
 //
 //   <scenario body — any markdown up to the next scenario heading;
@@ -157,8 +157,8 @@ export interface Feature {
 
 /**
  * Shared identity slug: feature file stems (`<slug>.feature.md`) and deep-link
- * url segments (specs/navigation.spec.md) both use it. Lives here rather than
- * features.ts so the frontend can import it without pulling in node:fs.
+ * url segments (specs/ui/navigation.feature.md) both use it. Lives here rather
+ * than features.ts so the frontend can import it without pulling in node:fs.
  */
 export function slugify(name: string): string {
   return name
@@ -171,7 +171,8 @@ export function slugify(name: string): string {
  * Display name derived from a feature file name — the stem of
  * `<slug>.feature.md`, de-kebabed and title-cased: "quote-policy.feature.md"
  * → "Quote Policy". Used wherever a feature has no `# <name>` heading to fall
- * back on (specs/ui.spec.md "Main page": show the name, not the file name).
+ * back on (specs/ui/ui.feature.md "Main page": show the name, not the file
+ * name).
  */
 export function titleFromFileName(fileName: string): string {
   return fileName
@@ -191,7 +192,7 @@ export function titleFromFileName(fileName: string): string {
  * GitHub shows verbatim. The name is the test function the url's `#L<n>`
  * anchor points at, read from the code when the link is added
  * (src/server/testName.ts). Older files carry a trailing `### Tests`
- * markdown table instead (specs/traceability.spec.md); the parser still
+ * markdown table instead (specs/traceability.feature.md); the parser still
  * reads it, and serializeFeature writes the lines, so a file moves to the
  * new form the first time it is written. Either way the links land in
  * `Scenario.tests`, apart from the body — which is what lets a published
@@ -213,7 +214,9 @@ const TEST_REF_RE = new RegExp(TEST_TOKEN, "g");
 /** A line holding nothing but test tokens. */
 const TEST_LINE_RE = new RegExp(String.raw`^\s*(?:${TEST_TOKEN}\s*)+$`);
 
-/** Only GitHub urls are stored as test links (specs/traceability.spec.md). */
+/**
+ * Only GitHub urls are stored as test links (specs/traceability.feature.md).
+ */
 export function isTestLink(url: string): boolean {
   return /^https:\/\/(www\.)?github\.com\/.+/.test(url.trim());
 }
@@ -699,7 +702,7 @@ interface HeadingMatch {
  * the un-prefixed `vN` version and the backtick chips. Both are read and
  * written back in the current syntax, so an old feature file normalizes the
  * first time it is saved. `saved` is the old name of the proposed state
- * (specs/crud-feature.spec.md "Feature file format").
+ * (crud-feature.md "Feature file format").
  */
 function matchScenario(line: string): HeadingMatch | null {
   const m =
@@ -721,7 +724,7 @@ function matchScenario(line: string): HeadingMatch | null {
 }
 
 /**
- * Canonical scenario order (specs/ui.spec.md): by name, then by version.
+ * Canonical scenario order (specs/ui/ui.feature.md): by name, then by version.
  * parseFeature returns scenarios in this order, so lists always render
  * sorted and a save writes the file back in canonical order.
  */
@@ -731,7 +734,7 @@ export function sortScenarios(scenarios: Scenario[]): Scenario[] {
 
 /**
  * Why a text is not a well-formed feature file, or null when it is
- * (specs/crud-feature.spec.md "Feature file format"): it opens with the
+ * (crud-feature.md "Feature file format"): it opens with the
  * feature heading — `# ` followed by the feature name — and nothing above it.
  * Reading stays lenient (a file with no heading still lists, named after its
  * stem); writing does not, so a bug upstream cannot commit a broken file.
@@ -862,9 +865,9 @@ export interface ScenarioPick {
  * the document's id for it when the editor holds one (`Scenario.id`). The id
  * is what keeps the scenario one scenario through a rename — the document
  * renames that entry rather than filing the new name as a second scenario
- * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
- * Twice"), which matters most for a draft: the file never held it, so a save
- * that leaves it out removes nothing
+ * (specs/editor/editor-autosave.feature.md "Autosave Never Adds the Same
+ * Scenario Twice"), which matters most for a draft: the file never held it, so
+ * a save that leaves it out removes nothing
  * (specs/datastore/automerge-store.feature.md "draft scenarios live in the
  * document only").
  */
@@ -875,7 +878,7 @@ export interface ScenarioTarget extends ScenarioPick {
 /**
  * Serialize just the picked scenarios of a feature file — the heading and
  * description stay, every unpicked scenario drops out
- * (specs/agents/claude.spec.md: a code gen session can take a whole spec or
+ * (specs/agents/claude.feature.md: a code gen session can take a whole spec or
  * a subset of its scenarios). Throws when a pick names a scenario the file
  * doesn't have, so a stale client selection fails loudly instead of running
  * Claude over less than the user chose.
@@ -898,7 +901,7 @@ export function extractScenarios(text: string, picks: ScenarioPick[]): string {
 
 /**
  * Rewrite the feature's `# <name>` heading — its display name — leaving the
- * rest of the text untouched (specs/ui.spec.md "Main page": the Edit link
+ * rest of the text untouched (specs/ui/ui.feature.md "Main page": the Edit link
  * edits the feature name, not the file name). Only the first `#` heading
  * before any scenario and outside fenced code blocks is the name; a file
  * without one gets a heading inserted at the top.
@@ -960,7 +963,7 @@ export function markPublished(text: string): string {
 
 /**
  * Mark one scenario (by name and version) as published, leaving every other
- * heading untouched (specs/crud-feature.spec.md "publish each scenario
+ * heading untouched (crud-feature.md "publish each scenario
  * individually").
  */
 export function markScenarioPublished(text: string, name: string, version: number): string {
@@ -971,7 +974,7 @@ export function markScenarioPublished(text: string, name: string, version: numbe
 
 /**
  * Mark every unmarked scenario heading with a [proposed] chip
- * (specs/crud-feature.spec.md, "Scenario is automatically saved locally and
+ * (crud-feature.md, "Scenario is automatically saved locally and
  * pushed to GitHub"). [published] and [proposed] headings are untouched, and
  * so is an explicit [draft] chip — that is the editor asking for the scenario
  * to stay a draft, stored in the document and kept out of the file.

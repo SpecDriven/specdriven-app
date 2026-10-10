@@ -1,4 +1,4 @@
-// Links that arrive from outside the app (specs/navigation.spec.md "links
+// Links that arrive from outside the app (specs/ui/navigation.feature.md "links
 // from outside the app"): the OS hands the desktop shell a `specdriven://`
 // url, which carries the same paths the window already routes on — after the
 // spec folder's name (`specdriven://specs-insurance/tasks/ship`), which the

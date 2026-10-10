@@ -1,4 +1,4 @@
-// Coding agent pane, client side (specs/agents/coding-agent-ui.feature.md):
+// Coding agent pane, client side (specs/agents/agent-pane.feature.md):
 // the store behind src/frontend/AgentPane.tsx. A module-level store read
 // through useSyncExternalStore (the src/frontend/Toasts.tsx pattern) rather
 // than more state in App.tsx: the pane's sessions, their transcripts and

@@ -52,7 +52,7 @@ import {
 } from "./agentChat";
 
 /**
- * The coding agent pane (specs/agents/coding-agent-ui.feature.md): a live
+ * The coding agent pane (specs/agents/agent-pane.feature.md): a live
  * coding agent chat inside SpecDriven for developers who have a CLI but not
  * Claude Code Desktop — Claude Code, or Pi over its RPC mode
  * (specs/agents/integration-with-pi-dev-agent.feature.md). Header (session,

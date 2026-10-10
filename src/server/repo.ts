@@ -1,4 +1,4 @@
-// Per specs/app-start.spec.md, the data repo may be given as a regular
+// Per specs/ui/app-start.feature.md, the data repo may be given as a regular
 // GitHub url, e.g. https://github.com/SpecDriven/data-insurance. A URL is
 // resolved to a local clone in a sibling directory of the app root
 // (../data-insurance), cloning on first use. Plain names/paths keep working
@@ -39,7 +39,7 @@ export function looksLikeRepoUrl(input: string): boolean {
 /**
  * Local directory a GitHub repo is cloned into: a sibling of the app root,
  * unless SPECDRIVEN_REPOS_DIR points somewhere (the desktop app keeps clones
- * in its own data directory — specs/desktop-app.spec.md).
+ * in its own data directory — specs/app/desktop-app.feature.md).
  */
 export function cloneDir(rootDir: string, repoName: string): string {
   return resolve(cloneBase(rootDir), repoName);
@@ -54,7 +54,7 @@ export function dataRepoDir(dataRepo: string, rootDir: string): string {
 /**
  * Clone into dir unless dir is already a git repo (e.g. a pre-existing
  * clone). Cloning goes through the git engine facade
- * (specs/git-operations.spec.md): `gh repo clone` on the GitHub CLI engine,
+ * (git-operations.md): `gh repo clone` on the GitHub CLI engine,
  * `git clone` on the system-git one.
  */
 export async function ensureClone(url: string, dir: string): Promise<void> {
@@ -65,7 +65,7 @@ export async function ensureClone(url: string, dir: string): Promise<void> {
 /**
  * Resolve the configured data repo (GitHub url or local name/path) to a local
  * directory. Cloning a URL on first use doubles as the access check from
- * specs/crud-feature.spec.md ("user is verified to have access to the data
+ * crud-feature.md ("user is verified to have access to the data
  * GH repo").
  */
 export async function resolveDataRepo(dataRepo: string, rootDir: string): Promise<string> {

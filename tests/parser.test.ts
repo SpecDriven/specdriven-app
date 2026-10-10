@@ -27,15 +27,15 @@ Quotes for potential customers.
 - **Then** the quote is declined
 `;
 
-// specs/ui.spec.md "Main page": show the feature name, not the file name —
-// files without a `# <name>` heading fall back to a stem-derived name.
+// specs/ui/ui.feature.md "Main page": show the feature name, not the file name
+// — files without a `# <name>` heading fall back to a stem-derived name.
 test("titleFromFileName derives a display name from the file stem", () => {
   expect(titleFromFileName("specs/quote-policy.feature.md")).toBe("Quote Policy");
   expect(titleFromFileName("legacy.feature")).toBe("Legacy");
   expect(titleFromFileName("specs/a.feature.md")).toBe("A");
 });
 
-// specs/crud-feature.spec.md "Feature file format": a feature file opens with
+// crud-feature.md "Feature file format": a feature file opens with
 // `# ` followed by the feature name, and nothing above it.
 test("featureTextError accepts a well-formed feature file", () => {
   expect(featureTextError(SAMPLE)).toBeNull();
@@ -152,7 +152,7 @@ test("extra spaces before the version and chip are tolerated", () => {
   });
 });
 
-// specs/ui.spec.md: "Scenarios are ordered by name, then by version" —
+// specs/ui/ui.feature.md: "Scenarios are ordered by name, then by version" —
 // regardless of the order they appear in the file.
 test("scenarios are ordered by name, then by version", () => {
   const feature = parseFeature(
@@ -219,7 +219,7 @@ test("markProposed adds the proposed chip to unmarked headings only", () => {
   expect(marked).not.toContain("[proposed] [proposed]");
 });
 
-// specs/crud-feature.spec.md "publish each scenario individually"
+// crud-feature.md "publish each scenario individually"
 test("markScenarioPublished flips only the named scenario version", () => {
   const marked = markScenarioPublished(
     "# X\n\n## Basic @v1 [proposed]\n\nold\n\n## Basic @v2\n\nnew\n\n## Other @v1\n\nbody\n",
@@ -273,7 +273,8 @@ test("mark helpers leave headings inside code fences alone", () => {
   expect(marked).toContain("\n## Example @v9\n");
 });
 
-// specs/ui.spec.md "Main page": the Edit link edits the feature name — the
+// specs/ui/ui.feature.md "Main page": the Edit link edits the feature name —
+// the
 // `# <name>` heading — leaving everything else in the file untouched.
 test("renameFeatureName rewrites only the feature heading", () => {
   const text = "# Old\n\ndesc\n\n## Basic @v1 [published]\n\nbody\n";
@@ -295,7 +296,7 @@ test("renameFeatureName ignores `#` lines in fences or after scenarios", () => {
   expect(renameFeatureName(inBody, "Named")).toBe("# Named\n\n## S @v1\n\n# heading in body\n");
 });
 
-// Scenario-level code gen selection (specs/agents/claude.spec.md): a session
+// Scenario-level code gen selection (specs/agents/claude.feature.md): a session
 // can take a whole spec or a subset of its scenarios — extractScenarios
 // keeps the heading and description and drops every unpicked scenario.
 test("extractScenarios keeps only the picked scenarios", () => {

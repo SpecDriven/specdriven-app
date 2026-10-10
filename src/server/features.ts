@@ -89,7 +89,7 @@ export interface FeatureListing {
   /** Display name: the file's `# <name>` heading, or derived from the stem. */
   name: string;
   /** The file's scenarios, for scenario-level code gen selection
-      (specs/agents/claude.spec.md) and the sidebar's publish rollup
+      (specs/agents/claude.feature.md) and the sidebar's publish rollup
       (specs/ui/ui.feature.md "Design system"). */
   scenarios: (ScenarioPick & { status: ScenarioStatus })[];
   /** The project member the feature is assigned to, for the sidebar filter. */
@@ -97,7 +97,7 @@ export interface FeatureListing {
 }
 
 /**
- * specs/ui.spec.md "Main page": the sidebar shows feature names, not file
+ * specs/ui/ui.feature.md "Main page": the sidebar shows feature names, not file
  * names — each listed file carries its display name. Feature files anywhere
  * in the folder tree are listed, with folder-relative paths.
  */
@@ -145,14 +145,14 @@ export async function readFeature(dataDir: string, fileName: string): Promise<st
 /**
  * The feature as the editor should see it: the `.feature.md` content plus
  * what lives only in the Automerge document — the draft scenarios
- * (specs/automerge-store.spec.md "draft scenarios live in the document
- * only"), serialized with explicit [draft] chips so a later save keeps them
- * drafts, and the external links the projection leaves out while "Publish
+ * (specs/datastore/automerge-store.feature.md "draft scenarios live in the
+ * document only"), serialized with explicit [draft] chips so a later save keeps
+ * them drafts, and the external links the projection leaves out while "Publish
  * external links" is off (specs/external-links/project-management-jira-
  * linear-etc.feature.md) — and the same thing parsed, each scenario carrying
- * the document's id for it (`Scenario.id`), which the markdown never does.
- * The file stays the source for everything it holds — the document only
- * contributes what the file cannot see.
+ * the document's id for it (`Scenario.id`), which the markdown never does. The
+ * file stays the source for everything it holds — the document only contributes
+ * what the file cannot see.
  */
 export interface FeatureView {
   content: string;
@@ -410,9 +410,9 @@ export async function moveFeature(
 }
 
 /**
- * specs/ui.spec.md "Main page": the Edit link next to the feature name edits
- * the feature name — the file's `# <name>` heading — not the file name. The
- * file (and every link to it) keeps its name; the new heading is committed
+ * specs/ui/ui.feature.md "Main page": the Edit link next to the feature name
+ * edits the feature name — the file's `# <name>` heading — not the file name.
+ * The file (and every link to it) keeps its name; the new heading is committed
  * and pushed like any other content edit.
  */
 export async function renameFeature(
@@ -437,7 +437,7 @@ export async function renameFeature(
 }
 
 /**
- * specs/ui.spec.md "Feature entry menu" (File → Rename): renames the
+ * specs/ui/ui.feature.md "Feature entry menu" (File → Rename): renames the
  * underlying file, keeping its folder and the `.feature.md` extension — the
  * UI only shows and edits the stem left of the dot. A `git mv`, committed
  * and pushed like a move; links to the old file name go stale.
@@ -464,8 +464,9 @@ export async function renameFeatureFile(
 }
 
 /**
- * specs/ui.spec.md "Feature entry menu" (Delete): deletes the feature file —
- * a `git rm`, committed and pushed. The client asks for confirmation first.
+ * specs/ui/ui.feature.md "Feature entry menu" (Delete): deletes the feature
+ * file — a `git rm`, committed and pushed. The client asks for confirmation
+ * first.
  */
 export async function deleteFeature(
   dataDir: string,
@@ -516,9 +517,9 @@ export interface SaveResult extends FeatureView {
  * `scenario` is the one the editor is saving, with the document id it read it
  * under: a scenario going out under a new name or version is then a rename
  * of that entry, not a second scenario beside it
- * (specs/editor-autosave.feature.md "Autosave Never Adds the Same Scenario
- * Twice") — the only way a draft gets out from under its old name, since a
- * save that leaves a draft out removes nothing.
+ * (specs/editor/editor-autosave.feature.md "Autosave Never Adds the Same
+ * Scenario Twice") — the only way a draft gets out from under its old name,
+ * since a save that leaves a draft out removes nothing.
  */
 export async function saveFeature(
   dataDir: string,
@@ -584,7 +585,7 @@ async function foldDiskEdit(dataDir: string, fileName: string, text: string): Pr
 }
 
 /**
- * Delete a draft scenario (specs/ui.spec.md "Scenario editor"): drafts
+ * Delete a draft scenario (specs/ui/ui.feature.md "Scenario editor"): drafts
  * live in the Automerge document only, so this is a document operation rather
  * than a save of the feature without them — markdown cannot express a draft's
  * absence, and the next read would fold the draft straight back in. Local like
@@ -786,7 +787,7 @@ export async function moveScenario(
 
 /**
  * Mark scenarios published: every scenario for a whole-feature publish, or
- * just the targeted one (specs/crud-feature.spec.md "publish each scenario
+ * just the targeted one (crud-feature.md "publish each scenario
  * individually"). A target that isn't in the content is an error, not a no-op.
  */
 function markForPublish(content: string, scenario?: ScenarioTarget): string {
@@ -802,11 +803,11 @@ function markForPublish(content: string, scenario?: ScenarioTarget): string {
 
 /**
  * Scenario "Publish feature": every scenario is marked [published] (published
- * scenarios are immutable — specs/ui.spec.md); git pull first; on a clean
+ * scenarios are immutable — specs/ui/ui.feature.md); git pull first; on a clean
  * merge, save, then git commit and push. On a merge conflict, report both
  * sides so the user can resolve (accept yours / accept theirs / manual edit).
  * With a scenario target, only that scenario is marked [published]
- * (specs/crud-feature.spec.md "publish each scenario individually").
+ * (crud-feature.md "publish each scenario individually").
  * The target's document id, when the editor sends one, is how the dialog's
  * Publish of a retyped title publishes the draft it came from rather than a
  * second scenario beside it (saveFeature).
@@ -909,7 +910,7 @@ export async function resolveFeatureConflict(
 }
 
 /**
- * specs/ui.spec.md: "If a scenario is already published, then it is
+ * specs/ui/ui.feature.md: "If a scenario is already published, then it is
  * immutable." A published scenario (same name and version) must survive a
  * publish still published and with its body intact; adding a new version
  * alongside it is fine.

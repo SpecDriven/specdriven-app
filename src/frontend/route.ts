@@ -1,4 +1,4 @@
-// Deep-link urls (specs/navigation.spec.md):
+// Deep-link urls (specs/ui/navigation.feature.md):
 //
 //   /                                               home
 //   /features/<feature>                             feature page
@@ -77,7 +77,7 @@ export function parseRoute(pathname: string): Route {
 }
 
 /**
- * Scheme the desktop app registers with the OS (specs/navigation.spec.md
+ * Scheme the desktop app registers with the OS (specs/ui/navigation.feature.md
  * "links from outside the app"). Inside the desktop window the origin is
  * `app://specdriven`, which nothing else on the machine can reach, so links
  * meant to be shared use this scheme over the same paths.
@@ -160,7 +160,7 @@ export function splitRepoPath(
 
 /**
  * Sidebar display name for the configured data repo
- * (specs/app-start.spec.md): just the folder or GitHub repo name — the
+ * (specs/ui/app-start.feature.md): just the folder or GitHub repo name — the
  * parent folders stay in the header's tooltip and in the edit dialog.
  */
 export function repoDisplayName(repo: string): string {
@@ -193,9 +193,9 @@ export function scenarioPath(
 }
 
 /**
- * The url of what is on screen (specs/navigation.spec.md "URL scheme"): the
- * scenario's own url while its page is open, otherwise the feature's, and `/`
- * with no feature open. A plugin's view — a roadmap page or a task, say —
+ * The url of what is on screen (specs/ui/navigation.feature.md "URL scheme"):
+ * the scenario's own url while its page is open, otherwise the feature's, and
+ * `/` with no feature open. A plugin's view — a roadmap page or a task, say —
  * takes the same pane a feature does and owns its own url, which the plugin
  * mints (src/plugins/builtin/pages/route.ts).
  */
@@ -210,7 +210,7 @@ export function pagePath(
 /**
  * Resolve a scenario ref against a parsed feature: exact version when the ref
  * has one, otherwise the highest version of that name. On slug collisions the
- * first match in file order wins (specs/navigation.spec.md). Returns the
+ * first match in file order wins (specs/ui/navigation.feature.md). Returns the
  * scenario's list index, or null if nothing matches.
  */
 export function resolveScenario(scenarios: Scenario[], ref: ScenarioRef): number | null {

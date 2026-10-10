@@ -1,4 +1,4 @@
-// Automates specs/app-startup.feature.md "App Starts with existing specs
+// Automates app-startup.md "App Starts with existing specs
 // folder selected": with a data folder already configured, the app opens on
 // the folder's README.md in an editor, and the editor's autosaves are plain
 // local writes that the reload cron's sync commits and pushes.

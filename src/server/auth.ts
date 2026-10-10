@@ -1,4 +1,4 @@
-// GitHub sign-in (specs/git-operations.spec.md), two flows over the same
+// GitHub sign-in (git-operations.md), two flows over the same
 // GitHub App: the browser (web application) flow — Settings opens
 // github.com/login/oauth/authorize, GitHub redirects back to this server's
 // callback route — and the device flow, where the user enters a short code

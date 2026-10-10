@@ -18,7 +18,7 @@ outside the app (an older app version, a GitHub PR) is reconciled back into
 the documents on the next sync tick. Optionally, Settings can name a
 websocket sync server (e.g. wss://sync.automerge.org) that delivers the
 same operations in near-real time — off by default, git stays the source of
-record. See specs/automerge-store.spec.md.
+record. See specs/datastore/automerge-store.feature.md.
 
 ## Authorized users:
 Users that have read/write access to the repo that stores data. 
@@ -26,7 +26,7 @@ Users that have read/write access to the repo that stores data.
 ## Local state
 
 `.specdriven/settings.json`, in the project root or in `$HOME`
-(specs/app-start.spec.md)
+(specs/ui/app-start.feature.md)
 
 ## Local trust boundary
 
@@ -147,7 +147,7 @@ carries Codex's thread id as `agentSessionId`; the thread is named after the
 session, so `codex resume` lists it by that name.
 
 The feature spec lives in the spec repo as
-`specs/agents/coding-agent-ui.feature.md`; the spec repo is never edited from
+`specs/agents/agent-pane.feature.md`; the spec repo is never edited from
 this one.
 
 # Decisions

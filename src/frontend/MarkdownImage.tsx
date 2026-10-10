@@ -3,9 +3,9 @@ import type { KeyboardEvent, PointerEvent } from "react";
 import { PencilRuler } from "lucide-react";
 import { isDiagram } from "./excalidraw/diagram";
 
-// Image sizing (specs/images.spec.md). A pasted screenshot lands at its pixel
-// size — on a HiDPI display twice as big as it looked on screen — so in an
-// editable Preview every image carries a handle at its bottom-right corner.
+// Image sizing (specs/images.feature.md). A pasted screenshot lands at its
+// pixel size — on a HiDPI display twice as big as it looked on screen — so in
+// an editable Preview every image carries a handle at its bottom-right corner.
 // Dragging it sets the width, written into the markdown as
 // `<img … width="…">` (src/frontend/markdown.tsx setImageWidth) so every
 // other view of the text shows the same size; a double-click on the handle

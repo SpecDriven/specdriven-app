@@ -121,8 +121,8 @@ test("the editor view carries each scenario's document id; the markdown carries 
 // draft under the first title, then the title and body were both rewritten.
 // The editor names the draft by its document id, so Publish publishes that
 // draft under its new name; it does not add a second spec beside a draft that
-// lingers under the old one (specs/editor-autosave.feature.md "Autosave Never
-// Adds the Same Scenario Twice").
+// lingers under the old one (specs/editor/editor-autosave.feature.md "Autosave
+// Never Adds the Same Scenario Twice").
 test("Publish of a renamed draft publishes that draft, not a second spec beside it", async () => {
   await createFeature(root, "Quote");
   const tick = await saveFeature(

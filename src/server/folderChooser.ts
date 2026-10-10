@@ -1,4 +1,4 @@
-// Native OS folder chooser (specs/app-start.spec.md "picking the data
+// Native OS folder chooser (specs/ui/app-start.feature.md "picking the data
 // directory with the native folder chooser"). Pluggable like the token
 // store's backend: the desktop shell swaps in Electron's window-parented
 // dialog (src/electron/main.ts); the defaults cover the web server on

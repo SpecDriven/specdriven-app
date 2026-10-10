@@ -83,7 +83,7 @@ const plugin: Plugin<Context> = {
     add("PUT", "/api/tests/executions/:id/results/:caseId", async (dir, req, params) => {
       const body = await bodyOf(req);
       // Who recorded it: the git author when known, else the signed-in login,
-      // else the OS user (specs/user-info-settings.spec.md).
+      // else the OS user (specs/user-info-settings.feature.md).
       const user = await getCurrentUser();
       const by = user.name ?? user.login ?? user.username;
       return json({

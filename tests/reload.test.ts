@@ -23,8 +23,9 @@ const realHome = process.env.SPECDRIVEN_HOME;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "specdriven-reload-"));
-  // Point the ~/.specdriven fallback (specs/app-start.spec.md) at an empty
-  // temp dir, so a developer's own settings file can't configure these tests.
+  // Point the ~/.specdriven fallback (specs/ui/app-start.feature.md) at an
+  // empty temp dir, so a developer's own settings file can't configure these
+  // tests.
   home = await mkdtemp(join(tmpdir(), "specdriven-reload-home-"));
   process.env.SPECDRIVEN_HOME = home;
 });
@@ -40,7 +41,7 @@ afterEach(async () => {
   else process.env.SPECDRIVEN_HOME = realHome;
 });
 
-// specs/crud-feature.spec.md: reload frequency is "every n seconds", set in
+// crud-feature.md: reload frequency is "every n seconds", set in
 // the Settings screen; unset or invalid values fall back to the default.
 test("unset or invalid frequency falls back to the default", () => {
   expect(normalizeReloadSeconds(undefined)).toBe(DEFAULT_RELOAD_SECONDS);

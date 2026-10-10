@@ -43,7 +43,7 @@ const proposals = isProposalsMode()
   : null;
 
 // The API itself lives in server/api.ts so the desktop app can serve the
-// same routes over its app:// protocol (specs/desktop-app.spec.md).
+// same routes over its app:// protocol (specs/app/desktop-app.feature.md).
 if (!proposals) void applyStartupState();
 
 // A hosted worker serves the API alone: its gateway serves the frontend to
@@ -59,7 +59,7 @@ const shellRoutes = () => ({
   // The platform's health check (railway.json), as the gateway answers it.
   "/healthz": new Response("ok"),
 
-  // Deep links (specs/navigation.spec.md): every /features/... url serves
+  // Deep links (specs/ui/navigation.feature.md): every /features/... url serves
   // the app shell; the client resolves it against /api/features/:file. The
   // desktop shell already falls back to it for any unbundled path
   // (src/electron/static.ts).

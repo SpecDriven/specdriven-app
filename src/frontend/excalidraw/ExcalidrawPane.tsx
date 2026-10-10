@@ -46,8 +46,8 @@ if (typeof window !== "undefined") {
 
 /**
  * Excalidraw's own light/dark: the app's explicit theme choice when there is
- * one (specs/ui.spec.md "Settings"), otherwise the system's — the same rule
- * the Event Models plugin's canvas follows.
+ * one (specs/ui/ui.feature.md "Settings"), otherwise the system's — the same
+ * rule the Event Models plugin's canvas follows.
  */
 function readDark(): boolean {
   const t = document.documentElement.dataset.theme;

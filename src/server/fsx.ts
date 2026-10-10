@@ -1,7 +1,7 @@
 // File helpers on Node APIs only, shared by web and desktop runtimes
-// (specs/desktop-app.spec.md). They fill the two Bun.file/Bun.write habits
-// the code was written against: writes create missing parent directories,
-// and reads of missing paths are null rather than exceptions.
+// (specs/app/desktop-app.feature.md). They fill the two Bun.file/Bun.write
+// habits the code was written against: writes create missing parent
+// directories, and reads of missing paths are null rather than exceptions.
 
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";

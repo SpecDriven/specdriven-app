@@ -1,5 +1,5 @@
-// Automates specs/desktop-app.spec.md: the API route table is matched by a
-// runtime-agnostic matcher so Bun.serve (web) and the app:// protocol
+// Automates specs/app/desktop-app.feature.md: the API route table is matched by
+// a runtime-agnostic matcher so Bun.serve (web) and the app:// protocol
 // (desktop) serve identical routes.
 
 import { describe, expect, test } from "bun:test";
@@ -27,7 +27,7 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/project-settings")).toBeNull();
   });
 
-  // GitHub sign-in routes (specs/git-operations.spec.md): device-flow
+  // GitHub sign-in routes (git-operations.md): device-flow
   // start and poll, browser-flow start/poll/callback, plus sign-out.
   test("auth routes match by method", () => {
     expect(matchApi("POST", "/api/auth/github/start")).not.toBeNull();
@@ -41,7 +41,7 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/auth/github")).toBeNull();
   });
 
-  // Image upload + serving (specs/images.spec.md).
+  // Image upload + serving (specs/images.feature.md).
   test("image routes match by method", () => {
     expect(matchApi("POST", "/api/images")).not.toBeNull();
     expect(matchApi("GET", "/api/images")).toBeNull();
@@ -152,7 +152,7 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/tests/executions/e1/results/c1")).toBeNull();
   });
 
-  // Code gen session (specs/agents/claude.spec.md): the client posts the
+  // Code gen session (specs/agents/claude.feature.md): the client posts the
   // session name and the selected specs.
   test("agent session route matches POST only", () => {
     expect(matchApi("POST", "/api/agent/session")).not.toBeNull();
@@ -193,7 +193,7 @@ describe("matchApi", () => {
     expect(move!.params).toEqual({ file: "quote.feature.md" });
   });
 
-  // Draft deletion (specs/ui.spec.md "Scenario editor"): POST, so the
+  // Draft deletion (specs/ui/ui.feature.md "Scenario editor"): POST, so the
   // scenario's name and version can ride in the body.
   test("the draft delete route matches POST only", () => {
     expect(matchApi("POST", "/api/features/quote.feature.md/delete-draft")).not.toBeNull();

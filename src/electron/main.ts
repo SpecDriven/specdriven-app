@@ -1,5 +1,5 @@
-// Electron entry (specs/desktop-app.spec.md): the desktop shell serves the
-// built frontend and the shared server/api.ts routes over an internal
+// Electron entry (specs/app/desktop-app.feature.md): the desktop shell serves
+// the built frontend and the shared server/api.ts routes over an internal
 // app:// protocol — no localhost port is opened. In development
 // (ELECTRON_DEV=1) it loads the running Bun dev server instead, for HMR.
 
@@ -51,7 +51,7 @@ const DEV_URL = process.env.ELECTRON_DEV
   ? `http://localhost:${process.env.PORT || 3000}`
   : null;
 
-// One app-data anchor for the server modules (specs/desktop-app.spec.md
+// One app-data anchor for the server modules (specs/app/desktop-app.feature.md
 // "Data locations"): settings resolve from here (falling through to
 // ~/.specdriven/settings.json, shared with the web version) and GitHub data
 // repos are cloned under <userData>/repos. The server modules read these
@@ -80,8 +80,8 @@ app.on("will-quit", (event) => {
 // A packaged macOS app launches with a minimal PATH; append the usual
 // Homebrew locations so git and gh can be found there — every git operation
 // needs the one, the default engine needs the other
-// (specs/desktop-app.spec.md "Git") — and ~/.local/bin, where the native
-// Claude installer puts `claude` (specs/agents/coding-agent-ui.feature.md).
+// (specs/app/desktop-app.feature.md "Git") — and ~/.local/bin, where the native
+// Claude installer puts `claude` (specs/agents/agent-pane.feature.md).
 if (process.platform === "darwin") {
   const parts = (process.env.PATH || "").split(":");
   for (const dir of ["/usr/local/bin", "/opt/homebrew/bin", join(homedir(), ".local", "bin")]) {
@@ -99,11 +99,12 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 
-// specdriven:// is the public face of the same paths (specs/navigation.spec.md
-// "links from outside the app"): registering it with the OS is what makes a
-// link in chat, email or a browser launch this app. The packaged app declares
-// it in its Info.plist too (package.json "build.protocols"); an unpackaged dev
-// run has to point the OS at the electron binary plus this project.
+// specdriven:// is the public face of the same paths
+// (specs/ui/navigation.feature.md "links from outside the app"): registering it
+// with the OS is what makes a link in chat, email or a browser launch this app.
+// The packaged app declares it in its Info.plist too (package.json
+// "build.protocols"); an unpackaged dev run has to point the OS at the electron
+// binary plus this project.
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
     app.setAsDefaultProtocolClient(DESKTOP_SCHEME, process.execPath, [resolve(process.argv[1]!)]);
@@ -139,7 +140,8 @@ async function serveApp(req: Request): Promise<Response> {
         return new Response(data, { headers: { "content-type": mimeType(filePath) } });
       }
     }
-    // Deep links (specs/navigation.spec.md): unknown paths serve the shell.
+    // Deep links (specs/ui/navigation.feature.md): unknown paths serve the
+    // shell.
     return await serveShell();
   } catch (e) {
     console.error(`[app://] ${url.pathname}: ${(e as Error).message}`);
@@ -203,7 +205,7 @@ function createWindow(): void {
     // Matches the design system's --surface-1 so the window never flashes
     // white while the renderer loads.
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1F1E1D" : "#F0EEE6",
-    // specs/desktop-app.spec.md "Window": traffic lights sit inside the
+    // specs/app/desktop-app.feature.md "Window": traffic lights sit inside the
     // sidebar header, which doubles as the drag region (CSS app-region).
     ...(process.platform === "darwin"
       ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 21 } }
@@ -248,7 +250,7 @@ function createWindow(): void {
     if (win && !win.isDestroyed()) saveWindowState(stateFile, currentState(win));
   });
 
-  // specs/desktop-app.spec.md "External links": target=_blank and plain
+  // specs/app/desktop-app.feature.md "External links": target=_blank and plain
   // navigations away from the app both land in the default browser.
   // A specdriven:// link pasted into a spec body is one of ours: follow it
   // in place rather than handing the OS a link back to this same window.
@@ -336,7 +338,7 @@ function installDebugMenu(): void {
   );
 }
 
-// One main window (specs/desktop-app.spec.md "Window"): a second launch
+// One main window (specs/app/desktop-app.feature.md "Window"): a second launch
 // focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -352,14 +354,15 @@ if (!app.requestSingleInstanceLock()) {
       respond(permission === "clipboard-sanitized-write");
     });
     protocol.handle("app", serveApp);
-    // GitHub token storage (specs/desktop-app.spec.md): OS-encrypted via
+    // GitHub token storage (specs/app/desktop-app.feature.md): OS-encrypted via
     // safeStorage; without a key store the server's 0600-file backend
     // stays in place. safeStorage needs the ready app, hence here.
     if (safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
     }
-    // Data-directory picker (specs/app-start.spec.md): replace the server's
-    // osascript fallback with the native dialog, parented to the window.
+    // Data-directory picker (specs/ui/app-start.feature.md): replace the
+    // server's osascript fallback with the native dialog, parented to the
+    // window.
     setFolderChooser(async () => {
       const opts: Electron.OpenDialogOptions = {
         title: "Choose the spec data directory",
