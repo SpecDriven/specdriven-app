@@ -7901,3 +7901,35 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   background: var(--danger-bg);
   color: var(--danger-fg);
 }
+
+/* Files stored with a scenario (specs/editor/store-associated-files
+   .feature.md): the card's "Files" list and the editor pane's field reuse
+   the pull request list and add-row layout, with each file's size and its
+   rename / replace / remove actions after the name. */
+.file-list .file-size {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.file-list .file-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.file-list .file-actions a.link {
+  display: inline-flex;
+  color: inherit;
+}
+
+.file-list .file-rename {
+  flex: 1;
+}
+
+.files-field .file-upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}

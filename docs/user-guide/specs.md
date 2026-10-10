@@ -175,6 +175,8 @@ Each card shows:
   **Scenario preview lines** setting.
 - An **Automated tests** table of links, when the scenario has any and
   **Show links to automated tests** is on.
+- A **Files** list of the files stored with the scenario, each a download
+  with its size.
 - A line saying who **created** the scenario and who **last updated** it.
   A new version of a published scenario is a new scenario, created by
   whoever proposed it.
@@ -246,11 +248,22 @@ Below, in one scrolling column:
   so the link reads `quotesAHomeownersPolicy` rather than a bare url. Java,
   Kotlin, TypeScript, JavaScript, Python and Go are recognised. A url left
   in the add field is folded into the next save.
+- **Files**: the files the scenario needs when it runs — xml, csv, json or
+  binary test data to upload into the system under test. **Upload files**
+  opens the system's file picker; pick one file or several. Each file is
+  listed with its size and downloads under its name when clicked. ✎ renames
+  it, ↻ replaces its contents with another file, ✕ removes it from the
+  scenario. Uploading a file named like one already listed asks before it
+  replaces the contents. Files are stored under the data folder's `.files/`,
+  committed and pushed like the rest of the data; each is limited to 25 MB.
+  Files can be added once the scenario has been saved, and stay with the
+  scenario when it moves to another feature. A new version starts without
+  files.
 
 A **published** scenario opens read-only: the title is fixed, the body is
 shown as source, the scenario table is hidden, and there is no save button,
-because nothing about a published scenario can change. Its ticket link and
-automated tests remain editable and are saved automatically, so developers
+because nothing about a published scenario can change. Its ticket link,
+automated tests, pull requests and files remain editable and are saved automatically, so developers
 can attach tests to a scenario long after it was published.
 
 **Delete** asks for confirmation. Deleting a draft or a proposed scenario
