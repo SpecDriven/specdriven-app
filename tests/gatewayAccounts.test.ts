@@ -157,7 +157,7 @@ test("changing the password needs the current one and ends every session", async
   expect(sessions.lookup(token)).toBeNull();
 });
 
-test("password rules: length, common passwords, the email's name", () => {
+test("password rules — length, common passwords, the email's name", () => {
   expect(passwordProblem("short")).toMatch(/at least 12/);
   expect(passwordProblem("x".repeat(257))).toMatch(/at most/);
   expect(passwordProblem("password1234")).toMatch(/common/);
