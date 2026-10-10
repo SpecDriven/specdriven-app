@@ -19,6 +19,8 @@ import {
   startWebFlow,
 } from "../src/server/auth";
 import { createFileBackend, setTokenBackend } from "../src/server/tokenStore";
+import { actAs } from "../src/server/actingAs";
+import { currentAuthor } from "../src/server/user";
 
 let dir: string;
 let tokenFile: string;
@@ -255,4 +257,21 @@ test("token round-trips through the file backend across backend resets", async (
   const auth = await getAuth();
   expect(auth?.login).toBe("octo");
   expect(auth?.token).toBe("tok-123");
+});
+
+// specs/app/spec-proposals.feature.md: the proposals service commits each
+// proposal as the visitor who made it, inside actAs; the stored sign-in is
+// what every call outside it — and every other request meanwhile — sees.
+test("inside actAs getAuth answers the visitor; outside it, the stored sign-in", async () => {
+  const stored = { token: "bot", login: "bot", name: "Bot", email: null, id: 1 };
+  setTokenBackend({ load: async () => stored, save: async () => {}, clear: async () => {} });
+  const visitor = { token: "bot", login: "ada", name: "Ada", email: "7+ada@users.noreply.github.com", id: 7 };
+  const seen = await actAs(visitor, async () => {
+    await Bun.sleep(1); // across an await, still the visitor
+    return (await getAuth())?.login;
+  });
+  expect(seen).toBe("ada");
+  expect((await getAuth())?.login).toBe("bot");
+  expect(await actAs(visitor, async () => currentAuthor())).toBe("ada");
+  setTokenBackend(createFileBackend(tokenFile));
 });
