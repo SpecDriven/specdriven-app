@@ -20,6 +20,7 @@ import { setFolderChooser } from "../src/server/folderChooser";
 import { setGitEngine } from "../src/server/git";
 import { readState } from "../src/server/state";
 import { version as pkgVersion } from "../package.json";
+import { sourceUrl } from "../src/server/sourceUrl";
 
 let root: string;
 let source: string;
@@ -355,6 +356,13 @@ test("no native folder chooser: /api/choose-folder is 501", async () => {
 test("state carries the app version — the demo shows it beside the user", async () => {
   const state = await bootState();
   expect(state.version).toBe(pkgVersion);
+});
+
+// specs/app/open-source-license.feature.md: the public demo is a network
+// service, so the AGPL asks it to offer its source — the user menu links it.
+test("state carries the source url of the running version", async () => {
+  const state = await bootState();
+  expect(state.sourceUrl).toBe(sourceUrl(pkgVersion));
 });
 
 test("the demo user is Test User, not the OS account", async () => {

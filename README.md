@@ -446,13 +446,24 @@ supersedes them. That link is bidirectional: the test carries a `@Spec` annotati
 `file#scenario@version`, so tooling can flag a spec that moved without its test.
 PMs publish spec versions; developers own the tests.
 
+## Contributing
+
+We do not accept pull requests. Every line we ship is code we answer for,
+and we can't take on the security liability of merging outside code or the
+time it takes to review it. Pull requests are closed automatically.
+
+What we do welcome is specs. This app is built from the specifications in
+[SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven),
+and a proposed spec — a feature with Given/When/Then scenarios — is the most
+useful thing you can send us. [CONTRIBUTING.md](CONTRIBUTING.md) says how;
+report vulnerabilities as [SECURITY.md](SECURITY.md) describes.
+
 ## License
 
-specdriven.app is source-available under the unmodified
-[PolyForm Perimeter 1.0.1](https://polyformproject.org/licenses/perimeter/1.0.1)
-license, not unrestricted open source. Internal business use, including
-commercial and production use, is permitted, and you may change and
-distribute the software; using it to provide a product that competes with
-specdriven.app is restricted. Read [LICENSE.md](LICENSE.md) and
-[NOTICE.md](NOTICE.md). For anything beyond that, contact
-info@specdriven.app.
+specdriven.app is free software under the
+[GNU Affero General Public License v3.0 only](https://choosealicense.com/licenses/agpl-3.0/)
+(`AGPL-3.0-only`). You may use, change and share it; if you run a modified
+copy as a network service, the license asks you to offer its users your
+source, and the app's **Source code** link (the user menu) points at it —
+set `SPECDRIVEN_SOURCE_URL` to your own. Read [LICENSE.md](LICENSE.md) and
+[NOTICE.md](NOTICE.md). No trademark rights are granted.
