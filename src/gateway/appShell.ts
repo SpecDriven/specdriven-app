@@ -75,7 +75,8 @@ export async function loadAppShell(opts: { production: boolean; distDir?: string
       }
       if (isWorkerPath(url.pathname)) return null;
       // Every other path is a page of the app: the client routes it
-      // (specs/navigation.spec.md), as the worker's own shell routes did.
+      // (specs/ui/navigation.feature.md "URL scheme"), as the worker's own
+      // shell routes did.
       return new Response(shellBody as BodyInit, {
         headers: { "Content-Type": "text/html;charset=utf-8", "Cache-Control": "no-cache" },
       });
