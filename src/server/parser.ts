@@ -98,6 +98,22 @@ export interface PullRequestLink {
   title: string;
 }
 
+/**
+ * A file stored with a scenario (specs/editor/store-associated-files
+ * .feature.md) — test data such as xml, csv, json or a binary the scenario
+ * uploads into the system under test. Held in the Automerge document only,
+ * like a pull request link; the bytes live under `.files/` in the data repo
+ * (src/server/scenarioFiles.ts).
+ */
+export interface ScenarioFile {
+  /** The name it is listed and downloaded under; unique within a scenario. */
+  name: string;
+  /** The stored, content-addressed file under `.files/`. */
+  file: string;
+  /** Size in bytes. */
+  size: number;
+}
+
 export interface Scenario {
   name: string;
   version: number;
@@ -125,6 +141,11 @@ export interface Scenario {
    * carried on what the editor reads from the server, never serialized.
    */
   prs?: PullRequestLink[];
+  /**
+   * The files stored with this scenario. Document-only, like `prs`: carried
+   * on what the editor reads from the server, never serialized.
+   */
+  files?: ScenarioFile[];
   /** Who created the scenario (specs/app/specs-authorship.feature.md). */
   createdBy?: string;
   /** Who last changed it. */

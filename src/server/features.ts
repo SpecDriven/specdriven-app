@@ -10,6 +10,7 @@ import {
   reconcile,
   removeDraftScenario,
   setPullRequests,
+  setScenarioFiles,
 } from "./automerge/reconcile";
 import {
   createFeatureDoc,
@@ -45,6 +46,7 @@ import {
 import type {
   Feature,
   PullRequestLink,
+  ScenarioFile,
   ScenarioPick,
   ScenarioStatus,
   ScenarioTarget,
@@ -196,6 +198,9 @@ async function featureView(
   // Plain copies of the document's links (docToFeature strips the proxies).
   const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
   const docPrs = new Map(inDoc.scenarios.map((s) => [key(s), s.prs] as const));
+  // Stored files (specs/editor/store-associated-files.feature.md): the
+  // document's alone, like the pull request links.
+  const docFiles = new Map(inDoc.scenarios.map((s) => [key(s), s.files] as const));
   // Authorship (specs/app/specs-authorship.feature.md) is the document's
   // record; the file carries it only while the repo asks for it, and a hand
   // edit of those lines never moves it (reconcile.ts assignAuthors).
@@ -210,6 +215,7 @@ async function featureView(
     .map((s) => {
       const link = docLinks.get(key(s));
       const prs = docPrs.get(key(s));
+      const files = docFiles.get(key(s));
       return {
         id: s.id,
         name: s.name,
@@ -219,6 +225,7 @@ async function featureView(
         tests: [...s.tests],
         ...(link ? { link } : {}),
         ...(prs ? { prs } : {}),
+        ...(files ? { files } : {}),
         ...docAuthors.get(key(s)),
       };
     });
@@ -231,12 +238,14 @@ async function featureView(
     const link = s.link ?? docLinks.get(key(s));
     if (link && !s.link) linked++;
     const prs = docPrs.get(key(s));
+    const files = docFiles.get(key(s));
     const { createdBy: _c, updatedBy: _u, ...rest } = s;
     return {
       ...rest,
       ...(id === undefined ? {} : { id }),
       ...(link ? { link } : {}),
       ...(prs ? { prs } : {}),
+      ...(files ? { files } : {}),
       ...docAuthors.get(key(s)),
     };
   });
@@ -649,6 +658,63 @@ export async function savePullRequests(
 }
 
 /**
+ * Set the files stored with one scenario
+ * (specs/editor/store-associated-files.feature.md): a direct document write
+ * like savePullRequests — the list never reaches the markdown — committed
+ * and pushed by the reload cron. The bytes are already stored
+ * (scenarioFiles.ts storeScenarioFile); this only says which of them the
+ * scenario lists, and under what names. A feature with no document yet gets
+ * one minted from the file first. Throws when the scenario is not in the
+ * document.
+ */
+export async function saveScenarioFiles(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+  files: ScenarioFile[],
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  let loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) {
+    await createFeatureDoc(dataDir, name, importFeatureDoc(parseFeature(content)));
+    loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Could not create a document for ${name}`);
+  }
+  const next = setScenarioFiles(loaded.doc, target, files);
+  if (next === null) {
+    throw new Error(`Scenario "${target.name}" @v${target.version} not found`);
+  }
+  await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, content)),
+    message: "files saved locally",
+  };
+}
+
+/**
+ * The files one scenario of a feature lists right now, read from its
+ * document — what an upload adds to or replaces in. Empty when the feature
+ * has no document yet; null when the document has no such scenario.
+ */
+export async function readScenarioFiles(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<ScenarioFile[] | null> {
+  const name = safe(fileName);
+  const loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) return [];
+  const entry =
+    (target.id ? loaded.doc.specs.find((s) => s.id === target.id) : undefined) ??
+    loaded.doc.specs.find((s) => s.name === target.name && s.version === target.version);
+  if (!entry) return null;
+  return (entry.files ?? []).map((f) => ({ name: f.name, file: f.file, size: f.size }));
+}
+
+/**
  * Delete a published scenario (specs/editor/spec-editor.feature.md "Delete
  * Published Spec"): the one removal a plain save must never perform —
  * published scenarios are immutable, and both immutability gates would refuse
@@ -748,9 +814,9 @@ export async function moveScenario(
   }
 
   // Into the target: a fresh document entry there (no id — ids belong to the
-  // source's document), then its pull request links, which only the
-  // document holds.
-  const { id: _id, prs, ...carried } = moving;
+  // source's document), then its pull request links and stored files, which
+  // only the document holds.
+  const { id: _id, prs, files, ...carried } = moving;
   await saveFeature(
     dataDir,
     to,
@@ -758,6 +824,9 @@ export async function moveScenario(
   );
   if (prs && prs.length > 0) {
     await savePullRequests(dataDir, to, { name: moving.name, version: moving.version }, prs);
+  }
+  if (files && files.length > 0) {
+    await saveScenarioFiles(dataDir, to, { name: moving.name, version: moving.version }, files);
   }
 
   // Out of the source, by what the scenario is — as its Delete would.

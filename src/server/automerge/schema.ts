@@ -8,7 +8,7 @@
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
 import type { ImmutableString } from "@automerge/automerge";
-import type { EntryKind, ExternalLink, PullRequestLink, ScenarioStatus } from "../parser";
+import type { EntryKind, ExternalLink, PullRequestLink, ScenarioFile, ScenarioStatus } from "../parser";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
 // the doc-only `draft` state.
@@ -68,6 +68,15 @@ export type SpecEntry = {
    * pull requests concurrently end with both. Optional key, no migration.
    */
   prs?: PullRequestLink[];
+  /**
+   * The files stored with this spec
+   * (specs/editor/store-associated-files.feature.md), by name. Document-only
+   * like `prs`, and a list for the same reason: two peers attaching
+   * different files concurrently end with both. The bytes are not in the
+   * document — each entry names a content-addressed file under `.files/`.
+   * Optional key, no migration.
+   */
+  files?: ScenarioFile[];
   /**
    * Who created this spec and who last changed it
    * (specs/app/specs-authorship.feature.md) — the identity the app works as
