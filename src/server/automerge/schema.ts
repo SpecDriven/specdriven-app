@@ -68,6 +68,15 @@ export type SpecEntry = {
    * pull requests concurrently end with both. Optional key, no migration.
    */
   prs?: PullRequestLink[];
+  /**
+   * Who created this spec and who last changed it
+   * (specs/app/specs-authorship.feature.md) — the identity the app works as
+   * (src/server/user.ts currentAuthor). Scalars set whole, so concurrent
+   * edits resolve to one name. Optional keys, no migration: a spec older
+   * than them simply has no recorded author.
+   */
+  createdBy?: string;
+  updatedBy?: string;
 };
 
 /** The recorded published body as a plain string, or undefined when the entry
@@ -111,6 +120,12 @@ export type FeatureDoc = {
    * simply lack it, no migration needed.
    */
   assigned?: string;
+  /**
+   * Who created the feature and who last changed it or any of its specs
+   * (specs/app/specs-authorship.feature.md; see SpecEntry.createdBy).
+   */
+  createdBy?: string;
+  updatedBy?: string;
 };
 
 // Page documents — the roadmap folder's (specs/app/roadmap.feature.md) and
