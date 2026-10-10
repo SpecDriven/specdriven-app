@@ -136,6 +136,7 @@ import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { version as appVersion } from "../../package.json";
+import { sourceUrl } from "./sourceUrl";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
@@ -445,6 +446,9 @@ async function stateFields(state: SpecDrivenState) {
     // The running app's version (package.json). The demo shows it beside the
     // user name, so a public demo says which build is on screen.
     version: appVersion,
+    // The running build's source (src/server/sourceUrl.ts): the AGPL asks a
+    // network-served copy to offer it, so the user menu links to it.
+    sourceUrl: sourceUrl(),
     ...gitEngineFields(state),
     ...(await authFields()),
   };
