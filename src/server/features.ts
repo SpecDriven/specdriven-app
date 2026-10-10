@@ -3,7 +3,7 @@ import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
-import { docToFeature, isProjectionOf, projectFeature } from "./automerge/project";
+import { docToFeature, isProjectionOf, projectFeature, projectionFor } from "./automerge/project";
 import {
   assertPublishedKept,
   importFeatureDoc,
@@ -50,6 +50,7 @@ import type {
   ScenarioTarget,
 } from "./parser";
 import { cleanLine } from "./text";
+import { currentAuthor } from "./user";
 
 export { slugify } from "./parser";
 export type { ScenarioTarget } from "./parser";
@@ -195,6 +196,14 @@ async function featureView(
   // Plain copies of the document's links (docToFeature strips the proxies).
   const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
   const docPrs = new Map(inDoc.scenarios.map((s) => [key(s), s.prs] as const));
+  // Authorship (specs/app/specs-authorship.feature.md) is the document's
+  // record; the file carries it only while the repo asks for it, and a hand
+  // edit of those lines never moves it (reconcile.ts assignAuthors).
+  const authorsOf = (s: { createdBy?: string; updatedBy?: string }) => ({
+    ...(s.createdBy ? { createdBy: s.createdBy } : {}),
+    ...(s.updatedBy ? { updatedBy: s.updatedBy } : {}),
+  });
+  const docAuthors = new Map(inDoc.scenarios.map((s) => [key(s), authorsOf(s)] as const));
   const have = new Set(feature.scenarios.map(key));
   const drafts = loaded.doc.specs
     .filter((s) => s.status === "draft" && !have.has(key(s)))
@@ -210,6 +219,7 @@ async function featureView(
         tests: [...s.tests],
         ...(link ? { link } : {}),
         ...(prs ? { prs } : {}),
+        ...docAuthors.get(key(s)),
       };
     });
   // Links: the file's own where it has one (it is the source for what it
@@ -221,45 +231,60 @@ async function featureView(
     const link = s.link ?? docLinks.get(key(s));
     if (link && !s.link) linked++;
     const prs = docPrs.get(key(s));
+    const { createdBy: _c, updatedBy: _u, ...rest } = s;
     return {
-      ...s,
+      ...rest,
       ...(id === undefined ? {} : { id }),
       ...(link ? { link } : {}),
       ...(prs ? { prs } : {}),
+      ...docAuthors.get(key(s)),
     };
   });
   const link = feature.link ?? inDoc.link;
   if (link && !feature.link) linked++;
   // Pull request links are the document's alone: the file never holds them,
   // and serializeFeature never writes them, so `content` is unaffected.
+  const { createdBy: _c, updatedBy: _u, ...featureRest } = feature;
   const parsed: Feature = {
-    ...feature,
+    ...featureRest,
     ...(link ? { link } : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
+    ...authorsOf(inDoc),
     scenarios: sortScenarios([...scenarios, ...drafts]),
   };
+  // The text keeps the file's form for authorship: lines only where the
+  // file has them, the parsed view carrying the document's record always.
+  const authored =
+    !!(feature.createdBy || feature.updatedBy) ||
+    feature.scenarios.some((s) => s.createdBy || s.updatedBy);
   return {
-    content: drafts.length === 0 && linked === 0 ? content : serializeFeature(parsed),
+    content:
+      drafts.length === 0 && linked === 0
+        ? content
+        : serializeFeature(parsed, { authors: authored }),
     parsed,
   };
 }
 
 /**
  * Rewrite every feature file to its document's current projection — what
- * the "Publish external links" switch does on the spot, so toggling it puts
- * the links into (or takes them out of) every `.feature.md` at once rather
+ * the "Publish external links" switch does on the spot, and the repo's
+ * `authors-in-markdown` switch (specs/app/specs-authorship.feature.md), so
+ * toggling either puts the links or the authors into (or takes them out of)
+ * every `.feature.md` at once rather
  * than one file at a time as they happen to be edited. Local writes; the
  * reload cron commits and pushes them like any saved change. Returns how
  * many files changed.
  */
 export async function reprojectFeatures(dataDir: string): Promise<number> {
+  const options = await projectionFor(dataDir);
   let changed = 0;
   for (const fileName of await listFeatureDocs(dataDir)) {
     const text = await readTextFile(`${dataDir}/${fileName}`);
     if (text === null) continue;
     const loaded = await loadFeatureDoc(dataDir, fileName);
     if (loaded === null) continue;
-    const projection = projectFeature(loaded.doc);
+    const projection = projectFeature(loaded.doc, options);
     // Only a file that already is a projection — in the other form — is
     // rewritten; a drifted file is left for the sync tick to absorb first.
     if (text === projection || !isProjectionOf(text, loaded.doc)) continue;
@@ -942,11 +967,26 @@ async function absorbIntoDoc(
 ): Promise<string> {
   return withSpan("automerge.absorb_edit", { "specdriven.file": fileName }, async (span) => {
     let feature = parseFeature(text);
+    // Every write through here is the app's user's own edit, so it is theirs
+    // to sign (specs/app/specs-authorship.feature.md); the drift folded in
+    // below is not, and reconciles unsigned.
+    const author = await currentAuthor();
+    const options = await projectionFor(dataDir);
     const loaded = await loadFeatureDoc(dataDir, fileName);
     if (loaded === null) {
       span.setAttribute("automerge.imported", true);
-      const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature));
-      return projectFeature(created.doc);
+      // A file already on disk without a document (written before documents
+      // existed) is imported unsigned first — its scenarios were not created
+      // by whoever happens to save it next — and this write reconciled on top.
+      const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
+      if (disk === null || featureTextError(disk) !== null) {
+        const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature, author));
+        return projectFeature(created.doc, options);
+      }
+      const imported = importFeatureDoc(parseFeature(disk));
+      const next = reconcile(imported, feature, { force, scenario, author });
+      const created = await createFeatureDoc(dataDir, fileName, next);
+      return projectFeature(created.doc, options);
     }
     let doc = loaded.doc;
     const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
@@ -954,9 +994,9 @@ async function absorbIntoDoc(
       span.setAttribute("automerge.drift_folded", true);
       ({ doc, feature } = foldDrift(fileName, doc, disk, feature));
     }
-    const next = reconcile(doc, feature, { force, scenario });
+    const next = reconcile(doc, feature, { force, scenario, author });
     await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
-    return projectFeature(next);
+    return projectFeature(next, options);
   });
 }
 

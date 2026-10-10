@@ -17,18 +17,31 @@ import type {
 import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
-/** Create a document from a parsed feature file (first import). */
-export function importFeatureDoc(feature: Feature): A.Doc<FeatureDoc> {
+/**
+ * Create a document from a parsed feature file (first import). `author` is
+ * who is writing it (specs/app/specs-authorship.feature.md): the creator of
+ * whatever the file does not already name a creator for, and the last
+ * updater of everything. Without one — a file found on disk, whose writer
+ * the app cannot know — only the authorship the markdown itself carries is
+ * recorded.
+ */
+export function importFeatureDoc(feature: Feature, author?: string): A.Doc<FeatureDoc> {
+  const createdBy = feature.createdBy ?? author;
+  const updatedBy = author ?? feature.updatedBy;
   return newFeatureDoc({
     name: feature.name,
     description: feature.description,
-    specs: feature.scenarios.map(newEntry),
+    specs: feature.scenarios.map((s) => newEntry(s, author)),
     ...(feature.link ? { link: { ...feature.link } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {}),
   });
 }
 
-function newEntry(s: Scenario): SpecEntry {
+function newEntry(s: Scenario, author?: string): SpecEntry {
+  const createdBy = s.createdBy ?? author;
+  const updatedBy = author ?? s.updatedBy;
   return {
     id: randomUUID(),
     type: "Scenario",
@@ -41,7 +54,27 @@ function newEntry(s: Scenario): SpecEntry {
     ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
     tests: [...s.tests],
     ...(s.link ? { link: { ...s.link } } : {}),
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {}),
   };
+}
+
+/**
+ * Set a doc map's authorship (specs/app/specs-authorship.feature.md). The
+ * creator is history: once the document records one it stays, and the
+ * target's only fills in a creator the document never had. The last updater
+ * is `author` when this write changed the thing, else the same rule as the
+ * creator — markdown cannot move it, so a stale line in an editor's buffer
+ * or a hand edit never rewrites who last touched a spec.
+ */
+function assignAuthors(
+  holder: { createdBy?: string; updatedBy?: string },
+  target: { createdBy?: string; updatedBy?: string },
+  stamp: string | undefined,
+): void {
+  if (!holder.createdBy && target.createdBy) holder.createdBy = target.createdBy;
+  const updatedBy = stamp ?? holder.updatedBy ?? target.updatedBy;
+  if (updatedBy && holder.updatedBy !== updatedBy) holder.updatedBy = updatedBy;
 }
 
 /** Identity of a link for change detection; none is the empty string. */
@@ -121,11 +154,21 @@ export function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): vo
  *
  * `force` skips the published-immutability gate — only for an explicit human
  * decision (the conflict-resolution dialog), never for an automated write.
+ *
+ * `author` is who is making the edit (specs/app/specs-authorship.feature.md):
+ * the creator of every spec it adds and the last updater of every spec it
+ * changes, and of the feature when anything in it changed. Without one — an
+ * external edit the drift pass absorbs, whose writer the app cannot know —
+ * nobody is stamped.
  */
 export function reconcile(
   doc: A.Doc<FeatureDoc>,
   target: Feature,
-  { force = false, scenario }: { force?: boolean; scenario?: ScenarioTarget } = {},
+  {
+    force = false,
+    scenario,
+    author,
+  }: { force?: boolean; scenario?: ScenarioTarget; author?: string } = {},
 ): A.Doc<FeatureDoc> {
   if (!force) assertPublishedKept(doc, target);
 
@@ -139,6 +182,8 @@ export function reconcile(
     tests: [...e.tests],
     ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
   }));
+  // Read before any key is assigned below — schema.ts keeps them optional.
+  const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
   const docLink = doc.link
     ? { program: doc.link.program, ticket: doc.link.ticket, url: doc.link.url }
     : undefined;
@@ -177,6 +222,27 @@ export function reconcile(
 
   const additions = target.scenarios.filter((s) => !matched.has(s));
 
+  // What this write changes, for the authorship stamps: a matched entry
+  // whose projection moves, and the feature when anything in it does.
+  const entryChanged = (entry: (typeof entries)[number], match: Scenario) =>
+    entry.name !== match.name ||
+    entry.version !== match.version ||
+    entry.status !== match.status ||
+    effectiveBody(entry) !== match.body ||
+    entry.tests.join("\n") !== match.tests.join("\n") ||
+    linkKey(entry.link) !== linkKey(match.link);
+  const changedAt = new Set<number>();
+  for (const [i, match] of matchAt) if (entryChanged(entries[i]!, match)) changedAt.add(i);
+  const removed = entries.some((e, i) => !matchAt.has(i) && e.status !== "draft");
+  const featureChanged =
+    doc.name !== target.name ||
+    doc.description !== target.description ||
+    linkKey(docLink) !== linkKey(target.link) ||
+    (docAssigned ?? "") !== (target.assigned ?? "") ||
+    changedAt.size > 0 ||
+    removed ||
+    additions.length > 0;
+
   return A.change(doc, (d) => {
     if (d.name !== target.name) A.updateText(d, ["name"], target.name);
     if (d.description !== target.description) {
@@ -211,11 +277,23 @@ export function reconcile(
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
       assignLink(live, entry.link, match.link);
+      const before = authorsAt[i]!;
+      const holder = { ...before };
+      assignAuthors(holder, match, changedAt.has(i) ? author : undefined);
+      if (holder.createdBy !== before.createdBy) live.createdBy = holder.createdBy!;
+      if (holder.updatedBy !== before.updatedBy) live.updatedBy = holder.updatedBy!;
+    }
+    {
+      const before = { createdBy: doc.createdBy, updatedBy: doc.updatedBy };
+      const holder = { ...before };
+      assignAuthors(holder, target, featureChanged ? author : undefined);
+      if (holder.createdBy !== before.createdBy) d.createdBy = holder.createdBy!;
+      if (holder.updatedBy !== before.updatedBy) d.updatedBy = holder.updatedBy!;
     }
     for (let i = entries.length - 1; i >= 0; i--) {
       if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.specs, i);
     }
-    for (const s of additions) d.specs.push(newEntry(s));
+    for (const s of additions) d.specs.push(newEntry(s, author));
   });
 }
 

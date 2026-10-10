@@ -29,6 +29,19 @@ async function gitConfig(key: string): Promise<string | null> {
   return out.exitCode === 0 && value ? value : null;
 }
 
+/**
+ * Who the app's edits are signed by — a notebook entry's author
+ * (specs/app/engineering-notebook.feature.md), the creator and last updater
+ * of a feature or a scenario (specs/app/specs-authorship.feature.md): the
+ * identity that authors the app's commits to the data repo — the GitHub
+ * login when one is known, which for an agent given its own token is the
+ * agent's account, else the git user name, else the OS user.
+ */
+export async function currentAuthor(): Promise<string> {
+  const user = await getCurrentUser();
+  return user.login ?? user.name ?? user.username;
+}
+
 export async function getCurrentUser(): Promise<CurrentUser> {
   // The demo has no real user behind it: everyone who opens it is Test User.
   if (isDemoMode()) return { ...DEMO_USER };

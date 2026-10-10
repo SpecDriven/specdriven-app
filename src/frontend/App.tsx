@@ -167,6 +167,7 @@ import {
 import { buildTree, scenarioRows, withOpenScenarios } from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
+import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import type { ScenarioRef } from "./route";
 
@@ -807,6 +808,9 @@ interface Listing {
   folders: string[];
   members: ProjectMember[];
   codeRepo: string | null;
+  /** Whether the repo writes authorship into its feature files
+      (specs/app/specs-authorship.feature.md, `authors-in-markdown`). */
+  authorsInMarkdown: boolean;
   /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
   issuesRepo: GitHubRepo | null;
 }
@@ -862,6 +866,7 @@ export async function fetchListing(
           folders: (data.folders as string[]) ?? [],
           members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
           codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
+          authorsInMarkdown: data.authorsInMarkdown === true,
           issuesRepo:
             data.issuesRepo &&
             typeof data.issuesRepo === "object" &&
@@ -1012,6 +1017,10 @@ export function App() {
   // Code repo (src/server/members.ts `code-repo`): where a code gen session
   // runs, from the same file; null means the data repo.
   const [codeRepo, setCodeRepo] = useState<string | null>(null);
+  // Authorship in the feature files (specs/app/specs-authorship.feature.md):
+  // the data repo's `authors-in-markdown`, from the same file; null until a
+  // listing has been read, so Settings offers the switch only for a folder.
+  const [authorsInMarkdown, setAuthorsInMarkdown] = useState<boolean | null>(null);
   // GitHub issues (specs/app/github-issues.feature.md): the repository the
   // code repo pushes to, when it is a GitHub one — the Issues tab shows for
   // it. Null (no code repo, or not on GitHub) means no tab.
@@ -1434,6 +1443,7 @@ export function App() {
     setFolders(listing.folders);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
+    setAuthorsInMarkdown(listing.authorsInMarkdown);
     setIssuesRepo(listing.issuesRepo);
     setLoadError(null);
     return listing;
@@ -3826,6 +3836,30 @@ export function App() {
   const toggleDeletePublished = async (on: boolean) => {
     setSettingsDeletePublishedDraft(on);
     if (!(await patchSettings({ deletePublished: on }))) setSettingsDeletePublishedDraft(!on);
+  };
+
+  // Authorship in the markdown (specs/app/specs-authorship.feature.md): a
+  // setting of the data repo, not of this device — written into its
+  // project-settings.json, and every feature file rewritten on the spot.
+  const toggleAuthorsInMarkdown = async (on: boolean) => {
+    setSettingsError(null);
+    const before = authorsInMarkdown;
+    setAuthorsInMarkdown(on);
+    const res = await fetch("/api/project-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ authorsInMarkdown: on }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      authorsInMarkdown?: boolean;
+      error?: string;
+    };
+    if (!res.ok) {
+      setSettingsError(data.error ?? "Could not save the data folder's settings");
+      setAuthorsInMarkdown(before);
+      return;
+    }
+    setAuthorsInMarkdown(data.authorsInMarkdown === true);
   };
 
   const toggleAssignments = async (on: boolean) => {
@@ -6279,6 +6313,31 @@ export function App() {
           />
         </label>
         )}
+        {/* Authorship (specs/app/specs-authorship.feature.md): a setting
+            of the open data folder, kept in its project-settings.json —
+            the app records who created and last updated every feature and
+            scenario either way; this decides whether the markdown says so. */}
+        {authorsInMarkdown !== null && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Write authors into feature files
+            <span className="settings-row-hint">
+              {authorsInMarkdown
+                ? "Each feature and scenario in this data folder carries “Created by” and “Updated by” lines (authors-in-markdown in its project-settings.json)."
+                : "Who created and last updated each feature and scenario is recorded and shown here, but not written into this data folder's markdown."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={authorsInMarkdown}
+              onChange={(e) => void toggleAuthorsInMarkdown(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
         {/* Feature assignment (src/server/members.ts): opt-in — with
             the switch off the feature page offers no "Assigned"
             dropdown, and nothing already assigned is rewritten. */}
@@ -7813,6 +7872,14 @@ export function App() {
                 {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
                 {feature.scenarios.length} published
               </span>
+              {/* Who created the feature and last changed it
+                  (specs/app/specs-authorship.feature.md). */}
+              {authorshipLine(feature) && (
+                <span className="chip static feature-authors">
+                  <UserRound size={14} aria-hidden="true" />
+                  {authorshipLine(feature)}
+                </span>
+              )}
               {assignments && (
                 <span className="chip-anchor assignee-anchor">
                   <button
@@ -8242,6 +8309,9 @@ export function App() {
                       <PullRequestList prs={s.prs} />
                     </div>
                   )}
+                  {/* specs/app/specs-authorship.feature.md: who created the
+                      scenario and who last changed it. */}
+                  {authorshipLine(s) && <p className="scenario-authors">{authorshipLine(s)}</p>}
                 </article>
                 ),
               )}

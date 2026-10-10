@@ -110,7 +110,7 @@ import {
 import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
-import { PROJECT_SETTINGS_FILE, readProjectSettings } from "./members";
+import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
@@ -1050,12 +1050,40 @@ const getFeatures = withDataDir(async (dir) => {
     folders: await listFolders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
+    // Authorship in the feature files (specs/app/specs-authorship.feature.md)
+    // — a setting of the data repo, so it comes with the repo's listing.
+    authorsInMarkdown: settings.authorsInMarkdown,
     // GitHub issue tracking (specs/app/github-issues.feature.md): the
     // repository the code repo pushes to, when it is a GitHub one — the
     // Issues tab shows for it, and only for it. readIssuesRepo answers for
     // the demo too, which names its repo outright (demo.ts).
     issuesRepo: await readIssuesRepo(dir),
   });
+});
+
+// The data repo's own settings that Settings can change
+// (specs/app/specs-authorship.feature.md): `authors-in-markdown` in its
+// project-settings.json. Written into the repo — every teammate's app then
+// writes the feature files the same way — and every `.feature.md` is
+// reprojected on the spot, as the "Publish external links" switch does; the
+// reload cron commits and pushes the lot like any saved change.
+const putProjectSettings = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => null)) as { authorsInMarkdown?: unknown } | null;
+  if (typeof body?.authorsInMarkdown !== "boolean") {
+    return json({ error: "authorsInMarkdown must be a boolean" }, 400);
+  }
+  try {
+    if (await writeAuthorsInMarkdown(dir, body.authorsInMarkdown)) {
+      const changed = await reprojectFeatures(dir);
+      reloadLog.info(
+        `authors ${body.authorsInMarkdown ? "written into" : "withheld from"} ${changed} feature file(s)`,
+      );
+    }
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+  const settings = await readProjectSettings(dir);
+  return json({ authorsInMarkdown: settings.authorsInMarkdown });
 });
 
 // Full-text search (specs/search.spec.md): ranked hits over feature
@@ -1996,6 +2024,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/images", postImage],
   ["GET", "/api/images/:name", getImage],
   ["GET", "/api/search", getSearch],
+  ["PUT", "/api/project-settings", putProjectSettings],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
   ["GET", "/api/test-name", getTestName],
