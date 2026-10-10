@@ -79,12 +79,15 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   codeGenTarget: "pane",
   // No plugin list: each reseed's fresh data folder shows Specs alone
   // (specs/app/plugins.feature.md "Each data folder keeps its own plugins"),
-  // and a visitor switches plugins on in Settings → Plugins. The ones the
+  // and a visitor switches plugins on in Settings → Plugins. The empty
+  // `repos` says the file keeps per-folder lists, so it is not read as one
+  // from before them (src/plugins/profile.ts startFolderLists). The ones the
   // demo installs from the marketplace count as seen, so the loader lists
   // them off rather than adopting them. No `marketplaces` key: the default
   // SpecDriven index.
   plugins: {
     seen: DEMO_MARKETPLACE_PLUGINS.map((p) => p.id),
+    repos: {},
   },
   assignments: true,
   deletePublished: true,

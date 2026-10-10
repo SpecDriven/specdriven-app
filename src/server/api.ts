@@ -157,6 +157,7 @@ import {
   migrateProfile,
   readProfile,
   sameProfile,
+  startFolderLists,
   storedProfile,
   withPlugin,
   writeProfile,
@@ -645,9 +646,11 @@ const putState: Handler = async (req) => {
     }
     // An older file's device-wide plugin list goes to the folders it already
     // knows before the switch, so the picked folder, if new, starts with
-    // Specs alone (specs/app/plugins.feature.md).
+    // Specs alone (specs/app/plugins.feature.md). The file then says it
+    // keeps per-folder lists, so a restart never takes it for an older one.
     migrateProfile(state as Record<string, unknown>, profileManifests);
     state.dataRepo = dataRepo;
+    startFolderLists(state as Record<string, unknown>);
     // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
     // to the front, the oldest past ten falls off.
     rememberDataRepo(state, dataRepo);

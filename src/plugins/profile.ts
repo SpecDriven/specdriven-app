@@ -11,8 +11,10 @@
 // `plugins.enabled`. A file that still has either is read as that list,
 // which the next write copies to every folder the file knows (the open one
 // and the recent ones) before dropping it; the switches stay as aliases of
-// `PUT /api/state` for one release. Shared by the server, the Electron main
-// process and the browser; no imports beyond the manifest.
+// `PUT /api/state` for one release. An older file with neither, that names a
+// folder but has no per-folder lists, showed the manifests' defaults (the
+// Notebook), and is read as those the same way. Shared by the server, the
+// Electron main process and the browser; no imports beyond the manifest.
 
 import type { PluginManifest } from "./manifest";
 
@@ -87,8 +89,29 @@ export function readProfile(state: State, manifests: readonly PluginManifest[]):
 function olderProfile(state: State, manifests: readonly PluginManifest[]): string[] | null {
   const device = idList(section(state).enabled);
   if (device) return device;
-  if (!hasLegacyKeys(state, manifests)) return null;
+  if (!hasLegacyKeys(state, manifests) && !predatesFolderLists(state)) return null;
   return manifests.filter((m) => legacyOn(m, state)).map((m) => m.id);
+}
+
+/**
+ * Whether a file names a data folder but has no per-folder lists: one from
+ * before them, which showed such a file the manifests' defaults — someone
+ * who never changed a plugin saw the Notebook. This app gives a file `repos`
+ * as soon as it records a folder (startFolderLists), so its own files never
+ * look older.
+ */
+function predatesFolderLists(state: State): boolean {
+  return section(state).repos === undefined && knownRepos(state).length > 0;
+}
+
+/** Every folder a settings file knows: the open one, then the recent ones. */
+function knownRepos(state: State): string[] {
+  const recent = Array.isArray(state.recentDataRepos) ? state.recentDataRepos : [];
+  return dedupe(
+    [profileRepo(state), ...recent]
+      .filter((r): r is string => typeof r === "string" && r.trim() !== "")
+      .map((r) => r.trim()),
+  );
 }
 
 /** Whether a legacy switch (or, absent, the manifest's default) turns a plugin on. */
@@ -113,12 +136,7 @@ export function hasLegacyKeys(state: State, manifests: readonly PluginManifest[]
 export function migrateProfile(state: State, manifests: readonly PluginManifest[]): boolean {
   const older = olderProfile(state, manifests);
   if (!older) return false;
-  const recent = Array.isArray(state.recentDataRepos) ? state.recentDataRepos : [];
-  const repos = dedupe(
-    [profileRepo(state), ...recent]
-      .filter((r): r is string => typeof r === "string" && r.trim() !== "")
-      .map((r) => r.trim()),
-  );
+  const repos = knownRepos(state);
   const { enabled: _device, ...rest } = section(state);
   if (repos.length === 0) {
     state[PROFILE_KEY] = { ...rest, enabled: older };
@@ -133,6 +151,17 @@ export function migrateProfile(state: State, manifests: readonly PluginManifest[
     if (m.legacyKey) delete state[m.legacyKey];
   }
   return true;
+}
+
+/**
+ * Mark a file as keeping per-folder lists before any folder has one: an
+ * empty `repos`. Called as this app records a data folder, after any older
+ * list has moved onto the folders, so a restart never reads the file as one
+ * from before per-folder lists.
+ */
+export function startFolderLists(state: State): void {
+  const current = section(state);
+  if (current.repos === undefined) state[PROFILE_KEY] = { ...current, repos: {} };
 }
 
 /**
