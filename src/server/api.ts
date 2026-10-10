@@ -73,6 +73,8 @@ import {
   reprojectFeatures,
   saveFeature,
   savePullRequests,
+  readScenarioFiles,
+  saveScenarioFiles,
   publishFeature,
   resolveFeatureConflict,
 } from "./features";
@@ -110,6 +112,14 @@ import {
 import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
 import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
+import {
+  FILES_DIR,
+  MAX_FILE_BYTES,
+  readScenarioFile,
+  scenarioFileExists,
+  storeScenarioFile,
+} from "./scenarioFiles";
+import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
 import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
@@ -1413,6 +1423,98 @@ const getImage = withDataDir(async (dir, _req, params) => {
   });
 });
 
+/** The `scenario` a files route names, the way a save names it; null when malformed. */
+function scenarioTargetOf(value: unknown): ScenarioTarget | null {
+  const { name, version, id } = (value ?? {}) as { name?: unknown; version?: unknown; id?: unknown };
+  if (typeof name !== "string" || typeof version !== "number") return null;
+  return { name: name.trim(), version, ...(typeof id === "string" ? { id } : {}) };
+}
+
+// specs/editor/store-associated-files.feature.md "CRUD on files for each
+// scenario" — create: the editor posts a chosen file as multipart form data
+// with the scenario it belongs to (a JSON `scenario` field). The bytes land
+// under `.files/` in the data repo, committed and pushed; the scenario's
+// list in the document gains the file under its own name — or, when the
+// list already has that name (or the form's `name` field names an entry to
+// replace), that entry now points at the new bytes.
+const postScenarioFile = withDataDir(async (dir, req, params) => {
+  let file: File;
+  let target: ScenarioTarget | null;
+  let replacing: string | null = null;
+  try {
+    const form = await req.formData();
+    const entry = form.get("file");
+    if (!(entry instanceof File)) throw new Error("no file");
+    file = entry;
+    const scenario = form.get("scenario");
+    target = typeof scenario === "string" ? scenarioTargetOf(JSON.parse(scenario)) : null;
+    const name = form.get("name");
+    if (typeof name === "string" && name !== "") replacing = fileDisplayName(name);
+  } catch {
+    return json({ error: "multipart form data with a 'file' and a 'scenario' field is required" }, 400);
+  }
+  if (target === null) return json({ error: "scenario needs a name and a version" }, 400);
+  if (file.size > MAX_FILE_BYTES) {
+    return json({ error: `File is too large (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)` }, 413);
+  }
+  const listed = replacing ?? fileDisplayName(file.name);
+  if (listed === null) return json({ error: "The file needs a name" }, 400);
+  try {
+    const current = await readScenarioFiles(dir, params.file!, target);
+    if (current === null) {
+      return json({ error: `Scenario "${target.name}" @v${target.version} not found` }, 400);
+    }
+    const stored = await storeScenarioFile(dir, file.name, new Uint8Array(await file.arrayBuffer()));
+    const added = { name: listed, file: stored, size: file.size };
+    const next = current.some((f) => f.name === listed)
+      ? current.map((f) => (f.name === listed ? added : f))
+      : [...current, added];
+    return json(await saveScenarioFiles(dir, params.file!, target, next), 201);
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// Update and delete: the whole list is sent — a file renamed, or one gone —
+// and the document brought to it by name. A document-only write like the
+// pull request links; the stored bytes stay in the repo's history.
+const putScenarioFiles = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { scenario?: unknown; files?: unknown };
+  const target = scenarioTargetOf(body.scenario);
+  if (target === null) return json({ error: "scenario needs a name and a version" }, 400);
+  const files = validScenarioFiles(body.files);
+  if (files === null) return json({ error: "files must be a list of { name, file, size }" }, 400);
+  for (const f of files) {
+    if (!(await scenarioFileExists(dir, f.file))) {
+      return json({ error: `No stored file ${f.file} in ${FILES_DIR}/` }, 400);
+    }
+  }
+  try {
+    return json(await saveScenarioFiles(dir, params.file!, target, files));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// Read: a stored file, downloaded under the name the scenario lists it by
+// (`?name=`). Always an attachment of opaque bytes — never rendered in the
+// app's origin, whatever the file holds. Content-addressed, so cache forever.
+const getScenarioFile = withDataDir(async (dir, req, params) => {
+  const bytes = await readScenarioFile(dir, params.name!);
+  if (bytes === null) return json({ error: "not found" }, 404);
+  const listed = fileDisplayName(new URL(req.url).searchParams.get("name") ?? "") ?? params.name!;
+  const ascii = listed.replace(/[^\x20-\x7e]|["\\]/g, "_");
+  return new Response(bytes, {
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(listed)}`,
+      "cache-control": "private, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "x-content-type-options": "nosniff",
+    },
+  });
+});
+
 // One selected spec in a session request: the whole file when `scenarios`
 // is absent, otherwise just the named scenarios of it.
 interface SessionFile {
@@ -2030,6 +2132,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features", postFeatures],
   ["POST", "/api/images", postImage],
   ["GET", "/api/images/:name", getImage],
+  ["GET", "/api/scenario-files/:name", getScenarioFile],
   ["GET", "/api/search", getSearch],
   ["PUT", "/api/project-settings", putProjectSettings],
   ["GET", "/api/readme", getReadme],
@@ -2048,6 +2151,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["PUT", "/api/features/:file/pull-requests", putPullRequests],
+  ["POST", "/api/features/:file/scenario-files", postScenarioFile],
+  ["PUT", "/api/features/:file/scenario-files", putScenarioFiles],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
   ["POST", "/api/agent/session", unlessHosted(postAgentSession)],

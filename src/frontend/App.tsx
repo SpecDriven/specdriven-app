@@ -16,6 +16,7 @@ import type {
   Feature,
   PullRequestLink,
   Scenario,
+  ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
 } from "../server/parser";
@@ -127,6 +128,7 @@ import {
 } from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
+import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
   EMPTY_LINK_DRAFT,
   externalLinkLabel,
@@ -4048,6 +4050,97 @@ export function App() {
   };
 
   /**
+   * Follow a files route's answer (specs/editor/store-associated-files
+   * .feature.md): the page and an open editor pane take the scenario's new
+   * list. True when it was saved.
+   */
+  const followScenarioFiles = async (
+    res: Response,
+    file: string,
+    target: ScenarioTarget,
+    failure: string,
+  ): Promise<boolean> => {
+    const data = await res.json();
+    if (selectedRef.current !== file) return res.ok;
+    if (!res.ok) {
+      toast.error(data.error ?? failure);
+      return false;
+    }
+    const next = featureFromResponse(data, file);
+    setFeature(next);
+    const saved = next.scenarios.find((s) =>
+      target.id !== undefined ? s.id === target.id : s.name === target.name && s.version === target.version,
+    );
+    setEditing((prev) =>
+      prev === null || prev.scenario.id !== target.id
+        ? prev
+        : { ...prev, scenario: { ...prev.scenario, files: saved?.files ?? [] } },
+    );
+    markSaved();
+    return true;
+  };
+
+  /**
+   * Upload files chosen for a scenario, one request each: the bytes are
+   * stored in the data repo and the scenario lists them by name. A chosen
+   * file named like one already listed replaces its contents — after a
+   * confirm, unless the Replace button is what chose it (`replacing`).
+   */
+  const uploadScenarioFiles = async (
+    target: ScenarioTarget | null,
+    listed: ScenarioFile[],
+    chosen: File[],
+    replacing?: string,
+  ) => {
+    if (!selected || !target) return;
+    const file = selected;
+    if (replacing === undefined) {
+      const clashes = chosen.filter((c) => listed.some((f) => f.name === c.name)).map((c) => c.name);
+      if (clashes.length > 0) {
+        const ok = await confirm({
+          title: clashes.length === 1 ? `Replace "${clashes[0]}"?` : `Replace ${clashes.length} files?`,
+          body: `This scenario already has ${clashes.map((n) => `"${n}"`).join(", ")}. The upload replaces the contents.`,
+          confirmLabel: "Replace",
+        });
+        if (!ok) return;
+      }
+    }
+    for (const one of chosen) {
+      const form = new FormData();
+      form.append("file", one);
+      form.append("scenario", JSON.stringify(target));
+      if (replacing !== undefined) form.append("name", replacing);
+      try {
+        const res = await fetch(`/api/features/${encodeURIComponent(file)}/scenario-files`, {
+          method: "POST",
+          body: form,
+        });
+        const ok = await followScenarioFiles(res, file, target, `Could not upload ${one.name}`);
+        if (!ok) return;
+      } catch {
+        toast.error(`Could not upload ${one.name} — is the server running?`);
+        return;
+      }
+    }
+  };
+
+  /** Save a scenario's file list after a rename or a removal. */
+  const saveScenarioFileList = async (target: ScenarioTarget | null, files: ScenarioFile[]) => {
+    if (!selected || !target) return;
+    const file = selected;
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}/scenario-files`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: target, files }),
+      });
+      await followScenarioFiles(res, file, target, "Could not save the files");
+    } catch {
+      toast.error("Could not save the files — is the server running?");
+    }
+  };
+
+  /**
    * The project members the "Assigned" dropdown offers: the data repo's
    * project-settings.json (src/server/members.ts), plus whoever the feature
    * is assigned to when that name is no longer on the list — a member who
@@ -4461,7 +4554,15 @@ export function App() {
       // Draft like any other new scenario, so autosave can't propose the next
       // version of a published scenario on the user's behalf — and without
       // the source's document id: this is a new scenario, not that one renamed.
-      scenario: { ...src, id: undefined, version: nextVersionFor(src.name), status: "draft" },
+      // Its files stay the source's (specs/editor/store-associated-files
+      // .feature.md): the new version starts with none.
+      scenario: {
+        ...src,
+        id: undefined,
+        files: undefined,
+        version: nextVersionFor(src.name),
+        status: "draft",
+      },
     });
   };
 
@@ -7700,6 +7801,28 @@ export function App() {
                   onChange={(prs) => savePullRequests(scenarioTarget(editing.scenario), prs)}
                 />
               </div>
+              {/* specs/editor/store-associated-files.feature.md: the files
+                  the scenario needs at run time — test data to upload into
+                  the system under test. Stored in the data repo and listed
+                  on the document, like the pull requests; editable on a
+                  published scenario too. */}
+              <div className="prs-field-wrap">
+                <span className="field-label">Files</span>
+                <ScenarioFilesField
+                  files={editing.scenario.files ?? []}
+                  disabled={editing.scenario.id === undefined}
+                  disabledHint="Files can be uploaded once the scenario has been saved."
+                  onUpload={(chosen, replacing) =>
+                    uploadScenarioFiles(
+                      scenarioTarget(editing.scenario),
+                      editing.scenario.files ?? [],
+                      chosen,
+                      replacing,
+                    )
+                  }
+                  onChange={(files) => saveScenarioFileList(scenarioTarget(editing.scenario), files)}
+                />
+              </div>
             </div>
           </div>
         ) : selected && feature ? (
@@ -8333,6 +8456,14 @@ export function App() {
                     <div className="scenario-prs">
                       <span className="scenario-prs-head">Pull requests</span>
                       <PullRequestList prs={s.prs} />
+                    </div>
+                  )}
+                  {/* specs/editor/store-associated-files.feature.md: the
+                      scenario's files, each a download. */}
+                  {s.files && s.files.length > 0 && (
+                    <div className="scenario-prs scenario-files">
+                      <span className="scenario-prs-head">Files</span>
+                      <ScenarioFileList files={s.files} />
                     </div>
                   )}
                   {/* specs/app/specs-authorship.feature.md: who created the

@@ -11,6 +11,7 @@ import type {
   Feature,
   PullRequestLink,
   Scenario,
+  ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
 } from "../parser";
@@ -388,6 +389,60 @@ export function setPullRequests(
     }
     for (const [url, title] of wanted) {
       if (!have.has(url)) list.push({ url, title });
+    }
+  });
+}
+
+/**
+ * Set the files stored with one scenario
+ * (specs/editor/store-associated-files.feature.md) — a direct document
+ * operation like setPullRequests, and merged the same way: the list is
+ * brought to `files` by name — names gone from it deleted, names new to it
+ * appended, a kept name pointed at its new stored file in place (a replaced
+ * upload), a name whose stored file reappears under another renamed in
+ * place — so two peers attaching different files at the same time end with
+ * both. The scenario is the entry carrying the target's document id,
+ * else the one with its name and version. Null when no scenario matches.
+ */
+export function setScenarioFiles(
+  doc: A.Doc<FeatureDoc>,
+  target: ScenarioTarget,
+  files: ScenarioFile[],
+): A.Doc<FeatureDoc> | null {
+  let at = target.id ? doc.specs.findIndex((s) => s.id === target.id) : -1;
+  if (at === -1) at = doc.specs.findIndex((s) => sameScenario(s, target));
+  if (at === -1) return null;
+  const wanted = new Map<string, ScenarioFile>();
+  for (const f of files) if (!wanted.has(f.name)) wanted.set(f.name, f);
+  return A.change(doc, (d) => {
+    const entry = d.specs[at]!;
+    // Created on first touch and only spliced after, as with pull requests.
+    if (!entry.files) entry.files = [];
+    const list = entry.files;
+    // A name gone from the list whose stored file comes back under a new
+    // name is a rename: renamed where it stands, so it keeps its place.
+    const listed = new Set(list.map((f) => f.name));
+    const newcomers = [...wanted.values()].filter((f) => !listed.has(f.name));
+    for (let i = list.length - 1; i >= 0; i--) {
+      const f = list[i]!;
+      if (wanted.has(f.name)) continue;
+      const at = newcomers.findIndex((n) => n.file === f.file);
+      if (at === -1) {
+        A.deleteAt(list, i);
+      } else {
+        f.name = newcomers[at]!.name;
+        newcomers.splice(at, 1);
+      }
+    }
+    const have = new Set<string>();
+    for (const f of list) {
+      have.add(f.name);
+      const next = wanted.get(f.name)!;
+      if (f.file !== next.file) f.file = next.file;
+      if (f.size !== next.size) f.size = next.size;
+    }
+    for (const [name, f] of wanted) {
+      if (!have.has(name)) list.push({ name, file: f.file, size: f.size });
     }
   });
 }

@@ -34,6 +34,7 @@ import {
   type ExternalLink,
   type Feature,
   type PullRequestLink,
+  type ScenarioFile,
 } from "../parser";
 import { readProjectSettings } from "../members";
 import { effectiveBody, type FeatureDoc } from "./schema";
@@ -82,10 +83,17 @@ function plainPrs(prs: PullRequestLink[] | undefined): PullRequestLink[] | undef
   return prs && prs.length > 0 ? prs.map((p) => ({ url: p.url, title: p.title })) : undefined;
 }
 
+/** Plain copies of the files listed in the doc; undefined when none. */
+function plainFiles(files: ScenarioFile[] | undefined): ScenarioFile[] | undefined {
+  return files && files.length > 0
+    ? files.map((f) => ({ name: f.name, file: f.file, size: f.size }))
+    : undefined;
+}
+
 /**
  * The doc's view of the domain model — drafts included — in canonical order.
- * Pull request links come along (the editor shows them) but serializeFeature
- * never writes them, so the projection below stays free of them.
+ * Pull request links and stored files come along (the editor shows them) but
+ * serializeFeature never writes them, so the projection below stays free of them.
  */
 export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   const feature: Feature = {
@@ -104,10 +112,12 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
         };
         const link = plainLink(s.link);
         const prs = plainPrs(s.prs);
+        const files = plainFiles(s.files);
         return {
           ...scenario,
           ...(link ? { link } : {}),
           ...(prs ? { prs } : {}),
+          ...(files ? { files } : {}),
           ...(s.createdBy ? { createdBy: s.createdBy } : {}),
           ...(s.updatedBy ? { updatedBy: s.updatedBy } : {}),
         };
