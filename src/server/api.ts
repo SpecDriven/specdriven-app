@@ -1457,14 +1457,18 @@ const postScenarioFile = withDataDir(async (dir, req, params) => {
   if (file.size > MAX_FILE_BYTES) {
     return json({ error: `File is too large (limit ${MAX_FILE_BYTES / 1024 / 1024} MB)` }, 413);
   }
-  const listed = replacing ?? fileDisplayName(file.name);
+  // Refused before its name is read: Bun 1.3 parses an empty part with no
+  // file name at all.
+  if (file.size === 0) return json({ error: "File is empty" }, 400);
+  const original = file.name ?? "";
+  const listed = replacing ?? fileDisplayName(original);
   if (listed === null) return json({ error: "The file needs a name" }, 400);
   try {
     const current = await readScenarioFiles(dir, params.file!, target);
     if (current === null) {
       return json({ error: `Scenario "${target.name}" @v${target.version} not found` }, 400);
     }
-    const stored = await storeScenarioFile(dir, file.name, new Uint8Array(await file.arrayBuffer()));
+    const stored = await storeScenarioFile(dir, original, new Uint8Array(await file.arrayBuffer()));
     const added = { name: listed, file: stored, size: file.size };
     const next = current.some((f) => f.name === listed)
       ? current.map((f) => (f.name === listed ? added : f))
