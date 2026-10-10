@@ -106,7 +106,7 @@ async function snapshot(dir: string): Promise<Map<string, string>> {
   return out;
 }
 
-test("boot state names the demo: ephemeral folder, no chooser, js git, no cron", async () => {
+test("boot state names the demo — ephemeral folder, no chooser, js git, no cron", async () => {
   const state = await bootState();
   expect(state.demo).toBe(true);
   expect(state.needsDataRepo).toBe(false);
@@ -212,7 +212,7 @@ test("edits land in the working copy; the pristine snapshot is untouched", async
   expect(await snapshot(source)).toEqual(before);
 });
 
-test("a page load reseeds: the edit is gone, the folder is a new generation", async () => {
+test("a page load reseeds — the edit is gone, the folder is a new generation", async () => {
   const first = await bootState();
   await api("/api/readme", {
     method: "PUT",
@@ -348,7 +348,7 @@ test("the demo tracks the release repo's issues and refuses every write", async 
   }
 });
 
-test("no native folder chooser: /api/choose-folder is 501", async () => {
+test("no native folder chooser — /api/choose-folder is 501", async () => {
   const res = await api("/api/choose-folder", { method: "POST" });
   expect(res.status).toBe(501);
 });
