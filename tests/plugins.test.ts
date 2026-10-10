@@ -247,7 +247,8 @@ test("the Issues tab registers only while the store knows a GitHub repo", async 
 // one folder may show Specs alone and another every plugin; a folder with
 // no list yet shows Specs alone.
 test("each data folder keeps its own profile; a new one shows Specs alone", () => {
-  const file: Record<string, unknown> = { dataRepo: "/a", plugins: { seen: ["hello"] } };
+  // A file this app wrote: it carries `repos` from the moment it names a folder.
+  const file: Record<string, unknown> = { dataRepo: "/a", plugins: { seen: ["hello"], repos: {} } };
   expect(readProfile(file, builtinManifests)).toEqual({ enabled: [], migrated: false });
   writeProfile(file, ["roadmap", "tasks"], builtinManifests);
   file.dataRepo = "/b";
@@ -296,6 +297,27 @@ test("an older device-wide list is copied to the folders the file knows", () => 
   const early: Record<string, unknown> = { roadmap: true };
   expect(migrateProfile(early, builtinManifests)).toBe(true);
   expect(early).toEqual({ plugins: { enabled: ["roadmap", "notebook"] } });
+});
+
+// An older file naming folders but holding no list and none of the switches
+// showed the manifests' defaults (the Notebook), so its folders keep them. A
+// file with `repos`, even empty, was written by this app and is not older.
+test("an older file with folders but no list gives them the defaults; one with repos does not", () => {
+  const older: Record<string, unknown> = { dataRepo: "/a", recentDataRepos: ["/a", "/b"], plugins: { seen: ["hello"] } };
+  expect(readProfile(older, builtinManifests)).toEqual({ enabled: ["notebook"], migrated: true });
+  expect(migrateProfile(older, builtinManifests)).toBe(true);
+  expect(older.plugins).toEqual({
+    seen: ["hello"],
+    repos: { "/a": { enabled: ["notebook"] }, "/b": { enabled: ["notebook"] } },
+  });
+  older.dataRepo = "/c";
+  expect(readProfile(older, builtinManifests).enabled).toEqual([]);
+
+  const current: Record<string, unknown> = { dataRepo: "/a", plugins: { repos: {} } };
+  expect(readProfile(current, builtinManifests)).toEqual({ enabled: [], migrated: false });
+  expect(migrateProfile(current, builtinManifests)).toBe(false);
+  // No folder known yet: a fresh install, with nothing to carry over.
+  expect(migrateProfile({}, builtinManifests)).toBe(false);
 });
 
 // The Event Models left the tree for the marketplace (the `models` plugin
