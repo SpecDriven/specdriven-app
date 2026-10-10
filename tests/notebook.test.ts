@@ -203,7 +203,7 @@ test("a duplicate slug for the same day is refused, and so is a blank title", as
 
 // "nested subfolders are not offered — a notebook is flat and chronological":
 // a `/` in the title is part of the title, not a folder to make.
-test("the notebook is flat: a slash in the title makes no subfolder", async () => {
+test("the notebook is flat — a slash in the title makes no subfolder", async () => {
   const clones = await twoClones(root);
   const fileName = await createEntry(clones.a, "CI/CD is too slow", "Observation", {
     date: "2026-09-12",
