@@ -14,9 +14,11 @@ import { openDatabase } from "./db";
 import { RateLimiter } from "./rateLimit";
 import { SecretStore } from "./secrets";
 import { runDemo } from "./demo";
+import { runProposals } from "./proposals";
 import { createGateway } from "./server";
 import { workerIsolation, WorkerPool } from "./workers";
 import { isDemoMode } from "../server/demoMode";
+import { isProposalsMode } from "../server/proposalsMode";
 
 if (process.argv[2] === "genkey") {
   console.log(generateMasterKey());
@@ -25,6 +27,8 @@ if (process.argv[2] === "genkey") {
 
 // A DEMO_MODE service built from this image is the public demo, not the gateway.
 if (isDemoMode()) await runDemo();
+// A SPECDRIVEN_PROPOSALS service is the public spec-proposals service (proposals.ts).
+if (isProposalsMode()) await runProposals();
 
 const config = readConfig();
 // Everything the gateway writes — the database first — is its own alone.

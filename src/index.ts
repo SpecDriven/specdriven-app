@@ -7,10 +7,12 @@ if (process.argv[2] === "plugin") {
 }
 
 import index from "./index.html";
+import proposalsIndex from "./proposals.html";
 import { applyStartupState, handleApi } from "./server/api";
 import { shell } from "./plugins/host/loader";
 import { installDemoPlugins, isDemoMode, setupDemo } from "./server/demo";
 import { isHostedMode } from "./server/hostedMode";
+import { isProposalsMode } from "./server/proposalsMode";
 import { createEnvBackend, setTokenBackend } from "./server/tokenStore";
 import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
 import { initTelemetry } from "./server/telemetry";
@@ -32,13 +34,25 @@ if (isDemoMode()) {
 // before the startup sync below, the first thing to need it.
 if (isHostedMode()) setTokenBackend(createEnvBackend());
 
+// Proposals mode (src/server/proposalsMode.ts): the public spec-proposals
+// service. It clones the spec repo as its bot and answers its own small API
+// in place of the app's (src/server/proposals/server.ts); the app's startup
+// sync and settings never run, so only the service's lock ever commits.
+const proposals = isProposalsMode()
+  ? await (await import("./server/proposals/setup")).startProposals()
+  : null;
+
 // The API itself lives in server/api.ts so the desktop app can serve the
 // same routes over its app:// protocol (specs/desktop-app.spec.md).
-void applyStartupState();
+if (!proposals) void applyStartupState();
 
 // A hosted worker serves the API alone: its gateway serves the frontend to
 // every user (src/gateway/appShell.ts), so no worker spends memory bundling it.
-const routes = () => (isHostedMode() ? {} : shellRoutes());
+// The proposals service serves its own page, not the app's.
+const routes = (): Record<string, Bun.HTMLBundle | Response> =>
+  isHostedMode() ? {} : proposals ? proposalsRoutes() : shellRoutes();
+
+const proposalsRoutes = () => ({ "/": proposalsIndex, "/healthz": new Response("ok") });
 
 const shellRoutes = () => ({
   "/": index,
@@ -71,7 +85,7 @@ const shellRoutes = () => ({
 const extraHosts = allowedHosts();
 const fetch = async (req: Request) =>
   rejectRequest(req, extraHosts) ??
-  (await handleApi(req)) ??
+  (proposals ? await proposals.api.handle(req) : await handleApi(req)) ??
   new Response("Not Found", { status: 404 });
 
 const options = {

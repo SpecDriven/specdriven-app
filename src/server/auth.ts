@@ -16,6 +16,7 @@ import {
   githubClientSecret,
   githubWebBase,
 } from "./github";
+import { actingAs } from "./actingAs";
 import { clearToken, loadToken, saveToken } from "./tokenStore";
 import type { TokenRecord } from "./tokenStore";
 
@@ -172,18 +173,51 @@ export function startWebFlow(origin: string): { authorizeUrl: string } {
       "Browser sign-in is not configured — set SPECDRIVEN_GITHUB_CLIENT_SECRET to the GitHub App's client secret, or sign in with a device code instead",
     );
   }
-  const state = base64url(randomBytes(24));
-  const verifier = base64url(randomBytes(32));
+  const { state, verifier } = newWebFlowSecrets();
   const redirectUri = `${origin}/api/auth/github/callback`;
   pendingWeb = { state, verifier, redirectUri, expiresAt: Date.now() + 10 * 60 * 1000 };
   webOutcome = null;
+  return { authorizeUrl: authorizeUrl({ redirectUri, state, verifier }) };
+}
+
+/** A fresh state nonce and PKCE verifier for one browser sign-in. */
+export function newWebFlowSecrets(): { state: string; verifier: string } {
+  return { state: base64url(randomBytes(24)), verifier: base64url(randomBytes(32)) };
+}
+
+/**
+ * GitHub's authorize url for a browser sign-in: the state nonce comes back
+ * on the callback, and the verifier's S256 hash binds the code to whoever
+ * holds the verifier (PKCE).
+ */
+export function authorizeUrl(flow: { redirectUri: string; state: string; verifier: string }): string {
   const url = new URL(`${githubWebBase()}/login/oauth/authorize`);
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", base64url(createHash("sha256").update(verifier).digest()));
+  url.searchParams.set("client_id", githubClientId());
+  url.searchParams.set("redirect_uri", flow.redirectUri);
+  url.searchParams.set("state", flow.state);
+  url.searchParams.set("code_challenge", base64url(createHash("sha256").update(flow.verifier).digest()));
   url.searchParams.set("code_challenge_method", "S256");
-  return { authorizeUrl: url.toString() };
+  return url.toString();
+}
+
+/** Trade the code GitHub sent to the callback for a user token. */
+export async function exchangeCode(flow: { code: string; redirectUri: string; verifier: string }): Promise<string> {
+  const res = await fetch(`${githubWebBase()}/login/oauth/access_token`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({
+      client_id: githubClientId(),
+      client_secret: githubClientSecret(),
+      code: flow.code,
+      redirect_uri: flow.redirectUri,
+      code_verifier: flow.verifier,
+    }),
+  });
+  const data = (await res.json()) as { access_token?: string; error?: string };
+  if (!data.access_token) {
+    throw new Error(`GitHub did not issue a token: ${data.error ?? `HTTP ${res.status}`}`);
+  }
+  return data.access_token;
 }
 
 /**
@@ -210,22 +244,8 @@ export async function handleWebCallback(
     return { ok: false, message: "Sign-in was denied on GitHub." };
   }
   try {
-    const res = await fetch(`${githubWebBase()}/login/oauth/access_token`, {
-      method: "POST",
-      headers: JSON_HEADERS,
-      body: JSON.stringify({
-        client_id: githubClientId(),
-        client_secret: githubClientSecret(),
-        code: params.get("code"),
-        redirect_uri: flow.redirectUri,
-        code_verifier: flow.verifier,
-      }),
-    });
-    const data = (await res.json()) as { access_token?: string; error?: string };
-    if (!data.access_token) {
-      throw new Error(`GitHub did not issue a token: ${data.error ?? `HTTP ${res.status}`}`);
-    }
-    const identity = await fetchIdentity(data.access_token);
+    const token = await exchangeCode({ code: params.get("code")!, redirectUri: flow.redirectUri, verifier: flow.verifier });
+    const identity = await fetchIdentity(token);
     await saveToken(identity);
     webOutcome = {
       status: "authorized",
@@ -279,9 +299,13 @@ export async function fetchIdentity(token: string): Promise<TokenRecord> {
   };
 }
 
-/** The stored sign-in, or null when signed out. */
+/**
+ * The stored sign-in, or null when signed out — unless the call runs inside
+ * actAs (src/server/actingAs.ts), whose identity it answers instead.
+ */
 export function getAuth(): Promise<TokenRecord | null> {
-  return loadToken();
+  const acting = actingAs();
+  return acting ? Promise.resolve(acting) : loadToken();
 }
 
 export async function signOut(): Promise<void> {
