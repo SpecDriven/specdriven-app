@@ -33,6 +33,12 @@
 // under the `#` heading, beside the link line. The parser lifts it into
 // `assigned`; the projection always writes it.
 //
+// A feature and each scenario record who created them and who last updated
+// them (specs/app/specs-authorship.feature.md): `**Created by:** <user>` and
+// `**Updated by:** <user>` lines under the heading, beside the link line. The
+// Automerge document holds them always; the projection writes them only when
+// the data repo's project-settings.json turns `authors-in-markdown` on.
+//
 // The first `#` heading is the feature name; a `##` heading that ends with a
 // version starts a scenario. The `@` marks where the name ends and the version
 // begins, so a name that itself contains a version ("Migrate to v2 API @v1")
@@ -119,6 +125,10 @@ export interface Scenario {
    * carried on what the editor reads from the server, never serialized.
    */
   prs?: PullRequestLink[];
+  /** Who created the scenario (specs/app/specs-authorship.feature.md). */
+  createdBy?: string;
+  /** Who last changed it. */
+  updatedBy?: string;
 }
 
 export interface Feature {
@@ -136,6 +146,13 @@ export interface Feature {
    * (src/server/members.ts). Absent when nobody is assigned.
    */
   assigned?: string;
+  /**
+   * Who created the feature and who last changed it — it or any of its
+   * scenarios (specs/app/specs-authorship.feature.md): the GitHub login the
+   * app works as, which may be an agent's given its own token.
+   */
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 /**
@@ -375,6 +392,36 @@ export function parseAssignedLine(line: string): string | null {
 }
 
 /**
+ * Authorship (specs/app/specs-authorship.feature.md) is written as two lines
+ * under a feature's or a scenario's heading — `**Created by:** ada` and
+ * `**Updated by:** grace` — beside the ticket link, in any order. Written
+ * only while the data repo's project-settings.json asks for it
+ * (`authors-in-markdown`); the Automerge document records them either way.
+ */
+const CREATED_BY_RE = /^\s{0,3}\*\*Created by:\*\*\s*(.+?)\s*$/i;
+const UPDATED_BY_RE = /^\s{0,3}\*\*Updated by:\*\*\s*(.+?)\s*$/i;
+
+/** The markdown line a creator is written as. */
+export function formatCreatedBy(user: string): string {
+  return `**Created by:** ${user}`;
+}
+
+/** The markdown line the last updater is written as. */
+export function formatUpdatedBy(user: string): string {
+  return `**Updated by:** ${user}`;
+}
+
+/** The creator a line of markdown names, or null when it is not one. */
+export function parseCreatedByLine(line: string): string | null {
+  return line.match(CREATED_BY_RE)?.[1]?.trim() || null;
+}
+
+/** The last updater a line of markdown names, or null when it is not one. */
+export function parseUpdatedByLine(line: string): string | null {
+  return line.match(UPDATED_BY_RE)?.[1]?.trim() || null;
+}
+
+/**
  * A task is finished or it is not (specs/app/tasks.feature.md), and that is
  * written as one more line under the heading — `**Status:** Done` — beside
  * the assignment, in either order. Only "Done" is ever written: a task still
@@ -546,30 +593,38 @@ export function splitPageMeta(text: string): {
 }
 
 /**
- * Lift a feature's metadata lines — its ticket link and its assignment — off
- * the top of the text under the `#` heading. Either may come first, and
- * anything else ends the metadata: a line further down, or one with more on
- * it, is ordinary description.
+ * Lift a feature's metadata lines — its ticket link, its assignment and its
+ * authorship — off the top of the text under the `#` heading. They may come
+ * in any order, and anything else ends the metadata: a line further down, or
+ * one with more on it, is ordinary description.
  */
 export function splitFeatureMeta(text: string): {
   text: string;
   link?: ExternalLink;
   assigned?: string;
+  createdBy?: string;
+  updatedBy?: string;
 } {
   let rest = text;
   let link: ExternalLink | undefined;
   let assigned: string | undefined;
-  // At most one line of each kind, so two passes settle it whichever order
-  // they were written in.
-  for (let pass = 0; pass < 2; pass++) {
+  let createdBy: string | undefined;
+  let updatedBy: string | undefined;
+  // At most one line of each kind, so a pass per kind settles it whichever
+  // order they were written in.
+  for (let pass = 0; pass < 4; pass++) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
     const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
+    const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
+    const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
     if (nextLink) link = nextLink;
     else if (nextAssigned) assigned = nextAssigned;
+    else if (nextCreated) createdBy = nextCreated;
+    else if (nextUpdated) updatedBy = nextUpdated;
     else break;
     rest = lines.slice(at + 1).join("\n").trim();
   }
@@ -577,6 +632,45 @@ export function splitFeatureMeta(text: string): {
     text: rest,
     ...(link ? { link } : {}),
     ...(assigned ? { assigned } : {}),
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {}),
+  };
+}
+
+/**
+ * Lift a scenario's metadata lines — its ticket link and its authorship —
+ * off the top of its body, in any order; the rest is the body.
+ */
+export function splitScenarioMeta(text: string): {
+  text: string;
+  link?: ExternalLink;
+  createdBy?: string;
+  updatedBy?: string;
+} {
+  let rest = text;
+  let link: ExternalLink | undefined;
+  let createdBy: string | undefined;
+  let updatedBy: string | undefined;
+  for (let pass = 0; pass < 3; pass++) {
+    const lines = rest.split("\n");
+    const at = lines.findIndex((line) => line.trim() !== "");
+    if (at === -1) break;
+    const line = lines[at]!;
+    const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
+    const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
+    const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
+    if (nextLink) link = nextLink;
+    else if (nextCreated) createdBy = nextCreated;
+    else if (nextUpdated) updatedBy = nextUpdated;
+    else break;
+    rest = lines.slice(at + 1).join("\n").trim();
+  }
+  if (!link && !createdBy && !updatedBy) return { text };
+  return {
+    text: rest,
+    ...(link ? { link } : {}),
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {}),
   };
 }
 
@@ -666,10 +760,12 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(bodyLines.join("\n").trim());
-      const { text, link } = splitExternalLink(split.body);
+      const { text, link, createdBy, updatedBy } = splitScenarioMeta(split.body);
       current.body = text;
       current.tests = split.tests;
       if (link) current.link = link;
+      if (createdBy) current.createdBy = createdBy;
+      if (updatedBy) current.updatedBy = updatedBy;
       scenarios.push(current);
       bodyLines.length = 0;
     }
@@ -702,10 +798,14 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, assigned } = splitFeatureMeta(preamble.join("\n").trim());
+  const { text: description, link, assigned, createdBy, updatedBy } = splitFeatureMeta(
+    preamble.join("\n").trim(),
+  );
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
   if (link) feature.link = link;
   if (assigned) feature.assigned = assigned;
+  if (createdBy) feature.createdBy = createdBy;
+  if (updatedBy) feature.updatedBy = updatedBy;
   return feature;
 }
 
@@ -721,16 +821,29 @@ export interface SerializeOptions {
    * the conflict dialog — always carries the links.
    */
   links?: boolean;
+  /**
+   * Whether who created and last updated the feature and each scenario is
+   * written (default true; specs/app/specs-authorship.feature.md). The
+   * projection passes the data repo's `authors-in-markdown` setting.
+   */
+  authors?: boolean;
 }
 
-export function serializeFeature(feature: Feature, { links = true }: SerializeOptions = {}): string {
+export function serializeFeature(
+  feature: Feature,
+  { links = true, authors = true }: SerializeOptions = {},
+): string {
   const parts = [`# ${feature.name}`];
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));
+  if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
+  if (authors && feature.updatedBy) parts.push(formatUpdatedBy(feature.updatedBy));
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
     const chunks = [header(s.name, s.version, s.status)];
     if (links && s.link) chunks.push(formatExternalLink(s.link));
+    if (authors && s.createdBy) chunks.push(formatCreatedBy(s.createdBy));
+    if (authors && s.updatedBy) chunks.push(formatUpdatedBy(s.updatedBy));
     if (s.body) chunks.push(s.body);
     if (s.tests.length > 0) chunks.push(testsLines(s.tests));
     parts.push(chunks.join("\n\n"));

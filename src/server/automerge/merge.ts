@@ -125,6 +125,26 @@ function mergeLink(
   return winner ? { ...winner } : undefined;
 }
 
+/**
+ * Who created and last updated a feature or a scenario
+ * (specs/app/specs-authorship.feature.md) merges like the assignment: one
+ * value each, the side that changed it wins, ours when both did.
+ */
+function mergeAuthors(
+  base: { createdBy?: string; updatedBy?: string } | undefined,
+  ours: { createdBy?: string; updatedBy?: string },
+  theirs: { createdBy?: string; updatedBy?: string },
+): { createdBy?: string; updatedBy?: string } {
+  const pick = (b?: string, o?: string, t?: string) =>
+    (t ?? "") !== (b ?? "") && (o ?? "") === (b ?? "") ? t : o;
+  const createdBy = pick(base?.createdBy, ours.createdBy, theirs.createdBy);
+  const updatedBy = pick(base?.updatedBy, ours.updatedBy, theirs.updatedBy);
+  return {
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {}),
+  };
+}
+
 /** Merge one scenario present on both sides. */
 function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
@@ -142,6 +162,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
     ...(link ? { link } : {}),
+    ...mergeAuthors(base, ours, theirs),
   };
 }
 
@@ -202,6 +223,7 @@ export function threeWayFeature(
       scenarios,
       ...(link ? { link } : {}),
       ...(assigned ? { assigned } : {}),
+      ...mergeAuthors(base, ours, theirs),
     },
   };
 }

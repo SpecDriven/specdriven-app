@@ -23,7 +23,7 @@ import {
   type MarkdownPage,
   type Supersedes,
 } from "./parser";
-import { getCurrentUser } from "./user";
+import { currentAuthor } from "./user";
 
 /** The body a new decision opens with — a skeleton the writer may delete. */
 const DECISION_SKELETON = "## Context\n\n## Decision\n\n## Consequences";
@@ -34,15 +34,8 @@ export function today(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-/**
- * Who a new entry is signed by: the identity that authors the app's commits
- * to the data repo (specs/user-info-settings.feature.md) — the GitHub login
- * when one is known, else the git user name, else the OS user.
- */
-export async function currentAuthor(): Promise<string> {
-  const user = await getCurrentUser();
-  return user.login ?? user.name ?? user.username;
-}
+/** Who a new entry is signed by (src/server/user.ts currentAuthor). */
+export { currentAuthor };
 
 /**
  * Write an entry: `notebook/<today>-<slug>.md` with its heading, author, date
