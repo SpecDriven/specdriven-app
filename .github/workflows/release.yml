@@ -2,8 +2,9 @@ name: Release
 
 # Pushing a v<version> tag (what `bun run bump` creates) publishes a source
 # snapshot of that commit as a GitHub Release on SpecDriven/specdriven-app-release,
-# and keeps that repository's install.sh — the one `curl | sh` fetches — in
-# step with this repository's (specs/app/installation.feature.md).
+# and keeps that repository's install.sh and install.ps1 — the ones `curl | sh`
+# and `irm | iex` fetch — in step with this repository's
+# (specs/app/installation.feature.md).
 # See README.md "Versioning" and "Distribution".
 #
 # Needs the RELEASE_REPO_TOKEN secret: a fine-grained PAT with Contents:
@@ -51,32 +52,35 @@ jobs:
       # release step refuses to overwrite an existing release, so the tag can
       # simply be re-run. The blob sha git computes is the sha GitHub's
       # contents API reports, which is how "unchanged" is decided.
-      - name: Publish install.sh to specdriven-app-release
+      - name: Publish the installers to specdriven-app-release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          local_sha="$(git hash-object install.sh)"
-          remote_sha="$(gh api "repos/$RELEASE_REPO/contents/install.sh" --jq .sha 2>/dev/null || true)"
-          if [ "$local_sha" = "$remote_sha" ]; then
-            echo "install.sh on $RELEASE_REPO is already at $local_sha"
-            exit 0
-          fi
-          args=(-f "message=Update install.sh from specdriven-app v$VERSION"
-                -f "content=$(base64 -w0 install.sh)")
-          if [ -n "$remote_sha" ]; then
-            args+=(-f "sha=$remote_sha")
-          fi
-          gh api -X PUT "repos/$RELEASE_REPO/contents/install.sh" "${args[@]}" --jq '.content.sha'
+          for installer in install.sh install.ps1; do
+            local_sha="$(git hash-object "$installer")"
+            remote_sha="$(gh api "repos/$RELEASE_REPO/contents/$installer" --jq .sha 2>/dev/null || true)"
+            if [ "$local_sha" = "$remote_sha" ]; then
+              echo "$installer on $RELEASE_REPO is already at $local_sha"
+              continue
+            fi
+            args=(-f "message=Update $installer from specdriven-app v$VERSION"
+                  -f "content=$(base64 -w0 "$installer")")
+            if [ -n "$remote_sha" ]; then
+              args+=(-f "sha=$remote_sha")
+            fi
+            gh api -X PUT "repos/$RELEASE_REPO/contents/$installer" "${args[@]}" --jq '.content.sha'
+          done
 
       - name: Create release on specdriven-app-release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+          notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
             "Source snapshot of SpecDriven/specdriven-app at v$VERSION ($GITHUB_SHA)." \
             "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$RELEASE_REPO/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, verifies it against \`SHASUMS256.txt\`, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
+            "**Install on Windows** (PowerShell): \`irm https://raw.githubusercontent.com/$RELEASE_REPO/main/install.ps1 | iex\` does the same under \`%USERPROFILE%\\.specdriven\\app\`, adds SpecDriven to the Start menu and starts it." \
             "**To review the source before it runs:** download \`specdriven-$VERSION-src.zip\`, verify it against \`SHASUMS256.txt\`, and unzip it yourself." \
             "SpecDriven is built with [Bun](https://bun.sh): \`bun install\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
             "Ignore the auto-generated *Source code (zip)* and *Source code (tar.gz)* entries below: GitHub attaches them to every release and they only contain this repository's README, not the app.")"
@@ -84,4 +88,4 @@ jobs:
             --repo "$RELEASE_REPO" \
             --title "SpecDriven v$VERSION" \
             --notes "$notes" \
-            "specdriven-$VERSION-src.zip" SHASUMS256.txt install.sh
+            "specdriven-$VERSION-src.zip" SHASUMS256.txt install.sh install.ps1

@@ -253,20 +253,24 @@ bun run build:desktop           # this machine's platform
 bun run build:desktop --mac     # dmg + zip
 bun run build:desktop --linux   # AppImage + deb, x64 and arm64
 bun run build:desktop --all     # both
-bun run build:desktop --local   # this machine's arch only: AppImage on Linux, dmg on macOS
+bun run build:desktop --win     # NSIS installer, x64 and arm64 (on Windows only)
+bun run build:desktop --local   # this machine's arch only: AppImage on Linux, dmg on macOS, unpacked app on Windows
 ```
 
 | platform | artifacts in `release/` |
 | --- | --- |
 | macOS | `SpecDriven-<version>-arm64.dmg`, `SpecDriven-<version>-arm64-mac.zip` |
 | Linux | `SpecDriven-<version>-{x86_64,arm64}.AppImage`, `specdriven_<version>_{amd64,arm64}.deb` |
+| Windows | `SpecDriven Setup <version>.exe`; with `--local`, `win-unpacked/SpecDriven.exe` (`win-arm64-unpacked` on ARM) |
 
 Three steps: bundle the frontend into static files (served over the `app://`
 protocol), bundle the Electron main process for Node, then hand both to
 electron-builder. See [scripts/build-desktop.ts](scripts/build-desktop.ts);
 targets and architectures live under `"build"` in package.json — add `x64` to
 the mac arch list for Intel artifacts. Linux cross-builds from macOS, so one
-machine can cut a full release; macOS artifacts need macOS.
+machine can cut a full release; macOS artifacts need macOS, and Windows ones
+need Windows (off it, electron-builder needs Wine to stamp the executable), so
+`--all` means macOS and Linux.
 
 The bundle registers the `specdriven://` url scheme with the OS — through
 `Info.plist` on macOS, through the desktop entry's `MimeType` on Linux — so
@@ -275,10 +279,13 @@ first launch needs Gatekeeper approval on macOS, and the `.deb` is installed
 with `sudo apt install ./specdriven_<version>_amd64.deb` (the AppImage just
 needs `chmod +x`).
 
-`--local` is what [install.sh](install.sh) runs. It skips the `.deb`, whose
+`--local` is what [install.sh](install.sh) and [install.ps1](install.ps1) run.
+It skips the `.deb`, whose
 packager (fpm) runs a bundled Ruby that needs `libcrypt.so.1` — missing on
 Arch and other non-Debian distros unless `libxcrypt-compat` is installed — and
-the other architecture, which nobody on that machine would start.
+the other architecture, which nobody on that machine would start. On Windows it
+packages no installer at all: the unpacked app is what install.ps1 starts and
+points the Start menu at.
 
 To check that a build actually starts — and starts again — run the restart
 crash test:
@@ -337,11 +344,11 @@ which checks the tag against `package.json`, zips the tagged tree with
 `git archive` (tracked files only — no `node_modules`, `dist`, or `.env`), and
 creates a `v<version>` release on
 [SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release)
-with the zip, its `SHASUMS256.txt`, and `install.sh` attached. Just before
-that it pushes this repository's [install.sh](install.sh) to the root of
-`specdriven-app-release` whenever the two differ — that is the copy the
-`curl | sh` line fetches, so it is never newer or older than the releases it
-installs. Writing to another repository needs the `RELEASE_REPO_TOKEN`
+with the zip, its `SHASUMS256.txt`, `install.sh` and `install.ps1` attached.
+Just before that it pushes this repository's [install.sh](install.sh) and
+[install.ps1](install.ps1) to the root of `specdriven-app-release` whenever
+they differ — those are the copies the `curl | sh` and `irm | iex` lines fetch,
+so they are never newer or older than the releases they install. Writing to another repository needs the `RELEASE_REPO_TOKEN`
 Actions secret: a fine-grained personal access token with *Contents: read and
 write* on `specdriven-app-release` alone. A release that already exists is not
 overwritten — re-running on the same tag fails, on purpose.
@@ -393,14 +400,39 @@ the settings live under), `SPECDRIVEN_INSTALL_BUN`, `BUN_INSTALL`, and
 `SPECDRIVEN_RELEASES_URL` (anything serving GitHub's
 `/latest` → `/tag/v<version>` redirect and `/download/v<version>/<asset>`
 layout, which is what [tests/install.test.ts](tests/install.test.ts) stands up
-on loopback). Windows shells are sent to the releases page: `curl | sh` needs
-a Unix shell.
+on loopback). A Windows shell (Git Bash, MSYS, Cygwin) is pointed at
+install.ps1 instead: `curl | sh` needs a Unix shell.
+
+On Windows, users install from PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+```
+
+[install.ps1](install.ps1) does the same in the same order — the same
+overrides, the same checksum rules, the same Bun question — under
+`%USERPROFILE%\.specdriven\app`, with `current` a junction (which needs neither
+admin rights nor Developer Mode) rather than a symlink. It downloads with
+`Invoke-WebRequest`, verifies with `Get-FileHash` and unpacks with .NET's
+`ZipFile`, so it needs nothing Windows 10 and 11 do not ship. Bun comes from
+Bun's own `install.ps1`, downloaded first and then run in a PowerShell of its
+own, never from an elevated (Administrator) one. After
+`bun run build:desktop --local` it adds a Start menu shortcut to
+`current\release\win-unpacked\SpecDriven.exe` — through `current`, so the next
+install moves it along — and starts the app; it warns when git, which holds
+SpecDriven's data, is not on PATH. It runs in one script block, so `irm | iex`
+leaves nothing in the caller's session, and a failure ends the script without
+closing their window. It is ASCII only: Windows PowerShell 5.1 reads a script
+file without a BOM in the legacy code page.
+[tests/installPs1.test.ts](tests/installPs1.test.ts) runs it under PowerShell 7
+(`pwsh` on PATH, or `SPECDRIVEN_TEST_PWSH`) against the same loopback releases;
+without one those tests skip.
 
 Two things the release repository has to be for this to work: **public** —
 GitHub answers a private repository's release assets and raw files with a 404,
-not a login prompt — and carrying `install.sh` at its root, which the release
-workflow keeps in step (see "Versioning"). `install.sh` is also attached to
-every release, so
+not a login prompt — and carrying `install.sh` and `install.ps1` at its root,
+which the release workflow keeps in step (see "Versioning"). Both are also
+attached to every release, so
 `https://github.com/SpecDriven/specdriven-app-release/releases/latest/download/install.sh`
 serves the copy that shipped with the latest one. The compiled-binary
 distribution behind `specdriven.app` is still to come; the hosted multi-user

@@ -62,7 +62,11 @@ info() {
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*|Windows_NT)
     die "this installer needs a Unix shell.
-On Windows, download specdriven-<version>-src.zip from
+On Windows, install from PowerShell instead:
+
+  irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+
+or download specdriven-<version>-src.zip from
 $RELEASES_URL, check it against SHASUMS256.txt, and unzip it."
     ;;
 esac
