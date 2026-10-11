@@ -29,7 +29,6 @@ import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
   Activity,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -7911,23 +7910,6 @@ export function App() {
                   savedAt={savedAt}
                   dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
                 />
-                <Tooltip
-                  label={copied === featurePath(selected) ? "Copied" : "Copy link"}
-                  keys="mod+shift+c"
-                >
-                  <button
-                    type="button"
-                    className="ibtn"
-                    aria-label="Copy link"
-                    onClick={() => void copyLink(featurePath(selected))}
-                  >
-                    {copied === featurePath(selected) ? (
-                      <Check size={15} aria-hidden="true" />
-                    ) : (
-                      <Link size={15} aria-hidden="true" />
-                    )}
-                  </button>
-                </Tooltip>
                 {/* The description editor (specs/editor/feature-editor
                     .feature.md): switches the description pane below between
                     rendered and editable. */}
@@ -8004,6 +7986,13 @@ export function App() {
                             },
                           ]
                         : []),
+                      {
+                        id: "copy",
+                        label: copied === featurePath(selected) ? "Copied" : "Copy link",
+                        icon: <Link size={13} />,
+                        keys: "mod+shift+c",
+                        onSelect: () => void copyLink(featurePath(selected)),
+                      },
                       {
                         id: "delete",
                         label: "Delete feature",
