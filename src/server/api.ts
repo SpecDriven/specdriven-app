@@ -1988,8 +1988,8 @@ const postChooseFolder: Handler = async (req) => {
   return json({ path: await chooseFolder(purpose) });
 };
 
-// Add the spec repo to a code repo as a git submodule (git-operations.md,
-// "Add the spec repo to a code repo as a submodule"; src/server/submodule.ts).
+// Add the spec repo to a code repo as a git submodule
+// (specs/app/code-repo-submodule.feature.md; src/server/submodule.ts).
 // The code repo is the one picked in Settings, else project-settings.json's
 // `code-repo`; a relative path resolves against the data repo, as that
 // setting's does. System git only — the bundled engine has no `submodule`.

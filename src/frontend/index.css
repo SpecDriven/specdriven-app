@@ -2474,7 +2474,7 @@ aside > .user-corner {
   background: var(--surface-3, var(--surface-1));
 }
 
-/* Code repo submodule (git-operations.md): no system git, nothing to run. */
+/* Code repo submodule (specs/app/code-repo-submodule.feature.md): no system git, nothing to run. */
 .settings-row > button:disabled {
   opacity: 0.55;
   cursor: not-allowed;

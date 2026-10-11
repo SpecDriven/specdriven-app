@@ -1,5 +1,5 @@
-// Automates git-operations.md "Add the spec repo to a code repo as a
-// submodule": from Settings the spec repo the app has open is added to a code
+// Automates specs/app/code-repo-submodule.feature.md:
+// from Settings the spec repo the app has open is added to a code
 // repo as a git submodule — its url the spec repo's origin, its branch the one
 // the app works on — and committed there, the two paths alone and never
 // pushed. The app's own clone of the spec repo is left as it was.

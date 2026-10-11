@@ -3928,8 +3928,8 @@ export function App() {
     setAuthorsInMarkdown(data.authorsInMarkdown === true);
   };
 
-  // Add the spec repo to a code repo as a git submodule (git-operations.md,
-  // "Add the spec repo to a code repo as a submodule"): the code repo is
+  // Add the spec repo to a code repo as a git submodule
+  // (specs/app/code-repo-submodule.feature.md): the code repo is
   // asked for, pre-filled with project-settings.json's `code-repo`; the
   // server adds and commits the submodule there, and leaves the push to the
   // user.
@@ -6678,8 +6678,8 @@ export function App() {
             <option value="js">Built-in (no git needed)</option>
           </select>
         </label>
-        {/* git-operations.md "Add the spec repo to a code repo as a
-            submodule": system git only — just-git has no `submodule`. */}
+        {/* specs/app/code-repo-submodule.feature.md:
+            system git only — just-git has no `submodule`. */}
         <div className="settings-row">
           <span className="settings-row-label">
             Code repo submodule

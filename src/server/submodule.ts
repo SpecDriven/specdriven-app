@@ -1,5 +1,5 @@
-// Add the spec repo to a code repo as a git submodule (git-operations.md,
-// "Add the spec repo to a code repo as a submodule"). The app keeps working
+// Add the spec repo to a code repo as a git submodule
+// (specs/app/code-repo-submodule.feature.md). The app keeps working
 // on its own standalone clone of the spec repo; what this adds is the other
 // direction — the code repo pins the spec repo, so cloning the code with
 // `--recurse-submodules` brings the specs that go with it.
