@@ -453,8 +453,9 @@ src/server/         api (routes shared by web + desktop), features, parser, sear
                     git/ (gh + cli + js engines), auth, github, tokenStore, repo, state, user, reload
 src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
-specs/*.spec.md     specifications for this app's own behavior — a symlink to the
-                    ../specs-specdriven clone, see "Clone the spec repo"
+specs/*.spec.md     specifications for this app's own behavior — a symlink into the
+                    specs-specdriven submodule, see docs/DEVELOPMENT.md
+specs-specdriven/   the SpecDriven/specs-specdriven submodule
 tests/              bun test suite
 scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts,
                     bump-version.ts (version, commit, tag)

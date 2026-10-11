@@ -783,10 +783,12 @@ test("a failed `bun install` is reported the same way", async () => {
 // --- what the real release zip carries ---------------------------------------
 //
 // `git archive` follows nothing: a tracked symlink is archived as a symlink,
-// and one that points outside the repo unpacks dangling. `specs` is such a
-// link (the spec repo lives beside this one), and a dangling path in the tree
+// and one that points outside the repo unpacks dangling — as does one into a
+// submodule, which the archive carries as an empty folder. `specs` is such a
+// link (into the specs-specdriven submodule), and a dangling path in the tree
 // stops `bun run build:desktop` — electron-builder stats everything under the
-// project. Those links belong in .gitattributes as `export-ignore`.
+// project. Those links, and the submodules, belong in .gitattributes as
+// `export-ignore`.
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -797,21 +799,24 @@ async function git(...args: string[]): Promise<string> {
   return out;
 }
 
-test("symlinks pointing out of the repo are kept out of the release source zip", async () => {
-  // Mode 120000 is git's symlink; the path is the last tab-separated field.
-  const links = (await git("ls-files", "-s"))
-    .split("\n")
-    .filter((line) => line.startsWith("120000 "))
-    .map((line) => line.slice(line.indexOf("\t") + 1));
+test("symlinks that dangle in the release source zip are kept out of it", async () => {
+  // Mode 120000 is git's symlink, 160000 a submodule; the path is the last
+  // tab-separated field.
+  const entries = (await git("ls-files", "-s")).split("\n");
+  const pathsOf = (mode: string) =>
+    entries.filter((line) => line.startsWith(`${mode} `)).map((line) => line.slice(line.indexOf("\t") + 1));
+  const submodules = pathsOf("160000").map((path) => join(REPO_ROOT, path));
 
-  const escaping: string[] = [];
-  for (const path of links) {
-    const target = readlinkSync(join(REPO_ROOT, path));
-    if (!resolve(dirname(join(REPO_ROOT, path)), target).startsWith(REPO_ROOT + "/")) escaping.push(path);
+  const dangling: string[] = [];
+  for (const path of pathsOf("120000")) {
+    const target = resolve(dirname(join(REPO_ROOT, path)), readlinkSync(join(REPO_ROOT, path)));
+    const escapes = !target.startsWith(REPO_ROOT + "/");
+    const intoSubmodule = submodules.some((dir) => target === dir || target.startsWith(dir + "/"));
+    if (escapes || intoSubmodule) dangling.push(path);
   }
-  expect(escaping).toContain("specs"); // the case that broke a build; keep the test honest
+  expect(dangling).toContain("specs"); // the case that broke a build; keep the test honest
 
-  for (const path of escaping) {
+  for (const path of [...dangling, ...pathsOf("160000")]) {
     // `git check-attr` answers "<path>: export-ignore: set|unset|unspecified".
     const attr = await git("check-attr", "export-ignore", "--", path);
     expect(attr.trim()).toBe(`${path}: export-ignore: set`);
