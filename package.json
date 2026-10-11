@@ -106,6 +106,17 @@
         }
       ]
     },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
     "appImage": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
