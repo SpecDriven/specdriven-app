@@ -1018,7 +1018,8 @@ button {
   min-height: 0;
 }
 
-.feature-desc-editor.resizing {
+.feature-desc-editor.resizing,
+.scenario-pane .body-field.resizing {
   cursor: row-resize;
   user-select: none;
 }
@@ -1031,11 +1032,12 @@ button {
   padding-bottom: 0.45rem;
 }
 
-/* The grab strip on the editor's lower boundary: a full-width rule with a
+/* The grab strip on an editor's lower boundary (HeightResizer.tsx — the
+   description editor's and the scenario body's): a full-width rule with a
    grip pill at its middle, always drawn so the boundary reads as something
    to take hold of — a sheet handle. Hover, focus and drag light it up.
    Outside the flow, so grabbing it never shifts the pane. */
-.desc-resizer {
+.height-resizer {
   position: absolute;
   left: 0;
   right: 0;
@@ -1046,7 +1048,7 @@ button {
 }
 
 /* the rule along the boundary */
-.desc-resizer::before {
+.height-resizer::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1060,7 +1062,7 @@ button {
 }
 
 /* the grip at its middle */
-.desc-resizer::after {
+.height-resizer::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -1073,16 +1075,16 @@ button {
   transition: background 0.15s ease;
 }
 
-.desc-resizer:hover::before,
-.desc-resizer:focus-visible::before,
-.feature-desc-editor.resizing .desc-resizer::before {
+.height-resizer:hover::before,
+.height-resizer:focus-visible::before,
+.resizing > .height-resizer::before {
   background: var(--accent);
   opacity: 0.7;
 }
 
-.desc-resizer:hover::after,
-.desc-resizer:focus-visible::after,
-.feature-desc-editor.resizing .desc-resizer::after {
+.height-resizer:hover::after,
+.height-resizer:focus-visible::after,
+.resizing > .height-resizer::after {
   background: var(--accent);
 }
 
@@ -1468,8 +1470,9 @@ button.link:disabled {
 
 /* Scenario editor pane (specs/editor/spec-editor.feature.md "Spec editor
    pane"): takes the feature pane's slot — a bar on top, one scrolling column
-   below. Part of the page, not a dialog: nothing is dimmed and nothing is
-   resizable; the body editor grows with the window instead. */
+   below. Part of the page, not a dialog: nothing is dimmed and the pane is
+   not resizable — only the body editor, by the strip under it ("Spec body
+   resize"). */
 .scenario-pane {
   flex: 1;
   min-height: 0;
@@ -1591,11 +1594,6 @@ button.link:disabled {
   flex-shrink: 0;
 }
 
-/* At least 40% of the window, growing with the pane; the markdown textarea
-   absorbs it, as it does the description editor's third. */
-.scenario-pane .body-field {
-  min-height: 40vh;
-}
 
 /* The version is assigned by the app, so it reads as a label, not a field.
    The badge beside it is the scenario's status — draft until Propose or
@@ -1617,6 +1615,26 @@ button.link:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+}
+
+/* The scenario body (specs/editor/spec-editor.feature.md "Spec body
+   resize"): at least 40% of the window, growing to fill the pane when what
+   is below is short — never squeezed by it: a long list of test links makes
+   the column scroll instead. Once its strip is dragged it holds that height.
+   The markdown editor absorbs it either way. */
+.scenario-pane .body-field {
+  position: relative;
+  flex: 1 0 auto;
+  min-height: 40vh;
+  /* room under the editor for the grab strip, so it never sits on the
+     editor's own bottom edge (the Vim status line) */
+  padding-bottom: 0.45rem;
+}
+
+.scenario-pane .body-field.sized {
+  flex: 0 0 auto;
+  height: var(--body-h);
+  min-height: 0;
 }
 
 .field-label {

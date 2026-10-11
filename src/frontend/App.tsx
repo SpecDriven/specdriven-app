@@ -68,6 +68,7 @@ import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
 import { Popover } from "./Popover";
+import { HeightResizer } from "./HeightResizer";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
 import { CommandPalette, type PaletteItem } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -294,6 +295,7 @@ function storeSidebarWidth(w: number): void {
 // editor opens a third of the window tall and is dragged taller or shorter by
 // the strip along its lower boundary. Device-local, like the sidebar width.
 const DESC_MIN = 120;
+const DESC_HEIGHT_KEY = "sd-desc-height";
 
 export function clampDescHeight(h: number, windowHeight: number): number {
   // The scenario list below keeps at least a quarter of the window, so the
@@ -302,30 +304,37 @@ export function clampDescHeight(h: number, windowHeight: number): number {
   return Math.min(Math.max(Math.round(h), DESC_MIN), max);
 }
 
-function readDescHeight(): number | null {
+// Scenario body height (specs/editor/spec-editor.feature.md "Spec body
+// resize"): the body editor opens at least 40% of the window tall and is
+// dragged taller or shorter by the strip under it; the pane's column scrolls
+// to whatever is below. Device-local, like the description's.
+const BODY_MIN = 120;
+const BODY_HEIGHT_KEY = "sd-body-height";
+
+export function clampBodyHeight(h: number, windowHeight: number): number {
+  // The pane scrolls, so the body may outgrow it — but never past what fits
+  // the window, or the strip would end up off screen mid-drag.
+  const max = Math.max(BODY_MIN, Math.round(windowHeight * 0.85));
+  return Math.min(Math.max(Math.round(h), BODY_MIN), max);
+}
+
+function readEditorHeight(key: string, min: number): number | null {
   try {
-    const h = Number(localStorage.getItem("sd-desc-height"));
+    const h = Number(localStorage.getItem(key));
     // Nothing stored, or junk: the CSS default stands until a first drag.
-    return Number.isFinite(h) && h >= DESC_MIN ? Math.round(h) : null;
+    return Number.isFinite(h) && h >= min ? Math.round(h) : null;
   } catch {
     return null;
   }
 }
 
-function storeDescHeight(h: number): void {
+/** A height, or null to clear it on a double-click: back to the CSS default. */
+function storeEditorHeight(key: string, h: number | null): void {
   try {
-    localStorage.setItem("sd-desc-height", String(h));
+    if (h === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(h));
   } catch {
     // Storage unavailable (private mode): the height just won't stick.
-  }
-}
-
-/** Double-click on the strip: back to the CSS default, and it stays there. */
-function clearDescHeight(): void {
-  try {
-    localStorage.removeItem("sd-desc-height");
-  } catch {
-    // Storage unavailable: nothing was stored to clear.
   }
 }
 
@@ -1418,11 +1427,19 @@ export function App() {
   // The editor's height, dragged by the strip along its lower boundary. null
   // until a first drag or a stored height: then the CSS third-of-the-window
   // default stands, and follows the window.
-  const [descHeight, setDescHeight] = useState<number | null>(readDescHeight);
-  /** True while that strip is being dragged; holds the drag's starting point. */
-  const descDrag = useRef<{ y: number; height: number } | null>(null);
+  const [descHeight, setDescHeight] = useState<number | null>(() =>
+    readEditorHeight(DESC_HEIGHT_KEY, DESC_MIN),
+  );
   const [resizingDesc, setResizingDesc] = useState(false);
   const descPaneRef = useRef<HTMLDivElement | null>(null);
+  // The scenario body's height, the same way (specs/editor/spec-editor.
+  // feature.md "Spec body resize"): null until a first drag or a stored
+  // height, while the CSS default stands.
+  const [bodyHeight, setBodyHeight] = useState<number | null>(() =>
+    readEditorHeight(BODY_HEIGHT_KEY, BODY_MIN),
+  );
+  const [resizingBody, setResizingBody] = useState(false);
+  const bodyFieldRef = useRef<HTMLDivElement | null>(null);
   // Git engine (git-operations.md): the GitHub CLI (the default
   // wherever gh is installed), plain system git, or the bundled JavaScript
   // one — which is always available, so it needs no availability flag.
@@ -7623,7 +7640,13 @@ export function App() {
               </p>
             </div>
             <div className="scenario-pane-body">
-              <div className="body-field">
+              <div
+                className={`body-field${bodyHeight === null ? "" : " sized"}${resizingBody ? " resizing" : ""}`}
+                ref={bodyFieldRef}
+                style={
+                  bodyHeight === null ? undefined : ({ "--body-h": `${bodyHeight}px` } as CSSProperties)
+                }
+              >
                 <span className="field-label">Body</span>
                 <MarkdownEditor
                   value={editing.scenario.body}
@@ -7633,6 +7656,24 @@ export function App() {
                   onChange={(body) =>
                     setEditing({ ...editing, scenario: { ...editing.scenario, body } })
                   }
+                />
+                {/* The body's lower boundary is a grab strip like the
+                    description editor's: drag it to give the body more room
+                    when the table, ticket and test links crowd it, double-
+                    click to restore the default. */}
+                <HeightResizer
+                  label="Resize the body editor"
+                  min={BODY_MIN}
+                  height={bodyHeight}
+                  target={bodyFieldRef}
+                  clamp={clampBodyHeight}
+                  onHeight={setBodyHeight}
+                  onCommit={(h) => storeEditorHeight(BODY_HEIGHT_KEY, h)}
+                  onReset={() => {
+                    setBodyHeight(null);
+                    storeEditorHeight(BODY_HEIGHT_KEY, null);
+                  }}
+                  onResizing={setResizingBody}
                 />
               </div>
               {!editingPublished && (
@@ -8238,58 +8279,19 @@ export function App() {
                     the description more or less room, double-click to restore
                     the default third of the window. Sized like the sidebar
                     divider, and nudged by the arrow keys when focused. */}
-                <div
-                  className="desc-resizer"
-                  role="separator"
-                  aria-orientation="horizontal"
-                  aria-label="Resize the description editor"
-                  aria-valuemin={DESC_MIN}
-                  aria-valuenow={descHeight ?? undefined}
-                  tabIndex={0}
-                  onPointerDown={(e) => {
-                    const pane = descPaneRef.current;
-                    if (!pane) return;
-                    e.preventDefault();
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    // From wherever the pane stands now, so the first drag off
-                    // the CSS default doesn't jump.
-                    descDrag.current = { y: e.clientY, height: pane.getBoundingClientRect().height };
-                    setResizingDesc(true);
-                  }}
-                  onPointerMove={(e) => {
-                    const start = descDrag.current;
-                    if (!start) return;
-                    setDescHeight(
-                      clampDescHeight(start.height + (e.clientY - start.y), window.innerHeight),
-                    );
-                  }}
-                  onPointerUp={(e) => {
-                    const start = descDrag.current;
-                    if (!start) return;
-                    descDrag.current = null;
-                    setResizingDesc(false);
-                    storeDescHeight(
-                      clampDescHeight(start.height + (e.clientY - start.y), window.innerHeight),
-                    );
-                  }}
-                  onLostPointerCapture={() => {
-                    descDrag.current = null;
-                    setResizingDesc(false);
-                  }}
-                  onDoubleClick={() => {
+                <HeightResizer
+                  label="Resize the description editor"
+                  min={DESC_MIN}
+                  height={descHeight}
+                  target={descPaneRef}
+                  clamp={clampDescHeight}
+                  onHeight={setDescHeight}
+                  onCommit={(h) => storeEditorHeight(DESC_HEIGHT_KEY, h)}
+                  onReset={() => {
                     setDescHeight(null);
-                    clearDescHeight();
+                    storeEditorHeight(DESC_HEIGHT_KEY, null);
                   }}
-                  onKeyDown={(e) => {
-                    const delta = e.key === "ArrowDown" ? 16 : e.key === "ArrowUp" ? -16 : 0;
-                    if (delta === 0) return;
-                    e.preventDefault();
-                    const from = descHeight ?? descPaneRef.current?.getBoundingClientRect().height;
-                    if (from === undefined) return;
-                    const h = clampDescHeight(from + delta, window.innerHeight);
-                    setDescHeight(h);
-                    storeDescHeight(h);
-                  }}
+                  onResizing={setResizingDesc}
                 />
               </div>
             ) : (
