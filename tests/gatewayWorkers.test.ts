@@ -55,12 +55,19 @@ test("the worker environment carries the user's folders and secrets, not the gat
   const env = workerEnv(
     dirs,
     { github: { token: "ghp_x", login: "o", name: null, email: null, id: 1 }, agentKeys: { anthropic: "sk-a" } },
-    { PATH: "/bin", SPECDRIVEN_MASTER_KEY: "secret", RESEND_API_KEY: "secret", OTEL_SERVICE_NAME: "sd" },
+    {
+      PATH: "/bin",
+      SPECDRIVEN_MASTER_KEY: "secret",
+      RESEND_API_KEY: "secret",
+      SPECDRIVEN_DATASTORE_TOKEN: "secret",
+      OTEL_SERVICE_NAME: "sd",
+    },
     "a@example.com",
   );
   expect(env.SPECDRIVEN_ACCOUNT_EMAIL).toBe("a@example.com");
   expect(env.SPECDRIVEN_MASTER_KEY).toBeUndefined();
   expect(env.RESEND_API_KEY).toBeUndefined();
+  expect(env.SPECDRIVEN_DATASTORE_TOKEN).toBeUndefined();
   expect(env.PATH).toBe("/bin");
   expect(env.OTEL_SERVICE_NAME).toBe("sd");
   expect(env.HOME).toBe(`/data/users/${A}/home`);

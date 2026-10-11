@@ -10,6 +10,7 @@ import { buildAssets } from "./assets";
 import { loadAppShell } from "./appShell";
 import { readConfig } from "./config";
 import { generateMasterKey, loadKeyring } from "./crypto";
+import { Datastore, datastoreGit, readDatastoreConfig } from "./datastore";
 import { openDatabase } from "./db";
 import { RateLimiter } from "./rateLimit";
 import { SecretStore } from "./secrets";
@@ -34,6 +35,27 @@ const config = readConfig();
 // Everything the gateway writes — the database first — is its own alone.
 process.umask(0o077);
 const db = openDatabase(join(config.dataDir, "app.db"));
+// The accounts' copy in GitHub (datastore.ts): read before anything else, so
+// a redeploy without the volume starts with everyone's accounts. A repo that
+// cannot be read stops the start instead of letting an empty list be pushed.
+const datastoreConfig = readDatastoreConfig();
+let datastore: Datastore | null = null;
+if (datastoreConfig) {
+  datastore = new Datastore({
+    db,
+    dataDir: config.dataDir,
+    repo: datastoreConfig.repo,
+    git: datastoreGit(datastoreConfig.token),
+  });
+  const { imported } = await datastore.restore().catch((e: Error) => {
+    throw new Error(`The datastore ${datastoreConfig.repo} could not be read: ${e.message}`);
+  });
+  if (imported) console.log(`restored ${imported} accounts from ${datastoreConfig.repo}`);
+  datastore.start();
+} else {
+  const say = config.production ? console.error : console.warn;
+  say("SPECDRIVEN_DATASTORE_TOKEN is not set — accounts live only in app.db on this volume");
+}
 const keyring = await loadKeyring(process.env, config.production);
 const secrets = new SecretStore(db, keyring);
 const resealed = await secrets.reseal();
@@ -89,11 +111,16 @@ const server = Bun.serve({
 console.log(`SpecDriven gateway on ${config.publicUrl ?? server.url} (data in ${config.dataDir})`);
 
 // A redeploy sends SIGTERM: stop the workers (each pushes nothing half-way —
-// saved work is on the volume and syncs on the next start), then exit.
+// saved work is on the volume and syncs on the next start), push the
+// accounts' last changes, then exit.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, async () => {
     await server.stop(true);
     await workers.stopAll();
+    if (datastore) {
+      datastore.stop();
+      await datastore.save({ force: true }).catch((e: Error) => console.error(`datastore save failed: ${e.message}`));
+    }
     db.close();
     process.exit(0);
   });
