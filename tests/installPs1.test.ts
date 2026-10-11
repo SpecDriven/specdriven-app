@@ -4,11 +4,13 @@
 // ~/.specdriven/app, builds the desktop app with Bun and starts it, and
 // leaves nothing behind when the download cannot be trusted.
 //
-// The script runs under PowerShell 7 (`pwsh`, or SPECDRIVEN_TEST_PWSH), so
-// these tests run on any machine that has one; without it only the static
-// checks run. Off Windows the script links `current` with a symbolic link
-// rather than a junction and adds no Start menu shortcut — the rest is the
-// same code path a Windows machine takes.
+// The script runs under PowerShell 7, and every run of it starts one — too
+// slow for the suite every pull request runs. So those tests are opt-in: they
+// run when SPECDRIVEN_TEST_PWSH names a `pwsh`, as the install.ps1 workflow
+// (.github/workflows/install-ps1.yml) does whenever the installer changes;
+// otherwise only the static checks run. Off Windows the script links `current`
+// with a symbolic link rather than a junction and adds no Start menu shortcut
+// — the rest is the same code path a Windows machine takes.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
   existsSync,
@@ -28,7 +30,7 @@ const INSTALL_PS1 = join(import.meta.dir, "..", "install.ps1");
 const VERSION = "0.1.40";
 const OLDER = "0.1.39";
 
-const PWSH = process.env.SPECDRIVEN_TEST_PWSH || Bun.which("pwsh");
+const PWSH = process.env.SPECDRIVEN_TEST_PWSH;
 
 // --- fixtures ----------------------------------------------------------------
 
@@ -142,6 +144,14 @@ beforeAll(async () => {
 });
 
 afterAll(() => good?.stop());
+
+// PowerShell's first start on a machine is slow: .NET reads and compiles its
+// assemblies from a cold disk, which on a CI runner takes longer than a test
+// may. One install up front pays for that here, so every test below times
+// the script rather than the runtime under it.
+beforeAll(async () => {
+  if (PWSH) await runInstaller(good.url, freshHome());
+}, 60_000);
 
 // --- what Windows PowerShell can read ----------------------------------------
 
@@ -362,7 +372,7 @@ test.skipIf(!PWSH || !PYTHON)("a yes at the terminal installs Bun; a no leaves i
   expect(run.stdout).toContain("Leaving Bun alone.");
   expect(existsSync(join(home, ".bun"))).toBe(false);
   expect(installer.hits).toBe(0); // not even downloaded
-}, 60_000); // .NET asks the terminal where its cursor is, and waits out the silence
+});
 
 test.skipIf(!PWSH)("with no one to ask, Bun is left alone and never downloaded", async () => {
   const installer = fakeBunInstaller();
