@@ -85,7 +85,7 @@ out of its reach — `bun run dev:electron` is for those.
   counts, with that one blind spot.
 - **`specs` symlink**: electron-builder stats every path in the project, so a
   dangling `specs` fails the packaged build with `ENOENT … stat '…/specs'`.
-  `mkdir -p ../specs-specdriven/specs` (or clone the real repo there, see
+  `git submodule update --init` (the specs-specdriven submodule, see
   docs/DEVELOPMENT.md) fixes it; `--unpackaged` sidesteps it.
 - **macOS**: the window appears on screen three times; that is expected.
   There is no Windows desktop build, so nothing runs there.
