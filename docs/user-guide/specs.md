@@ -130,13 +130,12 @@ Click a feature in the tree to open it. Across the top:
   **Cancel**). Renaming the heading does not rename the file.
 - The **save indicator** reads `Saving…`, `Unsaved`, `Saved`, then
   `Saved · 12s ago` and `Saved · 3m ago` as time passes.
-- **Copy link** (`⌘⇧C`) copies the page's url and flips to `Copied` for a
-  moment.
 - The pencil toggles between **Add description** / **Edit description** and
   **Done editing the description**.
 - **More actions** (⋯): **Rename feature** (the heading), **Rename file**,
   **Move to folder…** (type a path such as `billing/renewals`; `/` nests),
-  **Start AI Session**, and **Delete feature**.
+  **Start AI Session**, **Copy link** (`⌘⇧C`, which copies the page's url
+  and flips to `Copied` for a moment), and **Delete feature**.
 - **Publish all** publishes every unpublished scenario of the feature in one
   step and reads `Publishing…` while it runs. A dot on the button means the
   feature has unpublished changes.
