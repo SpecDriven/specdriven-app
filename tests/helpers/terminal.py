@@ -9,6 +9,9 @@
 #
 # In tty mode the command's stdout and stderr both come back on the terminal,
 # so they arrive here interleaved, as a person at the keyboard would see them.
+# Like a real terminal it answers "where is the cursor?" (ESC [ 6 n), which
+# .NET asks around every Read-Host; left unanswered, each query waits out a
+# timeout of its own and a PowerShell prompt takes seconds.
 import os
 import subprocess
 import sys
@@ -32,7 +35,9 @@ if pid == 0:
 # The line discipline holds the answer until the script reads it, so it can be
 # typed before the prompt is printed.
 os.write(fd, answer.encode())
+CURSOR_QUERY = b"\x1b[6n"
 out = bytearray()
+answered = 0
 while True:
     try:
         chunk = os.read(fd, 65536)
@@ -41,6 +46,15 @@ while True:
     if not chunk:
         break
     out += chunk
+    # Counted over everything read so far, so a query split across two reads
+    # is still answered once.
+    asked = out.count(CURSOR_QUERY)
+    try:
+        while answered < asked:
+            os.write(fd, b"\x1b[1;1R")
+            answered += 1
+    except OSError:
+        pass  # the command has gone, and asks nothing more
 sys.stdout.buffer.write(out)
 sys.stdout.buffer.flush()
 sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
