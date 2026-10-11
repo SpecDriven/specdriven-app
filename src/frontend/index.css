@@ -2458,7 +2458,8 @@ aside > .user-corner {
 }
 
 .auth-row button,
-.auth-device button {
+.auth-device button,
+.settings-row > button {
   padding: 0.45rem 0.85rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -2468,8 +2469,15 @@ aside > .user-corner {
   cursor: pointer;
 }
 
-.auth-row button:hover {
+.auth-row button:hover,
+.settings-row > button:hover:not(:disabled) {
   background: var(--surface-3, var(--surface-1));
+}
+
+/* Code repo submodule (specs/app/code-repo-submodule.feature.md): no system git, nothing to run. */
+.settings-row > button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .auth-device p {

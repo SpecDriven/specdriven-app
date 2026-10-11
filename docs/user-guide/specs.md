@@ -324,6 +324,37 @@ files by hand:
 
 A sync leaves an open editor alone; you can keep typing through it.
 
+### Specs as a submodule of your code repo
+
+To have the specs come along whenever someone clones the code, add the data
+repository to the code repository as a git submodule. Open **Settings → Git
+& GitHub → Code repo submodule**, press **Add to a code repo…**, and pick the
+code repository's folder (it starts out filled in with `code-repo` from
+`project-settings.json`, when one is set). The app:
+
+- runs `git submodule add` in the code repo, pointing at the data
+  repository's `origin` and following the branch you are on, into a folder
+  named after the repository (`specs-insurance`, say);
+- commits `.gitmodules` and that folder in the code repo, and nothing else
+  that happens to be staged there;
+- does **not** push. Push the code repo yourself when you are ready to share
+  it.
+
+The button needs git installed on the machine; the built-in git engine cannot
+add submodules. It is not offered in the demo or the hosted app.
+
+You keep editing specs in the app's own data folder, as before. The code repo
+pins one commit of the specs and moves only when someone commits a newer one.
+The everyday commands in the code repo:
+
+```sh
+git clone --recurse-submodules <code repo url>   # a fresh clone, with the specs
+git submodule update --init                      # an existing clone, after the specs were added
+git submodule update --remote specs-insurance    # move the pin to the newest specs on the branch
+git commit -am "Bump specs"                      # ...and record it
+git config submodule.recurse true                # optional: pull and checkout update the specs too
+```
+
 ## 8. Links and sharing
 
 Every page has a stable url:
