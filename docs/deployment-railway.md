@@ -63,6 +63,32 @@ Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT
 A copy of the volume, or a backup of it, reveals no secret without the master
 key.
 
+## Datastore
+
+The accounts are also mirrored into a private GitHub repository, by default
+[SpecDriven/hosted-app](https://github.com/SpecDriven/hosted-app), so a
+redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`).
+
+- **What goes in:** one JSON file per table: `users.json` (password hashes
+  and `os_uid`), `invites.json`, `secrets.json` (still AES-GCM ciphertext, in
+  base64), and `sessions.json` (the session hash, owner, created and expiry
+  times only; no IP address, user agent or last-seen time). Email links and
+  rate-limit counters stay behind.
+- **On start:** the gateway clones the repo into `/data/datastore` (root-only,
+  like `app.db`). If `app.db` has no accounts, it is filled from the repo. If it
+  already has accounts, the volume survived and is newer, so its copy is pushed
+  over the repo's.
+- **While running:** every 30 s, a change worth keeping (sign-up, password,
+  secret, invite, sign-in, sign-out) is committed as "Save accounts" and
+  pushed. A session's sliding expiry alone is not pushed.
+- **On SIGTERM** (every redeploy): one last forced push, so everything is in
+  the repo before the container goes.
+- **When the repo can't be read**, the gateway refuses to start rather than
+  start with no accounts and push that list over the real one.
+- **The master key must stay the same** across redeploys, or the secrets in the
+  repo no longer open. Rotate it with `SPECDRIVEN_MASTER_KEYS_PREVIOUS` as
+  usual. The re-sealed secrets are pushed on the next save.
+
 The browser can only write secrets: the account page shows each one's name,
 its last four characters and, for GitHub, the account the token belongs to.
 Secrets are decrypted only in the gateway, when it starts that person's
@@ -155,6 +181,8 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
    | `SPECDRIVEN_SIGNUP_ALLOWLIST` | who may sign up without an invite: `you@example.com,@yourcompany.com` |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
+   | `SPECDRIVEN_DATASTORE_TOKEN` | a GitHub token that can read and write the [datastore](#datastore) repo: a fine-grained token with resource owner **SpecDriven**, access to `hosted-app` only, and the **Contents: Read and write** permission. Unset, accounts live only on the volume |
+   | `SPECDRIVEN_DATASTORE_REPO` | optional, default `https://github.com/SpecDriven/hosted-app` |
 
    `PORT` comes from Railway. In production the gateway refuses to start
    without the first four variables.
@@ -169,9 +197,10 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
   (plugin events) reconnect on their own.
 - The gateway's idle timeout is 255 s, and the worker's is 60 s per request.
 
-**Backups:** Railway volume backups cover the accounts and the encrypted
-secrets. The specs themselves live in GitHub, and each worker pushes saved
-work on its sync tick.
+**Backups:** the [datastore](#datastore) repo holds the accounts and the
+encrypted secrets, and its history is a backup in itself. Railway volume
+backups cover them as well. The specs themselves live in GitHub, and each
+worker pushes saved work on its sync tick.
 
 ## Running it locally
 
@@ -195,6 +224,7 @@ When no variables are set:
 | `src/gateway/accounts.ts` | sign-up, login, reset and change password, invites |
 | `src/gateway/sessions.ts`, `rateLimit.ts` | cookies and sessions; fixed-window limits |
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
+| `src/gateway/datastore.ts` | the accounts' mirror in the datastore repo |
 | `src/gateway/workers.ts`, `proxy.ts` | the per-user worker pool and the streaming proxy |
 | `src/gateway/appShell.ts`, `assets.ts`, `pages/` | the app's frontend and the gateway's own pages |
 | `src/gateway/mail.ts` | Resend client and email texts |

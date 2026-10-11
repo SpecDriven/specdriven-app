@@ -151,7 +151,9 @@ else can be changed there. See
 password sign-in with password recovery by email (Resend), each user's GitHub
 token and agent API keys encrypted at rest, and one app server per user in its
 own folder. Local agents and plugin installs are off there. `Dockerfile.hosted`
-and `railway.json` deploy it on Railway with a volume at `/data`; see
+and `railway.json` deploy it on Railway with a volume at `/data`. With
+`SPECDRIVEN_DATASTORE_TOKEN` set, the accounts are also mirrored into a
+private GitHub repo, so they survive a redeploy. See
 [docs/deployment-railway.md](docs/deployment-railway.md). `bun run dev:hosted`
 runs it locally with emails printed to the console.
 

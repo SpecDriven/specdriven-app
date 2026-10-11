@@ -58,6 +58,19 @@ export function identityConfig(name: string, email: string): string[] {
 export async function appContext(): Promise<GitContext> {
   const auth = await getAuth();
   if (!auth) return { config: [], env: {} };
+  return tokenContext(
+    auth.token,
+    auth.name ?? auth.login,
+    auth.email ?? `${auth.login}@users.noreply.github.com`,
+  );
+}
+
+/**
+ * The signed-in context for one fixed token and commit author — appContext's
+ * shape, for callers (the hosted gateway's datastore) that hold a token of
+ * their own rather than the app's sign-in.
+ */
+export function tokenContext(token: string, name: string, email: string): GitContext {
   return {
     config: [
       "-c", "url.https://github.com/.insteadOf=git@github.com:",
@@ -65,12 +78,9 @@ export async function appContext(): Promise<GitContext> {
       "-c", "credential.helper=",
       "-c",
       "credential.helper=!f(){ echo username=x-access-token; echo \"password=$SPECDRIVEN_GIT_TOKEN\"; };f",
-      ...identityConfig(
-        auth.name ?? auth.login,
-        auth.email ?? `${auth.login}@users.noreply.github.com`,
-      ),
+      ...identityConfig(name, email),
     ],
-    env: { SPECDRIVEN_GIT_TOKEN: auth.token },
+    env: { SPECDRIVEN_GIT_TOKEN: token },
   };
 }
 
