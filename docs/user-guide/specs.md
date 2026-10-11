@@ -355,6 +355,44 @@ git commit -am "Bump specs"                      # ...and record it
 git config submodule.recurse true                # optional: pull and checkout update the specs too
 ```
 
+#### Only one folder of the specs
+
+A submodule is always a whole repository at one commit; git cannot make one out
+of a single folder. Keep the whole data repository as the submodule (the app
+treats it as one unit, `project-settings.json`, `README.md`, `roadmap/`,
+`tasks/` and `.specdriven/` included). Then show only the folder you want, in
+either of two ways.
+
+**A symlink to the folder.** This is committed, so everyone who clones the code
+repo gets it:
+
+```sh
+ln -s specs-insurance/specs/quotes specs   # specs/ in the code repo is the quotes folder
+git add specs && git commit -m "Link the quotes specs"
+```
+
+The submodule stays checked out in full next to the link. On Windows, git only
+creates the link where symlinks are allowed (Developer Mode, or
+`git config core.symlinks true`); elsewhere it checks out as a small text file
+holding the path.
+
+**A sparse checkout inside the submodule.** Only the chosen folders, and the
+files at the top of the repository, appear on disk. The rest of the repository
+is still fetched and pinned:
+
+```sh
+git -C specs-insurance sparse-checkout set specs/quotes   # only specs/quotes on disk
+git -C specs-insurance sparse-checkout disable            # everything back
+```
+
+This is a setting of your clone alone. It is not recorded in `.gitmodules`, so
+each teammate runs it after cloning.
+
+Splitting the folder into a repository of its own (`git subtree split`) and
+adding that as the submodule does not work with the app: SpecDriven edits and
+pushes the original data repository, and the split copy goes stale unless
+someone splits it again after every change.
+
 ## 8. Links and sharing
 
 Every page has a stable url:
