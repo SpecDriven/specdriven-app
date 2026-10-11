@@ -23,6 +23,7 @@ import {
 import { tmpdir, userInfo } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { cachedExecutable, linkExecutable } from "./helpers/fakeBin";
+import { fakeReleases, sha256, shasums, sourceZip } from "./helpers/fakeReleases";
 
 const INSTALL_SH = join(import.meta.dir, "..", "install.sh");
 const VERSION = "0.1.40";
@@ -65,76 +66,6 @@ function toolbox(names: string[], fakes: Record<string, string> = {}): string {
   return dir;
 }
 
-/** `git archive --format=zip --prefix=specdriven-<version>/`, as the workflow does.
-    The buffer is spelled out because `Response` takes an ArrayBuffer-backed
-    view, not the `ArrayBufferLike` default that also admits SharedArrayBuffer. */
-async function sourceZip(version: string): Promise<Uint8Array<ArrayBuffer>> {
-  const repo = mkdtempSync(join(tmpdir(), "specdriven-src-"));
-  writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "specdriven", version }) + "\n");
-  writeFileSync(join(repo, "README.md"), `# SpecDriven ${version}\n`);
-  mkdirSync(join(repo, "src"));
-  writeFileSync(join(repo, "src", "index.ts"), "export {};\n");
-  const env = {
-    ...process.env,
-    GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com",
-    GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com",
-  };
-  const run = async (...args: string[]) => {
-    const p = Bun.spawn(["git", ...args], { cwd: repo, env, stdout: "pipe", stderr: "pipe" });
-    if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());
-  };
-  await run("init", "-q");
-  await run("add", ".");
-  await run("commit", "-q", "-m", `v${version}`);
-  const out = join(repo, "src.zip");
-  await run("archive", "--format=zip", `--prefix=specdriven-${version}/`, "-o", out, "HEAD");
-  return new Uint8Array(await Bun.file(out).arrayBuffer());
-}
-
-function sha256(bytes: Uint8Array): string {
-  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-}
-
-/** The `sha256sum` line the workflow writes: two spaces between hash and name. */
-function shasums(entries: Record<string, Uint8Array>): string {
-  return Object.entries(entries).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join("");
-}
-
-interface Release {
-  /** Asset name -> bytes, served under /download/v<version>/. */
-  assets: Record<string, Uint8Array<ArrayBuffer> | string>;
-}
-
-/** Stands in for github.com/<owner>/<repo>/releases. */
-function fakeReleases(latest: string, releases: Record<string, Release>) {
-  const hits: string[] = [];
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    fetch(req) {
-      const url = new URL(req.url);
-      hits.push(url.pathname);
-      if (url.pathname === "/latest") {
-        return Response.redirect(`${url.origin}/tag/v${latest}`, 302);
-      }
-      const tag = url.pathname.match(/^\/tag\/v(.+)$/);
-      if (tag) {
-        return releases[tag[1]!] ? new Response("<html>release</html>") : new Response("Not Found", { status: 404 });
-      }
-      const dl = url.pathname.match(/^\/download\/v([^/]+)\/(.+)$/);
-      if (dl) {
-        const asset = releases[dl[1]!]?.assets[dl[2]!];
-        return asset ? new Response(asset) : new Response("Not Found", { status: 404 });
-      }
-      return new Response("Not Found", { status: 404 });
-    },
-  });
-  return {
-    url: `http://127.0.0.1:${server.port}`,
-    hits,
-    stop: () => server.stop(true),
-  };
-}
 
 interface RunOptions {
   shell?: string[];
@@ -463,13 +394,16 @@ test("a `current` that is a real directory is never replaced", async () => {
 
 // --- the machine it runs on --------------------------------------------------
 
-test("Windows shells are sent to the releases page instead", async () => {
+test("Windows shells are sent to install.ps1, or the releases page", async () => {
   const home = freshHome();
   good.hits.length = 0;
   const tools = toolbox([...BASE_TOOLS, "curl"], { uname: "#!/bin/sh\necho MINGW64_NT-10.0-19045\n" });
   const { code, stderr } = await runInstaller(good.url, home, { tools });
   expect(code).toBe(1);
   expect(stderr).toContain("this installer needs a Unix shell");
+  expect(stderr).toContain(
+    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex",
+  );
   expect(stderr).toContain(good.url);
   expect(good.hits).toEqual([]);
   expect(existsSync(join(home, ".specdriven"))).toBe(false);

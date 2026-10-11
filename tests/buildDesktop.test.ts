@@ -6,6 +6,7 @@ import { electronBuilderArgs, selectPlatforms } from "../scripts/build-desktop";
 test("without flags the build targets the machine it runs on", () => {
   expect(selectPlatforms([], "darwin")).toEqual(["mac"]);
   expect(selectPlatforms([], "linux")).toEqual(["linux"]);
+  expect(selectPlatforms([], "win32")).toEqual(["win"]);
 });
 
 test("a Mac cross-builds the Linux app", () => {
@@ -18,8 +19,16 @@ test("the macOS app is only built on macOS", () => {
   expect(() => selectPlatforms(["--all"], "linux")).toThrow(/only be built on macOS/);
 });
 
+test("the Windows app is only built on Windows, and --all leaves it out", () => {
+  expect(selectPlatforms(["--win"], "win32")).toEqual(["win"]);
+  expect(() => selectPlatforms(["--win"], "darwin")).toThrow(/only be built on Windows/);
+  expect(() => selectPlatforms(["--win"], "linux")).toThrow(/only be built on Windows/);
+  // --all is the release a Mac cuts; asking for it on Windows asks for macOS.
+  expect(() => selectPlatforms(["--all"], "win32")).toThrow(/only be built on macOS/);
+});
+
 test("an unsupported host or a mistyped flag stops before packaging", () => {
-  expect(() => selectPlatforms([], "win32")).toThrow(/no desktop build for win32/);
+  expect(() => selectPlatforms([], "freebsd")).toThrow(/no desktop build for freebsd/);
   expect(() => selectPlatforms(["--linx"], "darwin")).toThrow(/unknown option --linx/);
 });
 
@@ -33,5 +42,8 @@ test("--local packages only the installer this machine starts, for its own archi
   expect(electronBuilderArgs(["linux"], true, "x64")).toEqual(["--linux", "AppImage", "--x64"]);
   expect(electronBuilderArgs(["linux"], true, "arm")).toEqual(["--linux", "AppImage", "--armv7l"]);
   expect(electronBuilderArgs(["mac"], true, "arm64")).toEqual(["--mac", "dmg", "--arm64"]);
+  // Windows gets the app itself, unpacked, which install.ps1 starts in place.
+  expect(electronBuilderArgs(["win"], true, "x64")).toEqual(["--win", "dir", "--x64"]);
+  expect(electronBuilderArgs(["win"], true, "arm64")).toEqual(["--win", "dir", "--arm64"]);
   expect(() => electronBuilderArgs(["linux"], true, "ppc64")).toThrow(/ppc64 architecture/);
 });

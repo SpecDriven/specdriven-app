@@ -5,10 +5,12 @@
  *   bun run build:desktop            this machine's platform
  *   bun run build:desktop --mac      release/SpecDriven-<version>-arm64.dmg (+ zip)
  *   bun run build:desktop --linux    release/SpecDriven-<version>-<arch>.AppImage (+ deb)
- *   bun run build:desktop --all      both
+ *   bun run build:desktop --win      release/SpecDriven Setup <version>.exe (on Windows only)
+ *   bun run build:desktop --all      macOS and Linux, the release set
  *   bun run build:desktop --local    only what runs here: this machine's
  *                                    platform and architecture, as the
- *                                    AppImage (Linux) or .dmg (macOS)
+ *                                    AppImage (Linux), .dmg (macOS) or
+ *                                    unpacked SpecDriven.exe (Windows)
  *
  * Three steps: bundle the frontend into static files (served over the
  * app:// protocol), bundle the Electron main process, then hand both to
@@ -41,21 +43,27 @@
 import { $ } from "bun";
 import { rm } from "node:fs/promises";
 
-export type Platform = "mac" | "linux";
+export type Platform = "mac" | "linux" | "win";
 
-const PLATFORMS: Platform[] = ["mac", "linux"];
+const PLATFORMS: Platform[] = ["mac", "linux", "win"];
+
+/** What `--all` packages: everything one Mac can cut a release of. */
+const RELEASE_PLATFORMS: Platform[] = ["mac", "linux"];
 
 /** Which platform a given `process.platform` builds for by default. */
 export function hostPlatform(osPlatform: string): Platform | null {
   if (osPlatform === "darwin") return "mac";
   if (osPlatform === "linux") return "linux";
+  if (osPlatform === "win32") return "win";
   return null;
 }
 
 /**
- * Resolves `--mac` / `--linux` / `--all` against the host, and rejects what
- * this machine cannot build. macOS artifacts need macOS tooling (hdiutil,
- * codesign); Linux ones cross-build from macOS.
+ * Resolves `--mac` / `--linux` / `--win` / `--all` against the host, and
+ * rejects what this machine cannot build. macOS artifacts need macOS tooling
+ * (hdiutil, codesign); Linux ones cross-build from macOS. Windows ones are
+ * built on Windows, by install.ps1 — off Windows, electron-builder needs Wine
+ * to stamp the executable's resources.
  */
 export function selectPlatforms(args: string[], osPlatform: string): Platform[] {
   const known = ["--all", ...PLATFORMS.map((p) => `--${p}`)];
@@ -64,7 +72,7 @@ export function selectPlatforms(args: string[], osPlatform: string): Platform[] 
 
   const host = hostPlatform(osPlatform);
   let selected = args.includes("--all")
-    ? [...PLATFORMS]
+    ? [...RELEASE_PLATFORMS]
     : PLATFORMS.filter((p) => args.includes(`--${p}`));
   if (selected.length === 0) {
     if (!host) throw new Error(`no desktop build for ${osPlatform} — pass --mac or --linux`);
@@ -73,11 +81,18 @@ export function selectPlatforms(args: string[], osPlatform: string): Platform[] 
   if (selected.includes("mac") && host !== "mac") {
     throw new Error("the macOS app can only be built on macOS");
   }
+  if (selected.includes("win") && host !== "win") {
+    throw new Error("the Windows app can only be built on Windows");
+  }
   return selected;
 }
 
-/** What `--local` packages: the one installer install.sh starts or opens. */
-const LOCAL_TARGET: Record<Platform, string> = { linux: "AppImage", mac: "dmg" };
+/**
+ * What `--local` packages: what install.sh starts or opens, and what
+ * install.ps1 starts — on Windows the unpacked app (`dir`), run in place
+ * from release/win-unpacked rather than installed a second time.
+ */
+const LOCAL_TARGET: Record<Platform, string> = { linux: "AppImage", mac: "dmg", win: "dir" };
 
 /** electron-builder's architecture flag for a `process.arch`. */
 export function archFlag(osArch: string): string {
