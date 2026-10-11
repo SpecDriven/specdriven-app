@@ -101,7 +101,8 @@ back to whichever file was read.
 
 The user guides live in [docs/user-guide](docs/user-guide):
 [Features and specs](docs/user-guide/specs.md) covers the Specs tab, the
-draft → proposed → published lifecycle, saving, syncing and links to tests;
+draft → proposed → published lifecycle, saving, syncing, links to tests, and
+[adding the specs to a code repo as a git submodule](docs/user-guide/specs.md#specs-as-a-submodule-of-your-code-repo);
 [AI sessions](docs/user-guide/ai-sessions.md) covers handing selected specs to
 Claude Code Desktop, or to Claude, Codex or Pi in the app's own coding agent
 pane; [Pomodoro](docs/user-guide/pomodoro.md) covers timing

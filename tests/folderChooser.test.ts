@@ -11,6 +11,7 @@ import { join } from "node:path";
 import {
   canChooseFolder,
   chooseFolder,
+  FOLDER_TITLES,
   platformChooser,
   setFolderChooser,
 } from "../src/server/folderChooser";
@@ -150,4 +151,43 @@ test("POST /api/choose-folder is 501 with no native chooser", async () => {
 test("folder chooser route matches POST only", () => {
   expect(matchApi("GET", "/api/choose-folder")).toBeNull();
   expect(matchApi("PUT", "/api/choose-folder")).toBeNull();
+});
+
+// Picking the code repo to add the specs to as a submodule
+// (git-operations.md "Add the spec repo to a code repo as a submodule")
+// titles the dialog for that. The request names a purpose, never the title
+// itself — the title is spliced into the osascript and PowerShell.
+test("the dialog title follows the purpose, never free text from the request", async () => {
+  const titles: (string | undefined)[] = [];
+  setFolderChooser(async (title) => {
+    titles.push(title);
+    return "/tmp/picked";
+  });
+  const m = matchApi("POST", "/api/choose-folder")!;
+  const asking = (body: unknown) =>
+    new Request("http://localhost/api/choose-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  await m.handler(post(), {});
+  await m.handler(asking({ purpose: "code-repo" }), {});
+  await m.handler(asking({ purpose: '" & do shell script "rm -rf ~' }), {});
+  expect(titles).toEqual([
+    FOLDER_TITLES["data-repo"],
+    FOLDER_TITLES["code-repo"],
+    FOLDER_TITLES["data-repo"],
+  ]);
+  expect(FOLDER_TITLES["code-repo"]).toBe("Choose the code repository");
+});
+
+test("the Linux dialog shows the title it is given", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chooser-path-"));
+  const echoes = join(dir, "zenity");
+  // Prints its --title argument back as the "picked" path.
+  writeFileSync(echoes, '#!/bin/sh\nfor a in "$@"; do case "$a" in --title=*) echo "${a#--title=}";; esac; done\n');
+  chmodSync(echoes, 0o755);
+  const chooser = platformChooser("linux", { DISPLAY: ":0", PATH: dir })!;
+  expect(await chooser()).toBe(FOLDER_TITLES["data-repo"]);
+  expect(await chooser(FOLDER_TITLES["code-repo"])).toBe("Choose the code repository");
 });
