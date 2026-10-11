@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { endAllChatSessions } from "../server/agentChat";
 import { applyStartupState, handleApi } from "../server/api";
-import { setFolderChooser } from "../server/folderChooser";
+import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { DESKTOP_SCHEME } from "../frontend/route";
@@ -363,9 +363,9 @@ if (!app.requestSingleInstanceLock()) {
     // Data-directory picker (specs/ui/app-start.feature.md): replace the
     // server's osascript fallback with the native dialog, parented to the
     // window.
-    setFolderChooser(async () => {
+    setFolderChooser(async (title = FOLDER_TITLES["data-repo"]) => {
       const opts: Electron.OpenDialogOptions = {
-        title: "Choose the spec data directory",
+        title,
         properties: ["openDirectory", "createDirectory"],
       };
       const picked =

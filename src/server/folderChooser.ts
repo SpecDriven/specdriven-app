@@ -14,15 +14,27 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /** Resolves the picked absolute path, or null when the user cancels. */
-export type FolderChooser = () => Promise<string | null>;
+export type FolderChooser = (title?: string) => Promise<string | null>;
 
-const PROMPT = "Choose the spec data directory";
+/**
+ * What the folder is being picked for. Each maps to a fixed title — the
+ * title is spliced into the osascript and PowerShell below, so it is never
+ * free text from a request.
+ */
+export type FolderPurpose = "data-repo" | "code-repo";
 
-function osascriptChooser(): Promise<string | null> {
+export const FOLDER_TITLES: Record<FolderPurpose, string> = {
+  "data-repo": "Choose the spec data directory",
+  "code-repo": "Choose the code repository",
+};
+
+const PROMPT = FOLDER_TITLES["data-repo"];
+
+function osascriptChooser(title = PROMPT): Promise<string | null> {
   return new Promise((resolvePath) => {
     execFile(
       "osascript",
-      ["-e", `POSIX path of (choose folder with prompt "${PROMPT}")`],
+      ["-e", `POSIX path of (choose folder with prompt "${title}")`],
       (err, stdout) => resolvePath(err ? null : stdout.trim() || null),
     );
   });
@@ -32,11 +44,11 @@ function osascriptChooser(): Promise<string | null> {
 // thread, and an owner form so it comes up in front of the browser rather
 // than behind it; UTF-8 output keeps non-ASCII paths intact once stdout is
 // redirected. Cancel prints nothing, which reads back as null.
-const POWERSHELL_SCRIPT = [
+const powershellScript = (title: string) => [
   "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
   "Add-Type -AssemblyName System.Windows.Forms",
   "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-  `$dialog.Description = '${PROMPT}'`,
+  `$dialog.Description = '${title}'`,
   "$dialog.ShowNewFolderButton = $true",
   "$owner = New-Object System.Windows.Forms.Form",
   "$owner.TopMost = $true",
@@ -44,11 +56,11 @@ const POWERSHELL_SCRIPT = [
   "$owner.Dispose()",
 ].join("; ");
 
-function powershellChooser(): Promise<string | null> {
+function powershellChooser(title = PROMPT): Promise<string | null> {
   return new Promise((resolvePath) => {
     execFile(
       "powershell.exe",
-      ["-NoProfile", "-STA", "-Command", POWERSHELL_SCRIPT],
+      ["-NoProfile", "-STA", "-Command", powershellScript(title)],
       { windowsHide: true },
       (err, stdout) => resolvePath(err ? null : stdout.trim() || null),
     );
@@ -64,11 +76,11 @@ function powershellChooser(): Promise<string | null> {
 const LINUX_DIALOGS = [
   {
     command: "zenity",
-    args: () => ["--file-selection", "--directory", `--title=${PROMPT}`, `--filename=${homedir()}/`],
+    args: (title: string) => ["--file-selection", "--directory", `--title=${title}`, `--filename=${homedir()}/`],
   },
   {
     command: "kdialog",
-    args: () => ["--getexistingdirectory", homedir(), "--title", PROMPT],
+    args: (title: string) => ["--getexistingdirectory", homedir(), "--title", title],
   },
 ];
 
@@ -102,9 +114,9 @@ function linuxChooser(env: NodeJS.ProcessEnv): FolderChooser | null {
     // the one this lookup approved.
     const command = onPath(dialog.command, env);
     if (!command) continue;
-    return () =>
+    return (title = PROMPT) =>
       new Promise((resolvePath) => {
-        execFile(command, dialog.args(), (err, stdout) =>
+        execFile(command, dialog.args(title), (err, stdout) =>
           resolvePath(err ? null : stdout.trim() || null),
         );
       });
@@ -142,9 +154,9 @@ export function canChooseFolder(): boolean {
 }
 
 /** Open the chooser. Concurrent calls share the one open dialog. */
-export function chooseFolder(): Promise<string | null> {
+export function chooseFolder(purpose: FolderPurpose = "data-repo"): Promise<string | null> {
   if (!chooser) return Promise.resolve(null);
-  inFlight ??= chooser().finally(() => {
+  inFlight ??= chooser(FOLDER_TITLES[purpose]).finally(() => {
     inFlight = null;
   });
   return inFlight;

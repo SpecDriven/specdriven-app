@@ -101,7 +101,8 @@ back to whichever file was read.
 
 The user guides live in [docs/user-guide](docs/user-guide):
 [Features and specs](docs/user-guide/specs.md) covers the Specs tab, the
-draft → proposed → published lifecycle, saving, syncing and links to tests;
+draft → proposed → published lifecycle, saving, syncing, links to tests, and
+[adding the specs to a code repo as a git submodule](docs/user-guide/specs.md#specs-as-a-submodule-of-your-code-repo);
 [AI sessions](docs/user-guide/ai-sessions.md) covers handing selected specs to
 Claude Code Desktop, or to Claude, Codex or Pi in the app's own coding agent
 pane; [Pomodoro](docs/user-guide/pomodoro.md) covers timing
@@ -452,8 +453,9 @@ src/server/         api (routes shared by web + desktop), features, parser, sear
                     git/ (gh + cli + js engines), auth, github, tokenStore, repo, state, user, reload
 src/electron/       desktop shell — main, app:// static serving, deep links, token encryption
 src/frontend/       React app (App.tsx, markdown editor, scenario table, search, routing)
-specs/*.spec.md     specifications for this app's own behavior — a symlink to the
-                    ../specs-specdriven clone, see "Clone the spec repo"
+specs/*.spec.md     specifications for this app's own behavior — a symlink into the
+                    specs-specdriven submodule, see docs/DEVELOPMENT.md
+specs-specdriven/   the SpecDriven/specs-specdriven submodule
 tests/              bun test suite
 scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts,
                     bump-version.ts (version, commit, tag)
