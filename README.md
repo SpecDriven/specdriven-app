@@ -425,8 +425,12 @@ leaves nothing in the caller's session, and a failure ends the script without
 closing their window. It is ASCII only: Windows PowerShell 5.1 reads a script
 file without a BOM in the legacy code page.
 [tests/installPs1.test.ts](tests/installPs1.test.ts) runs it under PowerShell 7
-(`pwsh` on PATH, or `SPECDRIVEN_TEST_PWSH`) against the same loopback releases;
-without one those tests skip.
+against the same loopback releases. Each run starts a PowerShell, which is too
+slow for every pull request, so those tests run only when `SPECDRIVEN_TEST_PWSH`
+names a `pwsh` — `SPECDRIVEN_TEST_PWSH=$(command -v pwsh) bun test tests/installPs1.test.ts`
+— and otherwise skip. The
+[install.ps1 workflow](.github/workflows/install-ps1.yml) runs them on pushes
+and pull requests that change the installer or those tests.
 
 Two things the release repository has to be for this to work: **public** —
 GitHub answers a private repository's release assets and raw files with a 404,
