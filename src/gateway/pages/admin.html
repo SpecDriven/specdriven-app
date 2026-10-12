@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Admin · SpecDriven</title>
+    <link rel="stylesheet" href="./gateway.css" />
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body data-page="admin">
+    <main class="card">
+      <h1 class="brand">SpecDriven</h1>
+      <p class="links top"><a href="/">← Back to your specs</a> · <a href="/account">Account</a></p>
+      <h2>Admin</h2>
+
+      <section>
+        <h3>Allowed emails</h3>
+        <p class="hint">
+          Who may create an account: an address, or a whole domain written as <em>@example.com</em>. Taking one off the
+          list stops new sign-ups only; an account already made stays.
+        </p>
+        <ul id="allowed" class="keys"></ul>
+        <form id="allowed-form" novalidate>
+          <label>Email or @domain <input name="email" autocomplete="off" spellcheck="false" required placeholder="name@example.com or @example.com" /></label>
+          <label class="check"><input name="invite" type="checkbox" checked /> Email an invitation to an address</label>
+          <p class="error" role="alert" hidden></p>
+          <p class="notice" role="status" hidden></p>
+          <button type="submit">Allow</button>
+        </form>
+      </section>
+
+      <section>
+        <h3>Users</h3>
+        <p class="hint">Admins keep the allowed emails and the roles; users use the app. There is always at least one admin.</p>
+        <ul id="users" class="keys"></ul>
+        <p id="users-error" class="error" role="alert" hidden></p>
+      </section>
+    </main>
+  </body>
+</html>

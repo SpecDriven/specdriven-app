@@ -19,6 +19,7 @@ const ORIGIN = "https://specs.example.com";
 const PASSWORD = "correct horse battery";
 
 let dir: string;
+let db: ReturnType<typeof openDatabase>;
 let assets: GatewayAssets;
 let gateway: Gateway;
 let sent: Mail[];
@@ -81,7 +82,9 @@ beforeEach(async () => {
   sent = [];
   seen = new Map();
   restarts = [];
-  const db = openDatabase(":memory:");
+  db = openDatabase(":memory:");
+  // The admins' list (src/gateway/admin.ts) lets the whole test domain sign up.
+  db.query("INSERT INTO allowed_emails (email, created_at) VALUES ('@example.com', 0)").run();
   secrets = new SecretStore(db, await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() }));
   const workers: Workers = {
     socketFor: async (userId) => standIn(userId),
@@ -101,7 +104,6 @@ beforeEach(async () => {
     },
     production: true,
     publicUrl: ORIGIN,
-    signupAllowlist: ["@example.com"],
     githubIdentity: async (token) => {
       if (token !== "ghp_good_token") throw new Error("HTTP 401");
       return { token, login: "octo", name: "Octo Cat", email: "octo@example.com", id: 42 };
@@ -312,3 +314,108 @@ test("changing the password signs this browser in again and ends the others", as
   expect((await call("/auth/me", { cookie: second })).status).toBe(401);
   expect((await call("/auth/me", { cookie: cookieOf(res) })).status).toBe(200);
 });
+
+/** Signed in as a fresh account made an admin. */
+async function signUpAdmin(email = "boss@example.com"): Promise<string> {
+  const cookie = await signUp(email);
+  db.query("UPDATE users SET role = 'admin' WHERE email = ?").run(email);
+  return cookie;
+}
+
+const del = (path: string, cookie: string) => call(path, { method: "DELETE", cookie, headers: { origin: ORIGIN } });
+
+test("a new account is a user: no admin API, no admin page, and no invites to send", async () => {
+  const cookie = await signUp("a@example.com");
+  expect(((await (await call("/auth/me", { cookie })).json()) as { role: string }).role).toBe("user");
+  expect((await call("/auth/admin", { cookie })).status).toBe(403);
+  expect((await post("/auth/admin/allowed", { email: "x@else.example" }, cookie)).status).toBe(403);
+  const page = await call("/admin", { cookie });
+  expect(page.status).toBe(403);
+  expect(page.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  expect((await post("/auth/invite", { email: "x@else.example" }, cookie)).status).toBe(404);
+});
+
+test("signed out, the admin page leads to sign-in and its API refuses", async () => {
+  const page = await call("/admin");
+  expect(page.status).toBe(302);
+  expect(page.headers.get("location")).toBe("/login?next=%2Fadmin");
+  expect((await call("/auth/admin")).status).toBe(401);
+});
+
+test("an admin opens the admin page and sees the allowed emails and the users", async () => {
+  const cookie = await signUpAdmin();
+  expect(((await (await call("/auth/me", { cookie })).json()) as { role: string }).role).toBe("admin");
+  const page = await call("/admin", { cookie });
+  expect(page.status).toBe(200);
+  expect(await page.text()).toContain("Allowed emails");
+  const data = (await (await call("/auth/admin", { cookie })).json()) as {
+    you: string;
+    allowed: { email: string }[];
+    users: { id: string; email: string; role: string; createdAt: number; hasPassword: boolean }[];
+  };
+  expect(data.allowed.map((a) => a.email)).toEqual(["@example.com"]);
+  expect(data.users).toEqual([
+    { id: data.you, email: "boss@example.com", role: "admin", createdAt: expect.any(Number), hasPassword: true },
+  ]);
+});
+
+test("an admin allows an address, which is invited and can sign up, and takes it off again", async () => {
+  const cookie = await signUpAdmin();
+  expect((await post("/auth/admin/allowed", { email: "not an email" }, cookie)).status).toBe(400);
+  sent = [];
+  expect((await post("/auth/admin/allowed", { email: " Guest@Else.example ", invite: true }, cookie)).status).toBe(200);
+  await Bun.sleep(0);
+  expect(sent.map((m) => [m.to, m.subject])).toEqual([["guest@else.example", "You're invited to SpecDriven"]]);
+  expect(sent[0]!.text).toContain("boss@example.com invited you");
+  expect(sent[0]!.text).toContain(`${ORIGIN}/signup?email=guest%40else.example`);
+  const list = (await (await call("/auth/admin", { cookie })).json()) as { allowed: unknown[] };
+  expect(list.allowed).toContainEqual({
+    email: "guest@else.example",
+    addedBy: "boss@example.com",
+    createdAt: expect.any(Number),
+  });
+
+  await signUp("guest@else.example");
+
+  expect((await del("/auth/admin/allowed/guest%40else.example", cookie)).status).toBe(200);
+  expect((await del("/auth/admin/allowed/guest%40else.example", cookie)).status).toBe(404);
+  // Off the list: no new sign-up, but the account made stays.
+  sent = [];
+  await post("/auth/signup", { email: "other@else.example" });
+  await Bun.sleep(0);
+  expect(sent).toEqual([]);
+  expect((await post("/auth/login", { email: "guest@else.example", password: PASSWORD })).status).toBe(200);
+});
+
+test("a domain on the list lets every address in it sign up, and is never emailed", async () => {
+  const cookie = await signUpAdmin();
+  sent = [];
+  expect((await post("/auth/admin/allowed", { email: "@partner.example", invite: true }, cookie)).status).toBe(200);
+  await Bun.sleep(0);
+  expect(sent).toEqual([]);
+  await signUp("anyone@partner.example");
+});
+
+test("an admin gives and takes the admin role, which applies at once, but never from the last admin", async () => {
+  const boss = await signUpAdmin();
+  const other = await signUp("b@example.com");
+  const list = (await (await call("/auth/admin", { cookie: boss })).json()) as {
+    you: string;
+    users: { id: string; email: string }[];
+  };
+  const bossId = list.you;
+  const otherId = list.users.find((u) => u.email === "b@example.com")!.id;
+
+  const lastOne = await post(`/auth/admin/users/${bossId}/role`, { role: "user" }, boss, "PUT");
+  expect(lastOne.status).toBe(400);
+  expect(((await lastOne.json()) as { error: string }).error).toMatch(/someone else an admin first/);
+  expect((await post(`/auth/admin/users/${otherId}/role`, { role: "owner" }, boss, "PUT")).status).toBe(400);
+  expect((await post(`/auth/admin/users/nobody/role`, { role: "admin" }, boss, "PUT")).status).toBe(400);
+
+  expect((await post(`/auth/admin/users/${otherId}/role`, { role: "admin" }, boss, "PUT")).status).toBe(200);
+  // The other session needs no new sign-in to be an admin.
+  expect((await call("/auth/admin", { cookie: other })).status).toBe(200);
+  expect((await post(`/auth/admin/users/${bossId}/role`, { role: "user" }, other, "PUT")).status).toBe(200);
+  expect((await call("/auth/admin", { cookie: boss })).status).toBe(403);
+});
+

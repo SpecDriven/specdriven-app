@@ -32,12 +32,16 @@ beforeEach(() => {
   sent = [];
   const mailer: Mailer = { send: async (m) => void sent.push(m) };
   sessions = new Sessions(db, () => clock);
-  accounts = new Accounts(db, sessions, mailer, {
-    baseUrl: () => "https://specs.example.com",
-    allowlist: ["a@example.com", "@team.example"],
-    now: () => clock,
-  });
+  accounts = new Accounts(db, sessions, mailer, { baseUrl: () => "https://specs.example.com", now: () => clock });
+  // The admins' list (src/gateway/admin.ts): one address and one domain.
+  allow("a@example.com", "@team.example");
 });
+
+function allow(...entries: string[]) {
+  for (const entry of entries) {
+    db.query("INSERT INTO allowed_emails (email, created_at) VALUES (?, ?)").run(entry, clock);
+  }
+}
 
 /** The token from the last email's link. */
 function lastLinkToken(): string {
@@ -53,7 +57,7 @@ async function signUp(email = "a@example.com"): Promise<string> {
   return result.userId;
 }
 
-test("sign-up emails a link to an allowlisted address or domain, and nothing to others", async () => {
+test("sign-up emails a link to an allowed address or domain, and nothing to others", async () => {
   await accounts.signup("a@example.com");
   await accounts.signup("someone@team.example");
   await accounts.signup("stranger@example.com");
@@ -63,13 +67,10 @@ test("sign-up emails a link to an allowlisted address or domain, and nothing to 
   expect(sent[0]!.text).toContain("https://specs.example.com/set-password#token=");
 });
 
-test("an invite lets an address sign up", async () => {
-  const inviter = await signUp();
-  sent = [];
+test("an address put on the list later can sign up, and is matched whatever its case", async () => {
   await accounts.signup("guest@else.example");
   expect(sent).toEqual([]);
-  await accounts.invite(inviter, "guest@else.example");
-  expect(sent[0]!.subject).toMatch(/invited/);
+  allow("Guest@Else.example");
   await accounts.signup("guest@else.example");
   expect(sent.at(-1)!.subject).toMatch(/Finish setting up/);
 });
