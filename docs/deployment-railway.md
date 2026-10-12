@@ -214,7 +214,9 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
 
    `PORT` comes from Railway. In production the gateway refuses to start
    without the first four variables.
-4. **Add a domain** (Settings → Networking). Railway terminates TLS.
+4. **Add a domain** (Settings → Networking). Railway terminates TLS. For a
+   domain whose DNS is on Cloudflare, see
+   [Custom domains on Cloudflare](#custom-domains-on-cloudflare).
 5. **Deploy, then sign in** as the [first admin](#admins-and-the-allowed-emails)
    and change its password on the account page. Open **Admin** to allow the
    addresses and domains that may sign up. Open **Account & tokens**, paste
@@ -231,6 +233,67 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
 encrypted secrets, and its history is a backup in itself. Railway volume
 backups cover them as well. The specs themselves live in GitHub, and each
 worker pushes saved work on its sync tick.
+
+## Custom domains on Cloudflare
+
+The services run under `specdriven.app`, whose DNS is on Cloudflare:
+
+| Service | Domain | Railway domain |
+|---|---|---|
+| gateway | `private.specdriven.app` | `specdriven-app.up.railway.app` |
+| demo (`DEMO_MODE=1`) | `demo.specdriven.app` | `specdrivenapp-demo.up.railway.app` |
+
+1. **In Railway**, on the service: Settings → Networking → Public Networking →
+   **+ Custom Domain**. Enter the domain, and the port the service's
+   `*.up.railway.app` domain already uses. Railway shows two records to add: a
+   CNAME, and a TXT named `_railway-verify.<subdomain>`. Copy both with the
+   copy button, because the text on screen can be cut off. The CNAME target
+   may differ from the `*.up.railway.app` domain.
+2. **In Cloudflare**, `specdriven.app` → DNS → Records, add both, for example
+   for the demo:
+
+   | Type | Name | Content | Proxy status |
+   |---|---|---|---|
+   | CNAME | `demo` | the CNAME target from Railway | DNS only (grey cloud) |
+   | TXT | `_railway-verify.demo` | the TXT value from Railway | — |
+
+3. **Wait for the green check** next to the domain in Railway. Railway
+   verifies the domain only once the TXT record is there as well as the
+   CNAME, then issues the certificate itself.
+4. **On the gateway, set `PUBLIC_URL`** to the new domain
+   (`https://private.specdriven.app`) and redeploy. The gateway answers only
+   `PUBLIC_URL`'s host (`src/gateway/server.ts`), so:
+   - until then, the new domain answers 403 `Requests for host "…" are not
+     served`;
+   - from then on, the `*.up.railway.app` domain answers that, except for
+     `/healthz`, so Railway's health check still passes;
+   - everyone signs in again, since the `__Host-` session cookie belongs to
+     one host;
+   - email links sent before the switch point at the old host: send any
+     invitation still unused again.
+
+   The demo answers any host (`SPECDRIVEN_ALLOWED_HOSTS` defaults to `*` in
+   `src/gateway/demo.ts`) and needs no variable. The
+   [proposals service](#spec-proposals-service) answers only `PUBLIC_URL`'s
+   host, like the gateway, and its GitHub App's callback URL changes with it.
+
+**Leave Cloudflare's proxy off.** The gateway takes the rightmost
+`X-Forwarded-For` entry as the client's address, for the per-address
+[rate limits](#sign-up-and-password-recovery). Behind Cloudflare's proxy that
+entry is a Cloudflare server's address, so many people would share one limit.
+For the demo, which has no sign-in, the proxy is harmless; if you turn it on,
+set SSL/TLS to **Full**. Flexible loops on redirects, and Full (strict) can
+keep Railway from issuing the certificate. The mode applies to the whole
+`specdriven.app` zone.
+
+**When a domain stays on "Waiting for DNS update":** check that the TXT value
+matches Railway's exactly, that no CAA record shuts out Let's Encrypt, and
+that the proxy is off. Removing the domain in Railway and adding it again,
+with the right port, fixes some cases.
+
+**Mail:** `MAIL_FROM` can stay as it is. To send from an `@specdriven.app`
+address, verify `specdriven.app` in Resend and add the records it gives in
+Cloudflare.
 
 ## Running it locally
 
@@ -317,7 +380,8 @@ To deploy it:
    The service refuses to start without the bot token, a working one, or
    `PUBLIC_URL`. It drops from root to the image's `bun` user and keeps
    everything under `/data/proposals` (`src/gateway/proposals.ts`).
-4. **Add the domain** you named in `PUBLIC_URL` and the GitHub App.
+4. **Add the domain** you named in `PUBLIC_URL` and the GitHub App
+   ([on Cloudflare](#custom-domains-on-cloudflare)).
 
 To stop an account from proposing, set `banned_at` on its row in
 `/data/proposals/proposals.db` (`UPDATE users SET banned_at = unixepoch() * 1000
