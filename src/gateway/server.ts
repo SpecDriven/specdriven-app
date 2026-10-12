@@ -348,7 +348,16 @@ export function createGateway(deps: GatewayDeps): Gateway {
     // Host, Origin and body type, the app's own trust boundary
     // (src/server/requestGuard.ts), checked here for everything.
     const refused = rejectRequest(req, allowedHosts);
-    if (refused) return secure(refused, "api");
+    if (refused) {
+      // Another name for this service, such as its *.up.railway.app domain
+      // once PUBLIC_URL names a custom one: a page load moves to the same
+      // path on PUBLIC_URL. A GET or HEAD is refused only for its Host.
+      if (deps.publicUrl && (req.method === "GET" || req.method === "HEAD")) {
+        const location = `${deps.publicUrl}${url.pathname}${url.search}`;
+        return secure(new Response(null, { status: 301, headers: { Location: location } }), "api");
+      }
+      return secure(refused, "api");
+    }
 
     if (req.method === "GET" && url.pathname.startsWith(ASSET_PREFIX)) {
       const asset = deps.assets.file(url.pathname);
