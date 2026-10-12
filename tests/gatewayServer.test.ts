@@ -145,8 +145,36 @@ test("the health check answers without a Host check or a session", async () => {
 });
 
 test("a request for another host name is refused", async () => {
-  const res = await gateway.fetch(new Request("https://evil.example/login", { headers: { host: "evil.example" } }));
+  const res = await gateway.fetch(
+    new Request("https://evil.example/auth/login", {
+      method: "POST",
+      headers: { host: "evil.example", origin: "https://evil.example", "content-type": "application/json" },
+      body: JSON.stringify({ email: "ada@example.com", password: PASSWORD }),
+    }),
+  );
   expect(res.status).toBe(403);
+  const options = await gateway.fetch(
+    new Request("https://evil.example/login", { method: "OPTIONS", headers: { host: "evil.example" } }),
+  );
+  expect(options.status).toBe(403);
+});
+
+test("a page load on another host name, such as the Railway domain, moves to PUBLIC_URL", async () => {
+  const railway = "specdriven-app.up.railway.app";
+  const res = await gateway.fetch(
+    new Request(`https://${railway}/features/x?tab=scenarios`, { headers: { host: railway } }),
+  );
+  expect(res.status).toBe(301);
+  expect(res.headers.get("location")).toBe(`${ORIGIN}/features/x?tab=scenarios`);
+  expect(res.headers.get("cache-control")).toBe("no-store");
+  const head = await gateway.fetch(new Request(`https://${railway}/login`, { method: "HEAD", headers: { host: railway } }));
+  expect(head.status).toBe(301);
+  expect(head.headers.get("location")).toBe(`${ORIGIN}/login`);
+  // The path stays a path on PUBLIC_URL's host.
+  const sneaky = await gateway.fetch(new Request(`https://${railway}//evil.example/`, { headers: { host: railway } }));
+  expect(sneaky.headers.get("location")).toBe(`${ORIGIN}//evil.example/`);
+  expect(new URL(sneaky.headers.get("location")!).host).toBe(new URL(ORIGIN).host);
+  expect(seen.size).toBe(0);
 });
 
 test("signed out, the app redirects pages to sign-in and refuses the API", async () => {
