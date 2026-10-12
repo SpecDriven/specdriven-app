@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
+  normalizeResourceLinks,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeCodeGenTarget,
@@ -73,6 +74,7 @@ import {
   reprojectFeatures,
   saveFeature,
   savePullRequests,
+  saveResourceLinks,
   readScenarioFiles,
   saveScenarioFiles,
   publishFeature,
@@ -131,6 +133,7 @@ import { getPullRequest, readIssuesRepo } from "./issues";
 import { addSpecsSubmodule, SubmoduleError } from "./submodule";
 import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
+import { RESOURCE_LINK_KINDS, isResourceLinkKind } from "./resourceLinks";
 import type { PullRequestLookup } from "./pullRequests";
 import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
 import { fieldChoices, scanEntities } from "./entities";
@@ -409,6 +412,10 @@ async function stateFields(state: SpecDrivenState) {
     projectManagement: normalizeProjectManagement(state.projectManagement),
     projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
+    // Aha! and Figma links (specs/external-links/aha-and-figma-links
+    // .feature.md): each offered only once switched on.
+    ahaLinks: normalizeResourceLinks(state.ahaLinks),
+    figmaLinks: normalizeResourceLinks(state.figmaLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
@@ -535,6 +542,8 @@ const putState: Handler = async (req) => {
     projectManagement?: boolean;
     projectManagementTool?: string;
     publishExternalLinks?: boolean;
+    ahaLinks?: boolean;
+    figmaLinks?: boolean;
     codeGen?: boolean;
     codeGenTarget?: string;
     agentFirstResponseSeconds?: number;
@@ -567,6 +576,8 @@ const putState: Handler = async (req) => {
     body.projectManagement === undefined &&
     body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
+    body.ahaLinks === undefined &&
+    body.figmaLinks === undefined &&
     body.codeGen === undefined &&
     body.codeGenTarget === undefined &&
     body.agentFirstResponseSeconds === undefined &&
@@ -585,7 +596,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -765,6 +776,16 @@ const putState: Handler = async (req) => {
       body.publishExternalLinks !== normalizePublishExternalLinks(state.publishExternalLinks);
     if (body.publishExternalLinks) delete state.publishExternalLinks;
     else state.publishExternalLinks = false;
+  }
+  // Aha! and Figma links (specs/external-links/aha-and-figma-links
+  // .feature.md): opt-in — the default OFF is an absent key. Off only takes
+  // the chips and fields away; links already recorded stay in the documents.
+  for (const key of ["ahaLinks", "figmaLinks"] as const) {
+    const value = body[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") return json({ error: `${key} must be a boolean` }, 400);
+    if (value) state[key] = true;
+    else delete state[key];
   }
   // Code gen sessions (specs/agents/claude.feature.md): switched off here, the
   // app offers no way to run one — the default ON is an absent key.
@@ -1268,6 +1289,40 @@ const putPullRequests = withDataDir(async (dir, req, params) => {
   }
   try {
     return json(await savePullRequests(dir, params.file!, target, prs));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/external-links/aha-and-figma-links.feature.md: the Aha! records or
+// Figma designs linked to a feature (no `scenario` in the body) or to one of
+// its scenarios — `:kind` is `aha` or `figma`. A document-only write like
+// the pull requests': the whole list is sent and the document brought to it
+// by url.
+const putResourceLinks = withDataDir(async (dir, req, params) => {
+  const kind = params.kind;
+  if (!isResourceLinkKind(kind)) {
+    return json({ error: `kind must be ${RESOURCE_LINK_KINDS.join(" or ")}` }, 404);
+  }
+  const body = (await req.json()) as {
+    scenario?: { name?: string; version?: number; id?: string } | null;
+    links?: unknown;
+  };
+  // The same rows a pull request list takes: an http(s) url and a title.
+  const links = validPullRequests(body.links);
+  if (links === null) {
+    return json({ error: "links must be a list of { url, title } with http(s) urls" }, 400);
+  }
+  let target: ScenarioTarget | null = null;
+  if (body.scenario) {
+    const { name, version, id } = body.scenario;
+    if (typeof name !== "string" || typeof version !== "number") {
+      return json({ error: "scenario needs a name and a version" }, 400);
+    }
+    target = { name: name.trim(), version, ...(typeof id === "string" ? { id } : {}) };
+  }
+  try {
+    return json(await saveResourceLinks(dir, params.file!, target, kind, links));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -2193,6 +2248,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
   ["PUT", "/api/features/:file/pull-requests", putPullRequests],
+  ["PUT", "/api/features/:file/links/:kind", putResourceLinks],
   ["POST", "/api/features/:file/scenario-files", postScenarioFile],
   ["PUT", "/api/features/:file/scenario-files", putScenarioFiles],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],

@@ -158,6 +158,8 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
     "showTestLinks",
     "projectManagement",
     "publishExternalLinks",
+    "ahaLinks",
+    "figmaLinks",
   ] as const) {
     expect(`${module}=${state[module]}`).toBe(`${module}=true`);
   }

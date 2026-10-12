@@ -10,6 +10,7 @@ import {
   reconcile,
   removeDraftScenario,
   setPullRequests,
+  setResourceLinks,
   setScenarioFiles,
 } from "./automerge/reconcile";
 import {
@@ -46,11 +47,14 @@ import {
 import type {
   Feature,
   PullRequestLink,
+  ResourceLink,
   ScenarioFile,
   ScenarioPick,
   ScenarioStatus,
   ScenarioTarget,
 } from "./parser";
+import { RESOURCE_LINK_TOOLS } from "./resourceLinks";
+import type { ResourceLinkKind } from "./resourceLinks";
 import { cleanLine } from "./text";
 import { currentAuthor } from "./user";
 
@@ -178,6 +182,14 @@ export async function readFeatureForEditor(
   return (await readFeatureView(dataDir, fileName))?.content ?? null;
 }
 
+/** The Aha! and Figma lists a feature or scenario carries, as spread-able keys. */
+function resourcesOf(s: { aha?: ResourceLink[]; figma?: ResourceLink[] }) {
+  return {
+    ...(s.aha ? { aha: s.aha } : {}),
+    ...(s.figma ? { figma: s.figma } : {}),
+  };
+}
+
 /**
  * Fold the document's drafts, its ids, the external links the file doesn't
  * carry, and the pull request links it never carries
@@ -198,6 +210,11 @@ async function featureView(
   // Plain copies of the document's links (docToFeature strips the proxies).
   const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
   const docPrs = new Map(inDoc.scenarios.map((s) => [key(s), s.prs] as const));
+  // Aha! and Figma links (specs/external-links/aha-and-figma-links.feature.md):
+  // the document's alone, like the pull request links.
+  const docResources = new Map(
+    inDoc.scenarios.map((s) => [key(s), resourcesOf(s)] as const),
+  );
   // Stored files (specs/editor/store-associated-files.feature.md): the
   // document's alone, like the pull request links.
   const docFiles = new Map(inDoc.scenarios.map((s) => [key(s), s.files] as const));
@@ -225,6 +242,7 @@ async function featureView(
         tests: [...s.tests],
         ...(link ? { link } : {}),
         ...(prs ? { prs } : {}),
+        ...docResources.get(key(s)),
         ...(files ? { files } : {}),
         ...docAuthors.get(key(s)),
       };
@@ -245,6 +263,7 @@ async function featureView(
       ...(id === undefined ? {} : { id }),
       ...(link ? { link } : {}),
       ...(prs ? { prs } : {}),
+      ...docResources.get(key(s)),
       ...(files ? { files } : {}),
       ...docAuthors.get(key(s)),
     };
@@ -258,6 +277,7 @@ async function featureView(
     ...featureRest,
     ...(link ? { link } : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
+    ...resourcesOf(inDoc),
     ...authorsOf(inDoc),
     scenarios: sortScenarios([...scenarios, ...drafts]),
   };
@@ -658,6 +678,42 @@ export async function savePullRequests(
 }
 
 /**
+ * Set the Aha! or Figma links of the feature (`target` null) or one scenario
+ * (specs/external-links/aha-and-figma-links.feature.md): a direct document
+ * write like savePullRequests — the links never reach the markdown —
+ * committed and pushed by the reload cron. A feature with no document yet
+ * gets one minted from the file first. Throws when the scenario is not in
+ * the document.
+ */
+export async function saveResourceLinks(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget | null,
+  kind: ResourceLinkKind,
+  links: ResourceLink[],
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  let loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) {
+    await createFeatureDoc(dataDir, name, importFeatureDoc(parseFeature(content)));
+    loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Could not create a document for ${name}`);
+  }
+  const next = setResourceLinks(loaded.doc, target, kind, links);
+  if (next === null) {
+    throw new Error(`Scenario "${target!.name}" @v${target!.version} not found`);
+  }
+  await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, content)),
+    message: `${RESOURCE_LINK_TOOLS[kind].name} links saved locally`,
+  };
+}
+
+/**
  * Set the files stored with one scenario
  * (specs/editor/store-associated-files.feature.md): a direct document write
  * like savePullRequests — the list never reaches the markdown — committed
@@ -814,9 +870,9 @@ export async function moveScenario(
   }
 
   // Into the target: a fresh document entry there (no id — ids belong to the
-  // source's document), then its pull request links and stored files, which
-  // only the document holds.
-  const { id: _id, prs, files, ...carried } = moving;
+  // source's document), then its pull request, Aha! and Figma links and
+  // stored files, which only the document holds.
+  const { id: _id, prs, aha, figma, files, ...carried } = moving;
   await saveFeature(
     dataDir,
     to,
@@ -824,6 +880,14 @@ export async function moveScenario(
   );
   if (prs && prs.length > 0) {
     await savePullRequests(dataDir, to, { name: moving.name, version: moving.version }, prs);
+  }
+  for (const [kind, links] of [
+    ["aha", aha],
+    ["figma", figma],
+  ] as const) {
+    if (links && links.length > 0) {
+      await saveResourceLinks(dataDir, to, { name: moving.name, version: moving.version }, kind, links);
+    }
   }
   if (files && files.length > 0) {
     await saveScenarioFiles(dataDir, to, { name: moving.name, version: moving.version }, files);

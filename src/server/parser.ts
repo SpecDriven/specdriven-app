@@ -99,6 +99,19 @@ export interface PullRequestLink {
 }
 
 /**
+ * A link from a feature or a scenario to the product record or design behind
+ * it — an Aha! feature or idea, a Figma file or frame
+ * (specs/external-links/aha-and-figma-links.feature.md). Held in the
+ * Automerge document only, like a pull request link; which tool it belongs
+ * to is the list it is in (`aha`, `figma`).
+ */
+export interface ResourceLink {
+  url: string;
+  /** What the list shows for it; empty means a name read off the url. */
+  title: string;
+}
+
+/**
  * A file stored with a scenario (specs/editor/store-associated-files
  * .feature.md) — test data such as xml, csv, json or a binary the scenario
  * uploads into the system under test. Held in the Automerge document only,
@@ -142,6 +155,14 @@ export interface Scenario {
    */
   prs?: PullRequestLink[];
   /**
+   * The Aha! records and Figma designs behind this scenario
+   * (specs/external-links/aha-and-figma-links.feature.md). Document-only,
+   * like `prs`: carried on what the editor reads from the server, never
+   * serialized.
+   */
+  aha?: ResourceLink[];
+  figma?: ResourceLink[];
+  /**
    * The files stored with this scenario. Document-only, like `prs`: carried
    * on what the editor reads from the server, never serialized.
    */
@@ -161,6 +182,9 @@ export interface Feature {
   link?: ExternalLink;
   /** The pull requests implementing the feature as a whole; document-only. */
   prs?: PullRequestLink[];
+  /** The feature's Aha! records and Figma designs; document-only. */
+  aha?: ResourceLink[];
+  figma?: ResourceLink[];
   /**
    * Name of the project member the feature is assigned to, if any — one of
    * the members listed in the data repo's `project-settings.json`

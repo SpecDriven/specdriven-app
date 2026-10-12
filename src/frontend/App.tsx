@@ -15,11 +15,14 @@ import {
 import type {
   Feature,
   PullRequestLink,
+  ResourceLink,
   Scenario,
   ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
 } from "../server/parser";
+import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS, resourceChipLabel } from "../server/resourceLinks";
+import type { ResourceLinkKind } from "../server/resourceLinks";
 import type { FeatureListing } from "../server/features";
 import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
@@ -61,7 +64,9 @@ import {
   ArrowRightLeft,
   Bot,
   KeyRound,
+  Lightbulb,
   LogOut,
+  PenTool,
   ShieldCheck,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
@@ -129,6 +134,7 @@ import {
 } from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
+import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
   EMPTY_LINK_DRAFT,
@@ -259,6 +265,22 @@ const DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 // beside it. Mirrors the server's default in src/server/state.ts.
 const DEFAULT_PROJECT_MANAGEMENT_TOOL = "Jira";
 const PROJECT_MANAGEMENT_TOOLS = ["Jira", "Linear", "GitHub", "GitLab", "Asana", "Azure DevOps"];
+
+// Aha! and Figma links (specs/external-links/aha-and-figma-links.feature.md):
+// each tool is offered only once its Settings switch is on — both start off.
+type ResourceLinkSwitches = Record<ResourceLinkKind, boolean>;
+const NO_RESOURCE_LINKS: ResourceLinkSwitches = { aha: false, figma: false };
+/** The Settings key that switches each tool on. */
+const RESOURCE_LINK_SETTING = { aha: "ahaLinks", figma: "figmaLinks" } as const;
+const RESOURCE_LINK_ICON = { aha: Lightbulb, figma: PenTool } as const;
+
+/** The switches as /api/state reports them; anything but `true` is off. */
+export function resourceLinkSwitches(state: Record<string, unknown>): ResourceLinkSwitches {
+  return {
+    aha: state[RESOURCE_LINK_SETTING.aha] === true,
+    figma: state[RESOURCE_LINK_SETTING.figma] === true,
+  };
+}
 
 // Sidebar width (specs/ui/ui.feature.md "Sidebar resize"): dragged via the
 // divider so a deep folder tree gets room. Device-local, like the theme.
@@ -1269,6 +1291,9 @@ export function App() {
   const [projectManagementTool, setProjectManagementTool] = useState(
     DEFAULT_PROJECT_MANAGEMENT_TOOL,
   );
+  /** Which of Aha! and Figma features and scenarios link to
+      (specs/external-links/aha-and-figma-links.feature.md). */
+  const [resourceLinksOn, setResourceLinksOn] = useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1371,6 +1396,8 @@ export function App() {
   /** The tool name being typed/picked in Settings; saved when it is usable. */
   const [settingsToolDraft, setSettingsToolDraft] = useState(DEFAULT_PROJECT_MANAGEMENT_TOOL);
   const [settingsPublishLinksDraft, setSettingsPublishLinksDraft] = useState(true);
+  const [settingsResourceLinksDraft, setSettingsResourceLinksDraft] =
+    useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
@@ -1405,6 +1432,9 @@ export function App() {
   /** The feature's "Pull requests" popover
       (specs/external-links/related-pull-requests.feature.md). */
   const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
+  /** The feature's Aha! or Figma popover, whichever is open
+      (specs/external-links/aha-and-figma-links.feature.md). */
+  const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
   // The feature description editor (specs/editor/feature-editor.feature.md):
   // the free markdown above the first scenario, edited in place and autosaved
   // at the scenario editor's interval like the home README. Keyed by file so
@@ -1560,6 +1590,7 @@ export function App() {
         if (typeof state.projectManagementTool === "string") {
           setProjectManagementTool(state.projectManagementTool);
         }
+        setResourceLinksOn(resourceLinkSwitches(state));
         if (typeof state.codeGen === "boolean") {
           setCodeGen(state.codeGen);
         }
@@ -3583,6 +3614,7 @@ export function App() {
     setSettingsProjectManagementDraft(projectManagement);
     setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
+    setSettingsResourceLinksDraft(resourceLinksOn);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
@@ -3742,6 +3774,7 @@ export function App() {
     if (typeof data.projectManagementTool === "string") {
       setProjectManagementTool(data.projectManagementTool);
     }
+    setResourceLinksOn(resourceLinkSwitches(data));
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -3910,6 +3943,16 @@ export function App() {
       setSettingsPublishLinksDraft(!on);
     } else if (selected) {
       await openFeature(selected);
+    }
+  };
+
+  // Aha! and Figma links (specs/external-links/aha-and-figma-links
+  // .feature.md): off takes the tool's chip, field and lists away; the links
+  // already recorded stay in the documents and come back when it is on again.
+  const toggleResourceLinks = async (kind: ResourceLinkKind, on: boolean) => {
+    setSettingsResourceLinksDraft((prev) => ({ ...prev, [kind]: on }));
+    if (!(await patchSettings({ [RESOURCE_LINK_SETTING[kind]]: on }))) {
+      setSettingsResourceLinksDraft((prev) => ({ ...prev, [kind]: !on }));
     }
   };
 
@@ -4140,6 +4183,45 @@ export function App() {
       }
     } catch {
       toast.error("Could not save the pull requests — is the server running?");
+    }
+  };
+
+  /**
+   * Save the Aha! or Figma links of the feature (`target` null) or of one
+   * scenario (specs/external-links/aha-and-figma-links.feature.md): a
+   * document-only write through its own route, like the pull requests'.
+   */
+  const saveResourceLinks = async (
+    target: ScenarioTarget | null,
+    kind: ResourceLinkKind,
+    links: ResourceLink[],
+  ) => {
+    if (!selected) return;
+    const file = selected;
+    const { name } = RESOURCE_LINK_TOOLS[kind];
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}/links/${kind}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: target, links }),
+      });
+      const data = await res.json();
+      if (selectedRef.current !== file) return;
+      if (res.ok) {
+        setFeature(featureFromResponse(data, file));
+        if (target) {
+          setEditing((prev) =>
+            prev === null || prev.scenario.id !== target.id
+              ? prev
+              : { ...prev, scenario: { ...prev.scenario, [kind]: links } },
+          );
+        }
+        markSaved();
+      } else {
+        toast.error(data.error ?? `Could not save the ${name} links`);
+      }
+    } catch {
+      toast.error(`Could not save the ${name} links — is the server running?`);
     }
   };
 
@@ -5284,6 +5366,7 @@ export function App() {
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
+    if (featureResourceOpen) return setFeatureResourceOpen(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
     if (compact && pane.open) return agentChat.closePane();
@@ -6088,6 +6171,7 @@ export function App() {
         ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
         { id: "settings-editor", title: "Specs" },
         { id: "settings-project", title: "Project management" },
+        { id: "settings-links", title: "Aha! & Figma" },
         { id: "settings-workflow", title: "Workflow" },
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
       ]}
@@ -6478,6 +6562,40 @@ export function App() {
             </label>
           </>
         )}
+      </PageSection>
+      <PageSection
+        id="settings-links"
+        title="Aha! & Figma"
+        hint="Links from features and scenarios to the product records and designs behind them."
+      >
+        {/* specs/external-links/aha-and-figma-links.feature.md: one opt-in
+            switch per tool. Off, nothing in the app shows or asks for
+            that tool's links; the ones already recorded are kept. */}
+        {RESOURCE_LINK_KINDS.map((kind) => {
+          const { name, noun } = RESOURCE_LINK_TOOLS[kind];
+          return (
+            <label className="settings-row" key={kind}>
+              <span className="settings-row-label">
+                {name} links
+                <span className="settings-row-hint">
+                  {settingsResourceLinksDraft[kind]
+                    ? `Features and scenarios carry links to the ${name} ${noun}s behind them. They are kept with the feature in the app, not written into the .feature.md.`
+                    : `${name} links are off: nothing in the app shows or asks for one. Links already recorded are kept.`}
+                </span>
+              </span>
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  aria-label={`${name} links`}
+                  checked={settingsResourceLinksDraft[kind]}
+                  onChange={(e) => void toggleResourceLinks(kind, e.target.checked)}
+                />
+                <span className="switch-track" aria-hidden="true" />
+              </span>
+            </label>
+          );
+        })}
       </PageSection>
       <PageSection
         id="settings-workflow"
@@ -7957,6 +8075,23 @@ export function App() {
                   onChange={(prs) => savePullRequests(scenarioTarget(editing.scenario), prs)}
                 />
               </div>
+              {/* specs/external-links/aha-and-figma-links.feature.md: the
+                  Aha! records and Figma designs behind this scenario, each
+                  tool only while Settings switches it on. Saved to the
+                  document like the pull requests; editable on a published
+                  scenario too. */}
+              {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind]).map((kind) => (
+                <div className="prs-field-wrap" key={kind}>
+                  <span className="field-label">{RESOURCE_LINK_TOOLS[kind].name}</span>
+                  <ResourceLinkField
+                    kind={kind}
+                    links={editing.scenario[kind] ?? []}
+                    disabled={editing.scenario.id === undefined}
+                    disabledHint={`${RESOURCE_LINK_TOOLS[kind].name} links can be added once the scenario has been saved.`}
+                    onChange={(links) => saveResourceLinks(scenarioTarget(editing.scenario), kind, links)}
+                  />
+                </div>
+              ))}
               {/* specs/editor/store-associated-files.feature.md: the files
                   the scenario needs at run time — test data to upload into
                   the system under test. Stored in the data repo and listed
@@ -8341,6 +8476,55 @@ export function App() {
                   </div>
                 </Popover>
               </span>
+              {/* specs/external-links/aha-and-figma-links.feature.md "Link
+                  Aha! and Figma to a feature": a chip per tool switched on
+                  in Settings, counting the feature's links; the popover
+                  lists them and takes another. */}
+              {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind]).map((kind) => {
+                const { name, noun } = RESOURCE_LINK_TOOLS[kind];
+                const Icon = RESOURCE_LINK_ICON[kind];
+                const links = feature[kind] ?? [];
+                return (
+                  <span className={`chip-anchor resource-anchor-${kind}`} key={kind}>
+                    <button
+                      type="button"
+                      className={`chip${links.length ? "" : " muted"}`}
+                      aria-haspopup="dialog"
+                      aria-expanded={featureResourceOpen === kind}
+                      onClick={() => setFeatureResourceOpen((open) => (open === kind ? null : kind))}
+                    >
+                      <Icon size={14} aria-hidden="true" />
+                      {resourceChipLabel(kind, links.length)}
+                    </button>
+                    <Popover
+                      open={featureResourceOpen === kind}
+                      onClose={() => setFeatureResourceOpen(null)}
+                      label={`${name} links for this feature`}
+                      className="chip-popover pr-popover"
+                      containerSelector={`.resource-anchor-${kind}`}
+                    >
+                      <p className="hint">
+                        The {name} {noun}s behind this feature.
+                      </p>
+                      <ResourceLinkField
+                        kind={kind}
+                        links={links}
+                        autoFocus
+                        onChange={(next) => saveResourceLinks(null, kind, next)}
+                      />
+                      <div className="dialog-actions">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => setFeatureResourceOpen(null)}
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </Popover>
+                  </span>
+                );
+              })}
             </div>
             {descOpen && descEdit ? (
               /* specs/editor/feature-editor.feature.md "Edit feature
@@ -8565,6 +8749,16 @@ export function App() {
                       <span className="scenario-prs-head">Pull requests</span>
                       <PullRequestList prs={s.prs} />
                     </div>
+                  )}
+                  {/* specs/external-links/aha-and-figma-links.feature.md "The
+                      scenario card lists its Aha! and Figma links". */}
+                  {RESOURCE_LINK_KINDS.filter((kind) => resourceLinksOn[kind] && s[kind]?.length).map(
+                    (kind) => (
+                      <div className={`scenario-prs scenario-${kind}`} key={kind}>
+                        <span className="scenario-prs-head">{RESOURCE_LINK_TOOLS[kind].name}</span>
+                        <ResourceLinkList kind={kind} links={s[kind]!} />
+                      </div>
+                    ),
                   )}
                   {/* specs/editor/store-associated-files.feature.md: the
                       scenario's files, each a download. */}
