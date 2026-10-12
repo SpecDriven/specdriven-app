@@ -95,6 +95,8 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   showTestLinks: true,
   projectManagement: true,
   publishExternalLinks: true,
+  ahaLinks: true,
+  figmaLinks: true,
   openTestsInIdea: false,
 };
 

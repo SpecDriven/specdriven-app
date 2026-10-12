@@ -8,7 +8,14 @@
 // scenario renamed in the dialog stays one scenario (reconcile.ts).
 
 import type { ImmutableString } from "@automerge/automerge";
-import type { EntryKind, ExternalLink, PullRequestLink, ScenarioFile, ScenarioStatus } from "../parser";
+import type {
+  EntryKind,
+  ExternalLink,
+  PullRequestLink,
+  ResourceLink,
+  ScenarioFile,
+  ScenarioStatus,
+} from "../parser";
 
 // v2: `status` replaced the `published`/`proposed` booleans of v1 and added
 // the doc-only `draft` state.
@@ -69,6 +76,14 @@ export type SpecEntry = {
    */
   prs?: PullRequestLink[];
   /**
+   * The Aha! records and Figma designs behind this spec
+   * (specs/external-links/aha-and-figma-links.feature.md). Document-only and
+   * lists, exactly like `prs`: concurrent links from two peers end with
+   * both. Optional keys, no migration.
+   */
+  aha?: ResourceLink[];
+  figma?: ResourceLink[];
+  /**
    * The files stored with this spec
    * (specs/editor/store-associated-files.feature.md), by name. Document-only
    * like `prs`, and a list for the same reason: two peers attaching
@@ -121,6 +136,9 @@ export type FeatureDoc = {
   link?: ExternalLink;
   /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
   prs?: PullRequestLink[];
+  /** The feature's Aha! records and Figma designs (see SpecEntry.aha). */
+  aha?: ResourceLink[];
+  figma?: ResourceLink[];
   /**
    * Name of the project member the feature is assigned to
    * (src/server/members.ts). Absent when nobody is assigned; set whole, like

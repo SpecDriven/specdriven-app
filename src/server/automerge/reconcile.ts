@@ -10,11 +10,13 @@ import type {
   ExternalLink,
   Feature,
   PullRequestLink,
+  ResourceLink,
   Scenario,
   ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
 } from "../parser";
+import type { ResourceLinkKind } from "../resourceLinks";
 import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
@@ -360,6 +362,33 @@ export function setPullRequests(
   target: ScenarioTarget | null,
   prs: PullRequestLink[],
 ): A.Doc<FeatureDoc> | null {
+  return setLinkList(doc, target, "prs", prs);
+}
+
+/**
+ * Set the Aha! or Figma links of the feature (`target` null) or of one of
+ * its scenarios (specs/external-links/aha-and-figma-links.feature.md) — a
+ * direct document operation merged exactly like setPullRequests, each tool
+ * in its own list. Null when no scenario matches.
+ */
+export function setResourceLinks(
+  doc: A.Doc<FeatureDoc>,
+  target: ScenarioTarget | null,
+  kind: ResourceLinkKind,
+  links: ResourceLink[],
+): A.Doc<FeatureDoc> | null {
+  return setLinkList(doc, target, kind, links);
+}
+
+/** The document-only lists of `{ url, title }` links a feature and a spec carry. */
+type LinkListKey = "prs" | ResourceLinkKind;
+
+function setLinkList(
+  doc: A.Doc<FeatureDoc>,
+  target: ScenarioTarget | null,
+  key: LinkListKey,
+  links: { url: string; title: string }[],
+): A.Doc<FeatureDoc> | null {
   let at = -1;
   if (target) {
     at = target.id ? doc.specs.findIndex((s) => s.id === target.id) : -1;
@@ -367,24 +396,25 @@ export function setPullRequests(
     if (at === -1) return null;
   }
   const wanted = new Map<string, string>();
-  for (const p of prs) if (!wanted.has(p.url)) wanted.set(p.url, p.title);
+  for (const l of links) if (!wanted.has(l.url)) wanted.set(l.url, l.title);
   return A.change(doc, (d) => {
-    const holder: { prs?: PullRequestLink[] } = at === -1 ? d : d.specs[at]!;
+    const holder: Partial<Record<LinkListKey, { url: string; title: string }[]>> =
+      at === -1 ? d : d.specs[at]!;
     // The list is created on first touch — even an empty one — and then
     // only ever spliced, so every later peer pushes into the same list and
     // concurrent links merge as a union. (Two peers creating it at the same
     // moment is the one race the CRDT resolves to one side; the list exists
     // from the first link on, so it never happens twice.)
-    if (!holder.prs) holder.prs = [];
-    const list = holder.prs;
+    if (!holder[key]) holder[key] = [];
+    const list = holder[key]!;
     for (let i = list.length - 1; i >= 0; i--) {
       if (!wanted.has(list[i]!.url)) A.deleteAt(list, i);
     }
     const have = new Set<string>();
-    for (const p of list) {
-      have.add(p.url);
-      const title = wanted.get(p.url)!;
-      if (p.title !== title) p.title = title;
+    for (const l of list) {
+      have.add(l.url);
+      const title = wanted.get(l.url)!;
+      if (l.title !== title) l.title = title;
     }
     for (const [url, title] of wanted) {
       if (!have.has(url)) list.push({ url, title });
