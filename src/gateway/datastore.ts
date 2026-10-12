@@ -13,7 +13,7 @@
 
 import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isAuthFailure, subprocessRun, tokenContext, type GitRun } from "../server/git/cli";
 import { hashToken } from "./crypto";
@@ -58,10 +58,24 @@ const TABLES: Table[] = [
   {
     file: "users.json",
     name: "users",
-    columns: ["id", "email", "password_hash", "email_verified_at", "created_at", "password_changed_at", "os_uid"],
+    columns: [
+      "id",
+      "email",
+      "password_hash",
+      "email_verified_at",
+      "created_at",
+      "password_changed_at",
+      "os_uid",
+      "role",
+    ],
     orderBy: "id",
   },
-  { file: "invites.json", name: "invites", columns: ["email", "invited_by", "created_at"], orderBy: "email" },
+  {
+    file: "allowed-emails.json",
+    name: "allowed_emails",
+    columns: ["email", "added_by", "created_at"],
+    orderBy: "email",
+  },
   {
     file: "secrets.json",
     name: "secrets",
@@ -78,8 +92,30 @@ const TABLES: Table[] = [
 ];
 
 export const DATASTORE_FILES = TABLES.map((t) => t.file);
+/** Files from before the roles (admin.ts): read once, then removed from the repo. */
+const LEGACY_FILES = ["invites.json"];
 
 type Row = Record<string, unknown>;
+
+/**
+ * A snapshot pushed before the roles, in today's form: its users are all
+ * plain users, and its invites are the allowed emails.
+ */
+export function upgradeSnapshot(files: Record<string, string>): Record<string, string> {
+  const upgraded = { ...files };
+  if (upgraded["users.json"]) {
+    const users = JSON.parse(upgraded["users.json"]) as Row[];
+    upgraded["users.json"] = JSON.stringify(users.map((user) => ({ role: "user", ...user })));
+  }
+  if (!upgraded["allowed-emails.json"] && upgraded["invites.json"]) {
+    const invites = JSON.parse(upgraded["invites.json"]) as Row[];
+    upgraded["allowed-emails.json"] = JSON.stringify(
+      invites.map(({ invited_by, ...rest }) => ({ ...rest, added_by: invited_by })),
+    );
+  }
+  for (const file of LEGACY_FILES) delete upgraded[file];
+  return upgraded;
+}
 
 /** The tables as the repo's files: file name → content. */
 export function exportSnapshot(db: Database): Record<string, string> {
@@ -110,7 +146,8 @@ export function snapshotFingerprint(files: Record<string, string>): string {
 }
 
 /** Fill the tables from the repo's files, all or nothing; expired sessions are left out. */
-export function importSnapshot(db: Database, files: Record<string, string>, now = Date.now()): void {
+export function importSnapshot(db: Database, snapshot: Record<string, string>, now = Date.now()): void {
+  const files = upgradeSnapshot(snapshot);
   db.transaction(() => {
     for (const table of TABLES) {
       const content = files[table.file];
@@ -198,7 +235,7 @@ export class Datastore {
 
   private async readFiles(): Promise<Record<string, string>> {
     const files: Record<string, string> = {};
-    for (const file of DATASTORE_FILES) {
+    for (const file of [...DATASTORE_FILES, ...LEGACY_FILES]) {
       const path = join(this.dir, file);
       if (existsSync(path)) files[file] = await readFile(path, "utf8");
     }
@@ -241,6 +278,7 @@ export class Datastore {
       for (let attempt = 0; attempt < 2; attempt++) {
         const branch = await this.syncClone();
         for (const [file, content] of Object.entries(files)) await writeFile(join(this.dir, file), content);
+        for (const file of LEGACY_FILES) await rm(join(this.dir, file), { force: true });
         await this.git("add", "-A");
         if (await this.succeeds("diff", "--cached", "--quiet")) {
           this.saved = fingerprint;

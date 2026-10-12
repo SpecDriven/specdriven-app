@@ -1,6 +1,7 @@
 // The gateway's own pages (src/gateway/pages/*.html): sign in, sign up,
-// forgotten password, choosing a password from an emailed link, and the
-// account page with the GitHub token, agent keys, password and invites.
+// forgotten password, choosing a password from an emailed link, the account
+// page with the GitHub token, agent keys and password, and the admin page
+// with the allowed emails and the users' roles.
 // Plain DOM, no framework; every value from the server goes in as text.
 
 type Json = Record<string, unknown>;
@@ -161,16 +162,9 @@ const pages: Record<string, () => void> = {
       show(passwordForm.querySelector(".notice"), "Password changed. Your other sign-ins were ended.");
     });
 
-    const inviteForm = el<HTMLFormElement>("#invite-form");
-    onSubmit(inviteForm, async ({ email }) => {
-      const { ok, data } = await call("/auth/invite", "POST", { email });
-      if (!ok) return errorOf(data);
-      inviteForm.reset();
-      show(inviteForm.querySelector(".notice"), `Invited ${email}.`);
-    });
-
     function render(data: Json) {
       el("#email").textContent = String(data.email ?? "");
+      el("#admin-link").hidden = data.role !== "admin";
       const github = data.github as { login?: string; hint?: string } | null;
       el("#github-status").textContent = github
         ? `Connected as ${github.login} (token …${github.hint}).`
@@ -201,6 +195,89 @@ const pages: Record<string, () => void> = {
         li.append(label, remove);
         list.append(li);
       }
+    }
+  },
+
+  async admin() {
+    const first = await call("/auth/admin");
+    if (first.status === 401) {
+      location.assign("/login?next=/admin");
+      return;
+    }
+    render(first.data);
+
+    async function refresh() {
+      const again = await call("/auth/admin");
+      if (again.ok) render(again.data);
+    }
+
+    const allowedForm = el<HTMLFormElement>("#allowed-form");
+    onSubmit(allowedForm, async ({ email, invite }) => {
+      const entry = email?.trim() ?? "";
+      const { ok, data } = await call("/auth/admin/allowed", "POST", { email: entry, invite: invite === "on" });
+      if (!ok) return errorOf(data);
+      allowedForm.reset();
+      const invited = invite === "on" && !entry.startsWith("@");
+      const notice = invited ? `Allowed ${entry}, and invited it if it has no account yet.` : `Allowed ${entry}.`;
+      show(allowedForm.querySelector(".notice"), notice);
+      await refresh();
+    });
+
+    function render(data: Json) {
+      const allowed = (data.allowed as { email: string; addedBy: string | null; createdAt: number }[]) ?? [];
+      const allowedList = el("#allowed");
+      allowedList.replaceChildren();
+      if (!allowed.length) allowedList.append(hintItem("Nobody yet: no one can sign up."));
+      for (const entry of allowed) {
+        const by = entry.addedBy ? ` by ${entry.addedBy}` : "";
+        const text = `${entry.email} — added${by} · ${new Date(entry.createdAt).toLocaleDateString()}`;
+        allowedList.append(
+          item(text, "Remove", async () => {
+            if (!confirm(`Take ${entry.email} off the allowed emails?`)) return;
+            await call(`/auth/admin/allowed/${encodeURIComponent(entry.email)}`, "DELETE");
+            await refresh();
+          }),
+        );
+      }
+
+      const users = (data.users as { id: string; email: string; role: string; hasPassword: boolean }[]) ?? [];
+      const userList = el("#users");
+      userList.replaceChildren();
+      for (const user of users) {
+        const you = user.id === data.you ? " (you)" : "";
+        const pending = user.hasPassword ? "" : " · has not set a password yet";
+        const next = user.role === "admin" ? "user" : "admin";
+        userList.append(
+          item(`${user.email}${you} — ${user.role}${pending}`, `Make ${next}`, async () => {
+            show(el("#users-error"), null);
+            const { ok, data } = await call(`/auth/admin/users/${encodeURIComponent(user.id)}/role`, "PUT", {
+              role: next,
+            });
+            if (!ok) show(el("#users-error"), errorOf(data));
+            await refresh();
+          }),
+        );
+      }
+    }
+
+    function hintItem(text: string): HTMLLIElement {
+      const li = document.createElement("li");
+      li.className = "hint";
+      li.textContent = text;
+      return li;
+    }
+
+    function item(text: string, action: string, onClick: () => Promise<void>): HTMLLIElement {
+      const li = document.createElement("li");
+      const label = document.createElement("span");
+      label.textContent = text;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "link";
+      button.textContent = action;
+      button.addEventListener("click", () => void onClick());
+      li.append(label, button);
+      return li;
     }
   },
 };

@@ -15,8 +15,6 @@ export interface GatewayConfig {
   dataDir: string;
   /** e.g. https://specs.example.com — email links and the Host check use it. */
   publicUrl: string | null;
-  /** Emails (`a@b.c`) and domains (`@b.c`) that may sign up without an invite. */
-  signupAllowlist: string[];
   /** Resend API key; unset outside production means the console mailer. */
   resendApiKey: string | null;
   mailFrom: string;
@@ -34,7 +32,6 @@ export function readConfig(env: Env = process.env): GatewayConfig {
     port: Number(env.PORT) || 3000,
     dataDir: resolve(env.SPECDRIVEN_DATA_DIR?.trim() || "/data"),
     publicUrl,
-    signupAllowlist: parseAllowlist(env.SPECDRIVEN_SIGNUP_ALLOWLIST),
     resendApiKey: env.RESEND_API_KEY?.trim() || null,
     mailFrom: env.MAIL_FROM?.trim() || "SpecDriven <no-reply@localhost>",
     workerIdleMinutes: Number(env.SPECDRIVEN_WORKER_IDLE_MINUTES) || 30,
@@ -50,18 +47,4 @@ export function readConfig(env: Env = process.env): GatewayConfig {
     if (!publicUrl!.startsWith("https://")) throw new Error("PUBLIC_URL must be an https:// url");
   }
   return config;
-}
-
-export function parseAllowlist(raw: string | undefined): string[] {
-  return (raw ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-/** Whether the allowlist lets this email sign up on its own. */
-export function allowlisted(email: string, allowlist: string[]): boolean {
-  const lower = email.toLowerCase();
-  const domain = lower.slice(lower.lastIndexOf("@"));
-  return allowlist.includes(lower) || allowlist.includes(domain);
 }

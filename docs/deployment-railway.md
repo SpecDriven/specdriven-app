@@ -8,7 +8,7 @@ worker has its own folders and its own credentials.
 
 ```
 Browser ──HTTPS──▶ Railway edge ──▶ gateway (src/gateway, :$PORT)
-                                      │  /login /signup /forgot /set-password /account
+                                      │  /login /signup /forgot /set-password /account /admin
                                       │  /auth/* API, session cookie → user
                                       │  the app's frontend (built once, /_app/*)
                                       ▼
@@ -69,18 +69,20 @@ The accounts are also mirrored into a private GitHub repository, by default
 [SpecDriven/hosted-app](https://github.com/SpecDriven/hosted-app), so a
 redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`).
 
-- **What goes in:** one JSON file per table: `users.json` (password hashes
-  and `os_uid`), `invites.json`, `secrets.json` (still AES-GCM ciphertext, in
-  base64), and `sessions.json` (the session hash, owner, created and expiry
-  times only; no IP address, user agent or last-seen time). Email links and
-  rate-limit counters stay behind.
+- **What goes in:** one JSON file per table: `users.json` (password hashes,
+  roles and `os_uid`), `allowed-emails.json`, `secrets.json` (still AES-GCM
+  ciphertext, in base64), and `sessions.json` (the session hash, owner,
+  created and expiry times only; no IP address, user agent or last-seen
+  time). Email links and rate-limit counters stay behind. A repo saved before
+  the roles is still read: its accounts are users, its `invites.json` becomes
+  the allowed emails, and the next save replaces it with `allowed-emails.json`.
 - **On start:** the gateway clones the repo into `/data/datastore` (root-only,
   like `app.db`). If `app.db` has no accounts, it is filled from the repo. If it
   already has accounts, the volume survived and is newer, so its copy is pushed
   over the repo's.
 - **While running:** every 30 s, a change worth keeping (sign-up, password,
-  secret, invite, sign-in, sign-out) is committed as "Save accounts" and
-  pushed. A session's sliding expiry alone is not pushed.
+  secret, allowed email, role, sign-in, sign-out) is committed as "Save
+  accounts" and pushed. A session's sliding expiry alone is not pushed.
 - **On SIGTERM** (every redeploy): one last forced push, so everything is in
   the repo before the container goes.
 - **When the repo can't be read**, the gateway refuses to start rather than
@@ -124,11 +126,10 @@ name and email as the commit identity.
 
 ## Sign-up and password recovery
 
-1. **Sign up** (`/signup`): the person enters an email address. If it is on
-   `SPECDRIVEN_SIGNUP_ALLOWLIST` or was invited from someone's account page,
-   the gateway emails a link that chooses the first password. An account has
-   no password until that link is used, so nobody can claim an address they
-   cannot read.
+1. **Sign up** (`/signup`): the person enters an email address. If an admin
+   has allowed it, or its whole domain (see below), the gateway emails a link
+   that chooses the first password. An account has no password until that
+   link is used, so nobody can claim an address they cannot read.
 2. **Forgot password** (`/forgot`): the answer is the same "check your
    email" whether or not the account exists, and the email is sent in the
    background so response time doesn't tell either. The reset link works
@@ -151,7 +152,35 @@ name and email as the commit identity.
    | Forgot-password requests | 5 per hour | 20 per hour |
    | Password-change attempts | 10 per hour per account | — |
    | Secret changes | 60 per hour per account | — |
-   | Invites | 20 per hour per account | — |
+   | Admin changes | 120 per hour per account | — |
+
+## Admins and the allowed emails
+
+Every account has a role, **admin** or **user** (`src/gateway/admin.ts`).
+Users use the app. Admins also get **Admin** next to **Settings** in the
+user menu, which opens `/admin`:
+
+- **Allowed emails:** who may create an account, as an address
+  (`name@example.com`) or a whole domain (`@example.com`). Adding an address
+  can email it an invitation to the sign-up page. The list decides sign-up
+  only: taking an address off it stops new sign-ups, while an account
+  already made stays.
+- **Users:** every account, with its role. An admin makes another account an
+  admin, or an admin a user, and the change applies on that person's next
+  request. The last admin can't stop being one, so there is always one.
+
+Only admins can open `/admin` or call `/auth/admin/*`; for anyone else they
+answer 403.
+
+**The first admin** is `ORIGINAL_ADMIN` in `src/gateway/admin.ts`
+(`david@vydra.net`), with a password chosen for it and kept there only as
+its argon2id hash. When the gateway starts on a database with no admin,
+after the [datastore](#datastore) restore, it makes that account the admin
+with that password, creating it if needed, or replacing its password and
+ending its sessions if it exists. This happens once: from then on there is
+always an admin. Change that password on the account page after the first
+sign-in. A fork that runs its own gateway sets its own address and password
+hash there.
 
 Every write, the `/auth/*` API included, passes the app's own Host, Origin
 and Content-Type checks (`src/server/requestGuard.ts`), with `PUBLIC_URL`'s
@@ -179,7 +208,6 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
    | `PUBLIC_URL` | `https://specs.example.com` (or the `*.up.railway.app` domain) — email links and the Host check use it |
    | `RESEND_API_KEY` | from [resend.com](https://resend.com), with your sending domain verified |
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
-   | `SPECDRIVEN_SIGNUP_ALLOWLIST` | who may sign up without an invite: `you@example.com,@yourcompany.com` |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
    | `SPECDRIVEN_DATASTORE_TOKEN` | a GitHub token that can read and write the [datastore](#datastore) repo: a fine-grained token with resource owner **SpecDriven**, access to `hosted-app` only, and the **Contents: Read and write** permission. Unset, accounts live only on the volume |
    | `SPECDRIVEN_DATASTORE_REPO` | optional, default `https://github.com/SpecDriven/hosted-app` |
@@ -187,9 +215,11 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
    `PORT` comes from Railway. In production the gateway refuses to start
    without the first four variables.
 4. **Add a domain** (Settings → Networking). Railway terminates TLS.
-5. **Deploy, then sign up** with an allowlisted address. Open **Account &
-   tokens**, paste the GitHub token, and enter your specs repository's url
-   on the first-run screen.
+5. **Deploy, then sign in** as the [first admin](#admins-and-the-allowed-emails)
+   and change its password on the account page. Open **Admin** to allow the
+   addresses and domains that may sign up. Open **Account & tokens**, paste
+   the GitHub token, and enter your specs repository's url on the first-run
+   screen.
 
 **Limits to know:**
 
@@ -206,14 +236,14 @@ worker pushes saved work on its sync tick.
 
 ```sh
 bun run dev:hosted          # gateway on :3000, data in ./.hosted-data
-SPECDRIVEN_SIGNUP_ALLOWLIST=you@example.com bun run dev:hosted
 ```
 
 When no variables are set:
 
 - emails are printed to the console instead of being sent;
 - a throwaway master key is used, so stored secrets don't survive a restart;
-- the frontend is bundled in memory at start.
+- the frontend is bundled in memory at start;
+- the first admin is made as on Railway; sign in as it to allow addresses.
 
 ## Code map
 
@@ -221,7 +251,8 @@ When no variables are set:
 |---|---|
 | `src/gateway/index.ts` | entry: config, database, keyring, workers, `Bun.serve` |
 | `src/gateway/server.ts` | routing: pages, `/auth/*`, the session check, proxying |
-| `src/gateway/accounts.ts` | sign-up, login, reset and change password, invites |
+| `src/gateway/accounts.ts` | sign-up, login, reset and change password |
+| `src/gateway/admin.ts` | roles, the allowed emails and invitations, the first admin |
 | `src/gateway/sessions.ts`, `rateLimit.ts` | cookies and sessions; fixed-window limits |
 | `src/gateway/crypto.ts`, `secrets.ts` | AES-GCM keyring and the per-user secret store |
 | `src/gateway/datastore.ts` | the accounts' mirror in the datastore repo |
