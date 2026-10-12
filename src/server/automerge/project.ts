@@ -34,6 +34,7 @@ import {
   type ExternalLink,
   type Feature,
   type PullRequestLink,
+  type ResourceLink,
   type ScenarioFile,
 } from "../parser";
 import { readProjectSettings } from "../members";
@@ -83,6 +84,11 @@ function plainPrs(prs: PullRequestLink[] | undefined): PullRequestLink[] | undef
   return prs && prs.length > 0 ? prs.map((p) => ({ url: p.url, title: p.title })) : undefined;
 }
 
+/** Plain copies of the Aha! or Figma links held in the doc; undefined when none. */
+function plainResources(links: ResourceLink[] | undefined): ResourceLink[] | undefined {
+  return links && links.length > 0 ? links.map((l) => ({ url: l.url, title: l.title })) : undefined;
+}
+
 /** Plain copies of the files listed in the doc; undefined when none. */
 function plainFiles(files: ScenarioFile[] | undefined): ScenarioFile[] | undefined {
   return files && files.length > 0
@@ -92,7 +98,8 @@ function plainFiles(files: ScenarioFile[] | undefined): ScenarioFile[] | undefin
 
 /**
  * The doc's view of the domain model — drafts included — in canonical order.
- * Pull request links and stored files come along (the editor shows them) but
+ * Pull request, Aha! and Figma links and stored files come along (the editor
+ * shows them) but
  * serializeFeature never writes them, so the projection below stays free of them.
  */
 export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
@@ -112,11 +119,15 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
         };
         const link = plainLink(s.link);
         const prs = plainPrs(s.prs);
+        const aha = plainResources(s.aha);
+        const figma = plainResources(s.figma);
         const files = plainFiles(s.files);
         return {
           ...scenario,
           ...(link ? { link } : {}),
           ...(prs ? { prs } : {}),
+          ...(aha ? { aha } : {}),
+          ...(figma ? { figma } : {}),
           ...(files ? { files } : {}),
           ...(s.createdBy ? { createdBy: s.createdBy } : {}),
           ...(s.updatedBy ? { updatedBy: s.updatedBy } : {}),
@@ -128,6 +139,10 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   if (link) feature.link = link;
   const prs = plainPrs(doc.prs);
   if (prs) feature.prs = prs;
+  const aha = plainResources(doc.aha);
+  if (aha) feature.aha = aha;
+  const figma = plainResources(doc.figma);
+  if (figma) feature.figma = figma;
   if (doc.assigned) feature.assigned = doc.assigned;
   if (doc.createdBy) feature.createdBy = doc.createdBy;
   if (doc.updatedBy) feature.updatedBy = doc.updatedBy;
