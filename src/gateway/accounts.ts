@@ -9,7 +9,6 @@
 // response time does not tell either.
 
 import type { Database } from "bun:sqlite";
-import { allowlisted } from "./config";
 import { hashToken, randomToken } from "./crypto";
 import { templates, type Mailer } from "./mail";
 import type { Sessions } from "./sessions";
@@ -39,8 +38,6 @@ const COMMON_PASSWORDS = new Set([
 export interface AccountsOptions {
   /** The address email links point at, e.g. https://specs.example.com. */
   baseUrl: () => string;
-  /** Emails and @domains that may sign up without an invite (config.ts). */
-  allowlist: string[];
   now?: () => number;
 }
 
@@ -118,10 +115,10 @@ export class Accounts {
     return row.uid;
   }
 
-  /** Whether this address may create an account: the allowlist, or an invite. */
+  /** Whether this address may create an account: it or its @domain is on the admins' list (admin.ts). */
   mayJoin(email: string): boolean {
-    if (allowlisted(email, this.opts.allowlist)) return true;
-    return this.db.query("SELECT 1 FROM invites WHERE email = ?").get(email) !== null;
+    const domain = email.slice(email.lastIndexOf("@"));
+    return this.db.query("SELECT 1 FROM allowed_emails WHERE email IN (?, ?)").get(email, domain) !== null;
   }
 
   /** A fresh single-use link token for a user, retiring the older ones of that purpose. */
@@ -248,16 +245,6 @@ export class Accounts {
     this.sessions.revokeAll(userId);
     this.notifyChanged(row.email);
     return { ok: true };
-  }
-
-  /** Let another address sign up, and tell them. */
-  async invite(inviterId: string, email: string): Promise<void> {
-    this.db
-      .query("INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?) ON CONFLICT(email) DO NOTHING")
-      .run(email, inviterId, this.now());
-    if (this.findUser(email)?.passwordHash) return;
-    const inviter = this.emailOf(inviterId) ?? "A SpecDriven user";
-    await this.mailer.send({ to: email, ...templates.invite(`${this.opts.baseUrl()}/signup?email=${encodeURIComponent(email)}`, inviter) });
   }
 
   private notifyChanged(email: string): void {

@@ -1,14 +1,15 @@
-// The gateway's database (bun:sqlite on the Railway volume): accounts,
-// sessions, email links, invites, the users' encrypted secrets and the rate
-// limiter's counters. Tokens of every kind are stored as SHA-256 hashes
-// only, so a copy of the file cannot be replayed; secrets are AES-GCM
-// ciphertext under a key that never touches the volume (crypto.ts).
+// The gateway's database (bun:sqlite on the Railway volume): accounts and
+// their roles, sessions, email links, the allowed emails, the users'
+// encrypted secrets and the rate limiter's counters. Tokens of every kind
+// are stored as SHA-256 hashes only, so a copy of the file cannot be
+// replayed; secrets are AES-GCM ciphertext under a key that never touches
+// the volume (crypto.ts).
 
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   `
   CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -63,6 +64,14 @@ const MIGRATIONS: string[] = [
     window_start INTEGER NOT NULL,
     count INTEGER NOT NULL
   );
+  `,
+  // Roles (admin.ts): admins keep the list of who may sign up, which
+  // replaces SPECDRIVEN_SIGNUP_ALLOWLIST and the invites any user could send.
+  `
+  ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user'));
+  -- An email (a@b.c) or a whole domain (@b.c).
+  ALTER TABLE invites RENAME TO allowed_emails;
+  ALTER TABLE allowed_emails RENAME COLUMN invited_by TO added_by;
   `,
 ];
 

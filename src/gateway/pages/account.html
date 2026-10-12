@@ -11,7 +11,9 @@
   <body data-page="account">
     <main class="card">
       <h1 class="brand">SpecDriven</h1>
-      <p class="links top"><a href="/">← Back to your specs</a> · <button id="sign-out" class="link" type="button">Sign out</button></p>
+      <p class="links top">
+        <a href="/">← Back to your specs</a> · <span id="admin-link" hidden><a href="/admin">Admin</a> · </span><button id="sign-out" class="link" type="button">Sign out</button>
+      </p>
       <h2>Account</h2>
       <p>Signed in as <strong id="email">…</strong></p>
 
@@ -55,16 +57,6 @@
           <p class="error" role="alert" hidden></p>
           <p class="notice" role="status" hidden></p>
           <button type="submit">Change password</button>
-        </form>
-      </section>
-
-      <section>
-        <h3>Invite someone</h3>
-        <form id="invite-form" novalidate>
-          <label>Email <input name="email" type="email" autocomplete="off" required /></label>
-          <p class="error" role="alert" hidden></p>
-          <p class="notice" role="status" hidden></p>
-          <button type="submit">Send invite</button>
         </form>
       </section>
     </main>

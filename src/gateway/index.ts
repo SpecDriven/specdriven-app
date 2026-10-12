@@ -6,6 +6,7 @@
 
 import { join } from "node:path";
 import { consoleMailer, resendMailer } from "./mail";
+import { ensureOriginalAdmin, ORIGINAL_ADMIN } from "./admin";
 import { buildAssets } from "./assets";
 import { loadAppShell } from "./appShell";
 import { readConfig } from "./config";
@@ -56,6 +57,9 @@ if (datastoreConfig) {
   const say = config.production ? console.error : console.warn;
   say("SPECDRIVEN_DATASTORE_TOKEN is not set — accounts live only in app.db on this volume");
 }
+// The first admin (admin.ts), only once the repo's accounts are in, so a
+// fresh volume takes its admins from there rather than making a new one.
+if (ensureOriginalAdmin(db)) console.log(`${ORIGINAL_ADMIN} is now the admin`);
 const keyring = await loadKeyring(process.env, config.production);
 const secrets = new SecretStore(db, keyring);
 const resealed = await secrets.reseal();
@@ -90,7 +94,6 @@ const gateway = createGateway({
   appShell: await loadAppShell({ production: config.production, distDir: process.env.SPECDRIVEN_APP_DIST }),
   production: config.production,
   publicUrl: config.publicUrl,
-  signupAllowlist: config.signupAllowlist,
 });
 
 // Expired sessions and old rate-limit windows, hourly.

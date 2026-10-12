@@ -5,7 +5,7 @@
 import { join } from "node:path";
 
 export const ASSET_PREFIX = "/_gw/";
-export const PAGES = ["login", "signup", "forgot", "set-password", "account"] as const;
+export const PAGES = ["login", "signup", "forgot", "set-password", "account", "admin"] as const;
 export type PageName = (typeof PAGES)[number];
 
 export interface Asset {
