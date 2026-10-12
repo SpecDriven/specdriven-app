@@ -68,6 +68,15 @@ export interface SpecDrivenState {
    * absent means ON. Off keeps the links in the app's documents only.
    */
   publishExternalLinks?: boolean;
+  /**
+   * Offer Aha! links on features and scenarios
+   * (specs/external-links/aha-and-figma-links.feature.md); absent means OFF.
+   * Off hides the Aha! chip, field and lists; the links already recorded
+   * stay in the documents.
+   */
+  ahaLinks?: boolean;
+  /** Offer Figma links on features and scenarios, the same way as `ahaLinks`. */
+  figmaLinks?: boolean;
   /** Offer code gen sessions (specs/agents/claude.feature.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to a coding agent. */
@@ -340,6 +349,13 @@ export function normalizeGoogleCalendar(value: unknown): boolean {
     off (specs/external-links/project-management-jira-linear-etc.feature.md). */
 export function normalizePublishExternalLinks(value: unknown): boolean {
   return value !== false;
+}
+
+/** Effective Aha! and Figma link settings
+    (specs/external-links/aha-and-figma-links.feature.md): OFF unless
+    explicitly turned on — a team that doesn't use the tool never sees it. */
+export function normalizeResourceLinks(value: unknown): boolean {
+  return value === true;
 }
 
 // Project management (specs/external-links/project-management-jira-linear-

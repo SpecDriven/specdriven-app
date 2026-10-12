@@ -156,6 +156,12 @@ Under the header, chips summarise the feature:
   small form with the tracking tool, id and url, plus **Remove link**. The
   link is written into the file as a markdown link when **Publish external
   links** is on.
+- The **Aha!** and **Figma** chips (`Link Aha!`, or `2 Aha! links` once
+  linked) appear when **Aha! links** or **Figma links** is on. Each opens a
+  list of the feature's links with ✕ to remove one, and a url and optional
+  title to add another. Without a title a link reads as the Aha! reference
+  (`APP-123`) or the Figma file name taken from its url. These links are kept
+  with the feature in the app and never written into the `.feature.md`.
 
 The **description** is free markdown. Click it to edit; it is saved
 automatically, and **Done** shows it rendered again.
@@ -174,6 +180,8 @@ Each card shows:
   **Scenario preview lines** setting.
 - An **Automated tests** table of links, when the scenario has any and
   **Show links to automated tests** is on.
+- **Aha!** and **Figma** lists of the scenario's links, when it has any and
+  the matching setting is on.
 - A **Files** list of the files stored with the scenario, each a download
   with its size.
 - A line saying who **created** the scenario and who **last updated** it.
@@ -247,6 +255,12 @@ Below, in one scrolling column:
   so the link reads `quotesAHomeownersPolicy` rather than a bare url. Java,
   Kotlin, TypeScript, JavaScript, Python and Go are recognised. A url left
   in the add field is folded into the next save.
+- **Aha!** and **Figma** (when switched on in Settings): the product
+  records and designs behind the scenario. Paste a url, optionally give it a
+  title, and press **Add**; ✕ removes one. A url outside aha.io or figma.com
+  is accepted with a warning. Like pull requests, they are saved on the spot,
+  can be added once the scenario has been saved, and stay with the scenario
+  when it moves to another feature.
 - **Files**: the files the scenario needs when it runs — xml, csv, json or
   binary test data to upload into the system under test. **Upload files**
   opens the system's file picker; pick one file or several. Each file is
@@ -262,7 +276,7 @@ Below, in one scrolling column:
 A **published** scenario opens read-only: the title is fixed, the body is
 shown as source, the scenario table is hidden, and there is no save button,
 because nothing about a published scenario can change. Its ticket link,
-automated tests, pull requests and files remain editable and are saved automatically, so developers
+automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
 can attach tests to a scenario long after it was published.
 
 **Delete** asks for confirmation. Deleting a draft or a proposed scenario
@@ -431,6 +445,7 @@ Open Settings with `⌘,` or `g s`.
 | **Show links to automated tests** | Shows or hides the Automated tests table on cards. Hiding never deletes the links. |
 | **Project management** and **Project management tool** | Whether features and scenarios offer a ticket link, and which tracker it names. |
 | **Publish external links** | Writes ticket links into the `.feature.md` file as markdown links. |
+| **Aha! links** and **Figma links** | Each off by default. On, features and scenarios offer links to Aha! records or Figma designs. Off hides them; links already added are kept. |
 | **Write authors into feature files** | A setting of the open data folder, not of the device: `"authors-in-markdown": true` in its `project-settings.json`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
 | **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.json`. |
 | **Allow deleting published specs** | Offers Delete on published scenarios, behind the Danger Zone confirmation. |
@@ -490,6 +505,8 @@ On Windows and Linux `⌘` is `Ctrl`.
   with the test's name, that says which test automates a scenario.
 - **Ticket link** (external link): the tracker issue behind a feature or a
   scenario, such as `Jira:ABC-123`.
+- **Aha! / Figma link**: a url to the product record or design behind a
+  feature or a scenario, kept with the feature in the app only.
 - **Member / assignee**: a name from `project-settings.json` that a feature
   can be assigned to.
 - **Publish ring**: the arc on a sidebar feature showing how many of its
