@@ -1,7 +1,8 @@
-// The hosted gateway's datastore (src/gateway/datastore.ts): accounts,
-// invites, sealed secrets and sessions mirrored as JSON into a git repo, read
-// back into an empty database after a redeploy, pushed only when something
-// worth keeping changed, and never pushed over the repo before it was read.
+// The hosted gateway's datastore (src/gateway/datastore.ts): accounts and
+// their roles, allowed emails, sealed secrets and sessions mirrored as JSON
+// into a git repo, read back into an empty database after a redeploy,
+// pushed only when something worth keeping changed, and never pushed over
+// the repo before it was read.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { $ } from "bun";
@@ -81,11 +82,12 @@ test("the token reaches git through the credential helper's environment, not arg
   expect(context.config.some((c) => c.includes("password=$SPECDRIVEN_GIT_TOKEN"))).toBe(true);
 });
 
-test("a snapshot read into a fresh database gives back accounts, invites, secrets that still open, and live sessions", async () => {
+test("a snapshot read into a fresh database gives back accounts, roles, allowed emails, secrets that still open, and live sessions", async () => {
   const keyring = await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() });
   const db = openDatabase(":memory:");
   addUser(db, A, "a@example.com");
-  db.query("INSERT INTO invites (email, invited_by, created_at) VALUES (?, ?, ?)").run("c@example.com", A, NOW);
+  db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(A);
+  db.query("INSERT INTO allowed_emails (email, added_by, created_at) VALUES (?, ?, ?)").run("c@example.com", A, NOW);
   await new SecretStore(db, keyring, () => NOW).put(A, "anthropic", "agent_key", "sk-a");
   const sessions = new Sessions(db, () => NOW);
   const live = sessions.create(A, { ip: "203.0.113.9", userAgent: "Browser" });
@@ -102,10 +104,10 @@ test("a snapshot read into a fresh database gives back accounts, invites, secret
   parsed[0]!.expires_at = later - 1;
   importSnapshot(copy, { ...files, "sessions.json": JSON.stringify(parsed) }, later);
 
-  expect(copy.query("SELECT email, password_hash, os_uid FROM users").all()).toEqual([
-    { email: "a@example.com", password_hash: "$argon2id$hash-of-a@example.com", os_uid: 200000 },
+  expect(copy.query("SELECT email, password_hash, os_uid, role FROM users").all()).toEqual([
+    { email: "a@example.com", password_hash: "$argon2id$hash-of-a@example.com", os_uid: 200000, role: "admin" },
   ]);
-  expect(copy.query("SELECT email, invited_by FROM invites").all()).toEqual([{ email: "c@example.com", invited_by: A }]);
+  expect(copy.query("SELECT email, added_by FROM allowed_emails").all()).toEqual([{ email: "c@example.com", added_by: A }]);
   expect((await new SecretStore(copy, keyring).values(A)).agentKeys).toEqual({ anthropic: "sk-a" });
   const restored = new Sessions(copy, () => later);
   const survivors = [live, old].filter((token) => restored.lookup(token));
@@ -133,6 +135,38 @@ test("an empty database is filled from what another gateway pushed; one with acc
   expect(survived.query("SELECT email FROM users").all()).toEqual([{ email: "b@example.com" }]);
   expect(await kept.save()).toBe(true);
   expect(await originFile("users.json")).not.toContain("a@example.com");
+});
+
+test("a repo pushed before the roles is read as plain users and allowed emails, and saved in today's form", async () => {
+  // What a gateway from before the roles pushed: no role, and invites.json.
+  const seed = join(root, "seed");
+  await $`git clone ${origin} ${seed}`.quiet();
+  const user = {
+    id: A,
+    email: "a@example.com",
+    password_hash: "$argon2id$x",
+    email_verified_at: NOW,
+    created_at: NOW,
+    password_changed_at: NOW,
+    os_uid: 200000,
+  };
+  const invite = { email: "c@example.com", invited_by: A, created_at: NOW };
+  await Bun.write(join(seed, "users.json"), JSON.stringify([user]));
+  await Bun.write(join(seed, "invites.json"), JSON.stringify([invite]));
+  await git(seed, "add", "-A");
+  await git(seed, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-m", "old gateway");
+  await git(seed, "push", "origin", "HEAD:main");
+
+  const db = openDatabase(":memory:");
+  const ds = store("gw", db);
+  expect(await ds.restore()).toEqual({ imported: 1 });
+  expect(db.query("SELECT email, role FROM users").all()).toEqual([{ email: "a@example.com", role: "user" }]);
+  expect(db.query("SELECT email, added_by FROM allowed_emails").all()).toEqual([{ email: "c@example.com", added_by: A }]);
+
+  expect(await ds.save()).toBe(true);
+  expect(await originFile("invites.json")).toBeNull();
+  expect(await originFile("allowed-emails.json")).toContain("c@example.com");
+  expect(await originFile("users.json")).toContain('"role": "user"');
 });
 
 test("a sliding session expiry alone is not pushed until a forced save; a new session is", async () => {

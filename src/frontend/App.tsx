@@ -62,6 +62,7 @@ import {
   Bot,
   KeyRound,
   LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -1040,6 +1041,9 @@ export function App() {
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
   const [hosted, setHosted] = useState(false);
+  // Whether the signed-in hosted account is an admin (src/gateway/admin.ts),
+  // which puts Admin beside Settings in the user menu.
+  const [hostedAdmin, setHostedAdmin] = useState(false);
   // The running app's version, shown beside the user name in demo mode.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Where that version's source lives — the user menu links to it.
@@ -1631,6 +1635,21 @@ export function App() {
   useEffect(() => {
     void boot();
   }, [boot]);
+
+  // The account's role is the gateway's, not the worker's: ask it.
+  useEffect(() => {
+    if (!hosted) return;
+    let live = true;
+    fetch("/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me: { role?: string } | null) => {
+        if (live) setHostedAdmin(me?.role === "admin");
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [hosted]);
 
   // Each failed try sets a fresh error, which schedules the next one.
   useEffect(() => {
@@ -7442,6 +7461,18 @@ export function App() {
                   openSettings();
                 },
               },
+              // The hosted gateway's admin page (src/gateway/admin.ts): the
+              // allowed emails and the users' roles, for admins only.
+              ...(hosted && hostedAdmin
+                ? [
+                    {
+                      id: "admin",
+                      label: "Admin",
+                      icon: <ShieldCheck size={13} />,
+                      onSelect: () => window.location.assign("/admin"),
+                    },
+                  ]
+                : []),
               {
                 id: "plugins",
                 label: "Plugins",

@@ -8,6 +8,7 @@ import { fetchIdentity } from "../server/auth";
 import type { TokenRecord } from "../server/tokenStore";
 import { rejectRequest } from "../server/requestGuard";
 import { Accounts, normalizeEmail } from "./accounts";
+import { Admin, normalizeAllowedEntry, type Role } from "./admin";
 import type { AppShell } from "./appShell";
 import { ASSET_PREFIX, type GatewayAssets, type PageName } from "./assets";
 import type { Mailer } from "./mail";
@@ -48,7 +49,6 @@ export interface GatewayDeps {
   production: boolean;
   /** e.g. https://specs.example.com; null in development (links use the request's origin). */
   publicUrl: string | null;
-  signupAllowlist: string[];
   /** Who a GitHub token belongs to (src/server/auth.ts); replaced in tests. */
   githubIdentity?: (token: string) => Promise<TokenRecord>;
   now?: () => number;
@@ -58,9 +58,13 @@ export interface Gateway {
   fetch(req: Request, server?: { requestIP(req: Request): { address: string } | null }): Promise<Response>;
   sessions: Sessions;
   accounts: Accounts;
+  admin: Admin;
 }
 
-type Ctx = { req: Request; url: URL; ip: string; user: SessionUser | null; token: string | null };
+/** A signed-in user and their role (admin.ts). */
+type User = SessionUser & { role: Role };
+
+type Ctx = { req: Request; url: URL; ip: string; user: User | null; token: string | null };
 
 const PAGE_ROUTES: Record<string, PageName> = {
   "/login": "login",
@@ -68,7 +72,11 @@ const PAGE_ROUTES: Record<string, PageName> = {
   "/forgot": "forgot",
   "/set-password": "set-password",
   "/account": "account",
+  "/admin": "admin",
 };
+
+/** Pages for signing in, which a signed-in browser skips. */
+const SIGN_IN_PAGES = new Set<PageName>(["login", "signup", "forgot"]);
 
 const PAGE_CSP = [
   "default-src 'self'",
@@ -93,11 +101,8 @@ export function createGateway(deps: GatewayDeps): Gateway {
   const githubIdentity = deps.githubIdentity ?? fetchIdentity;
   // Development without PUBLIC_URL: links point wherever the request came in.
   let baseUrl = deps.publicUrl ?? "http://localhost:3000";
-  const accounts = new Accounts(deps.db, sessions, deps.mailer, {
-    baseUrl: () => baseUrl,
-    allowlist: deps.signupAllowlist,
-    now,
-  });
+  const accounts = new Accounts(deps.db, sessions, deps.mailer, { baseUrl: () => baseUrl, now });
+  const admin = new Admin(deps.db, deps.mailer, { baseUrl: () => baseUrl, now });
   const allowedHosts = deps.publicUrl ? [new URL(deps.publicUrl).host] : ["*"];
 
   function secure(res: Response, kind: "page" | "api" | "app"): Response {
@@ -138,11 +143,12 @@ export function createGateway(deps: GatewayDeps): Gateway {
     work.catch((e) => console.error(`${what} failed: ${(e as Error).message}`));
   }
 
-  async function me(userId: string, email: string) {
+  async function me({ userId, email, role }: User) {
     const all = await deps.secrets.list(userId);
     const github = all.find((s) => s.name === GITHUB_SECRET);
     return {
       email,
+      role,
       github: github ? { login: github.meta.login ?? null, hint: github.hint, updatedAt: github.updatedAt } : null,
       agentKeys: all
         .filter((s) => s.kind === "agent_key")
@@ -216,7 +222,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
     if (!url.pathname.startsWith("/auth/")) return null;
     if (!user) return json({ error: "Sign in first" }, 401);
 
-    if (route === "GET /auth/me") return json(await me(user.userId, user.email));
+    if (route === "GET /auth/me") return json(await me(user));
 
     if (route === "POST /auth/change-password") {
       if (!limiter.hit(...limits.user("chpw", user.userId, 10))) return json(TOO_MANY, 429);
@@ -226,12 +232,9 @@ export function createGateway(deps: GatewayDeps): Gateway {
       return signedIn(ctx, user.userId);
     }
 
-    if (route === "POST /auth/invite") {
-      const email = normalizeEmail((await body(req)).email);
-      if (!email) return json({ error: "Enter a valid email address" }, 400);
-      if (!limiter.hit(...limits.user("invite", user.userId, 20))) return json(TOO_MANY, 429);
-      background(accounts.invite(user.userId, email), "invite email");
-      return json({ ok: true });
+    if (url.pathname === "/auth/admin" || url.pathname.startsWith("/auth/admin/")) {
+      if (user.role !== "admin") return json({ error: "Only admins can do this" }, 403);
+      return adminApi(req, url, user);
     }
 
     if (url.pathname === "/auth/secrets/github") {
@@ -287,6 +290,42 @@ export function createGateway(deps: GatewayDeps): Gateway {
     return json({ error: "Not found" }, 404);
   }
 
+  /** The admin page's API (admin.ts), for a user the caller found to be an admin. */
+  async function adminApi(req: Request, url: URL, user: User): Promise<Response> {
+    if (req.method === "GET" && url.pathname === "/auth/admin") {
+      return json({ you: user.userId, allowed: admin.allowed(), users: admin.users() });
+    }
+    if (!limiter.hit(...limits.user("admin", user.userId, 120))) return json(TOO_MANY, 429);
+
+    if (req.method === "POST" && url.pathname === "/auth/admin/allowed") {
+      const data = await body(req);
+      const entry = normalizeAllowedEntry(data.email);
+      if (!entry) return json({ error: "Enter an email address, or @ and a domain" }, 400);
+      admin.allow(user.userId, entry);
+      if (data.invite === true && !entry.startsWith("@")) {
+        background(admin.invite(user.userId, entry), "invite email");
+      }
+      return json({ ok: true });
+    }
+
+    const allowedMatch = url.pathname.match(/^\/auth\/admin\/allowed\/([^/]+)$/);
+    if (allowedMatch && req.method === "DELETE") {
+      const entry = normalizeAllowedEntry(decodeURIComponent(allowedMatch[1]!));
+      if (!entry || !admin.disallow(entry)) return json({ error: "That is not on the list" }, 404);
+      return json({ ok: true });
+    }
+
+    const roleMatch = url.pathname.match(/^\/auth\/admin\/users\/([^/]+)\/role$/);
+    if (roleMatch && req.method === "PUT") {
+      const role = (await body(req)).role;
+      if (role !== "admin" && role !== "user") return json({ error: "The role is admin or user" }, 400);
+      const result = admin.setRole(decodeURIComponent(roleMatch[1]!), role);
+      if ("error" in result) return json({ error: result.error }, 400);
+      return json({ ok: true });
+    }
+    return json({ error: "Not found" }, 404);
+  }
+
   function clientIp(req: Request, server?: Parameters<Gateway["fetch"]>[1]): string {
     // Railway's edge appends the address it saw; the rightmost entry is the
     // one a client cannot forge.
@@ -323,14 +362,26 @@ export function createGateway(deps: GatewayDeps): Gateway {
     }
 
     const token = readSessionToken(req, cookieOpts);
-    const user = sessions.lookup(token);
+    const session = sessions.lookup(token);
+    const user = session ? { ...session, role: admin.roleOf(session.userId) } : null;
     const ctx: Ctx = { req, url, ip: clientIp(req, server), user, token };
 
     const page = PAGE_ROUTES[url.pathname];
     if (page && req.method === "GET") {
       // Signed in already: the sign-in pages lead on to the app.
-      if (user && page !== "account" && page !== "set-password") {
+      if (user && SIGN_IN_PAGES.has(page)) {
         return secure(new Response(null, { status: 302, headers: { Location: "/" } }), "api");
+      }
+      // The admin page is for admins only (admin.ts).
+      if (page === "admin" && user?.role !== "admin") {
+        if (!user) {
+          return secure(new Response(null, { status: 302, headers: { Location: "/login?next=%2Fadmin" } }), "api");
+        }
+        const refused = new Response("Only admins can open this page.", {
+          status: 403,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+        return secure(refused, "page");
       }
       const asset = deps.assets.page(page);
       return secure(new Response(asset.body, { headers: { "Content-Type": asset.type } }), "page");
@@ -364,5 +415,5 @@ export function createGateway(deps: GatewayDeps): Gateway {
     }
   }
 
-  return { fetch: handle, sessions, accounts };
+  return { fetch: handle, sessions, accounts, admin };
 }
