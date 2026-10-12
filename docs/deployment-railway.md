@@ -184,9 +184,11 @@ hash there.
 
 Every write, the `/auth/*` API included, passes the app's own Host, Origin
 and Content-Type checks (`src/server/requestGuard.ts`), with `PUBLIC_URL`'s
-host as the allowed host. Gateway pages are sent with a strict CSP,
-`frame-ancestors 'none'` and `no-store`; every response gets HSTS and
-`nosniff`.
+host as the allowed host. A GET or HEAD for any other host, such as the
+service's `*.up.railway.app` domain, is redirected (301) to the same path on
+`PUBLIC_URL`; any other request for it is refused. Gateway pages are sent
+with a strict CSP, `frame-ancestors 'none'` and `no-store`; every response
+gets HSTS and `nosniff`.
 
 ## Deploying on Railway
 
@@ -205,7 +207,7 @@ host as the allowed host. Gateway pages are sent with a strict CSP,
    | Variable | Value |
    |---|---|
    | `SPECDRIVEN_MASTER_KEY` | output of `bun src/gateway/index.ts genkey` — keep a copy in your password manager; without it the stored secrets are lost |
-   | `PUBLIC_URL` | `https://specs.example.com` (or the `*.up.railway.app` domain) — email links and the Host check use it |
+   | `PUBLIC_URL` | `https://specs.example.com` (or the `*.up.railway.app` domain) — email links and the Host check use it, and page loads on any other host redirect to it |
    | `RESEND_API_KEY` | from [resend.com](https://resend.com), with your sending domain verified |
    | `MAIL_FROM` | e.g. `SpecDriven <no-reply@specs.example.com>` on that verified domain |
    | `SPECDRIVEN_WORKER_IDLE_MINUTES` | optional, default 30 |
@@ -261,16 +263,18 @@ The services run under `specdriven.app`, whose DNS is on Cloudflare:
    verifies the domain only once the TXT record is there as well as the
    CNAME, then issues the certificate itself.
 4. **On the gateway, set `PUBLIC_URL`** to the new domain
-   (`https://private.specdriven.app`) and redeploy. The gateway answers only
-   `PUBLIC_URL`'s host (`src/gateway/server.ts`), so:
-   - until then, the new domain answers 403 `Requests for host "…" are not
-     served`;
-   - from then on, the `*.up.railway.app` domain answers that, except for
-     `/healthz`, so Railway's health check still passes;
+   (`https://private.specdriven.app`) and redeploy. The gateway serves only
+   `PUBLIC_URL`'s host and redirects page loads on any other host to it
+   (`src/gateway/server.ts`), so:
+   - until then, opening the new domain redirects to the old one;
+   - from then on, opening a page on the `*.up.railway.app` domain redirects
+     to the same page on the new one, and other requests there are refused.
+     `/healthz` answers on every host, so Railway's health check still
+     passes;
    - everyone signs in again, since the `__Host-` session cookie belongs to
      one host;
-   - email links sent before the switch point at the old host: send any
-     invitation still unused again.
+   - email links sent before the switch still work: they redirect, and the
+     browser keeps the link's `#token`.
 
    The demo answers any host (`SPECDRIVEN_ALLOWED_HOSTS` defaults to `*` in
    `src/gateway/demo.ts`) and needs no variable. The
