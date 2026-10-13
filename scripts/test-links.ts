@@ -13,10 +13,8 @@
 //                                           Claude Code hooks (.claude/settings.json)
 //
 // The spec repo is found at $SPECDRIVEN_SPECS_DIR, else the checkout's
-// specs/ symlink into its specs-specdriven submodule, else the main
-// checkout's submodule (a worktree under .claude/worktrees has its own,
-// uninitialised one, so its symlink dangles), else an older sibling clone at
-// ../specs-specdriven.
+// specs/ symlink, else ../specs-specdriven/specs beside the main checkout
+// (the symlink dangles inside .claude/worktrees).
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -225,10 +223,7 @@ function git(cwd: string, ...args: string[]): string | null {
 function specsDir(root: string): string | null {
   const candidates = [process.env.SPECDRIVEN_SPECS_DIR, join(root, "specs")];
   const common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
-  if (common) {
-    const main = dirname(common);
-    candidates.push(join(main, "specs-specdriven", "specs"), join(main, "..", "specs-specdriven", "specs"));
-  }
+  if (common) candidates.push(join(dirname(common), "..", "specs-specdriven", "specs"));
   for (const c of candidates) {
     if (c && existsSync(c) && statSync(c).isDirectory()) return realpathSync(c);
   }
@@ -333,7 +328,7 @@ function list(title: string, items: string[]): string {
 
 const HOW =
   `Links are \`[test: <test title> : https://github.com/SpecDriven/specdriven-app/blob/main/<path>#L<line> ]\` lines at the end of a scenario ` +
-  `in the spec repo (specs/<area>/<name>.feature.md, the specs-specdriven submodule); the title is the test("…") title, without ":" or "]". ` +
+  `in the spec repo (../specs-specdriven/specs/<area>/<name>.feature.md); the title is the test("…") title, without ":" or "]". ` +
   `Rerun \`bun scripts/test-links.ts --changed --fix\` after fixing.`;
 
 async function hook(kind: string): Promise<void> {
@@ -405,7 +400,7 @@ if (import.meta.main) {
   const changed = args.includes("--changed") ? changedTests(root, base) : undefined;
   const report = run(root, { fix: args.includes("--fix"), only: changed, newSince: changed ? base : undefined });
   if (!report) {
-    console.error("No spec repo found: run `git submodule update --init`, or set SPECDRIVEN_SPECS_DIR.");
+    console.error("No spec repo found: set SPECDRIVEN_SPECS_DIR or check out ../specs-specdriven.");
     process.exit(1);
   }
   process.stdout.write(

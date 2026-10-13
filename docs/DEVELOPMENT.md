@@ -4,46 +4,24 @@ Fork https://github.com/SpecDriven/specs-insurance and 'git clone' locally in or
 
 # Development
 
-## The spec repo submodule
+## Clone the spec repo
 
 This app's own specs live in a separate repo, [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven),
-checked out here as a git submodule at `specs-specdriven/`; `specs` is a
-checked-in symlink to `specs-specdriven/specs`, so `specs/<area>/<name>.feature.md`
-paths work as before. Clone with the submodule, or fetch it into an existing
-checkout, or `specs/` dangles:
+and `specs/` here is a checked-in symlink to `../specs-specdriven`. Clone it as a
+sibling of this checkout, or `specs/` dangles:
 
 ```sh
-git clone --recurse-submodules https://github.com/SpecDriven/specdriven-app.git
-git submodule update --init          # in a checkout made without it
+gh repo clone SpecDriven/specs-specdriven ../specs-specdriven
 ```
 
-The submodule is pinned to one commit of the spec repo and checks out on a
-detached HEAD. To write specs from here, put it on its branch first, push from
-inside it, then record the new pin in this repo:
-
-```sh
-git -C specs-specdriven switch main
-# …edit, commit and push in specs-specdriven…
-git add specs-specdriven && git commit -m "Bump specs"
-```
-
-`git submodule update --remote specs-specdriven` moves the pin to the newest
-specs on `main` without editing them. `git config submodule.recurse true` makes
-`git pull` and `git checkout` update the submodule too.
-
-To edit the specs in the SpecDriven app itself, open a standalone clone of
-specs-specdriven (an older `../specs-specdriven` beside this checkout is fine to
-keep for that): the app syncs a repository whose `.git` is a folder, and treats
-a submodule checkout — whose `.git` is a file — as a plain folder it saves into
-without committing or pushing.
-
-Nothing at runtime reads `specs/` — it is there for the workflow below — so
-without the submodule you lose only the links in this README and the spec
-references in the code, and the release zip leaves both out
+Without `gh`, `git clone https://github.com/SpecDriven/specs-specdriven.git ../specs-specdriven`
+does the same. Nothing at runtime reads `specs/` — it is there for the workflow
+below — so a dangling symlink costs you only the links in this README and the
+spec references in the code, and the release zip leaves the symlink out
 (`.gitattributes`). `bun run build:desktop` is the exception: electron-builder
 stats every path in the project, so a dangling `specs` fails the desktop build
-with `ENOENT ... stat '<checkout>/specs'`. Run `git submodule update --init`
-first.
+with `ENOENT ... stat '<checkout>/specs'`. Point it somewhere real or delete
+it.
 
 ## Deleting old releases
 
