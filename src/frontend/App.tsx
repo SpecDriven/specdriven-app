@@ -176,7 +176,13 @@ import {
   testLinkLabel,
   updateTestLink,
 } from "./testlinks";
-import { buildTree, scenarioRows, withOpenScenarios } from "./tree";
+import {
+  buildTree,
+  scenarioNeighbors,
+  scenarioRows,
+  scenarioSequence,
+  withOpenScenarios,
+} from "./tree";
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
@@ -5436,6 +5442,28 @@ export function App() {
     if (selectedFolder !== null) return setSelectedFolder(null);
     return false;
   };
+  // The scenario editor's `<` / `>` and their keys: step to the scenario
+  // before or after the open one, through every scenario in the tree in the
+  // order the sidebar lists them — across features too. The same way the
+  // tree's own rows switch scenarios (openScenarioRow), so the open pane
+  // autosaves on the way out. Located by the scenario as last saved, not by
+  // a name still being typed; a new scenario not yet saved has no place in
+  // the walk, so both ways are off until it does.
+  const editedEntry =
+    editing !== null && editing.index !== null ? (feature?.scenarios[editing.index] ?? null) : null;
+  const scenarioNav =
+    selected && editedEntry
+      ? scenarioNeighbors(
+          scenarioSequence(buildTree(folders, features), selected, feature),
+          selected,
+          editedEntry,
+        )
+      : { prev: null, next: null };
+  const stepScenario = (step: -1 | 1): void | false => {
+    const to = step < 0 ? scenarioNav.prev : scenarioNav.next;
+    if (!to) return false;
+    openScenarioRow(to.file, to.scenario);
+  };
   const shortcuts: Shortcut[] = [
     {
       id: "search",
@@ -5615,6 +5643,22 @@ export function App() {
       group: "Scenarios",
       when: () => !quiet && onFeaturePage && selectedScenario !== null,
       run: openSelectedScenario,
+    },
+    {
+      id: "editor-prev",
+      keys: ["<", "k"],
+      label: "Previous scenario (in the scenario editor)",
+      group: "Scenarios",
+      when: () => !quiet && editing !== null && scenarioNav.prev !== null,
+      run: () => stepScenario(-1),
+    },
+    {
+      id: "editor-next",
+      keys: [">", "j"],
+      label: "Next scenario (in the scenario editor)",
+      group: "Scenarios",
+      when: () => !quiet && editing !== null && scenarioNav.next !== null,
+      run: () => stepScenario(1),
     },
     {
       id: "publish",
@@ -7847,6 +7891,46 @@ export function App() {
                 />
               </div>
               <div className="editor-actions scenario-pane-actions">
+                {/* Previous / next scenario across the whole tree, as `<`
+                    and `>` (or k / j) do from the keyboard. */}
+                <span className="scenario-nav" role="group" aria-label="Scenario navigation">
+                  <Tooltip
+                    label={
+                      scenarioNav.prev
+                        ? `Previous: ${scenarioNav.prev.scenario.name} v${scenarioNav.prev.scenario.version}`
+                        : "No previous scenario"
+                    }
+                    keys="<"
+                  >
+                    <button
+                      type="button"
+                      className="scenario-nav-btn"
+                      aria-label="Previous scenario"
+                      disabled={scenarioNav.prev === null}
+                      onClick={() => stepScenario(-1)}
+                    >
+                      <ChevronLeft size={18} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip
+                    label={
+                      scenarioNav.next
+                        ? `Next: ${scenarioNav.next.scenario.name} v${scenarioNav.next.scenario.version}`
+                        : "No next scenario"
+                    }
+                    keys=">"
+                  >
+                    <button
+                      type="button"
+                      className="scenario-nav-btn"
+                      aria-label="Next scenario"
+                      disabled={scenarioNav.next === null}
+                      onClick={() => stepScenario(1)}
+                    >
+                      <ChevronRight size={18} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                </span>
                 <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
                 {/* Proposed scenarios and drafts can be deleted
                     (specs/editor/spec-editor.feature.md) — published ones too

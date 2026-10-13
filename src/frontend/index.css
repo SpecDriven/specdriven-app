@@ -1505,6 +1505,37 @@ button.link:disabled {
   flex-shrink: 0;
 }
 
+/* The scenario editor's previous / next scenario: the same quiet icon
+   buttons, side by side. */
+.scenario-nav {
+  display: inline-flex;
+  gap: 0.15rem;
+}
+
+.editor-bar button.scenario-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.editor-bar button.scenario-nav-btn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.editor-bar button.scenario-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .editor-bar button.back-button:hover:not(:disabled) {
   color: var(--text-1);
   background: var(--hover);
