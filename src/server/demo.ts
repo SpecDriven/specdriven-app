@@ -90,6 +90,7 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
     repos: {},
   },
   assignments: true,
+  featureFlags: true,
   deletePublished: true,
   googleCalendar: true,
   showTestLinks: true,

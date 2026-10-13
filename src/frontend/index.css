@@ -7764,6 +7764,106 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   min-width: 26rem;
 }
 
+/* Feature flags (specs/app/feature-flags.feature.md): a chip per flag on the
+   feature header and the scenario card — an on flag green, an off flag red —
+   and the field
+   that edits them in the scenario editor and the header's popover. */
+.feature-flag-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  vertical-align: middle;
+}
+
+.scenario-title .feature-flag-chips {
+  margin-left: 0.4rem;
+}
+
+.chip.feature-flag {
+  gap: 0.3rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.chip.feature-flag.on {
+  color: var(--status-published);
+  border-color: currentColor;
+}
+
+.chip.feature-flag.off {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+/* The OFF beside a switch in the flags field reads red too. */
+.feature-flag-state.off {
+  color: var(--danger-fg);
+  opacity: 1;
+}
+
+.feature-flag-state {
+  font-family: var(--font-sans, inherit);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.feature-flags-field-wrap,
+.feature-flags-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.feature-flag-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.feature-flag-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.feature-flag-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.feature-flag-add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.feature-flag-add input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.feature-flag-add input[aria-invalid="true"] {
+  border-color: var(--danger-fg);
+}
+
+/* Its chip comes after the ticket and PR chips, toward the right edge of
+   the page: grow leftwards so it stays on screen, like .chip-menu-end. */
+.chip-popover.feature-flags-popover {
+  min-width: 22rem;
+  left: auto;
+  right: 0;
+}
+
 /* Add a task to Google Calendar (specs/app/tasks.feature.md): the calendar
    chip's popover — an estimate, its presets, a start, and the link that is
    the form's submit, dressed as the dialogs' primary button. */

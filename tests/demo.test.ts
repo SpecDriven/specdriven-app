@@ -153,6 +153,7 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
   }
   for (const module of [
     "assignments",
+    "featureFlags",
     "deletePublished",
     "googleCalendar",
     "showTestLinks",
