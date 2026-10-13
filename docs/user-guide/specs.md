@@ -213,14 +213,20 @@ follows (`SpecDriven — <feature> · <scenario> v<N>`).
 
 At the top:
 
-- Breadcrumbs back to the feature. `<` or `Esc` saves and returns, and the
-  card you came from stays highlighted.
+- Breadcrumbs back to the feature. The feature crumb or `Esc` saves and
+  returns, and the card you came from stays highlighted.
 - The **title**, editable unless the scenario is published.
 - **Version v<N>**, assigned by the app and never editable. A new scenario
   takes one past the highest version of the same name.
 - A **status badge**: `draft`, `proposed` or `published`.
-- On the right, the save indicator and the actions: **Delete**, set apart
-  from **Propose** (drafts only) and **Publish**.
+- On the right, the **‹** and **›** buttons, then the save indicator and the
+  actions: **Delete**, set apart from **Propose** (drafts only) and
+  **Publish**. **‹** and **›** open the previous and next scenario, through
+  every scenario in the order the sidebar lists them, crossing from one
+  feature into the next. The keys are `<` and `>` (or `k` and `j`) while the
+  caret isn't in a text field. Like every way out of the pane, they save
+  the open scenario first. Hover a button to see which scenario it opens.
+  A new scenario joins the sequence once it has been saved.
 
 Below, in one scrolling column:
 
@@ -483,6 +489,7 @@ tab:
 | `Esc` | Close, go back, or clear the selection |
 | `c` | New feature, or New scenario on a feature page |
 | `j`, `↓` / `k`, `↑` | Next / previous scenario |
+| `>`, `j` / `<`, `k` | Next / previous scenario (in the scenario editor) |
 | `Enter`, `e`, `o` | Open the selected scenario |
 | `⌘Enter` | Publish all, Propose, or Publish, depending on where you are |
 | `⌘⇧C` | Copy link to this page |
