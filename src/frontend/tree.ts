@@ -117,3 +117,48 @@ export function withOpenScenarios(
   next[at] = { ...entry, scenarios };
   return next;
 }
+
+/** One stop on the scenario editor's `<` / `>` walk: a scenario and its feature. */
+export interface ScenarioStop {
+  file: string;
+  scenario: ScenarioRow;
+}
+
+/**
+ * Every scenario in the spec tree, in the order the sidebar shows them —
+ * folders before features, depth first, each feature's scenarios in file
+ * order — for the scenario editor's `<` / `>` buttons. Rows come from
+ * `scenarioRows`, so the open feature contributes its live scenarios (its
+ * drafts included) and every other feature its listing.
+ */
+export function scenarioSequence(
+  root: FolderNode,
+  openFile: string | null,
+  open: { scenarios: readonly Scenario[] } | null,
+): ScenarioStop[] {
+  const out: ScenarioStop[] = [];
+  const walk = (node: FolderNode) => {
+    for (const child of node.folders) walk(child);
+    for (const f of node.features) {
+      for (const scenario of scenarioRows(f, openFile, open)) out.push({ file: f.fileName, scenario });
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/**
+ * The scenarios either side of `at` in `sequence` — null at either end, and
+ * both null when `at` isn't in it (a new scenario not yet saved).
+ */
+export function scenarioNeighbors(
+  sequence: readonly ScenarioStop[],
+  file: string,
+  at: { name: string; version: number },
+): { prev: ScenarioStop | null; next: ScenarioStop | null } {
+  const i = sequence.findIndex(
+    (s) => s.file === file && s.scenario.name === at.name && s.scenario.version === at.version,
+  );
+  if (i < 0) return { prev: null, next: null };
+  return { prev: sequence[i - 1] ?? null, next: sequence[i + 1] ?? null };
+}
