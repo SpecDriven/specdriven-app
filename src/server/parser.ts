@@ -39,6 +39,14 @@
 // Automerge document holds them always; the projection writes them only when
 // the data repo's project-settings.json turns `authors-in-markdown` on.
 //
+// A feature and each scenario may name the feature flags that gate them
+// (specs/app/feature-flags.feature.md): `[ff:<name>:on|off]` tokens on a
+// line of their own under the heading, beside the link line — several to a
+// line, or several such lines, e.g. `[ff:new-checkout:on] [ff:card-v2:off]`.
+// The parser lifts them into `flags`; the projection always writes them, one
+// line right under the heading, whatever the "Feature flags" setting says —
+// that setting only shows or hides them in the app.
+//
 // The first `#` heading is the feature name; a `##` heading that ends with a
 // version starts a scenario. The `@` marks where the name ends and the version
 // begins, so a name that itself contains a version ("Migrate to v2 API @v1")
@@ -171,6 +179,8 @@ export interface Scenario {
   createdBy?: string;
   /** Who last changed it. */
   updatedBy?: string;
+  /** The feature flags gating this scenario, in the order they are written. */
+  flags?: FeatureFlag[];
 }
 
 export interface Feature {
@@ -198,6 +208,8 @@ export interface Feature {
    */
   createdBy?: string;
   updatedBy?: string;
+  /** The feature flags gating the feature as a whole, in written order. */
+  flags?: FeatureFlag[];
 }
 
 /**
@@ -414,6 +426,62 @@ export function splitExternalLink(text: string): { text: string; link?: External
   const link = parseExternalLinkLine(lines[at]!);
   if (!link) return { text };
   return { text: lines.slice(at + 1).join("\n").trim(), link };
+}
+
+/**
+ * A feature flag gating a feature or a scenario
+ * (specs/app/feature-flags.feature.md), written `[ff:<name>:on|off]`.
+ */
+export interface FeatureFlag {
+  name: string;
+  on: boolean;
+}
+
+/** A flag name the token syntax can carry: no colon, space or bracket. */
+const FEATURE_FLAG_NAME = String.raw`[A-Za-z0-9][A-Za-z0-9._-]*`;
+const FEATURE_FLAG_NAME_RE = new RegExp(`^${FEATURE_FLAG_NAME}$`);
+const FEATURE_FLAG_TOKEN = String.raw`\[ff:(${FEATURE_FLAG_NAME}):(on|off)\]`;
+const FEATURE_FLAG_TOKEN_RE = new RegExp(FEATURE_FLAG_TOKEN, "gi");
+/** A line holding nothing but flag tokens. */
+const FEATURE_FLAGS_LINE_RE = new RegExp(`^\\s{0,3}(?:${FEATURE_FLAG_TOKEN}\\s*)+$`, "i");
+
+export function isFeatureFlagName(name: string): boolean {
+  return FEATURE_FLAG_NAME_RE.test(name);
+}
+
+/** The markdown line a list of flags is written as. */
+export function formatFeatureFlags(flags: FeatureFlag[]): string {
+  return flags.map((f) => `[ff:${f.name}:${f.on ? "on" : "off"}]`).join(" ");
+}
+
+/**
+ * The flags a line of markdown holds, or null when it is not a flag line —
+ * one with nothing but `[ff:…]` tokens on it. `on`/`off` read in any case.
+ */
+export function parseFeatureFlagsLine(line: string): FeatureFlag[] | null {
+  if (!FEATURE_FLAGS_LINE_RE.test(line)) return null;
+  return [...line.matchAll(FEATURE_FLAG_TOKEN_RE)].map((m) => ({
+    name: m[1]!,
+    on: m[2]!.toLowerCase() === "on",
+  }));
+}
+
+/**
+ * Plain copies of flags held in an Automerge document (it hands out
+ * proxies); undefined when there are none.
+ */
+export function plainFeatureFlags(flags: readonly FeatureFlag[] | undefined): FeatureFlag[] | undefined {
+  return flags && flags.length > 0 ? flags.map((f) => ({ name: f.name, on: f.on })) : undefined;
+}
+
+/** Identity of a list of flags for change detection; none is the empty string. */
+export function featureFlagsKey(flags: readonly FeatureFlag[] | undefined): string {
+  return flags && flags.length > 0 ? formatFeatureFlags([...flags]) : "";
+}
+
+/** Append flags whose names are not taken yet: the first one written wins. */
+function addFlags(into: FeatureFlag[], more: FeatureFlag[]): void {
+  for (const f of more) if (!into.some((g) => g.name === f.name)) into.push(f);
 }
 
 /**
@@ -641,10 +709,10 @@ export function splitPageMeta(text: string): {
 }
 
 /**
- * Lift a feature's metadata lines — its ticket link, its assignment and its
- * authorship — off the top of the text under the `#` heading. They may come
- * in any order, and anything else ends the metadata: a line further down, or
- * one with more on it, is ordinary description.
+ * Lift a feature's metadata lines — its feature flags, its ticket link, its
+ * assignment and its authorship — off the top of the text under the `#`
+ * heading. They may come in any order, and anything else ends the metadata: a
+ * line further down, or one with more on it, is ordinary description.
  */
 export function splitFeatureMeta(text: string): {
   text: string;
@@ -652,24 +720,28 @@ export function splitFeatureMeta(text: string): {
   assigned?: string;
   createdBy?: string;
   updatedBy?: string;
+  flags?: FeatureFlag[];
 } {
   let rest = text;
   let link: ExternalLink | undefined;
   let assigned: string | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
-  // At most one line of each kind, so a pass per kind settles it whichever
-  // order they were written in.
-  for (let pass = 0; pass < 4; pass++) {
+  const flags: FeatureFlag[] = [];
+  // At most one line of each kind but flags, which may take several lines,
+  // so the loop ends at the first line that is none of them.
+  for (;;) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
+    const nextFlags = parseFeatureFlagsLine(line);
     const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
-    if (nextLink) link = nextLink;
+    if (nextFlags) addFlags(flags, nextFlags);
+    else if (nextLink) link = nextLink;
     else if (nextAssigned) assigned = nextAssigned;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
@@ -682,43 +754,52 @@ export function splitFeatureMeta(text: string): {
     ...(assigned ? { assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
+    ...(flags.length > 0 ? { flags } : {}),
   };
 }
 
 /**
- * Lift a scenario's metadata lines — its ticket link and its authorship —
- * off the top of its body, in any order; the rest is the body.
+ * Lift a scenario's metadata lines — its feature flags, its ticket link and
+ * its authorship — off the top of its body, in any order; the rest is the
+ * body.
  */
 export function splitScenarioMeta(text: string): {
   text: string;
   link?: ExternalLink;
   createdBy?: string;
   updatedBy?: string;
+  flags?: FeatureFlag[];
 } {
   let rest = text;
   let link: ExternalLink | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
-  for (let pass = 0; pass < 3; pass++) {
+  const flags: FeatureFlag[] = [];
+  let lifted = false;
+  for (;;) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
+    const nextFlags = parseFeatureFlagsLine(line);
     const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
-    if (nextLink) link = nextLink;
+    if (nextFlags) addFlags(flags, nextFlags);
+    else if (nextLink) link = nextLink;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
     else break;
+    lifted = true;
     rest = lines.slice(at + 1).join("\n").trim();
   }
-  if (!link && !createdBy && !updatedBy) return { text };
+  if (!lifted) return { text };
   return {
     text: rest,
     ...(link ? { link } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
+    ...(flags.length > 0 ? { flags } : {}),
   };
 }
 
@@ -808,9 +889,10 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(bodyLines.join("\n").trim());
-      const { text, link, createdBy, updatedBy } = splitScenarioMeta(split.body);
+      const { text, link, createdBy, updatedBy, flags } = splitScenarioMeta(split.body);
       current.body = text;
       current.tests = split.tests;
+      if (flags) current.flags = flags;
       if (link) current.link = link;
       if (createdBy) current.createdBy = createdBy;
       if (updatedBy) current.updatedBy = updatedBy;
@@ -846,10 +928,11 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, assigned, createdBy, updatedBy } = splitFeatureMeta(
+  const { text: description, link, assigned, createdBy, updatedBy, flags } = splitFeatureMeta(
     preamble.join("\n").trim(),
   );
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
+  if (flags) feature.flags = flags;
   if (link) feature.link = link;
   if (assigned) feature.assigned = assigned;
   if (createdBy) feature.createdBy = createdBy;
@@ -882,6 +965,7 @@ export function serializeFeature(
   { links = true, authors = true }: SerializeOptions = {},
 ): string {
   const parts = [`# ${feature.name}`];
+  if (feature.flags?.length) parts.push(formatFeatureFlags(feature.flags));
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));
   if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
@@ -889,6 +973,7 @@ export function serializeFeature(
   if (feature.description) parts.push(feature.description);
   for (const s of feature.scenarios) {
     const chunks = [header(s.name, s.version, s.status)];
+    if (s.flags?.length) chunks.push(formatFeatureFlags(s.flags));
     if (links && s.link) chunks.push(formatExternalLink(s.link));
     if (authors && s.createdBy) chunks.push(formatCreatedBy(s.createdBy));
     if (authors && s.updatedBy) chunks.push(formatUpdatedBy(s.updatedBy));

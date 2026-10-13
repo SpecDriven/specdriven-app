@@ -6,15 +6,18 @@
 
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
-import type {
-  ExternalLink,
-  Feature,
-  PullRequestLink,
-  ResourceLink,
-  Scenario,
-  ScenarioFile,
-  ScenarioPick,
-  ScenarioTarget,
+import {
+  featureFlagsKey,
+  plainFeatureFlags,
+  type ExternalLink,
+  type Feature,
+  type FeatureFlag,
+  type PullRequestLink,
+  type ResourceLink,
+  type Scenario,
+  type ScenarioFile,
+  type ScenarioPick,
+  type ScenarioTarget,
 } from "../parser";
 import type { ResourceLinkKind } from "../resourceLinks";
 import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
@@ -35,6 +38,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
     name: feature.name,
     description: feature.description,
     specs: feature.scenarios.map((s) => newEntry(s, author)),
+    ...(feature.flags?.length ? { flags: plainFeatureFlags(feature.flags)! } : {}),
     ...(feature.link ? { link: { ...feature.link } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
@@ -56,6 +60,7 @@ function newEntry(s: Scenario, author?: string): SpecEntry {
     // `publishedBody`), the same as one published through reconcile.
     ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
     tests: [...s.tests],
+    ...(s.flags?.length ? { flags: plainFeatureFlags(s.flags)! } : {}),
     ...(s.link ? { link: { ...s.link } } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -98,6 +103,22 @@ function assignLink(
   if (linkKey(before) === linkKey(after)) return;
   if (after) target.link = { program: after.program, ticket: after.ticket, url: after.url };
   else delete target.link;
+}
+
+/**
+ * Set or clear a `flags` key on a doc map. The list is replaced whole, like a
+ * link (specs/app/feature-flags.feature.md): concurrent edits resolve to one
+ * list the same way on every peer.
+ */
+function assignFlags(
+  target: { flags?: FeatureFlag[] },
+  before: FeatureFlag[] | undefined,
+  after: FeatureFlag[] | undefined,
+): void {
+  if (featureFlagsKey(before) === featureFlagsKey(after)) return;
+  const flags = plainFeatureFlags(after);
+  if (flags) target.flags = flags;
+  else delete target.flags;
 }
 
 const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
@@ -183,6 +204,7 @@ export function reconcile(
     publishedBody: snapshotOf(e),
     tests: [...e.tests],
     ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
+    ...(e.flags?.length ? { flags: plainFeatureFlags(e.flags)! } : {}),
   }));
   // Read before any key is assigned below — schema.ts keeps them optional.
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
@@ -190,6 +212,7 @@ export function reconcile(
     ? { program: doc.link.program, ticket: doc.link.ticket, url: doc.link.url }
     : undefined;
   const docAssigned = doc.assigned;
+  const docFlags = plainFeatureFlags(doc.flags);
   const matchAt = new Map<number, Scenario>();
   const matched = new Set<Scenario>();
   const claim = (candidate: (s: Scenario, i: number) => boolean) => {
@@ -232,7 +255,8 @@ export function reconcile(
     entry.status !== match.status ||
     effectiveBody(entry) !== match.body ||
     entry.tests.join("\n") !== match.tests.join("\n") ||
-    linkKey(entry.link) !== linkKey(match.link);
+    linkKey(entry.link) !== linkKey(match.link) ||
+    featureFlagsKey(entry.flags) !== featureFlagsKey(match.flags);
   const changedAt = new Set<number>();
   for (const [i, match] of matchAt) if (entryChanged(entries[i]!, match)) changedAt.add(i);
   const removed = entries.some((e, i) => !matchAt.has(i) && e.status !== "draft");
@@ -240,6 +264,7 @@ export function reconcile(
     doc.name !== target.name ||
     doc.description !== target.description ||
     linkKey(docLink) !== linkKey(target.link) ||
+    featureFlagsKey(docFlags) !== featureFlagsKey(target.flags) ||
     (docAssigned ?? "") !== (target.assigned ?? "") ||
     changedAt.size > 0 ||
     removed ||
@@ -251,6 +276,7 @@ export function reconcile(
       A.updateText(d, ["description"], target.description);
     }
     assignLink(d, docLink, target.link);
+    assignFlags(d, docFlags, target.flags);
     // The assignment is one member, not text to merge — replaced whole, the
     // same way on every peer (src/server/members.ts).
     if ((docAssigned ?? "") !== (target.assigned ?? "")) {
@@ -279,6 +305,7 @@ export function reconcile(
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
       assignLink(live, entry.link, match.link);
+      assignFlags(live, entry.flags, match.flags);
       const before = authorsAt[i]!;
       const holder = { ...before };
       assignAuthors(holder, match, changedAt.has(i) ? author : undefined);

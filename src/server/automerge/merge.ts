@@ -7,13 +7,16 @@
 // it is the fallback that keeps mixed-version teams and the PR workflow safe.
 
 import * as A from "@automerge/automerge";
-import type {
-  EntryKind,
-  ExternalLink,
-  Feature,
-  MarkdownPage,
-  Scenario,
-  Supersedes,
+import {
+  featureFlagsKey,
+  plainFeatureFlags,
+  type EntryKind,
+  type ExternalLink,
+  type Feature,
+  type FeatureFlag,
+  type MarkdownPage,
+  type Scenario,
+  type Supersedes,
 } from "../parser";
 
 export type ThreeWayResult =
@@ -126,6 +129,23 @@ function mergeLink(
 }
 
 /**
+ * Feature flags (specs/app/feature-flags.feature.md) are one list, set whole
+ * like a link: the side that changed it wins, ours when both did.
+ */
+function mergeFlags(
+  base: FeatureFlag[] | undefined,
+  ours: FeatureFlag[] | undefined,
+  theirs: FeatureFlag[] | undefined,
+): FeatureFlag[] | undefined {
+  const winner =
+    featureFlagsKey(theirs) !== featureFlagsKey(base) &&
+    featureFlagsKey(ours) === featureFlagsKey(base)
+      ? theirs
+      : ours;
+  return plainFeatureFlags(winner);
+}
+
+/**
  * Who created and last updated a feature or a scenario
  * (specs/app/specs-authorship.feature.md) merges like the assignment: one
  * value each, the side that changed it wins, ours when both did.
@@ -153,6 +173,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
       ? theirs.tests
       : ours.tests;
   const link = mergeLink(base?.link, ours.link, theirs.link);
+  const flags = mergeFlags(base?.flags, ours.flags, theirs.flags);
   return {
     name: ours.name,
     version: ours.version,
@@ -161,6 +182,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
+    ...(flags ? { flags } : {}),
     ...(link ? { link } : {}),
     ...mergeAuthors(base, ours, theirs),
   };
@@ -209,6 +231,7 @@ export function threeWayFeature(
     }
   }
   const link = mergeLink(base.link, ours.link, theirs.link);
+  const flags = mergeFlags(base.flags, ours.flags, theirs.flags);
   // The assignment merges like a link: one value, the side that changed it
   // wins, ours when both did (src/server/members.ts).
   const assigned =
@@ -221,6 +244,7 @@ export function threeWayFeature(
       name,
       description,
       scenarios,
+      ...(flags ? { flags } : {}),
       ...(link ? { link } : {}),
       ...(assigned ? { assigned } : {}),
       ...mergeAuthors(base, ours, theirs),
@@ -233,7 +257,8 @@ function sameScenario(a: Scenario, b: Scenario): boolean {
     a.body === b.body &&
     a.status === b.status &&
     a.tests.join("\n") === b.tests.join("\n") &&
-    linkKey(a.link) === linkKey(b.link)
+    linkKey(a.link) === linkKey(b.link) &&
+    featureFlagsKey(a.flags) === featureFlagsKey(b.flags)
   );
 }
 

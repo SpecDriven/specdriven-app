@@ -108,6 +108,12 @@ export interface SpecDrivenState {
    * turning the switch back on finds it again.
    */
   assignments?: boolean;
+  /**
+   * Show feature flags (specs/app/feature-flags.feature.md) — the
+   * `[ff:<name>:on|off]` chips and their editors; absent means OFF. Off only
+   * hides them: flag lines already in a `.feature.md` are kept as written.
+   */
+  featureFlags?: boolean;
   /** Allow deleting or moving published scenarios (specs/editor/spec-editor.feature.md
       "Delete Published Spec"); absent means OFF — published scenarios are
       immutable unless this is explicitly turned on. */
@@ -336,6 +342,12 @@ export function normalizeDeletePublished(value: unknown): boolean {
     that doesn't assign features never sees the dropdown
     (src/server/members.ts). */
 export function normalizeAssignments(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective feature-flags setting: OFF unless explicitly turned on
+    (specs/app/feature-flags.feature.md). */
+export function normalizeFeatureFlags(value: unknown): boolean {
   return value === true;
 }
 

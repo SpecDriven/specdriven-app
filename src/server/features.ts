@@ -218,6 +218,9 @@ async function featureView(
   // Stored files (specs/editor/store-associated-files.feature.md): the
   // document's alone, like the pull request links.
   const docFiles = new Map(inDoc.scenarios.map((s) => [key(s), s.files] as const));
+  // Feature flags (specs/app/feature-flags.feature.md): a draft is the
+  // document's alone, so its flags come from there too.
+  const docFlags = new Map(inDoc.scenarios.map((s) => [key(s), s.flags] as const));
   // Authorship (specs/app/specs-authorship.feature.md) is the document's
   // record; the file carries it only while the repo asks for it, and a hand
   // edit of those lines never moves it (reconcile.ts assignAuthors).
@@ -233,6 +236,7 @@ async function featureView(
       const link = docLinks.get(key(s));
       const prs = docPrs.get(key(s));
       const files = docFiles.get(key(s));
+      const flags = docFlags.get(key(s));
       return {
         id: s.id,
         name: s.name,
@@ -240,6 +244,7 @@ async function featureView(
         status: s.status,
         body: s.body,
         tests: [...s.tests],
+        ...(flags ? { flags } : {}),
         ...(link ? { link } : {}),
         ...(prs ? { prs } : {}),
         ...docResources.get(key(s)),
