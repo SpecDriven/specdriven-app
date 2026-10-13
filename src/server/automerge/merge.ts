@@ -8,7 +8,9 @@
 
 import * as A from "@automerge/automerge";
 import {
+  attributesKey,
   featureFlagsKey,
+  plainAttributes,
   plainFeatureFlags,
   type EntryKind,
   type ExternalLink,
@@ -16,6 +18,7 @@ import {
   type FeatureFlag,
   type MarkdownPage,
   type Scenario,
+  type SpecAttribute,
   type Supersedes,
 } from "../parser";
 
@@ -146,6 +149,22 @@ function mergeFlags(
 }
 
 /**
+ * Custom attributes (specs/app/custom-attributes.feature.md) merge like the
+ * flags: one list, the side that changed it wins, ours when both did.
+ */
+function mergeAttributes(
+  base: SpecAttribute[] | undefined,
+  ours: SpecAttribute[] | undefined,
+  theirs: SpecAttribute[] | undefined,
+): SpecAttribute[] | undefined {
+  const winner =
+    attributesKey(theirs) !== attributesKey(base) && attributesKey(ours) === attributesKey(base)
+      ? theirs
+      : ours;
+  return plainAttributes(winner);
+}
+
+/**
  * Who created and last updated a feature or a scenario
  * (specs/app/specs-authorship.feature.md) merges like the assignment: one
  * value each, the side that changed it wins, ours when both did.
@@ -174,6 +193,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
       : ours.tests;
   const link = mergeLink(base?.link, ours.link, theirs.link);
   const flags = mergeFlags(base?.flags, ours.flags, theirs.flags);
+  const attributes = mergeAttributes(base?.attributes, ours.attributes, theirs.attributes);
   return {
     name: ours.name,
     version: ours.version,
@@ -183,6 +203,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
     ...(flags ? { flags } : {}),
+    ...(attributes ? { attributes } : {}),
     ...(link ? { link } : {}),
     ...mergeAuthors(base, ours, theirs),
   };
@@ -232,6 +253,7 @@ export function threeWayFeature(
   }
   const link = mergeLink(base.link, ours.link, theirs.link);
   const flags = mergeFlags(base.flags, ours.flags, theirs.flags);
+  const attributes = mergeAttributes(base.attributes, ours.attributes, theirs.attributes);
   // The assignment merges like a link: one value, the side that changed it
   // wins, ours when both did (src/server/members.ts).
   const assigned =
@@ -245,6 +267,7 @@ export function threeWayFeature(
       description,
       scenarios,
       ...(flags ? { flags } : {}),
+      ...(attributes ? { attributes } : {}),
       ...(link ? { link } : {}),
       ...(assigned ? { assigned } : {}),
       ...mergeAuthors(base, ours, theirs),
@@ -258,7 +281,8 @@ function sameScenario(a: Scenario, b: Scenario): boolean {
     a.status === b.status &&
     a.tests.join("\n") === b.tests.join("\n") &&
     linkKey(a.link) === linkKey(b.link) &&
-    featureFlagsKey(a.flags) === featureFlagsKey(b.flags)
+    featureFlagsKey(a.flags) === featureFlagsKey(b.flags) &&
+    attributesKey(a.attributes) === attributesKey(b.attributes)
   );
 }
 

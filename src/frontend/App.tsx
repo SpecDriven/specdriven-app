@@ -137,6 +137,7 @@ import {
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
+import { AttributeChips } from "./AttributesField";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
@@ -458,7 +459,16 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  */
 export function scenarioSignature(s: Scenario, version: number): string {
   // The name as a save writes it: a stray space is nothing new to save.
-  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null, s.flags ?? null]);
+  return JSON.stringify([
+    savedScenarioName(s),
+    version,
+    s.status,
+    s.body,
+    s.tests,
+    s.link ?? null,
+    s.flags ?? null,
+    s.attributes ?? null,
+  ]);
 }
 
 /**
@@ -8768,6 +8778,9 @@ export function App() {
                 </span>
               )}
               {featureFlags && <FeatureFlagChips flags={feature.flags} />}
+              {/* specs/app/custom-attributes.feature.md: the feature's own
+                  attributes, a chip each, whenever it carries any. */}
+              <AttributeChips attributes={feature.attributes} />
               {/* specs/external-links/aha-and-figma-links.feature.md "Link
                   Aha! and Figma to a feature": a chip per tool switched on
                   in Settings, counting the feature's links; the popover
@@ -9029,6 +9042,13 @@ export function App() {
                       />
                     </span>
                   </header>
+                  {/* Its custom attributes (specs/app/custom-attributes.feature.md),
+                      a row of chips under the title whenever it carries any. */}
+                  {s.attributes && s.attributes.length > 0 && (
+                    <div className="scenario-attributes">
+                      <AttributeChips attributes={s.attributes} />
+                    </div>
+                  )}
                   {s.body && (
                     <div className="md-preview scenario-body">{renderMarkdown(s.body)}</div>
                   )}

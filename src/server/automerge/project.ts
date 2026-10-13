@@ -29,6 +29,7 @@
 
 import type * as A from "@automerge/automerge";
 import {
+  plainAttributes,
   plainFeatureFlags,
   serializeFeature,
   sortScenarios,
@@ -124,9 +125,11 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
         const figma = plainResources(s.figma);
         const files = plainFiles(s.files);
         const flags = plainFeatureFlags(s.flags);
+        const attributes = plainAttributes(s.attributes);
         return {
           ...scenario,
           ...(flags ? { flags } : {}),
+          ...(attributes ? { attributes } : {}),
           ...(link ? { link } : {}),
           ...(prs ? { prs } : {}),
           ...(aha ? { aha } : {}),
@@ -140,6 +143,8 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   };
   const flags = plainFeatureFlags(doc.flags);
   if (flags) feature.flags = flags;
+  const attributes = plainAttributes(doc.attributes);
+  if (attributes) feature.attributes = attributes;
   const link = plainLink(doc.link);
   if (link) feature.link = link;
   const prs = plainPrs(doc.prs);

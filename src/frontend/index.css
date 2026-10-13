@@ -7950,6 +7950,40 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   right: 0;
 }
 
+/* Custom attributes (specs/app/custom-attributes.feature.md): a chip per
+   attribute on the feature header and in a row under a scenario card's
+   title — its label, its names and its value. */
+.attribute-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  vertical-align: middle;
+}
+
+.scenario-attributes {
+  margin: 0.25rem 0 0.4rem;
+}
+
+.chip.attribute {
+  gap: 0.35rem;
+}
+
+.chip.attribute .attribute-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.chip.attribute .attribute-names {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.chip.attribute .attribute-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
 /* Add a task to Google Calendar (specs/app/tasks.feature.md): the calendar
    chip's popover — an estimate, its presets, a start, and the link that is
    the form's submit, dressed as the dialogs' primary button. */

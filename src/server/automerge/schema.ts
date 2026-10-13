@@ -12,6 +12,7 @@ import type {
   EntryKind,
   ExternalLink,
   FeatureFlag,
+  SpecAttribute,
   PullRequestLink,
   ResourceLink,
   ScenarioFile,
@@ -109,6 +110,12 @@ export type SpecEntry = {
    * to one list rather than a mix of two. Optional key, no migration.
    */
   flags?: FeatureFlag[];
+  /**
+   * Its custom attributes (specs/app/custom-attributes.feature.md), in
+   * written order. Set whole and editable while published, like `flags`.
+   * Optional key, no migration.
+   */
+  attributes?: SpecAttribute[];
 };
 
 /** The recorded published body as a plain string, or undefined when the entry
@@ -163,6 +170,8 @@ export type FeatureDoc = {
   updatedBy?: string;
   /** The feature flags gating the feature as a whole (see SpecEntry.flags). */
   flags?: FeatureFlag[];
+  /** The feature's own custom attributes (see SpecEntry.attributes). */
+  attributes?: SpecAttribute[];
 };
 
 // Page documents — the roadmap folder's (specs/app/roadmap.feature.md) and

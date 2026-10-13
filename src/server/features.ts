@@ -221,6 +221,8 @@ async function featureView(
   // Feature flags (specs/app/feature-flags.feature.md): a draft is the
   // document's alone, so its flags come from there too.
   const docFlags = new Map(inDoc.scenarios.map((s) => [key(s), s.flags] as const));
+  // Custom attributes (specs/app/custom-attributes.feature.md): the same.
+  const docAttributes = new Map(inDoc.scenarios.map((s) => [key(s), s.attributes] as const));
   // Authorship (specs/app/specs-authorship.feature.md) is the document's
   // record; the file carries it only while the repo asks for it, and a hand
   // edit of those lines never moves it (reconcile.ts assignAuthors).
@@ -237,6 +239,7 @@ async function featureView(
       const prs = docPrs.get(key(s));
       const files = docFiles.get(key(s));
       const flags = docFlags.get(key(s));
+      const attributes = docAttributes.get(key(s));
       return {
         id: s.id,
         name: s.name,
@@ -245,6 +248,7 @@ async function featureView(
         body: s.body,
         tests: [...s.tests],
         ...(flags ? { flags } : {}),
+        ...(attributes ? { attributes } : {}),
         ...(link ? { link } : {}),
         ...(prs ? { prs } : {}),
         ...docResources.get(key(s)),

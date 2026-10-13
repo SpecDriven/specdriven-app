@@ -121,8 +121,8 @@ version (section 6).
 
 ## 5. Feature metadata lines
 
-Directly under the `# <name>` heading, a feature may carry up to two metadata
-lines, in either order, as its first non-blank lines:
+Directly under the `# <name>` heading, a feature may carry metadata lines,
+in any order, as its first non-blank lines:
 
 **External ticket link** — one markdown link alone on its line:
 
@@ -151,11 +151,36 @@ but only member names appear in the app's assignment dropdown. Assignment is
 feature-level only — an `**Assigned:**` line under a scenario heading is
 silently ordinary prose.
 
-Metadata parsing stops at the first line that is neither a link line nor an
-assignment line: a link further down the description, or a paragraph that
-merely starts with a link plus more text, is ordinary content. At most one of
-each kind is lifted. Canonical order writes the link first, then the
-assignment (section 10).
+**Feature flags** — `[ff:<name>:on|off]` tokens, alone on their line:
+
+```text
+[ff:new-checkout:on] [ff:card-v2:off]
+```
+
+A name starts with a letter or digit and holds letters, digits, `.`, `_` and
+`-`; `on`/`off` read in any case. A malformed `[ff:…]` token makes the
+whole line prose.
+
+**Custom attributes** — `[<key>:<name>…:<value>]` tokens, alone on their line
+(a line may mix them with flag tokens):
+
+```text
+[br:young-driver-surcharge:on] [br:max-claims:3]
+[br-sub:young-driver-surcharge:under-21:1.5]
+```
+
+The key is lower case: `[a-z][a-z0-9._-]*`, never `ff`, `test`, `http` or
+`https`. Each segment after it holds no `[`, `]`, `:` or line break and no
+whitespace at either end (inner spaces are fine). The last segment is the
+value, the ones before it are names. Which keys a team uses is defined in the
+data repo's `custom-attributes.txt`, but any token of this shape parses and
+is kept; an exact duplicate token is dropped.
+
+Metadata parsing stops at the first line that is none of these: a link
+further down the description, or a paragraph that merely starts with a link
+plus more text, is ordinary content. At most one link and one assignment are
+lifted; flag and attribute lines may repeat and add up. Canonical order is in
+section 10.
 
 ## 6. Scenario headings
 
@@ -224,9 +249,10 @@ The two rules that matter most when generating files:
 
 ## 8. Scenario metadata and body
 
-Right under its heading, a scenario may carry its own external ticket link —
-same pattern and same first-non-blank-line rule as the feature's (section 5).
-Scenarios cannot carry `**Assigned:**` lines.
+Right under its heading, a scenario may carry its own external ticket link,
+feature flags and custom attributes — same patterns and same
+first-non-blank-line rule as the feature's (section 5). Scenarios cannot
+carry `**Assigned:**` lines.
 
 Everything from there to the next scenario heading (or end of file) is the
 body: **arbitrary markdown**. The parser imposes nothing on it, but these
@@ -280,9 +306,12 @@ Parser behavior to respect:
 The app rewrites every file it saves into one canonical form. Producing that
 form directly means the app's first save of your file is a zero diff:
 
-1. Blocks in order: `# <name>` → feature link line → `**Assigned:**` line →
-   description → scenarios. Each scenario: heading → scenario link line →
-   body → `[test: <url> ]` lines.
+1. Blocks in order: `# <name>` → flag line → attribute lines → feature link
+   line → `**Assigned:**` line → authorship lines → description → scenarios.
+   Each scenario: heading → flag line → attribute lines → scenario link line
+   → authorship lines → body → `[test: <url> ]` lines. All flags go on one
+   line; the attributes form one block, in written order, with a new line
+   (no blank line) wherever the key changes.
 2. Every block separated from the next by **exactly one blank line**; no
    leading/trailing blank lines inside blocks; the file ends with a single
    `\n`.
