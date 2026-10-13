@@ -333,6 +333,7 @@ test("the demo tracks the release repo's issues and refuses every write", async 
   const { issuesRepo } = await (await api("/api/features")).json();
   expect(issuesRepo).toEqual({
     url: "https://github.com/SpecDriven/specdriven-app-release",
+    host: "github.com",
     owner: "SpecDriven",
     name: "specdriven-app-release",
   });

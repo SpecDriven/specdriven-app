@@ -61,7 +61,7 @@ describe("which repository", () => {
   });
 
   test("GitHub remotes in every spelling name the repo; other hosts do not", () => {
-    const expected = { owner: "SpecDriven", name: "specdriven_app", url: "https://github.com/SpecDriven/specdriven_app" };
+    const expected = { url: "https://github.com/SpecDriven/specdriven_app", host: "github.com", owner: "SpecDriven", name: "specdriven_app" };
     expect(githubRepoOfRemote("https://github.com/SpecDriven/specdriven_app.git")).toEqual(expected);
     expect(githubRepoOfRemote("https://github.com/SpecDriven/specdriven_app")).toEqual(expected);
     expect(githubRepoOfRemote("git@github.com:SpecDriven/specdriven_app.git")).toEqual(expected);
@@ -75,7 +75,7 @@ describe("which repository", () => {
     const dir = join(root, "code");
     await fakeRepo(dir, "git@github.com:acme/app.git");
     expect(await originUrl(dir)).toBe("git@github.com:acme/app.git");
-    expect(await repoOfFolder(dir)).toEqual({ owner: "acme", name: "app", url: "https://github.com/acme/app" });
+    expect(await repoOfFolder(dir)).toEqual({ url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" });
   });
 
   test("a worktree follows its gitdir pointer and commondir to the shared config", async () => {
@@ -87,7 +87,7 @@ describe("which repository", () => {
     const worktree = join(root, "feature");
     await mkdir(worktree, { recursive: true });
     await writeFile(join(worktree, ".git"), `gitdir: ${wtGitDir}\n`);
-    expect(await repoOfFolder(worktree)).toEqual({ owner: "acme", name: "app", url: "https://github.com/acme/app" });
+    expect(await repoOfFolder(worktree)).toEqual({ url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" });
   });
 
   test("no repo, no origin or a non-GitHub origin means no issues repo", async () => {
@@ -105,7 +105,7 @@ describe("which repository", () => {
     await mkdir(data, { recursive: true });
     await fakeRepo(join(root, "app"), "https://github.com/acme/app.git");
     await writeFile(join(data, "project-settings.json"), JSON.stringify({ members: [], "code-repo": "../app" }));
-    expect(await readIssuesRepo(data)).toEqual({ owner: "acme", name: "app", url: "https://github.com/acme/app" });
+    expect(await readIssuesRepo(data)).toEqual({ url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" });
     // No code repo named: nothing to track.
     await writeFile(join(data, "project-settings.json"), JSON.stringify({ members: ["Ada"] }));
     expect(await readIssuesRepo(data)).toBeNull();
@@ -117,7 +117,7 @@ describe("which repository", () => {
 
 // --- The GitHub API ---------------------------------------------------------------------
 
-const REPO = { owner: "acme", name: "app", url: "https://github.com/acme/app" };
+const REPO = { url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" };
 
 function rawIssue(number: number, extra: Record<string, unknown> = {}) {
   return {

@@ -38,6 +38,7 @@ afterEach(async () => {
 test("parses a regular GitHub url", () => {
   expect(parseGitHubUrl("https://github.com/SpecDriven/data-insurance")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    host: "github.com",
     owner: "SpecDriven",
     name: "data-insurance",
   });
@@ -52,6 +53,7 @@ test("accepts .git suffix, trailing slash, and scheme-less variants", () => {
   );
   expect(parseGitHubUrl("github.com/SpecDriven/data-insurance")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    host: "github.com",
     owner: "SpecDriven",
     name: "data-insurance",
   });
@@ -60,6 +62,7 @@ test("accepts .git suffix, trailing slash, and scheme-less variants", () => {
 test("accepts ssh remotes; the url form does not pick the transport", () => {
   expect(parseGitHubUrl("git@github.com:SpecDriven/data-insurance.git")).toEqual({
     url: "https://github.com/SpecDriven/data-insurance",
+    host: "github.com",
     owner: "SpecDriven",
     name: "data-insurance",
   });
