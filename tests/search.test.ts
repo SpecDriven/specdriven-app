@@ -70,6 +70,22 @@ test("a body-only word returns scenario hits with a snippet", async () => {
   expect(results.map((r) => r.scenario!.version).sort()).toEqual([1, 2]);
 });
 
+// specs/app/custom-attributes.feature.md "Search finds attributes"
+test("a custom attribute finds the feature or scenario carrying it, with its line as the snippet", async () => {
+  await Bun.write(
+    join(root, "specs/quotes.feature.md"),
+    "# Quotes\n\n[line:auto]\n\n## Discounted quote @v1 [proposed]\n\n[br:good-driver-discount:on]\n\n- Then: the premium is lower\n",
+  );
+  const [hit] = await searchSpecs(root, "good driver");
+  expect(hit!.kind).toBe("scenario");
+  expect(hit!.scenario).toEqual({ name: "Discounted quote", version: 1 });
+  expect(hit!.snippet).toBe("[br:good-driver-discount:on]");
+  const feature = (await searchSpecs(root, "auto")).find((r) => r.kind === "feature");
+  expect(feature!.featureName).toBe("Quotes");
+  // A match in the text keeps the text's snippet.
+  expect((await searchSpecs(root, "premium"))[0]!.snippet).toBe("- Then: the premium is lower");
+});
+
 test("a feature-name match returns a feature hit", async () => {
   await Bun.write(join(root, "specs/quotes.feature.md"), QUOTES);
   const results = await searchSpecs(root, "quotes");

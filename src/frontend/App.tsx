@@ -140,6 +140,16 @@ import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
 import { AttributeChips, AttributesField } from "./AttributesField";
+import {
+  NO_FILTER,
+  attributeFilterGroups,
+  attributeFilterLabel,
+  featureMatches,
+  isFiltering,
+  sameAttributeFilter,
+  scenarioMatches,
+  type TreeFilter,
+} from "./treeFilter";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
 import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server/customAttributes";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
@@ -814,12 +824,6 @@ export function storeEditorHidden(hidden: boolean) {
   }
 }
 
-/** The sidebar's filter: features by scenario status and by assignee. */
-interface TreeFilter {
-  status: Scenario["status"] | null;
-  assignee: string | null;
-}
-
 /** Two-letter initials for an assignee chip. */
 function initialsOf(name: string): string {
   return (
@@ -1206,7 +1210,7 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
   /** The sidebar's filter, and its menu. */
-  const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
+  const [filter, setFilter] = useState<TreeFilter>(NO_FILTER);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /** A feature is being fetched — the skeleton shows until it lands. */
   const [featureLoading, setFeatureLoading] = useState(false);
@@ -6160,12 +6164,12 @@ export function App() {
     );
 
   // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
-  // matches by having a scenario in the chosen status, and by its assignee.
-  const matchesFilter = (f: FeatureListing) =>
-    (filter.status === null || f.scenarios.some((s) => s.status === filter.status)) &&
-    (filter.assignee === null || f.assigned === filter.assignee);
+  // matches by having a scenario in the chosen status, by its assignee, and
+  // by a custom attribute it or a scenario of it carries
+  // (specs/app/custom-attributes.feature.md, src/frontend/treeFilter.ts).
+  const matchesFilter = (f: FeatureListing) => featureMatches(f, filter);
   const me = user?.name || user?.login || user?.username || null;
-  const filtering = filter.status !== null || filter.assignee !== null;
+  const filtering = isFiltering(filter);
 
   // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
   // in), ← closes it or climbs to it from a feature, Home/End jump,
@@ -7706,6 +7710,22 @@ export function App() {
                       },
                     ]
                   : []),
+                // One entry per attribute key the specs use: "Any …", each
+                // attribute by its names, and each with its value.
+                ...attributeFilterGroups(features, attributeDefs).map((group) => ({
+                  id: `attribute-${group.key}`,
+                  label: group.label,
+                  items: group.items.map((item) => ({
+                    id: `attribute-${item.id}`,
+                    label: item.label,
+                    checked: sameAttributeFilter(filter.attribute, item.filter),
+                    onSelect: () =>
+                      setFilter((f) => ({
+                        ...f,
+                        attribute: sameAttributeFilter(f.attribute, item.filter) ? null : item.filter,
+                      })),
+                  })),
+                })),
               ]}
             />
           </span>
@@ -7764,7 +7784,7 @@ export function App() {
             </Tooltip>
           </span>
         </div>
-        {(filter.status || filter.assignee) && (
+        {filtering && (
           <div className="filter-chips">
             {filter.status && (
               <button
@@ -7785,6 +7805,17 @@ export function App() {
                 onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
               >
                 {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            {filter.attribute && (
+              <button
+                type="button"
+                className="chip on"
+                aria-label="Clear the attribute filter"
+                onClick={() => setFilter((f) => ({ ...f, attribute: null }))}
+              >
+                <Tag size={12} aria-hidden="true" /> {attributeFilterLabel(filter.attribute, attributeDefs)}{" "}
+                <X size={11} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -9054,7 +9085,7 @@ export function App() {
               style={{ "--preview-lines": previewLines } as CSSProperties}
             >
               {feature.scenarios.map((s, i) =>
-                filter.status !== null && s.status !== filter.status ? null : (
+                !scenarioMatches(s, feature, filter) ? null : (
                 <article
                   key={i}
                   ref={(el) => {
@@ -9249,11 +9280,13 @@ export function App() {
                 </article>
                 ),
               )}
-              {filter.status !== null &&
-                feature.scenarios.length > 0 &&
-                !feature.scenarios.some((s) => s.status === filter.status) && (
+              {feature.scenarios.length > 0 &&
+                !feature.scenarios.some((s) => scenarioMatches(s, feature, filter)) && (
                   <p className="empty">
-                    No {filter.status} scenarios here — the sidebar filter hides the rest.
+                    {filter.attribute
+                      ? `No ${filter.status ? `${filter.status} ` : ""}scenarios here carry ${attributeFilterLabel(filter.attribute, attributeDefs)}`
+                      : `No ${filter.status} scenarios here`}{" "}
+                    — the sidebar filter hides the rest.
                   </p>
                 )}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}

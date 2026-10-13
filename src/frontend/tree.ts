@@ -3,7 +3,7 @@
 // built from the flat /api/features listing.
 
 import type { FeatureListing } from "../server/features";
-import type { Scenario, ScenarioStatus } from "../server/parser";
+import { attributesKey, type Scenario, type ScenarioStatus, type SpecAttribute } from "../server/parser";
 import { SPECS_FOLDER } from "./route";
 
 export interface FolderNode {
@@ -91,30 +91,40 @@ export function scenarioRows(
  * The entry holds what the server's listing would: the scenarios in the file.
  * A draft lives only in the feature's document, so it stays out — the next
  * refresh would only take it out again. The same array comes back when the
- * entry already agrees, so a state update with it changes nothing.
+ * entry already agrees, so a state update with it changes nothing. The
+ * custom attributes come along (specs/app/custom-attributes.feature.md), so
+ * the attribute filter sees an edit before the refresh does.
  */
 export function withOpenScenarios(
   listing: FeatureListing[],
   openFile: string,
-  open: { scenarios: readonly Scenario[] },
+  open: { scenarios: readonly Scenario[]; attributes?: SpecAttribute[] },
 ): FeatureListing[] {
   const at = listing.findIndex((f) => f.fileName === openFile);
   if (at < 0) return listing;
   const scenarios = open.scenarios
     .filter((s) => s.status !== "draft")
-    .map(({ name, version, status }) => ({ name, version, status }));
+    .map(({ name, version, status, attributes }) => ({
+      name,
+      version,
+      status,
+      ...(attributes?.length ? { attributes } : {}),
+    }));
   const entry = listing[at]!;
   const same =
+    attributesKey(entry.attributes) === attributesKey(open.attributes) &&
     entry.scenarios.length === scenarios.length &&
     entry.scenarios.every(
       (s, i) =>
         s.name === scenarios[i]!.name &&
         s.version === scenarios[i]!.version &&
-        s.status === scenarios[i]!.status,
+        s.status === scenarios[i]!.status &&
+        attributesKey(s.attributes) === attributesKey(scenarios[i]!.attributes),
     );
   if (same) return listing;
   const next = listing.slice();
-  next[at] = { ...entry, scenarios };
+  const { attributes: _previous, ...rest } = entry;
+  next[at] = { ...rest, scenarios, ...(open.attributes?.length ? { attributes: open.attributes } : {}) };
   return next;
 }
 

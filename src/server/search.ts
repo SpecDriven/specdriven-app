@@ -13,7 +13,7 @@ import { stat } from "node:fs/promises";
 import MiniSearch from "minisearch";
 import { walk } from "./walk";
 import { readTextFile } from "./fsx";
-import { parseFeature, parsePage, titleFromFileName } from "./parser";
+import { formatAttribute, parseFeature, parsePage, titleFromFileName, type SpecAttribute } from "./parser";
 import { PAGE_FOLDERS, pageFiles, pageFolderNamed, type PageFolder } from "./pages";
 
 /**
@@ -61,6 +61,12 @@ interface SearchDoc {
   name: string;
   /** Indexed: feature description, scenario body (tests table excluded) or page body. */
   text: string;
+  /**
+   * Indexed: a feature's or a scenario's own custom attribute tokens
+   * (specs/app/custom-attributes.feature.md "Search finds attributes"),
+   * `[br:good-driver-discount:on]` — boosted over `text`, under `name`.
+   */
+  attrs?: string;
   kind: "feature" | "scenario" | "page" | (string & {});
   fileName: string;
   featureName: string;
@@ -85,9 +91,9 @@ export interface SearchResultItem {
 
 function newIndex(): MiniSearch<SearchDoc> {
   return new MiniSearch<SearchDoc>({
-    fields: ["name", "text"],
-    storeFields: ["kind", "fileName", "featureName", "scenarioName", "version", "text"],
-    searchOptions: { boost: { name: 3 }, prefix: true, fuzzy: 0.2 },
+    fields: ["name", "text", "attrs"],
+    storeFields: ["kind", "fileName", "featureName", "scenarioName", "version", "text", "attrs"],
+    searchOptions: { boost: { name: 3, attrs: 2 }, prefix: true, fuzzy: 0.2 },
   });
 }
 
@@ -118,6 +124,11 @@ async function fingerprint(dataDir: string, files: string[]): Promise<string> {
   return parts.sort().join("|");
 }
 
+/** The attrs field: a list's tokens, one after another. */
+function attrsOf(attributes: readonly SpecAttribute[] | undefined): { attrs?: string } {
+  return attributes?.length ? { attrs: attributes.map(formatAttribute).join(" ") } : {};
+}
+
 async function buildSpecsIndex(dataDir: string, files: string[]): Promise<MiniSearch<SearchDoc>> {
   const docs: SearchDoc[] = [];
   for (const fileName of files) {
@@ -130,6 +141,7 @@ async function buildSpecsIndex(dataDir: string, files: string[]): Promise<MiniSe
       kind: "feature",
       name: featureName,
       text: feature.description,
+      ...attrsOf(feature.attributes),
       fileName,
       featureName,
     });
@@ -141,6 +153,7 @@ async function buildSpecsIndex(dataDir: string, files: string[]): Promise<MiniSe
         kind: "scenario",
         name: s.name,
         text: s.body,
+        ...attrsOf(s.attributes),
         fileName,
         featureName,
         scenarioName: s.name,
@@ -299,6 +312,19 @@ async function search(
       : {}),
     score: r.score,
     terms: r.terms,
-    snippet: makeSnippet(r.text as string, r.terms),
+    snippet: snippetOf(r.text as string, r.attrs as string | undefined, r.terms),
   }));
+}
+
+/**
+ * The snippet around the first match in the text; a hit only its attributes
+ * matched shows their line instead, so the result says why it is there.
+ */
+function snippetOf(text: string, attrs: string | undefined, terms: string[]): string {
+  const lower = text.toLowerCase();
+  if (attrs && !terms.some((t) => lower.includes(t.toLowerCase()))) {
+    const inAttrs = attrs.toLowerCase();
+    if (terms.some((t) => inAttrs.includes(t.toLowerCase()))) return makeSnippet(attrs, terms);
+  }
+  return makeSnippet(text, terms);
 }
