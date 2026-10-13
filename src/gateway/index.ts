@@ -14,6 +14,7 @@ import { generateMasterKey, loadKeyring } from "./crypto";
 import { Datastore, datastoreGit, readDatastoreConfig } from "./datastore";
 import { openDatabase } from "./db";
 import { RateLimiter } from "./rateLimit";
+import { RecentRepos } from "./repos";
 import { SecretStore } from "./secrets";
 import { runDemo } from "./demo";
 import { runProposals } from "./proposals";
@@ -82,6 +83,9 @@ const workers = new WorkerPool({
   // Called only once requests flow, after `gateway` below exists.
   emailOf: (userId) => gateway.accounts.emailOf(userId),
   osUid: isolate ? (userId) => gateway.accounts.osUid(userId) : undefined,
+  // Kept in app.db, and so in the datastore: the next sign-in after a
+  // redeploy opens the repo the user had open (repos.ts).
+  repos: new RecentRepos(db),
 });
 workers.startSweeper();
 

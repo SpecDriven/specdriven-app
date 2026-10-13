@@ -71,7 +71,8 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
 
 - **What goes in:** one JSON file per table: `users.json` (password hashes,
   roles and `os_uid`), `allowed-emails.json`, `secrets.json` (still AES-GCM
-  ciphertext, in base64), and `sessions.json` (the session hash, owner,
+  ciphertext, in base64), `repos.json` (each user's recent data repos, GitHub
+  urls only, the open one first), and `sessions.json` (the session hash, owner,
   created and expiry times only; no IP address, user agent or last-seen
   time). Email links and rate-limit counters stay behind. A repo saved before
   the roles is still read: its accounts are users, its `invites.json` becomes
@@ -81,8 +82,14 @@ redeploy that loses the volume still knows everyone (`src/gateway/datastore.ts`)
   already has accounts, the volume survived and is newer, so its copy is pushed
   over the repo's.
 - **While running:** every 30 s, a change worth keeping (sign-up, password,
-  secret, allowed email, role, sign-in, sign-out) is committed as "Save
-  accounts" and pushed. A session's sliding expiry alone is not pushed.
+  secret, allowed email, role, recent repos, sign-in, sign-out) is committed
+  as "Save accounts" and pushed. A session's sliding expiry alone is not pushed.
+- **Recent repos** (`src/gateway/repos.ts`): the gateway reads them from each
+  running worker's settings file every minute and when the worker stops. A
+  worker that starts with no settings file (its folder was on the lost
+  volume) gets one naming them, the most recent open, so the next sign-in
+  goes straight to that repo instead of asking for its url. A settings file
+  that is already there is never overwritten, and symlinks are not followed.
 - **On SIGTERM** (every redeploy): one last forced push, so everything is in
   the repo before the container goes.
 - **When the repo can't be read**, the gateway refuses to start rather than
