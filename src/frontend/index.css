@@ -8004,6 +8004,68 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   border-color: currentColor;
 }
 
+/* The field that edits them, in the scenario editor and the header's
+   popover: a row per attribute and an add row, laid out like the flags'. */
+.attributes-field-wrap,
+.attributes-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.attribute-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.attribute-list li,
+.attribute-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.attribute-row-label {
+  font-weight: 600;
+}
+
+.attribute-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.attribute-list input,
+.attribute-list select,
+.attribute-add input,
+.attribute-add select {
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+.attribute-add input {
+  width: 9rem;
+}
+
+.attribute-problem {
+  color: var(--status-proposed);
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chip-popover.attributes-popover {
+  min-width: 28rem;
+}
+
 /* Settings → Custom attributes: the definitions file, its problems and a
    summary of what it defines. */
 .custom-attributes-editor {

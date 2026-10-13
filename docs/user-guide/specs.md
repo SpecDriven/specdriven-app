@@ -42,7 +42,8 @@ Inside the folder:
 - A **feature** is one file, `<slug>.feature.md`, in any folder. It has a
   name (the `# <name>` heading, independent of the file name), an optional
   description in free markdown, an optional ticket link, an optional
-  assignee, optional feature flags, and a list of scenarios.
+  assignee, optional feature flags and custom attributes, and a list of
+  scenarios.
 - A **scenario** is one `## <name> @v<N> [status]` heading plus the markdown
   body under it. Scenarios are **atomic, immutable once published, and
   versioned**: a published scenario never changes, and a change in behaviour
@@ -167,6 +168,16 @@ Under the header, chips summarise the feature:
   with a switch and ✕ per flag, and a name plus an on/off switch to add
   another already set. Each change is saved on the spot and written into the
   file as one `[ff:<name>:on|off]` line under the `#` heading.
+- The feature's **custom attributes** show as chips whenever it has any,
+  such as `Business rule young-driver-surcharge on`, labelled by
+  **Settings → Custom attributes** (section 9). An `on` value is green and
+  `off` red; an amber chip does not fit its definition, and its tooltip
+  says why. Once the data folder defines attributes for features, **Edit
+  attributes** (or **Add attribute**) opens a list with a control and ✕ per
+  attribute, and an add row: pick the kind of attribute, fill in its names
+  (the ones already used in the data folder are suggested), set its value
+  and press **Add**. Each change is saved on the spot and written as
+  `[<key>:<name>:<value>]` lines under the `#` heading.
 
 The **description** is free markdown. Click it to edit; it is saved
 automatically, and **Done** shows it rendered again.
@@ -189,6 +200,8 @@ Each card shows:
   the matching setting is on.
 - The scenario's **feature flags** beside its title, green when on and red
   when off, when **Feature flags** is on.
+- The scenario's **custom attributes** in a row of chips under its title,
+  as on the feature header.
 - A **Files** list of the files stored with the scenario, each a download
   with its size.
 - A line saying who **created** the scenario and who **last updated** it.
@@ -266,6 +279,13 @@ Below, in one scrolling column:
   (letters, digits, `.`, `_` and `-`), set its switch, and press **Add**.
   They are saved with the scenario as a `[ff:<name>:on|off]` line under its
   heading.
+- **Attributes** (once the data folder defines attributes for scenarios, or
+  while the scenario has some): the same list and add row as the feature's
+  popover. A value is a switch for `on|off`, a list for fixed words, or a
+  field to type in; **Other…** types a value the list does not have. The add
+  row refuses a part left empty, a business sub-rule whose rule no spec uses
+  yet, an attribute already there, or a value that should be a number. They
+  are saved with the scenario under its heading.
 - **Automated tests**: one row per test that automates the scenario. Each
   row has ✎ to edit in place and ✕ to remove. To add one, paste a GitHub url
   that names a line (`…/QuoteTest.java#L32`) and press **Add**; the app reads
@@ -294,7 +314,7 @@ Below, in one scrolling column:
 A **published** scenario opens read-only: the title is fixed, the body is
 shown as source, the scenario table is hidden, and there is no save button,
 because nothing about a published scenario can change. Its ticket link,
-feature flags, automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
+feature flags, custom attributes, automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
 can attach tests to a scenario long after it was published.
 
 **Delete** asks for confirmation. Deleting a draft or a proposed scenario
@@ -464,12 +484,54 @@ Open Settings with `⌘,` or `g s`.
 | **Project management** and **Project management tool** | Whether features and scenarios offer a ticket link, and which tracker it names. |
 | **Publish external links** | Writes ticket links into the `.feature.md` file as markdown links. |
 | **Feature flags** | Off by default. On, features and scenarios show their `[ff:<name>:on\|off]` flags as chips (red when off) and the editors add, toggle and remove them. Off hides them; the flag lines stay in the files. |
+| **Custom attributes** | A setting of the open data folder, shared with the team: its `custom-attributes.txt`, described below. |
 | **Aha! links** and **Figma links** | Each off by default. On, features and scenarios offer links to Aha! records or Figma designs. Off hides them; links already added are kept. |
 | **Write authors into feature files** | A setting of the open data folder, not of the device: `"authors-in-markdown": true` in its `project-settings.json`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
 | **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.json`. |
 | **Allow deleting published specs** | Offers Delete on published scenarios, behind the Danger Zone confirmation. |
 | **Git engine** | Which git the app drives: the GitHub CLI, the system `git`, or the built-in engine. |
 | **GitHub account** | Sign in so that pushes and test-name lookups are authenticated. |
+
+### Custom attributes
+
+**Settings → Custom attributes** edits the data folder's
+`custom-attributes.txt`. It is saved as you type, like the README, and the
+next sync pushes it, so the whole team works from the same definitions.
+**Start from the example** fills in business rules and sub-rules:
+
+```text
+[br:<rule>:on|off|<value>]
+  label: Business rule
+  scope: feature, scenario
+  description: A business rule the spec depends on
+
+[br-sub:<rule from br>:<sub-rule>:on|off|<value>]
+  label: Business sub-rule
+```
+
+Each definition is a pattern, written the way the attribute is written in a
+feature file and starting in the first column, followed by indented
+properties. In a pattern:
+
+- the part after `[` is the **key**, in lower case;
+- each `:`-separated part after it is a **name**, and the last one is the
+  **value**;
+- `on|off|<value>` lists alternatives: a fixed word, or a part you fill in;
+- `<name>` takes any text, `<name:number>` a number, and `<rule from br>`
+  the name of a rule some `[br:…]` attribute in the data folder already
+  uses.
+
+The properties are `label` (what chips and menus call it; the key by
+default), `scope` (`feature`, `scenario`, or both, the default) and
+`description` (help text in the chip's tooltip). Lines starting with `#`
+are comments. The keys `ff`, `test`, `http`, `https`, `draft`,
+`proposed`, `published` and `saved` are reserved.
+
+Under the editor the app counts the problems and lists each one by line, and
+sums up what the file defines. A definition with a problem is left out and a
+bad property is ignored, but the file is saved either way. The definitions
+never change how a feature file is read: an attribute no definition covers
+stays in the file and shows as an amber chip.
 
 ## 10. Keyboard shortcuts
 
@@ -529,6 +591,9 @@ On Windows and Linux `⌘` is `Ctrl`.
   feature or a scenario, kept with the feature in the app only.
 - **Feature flag**: a named on/off switch in the product that gates a feature
   or a scenario, written `[ff:<name>:on|off]` under its heading.
+- **Custom attribute**: a team-defined tag on a feature or a scenario, such
+  as a business rule `[br:young-driver-surcharge:on]`, written under its
+  heading and defined in the data folder's `custom-attributes.txt`.
 - **Member / assignee**: a name from `project-settings.json` that a feature
   can be assigned to.
 - **Publish ring**: the arc on a sidebar feature showing how many of its

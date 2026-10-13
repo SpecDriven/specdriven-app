@@ -21,6 +21,7 @@ import type {
   ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
+  SpecAttribute,
 } from "../server/parser";
 import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS, resourceChipLabel } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
@@ -48,6 +49,7 @@ import {
   GitPullRequest,
   Flag,
   Home,
+  Tag,
   Keyboard,
   Link,
   ListFilter,
@@ -137,9 +139,9 @@ import {
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
-import { AttributeChips } from "./AttributesField";
+import { AttributeChips, AttributesField } from "./AttributesField";
 import { CustomAttributesEditor } from "./CustomAttributesEditor";
-import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
+import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server/customAttributes";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
@@ -1497,6 +1499,8 @@ export function App() {
       (specs/external-links/related-pull-requests.feature.md). */
   const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
   const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
+  /** The feature's attributes popover (specs/app/custom-attributes.feature.md). */
+  const [featureAttributesOpen, setFeatureAttributesOpen] = useState(false);
   /** The feature's Aha! or Figma popover, whichever is open
       (specs/external-links/aha-and-figma-links.feature.md). */
   const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
@@ -4223,6 +4227,36 @@ export function App() {
     }
   };
 
+  /**
+   * The feature's own custom attributes (specs/app/custom-attributes.feature.md),
+   * saved on the spot from the header's popover like the flags.
+   */
+  const saveFeatureAttributes = async (attributes: SpecAttribute[]) => {
+    if (!feature || !selected) return;
+    const { attributes: _previous, ...rest } = feature;
+    const next: Feature = attributes.length > 0 ? { ...rest, attributes } : rest;
+    setFeature(next);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        markSaved();
+      } else {
+        setFeature(feature);
+        toast.error(data.error ?? "Could not save the attributes");
+      }
+    } catch {
+      setFeature(feature);
+      toast.error("Could not save the attributes — is the server running?");
+    }
+  };
+
   const saveFeatureLink = async () => {
     if (!feature || !selected || featureLinkDraft === null) return;
     const resolved = resolveLinkDraft(featureLinkDraft);
@@ -5357,6 +5391,7 @@ export function App() {
     featureLinkOpen ||
     featurePrsOpen ||
     featureFlagsOpen ||
+    featureAttributesOpen ||
     sessionError !== null ||
     sheetOpen ||
     palette !== null;
@@ -5479,6 +5514,7 @@ export function App() {
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
     if (featureFlagsOpen) return setFeatureFlagsOpen(false);
+    if (featureAttributesOpen) return setFeatureAttributesOpen(false);
     if (featureResourceOpen) return setFeatureResourceOpen(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
@@ -8229,6 +8265,29 @@ export function App() {
                   />
                 </div>
               )}
+              {/* specs/app/custom-attributes.feature.md: the scenario's custom
+                  attributes, saved with it — editable on a published
+                  scenario too, like the flags. Shown once the data repo
+                  defines attributes for scenarios, or while it has some. */}
+              {(definitionsFor(attributeDefs, "scenario").length > 0 ||
+                (editing.scenario.attributes?.length ?? 0) > 0) && (
+                <div className="attributes-field-wrap">
+                  <span className="field-label">Attributes</span>
+                  <AttributesField
+                    attributes={editing.scenario.attributes ?? []}
+                    where="scenario"
+                    defs={attributeDefs}
+                    known={knownAttributes}
+                    onChange={(attributes) => {
+                      const { attributes: _previous, ...rest } = editing.scenario;
+                      setEditing({
+                        ...editing,
+                        scenario: attributes.length > 0 ? { ...rest, attributes } : rest,
+                      });
+                    }}
+                  />
+                </div>
+              )}
               {showTestLinks && (
                 <div className="tests-field">
                   <span className="field-label">Automated tests</span>
@@ -8830,7 +8889,48 @@ export function App() {
               )}
               {featureFlags && <FeatureFlagChips flags={feature.flags} />}
               {/* specs/app/custom-attributes.feature.md: the feature's own
-                  attributes, a chip each, whenever it carries any. */}
+                  attributes, a chip each, whenever it carries any, and —
+                  once the data repo defines attributes for features — a
+                  chip whose popover adds, changes and removes them, saved
+                  on the spot. */}
+              {definitionsFor(attributeDefs, "feature").length > 0 && (
+                <span className="chip-anchor feature-attributes-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.attributes?.length ? "" : " muted"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={featureAttributesOpen}
+                    onClick={() => setFeatureAttributesOpen((open) => !open)}
+                  >
+                    <Tag size={14} aria-hidden="true" />
+                    {feature.attributes?.length ? "Edit attributes" : "Add attribute"}
+                  </button>
+                  <Popover
+                    open={featureAttributesOpen}
+                    onClose={() => setFeatureAttributesOpen(false)}
+                    label="Attributes of this feature"
+                    className="chip-popover feature-flags-popover attributes-popover"
+                    containerSelector=".feature-attributes-anchor"
+                  >
+                    <p className="hint">
+                      The custom attributes of this feature, as Settings → Custom attributes defines them.
+                    </p>
+                    <AttributesField
+                      attributes={feature.attributes ?? []}
+                      where="feature"
+                      defs={attributeDefs}
+                      known={knownAttributes}
+                      autoFocus
+                      onChange={(attributes) => saveFeatureAttributes(attributes)}
+                    />
+                    <div className="dialog-actions">
+                      <button type="button" className="secondary" onClick={() => setFeatureAttributesOpen(false)}>
+                        Close
+                      </button>
+                    </div>
+                  </Popover>
+                </span>
+              )}
               <AttributeChips
                 attributes={feature.attributes}
                 where="feature"
