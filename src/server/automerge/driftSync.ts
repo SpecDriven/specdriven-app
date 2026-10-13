@@ -35,7 +35,8 @@ import {
 } from "../git";
 import { featureTextError, parseFeature, parsePage, type Feature, type MarkdownPage } from "../parser";
 import { isPageFile, isPageFolderPath } from "../pages";
-import { threeWayFeature, threeWayPage } from "./merge";
+import { CUSTOM_ATTRIBUTES_FILE } from "../customAttributes";
+import { mergeText, threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
 import { docToFeature, isProjectionOf, projectFeature, projectionFor } from "./project";
 import { healPublished, importFeatureDoc, reconcile } from "./reconcile";
@@ -205,6 +206,18 @@ async function autoResolveOne(
   // version; markdown that arrived without operations folds in three-way.
   if (isPageFolderPath(path) && isPageFile(path)) {
     return autoResolvePage(dataDir, path);
+  }
+  // The custom attribute definitions (specs/app/custom-attributes.feature.md
+  // "The definitions file is shared with the team"): plain text two
+  // teammates may both add to, merged three-way like a page body so the
+  // sync never stalls on it.
+  if (path === CUSTOM_ATTRIBUTES_FILE) {
+    const ours = await stageVersion(dataDir, path, 2);
+    const theirs = await stageVersion(dataDir, path, 3);
+    if (ours === null || theirs === null) return "deleted on one side";
+    const base = (await stageVersion(dataDir, path, 1)) ?? "";
+    await resolveConflict(dataDir, path, mergeText(base, ours, theirs));
+    return null;
   }
   if (!path.endsWith(".feature.md") || path.startsWith(`${AUTOMERGE_ROOT}/`)) {
     return "not a feature file";
