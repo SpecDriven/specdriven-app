@@ -1,0 +1,17 @@
+# Custom attributes for features and scenarios.
+#   <name>          a part you fill in
+#   on|off|<value>  alternatives: a fixed word, or a part you fill in
+#   <rule from br>  must name a rule already used in a [br:…] attribute
+[br:<rule>:on|off|<value>]
+  label: Business rule
+  scope: feature, scenario
+  description: A business rule the spec depends on
+
+[br-sub:<rule from br>:<sub-rule>:on|off|<value>]
+  label: Business sub-rule
+  scope: feature, scenario
+  description: A refinement of a business rule
+
+[line:auto|home|boat|motorcycle]
+  label: Line of business
+  scope: feature

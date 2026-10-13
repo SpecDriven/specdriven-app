@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -21,6 +21,7 @@ import type {
   ScenarioFile,
   ScenarioPick,
   ScenarioTarget,
+  SpecAttribute,
 } from "../server/parser";
 import { RESOURCE_LINK_KINDS, RESOURCE_LINK_TOOLS, resourceChipLabel } from "../server/resourceLinks";
 import type { ResourceLinkKind } from "../server/resourceLinks";
@@ -48,6 +49,7 @@ import {
   GitPullRequest,
   Flag,
   Home,
+  Tag,
   Keyboard,
   Link,
   ListFilter,
@@ -137,6 +139,19 @@ import {
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
+import { AttributeChips, AttributesField } from "./AttributesField";
+import {
+  NO_FILTER,
+  attributeFilterGroups,
+  attributeFilterLabel,
+  featureMatches,
+  isFiltering,
+  sameAttributeFilter,
+  scenarioMatches,
+  type TreeFilter,
+} from "./treeFilter";
+import { CustomAttributesEditor } from "./CustomAttributesEditor";
+import { definitionsFor, knownNames, parseAttributeDefinitions } from "../server/customAttributes";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
@@ -458,7 +473,16 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  */
 export function scenarioSignature(s: Scenario, version: number): string {
   // The name as a save writes it: a stray space is nothing new to save.
-  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null, s.flags ?? null]);
+  return JSON.stringify([
+    savedScenarioName(s),
+    version,
+    s.status,
+    s.body,
+    s.tests,
+    s.link ?? null,
+    s.flags ?? null,
+    s.attributes ?? null,
+  ]);
 }
 
 /**
@@ -800,12 +824,6 @@ export function storeEditorHidden(hidden: boolean) {
   }
 }
 
-/** The sidebar's filter: features by scenario status and by assignee. */
-interface TreeFilter {
-  status: Scenario["status"] | null;
-  assignee: string | null;
-}
-
 /** Two-letter initials for an assignee chip. */
 function initialsOf(name: string): string {
   return (
@@ -861,6 +879,8 @@ interface Listing {
   authorsInMarkdown: boolean;
   /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
   issuesRepo: GitHubRepo | null;
+  /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
+  customAttributes: string;
 }
 
 /** The user menu's link to the running build's source
@@ -942,6 +962,7 @@ export async function fetchListing(
             typeof (data.issuesRepo as GitHubRepo).owner === "string"
               ? (data.issuesRepo as GitHubRepo)
               : null,
+          customAttributes: typeof data.customAttributes === "string" ? data.customAttributes : "",
         },
       };
     }
@@ -1112,6 +1133,14 @@ export function App() {
   // code repo pushes to, when it is a GitHub one — the Issues tab shows for
   // it. Null (no code repo, or not on GitHub) means no tab.
   const [issuesRepo, setIssuesRepo] = useState<GitHubRepo | null>(null);
+  // Custom attributes (specs/app/custom-attributes.feature.md): the data
+  // repo's definitions as written, from the listing; null until one has been
+  // read, so Settings offers the editor only for a folder.
+  const [customAttributesText, setCustomAttributesText] = useState<string | null>(null);
+  const attributeDefs = useMemo(
+    () => parseAttributeDefinitions(customAttributesText ?? ""),
+    [customAttributesText],
+  );
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -1181,12 +1210,25 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerTrapRef = useFocusTrap(compact && drawerOpen);
   /** The sidebar's filter, and its menu. */
-  const [filter, setFilter] = useState<TreeFilter>({ status: null, assignee: null });
+  const [filter, setFilter] = useState<TreeFilter>(NO_FILTER);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /** A feature is being fetched — the skeleton shows until it lands. */
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
+  // What the data repo's attributes use, for the chips' checks and the
+  // editor's suggestions (specs/app/custom-attributes.feature.md): every
+  // listed feature, and the open one as it stands — its drafts and an edit
+  // the listing has not caught up with included.
+  const knownAttributes = useMemo(
+    () =>
+      knownNames([
+        ...features.flatMap((f) => [f.attributes, ...f.scenarios.map((s) => s.attributes)]),
+        feature?.attributes,
+        ...(feature?.scenarios.map((s) => s.attributes) ?? []),
+      ]),
+    [features, feature],
+  );
   /** Draft for the inline file-name editor; null while not editing. */
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -1461,6 +1503,8 @@ export function App() {
       (specs/external-links/related-pull-requests.feature.md). */
   const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
   const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
+  /** The feature's attributes popover (specs/app/custom-attributes.feature.md). */
+  const [featureAttributesOpen, setFeatureAttributesOpen] = useState(false);
   /** The feature's Aha! or Figma popover, whichever is open
       (specs/external-links/aha-and-figma-links.feature.md). */
   const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
@@ -1557,6 +1601,7 @@ export function App() {
     setCodeRepo(listing.codeRepo);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
     setIssuesRepo(listing.issuesRepo);
+    setCustomAttributesText(listing.customAttributes);
     setLoadError(null);
     return listing;
   }, []);
@@ -4186,6 +4231,36 @@ export function App() {
     }
   };
 
+  /**
+   * The feature's own custom attributes (specs/app/custom-attributes.feature.md),
+   * saved on the spot from the header's popover like the flags.
+   */
+  const saveFeatureAttributes = async (attributes: SpecAttribute[]) => {
+    if (!feature || !selected) return;
+    const { attributes: _previous, ...rest } = feature;
+    const next: Feature = attributes.length > 0 ? { ...rest, attributes } : rest;
+    setFeature(next);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        markSaved();
+      } else {
+        setFeature(feature);
+        toast.error(data.error ?? "Could not save the attributes");
+      }
+    } catch {
+      setFeature(feature);
+      toast.error("Could not save the attributes — is the server running?");
+    }
+  };
+
   const saveFeatureLink = async () => {
     if (!feature || !selected || featureLinkDraft === null) return;
     const resolved = resolveLinkDraft(featureLinkDraft);
@@ -5320,6 +5395,7 @@ export function App() {
     featureLinkOpen ||
     featurePrsOpen ||
     featureFlagsOpen ||
+    featureAttributesOpen ||
     sessionError !== null ||
     sheetOpen ||
     palette !== null;
@@ -5442,6 +5518,7 @@ export function App() {
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
     if (featureFlagsOpen) return setFeatureFlagsOpen(false);
+    if (featureAttributesOpen) return setFeatureAttributesOpen(false);
     if (featureResourceOpen) return setFeatureResourceOpen(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
@@ -6087,12 +6164,12 @@ export function App() {
     );
 
   // The sidebar filter (specs/ui/ui.feature.md "Design system"): a feature
-  // matches by having a scenario in the chosen status, and by its assignee.
-  const matchesFilter = (f: FeatureListing) =>
-    (filter.status === null || f.scenarios.some((s) => s.status === filter.status)) &&
-    (filter.assignee === null || f.assigned === filter.assignee);
+  // matches by having a scenario in the chosen status, by its assignee, and
+  // by a custom attribute it or a scenario of it carries
+  // (specs/app/custom-attributes.feature.md, src/frontend/treeFilter.ts).
+  const matchesFilter = (f: FeatureListing) => featureMatches(f, filter);
   const me = user?.name || user?.login || user?.username || null;
-  const filtering = filter.status !== null || filter.assignee !== null;
+  const filtering = isFiltering(filter);
 
   // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
   // in), ← closes it or climbs to it from a feature, Home/End jump,
@@ -6324,6 +6401,7 @@ export function App() {
         { id: "settings-general", title: "General" },
         ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
         { id: "settings-editor", title: "Specs" },
+        ...(customAttributesText !== null ? [{ id: "settings-attributes", title: "Custom attributes" }] : []),
         { id: "settings-project", title: "Project management" },
         { id: "settings-links", title: "Aha! & Figma" },
         { id: "settings-workflow", title: "Workflow" },
@@ -6652,6 +6730,29 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {/* specs/app/custom-attributes.feature.md "Custom attributes are
+          defined in Settings": the data repo's definitions, shared with the
+          team through git rather than kept on this device. */}
+      {customAttributesText !== null && (
+        <PageSection
+          id="settings-attributes"
+          title="Custom attributes"
+          hint={
+            <>
+              The attributes your team tags features and scenarios with, such as{" "}
+              <code>[br:young-driver-surcharge:on]</code>. Saved in the data folder&apos;s{" "}
+              <code>custom-attributes.txt</code> and pushed with the next sync.
+            </>
+          }
+        >
+          <CustomAttributesEditor
+            content={customAttributesText}
+            autosaveSeconds={autosaveSeconds}
+            onSaved={setCustomAttributesText}
+            onError={(message) => toast.error(message)}
+          />
+        </PageSection>
+      )}
       <PageSection
         id="settings-project"
         title="Project management"
@@ -7609,6 +7710,23 @@ export function App() {
                       },
                     ]
                   : []),
+                // One entry per attribute key the specs use: "Any …", each
+                // attribute by its names, and each with its value.
+                ...attributeFilterGroups(features, attributeDefs).map((group) => ({
+                  id: `attribute-${group.key}`,
+                  label: group.label,
+                  items: group.items.map((item) => ({
+                    id: `attribute-${item.id}`,
+                    label: item.label,
+                    title: item.label,
+                    checked: sameAttributeFilter(filter.attribute, item.filter),
+                    onSelect: () =>
+                      setFilter((f) => ({
+                        ...f,
+                        attribute: sameAttributeFilter(f.attribute, item.filter) ? null : item.filter,
+                      })),
+                  })),
+                })),
               ]}
             />
           </span>
@@ -7667,7 +7785,7 @@ export function App() {
             </Tooltip>
           </span>
         </div>
-        {(filter.status || filter.assignee) && (
+        {filtering && (
           <div className="filter-chips">
             {filter.status && (
               <button
@@ -7688,6 +7806,19 @@ export function App() {
                 onClick={() => setFilter((f) => ({ ...f, assignee: null }))}
               >
                 {filter.assignee === me ? "Mine" : filter.assignee} <X size={11} aria-hidden="true" />
+              </button>
+            )}
+            {filter.attribute && (
+              <button
+                type="button"
+                className="chip on attribute-filter-chip"
+                aria-label="Clear the attribute filter"
+                title={attributeFilterLabel(filter.attribute, attributeDefs)}
+                onClick={() => setFilter((f) => ({ ...f, attribute: null }))}
+              >
+                <Tag size={12} aria-hidden="true" />{" "}
+                <span className="filter-chip-label">{attributeFilterLabel(filter.attribute, attributeDefs)}</span>{" "}
+                <X size={11} aria-hidden="true" />
               </button>
             )}
           </div>
@@ -8164,6 +8295,29 @@ export function App() {
                     onChange={(flags) => {
                       const { flags: _previous, ...rest } = editing.scenario;
                       setEditing({ ...editing, scenario: flags.length > 0 ? { ...rest, flags } : rest });
+                    }}
+                  />
+                </div>
+              )}
+              {/* specs/app/custom-attributes.feature.md: the scenario's custom
+                  attributes, saved with it — editable on a published
+                  scenario too, like the flags. Shown once the data repo
+                  defines attributes for scenarios, or while it has some. */}
+              {(definitionsFor(attributeDefs, "scenario").length > 0 ||
+                (editing.scenario.attributes?.length ?? 0) > 0) && (
+                <div className="attributes-field-wrap">
+                  <span className="field-label">Attributes</span>
+                  <AttributesField
+                    attributes={editing.scenario.attributes ?? []}
+                    where="scenario"
+                    defs={attributeDefs}
+                    known={knownAttributes}
+                    onChange={(attributes) => {
+                      const { attributes: _previous, ...rest } = editing.scenario;
+                      setEditing({
+                        ...editing,
+                        scenario: attributes.length > 0 ? { ...rest, attributes } : rest,
+                      });
                     }}
                   />
                 </div>
@@ -8768,6 +8922,55 @@ export function App() {
                 </span>
               )}
               {featureFlags && <FeatureFlagChips flags={feature.flags} />}
+              {/* specs/app/custom-attributes.feature.md: the feature's own
+                  attributes, a chip each, whenever it carries any, and —
+                  once the data repo defines attributes for features — a
+                  chip whose popover adds, changes and removes them, saved
+                  on the spot. */}
+              {definitionsFor(attributeDefs, "feature").length > 0 && (
+                <span className="chip-anchor feature-attributes-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.attributes?.length ? "" : " muted"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={featureAttributesOpen}
+                    onClick={() => setFeatureAttributesOpen((open) => !open)}
+                  >
+                    <Tag size={14} aria-hidden="true" />
+                    {feature.attributes?.length ? "Edit attributes" : "Add attribute"}
+                  </button>
+                  <Popover
+                    open={featureAttributesOpen}
+                    onClose={() => setFeatureAttributesOpen(false)}
+                    label="Attributes of this feature"
+                    className="chip-popover feature-flags-popover attributes-popover"
+                    containerSelector=".feature-attributes-anchor"
+                  >
+                    <p className="hint">
+                      The custom attributes of this feature, as Settings → Custom attributes defines them.
+                    </p>
+                    <AttributesField
+                      attributes={feature.attributes ?? []}
+                      where="feature"
+                      defs={attributeDefs}
+                      known={knownAttributes}
+                      autoFocus
+                      onChange={(attributes) => saveFeatureAttributes(attributes)}
+                    />
+                    <div className="dialog-actions">
+                      <button type="button" className="secondary" onClick={() => setFeatureAttributesOpen(false)}>
+                        Close
+                      </button>
+                    </div>
+                  </Popover>
+                </span>
+              )}
+              <AttributeChips
+                attributes={feature.attributes}
+                where="feature"
+                defs={attributeDefs}
+                known={knownAttributes}
+              />
               {/* specs/external-links/aha-and-figma-links.feature.md "Link
                   Aha! and Figma to a feature": a chip per tool switched on
                   in Settings, counting the feature's links; the popover
@@ -8885,7 +9088,7 @@ export function App() {
               style={{ "--preview-lines": previewLines } as CSSProperties}
             >
               {feature.scenarios.map((s, i) =>
-                filter.status !== null && s.status !== filter.status ? null : (
+                !scenarioMatches(s, feature, filter) ? null : (
                 <article
                   key={i}
                   ref={(el) => {
@@ -9029,6 +9232,18 @@ export function App() {
                       />
                     </span>
                   </header>
+                  {/* Its custom attributes (specs/app/custom-attributes.feature.md),
+                      a row of chips under the title whenever it carries any. */}
+                  {s.attributes && s.attributes.length > 0 && (
+                    <div className="scenario-attributes">
+                      <AttributeChips
+                        attributes={s.attributes}
+                        where="scenario"
+                        defs={attributeDefs}
+                        known={knownAttributes}
+                      />
+                    </div>
+                  )}
                   {s.body && (
                     <div className="md-preview scenario-body">{renderMarkdown(s.body)}</div>
                   )}
@@ -9068,11 +9283,13 @@ export function App() {
                 </article>
                 ),
               )}
-              {filter.status !== null &&
-                feature.scenarios.length > 0 &&
-                !feature.scenarios.some((s) => s.status === filter.status) && (
+              {feature.scenarios.length > 0 &&
+                !feature.scenarios.some((s) => scenarioMatches(s, feature, filter)) && (
                   <p className="empty">
-                    No {filter.status} scenarios here — the sidebar filter hides the rest.
+                    {filter.attribute
+                      ? `No ${filter.status ? `${filter.status} ` : ""}scenarios here carry ${attributeFilterLabel(filter.attribute, attributeDefs)}`
+                      : `No ${filter.status} scenarios here`}{" "}
+                    — the sidebar filter hides the rest.
                   </p>
                 )}
               {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}

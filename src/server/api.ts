@@ -130,6 +130,7 @@ import { extractScenarios } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
+import { readCustomAttributes, writeCustomAttributes } from "./customAttributesFile";
 import type { SessionSection } from "./agent";
 import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
@@ -1158,6 +1159,10 @@ const getFeatures = withDataDir(async (dir) => {
     // Issues tab shows for it, and only for it. readIssuesRepo answers for
     // the demo too, which names its repo outright (demo.ts).
     issuesRepo: await readIssuesRepo(dir),
+    // The custom attribute definitions (specs/app/custom-attributes.feature.md):
+    // the data repo's custom-attributes.txt as written, so a teammate's
+    // definitions arriving with a pull reach the editors on the next tick.
+    customAttributes: await readCustomAttributes(dir),
   });
 });
 
@@ -1208,6 +1213,21 @@ const putReadme = withDataDir(async (dir, req) => {
     return json(await writeReadme(dir, body.content, from));
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
+  }
+});
+
+// Settings → Custom attributes' autosave (specs/app/custom-attributes.feature.md
+// "Custom attributes are defined in Settings"): a local write the reload
+// cron commits and pushes, like the README's. `from` folds in a disk edit
+// the editor has not shown. A file with problems is saved too.
+const putCustomAttributes = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => null)) as { content?: unknown; from?: unknown } | null;
+  if (typeof body?.content !== "string") return json({ error: "content is required" }, 400);
+  const from = typeof body.from === "string" ? body.from : undefined;
+  try {
+    return json({ content: await writeCustomAttributes(dir, body.content, from) });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
   }
 });
 
@@ -2292,6 +2312,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/project-settings", putProjectSettings],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
+  ["PUT", "/api/custom-attributes", putCustomAttributes],
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],

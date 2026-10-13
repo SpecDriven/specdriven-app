@@ -47,6 +47,15 @@
 // line right under the heading, whatever the "Feature flags" setting says —
 // that setting only shows or hides them in the app.
 //
+// A feature and each scenario may also carry custom attributes
+// (specs/app/custom-attributes.feature.md): `[<key>:<name>…:<value>]` tokens,
+// e.g. `[br:young-driver-surcharge:on]`, on lines of their own beside the
+// flag line, which a line may mix them with. The parser lifts them into
+// `attributes` by a fixed grammar (parseMetadataTokens) that never reads the
+// data repo's definitions, so editing those cannot re-split a published body.
+// The projection writes them right after the flag line, starting a new line
+// wherever the key changes.
+//
 // The first `#` heading is the feature name; a `##` heading that ends with a
 // version starts a scenario. The `@` marks where the name ends and the version
 // begins, so a name that itself contains a version ("Migrate to v2 API @v1")
@@ -181,6 +190,8 @@ export interface Scenario {
   updatedBy?: string;
   /** The feature flags gating this scenario, in the order they are written. */
   flags?: FeatureFlag[];
+  /** Its custom attributes (specs/app/custom-attributes.feature.md), in written order. */
+  attributes?: SpecAttribute[];
 }
 
 export interface Feature {
@@ -210,6 +221,8 @@ export interface Feature {
   updatedBy?: string;
   /** The feature flags gating the feature as a whole, in written order. */
   flags?: FeatureFlag[];
+  /** The feature's own custom attributes, in written order. */
+  attributes?: SpecAttribute[];
 }
 
 /**
@@ -485,6 +498,157 @@ function addFlags(into: FeatureFlag[], more: FeatureFlag[]): void {
 }
 
 /**
+ * A custom attribute on a feature or a scenario
+ * (specs/app/custom-attributes.feature.md), written
+ * `[<key>:<name>…:<value>]`, e.g. `[br:young-driver-surcharge:on]` or
+ * `[br-sub:young-driver-surcharge:under-21:1.5]`. The segments before the
+ * last are its names, the last its value; its identity is the key and the
+ * names. The data repo's `custom-attributes.txt` says which keys a team
+ * uses, but the token grammar here never reads it — a definitions edit must
+ * not change how a published body parses (src/server/customAttributes.ts).
+ */
+export interface SpecAttribute {
+  key: string;
+  names: string[];
+  value: string;
+}
+
+/** An attribute key: lower case first, so `[TODO:x]` and `[Jira:ABC-1]` never match. */
+const ATTRIBUTE_KEY = String.raw`[a-z][a-z0-9._-]*`;
+const ATTRIBUTE_KEY_RE = new RegExp(`^${ATTRIBUTE_KEY}$`);
+/** A segment: no bracket, colon or line break, no whitespace at either end. */
+const ATTRIBUTE_SEGMENT = String.raw`[^\s\[\]:](?:[^\[\]:\n]*[^\s\[\]:])?`;
+const ATTRIBUTE_SEGMENT_RE = new RegExp(`^${ATTRIBUTE_SEGMENT}$`);
+const ATTRIBUTE_TOKEN_RE = new RegExp(
+  String.raw`\[(${ATTRIBUTE_KEY})((?::${ATTRIBUTE_SEGMENT})+)\]`,
+  "y",
+);
+const FEATURE_FLAG_STICKY_RE = new RegExp(FEATURE_FLAG_TOKEN, "iy");
+/**
+ * Keys that are never attributes: `ff` is a feature flag, and `[test: … ]`
+ * and `[https://…]` stay what they are.
+ */
+const NOT_ATTRIBUTE_KEYS = new Set(["ff", "test", "http", "https"]);
+
+export function isAttributeKey(key: string): boolean {
+  return ATTRIBUTE_KEY_RE.test(key) && !NOT_ATTRIBUTE_KEYS.has(key);
+}
+
+export function isAttributeSegment(segment: string): boolean {
+  return ATTRIBUTE_SEGMENT_RE.test(segment);
+}
+
+/** Whether an attribute round-trips through its token — only those are written. */
+export function isAttribute(a: SpecAttribute): boolean {
+  return (
+    isAttributeKey(a.key) &&
+    Array.isArray(a.names) &&
+    a.names.every((n) => typeof n === "string" && isAttributeSegment(n)) &&
+    typeof a.value === "string" &&
+    isAttributeSegment(a.value)
+  );
+}
+
+/** The token an attribute is written as. */
+export function formatAttribute(a: SpecAttribute): string {
+  return `[${[a.key, ...a.names, a.value].join(":")}]`;
+}
+
+/** The attribute a token holds — the whole string, `[` to `]` — or null. */
+export function parseAttributeToken(token: string): SpecAttribute | null {
+  ATTRIBUTE_TOKEN_RE.lastIndex = 0;
+  const m = ATTRIBUTE_TOKEN_RE.exec(token);
+  if (!m || m[0].length !== token.length) return null;
+  const key = m[1]!;
+  if (!isAttributeKey(key)) return null;
+  const segments = m[2]!.slice(1).split(":");
+  return { key, names: segments.slice(0, -1), value: segments.at(-1)! };
+}
+
+/**
+ * The lines a list of attributes is written as: in list order, a new line
+ * wherever the key changes. Attributes the token cannot carry are left out.
+ */
+export function formatAttributeLines(attributes: readonly SpecAttribute[]): string {
+  const lines: string[][] = [];
+  let key: string | undefined;
+  for (const a of attributes) {
+    if (!isAttribute(a)) continue;
+    if (a.key !== key || lines.length === 0) lines.push([]);
+    key = a.key;
+    lines.at(-1)!.push(formatAttribute(a));
+  }
+  return lines.map((l) => l.join(" ")).join("\n");
+}
+
+/**
+ * The feature flags and attributes a line of markdown holds, or null when it
+ * is not a metadata line — one with nothing but `[ff:…]` and attribute
+ * tokens on it. An `[ff:…]` token that is not a valid flag makes the whole
+ * line text, as a malformed flag always did.
+ */
+export function parseMetadataTokens(
+  line: string,
+): { flags: FeatureFlag[]; attributes: SpecAttribute[] } | null {
+  const lead = line.match(/^\s{0,3}/)![0].length;
+  if (line.length > lead && /\s/.test(line[lead]!)) return null;
+  const flags: FeatureFlag[] = [];
+  const attributes: SpecAttribute[] = [];
+  let at = lead;
+  while (at < line.length) {
+    FEATURE_FLAG_STICKY_RE.lastIndex = at;
+    const flag = FEATURE_FLAG_STICKY_RE.exec(line);
+    if (flag) {
+      flags.push({ name: flag[1]!, on: flag[2]!.toLowerCase() === "on" });
+      at = FEATURE_FLAG_STICKY_RE.lastIndex;
+    } else {
+      ATTRIBUTE_TOKEN_RE.lastIndex = at;
+      const token = ATTRIBUTE_TOKEN_RE.exec(line);
+      if (!token || !isAttributeKey(token[1]!)) return null;
+      const segments = token[2]!.slice(1).split(":");
+      attributes.push({ key: token[1]!, names: segments.slice(0, -1), value: segments.at(-1)! });
+      at = ATTRIBUTE_TOKEN_RE.lastIndex;
+    }
+    while (at < line.length && /\s/.test(line[at]!)) at++;
+  }
+  if (flags.length === 0 && attributes.length === 0) return null;
+  return { flags, attributes };
+}
+
+/** An attribute's identity — its key and names — as one string. */
+export function attributeIdentity(a: SpecAttribute): string {
+  return [a.key, ...a.names].join(":");
+}
+
+/**
+ * Plain copies of attributes held in an Automerge document (it hands out
+ * proxies); undefined when there are none.
+ */
+export function plainAttributes(
+  attributes: readonly SpecAttribute[] | undefined,
+): SpecAttribute[] | undefined {
+  return attributes && attributes.length > 0
+    ? attributes.map((a) => ({ key: a.key, names: [...a.names], value: a.value }))
+    : undefined;
+}
+
+/** Identity of a list of attributes for change detection; none is the empty string. */
+export function attributesKey(attributes: readonly SpecAttribute[] | undefined): string {
+  return attributes && attributes.length > 0 ? attributes.map(formatAttribute).join(" ") : "";
+}
+
+/**
+ * Append attributes, dropping exact duplicates. The same identity with
+ * another value is kept: it is shown as a warning, not silently resolved.
+ */
+export function addAttributes(into: SpecAttribute[], more: readonly SpecAttribute[]): void {
+  for (const a of more) {
+    const token = formatAttribute(a);
+    if (!into.some((b) => formatAttribute(b) === token)) into.push(a);
+  }
+}
+
+/**
  * The project member a feature is assigned to (src/server/members.ts) is
  * written as one line under the feature's `# <name>` heading —
  * `**Assigned:** Ada Lovelace` — beside the external-link line, in either
@@ -709,10 +873,11 @@ export function splitPageMeta(text: string): {
 }
 
 /**
- * Lift a feature's metadata lines — its feature flags, its ticket link, its
- * assignment and its authorship — off the top of the text under the `#`
- * heading. They may come in any order, and anything else ends the metadata: a
- * line further down, or one with more on it, is ordinary description.
+ * Lift a feature's metadata lines — its feature flags and custom attributes,
+ * its ticket link, its assignment and its authorship — off the top of the
+ * text under the `#` heading. They may come in any order, and anything else
+ * ends the metadata: a line further down, or one with more on it, is
+ * ordinary description.
  */
 export function splitFeatureMeta(text: string): {
   text: string;
@@ -721,6 +886,7 @@ export function splitFeatureMeta(text: string): {
   createdBy?: string;
   updatedBy?: string;
   flags?: FeatureFlag[];
+  attributes?: SpecAttribute[];
 } {
   let rest = text;
   let link: ExternalLink | undefined;
@@ -728,20 +894,23 @@ export function splitFeatureMeta(text: string): {
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
   const flags: FeatureFlag[] = [];
-  // At most one line of each kind but flags, which may take several lines,
-  // so the loop ends at the first line that is none of them.
+  const attributes: SpecAttribute[] = [];
+  // At most one line of each kind but flags and attributes, which may take
+  // several lines, so the loop ends at the first line that is none of them.
   for (;;) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
-    const nextFlags = parseFeatureFlagsLine(line);
+    const nextTokens = parseMetadataTokens(line);
     const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
-    if (nextFlags) addFlags(flags, nextFlags);
-    else if (nextLink) link = nextLink;
+    if (nextTokens) {
+      addFlags(flags, nextTokens.flags);
+      addAttributes(attributes, nextTokens.attributes);
+    } else if (nextLink) link = nextLink;
     else if (nextAssigned) assigned = nextAssigned;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
@@ -755,13 +924,14 @@ export function splitFeatureMeta(text: string): {
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
     ...(flags.length > 0 ? { flags } : {}),
+    ...(attributes.length > 0 ? { attributes } : {}),
   };
 }
 
 /**
- * Lift a scenario's metadata lines — its feature flags, its ticket link and
- * its authorship — off the top of its body, in any order; the rest is the
- * body.
+ * Lift a scenario's metadata lines — its feature flags and custom
+ * attributes, its ticket link and its authorship — off the top of its body,
+ * in any order; the rest is the body.
  */
 export function splitScenarioMeta(text: string): {
   text: string;
@@ -769,24 +939,28 @@ export function splitScenarioMeta(text: string): {
   createdBy?: string;
   updatedBy?: string;
   flags?: FeatureFlag[];
+  attributes?: SpecAttribute[];
 } {
   let rest = text;
   let link: ExternalLink | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
   const flags: FeatureFlag[] = [];
+  const attributes: SpecAttribute[] = [];
   let lifted = false;
   for (;;) {
     const lines = rest.split("\n");
     const at = lines.findIndex((line) => line.trim() !== "");
     if (at === -1) break;
     const line = lines[at]!;
-    const nextFlags = parseFeatureFlagsLine(line);
+    const nextTokens = parseMetadataTokens(line);
     const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
-    if (nextFlags) addFlags(flags, nextFlags);
-    else if (nextLink) link = nextLink;
+    if (nextTokens) {
+      addFlags(flags, nextTokens.flags);
+      addAttributes(attributes, nextTokens.attributes);
+    } else if (nextLink) link = nextLink;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
     else break;
@@ -800,6 +974,7 @@ export function splitScenarioMeta(text: string): {
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
     ...(flags.length > 0 ? { flags } : {}),
+    ...(attributes.length > 0 ? { attributes } : {}),
   };
 }
 
@@ -889,10 +1064,11 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(bodyLines.join("\n").trim());
-      const { text, link, createdBy, updatedBy, flags } = splitScenarioMeta(split.body);
+      const { text, link, createdBy, updatedBy, flags, attributes } = splitScenarioMeta(split.body);
       current.body = text;
       current.tests = split.tests;
       if (flags) current.flags = flags;
+      if (attributes) current.attributes = attributes;
       if (link) current.link = link;
       if (createdBy) current.createdBy = createdBy;
       if (updatedBy) current.updatedBy = updatedBy;
@@ -928,11 +1104,11 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, assigned, createdBy, updatedBy, flags } = splitFeatureMeta(
-    preamble.join("\n").trim(),
-  );
+  const { text: description, link, assigned, createdBy, updatedBy, flags, attributes } =
+    splitFeatureMeta(preamble.join("\n").trim());
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
   if (flags) feature.flags = flags;
+  if (attributes) feature.attributes = attributes;
   if (link) feature.link = link;
   if (assigned) feature.assigned = assigned;
   if (createdBy) feature.createdBy = createdBy;
@@ -966,6 +1142,8 @@ export function serializeFeature(
 ): string {
   const parts = [`# ${feature.name}`];
   if (feature.flags?.length) parts.push(formatFeatureFlags(feature.flags));
+  const featureAttributes = formatAttributeLines(feature.attributes ?? []);
+  if (featureAttributes) parts.push(featureAttributes);
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));
   if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
@@ -974,6 +1152,8 @@ export function serializeFeature(
   for (const s of feature.scenarios) {
     const chunks = [header(s.name, s.version, s.status)];
     if (s.flags?.length) chunks.push(formatFeatureFlags(s.flags));
+    const attributes = formatAttributeLines(s.attributes ?? []);
+    if (attributes) chunks.push(attributes);
     if (links && s.link) chunks.push(formatExternalLink(s.link));
     if (authors && s.createdBy) chunks.push(formatCreatedBy(s.createdBy));
     if (authors && s.updatedBy) chunks.push(formatUpdatedBy(s.updatedBy));
