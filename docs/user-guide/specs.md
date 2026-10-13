@@ -42,7 +42,7 @@ Inside the folder:
 - A **feature** is one file, `<slug>.feature.md`, in any folder. It has a
   name (the `# <name>` heading, independent of the file name), an optional
   description in free markdown, an optional ticket link, an optional
-  assignee, and a list of scenarios.
+  assignee, optional feature flags, and a list of scenarios.
 - A **scenario** is one `## <name> @v<N> [status]` heading plus the markdown
   body under it. Scenarios are **atomic, immutable once published, and
   versioned**: a published scenario never changes, and a change in behaviour
@@ -162,6 +162,11 @@ Under the header, chips summarise the feature:
   title to add another. Without a title a link reads as the Aha! reference
   (`APP-123`) or the Figma file name taken from its url. These links are kept
   with the feature in the app and never written into the `.feature.md`.
+- When **Feature flags** is on, the feature's **flags** show as chips:
+  green when on, red when off. **Edit flags** (or **Add flag**) opens a list
+  with a switch and ✕ per flag, and a name plus an on/off switch to add
+  another already set. Each change is saved on the spot and written into the
+  file as one `[ff:<name>:on|off]` line under the `#` heading.
 
 The **description** is free markdown. Click it to edit; it is saved
 automatically, and **Done** shows it rendered again.
@@ -182,6 +187,8 @@ Each card shows:
   **Show links to automated tests** is on.
 - **Aha!** and **Figma** lists of the scenario's links, when it has any and
   the matching setting is on.
+- The scenario's **feature flags** beside its title, green when on and red
+  when off, when **Feature flags** is on.
 - A **Files** list of the files stored with the scenario, each a download
   with its size.
 - A line saying who **created** the scenario and who **last updated** it.
@@ -248,6 +255,11 @@ Below, in one scrolling column:
   table** appears when the body has none.
 - **Ticket link**: the tracking tool (GitHub, Jira, Linear or Other), id and
   url.
+- **Feature flags** (when switched on in Settings): the flags that gate the
+  scenario, each with an on/off switch and ✕. To add one, type a name
+  (letters, digits, `.`, `_` and `-`), set its switch, and press **Add**.
+  They are saved with the scenario as a `[ff:<name>:on|off]` line under its
+  heading.
 - **Automated tests**: one row per test that automates the scenario. Each
   row has ✎ to edit in place and ✕ to remove. To add one, paste a GitHub url
   that names a line (`…/QuoteTest.java#L32`) and press **Add**; the app reads
@@ -276,7 +288,7 @@ Below, in one scrolling column:
 A **published** scenario opens read-only: the title is fixed, the body is
 shown as source, the scenario table is hidden, and there is no save button,
 because nothing about a published scenario can change. Its ticket link,
-automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
+feature flags, automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
 can attach tests to a scenario long after it was published.
 
 **Delete** asks for confirmation. Deleting a draft or a proposed scenario
@@ -445,6 +457,7 @@ Open Settings with `⌘,` or `g s`.
 | **Show links to automated tests** | Shows or hides the Automated tests table on cards. Hiding never deletes the links. |
 | **Project management** and **Project management tool** | Whether features and scenarios offer a ticket link, and which tracker it names. |
 | **Publish external links** | Writes ticket links into the `.feature.md` file as markdown links. |
+| **Feature flags** | Off by default. On, features and scenarios show their `[ff:<name>:on\|off]` flags as chips (red when off) and the editors add, toggle and remove them. Off hides them; the flag lines stay in the files. |
 | **Aha! links** and **Figma links** | Each off by default. On, features and scenarios offer links to Aha! records or Figma designs. Off hides them; links already added are kept. |
 | **Write authors into feature files** | A setting of the open data folder, not of the device: `"authors-in-markdown": true` in its `project-settings.json`. On, every feature and scenario in the `.feature.md` files carries `**Created by:**` and `**Updated by:**` lines; off (the default), the app still records and shows them, but the markdown leaves them out. Switching it rewrites every feature file at once; the next sync pushes them. |
 | **Assign features to project members** | Adds the assignee chip and the Assignee filter. Members come from `project-settings.json`. |
@@ -507,6 +520,8 @@ On Windows and Linux `⌘` is `Ctrl`.
   scenario, such as `Jira:ABC-123`.
 - **Aha! / Figma link**: a url to the product record or design behind a
   feature or a scenario, kept with the feature in the app only.
+- **Feature flag**: a named on/off switch in the product that gates a feature
+  or a scenario, written `[ff:<name>:on|off]` under its heading.
 - **Member / assignee**: a name from `project-settings.json` that a feature
   can be assigned to.
 - **Publish ring**: the arc on a sidebar feature showing how many of its

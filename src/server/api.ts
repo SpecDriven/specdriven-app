@@ -8,6 +8,7 @@ import {
   needsDataRepo,
   normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
+  normalizeFeatureFlags,
   normalizeResourceLinks,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
@@ -438,6 +439,7 @@ async function stateFields(state: SpecDrivenState) {
     canRunCodex: !isHostedMode() && codexAvailable(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
+    featureFlags: normalizeFeatureFlags(state.featureFlags),
     // The plugins (specs/app/plugins.feature.md): the profile's entries in
     // tab order, then the built-ins it leaves off — what Settings → Plugins
     // lists — with the per-module switches they replaced (`roadmap`,
@@ -549,6 +551,7 @@ const putState: Handler = async (req) => {
     agentFirstResponseSeconds?: number;
     deletePublished?: boolean;
     assignments?: boolean;
+    featureFlags?: boolean;
     /**
      * The profile: the enabled plugins, in tab order; the explicit plugin
      * folders; a data-repo plugin folder to trust from now on.
@@ -583,6 +586,7 @@ const putState: Handler = async (req) => {
     body.agentFirstResponseSeconds === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
+    body.featureFlags === undefined &&
     body.plugins === undefined &&
     body.roadmap === undefined &&
     body.notebook === undefined &&
@@ -596,7 +600,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -835,6 +839,15 @@ const putState: Handler = async (req) => {
     }
     if (body.assignments) state.assignments = true;
     else delete state.assignments;
+  }
+  // Feature flags (specs/app/feature-flags.feature.md): opt-in, the default
+  // OFF an absent key. Off only hides the chips; flag lines stay in the files.
+  if (body.featureFlags !== undefined) {
+    if (typeof body.featureFlags !== "boolean") {
+      return json({ error: "featureFlags must be a boolean" }, 400);
+    }
+    if (body.featureFlags) state.featureFlags = true;
+    else delete state.featureFlags;
   }
   // The profile (specs/app/plugins.feature.md "The profile lists enabled
   // plugins in tab order"): the open data folder's ordered list of enabled

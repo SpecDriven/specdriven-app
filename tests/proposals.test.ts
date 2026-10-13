@@ -101,6 +101,11 @@ describe("building a proposal", () => {
     expect(() => appendScenario(FEATURE, s)).toThrow(/read back/);
   });
 
+  test("a body that would add a feature flag line is refused", () => {
+    expect(() => appendScenario(FEATURE, proposedScenario("Flagged", "[ff:beta:on]\n\n- Then: x"))).toThrow(/read back/);
+    expect(() => newFeatureText("Flagged", "[ff:beta:on]", proposedScenario("A", "- Then: x"))).toThrow(/read back/);
+  });
+
   test("a body that would add a ticket or a test link is refused", () => {
     expect(() =>
       appendScenario(FEATURE, proposedScenario("Ticket", "[Jira:ABC-1](https://x.atlassian.net/browse/ABC-1)\n\n- Then: x")),
