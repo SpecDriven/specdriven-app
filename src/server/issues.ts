@@ -20,7 +20,7 @@ import { isAbsolute, resolve } from "node:path";
 import { getAuth } from "./auth";
 import { DEMO_ISSUES_REPO, isDemoMode } from "./demoMode";
 import { ghAvailable, ghToken } from "./git/gh";
-import { githubApiBase } from "./github";
+import { GITHUB_HOST, githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
 import type { PullRequestState } from "./pullRequests";
@@ -133,7 +133,9 @@ export function parseOriginUrl(config: string): string | null {
 export function githubRepoOfRemote(url: string): GitHubRepo | null {
   const trimmed = url.trim();
   const ssh = trimmed.match(/^ssh:\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/(.+)$/i);
-  return parseGitHubUrl(ssh ? `https://github.com/${ssh[1]}` : trimmed);
+  const repo = parseGitHubUrl(ssh ? `https://github.com/${ssh[1]}` : trimmed);
+  // Issues are read from github.com's API only; an Enterprise remote has none here yet.
+  return repo?.host === GITHUB_HOST ? repo : null;
 }
 
 /** The GitHub repository a local folder pushes to, or null. */

@@ -92,6 +92,24 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
     expect(markup).toContain("switch to another folder first");
   });
 
+  test("a GitHub url shows the folder it is cloned to", () => {
+    const markup = html(
+      <SpecFoldersDialog
+        folders={folders}
+        current="/specs/insurance"
+        dirs={{ "https://github.com/acme/specs": "/Users/me/repos/specs" }}
+        onOpen={noop}
+        onRemove={noop}
+        onAdd={noop}
+        onClose={noop}
+      />,
+    );
+    expect(markup).toContain("Cloned to /Users/me/repos/specs");
+    expect(markup).toContain('title="/Users/me/repos/specs"');
+    // Local folders are already their own path.
+    expect(markup.match(/Cloned to/g)).toHaveLength(1);
+  });
+
   test("offers to open another folder from the file system, and to close", () => {
     const markup = render();
     expect(markup).toContain(">Open another folder…</button>");

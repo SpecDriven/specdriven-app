@@ -36,7 +36,7 @@ const issue = (number: number, extra: Partial<Issue> = {}): Issue => ({
 
 const store: IssuesStore = {
   ...EMPTY_ISSUES,
-  repo: { owner: "acme", name: "app", url: "https://github.com/acme/app" },
+  repo: { url: "https://github.com/acme/app", host: "github.com", owner: "acme", name: "app" },
   issues: [issue(3, { title: "Crash on save", body: "Saving a quote crashes" }), issue(2), issue(1, { title: "Typo" })],
   loaded: true,
 };

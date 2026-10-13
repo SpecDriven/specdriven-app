@@ -262,6 +262,7 @@ export class ProposalService {
       name: user.name || user.login,
       email: user.email,
       id: Number(user.id),
+      host: this.opts.bot.host,
     };
   }
 

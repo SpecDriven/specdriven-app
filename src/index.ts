@@ -16,6 +16,12 @@ import { isProposalsMode } from "./server/proposalsMode";
 import { createEnvBackend, setTokenBackend } from "./server/tokenStore";
 import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
 import { initTelemetry } from "./server/telemetry";
+import { applyProfile } from "./server/profile";
+
+// `--profile <dir>` (src/server/profile.ts): settings, token and clones in a
+// folder of their own — before anything reads where they live.
+const profile = applyProfile();
+if (profile) console.log(`Using the settings folder ${profile} (--profile)`);
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
 // be up before the first sync or API call so nothing escapes the pipeline.

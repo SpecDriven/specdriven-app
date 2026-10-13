@@ -20,6 +20,7 @@ import type { CredentialProvider, IdentityOverride } from "just-git";
 import { getAuth } from "../auth";
 import { DEMO_USER, isDemoMode } from "../demoMode";
 import { readTextFile } from "../fsx";
+import { urlOnHost } from "../github";
 import type { RunResult } from "../run";
 import type { GitBackend } from "./backend";
 import { createGitBackend } from "./cli";
@@ -37,13 +38,16 @@ export function jsGitAvailable(): boolean {
 /**
  * The GitHub token as an HTTPS credential, in the same
  * `x-access-token:<token>` form the system-git engine feeds its credential
- * helper. Signed out there is no credential to offer, and just-git makes the
+ * helper — offered to the sign-in's own host only, so a GitHub Enterprise
+ * token never reaches github.com and the other way round. Signed out, or for
+ * any other host, there is no credential to offer and just-git makes the
  * request anonymously.
  */
 async function credentials(): Promise<CredentialProvider> {
   const auth = await getAuth();
   if (!auth) return () => null;
-  return () => ({ type: "basic", username: "x-access-token", password: auth.token });
+  return (url) =>
+    urlOnHost(url, auth.host) ? { type: "basic", username: "x-access-token", password: auth.token } : null;
 }
 
 /**

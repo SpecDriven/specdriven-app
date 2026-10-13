@@ -154,6 +154,30 @@ test("GET /api/state carries the recent folders, the current one first", async (
   expect(state.recentDataRepos).toEqual(["/specs/b", "/specs/a"]);
 });
 
+test("GET /api/state says where each GitHub url on the list is cloned", async () => {
+  const repos = await mkdtemp(join(tmpdir(), "specdriven-recent-repos-"));
+  const realRepos = process.env.SPECDRIVEN_REPOS_DIR;
+  process.env.SPECDRIVEN_REPOS_DIR = repos;
+  try {
+    await writeState(
+      {
+        dataRepo: "/specs/b",
+        recentDataRepos: ["https://github.com/acme/specs-insurance", "/specs/b"],
+        reloadFrequencySeconds: 0,
+      },
+      root,
+    );
+    // Local folders are their own path; only the url gets an entry.
+    expect((await getState()).recentDataRepoDirs).toEqual({
+      "https://github.com/acme/specs-insurance": join(repos, "specs-insurance"),
+    });
+  } finally {
+    if (realRepos === undefined) delete process.env.SPECDRIVEN_REPOS_DIR;
+    else process.env.SPECDRIVEN_REPOS_DIR = realRepos;
+    await rm(repos, { recursive: true, force: true });
+  }
+});
+
 test("picking folders builds the list, most recent first, and persists it", async () => {
   const a = await dataFolder("a");
   const b = await dataFolder("b");

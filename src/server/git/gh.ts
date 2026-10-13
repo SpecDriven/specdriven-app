@@ -7,8 +7,11 @@
 //
 // With gh installed but signed out there is nothing for it to contribute, so
 // every command falls back to the plain-git context — the machine's own
-// credentials keep working instead of being reset to nothing.
+// credentials keep working instead of being reset to nothing. The app's own
+// sign-in (a pasted token above all) is the person's explicit choice, so it
+// wins over gh's account the same way.
 
+import { getAuth } from "../auth";
 import { run, which } from "../run";
 import type { GitBackend } from "./backend";
 import {
@@ -109,14 +112,15 @@ function credentialHelper(path: string): string {
 }
 
 /**
- * Context for the GitHub CLI engine: gh's credential helper for github.com,
+ * Context for the GitHub CLI engine, unless the app has a sign-in of its own:
+ * gh's credential helper for github.com,
  * scoped to that host so helpers configured for anything else stay untouched
  * (the empty entry resets only github.com's helper list). The gh account
  * authors the commits, the way the app's own sign-in does on the other engine.
  */
 async function ghContext(): Promise<GitContext> {
   const path = ghPath();
-  if (!path || !(await ghSignedIn())) return appContext();
+  if (!path || (await getAuth()) || !(await ghSignedIn())) return appContext();
   const who = await ghAccount();
   return {
     config: [
@@ -146,7 +150,7 @@ function githubSlug(url: string): string | null {
 async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   const path = ghPath();
   const slug = githubSlug(url);
-  if (!path || !slug || !(await ghSignedIn())) return gitClone(git, url, dir);
+  if (!path || !slug || (await getAuth()) || !(await ghSignedIn())) return gitClone(git, url, dir);
   const res = await run(path, ["repo", "clone", slug, dir], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
