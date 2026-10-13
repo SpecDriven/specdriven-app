@@ -4867,6 +4867,20 @@ aside header .collapse-btn {
   font-size: 0.6875rem;
 }
 
+/* An attribute filter's label can be long: it ellipsizes inside the row,
+   the full label in the chip's title. */
+.filter-chips .attribute-filter-chip {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.filter-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The tree's actions on the Features head (src/frontend/ActionIcons.tsx):
    New folder, New feature, Start session — icons where two rows of buttons
    used to be. */
@@ -4933,6 +4947,10 @@ aside header .collapse-btn {
   top: calc(100% + 0.25rem);
   right: 0;
   min-width: 12rem;
+  /* Within the sidebar, which clips: a long attribute entry
+     (specs/app/custom-attributes.feature.md) ellipsizes instead of
+     pushing the menu off its left edge. */
+  max-width: 100%;
 }
 
 .filter-note {

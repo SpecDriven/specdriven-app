@@ -7718,6 +7718,7 @@ export function App() {
                   items: group.items.map((item) => ({
                     id: `attribute-${item.id}`,
                     label: item.label,
+                    title: item.label,
                     checked: sameAttributeFilter(filter.attribute, item.filter),
                     onSelect: () =>
                       setFilter((f) => ({
@@ -7810,11 +7811,13 @@ export function App() {
             {filter.attribute && (
               <button
                 type="button"
-                className="chip on"
+                className="chip on attribute-filter-chip"
                 aria-label="Clear the attribute filter"
+                title={attributeFilterLabel(filter.attribute, attributeDefs)}
                 onClick={() => setFilter((f) => ({ ...f, attribute: null }))}
               >
-                <Tag size={12} aria-hidden="true" /> {attributeFilterLabel(filter.attribute, attributeDefs)}{" "}
+                <Tag size={12} aria-hidden="true" />{" "}
+                <span className="filter-chip-label">{attributeFilterLabel(filter.attribute, attributeDefs)}</span>{" "}
                 <X size={11} aria-hidden="true" />
               </button>
             )}
