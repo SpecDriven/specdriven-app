@@ -14,6 +14,7 @@ import type { Database } from "bun:sqlite";
 import { chown, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { PROFILE_KEY } from "../plugins/profile";
+import { GITHUB_HOST } from "../server/github";
 import { parseGitHubUrl } from "../server/repo";
 import { MAX_RECENT_DATA_REPOS, STATE_DIR, STATE_FILE } from "../server/state";
 
@@ -26,7 +27,9 @@ export function cleanRepos(value: unknown): string[] {
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") continue;
-    const url = parseGitHubUrl(entry)?.url;
+    const repo = parseGitHubUrl(entry);
+    // The hosted app opens github.com repositories only.
+    const url = repo?.host === GITHUB_HOST ? repo.url : null;
     if (!url || out.includes(url)) continue;
     out.push(url);
     if (out.length === MAX_RECENT_DATA_REPOS) break;

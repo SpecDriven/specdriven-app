@@ -8,6 +8,7 @@ import { chmod, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeTextFile } from "./fsx";
+import { GITHUB_HOST } from "./github";
 import { STATE_DIR } from "./state";
 
 /** The signed-in GitHub identity plus its token. */
@@ -17,6 +18,13 @@ export interface TokenRecord {
   name: string | null;
   email: string | null;
   id: number;
+  /**
+   * The GitHub the token belongs to: github.com, or a GitHub Enterprise host
+   * such as github.acme.com or acme.ghe.com. Git hands the token to that
+   * host only. Absent means github.com — every record saved before GitHub
+   * Enterprise, and the ones the hosted gateway and proposals service build.
+   */
+  host?: string;
 }
 
 export interface TokenBackend {
@@ -32,7 +40,8 @@ export function tokenPath(): string {
   return join(process.env.SPECDRIVEN_HOME || join(homedir(), STATE_DIR), TOKEN_FILE);
 }
 
-function parseRecord(raw: string): TokenRecord | null {
+/** A stored record, or null when it is not one; shared with the desktop backend. */
+export function parseRecord(raw: string): TokenRecord | null {
   try {
     const parsed = JSON.parse(raw) as Partial<TokenRecord>;
     if (typeof parsed !== "object" || parsed === null) return null;
@@ -44,6 +53,9 @@ function parseRecord(raw: string): TokenRecord | null {
       name: typeof parsed.name === "string" ? parsed.name : null,
       email: typeof parsed.email === "string" ? parsed.email : null,
       id: typeof parsed.id === "number" ? parsed.id : 0,
+      ...(typeof parsed.host === "string" && parsed.host && parsed.host !== GITHUB_HOST
+        ? { host: parsed.host }
+        : {}),
     };
   } catch {
     return null; // a corrupt token file means signed out, never a crash

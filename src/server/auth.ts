@@ -2,7 +2,9 @@
 // GitHub App: the browser (web application) flow — Settings opens
 // github.com/login/oauth/authorize, GitHub redirects back to this server's
 // callback route — and the device flow, where the user enters a short code
-// at github.com/login/device. Either way the resulting user token is the
+// at github.com/login/device. A third way, for GitHub Enterprise and for
+// anyone the GitHub App does not reach, is a pasted personal access token
+// (signInWithToken). Either way the resulting user token is the
 // HTTPS credential the system-git and built-in engines authenticate with,
 // and the identity that authors data-repo commits. The GitHub CLI engine
 // gets both from gh instead. Tokens are stored through tokenStore
@@ -10,8 +12,9 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import {
+  apiBase,
   CLIENT_ID_PLACEHOLDER,
-  githubApiBase,
+  GITHUB_HOST,
   githubClientId,
   githubClientSecret,
   githubWebBase,
@@ -274,11 +277,12 @@ export function pollWebFlow(): WebPollResult {
 }
 
 /**
- * The GitHub identity a token belongs to. A hidden email falls back to the
- * account's noreply address so commits still attribute to the account.
+ * The GitHub identity a token belongs to, on github.com or a GitHub
+ * Enterprise host. A hidden email falls back to the account's noreply
+ * address so commits still attribute to the account.
  */
-export async function fetchIdentity(token: string): Promise<TokenRecord> {
-  const res = await fetch(`${githubApiBase()}/user`, {
+export async function fetchIdentity(token: string, host: string = GITHUB_HOST): Promise<TokenRecord> {
+  const res = await fetch(`${apiBase(host)}/user`, {
     headers: { ...JSON_HEADERS, Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`GitHub identity lookup failed: HTTP ${res.status}`);
@@ -294,9 +298,28 @@ export async function fetchIdentity(token: string): Promise<TokenRecord> {
     token,
     login: user.login,
     name: user.name ?? null,
-    email: user.email ?? `${id}+${user.login}@users.noreply.github.com`,
+    email: user.email ?? `${id}+${user.login}@users.noreply.${noreplyDomain(host)}`,
     id,
+    ...(host === GITHUB_HOST ? {} : { host }),
   };
+}
+
+/** The domain a host's noreply addresses live under: github.com's, or the Enterprise host's own. */
+function noreplyDomain(host: string): string {
+  return host === GITHUB_HOST ? "github.com" : host.replace(/:\d+$/, "");
+}
+
+/**
+ * Sign in with a personal access token pasted by the person
+ * (specs/ui/app-start.feature.md, git-operations.md "Personal access
+ * token") — the way in for GitHub Enterprise and for anyone the GitHub App
+ * sign-in does not reach. The token is checked against the host's /user
+ * before it is kept.
+ */
+export async function signInWithToken(token: string, host: string = GITHUB_HOST): Promise<TokenRecord> {
+  const identity = await fetchIdentity(token.trim(), host);
+  await saveToken(identity);
+  return identity;
 }
 
 /**

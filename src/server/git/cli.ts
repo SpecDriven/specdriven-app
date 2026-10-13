@@ -19,6 +19,7 @@ import { mkdir, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { getAuth } from "../auth";
 import { writeTextFile } from "../fsx";
+import { GITHUB_HOST, webBase } from "../github";
 import { run, which } from "../run";
 import type { RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
@@ -50,10 +51,11 @@ export function identityConfig(name: string, email: string): string[] {
 }
 
 /**
- * Context for the plain-git engine: signed in, GitHub remotes are rewritten
- * to https, the token is echoed by the only credential helper, and the
- * account authors the commits. The empty helper entry resets helpers
- * inherited from the machine's config. Signed out, git is left alone.
+ * Context for the plain-git engine: signed in, remotes on the sign-in's
+ * GitHub host are rewritten to https, the token is echoed by the only
+ * credential helper for that host, and the account authors the commits. The
+ * empty helper entry resets the host's helpers inherited from the machine's
+ * config; every other host keeps its own. Signed out, git is left alone.
  */
 export async function appContext(): Promise<GitContext> {
   const auth = await getAuth();
@@ -62,6 +64,7 @@ export async function appContext(): Promise<GitContext> {
     auth.token,
     auth.name ?? auth.login,
     auth.email ?? `${auth.login}@users.noreply.github.com`,
+    auth.host,
   );
 }
 
@@ -70,14 +73,16 @@ export async function appContext(): Promise<GitContext> {
  * shape, for callers (the hosted gateway's datastore) that hold a token of
  * their own rather than the app's sign-in.
  */
-export function tokenContext(token: string, name: string, email: string): GitContext {
+export function tokenContext(token: string, name: string, email: string, host: string = GITHUB_HOST): GitContext {
+  const base = webBase(host);
+  const sshHost = host.replace(/:\d+$/, "");
   return {
     config: [
-      "-c", "url.https://github.com/.insteadOf=git@github.com:",
-      "-c", "url.https://github.com/.insteadOf=ssh://git@github.com/",
-      "-c", "credential.helper=",
+      "-c", `url.${base}/.insteadOf=git@${sshHost}:`,
+      "-c", `url.${base}/.insteadOf=ssh://git@${sshHost}/`,
+      "-c", `credential.${base}.helper=`,
       "-c",
-      "credential.helper=!f(){ echo username=x-access-token; echo \"password=$SPECDRIVEN_GIT_TOKEN\"; };f",
+      `credential.${base}.helper=!f(){ echo username=x-access-token; echo "password=$SPECDRIVEN_GIT_TOKEN"; };f`,
       ...identityConfig(name, email),
     ],
     env: { SPECDRIVEN_GIT_TOKEN: token },

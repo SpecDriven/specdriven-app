@@ -6,7 +6,7 @@
 import { safeStorage } from "electron";
 import { readFile, rm } from "node:fs/promises";
 import { writeTextFile } from "../server/fsx";
-import type { TokenBackend, TokenRecord } from "../server/tokenStore";
+import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
 export function safeStorageAvailable(): boolean {
   return safeStorage.isEncryptionAvailable();
@@ -18,7 +18,7 @@ export function createSafeStorageBackend(tokenFile: string): TokenBackend {
     async load() {
       try {
         const encrypted = Buffer.from(await readFile(tokenFile, "utf8"), "base64");
-        return JSON.parse(safeStorage.decryptString(encrypted)) as TokenRecord;
+        return parseRecord(safeStorage.decryptString(encrypted));
       } catch {
         // Missing, corrupt or undecryptable (e.g. keychain reset) reads as
         // signed out — never a startup crash.

@@ -32,7 +32,7 @@ import {
   DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import { ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
+import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
@@ -51,10 +51,12 @@ import {
   handleWebCallback,
   pollDeviceFlow,
   pollWebFlow,
+  signInWithToken,
   signOut,
   startDeviceFlow,
   startWebFlow,
 } from "./auth";
+import { GITHUB_HOST } from "./github";
 import { getCurrentUser } from "./user";
 import { getAppRoot } from "./paths";
 import {
@@ -326,7 +328,7 @@ async function authFields() {
   const gh = ghAvailable() ? await ghAccount() : null;
   return {
     auth: auth
-      ? { signedIn: true, login: auth.login, name: auth.name, email: auth.email }
+      ? { signedIn: true, login: auth.login, name: auth.name, email: auth.email, host: auth.host }
       : { signedIn: false as const },
     gh: {
       available: ghAvailable(),
@@ -398,6 +400,14 @@ function profileSection(state: SpecDrivenState): Record<string, unknown> {
   return section && typeof section === "object" ? (section as Record<string, unknown>) : {};
 }
 
+/** The local clone directory of each GitHub url among `repos`, by url. */
+function cloneDirs(repos: string[]): Record<string, string> {
+  const root = getAppRoot();
+  return Object.fromEntries(
+    repos.filter((r) => parseGitHubUrl(r)).map((r) => [r, dataRepoDir(r, root)]),
+  );
+}
+
 async function stateFields(state: SpecDrivenState) {
   return {
     dataRepo: state.dataRepo ?? null,
@@ -457,6 +467,11 @@ async function stateFields(state: SpecDrivenState) {
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
     recentDataRepos: recentDataRepos(state),
+    // Where each GitHub url on that list is cloned on this computer
+    // (specs/app/spec-folders.feature.md "Manage specification folders"),
+    // which the Spec folders dialog shows under the url. The hosted server's
+    // disk is not the user's, so it reports none.
+    recentDataRepoDirs: isHostedMode() ? {} : cloneDirs(recentDataRepos(state)),
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
@@ -512,7 +527,10 @@ function hostedStateRefusal(body: {
   syncServerUrl?: unknown;
 }): string | null {
   if (!isHostedMode()) return null;
-  if (body.dataRepo !== undefined && (typeof body.dataRepo !== "string" || !parseGitHubUrl(body.dataRepo))) {
+  if (
+    body.dataRepo !== undefined &&
+    (typeof body.dataRepo !== "string" || parseGitHubUrl(body.dataRepo)?.host !== GITHUB_HOST)
+  ) {
     return "The hosted app opens GitHub repositories only — enter a https://github.com/owner/repo url";
   }
   if (body.gitEngine === "gh") return "The GitHub CLI engine is not available in the hosted app";
@@ -1039,6 +1057,33 @@ const postAuthPoll: Handler = async () => {
     return json({ error: (e as Error).message }, 502);
   }
 };
+
+// Personal access token (git-operations.md "Personal access token"): the
+// token is checked against the host's /user and becomes the app's sign-in.
+// The first-run "Clone from GitHub" form and Settings both post here.
+const postAuthToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { token?: unknown; host?: unknown };
+  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+    return json({ error: "Paste a GitHub token" }, 400);
+  }
+  const host = normalizeGitHubHost(body.host);
+  if (!host) return json({ error: "host must be a GitHub host name, like github.com or github.acme.com" }, 400);
+  try {
+    const identity = await signInWithToken(body.token, host);
+    return json({ signedIn: true, login: identity.login, name: identity.name, email: identity.email, host });
+  } catch {
+    return json({ error: "GitHub did not accept this token — check it and its expiry" }, 400);
+  }
+};
+
+/** A posted GitHub host: github.com when absent, a bare `name[:port]` otherwise; null when malformed. */
+function normalizeGitHubHost(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return GITHUB_HOST;
+  if (typeof value !== "string") return null;
+  const host = value.trim().toLowerCase().replace(/^https:\/\//, "").replace(/\/+$/, "");
+  if (host === "www.github.com") return GITHUB_HOST;
+  return /^[a-z0-9.-]+(:\d+)?$/.test(host) ? host : null;
+}
 
 const deleteAuth: Handler = async () => {
   await signOut();
@@ -2236,6 +2281,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/auth/github/web/start", unlessHosted(unlessDemo(postAuthWebStart))],
   ["POST", "/api/auth/github/web/poll", unlessHosted(unlessDemo(postAuthWebPoll))],
   ["GET", "/api/auth/github/callback", unlessHosted(unlessDemo(getAuthWebCallback))],
+  ["POST", "/api/auth/github/token", unlessHosted(unlessDemo(postAuthToken))],
   ["DELETE", "/api/auth/github", unlessHosted(unlessDemo(deleteAuth))],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
