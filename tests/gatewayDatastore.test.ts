@@ -19,6 +19,7 @@ import {
   readDatastoreConfig,
 } from "../src/gateway/datastore";
 import { openDatabase } from "../src/gateway/db";
+import { RecentRepos } from "../src/gateway/repos";
 import { SecretStore } from "../src/gateway/secrets";
 import { SESSION_IDLE_MS, Sessions } from "../src/gateway/sessions";
 import { tokenContext, type GitRun } from "../src/server/git/cli";
@@ -82,13 +83,14 @@ test("the token reaches git through the credential helper's environment, not arg
   expect(context.config.some((c) => c.includes("password=$SPECDRIVEN_GIT_TOKEN"))).toBe(true);
 });
 
-test("a snapshot read into a fresh database gives back accounts, roles, allowed emails, secrets that still open, and live sessions", async () => {
+test("a snapshot read into a fresh database gives back accounts, roles, allowed emails, secrets that still open, recent repos and live sessions", async () => {
   const keyring = await loadKeyring({ SPECDRIVEN_MASTER_KEY: generateMasterKey() });
   const db = openDatabase(":memory:");
   addUser(db, A, "a@example.com");
   db.query("UPDATE users SET role = 'admin' WHERE id = ?").run(A);
   db.query("INSERT INTO allowed_emails (email, added_by, created_at) VALUES (?, ?, ?)").run("c@example.com", A, NOW);
   await new SecretStore(db, keyring, () => NOW).put(A, "anthropic", "agent_key", "sk-a");
+  new RecentRepos(db, () => NOW).set(A, ["https://github.com/o/specs", "https://github.com/o/older"]);
   const sessions = new Sessions(db, () => NOW);
   const live = sessions.create(A, { ip: "203.0.113.9", userAgent: "Browser" });
   const old = sessions.create(A);
@@ -109,6 +111,7 @@ test("a snapshot read into a fresh database gives back accounts, roles, allowed 
   ]);
   expect(copy.query("SELECT email, added_by FROM allowed_emails").all()).toEqual([{ email: "c@example.com", added_by: A }]);
   expect((await new SecretStore(copy, keyring).values(A)).agentKeys).toEqual({ anthropic: "sk-a" });
+  expect(new RecentRepos(copy).get(A)).toEqual(["https://github.com/o/specs", "https://github.com/o/older"]);
   const restored = new Sessions(copy, () => later);
   const survivors = [live, old].filter((token) => restored.lookup(token));
   expect(survivors).toHaveLength(1);
