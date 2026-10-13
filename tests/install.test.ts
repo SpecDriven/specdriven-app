@@ -785,7 +785,7 @@ test("a failed `bun install` is reported the same way", async () => {
 // `git archive` follows nothing: a tracked symlink is archived as a symlink,
 // and one that points outside the repo unpacks dangling — as does one into a
 // submodule, which the archive carries as an empty folder. `specs` is such a
-// link (into the specs-specdriven submodule), and a dangling path in the tree
+// link (the spec repo lives beside this one), and a dangling path in the tree
 // stops `bun run build:desktop` — electron-builder stats everything under the
 // project. Those links, and the submodules, belong in .gitattributes as
 // `export-ignore`.

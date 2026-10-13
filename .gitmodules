@@ -1,4 +1,0 @@
-[submodule "specs-specdriven"]
-	path = specs-specdriven
-	url = https://github.com/SpecDriven/specs-specdriven.git
-	branch = main
