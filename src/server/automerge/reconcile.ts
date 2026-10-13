@@ -7,8 +7,11 @@
 import * as A from "@automerge/automerge";
 import { randomUUID } from "node:crypto";
 import {
+  attributesKey,
   featureFlagsKey,
+  plainAttributes,
   plainFeatureFlags,
+  splitScenarioMeta,
   type ExternalLink,
   type Feature,
   type FeatureFlag,
@@ -18,6 +21,7 @@ import {
   type ScenarioFile,
   type ScenarioPick,
   type ScenarioTarget,
+  type SpecAttribute,
 } from "../parser";
 import type { ResourceLinkKind } from "../resourceLinks";
 import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
@@ -39,6 +43,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
     description: feature.description,
     specs: feature.scenarios.map((s) => newEntry(s, author)),
     ...(feature.flags?.length ? { flags: plainFeatureFlags(feature.flags)! } : {}),
+    ...(feature.attributes?.length ? { attributes: plainAttributes(feature.attributes)! } : {}),
     ...(feature.link ? { link: { ...feature.link } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
@@ -61,6 +66,7 @@ function newEntry(s: Scenario, author?: string): SpecEntry {
     ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
     tests: [...s.tests],
     ...(s.flags?.length ? { flags: plainFeatureFlags(s.flags)! } : {}),
+    ...(s.attributes?.length ? { attributes: plainAttributes(s.attributes)! } : {}),
     ...(s.link ? { link: { ...s.link } } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -121,6 +127,21 @@ function assignFlags(
   else delete target.flags;
 }
 
+/**
+ * Set or clear an `attributes` key on a doc map: replaced whole, like the
+ * flags (specs/app/custom-attributes.feature.md).
+ */
+function assignAttributes(
+  target: { attributes?: SpecAttribute[] },
+  before: SpecAttribute[] | undefined,
+  after: SpecAttribute[] | undefined,
+): void {
+  if (attributesKey(before) === attributesKey(after)) return;
+  const attributes = plainAttributes(after);
+  if (attributes) target.attributes = attributes;
+  else delete target.attributes;
+}
+
 const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
   a.name === b.name && a.version === b.version;
 
@@ -138,11 +159,22 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
  * assertPublishedUnchanged in features.ts, checked here so a drifted markdown
  * file can never rewrite published history through the reconciliation door.
  */
+/**
+ * Whether a published scenario's body survives in the target: unchanged, or
+ * the recorded body with the metadata lines an older build kept as text read
+ * off its top — a flag or attribute line published before the parser lifted
+ * it (specs/app/custom-attributes.feature.md). Without the second reading a
+ * body recorded that way would refuse every later save of its feature.
+ */
+function keptBody(body: string, recorded: string): boolean {
+  return body === recorded || body === splitScenarioMeta(recorded).text;
+}
+
 export function assertPublishedKept(doc: A.Doc<FeatureDoc>, target: Feature): void {
   for (const entry of doc.specs) {
     if (entry.status !== "published") continue;
     const match = target.scenarios.find((s) => sameScenario(entry, s));
-    if (!match || match.status !== "published" || match.body !== effectiveBody(entry)) {
+    if (!match || match.status !== "published" || !keptBody(match.body, effectiveBody(entry))) {
       throw new Error(`Scenario "${entry.name}" @v${entry.version} is published and immutable`);
     }
   }
@@ -205,6 +237,7 @@ export function reconcile(
     tests: [...e.tests],
     ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
     ...(e.flags?.length ? { flags: plainFeatureFlags(e.flags)! } : {}),
+    ...(e.attributes?.length ? { attributes: plainAttributes(e.attributes)! } : {}),
   }));
   // Read before any key is assigned below — schema.ts keeps them optional.
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
@@ -213,6 +246,7 @@ export function reconcile(
     : undefined;
   const docAssigned = doc.assigned;
   const docFlags = plainFeatureFlags(doc.flags);
+  const docAttributes = plainAttributes(doc.attributes);
   const matchAt = new Map<number, Scenario>();
   const matched = new Set<Scenario>();
   const claim = (candidate: (s: Scenario, i: number) => boolean) => {
@@ -256,7 +290,8 @@ export function reconcile(
     effectiveBody(entry) !== match.body ||
     entry.tests.join("\n") !== match.tests.join("\n") ||
     linkKey(entry.link) !== linkKey(match.link) ||
-    featureFlagsKey(entry.flags) !== featureFlagsKey(match.flags);
+    featureFlagsKey(entry.flags) !== featureFlagsKey(match.flags) ||
+    attributesKey(entry.attributes) !== attributesKey(match.attributes);
   const changedAt = new Set<number>();
   for (const [i, match] of matchAt) if (entryChanged(entries[i]!, match)) changedAt.add(i);
   const removed = entries.some((e, i) => !matchAt.has(i) && e.status !== "draft");
@@ -265,6 +300,7 @@ export function reconcile(
     doc.description !== target.description ||
     linkKey(docLink) !== linkKey(target.link) ||
     featureFlagsKey(docFlags) !== featureFlagsKey(target.flags) ||
+    attributesKey(docAttributes) !== attributesKey(target.attributes) ||
     (docAssigned ?? "") !== (target.assigned ?? "") ||
     changedAt.size > 0 ||
     removed ||
@@ -277,6 +313,7 @@ export function reconcile(
     }
     assignLink(d, docLink, target.link);
     assignFlags(d, docFlags, target.flags);
+    assignAttributes(d, docAttributes, target.attributes);
     // The assignment is one member, not text to merge — replaced whole, the
     // same way on every peer (src/server/members.ts).
     if ((docAssigned ?? "") !== (target.assigned ?? "")) {
@@ -306,6 +343,7 @@ export function reconcile(
       }
       assignLink(live, entry.link, match.link);
       assignFlags(live, entry.flags, match.flags);
+      assignAttributes(live, entry.attributes, match.attributes);
       const before = authorsAt[i]!;
       const holder = { ...before };
       assignAuthors(holder, match, changedAt.has(i) ? author : undefined);

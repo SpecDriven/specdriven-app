@@ -1,5 +1,7 @@
 # Quote Auto Policy
 
+[line:auto]
+
 Rating and quoting for personal auto. A prospect answers a short
 questionnaire and receives a premium they can later bind
 (bind-policy.feature.md).
@@ -20,6 +22,9 @@ questionnaire and receives a premium they can later bind
 
 ## Basic auto quote @v2 [proposed]
 
+[br:good-driver-discount:on] [br:good-driver-lookback-years:5]
+[br-sub:good-driver-discount:percent:15]
+
 Adds the good-driver discount to v1.
 
 - **Given** a prospect provides a vehicle, its primary driver, and a garaging ZIP code
@@ -30,6 +35,8 @@ Adds the good-driver discount to v1.
 
 ## Decline high-risk driver @v1 [published]
 
+[br:max-at-fault-accidents:3]
+
 - **Given** a prospect's driving record shows 3 or more at-fault accidents in the past 3 years
 - **When** the prospect requests a quote
 - **Then** no quote is offered
@@ -38,6 +45,8 @@ Adds the good-driver discount to v1.
 [test: declineHighRiskDriver : https://github.com/SpecDriven/insurance-cap-java/blob/main/srv/src/test/java/com/acme/insurance/policy/QuoteAutoPolicyTest.java#L78 ]
 
 ## Quote expires after 30 days @v1 [proposed]
+
+[br:quote-validity-days:30]
 
 - **Given** a quote was issued 31 days ago
 - **When** the prospect tries to bind it

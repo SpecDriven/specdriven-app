@@ -20,6 +20,14 @@ The one change the verification led to under `src/` is the fix for H2's
 published case (REPORT.md section 2): `schema.ts` `publishedBody`,
 `effectiveBody`, `reconcile.ts` `healPublished`, mirrored here.
 
+Not mirrored yet: `assertPublishedKept` (T10) also accepts a target body
+equal to the recorded body with its leading metadata lines read off
+(`reconcile.ts` `keptBody`, specs/app/custom-attributes.feature.md). A body
+an older build published with a flag or attribute line still in its text
+would otherwise refuse every later save of its feature. The model's gate is
+the strict one, so T10 holds for every body that does not start with such a
+line; the differential vectors never generate one.
+
 ## Layout
 
 ```

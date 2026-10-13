@@ -138,6 +138,19 @@ describe("the listing keeps what the open feature holds", () => {
     expect(withOpenScenarios(all, nav.fileName, live)).toBe(all);
   });
 
+  // specs/app/custom-attributes.feature.md: the attribute filter sees an edit before the refresh does.
+  test("custom attributes changed in the open feature carry over too", () => {
+    const rule = { key: "br", names: ["max-claims"], value: "3" };
+    const live = {
+      ...openFeature([{ ...sc("open a feature link", 1), attributes: [rule] }, sc("open a scenario link", 1), sc("share a link", 2, "published")]),
+      attributes: [{ key: "line", names: [], value: "auto" }],
+    };
+    const next = withOpenScenarios(all, nav.fileName, live)[0]!;
+    expect(next.scenarios[0]!.attributes).toEqual([rule]);
+    expect(next.scenarios[1]!.attributes).toBeUndefined();
+    expect(next.attributes).toEqual([{ key: "line", names: [], value: "auto" }]);
+  });
+
   test("a file the listing does not hold yet leaves it as it is", () => {
     expect(withOpenScenarios(all, "specs/new.feature.md", openFeature([sc("x", 1)]))).toBe(all);
   });

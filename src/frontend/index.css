@@ -4867,6 +4867,20 @@ aside header .collapse-btn {
   font-size: 0.6875rem;
 }
 
+/* An attribute filter's label can be long: it ellipsizes inside the row,
+   the full label in the chip's title. */
+.filter-chips .attribute-filter-chip {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.filter-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The tree's actions on the Features head (src/frontend/ActionIcons.tsx):
    New folder, New feature, Start session — icons where two rows of buttons
    used to be. */
@@ -4933,6 +4947,10 @@ aside header .collapse-btn {
   top: calc(100% + 0.25rem);
   right: 0;
   min-width: 12rem;
+  /* Within the sidebar, which clips: a long attribute entry
+     (specs/app/custom-attributes.feature.md) ellipsizes instead of
+     pushing the menu off its left edge. */
+  max-width: 100%;
 }
 
 .filter-note {
@@ -7948,6 +7966,170 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   min-width: 22rem;
   left: auto;
   right: 0;
+}
+
+/* Custom attributes (specs/app/custom-attributes.feature.md): a chip per
+   attribute on the feature header and in a row under a scenario card's
+   title — its label, its names and its value. */
+.attribute-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  vertical-align: middle;
+}
+
+.scenario-attributes {
+  margin: 0.25rem 0 0.4rem;
+}
+
+.chip.attribute {
+  gap: 0.35rem;
+}
+
+.chip.attribute .attribute-label {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.chip.attribute .attribute-names {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.chip.attribute .attribute-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: 600;
+}
+
+/* With definitions: an on value green and an off one red, as the flags
+   read; one that does not fit its definition amber, the reason in its
+   title. */
+.chip.attribute.on {
+  color: var(--status-published);
+  border-color: currentColor;
+}
+
+.chip.attribute.off {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.chip.attribute.warning {
+  color: var(--status-proposed);
+  background: color-mix(in srgb, var(--status-proposed) 14%, transparent);
+  border-color: currentColor;
+}
+
+/* The field that edits them, in the scenario editor and the header's
+   popover: a row per attribute and an add row, laid out like the flags'. */
+.attributes-field-wrap,
+.attributes-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.attribute-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.attribute-list li,
+.attribute-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.attribute-row-label {
+  font-weight: 600;
+}
+
+.attribute-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.attribute-list input,
+.attribute-list select,
+.attribute-add input,
+.attribute-add select {
+  font-size: 0.8125rem;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+.attribute-add input {
+  width: 9rem;
+}
+
+.attribute-problem {
+  color: var(--status-proposed);
+  font-size: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.chip-popover.attributes-popover {
+  min-width: 28rem;
+}
+
+/* Settings → Custom attributes: the definitions file, its problems and a
+   summary of what it defines. */
+.custom-attributes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.custom-attributes-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: 0.5rem 0.65rem;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.custom-attributes-text[aria-invalid="true"] {
+  border-color: var(--status-proposed);
+}
+
+.custom-attributes-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  opacity: 0.8;
+}
+
+.custom-attributes-status.has-problems {
+  color: var(--status-proposed);
+  opacity: 1;
+}
+
+.custom-attributes-problems,
+.custom-attributes-summary {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.custom-attributes-editor > button {
+  align-self: flex-start;
 }
 
 /* Add a task to Google Calendar (specs/app/tasks.feature.md): the calendar
