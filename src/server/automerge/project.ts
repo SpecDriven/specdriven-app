@@ -29,6 +29,7 @@
 
 import type * as A from "@automerge/automerge";
 import {
+  plainFeatureFlags,
   serializeFeature,
   sortScenarios,
   type ExternalLink,
@@ -122,8 +123,10 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
         const aha = plainResources(s.aha);
         const figma = plainResources(s.figma);
         const files = plainFiles(s.files);
+        const flags = plainFeatureFlags(s.flags);
         return {
           ...scenario,
+          ...(flags ? { flags } : {}),
           ...(link ? { link } : {}),
           ...(prs ? { prs } : {}),
           ...(aha ? { aha } : {}),
@@ -135,6 +138,8 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
       }),
     ),
   };
+  const flags = plainFeatureFlags(doc.flags);
+  if (flags) feature.flags = flags;
   const link = plainLink(doc.link);
   if (link) feature.link = link;
   const prs = plainPrs(doc.prs);

@@ -14,6 +14,7 @@ import {
 } from "../server/parser";
 import type {
   Feature,
+  FeatureFlag,
   PullRequestLink,
   ResourceLink,
   Scenario,
@@ -45,6 +46,7 @@ import {
   FileText,
   FolderInput,
   GitPullRequest,
+  Flag,
   Home,
   Keyboard,
   Link,
@@ -134,6 +136,7 @@ import {
 } from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
+import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
@@ -446,7 +449,7 @@ function scenarioTarget(s: Scenario): ScenarioTarget {
  */
 export function scenarioSignature(s: Scenario, version: number): string {
   // The name as a save writes it: a stray space is nothing new to save.
-  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null]);
+  return JSON.stringify([savedScenarioName(s), version, s.status, s.body, s.tests, s.link ?? null, s.flags ?? null]);
 }
 
 /**
@@ -1337,6 +1340,9 @@ export function App() {
   // Feature assignment (src/server/members.ts): opt-in — the "Assigned"
   // dropdown shows only once the Settings switch turns assignments on.
   const [assignments, setAssignments] = useState(false);
+  // Feature flags (specs/app/feature-flags.feature.md): opt-in — the flag
+  // chips and editors show only once the Settings switch turns them on.
+  const [featureFlags, setFeatureFlags] = useState(false);
   // The plugins (specs/app/plugins.feature.md) as `GET /api/state` lists
   // them: the profile's entries in tab order, then the built-ins it leaves
   // off — what Settings → Plugins renders, each with its switch. Every
@@ -1401,6 +1407,7 @@ export function App() {
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
+  const [settingsFeatureFlagsDraft, setSettingsFeatureFlagsDraft] = useState(false);
   const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
@@ -1432,6 +1439,7 @@ export function App() {
   /** The feature's "Pull requests" popover
       (specs/external-links/related-pull-requests.feature.md). */
   const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
+  const [featureFlagsOpen, setFeatureFlagsOpen] = useState(false);
   /** The feature's Aha! or Figma popover, whichever is open
       (specs/external-links/aha-and-figma-links.feature.md). */
   const [featureResourceOpen, setFeatureResourceOpen] = useState<ResourceLinkKind | null>(null);
@@ -1609,6 +1617,9 @@ export function App() {
         }
         if (typeof state.assignments === "boolean") {
           setAssignments(state.assignments);
+        }
+        if (typeof state.featureFlags === "boolean") {
+          setFeatureFlags(state.featureFlags);
         }
         setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
         setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
@@ -3618,6 +3629,7 @@ export function App() {
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
+    setSettingsFeatureFlagsDraft(featureFlags);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
@@ -3791,6 +3803,7 @@ export function App() {
     setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
+    setFeatureFlags(data.featureFlags === true);
     // The profile's plugins mount and unmount to match, in its order — a
     // tab appears, goes or moves before this returns (src/plugins/client/
     // loader.ts).
@@ -4030,6 +4043,11 @@ export function App() {
     if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
   };
 
+  const toggleFeatureFlags = async (on: boolean) => {
+    setSettingsFeatureFlagsDraft(on);
+    if (!(await patchSettings({ featureFlags: on }))) setSettingsFeatureFlagsDraft(!on);
+  };
+
   // The profile (specs/app/plugins.feature.md "Turning a plugin off unwinds
   // everything it registered", "The profile lists enabled plugins in tab
   // order"): Settings → Plugins edits the ordered list of enabled plugins
@@ -4112,6 +4130,37 @@ export function App() {
    * is saved like any scenario edit — locally, marked [proposed] where
    * applicable, pushed by the reload cron — with the link set or cleared.
    */
+  /**
+   * The feature's own flags (specs/app/feature-flags.feature.md), saved on
+   * the spot from the header's popover — written into the `.feature.md` like
+   * the ticket link.
+   */
+  const saveFeatureFlags = async (flags: FeatureFlag[]) => {
+    if (!feature || !selected) return;
+    const { flags: _previous, ...rest } = feature;
+    const next: Feature = flags.length > 0 ? { ...rest, flags } : rest;
+    setFeature(next);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        markSaved();
+      } else {
+        setFeature(feature);
+        toast.error(data.error ?? "Could not save the feature flags");
+      }
+    } catch {
+      setFeature(feature);
+      toast.error("Could not save the feature flags — is the server running?");
+    }
+  };
+
   const saveFeatureLink = async () => {
     if (!feature || !selected || featureLinkDraft === null) return;
     const resolved = resolveLinkDraft(featureLinkDraft);
@@ -5245,6 +5294,7 @@ export function App() {
     conflict !== null ||
     featureLinkOpen ||
     featurePrsOpen ||
+    featureFlagsOpen ||
     sessionError !== null ||
     sheetOpen ||
     palette !== null;
@@ -5366,6 +5416,7 @@ export function App() {
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
+    if (featureFlagsOpen) return setFeatureFlagsOpen(false);
     if (featureResourceOpen) return setFeatureResourceOpen(null);
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
@@ -6467,6 +6518,36 @@ export function App() {
             </span>
           </label>
         )}
+        {/* specs/app/feature-flags.feature.md: opt-in — with the switch
+            off no flag chips or editors show, and the `[ff:…]` lines
+            already in feature files stay as written. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Feature flags
+            <span className="settings-row-hint">
+              {settingsFeatureFlagsDraft ? (
+                <>
+                  Features and scenarios show the flags that gate them, written <code>[ff:name:on|off]</code>{" "}
+                  under their heading, and the editors add, toggle and remove them.
+                </>
+              ) : (
+                <>
+                  Flags are hidden; any <code>[ff:…]</code> line already in a feature file stays there.
+                </>
+              )}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Feature flags"
+              checked={settingsFeatureFlagsDraft}
+              onChange={(e) => void toggleFeatureFlags(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
       </PageSection>
       <PageSection
         id="settings-project"
@@ -7918,6 +7999,21 @@ export function App() {
                   />
                 </div>
               )}
+              {/* specs/app/feature-flags.feature.md: the flags gating this
+                  scenario, saved with it. Editable on a published scenario
+                  too — like the ticket link, bookkeeping around the spec. */}
+              {featureFlags && (
+                <div className="feature-flags-field-wrap">
+                  <span className="field-label">Feature flags</span>
+                  <FeatureFlagsField
+                    flags={editing.scenario.flags ?? []}
+                    onChange={(flags) => {
+                      const { flags: _previous, ...rest } = editing.scenario;
+                      setEditing({ ...editing, scenario: flags.length > 0 ? { ...rest, flags } : rest });
+                    }}
+                  />
+                </div>
+              )}
               {showTestLinks && (
                 <div className="tests-field">
                   <span className="field-label">Automated tests</span>
@@ -8476,6 +8572,48 @@ export function App() {
                   </div>
                 </Popover>
               </span>
+              {/* specs/app/feature-flags.feature.md: the flags gating the
+                  feature as a whole, a chip each, and a chip whose popover
+                  adds, toggles and removes them — saved on the spot. Only
+                  while Settings turns feature flags on. The edit chip comes
+                  first, so adding a flag never moves the popover's anchor. */}
+              {featureFlags && (
+                <span className="chip-anchor feature-flags-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.flags?.length ? "" : " muted"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={featureFlagsOpen}
+                    onClick={() => setFeatureFlagsOpen((open) => !open)}
+                  >
+                    <Flag size={14} aria-hidden="true" />
+                    {feature.flags?.length ? "Edit flags" : "Add flag"}
+                  </button>
+                  <Popover
+                    open={featureFlagsOpen}
+                    onClose={() => setFeatureFlagsOpen(false)}
+                    label="Feature flags for this feature"
+                    className="chip-popover feature-flags-popover"
+                    containerSelector=".feature-flags-anchor"
+                  >
+                    <p className="hint">
+                      The feature flags gating this feature, written <code>[ff:name:on|off]</code> under its
+                      heading.
+                    </p>
+                    <FeatureFlagsField
+                      flags={feature.flags ?? []}
+                      autoFocus
+                      onChange={(flags) => saveFeatureFlags(flags)}
+                    />
+                    <div className="dialog-actions">
+                      <button type="button" className="secondary" onClick={() => setFeatureFlagsOpen(false)}>
+                        Close
+                      </button>
+                    </div>
+                  </Popover>
+                </span>
+              )}
+              {featureFlags && <FeatureFlagChips flags={feature.flags} />}
               {/* specs/external-links/aha-and-figma-links.feature.md "Link
                   Aha! and Figma to a feature": a chip per tool switched on
                   in Settings, counting the feature's links; the popover
@@ -8665,6 +8803,8 @@ export function App() {
                           {externalLinkLabel(s.link)}
                         </a>
                       )}
+                      {/* The flags gating it (specs/app/feature-flags.feature.md). */}
+                      {featureFlags && <FeatureFlagChips flags={s.flags} />}
                     </span>
                     <span className="card-actions">
                       {/* Edit up front, the rest behind ⋯ — Publish or New

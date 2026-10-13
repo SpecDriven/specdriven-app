@@ -11,6 +11,7 @@ import type { ImmutableString } from "@automerge/automerge";
 import type {
   EntryKind,
   ExternalLink,
+  FeatureFlag,
   PullRequestLink,
   ResourceLink,
   ScenarioFile,
@@ -101,6 +102,13 @@ export type SpecEntry = {
    */
   createdBy?: string;
   updatedBy?: string;
+  /**
+   * The feature flags gating this spec (specs/app/feature-flags.feature.md),
+   * in written order. Set whole, like `link`: they are bookkeeping around
+   * the spec, editable while it is published, and concurrent edits resolve
+   * to one list rather than a mix of two. Optional key, no migration.
+   */
+  flags?: FeatureFlag[];
 };
 
 /** The recorded published body as a plain string, or undefined when the entry
@@ -153,6 +161,8 @@ export type FeatureDoc = {
    */
   createdBy?: string;
   updatedBy?: string;
+  /** The feature flags gating the feature as a whole (see SpecEntry.flags). */
+  flags?: FeatureFlag[];
 };
 
 // Page documents — the roadmap folder's (specs/app/roadmap.feature.md) and
