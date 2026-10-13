@@ -5,12 +5,23 @@
 // without a new version.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { reloader } from "../src/server/api";
+import { handleApi, reloader } from "../src/server/api";
+import {
+  CUSTOM_ATTRIBUTES_FILE,
+  EXAMPLE_ATTRIBUTE_DEFINITIONS,
+  parseAttributeDefinitions,
+} from "../src/server/customAttributes";
+import { readCustomAttributes, writeCustomAttributes } from "../src/server/customAttributesFile";
+import { conflictedFiles } from "../src/server/git";
+import { syncDataDir } from "../src/server/reload";
+import { writeState } from "../src/server/state";
+import { twoClones } from "./helpers/fixtures";
 import {
   createFeature,
+  listFeatures,
   publishFeature,
   readFeature,
   readFeatureView,
@@ -210,20 +221,31 @@ test("a published body recorded with its attribute line still in it does not blo
 });
 
 let root: string;
+let home: string;
 let data: string;
 const realRoot = process.env.SPECDRIVEN_ROOT;
+const realHome = process.env.SPECDRIVEN_HOME;
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-custom-attributes-"));
+  // An empty home keeps the developer's own settings file out of the test.
+  home = await mkdtemp(join(tmpdir(), "specdriven-custom-attributes-home-"));
   process.env.SPECDRIVEN_ROOT = root;
+  process.env.SPECDRIVEN_HOME = home;
   data = join(root, "data");
 });
 
 afterEach(async () => {
   reloader.stop();
   await rm(root, { recursive: true, force: true });
-  if (realRoot === undefined) delete process.env.SPECDRIVEN_ROOT;
-  else process.env.SPECDRIVEN_ROOT = realRoot;
+  await rm(home, { recursive: true, force: true });
+  for (const [name, value] of [
+    ["SPECDRIVEN_ROOT", realRoot],
+    ["SPECDRIVEN_HOME", realHome],
+  ] as const) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
 });
 
 test("an attribute on a published scenario changes without a new version", async () => {
@@ -258,4 +280,76 @@ test("a draft's attributes reach the editor from the document", async () => {
   await saveFeature(data, file, "# Quote\n\n## Basic @v1 [draft]\n\n[line:boat]\n\nbody\n");
   const view = (await readFeatureView(data, file))!;
   expect(view.parsed.scenarios[0]!.attributes).toEqual([{ key: "line", names: [], value: "boat" }]);
+});
+
+const put = async (body: unknown) =>
+  (await handleApi(
+    new Request("http://localhost/api/custom-attributes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  ))!;
+
+test("the definitions are read with the listing and written by Settings", async () => {
+  await mkdir(data, { recursive: true });
+  await writeState({ dataRepo: data }, root);
+  const listing = async () =>
+    (await (await handleApi(new Request("http://localhost/api/features")))!.json()) as {
+      customAttributes: string;
+    };
+  expect((await listing()).customAttributes).toBe("");
+  const res = await put({ content: EXAMPLE_ATTRIBUTE_DEFINITIONS });
+  expect(res.status).toBe(200);
+  expect(await readFile(join(data, CUSTOM_ATTRIBUTES_FILE), "utf8")).toBe(EXAMPLE_ATTRIBUTE_DEFINITIONS);
+  expect((await listing()).customAttributes).toBe(EXAMPLE_ATTRIBUTE_DEFINITIONS);
+  // Saved even with problems: a broken definition is only left out where it is read.
+  expect((await put({ content: "[br:on||off]\n" })).status).toBe(200);
+  expect((await put({})).status).toBe(400);
+  expect((await put({ content: "#".repeat(64 * 1024 + 1) })).status).toBe(400);
+});
+
+test("a save folds in a disk edit Settings has not shown", async () => {
+  await mkdir(data, { recursive: true });
+  const base = "[br:<rule>:on|off]\n";
+  await writeCustomAttributes(data, base);
+  // A teammate's definition arrives on disk; Settings, still on the base, adds its own.
+  await writeFile(join(data, CUSTOM_ATTRIBUTES_FILE), `# from a teammate\n${base}`);
+  const written = await writeCustomAttributes(data, `${base}[line:auto|home]\n`, base);
+  expect(written).toBe(`# from a teammate\n${base}[line:auto|home]\n`);
+  expect(await readCustomAttributes(data)).toBe(written);
+});
+
+test("the listing carries the feature's and the scenarios' attributes", async () => {
+  await createFeature(data, "Quote");
+  await saveFeature(data, "specs/quote.feature.md", RULED);
+  const [listed] = await listFeatures(data);
+  expect(listed!.attributes?.map(formatAttribute)).toEqual([
+    "[br:young-driver-surcharge:on]",
+    "[br:max-claims:3]",
+    "[line:auto]",
+  ]);
+  expect(listed!.scenarios[0]!.attributes?.map(formatAttribute)).toEqual([
+    "[br:young-driver-surcharge:on]",
+    "[br-sub:young-driver-surcharge:under-21:1.5]",
+  ]);
+});
+
+test("two teammates adding definitions at once merge on the next sync", async () => {
+  const base = "[br:<rule>:on|off]\n";
+  const { a, b } = await twoClones(join(root, "clones"), { [CUSTOM_ATTRIBUTES_FILE]: base });
+  // Both append at the end, so git cannot merge the two lines on its own.
+  await writeFile(join(a, CUSTOM_ATTRIBUTES_FILE), `${base}[line:auto|home]\n`);
+  await writeFile(join(b, CUSTOM_ATTRIBUTES_FILE), `${base}[claims:<n:number>]\n`);
+  await syncDataDir(a);
+  // The first tick commits b's edit, the second pulls a's and merges the two.
+  await syncDataDir(b);
+  await syncDataDir(b);
+  expect(await conflictedFiles(b)).toEqual([]);
+  const merged = await readFile(join(b, CUSTOM_ATTRIBUTES_FILE), "utf8");
+  expect(merged).not.toContain("<<<<<<<");
+  expect(parseAttributeDefinitions(merged).list.map((d) => d.key).sort()).toEqual(["br", "claims", "line"]);
+  // And a gets the same file back.
+  await syncDataDir(a);
+  expect(await readFile(join(a, CUSTOM_ATTRIBUTES_FILE), "utf8")).toBe(merged);
 });

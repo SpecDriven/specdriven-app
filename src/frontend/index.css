@@ -7984,6 +7984,74 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   font-weight: 600;
 }
 
+/* With definitions: an on value green and an off one red, as the flags
+   read; one that does not fit its definition amber, the reason in its
+   title. */
+.chip.attribute.on {
+  color: var(--status-published);
+  border-color: currentColor;
+}
+
+.chip.attribute.off {
+  color: var(--danger-fg);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.chip.attribute.warning {
+  color: var(--status-proposed);
+  background: color-mix(in srgb, var(--status-proposed) 14%, transparent);
+  border-color: currentColor;
+}
+
+/* Settings → Custom attributes: the definitions file, its problems and a
+   summary of what it defines. */
+.custom-attributes-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.custom-attributes-text {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding: 0.5rem 0.65rem;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.custom-attributes-text[aria-invalid="true"] {
+  border-color: var(--status-proposed);
+}
+
+.custom-attributes-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  opacity: 0.8;
+}
+
+.custom-attributes-status.has-problems {
+  color: var(--status-proposed);
+  opacity: 1;
+}
+
+.custom-attributes-problems,
+.custom-attributes-summary {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.custom-attributes-editor > button {
+  align-self: flex-start;
+}
+
 /* Add a task to Google Calendar (specs/app/tasks.feature.md): the calendar
    chip's popover — an estimate, its presets, a start, and the link that is
    the form's submit, dressed as the dialogs' primary button. */

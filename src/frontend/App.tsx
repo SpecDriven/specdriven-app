@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -138,6 +138,8 @@ import { ExternalLinkField } from "./ExternalLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
 import { AttributeChips } from "./AttributesField";
+import { CustomAttributesEditor } from "./CustomAttributesEditor";
+import { knownNames, parseAttributeDefinitions } from "../server/customAttributes";
 import { ResourceLinkField, ResourceLinkList } from "./ResourceLinkField";
 import { ScenarioFileList, ScenarioFilesField } from "./ScenarioFilesField";
 import {
@@ -871,6 +873,8 @@ interface Listing {
   authorsInMarkdown: boolean;
   /** The GitHub repo the code repo pushes to — whose issues the Issues tab shows. */
   issuesRepo: GitHubRepo | null;
+  /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
+  customAttributes: string;
 }
 
 /** The user menu's link to the running build's source
@@ -952,6 +956,7 @@ export async function fetchListing(
             typeof (data.issuesRepo as GitHubRepo).owner === "string"
               ? (data.issuesRepo as GitHubRepo)
               : null,
+          customAttributes: typeof data.customAttributes === "string" ? data.customAttributes : "",
         },
       };
     }
@@ -1122,6 +1127,14 @@ export function App() {
   // code repo pushes to, when it is a GitHub one — the Issues tab shows for
   // it. Null (no code repo, or not on GitHub) means no tab.
   const [issuesRepo, setIssuesRepo] = useState<GitHubRepo | null>(null);
+  // Custom attributes (specs/app/custom-attributes.feature.md): the data
+  // repo's definitions as written, from the listing; null until one has been
+  // read, so Settings offers the editor only for a folder.
+  const [customAttributesText, setCustomAttributesText] = useState<string | null>(null);
+  const attributeDefs = useMemo(
+    () => parseAttributeDefinitions(customAttributesText ?? ""),
+    [customAttributesText],
+  );
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -1197,6 +1210,19 @@ export function App() {
   const [featureLoading, setFeatureLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [feature, setFeature] = useState<Feature | null>(null);
+  // What the data repo's attributes use, for the chips' checks and the
+  // editor's suggestions (specs/app/custom-attributes.feature.md): every
+  // listed feature, and the open one as it stands — its drafts and an edit
+  // the listing has not caught up with included.
+  const knownAttributes = useMemo(
+    () =>
+      knownNames([
+        ...features.flatMap((f) => [f.attributes, ...f.scenarios.map((s) => s.attributes)]),
+        feature?.attributes,
+        ...(feature?.scenarios.map((s) => s.attributes) ?? []),
+      ]),
+    [features, feature],
+  );
   /** Draft for the inline file-name editor; null while not editing. */
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -1567,6 +1593,7 @@ export function App() {
     setCodeRepo(listing.codeRepo);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
     setIssuesRepo(listing.issuesRepo);
+    setCustomAttributesText(listing.customAttributes);
     setLoadError(null);
     return listing;
   }, []);
@@ -6334,6 +6361,7 @@ export function App() {
         { id: "settings-general", title: "General" },
         ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
         { id: "settings-editor", title: "Specs" },
+        ...(customAttributesText !== null ? [{ id: "settings-attributes", title: "Custom attributes" }] : []),
         { id: "settings-project", title: "Project management" },
         { id: "settings-links", title: "Aha! & Figma" },
         { id: "settings-workflow", title: "Workflow" },
@@ -6662,6 +6690,29 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {/* specs/app/custom-attributes.feature.md "Custom attributes are
+          defined in Settings": the data repo's definitions, shared with the
+          team through git rather than kept on this device. */}
+      {customAttributesText !== null && (
+        <PageSection
+          id="settings-attributes"
+          title="Custom attributes"
+          hint={
+            <>
+              The attributes your team tags features and scenarios with, such as{" "}
+              <code>[br:young-driver-surcharge:on]</code>. Saved in the data folder&apos;s{" "}
+              <code>custom-attributes.txt</code> and pushed with the next sync.
+            </>
+          }
+        >
+          <CustomAttributesEditor
+            content={customAttributesText}
+            autosaveSeconds={autosaveSeconds}
+            onSaved={setCustomAttributesText}
+            onError={(message) => toast.error(message)}
+          />
+        </PageSection>
+      )}
       <PageSection
         id="settings-project"
         title="Project management"
@@ -8780,7 +8831,12 @@ export function App() {
               {featureFlags && <FeatureFlagChips flags={feature.flags} />}
               {/* specs/app/custom-attributes.feature.md: the feature's own
                   attributes, a chip each, whenever it carries any. */}
-              <AttributeChips attributes={feature.attributes} />
+              <AttributeChips
+                attributes={feature.attributes}
+                where="feature"
+                defs={attributeDefs}
+                known={knownAttributes}
+              />
               {/* specs/external-links/aha-and-figma-links.feature.md "Link
                   Aha! and Figma to a feature": a chip per tool switched on
                   in Settings, counting the feature's links; the popover
@@ -9046,7 +9102,12 @@ export function App() {
                       a row of chips under the title whenever it carries any. */}
                   {s.attributes && s.attributes.length > 0 && (
                     <div className="scenario-attributes">
-                      <AttributeChips attributes={s.attributes} />
+                      <AttributeChips
+                        attributes={s.attributes}
+                        where="scenario"
+                        defs={attributeDefs}
+                        known={knownAttributes}
+                      />
                     </div>
                   )}
                   {s.body && (
