@@ -181,6 +181,7 @@ import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
+import { CloneFromGitHub, GITHUB_HOST, PasteToken } from "./GitHubToken";
 import type { ScenarioRef } from "./route";
 
 interface Conflict {
@@ -198,6 +199,8 @@ interface AuthInfo {
   login?: string;
   name?: string | null;
   email?: string | null;
+  /** The GitHub Enterprise host a pasted token belongs to; absent for github.com. */
+  host?: string;
 }
 
 /** What the GitHub CLI reports (git-operations.md). */
@@ -1027,6 +1030,9 @@ export function App() {
   // data folders used before, most recent first, up to 10 — what the ▾
   // beside the folder name drops down.
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  // Where each GitHub url among them is cloned on this computer — what the
+  // Spec folders dialog shows under the url.
+  const [recentRepoDirs, setRecentRepoDirs] = useState<Record<string, string>>({});
   /**
    * The same two, for a link that names its spec folder
    * (`specdriven://<folder>/...`): openFromLocation runs from closures older
@@ -1038,18 +1044,27 @@ export function App() {
    * Take the open folder and the recent list from an /api/state answer. The
    * open folder is also the one "Copy link" names (src/frontend/shareLink.ts).
    */
-  const applyRepos = (state: { dataRepo?: string | null; recentDataRepos?: unknown }) => {
+  const applyRepos = (state: {
+    dataRepo?: string | null;
+    recentDataRepos?: unknown;
+    recentDataRepoDirs?: unknown;
+  }) => {
     const open = state.dataRepo ?? null;
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
+    const dirs = state.recentDataRepoDirs;
     reposRef.current = { open, recent };
     setShareRepo(open);
     setDataRepo(open);
     setRecentRepos(recent);
+    setRecentRepoDirs(dirs && typeof dirs === "object" ? (dirs as Record<string, string>) : {});
   };
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [settingRepo, setSettingRepo] = useState(false);
+  // First-run screen (specs/ui/app-start.feature.md): open a folder on this
+  // computer, or clone a GitHub repository with a personal access token.
+  const [startChoice, setStartChoice] = useState<"folder" | "clone">("folder");
   // Switch spec folder (specs/app/spec-folders.feature.md): while a switch
   // runs, a modal covers the app with the folder being opened and the step
   // it is on; null between switches.
@@ -2113,7 +2128,11 @@ export function App() {
         body: JSON.stringify({ forgetDataRepo: repo }),
       });
       const state = await res.json();
-      if (res.ok) applyRepos({ dataRepo: reposRef.current.open, recentDataRepos: state.recentDataRepos });
+      if (res.ok) applyRepos({
+          dataRepo: reposRef.current.open,
+          recentDataRepos: state.recentDataRepos,
+          recentDataRepoDirs: state.recentDataRepoDirs,
+        });
       else toast.error(state.error ?? "Could not remove this folder");
     } finally {
       setSettingRepo(false);
@@ -6145,6 +6164,39 @@ export function App() {
     );
 
   if (needsRepo) {
+    const folderForm = (
+      <>
+        <p>
+          {hosted
+            ? "Enter the GitHub url of your specs repository:"
+            : "Enter the path to the spec data directory:"}
+        </p>
+        {/* Hosted mode (src/server/hostedMode.ts): a GitHub repository
+            only, reached with the token from the account page. */}
+        {hosted && !auth?.signedIn && (
+          <p className="hint">
+            First <a href="/account">add a GitHub token</a> that can read and write it.
+          </p>
+        )}
+        <div className="input-row">
+          <input
+            ref={repoInputRef}
+            name="repo"
+            placeholder={hosted ? "https://github.com/owner/specs" : "/path/to/spec-data"}
+            autoFocus
+          />
+          {canChooseFolder && (
+            <button type="button" className="browse" onClick={() => void browseIntoRepoInput()}>
+              Browse…
+            </button>
+          )}
+        </div>
+        <button type="submit" disabled={settingRepo}>
+          {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
+        </button>
+        {repoError && <p className="error">{repoError}</p>}
+      </>
+    );
     return (
       <main className="centered">
         <form
@@ -6152,41 +6204,48 @@ export function App() {
           onSubmit={(e) => {
             e.preventDefault();
             const input = new FormData(e.currentTarget).get("repo") as string;
-            if (input.trim()) saveRepo(input.trim());
+            if (input?.trim()) saveRepo(input.trim());
           }}
         >
           <h1>SpecDriven</h1>
-          {hosted ? (
-            // Hosted mode (src/server/hostedMode.ts): a GitHub repository
-            // only, reached with the token from the account page.
+          {hosted || demo ? (
+            folderForm
+          ) : (
             <>
-              <p>Enter the GitHub url of your specs repository:</p>
-              {!auth?.signedIn && (
-                <p className="hint">
-                  First <a href="/account">add a GitHub token</a> that can read and write it.
-                </p>
+              <p>No spec data directory configured yet. Where are your specs?</p>
+              <div className="issue-filter start-choice" role="radiogroup" aria-label="Where the specs are">
+                {(["folder", "clone"] as const).map((choice) => (
+                  <button
+                    key={choice}
+                    type="button"
+                    role="radio"
+                    aria-checked={startChoice === choice}
+                    className={startChoice === choice ? "active" : ""}
+                    onClick={() => {
+                      setStartChoice(choice);
+                      setRepoError(null);
+                    }}
+                  >
+                    {choice === "folder" ? "Open a folder on this computer" : "Clone from GitHub"}
+                  </button>
+                ))}
+              </div>
+              {startChoice === "folder" ? (
+                folderForm
+              ) : (
+                <CloneFromGitHub
+                  auth={auth}
+                  busy={settingRepo}
+                  error={repoError}
+                  onSignedIn={(signedIn) => {
+                    setAuth(signedIn);
+                    void refreshUser();
+                  }}
+                  onClone={saveRepo}
+                />
               )}
             </>
-          ) : (
-            <p>No spec data directory configured yet. Enter the path to the spec data directory:</p>
           )}
-          <div className="input-row">
-            <input
-              ref={repoInputRef}
-              name="repo"
-              placeholder={hosted ? "https://github.com/owner/specs" : "/path/to/spec-data"}
-              autoFocus
-            />
-            {canChooseFolder && (
-              <button type="button" className="browse" onClick={() => void browseIntoRepoInput()}>
-                Browse…
-              </button>
-            )}
-          </div>
-          <button type="submit" disabled={settingRepo}>
-            {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
-          </button>
-          {repoError && <p className="error">{repoError}</p>}
         </form>
       </main>
     );
@@ -6873,7 +6932,7 @@ export function App() {
             Git engine
             <span className="settings-row-hint">
               {gitEngineEffective === "gh"
-                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine."
+                ? "The GitHub CLI is in use: gh supplies the credentials and clones, on top of the git binary on this machine — unless the app has a sign-in of its own below, which then wins."
                 : gitEngineEffective === "js"
                   ? "The built-in engine is in use: git implemented in JavaScript, running inside the app, so nothing needs to be installed. It authenticates with the account signed in below."
                   : "System git runs the git binary on this machine, authenticating with the account signed in below, or with git's own credentials."}
@@ -6944,6 +7003,7 @@ export function App() {
             <div className="auth-row">
               <span>
                 Signed in as <strong>{auth.login}</strong>
+                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
               </span>
               <button className="secondary" onClick={signOutGitHub}>
                 Sign out
@@ -6981,11 +7041,21 @@ export function App() {
               </button>
             </div>
           )}
+          {!deviceFlow && !webConnecting && (
+            <PasteToken
+              replacing={Boolean(auth?.signedIn)}
+              onSignedIn={(signedIn) => {
+                setAuth(signedIn);
+                setAuthStatus(null);
+                void refreshUser();
+              }}
+            />
+          )}
           {authStatus && <p className="error">{authStatus}</p>}
           <p className="hint">
-            Publishing to GitHub uses the GitHub CLI's account on the gh engine, and this
-            sign-in on the system git and built-in ones. Local folders work without
-            either.
+            Publishing to GitHub uses this sign-in on every engine; without one, the
+            GitHub CLI's account on the gh engine, or git's own credentials. Local
+            folders work without either.
           </p>
         </div>
       </PageSection>
@@ -9156,6 +9226,7 @@ export function App() {
         <SpecFoldersDialog
           folders={recentRepos}
           current={dataRepo}
+          dirs={recentRepoDirs}
           busy={settingRepo}
           trapRef={foldersTrapRef}
           onClose={() => setFoldersOpen(false)}

@@ -35,6 +35,7 @@ export const DEMO_USER = {
  */
 export const DEMO_ISSUES_REPO: GitHubRepo = {
   url: "https://github.com/SpecDriven/specdriven-app-release",
+  host: "github.com",
   owner: "SpecDriven",
   name: "specdriven-app-release",
 };

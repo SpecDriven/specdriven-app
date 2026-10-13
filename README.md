@@ -97,6 +97,20 @@ and fall back to `~/.specdriven/settings.json`, so one settings file can serve
 every checkout; `SPECDRIVEN_HOME` overrides that home directory. Settings are saved
 back to whichever file was read.
 
+To try the app on a clean slate — the first-run screen, cloning with a
+personal access token — without touching your real settings, GitHub token or
+clones, give it a folder of its own:
+
+```bash
+PORT=3100 bun run dev --profile /tmp/specdriven-try
+```
+
+`--profile <dir>` keeps settings in `<dir>/.specdriven/`, the home folder
+(GitHub token, logs) in `<dir>/home` and GitHub clones in `<dir>/repos`; it
+creates the folders, and `SPECDRIVEN_ROOT`, `SPECDRIVEN_HOME` or
+`SPECDRIVEN_REPOS_DIR` set explicitly still win. Delete the folder to start
+over.
+
 ## Using the app
 
 The user guides live in [docs/user-guide](docs/user-guide):

@@ -159,6 +159,61 @@ body {
   font-size: 0.8125rem;
 }
 
+/* First-run choice (specs/ui/app-start.feature.md): a folder on this
+   computer, or a GitHub clone with a personal access token. The segments
+   reuse the issue filter's look; the prompt's accent buttons stay for the
+   one action that submits. */
+.repo-prompt .start-choice {
+  display: flex;
+}
+
+.repo-prompt .start-choice button {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.repo-prompt .start-choice button.active {
+  color: var(--text-1);
+  background: var(--accent-soft);
+}
+
+.repo-prompt .start-choice button:hover:not(:disabled):not(.active) {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.repo-prompt .clone-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* Settings → Git & GitHub: paste a token, for GitHub Enterprise above all. */
+.paste-token {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.paste-token .auth-row {
+  justify-content: flex-start;
+}
+
+.paste-token input {
+  min-width: 0;
+  flex: 1;
+}
+
+.paste-token input.paste-token-host {
+  flex: 0 1 10rem;
+}
+
 /* Path field + native "Browse…" chooser (specs/app-start.spec.md), used in
    the first-run form and the Data directory dialog. Secondary styling: the
    picker fills the field, it never submits. */

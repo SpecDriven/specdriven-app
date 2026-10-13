@@ -105,6 +105,7 @@ export function FolderSwitchDialog({
 export function SpecFoldersDialog({
   folders,
   current,
+  dirs = {},
   busy = false,
   onOpen,
   onRemove,
@@ -115,6 +116,8 @@ export function SpecFoldersDialog({
   /** Most recent first, the current folder included. */
   folders: string[];
   current: string | null;
+  /** Where each GitHub url among `folders` is cloned on this computer. */
+  dirs?: Record<string, string>;
   /** A request is in flight: the buttons wait for it. */
   busy?: boolean;
   onOpen: (folder: string) => void;
@@ -163,6 +166,11 @@ export function SpecFoldersDialog({
                     <span className="spec-folder-path" title={folder}>
                       {folder}
                     </span>
+                    {dirs[folder] && (
+                      <span className="spec-folder-path spec-folder-clone" title={dirs[folder]}>
+                        Cloned to {dirs[folder]}
+                      </span>
+                    )}
                   </div>
                   <div className="spec-folder-actions">
                     {!isCurrent && (
