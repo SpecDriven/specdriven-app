@@ -22,6 +22,7 @@ import { chmod, chown, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { agentKeyEnvName } from "../server/agentKeys";
 import { TOKEN_ENV } from "../server/tokenStore";
+import { readWorkerRepos, seedWorkerRepos } from "./repos";
 import type { UserSecrets } from "./secrets";
 
 /** Variables a worker inherits from the gateway: runtime, logging, network. */
@@ -65,6 +66,12 @@ export interface WorkerPoolOptions {
    * the gateway's own user (development, tests). See workerIsolation().
    */
   osUid?(userId: string): number;
+  /**
+   * The user's remembered data repos (repos.ts): written into a worker that
+   * starts with no settings file, and read back while it runs and as it
+   * stops, so a redeploy that loses the volume still opens their repo.
+   */
+  repos?: { get(userId: string): string[]; set(userId: string, repos: string[]): unknown };
   /** The environment the passthrough variables come from. */
   baseEnv?: Record<string, string | undefined>;
   startTimeoutMs?: number;
@@ -203,6 +210,18 @@ export class WorkerPool {
     live.proc.kill("SIGTERM");
     const exited = await Promise.race([live.proc.exited.then(() => true), Bun.sleep(5_000).then(() => false)]);
     if (!exited) live.proc.kill("SIGKILL");
+    await this.captureRepos(userId);
+  }
+
+  /** Copy the repos the user's settings file names into the gateway's list. */
+  async captureRepos(userId: string): Promise<void> {
+    if (!this.opts.repos) return;
+    try {
+      const repos = await readWorkerRepos(userDirs(this.opts.dataDir, userId).root);
+      if (repos) this.opts.repos.set(userId, repos);
+    } catch (e) {
+      console.error(`reading the repos of ${userId} failed: ${(e as Error).message}`);
+    }
   }
 
   async stopAll(): Promise<void> {
@@ -211,10 +230,14 @@ export class WorkerPool {
     await Promise.all([...this.running.keys()].map((id) => this.stop(id)));
   }
 
-  /** Stop the workers left unused past the idle limit; runs every minute once started. */
+  /**
+   * Stop the workers left unused past the idle limit, and note the repos of
+   * the ones still running; runs every minute once started.
+   */
   async sweepIdle(now = Date.now()): Promise<void> {
     const idle = [...this.running.entries()].filter(([, w]) => now - w.lastUsed >= this.opts.idleMs);
     await Promise.all(idle.map(([id]) => this.stop(id)));
+    await Promise.all([...this.running.keys()].map((id) => this.captureRepos(id)));
   }
 
   startSweeper(everyMs = 60_000): void {
@@ -231,6 +254,11 @@ export class WorkerPool {
     const uid = this.opts.osUid ? this.opts.osUid(userId) : null;
     const email = this.opts.emailOf?.(userId) ?? null;
     await this.prepareDirs(dirs, uid);
+    if (this.opts.repos) {
+      await seedWorkerRepos(dirs.root, this.opts.repos.get(userId), uid).catch((e: Error) =>
+        console.error(`restoring the repos of ${userId} failed: ${e.message}`),
+      );
+    }
     if (email) await this.writeGitIdentity(dirs, uid, email);
     await rm(dirs.socket, { force: true });
     const env = workerEnv(dirs, await this.opts.secrets(userId), this.opts.baseEnv, email);
@@ -247,6 +275,7 @@ export class WorkerPool {
       if (this.running.get(userId) === worker) this.running.delete(userId);
       if (!worker.stopping) {
         console.error(`worker for ${userId} exited with code ${code}`);
+        void this.captureRepos(userId);
         this.crashes.set(userId, [...recent, Date.now()].slice(-CRASH_LIMIT));
       }
     });

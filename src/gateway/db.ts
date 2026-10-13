@@ -1,9 +1,9 @@
 // The gateway's database (bun:sqlite on the Railway volume): accounts and
 // their roles, sessions, email links, the allowed emails, the users'
-// encrypted secrets and the rate limiter's counters. Tokens of every kind
-// are stored as SHA-256 hashes only, so a copy of the file cannot be
-// replayed; secrets are AES-GCM ciphertext under a key that never touches
-// the volume (crypto.ts).
+// encrypted secrets and recent data repos, and the rate limiter's counters.
+// Tokens of every kind are stored as SHA-256 hashes only, so a copy of the
+// file cannot be replayed; secrets are AES-GCM ciphertext under a key that
+// never touches the volume (crypto.ts).
 
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
@@ -72,6 +72,16 @@ export const MIGRATIONS: string[] = [
   -- An email (a@b.c) or a whole domain (@b.c).
   ALTER TABLE invites RENAME TO allowed_emails;
   ALTER TABLE allowed_emails RENAME COLUMN invited_by TO added_by;
+  `,
+  // Recent data repos (repos.ts): what each user last opened, kept here so
+  // the datastore carries it past a redeploy that loses their folder.
+  `
+  CREATE TABLE user_repos (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    -- A JSON array of GitHub urls, most recent first.
+    repos TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
   `,
 ];
 

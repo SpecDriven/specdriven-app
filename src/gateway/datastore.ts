@@ -6,8 +6,9 @@
 // rest goes before the gateway exits.
 //
 // What is copied is what app.db already holds in a form safe to copy:
-// password hashes, session hashes (never the cookie), and secrets still
-// sealed under SPECDRIVEN_MASTER_KEY, which never goes into the repo.
+// password hashes, session hashes (never the cookie), secrets still sealed
+// under SPECDRIVEN_MASTER_KEY, which never goes into the repo, and each
+// user's recent data repos (repos.ts).
 // Sessions lose their ip, user agent and last-seen time on the way; email
 // links and rate-limit counters are short-lived and stay behind.
 
@@ -82,6 +83,12 @@ const TABLES: Table[] = [
     columns: ["user_id", "name", "kind", "ciphertext", "iv", "key_id", "meta", "updated_at"],
     orderBy: "user_id, name",
     blobs: ["ciphertext", "iv"],
+  },
+  {
+    file: "repos.json",
+    name: "user_repos",
+    columns: ["user_id", "repos", "updated_at"],
+    orderBy: "user_id",
   },
   {
     file: "sessions.json",
