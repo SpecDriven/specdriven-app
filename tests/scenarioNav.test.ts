@@ -157,7 +157,7 @@ describe("stepping through every scenario from the editor", () => {
   const seq = scenarioSequence(tree, null, null);
   const names = (s: ReturnType<typeof scenarioSequence>) => s.map((x) => x.scenario.name);
 
-  test("the walk follows the tree: folders first, then features by name, each in file order", () => {
+  test("the walk follows the tree — folders first, then features by name, each in file order", () => {
     expect(names(seq)).toEqual([
       "autopay succeeds",
       "failed autopay starts the grace period",
