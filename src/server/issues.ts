@@ -10,17 +10,20 @@
 // so it works on every git engine (git-operations.md), including
 // the bundled JavaScript one on a machine with no git at all.
 //
-// Requests carry the app's own GitHub sign-in token (src/server/tokenStore
-// .ts) when there is one, else the GitHub CLI's; without either, reads of a
-// public repository still work within GitHub's anonymous rate limit, and a
-// write answers with a clear "sign in" message.
+// Requests go to the API of the host the repository lives on — github.com
+// or a GitHub Enterprise host — and carry the app's own GitHub sign-in token
+// (src/server/tokenStore.ts) only when it was made on that host, else the
+// GitHub CLI's for github.com; a token is never offered to another host, the
+// rule git follows too. Without either, reads of a public repository still
+// work within GitHub's anonymous rate limit, and a write answers with a
+// clear "sign in" message.
 
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { getAuth } from "./auth";
 import { DEMO_ISSUES_REPO, isDemoMode } from "./demoMode";
 import { ghAccountInUse, ghToken } from "./git/gh";
-import { GITHUB_HOST, githubApiBase } from "./github";
+import { GITHUB_HOST, apiBase, sameHost, webBase } from "./github";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
 import type { PullRequestState } from "./pullRequests";
@@ -134,21 +137,45 @@ export function githubRepoOfRemote(url: string): GitHubRepo | null {
   const trimmed = url.trim();
   const ssh = trimmed.match(/^ssh:\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/(.+)$/i);
   const repo = parseGitHubUrl(ssh ? `https://github.com/${ssh[1]}` : trimmed);
-  // Issues are read from github.com's API only; an Enterprise remote has none here yet.
+  // An Enterprise remote counts only on the sign-in's host (enterpriseRepoOfRemote).
   return repo?.host === GITHUB_HOST ? repo : null;
 }
 
-/** The GitHub repository a local folder pushes to, or null. */
-export async function repoOfFolder(dir: string): Promise<GitHubRepo | null> {
+/**
+ * The repository a remote url names on one GitHub Enterprise host — the
+ * app's sign-in host, the only Enterprise host the app knows to be a GitHub
+ * — or null for any other host. The https, scp-like ssh and `ssh://` forms
+ * alike; an ssh remote names the host without the web port.
+ */
+export function enterpriseRepoOfRemote(url: string, host: string): GitHubRepo | null {
+  if (sameHost(undefined, host)) return null;
+  const trimmed = url.trim();
+  const ssh =
+    trimmed.match(/^ssh:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i) ?? trimmed.match(/^[^@/:]+@([^/:]+):(?!\/)(.+)$/);
+  if (ssh) {
+    if (ssh[1]!.toLowerCase() !== host.replace(/:\d+$/, "").toLowerCase()) return null;
+    return parseGitHubUrl(`${webBase(host)}/${ssh[2]}`);
+  }
+  const repo = parseGitHubUrl(trimmed);
+  return repo && sameHost(repo.host, host) ? repo : null;
+}
+
+/**
+ * The GitHub repository a local folder pushes to, or null: a github.com one,
+ * or one on `enterpriseHost` when the app is signed in there.
+ */
+export async function repoOfFolder(dir: string, enterpriseHost?: string): Promise<GitHubRepo | null> {
   const url = await originUrl(dir);
-  return url ? githubRepoOfRemote(url) : null;
+  if (!url) return null;
+  return githubRepoOfRemote(url) ?? (enterpriseHost ? enterpriseRepoOfRemote(url, enterpriseHost) : null);
 }
 
 /**
  * The repository whose issues the app tracks for a data repo: the one its
  * project-settings.json `code-repo` pushes to. Null when the file names no
  * code repo, or the code repo is not a GitHub one — then there is no Issues
- * tab.
+ * tab. A GitHub Enterprise code repo counts when the app's sign-in was made
+ * on its host: that is how the app knows the host is a GitHub at all.
  *
  * The demo is the exception: its dataset is a copy with no .git anywhere, so
  * no remote can be read from it. It tracks the public release repo instead
@@ -159,32 +186,35 @@ export async function readIssuesRepo(dataDir: string): Promise<GitHubRepo | null
   if (isDemoMode()) return DEMO_ISSUES_REPO;
   const { codeRepo } = await readProjectSettings(dataDir);
   if (codeRepo === null) return null;
-  return repoOfFolder(codeRepo);
+  return repoOfFolder(codeRepo, (await getAuth())?.host);
 }
 
 // --- The GitHub API -----------------------------------------------------------------
 
 /**
- * The token requests carry: the app's own sign-in first, then the GitHub
- * CLI's (unless signing out turned it off), else none. The CLI's is asked for on every call rather than
+ * The token a request to `host` carries: the app's own sign-in when it was
+ * made on that host, else the GitHub CLI's — for github.com only, gh's
+ * host, and only while its account is in use (signing out of the app turns
+ * it off) — else none. The CLI's is asked for on every call rather than
  * cached — `gh auth logout` must take effect without a restart.
  */
-export async function issuesToken(): Promise<string | null> {
+export async function issuesToken(host: string = GITHUB_HOST): Promise<string | null> {
   const auth = await getAuth();
-  if (auth) return auth.token;
-  if (await ghAccountInUse()) return ghToken();
+  if (auth && sameHost(auth.host, host)) return auth.token;
+  if (sameHost(undefined, host) && (await ghAccountInUse())) return ghToken();
   return null;
 }
 
 const API_VERSION = "2022-11-28";
 
-/** One request to the GitHub REST API, with the token and headers it wants. */
+/** One request to a GitHub host's REST API, with the token and headers it wants. */
 async function githubRequest(
+  host: string,
   path: string,
   accept: string,
   init: RequestInit & { json?: unknown } = {},
 ): Promise<Response> {
-  const token = await issuesToken();
+  const token = await issuesToken(host);
   const headers: Record<string, string> = {
     Accept: accept,
     "User-Agent": "SpecDriven",
@@ -192,7 +222,7 @@ async function githubRequest(
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (init.json !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(`${githubApiBase()}${path}`, {
+  const res = await fetch(`${apiBase(host)}${path}`, {
     method: init.method ?? "GET",
     headers,
     body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
@@ -201,19 +231,19 @@ async function githubRequest(
   return res;
 }
 
-async function github<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
-  const res = await githubRequest(path, "application/vnd.github+json", init);
+async function github<T>(host: string, path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+  const res = await githubRequest(host, path, "application/vnd.github+json", init);
   return (await res.json()) as T;
 }
 
 /**
  * A file's raw text through the contents endpoint —
  * `/repos/{owner}/{repo}/contents/{path}?ref={ref}` with GitHub's raw media
- * type — as src/server/testName.ts reads a test's source. Same token, same
- * failure wording as every other call here.
+ * type — as src/server/testName.ts reads a test's source. Same token rule,
+ * same failure wording as every other call here.
  */
-export async function githubText(path: string): Promise<string> {
-  const res = await githubRequest(path, "application/vnd.github.raw+json");
+export async function githubText(path: string, host: string = GITHUB_HOST): Promise<string> {
+  const res = await githubRequest(host, path, "application/vnd.github.raw+json");
   return res.text();
 }
 
@@ -318,13 +348,14 @@ const repoPath = (repo: GitHubRepo) =>
  */
 export async function listIssues(repo: GitHubRepo, state: IssueState = "open"): Promise<Issue[]> {
   const raw = await github<RawIssue[]>(
+    repo.host,
     `${repoPath(repo)}/issues?state=${state}&sort=updated&direction=desc&per_page=100`,
   );
   return raw.filter((i) => i.pull_request === undefined).map(toIssue);
 }
 
 export async function getIssue(repo: GitHubRepo, number: number): Promise<Issue> {
-  const raw = await github<RawIssue>(`${repoPath(repo)}/issues/${number}`);
+  const raw = await github<RawIssue>(repo.host, `${repoPath(repo)}/issues/${number}`);
   if (raw.pull_request !== undefined) {
     throw new GitHubError(`#${number} is a pull request, not an issue`, 404);
   }
@@ -352,7 +383,9 @@ export async function getPullRequest(
   name: string,
   number: number,
 ): Promise<{ number: number; title: string; state: PullRequestState }> {
+  // A pull request url is a github.com one (src/server/pullRequests.ts).
   const raw = await github<RawPullRequest>(
+    GITHUB_HOST,
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls/${number}`,
   );
   const state: PullRequestState = raw.merged_at
@@ -366,7 +399,7 @@ export async function getPullRequest(
 }
 
 export async function listComments(repo: GitHubRepo, number: number): Promise<IssueComment[]> {
-  const raw = await github<RawComment[]>(`${repoPath(repo)}/issues/${number}/comments?per_page=100`);
+  const raw = await github<RawComment[]>(repo.host, `${repoPath(repo)}/issues/${number}/comments?per_page=100`);
   return raw.map(toComment);
 }
 
@@ -383,7 +416,7 @@ export async function createIssue(
 ): Promise<Issue> {
   const payload: { title: string; body?: string } = { title: requireTitle(input.title) };
   if (typeof input.body === "string" && input.body.trim()) payload.body = cleanText(input.body);
-  return toIssue(await github<RawIssue>(`${repoPath(repo)}/issues`, { method: "POST", json: payload }));
+  return toIssue(await github<RawIssue>(repo.host, `${repoPath(repo)}/issues`, { method: "POST", json: payload }));
 }
 
 /**
@@ -417,7 +450,7 @@ export async function updateIssue(
     throw new GitHubError("Nothing to change: give a title, body or state", 400);
   }
   return toIssue(
-    await github<RawIssue>(`${repoPath(repo)}/issues/${number}`, { method: "PATCH", json: payload }),
+    await github<RawIssue>(repo.host, `${repoPath(repo)}/issues/${number}`, { method: "PATCH", json: payload }),
   );
 }
 
@@ -425,7 +458,7 @@ export async function addComment(repo: GitHubRepo, number: number, body: unknown
   const text = typeof body === "string" ? cleanText(body) : "";
   if (!text.trim()) throw new GitHubError("A comment needs some text", 400);
   return toComment(
-    await github<RawComment>(`${repoPath(repo)}/issues/${number}/comments`, {
+    await github<RawComment>(repo.host, `${repoPath(repo)}/issues/${number}/comments`, {
       method: "POST",
       json: { body: text },
     }),
