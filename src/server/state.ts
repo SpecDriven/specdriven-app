@@ -38,6 +38,13 @@ export interface SpecDrivenState {
    * installed, then cli, then js on a machine with no git at all.
    */
   gitEngine?: GitEngine;
+  /**
+   * Fall back to the GitHub CLI's account while the app has no sign-in of
+   * its own (specs/user-info-settings.feature.md "signing out stops using
+   * the GitHub CLI account"); absent means ON. Signing out turns it off, so
+   * a signed-out app stays signed out until Settings turns it back on.
+   */
+  useGhAccount?: boolean;
   /** Show the test-links table on scenario cards
       (specs/traceability.feature.md); absent means ON. */
   showTestLinks?: boolean;
@@ -289,6 +296,12 @@ export function normalizeAgentFirstResponseSeconds(value: unknown): number {
   const n = typeof value === "number" ? value : Number.NaN;
   if (!Number.isFinite(n) || n < 0) return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
   return Math.floor(n);
+}
+
+/** Effective "use the GitHub CLI account" setting: ON unless explicitly
+    turned off — which signing out does. */
+export function normalizeUseGhAccount(value: unknown): boolean {
+  return value !== false;
 }
 
 /** Effective test-links display setting: ON unless explicitly turned off

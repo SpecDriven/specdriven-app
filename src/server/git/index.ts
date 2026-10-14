@@ -15,7 +15,7 @@ import { jsBackend } from "./js";
 
 export type { PathMove, PullResult, SyncResult } from "./backend";
 export { cliGitAvailable } from "./cli";
-export { ghAccount, ghAvailable, ghSignedIn } from "./gh";
+export { ghAccount, ghAccountInUse, ghAvailable, ghSignedIn, setGhAccountEnabled } from "./gh";
 export type { GhAccount } from "./gh";
 export { jsGitAvailable } from "./js";
 export { isRepoRoot } from "./repoRoot";

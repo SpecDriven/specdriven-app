@@ -6,7 +6,7 @@
 // Enterprise host. The built-in git engine then clones and pushes with it,
 // so nothing has to be installed.
 
-import { useState } from "react";
+import { useState, type Ref } from "react";
 
 export const GITHUB_HOST = "github.com";
 
@@ -176,10 +176,13 @@ function cloneError(error: string): string {
  */
 export function PasteToken({
   replacing,
+  autoFocus = false,
   onSignedIn,
 }: {
   /** Signed in already: the pasted token takes that sign-in's place. */
   replacing: boolean;
+  /** Focus the token field — when the form is all a dialog holds. */
+  autoFocus?: boolean;
   onSignedIn: (auth: TokenSignIn) => void;
 }) {
   const [host, setHost] = useState(GITHUB_HOST);
@@ -220,6 +223,7 @@ export function PasteToken({
           aria-label="Personal access token"
           type="password"
           autoComplete="off"
+          autoFocus={autoFocus}
           value={token}
           onChange={(e) => setToken(e.target.value)}
           onKeyDown={(e) => {
@@ -233,6 +237,52 @@ export function PasteToken({
       </div>
       <TokenHint host={cleanHost} />
       {status && <p className="error">{status}</p>}
+    </div>
+  );
+}
+
+/**
+ * The user menu's "Sign in with token…" / "Switch account…" dialog
+ * (specs/user-info-settings.feature.md "sign in with a token from the user
+ * menu"): the Settings paste form on its own, for the desktop app, where
+ * the browser sign-in has no http(s) page to return to.
+ */
+export function TokenSignInDialog({
+  auth,
+  trapRef,
+  onSignedIn,
+  onClose,
+}: {
+  auth: TokenSignIn | null;
+  trapRef?: Ref<HTMLDivElement>;
+  onSignedIn: (auth: TokenSignIn) => void;
+  onClose: () => void;
+}) {
+  const signedIn = Boolean(auth?.signedIn);
+  return (
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sign in to GitHub"
+        ref={trapRef}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3>Sign in to GitHub</h3>
+        {signedIn && (
+          <p>
+            Signed in as <strong>{auth?.login}</strong>
+            {auth?.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}.
+          </p>
+        )}
+        <PasteToken replacing={signedIn} autoFocus onSignedIn={onSignedIn} />
+        <div className="dialog-actions">
+          <button className="secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
