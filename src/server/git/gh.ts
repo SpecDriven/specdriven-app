@@ -138,7 +138,7 @@ function credentialHelper(path: string): string {
  */
 async function ghContext(): Promise<GitContext> {
   const path = ghPath();
-  if (!path || (await getAuth()) || !(await ghSignedIn())) return appContext();
+  if (!path || (await getAuth()) || !(await ghAccountInUse())) return appContext();
   const who = await ghAccount();
   return {
     config: [
@@ -168,7 +168,7 @@ function githubSlug(url: string): string | null {
 async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   const path = ghPath();
   const slug = githubSlug(url);
-  if (!path || !slug || (await getAuth()) || !(await ghSignedIn())) return gitClone(git, url, dir);
+  if (!path || !slug || (await getAuth()) || !(await ghAccountInUse())) return gitClone(git, url, dir);
   const res = await run(path, ["repo", "clone", slug, dir], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
