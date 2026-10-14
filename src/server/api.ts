@@ -24,6 +24,7 @@ import {
   normalizeScenarioPreviewLines,
   normalizeOpenTestsInIdea,
   normalizeShowTestLinks,
+  normalizeUseGhAccount,
   normalizeSyncServerUrl,
   forgetDataRepo,
   normalizeDataRepo,
@@ -41,10 +42,12 @@ import {
   cliGitAvailable,
   currentEngine,
   ghAccount,
+  ghAccountInUse,
   ghAvailable,
   ghSignedIn,
   jsGitAvailable,
   normalizeGitEngine,
+  setGhAccountEnabled,
   setGitEngine,
 } from "./git";
 import {
@@ -279,6 +282,7 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
+  setGhAccountEnabled(normalizeUseGhAccount(state.useGhAccount));
   // The profile (specs/app/plugins.feature.md "Each data folder keeps its
   // own plugins"): an older settings file — the per-module switches, or one
   // device-wide `plugins.enabled` — is read as that list once and copied to
@@ -336,6 +340,8 @@ async function authFields() {
       available: ghAvailable(),
       signedIn: ghAvailable() ? await ghSignedIn() : false,
       login: gh?.login ?? null,
+      /** Whether gh's account stands in while the app is signed out. */
+      inUse: await ghAccountInUse(),
     },
   };
 }
@@ -562,6 +568,7 @@ const putState: Handler = async (req) => {
     scenarioPreviewLines?: number;
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
+    useGhAccount?: boolean;
     showTestLinks?: boolean;
     openTestsInIdea?: boolean;
     projectManagement?: boolean;
@@ -598,6 +605,7 @@ const putState: Handler = async (req) => {
     body.scenarioPreviewLines === undefined &&
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
+    body.useGhAccount === undefined &&
     body.showTestLinks === undefined &&
     body.openTestsInIdea === undefined &&
     body.projectManagement === undefined &&
@@ -625,7 +633,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -748,6 +756,17 @@ const putState: Handler = async (req) => {
       );
     }
     state.autosaveIntervalSeconds = Math.floor(n);
+  }
+  // Use the GitHub CLI account while signed out
+  // (specs/user-info-settings.feature.md): default ON, stored as an absent
+  // key; signing out stores it OFF.
+  if (body.useGhAccount !== undefined) {
+    if (typeof body.useGhAccount !== "boolean") {
+      return json({ error: "useGhAccount must be a boolean" }, 400);
+    }
+    if (body.useGhAccount) delete state.useGhAccount;
+    else state.useGhAccount = false;
+    setGhAccountEnabled(body.useGhAccount);
   }
   // Test-links display (specs/traceability.feature.md): optional, default
   // ON — the default is stored as an absent key.
@@ -1102,8 +1121,16 @@ function normalizeGitHubHost(value: unknown): string | null {
   return /^[a-z0-9.-]+(:\d+)?$/.test(host) ? host : null;
 }
 
+// Signing out (specs/user-info-settings.feature.md "sign out from the user
+// menu") also stops the app falling back to the GitHub CLI's account, so the
+// app is signed out rather than quietly signed in as gh's user; Settings
+// turns it back on.
 const deleteAuth: Handler = async () => {
   await signOut();
+  const state = await readState(getAppRoot());
+  state.useGhAccount = false;
+  await writeState(state, getAppRoot());
+  setGhAccountEnabled(false);
   return json({ message: "signed out" });
 };
 

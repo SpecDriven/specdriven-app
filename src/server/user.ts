@@ -2,7 +2,7 @@ import { userInfo } from "node:os";
 import { getAuth } from "./auth";
 import { DEMO_USER, isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
-import { cliGitAvailable, currentEngine, ghAccount } from "./git";
+import { cliGitAvailable, currentEngine, ghAccount, ghAccountInUse } from "./git";
 import { run } from "./run";
 
 // Current user (specs/user-info-settings.feature.md): by default the user on
@@ -58,8 +58,9 @@ export async function getCurrentUser(): Promise<CurrentUser> {
     };
   }
   // Only when gh is the engine in effect: on system git the gh account
-  // authors nothing, so reporting it would misname the commits.
-  const gh = currentEngine() === "gh" ? await ghAccount() : null;
+  // authors nothing, so reporting it would misname the commits. Not after
+  // signing out of the app either — that turns gh's account off too.
+  const gh = currentEngine() === "gh" && (await ghAccountInUse()) ? await ghAccount() : null;
   if (gh) {
     return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
   }

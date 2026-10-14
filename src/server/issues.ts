@@ -19,7 +19,7 @@ import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { getAuth } from "./auth";
 import { DEMO_ISSUES_REPO, isDemoMode } from "./demoMode";
-import { ghAvailable, ghToken } from "./git/gh";
+import { ghAccountInUse, ghToken } from "./git/gh";
 import { GITHUB_HOST, githubApiBase } from "./github";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
@@ -166,13 +166,13 @@ export async function readIssuesRepo(dataDir: string): Promise<GitHubRepo | null
 
 /**
  * The token requests carry: the app's own sign-in first, then the GitHub
- * CLI's, else none. The CLI's is asked for on every call rather than
+ * CLI's (unless signing out turned it off), else none. The CLI's is asked for on every call rather than
  * cached — `gh auth logout` must take effect without a restart.
  */
 export async function issuesToken(): Promise<string | null> {
   const auth = await getAuth();
   if (auth) return auth.token;
-  if (ghAvailable()) return ghToken();
+  if (await ghAccountInUse()) return ghToken();
   return null;
 }
 
