@@ -119,7 +119,7 @@ function linkKey(link: ExternalLink | undefined): string {
 /**
  * An external link is one value, not text: the side that changed it wins,
  * ours when both did (specs/external-links/project-management-jira-linear-
- * etc.feature.md).
+ * etc.feature.md). A qTest test case link merges the same way.
  */
 function mergeLink(
   base: ExternalLink | undefined,
@@ -192,6 +192,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
       ? theirs.tests
       : ours.tests;
   const link = mergeLink(base?.link, ours.link, theirs.link);
+  const qtest = mergeLink(base?.qtest, ours.qtest, theirs.qtest);
   const flags = mergeFlags(base?.flags, ours.flags, theirs.flags);
   const attributes = mergeAttributes(base?.attributes, ours.attributes, theirs.attributes);
   return {
@@ -205,6 +206,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     ...(flags ? { flags } : {}),
     ...(attributes ? { attributes } : {}),
     ...(link ? { link } : {}),
+    ...(qtest ? { qtest } : {}),
     ...mergeAuthors(base, ours, theirs),
   };
 }
@@ -252,6 +254,7 @@ export function threeWayFeature(
     }
   }
   const link = mergeLink(base.link, ours.link, theirs.link);
+  const qtest = mergeLink(base.qtest, ours.qtest, theirs.qtest);
   const flags = mergeFlags(base.flags, ours.flags, theirs.flags);
   const attributes = mergeAttributes(base.attributes, ours.attributes, theirs.attributes);
   // The assignment merges like a link: one value, the side that changed it
@@ -269,6 +272,7 @@ export function threeWayFeature(
       ...(flags ? { flags } : {}),
       ...(attributes ? { attributes } : {}),
       ...(link ? { link } : {}),
+      ...(qtest ? { qtest } : {}),
       ...(assigned ? { assigned } : {}),
       ...mergeAuthors(base, ours, theirs),
     },
@@ -281,6 +285,7 @@ function sameScenario(a: Scenario, b: Scenario): boolean {
     a.status === b.status &&
     a.tests.join("\n") === b.tests.join("\n") &&
     linkKey(a.link) === linkKey(b.link) &&
+    linkKey(a.qtest) === linkKey(b.qtest) &&
     featureFlagsKey(a.flags) === featureFlagsKey(b.flags) &&
     attributesKey(a.attributes) === attributesKey(b.attributes)
   );

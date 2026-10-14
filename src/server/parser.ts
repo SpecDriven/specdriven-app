@@ -28,6 +28,13 @@
 // lifts it into `link`; whether the projection writes it is the "Publish
 // external links" setting.
 //
+// A feature or a scenario may also link the qTest test case that covers it
+// (specs/external-links/qtest-test-cases.feature.md): a second link line of
+// the same form whose program is `qTest`, e.g.
+// `[qTest:TC-42](https://acme.qtestnet.com/p/1/portal/project#tab=testdesign&object=1&id=9)`.
+// The parser lifts it into `qtest`; it is an external link like the ticket,
+// so the same "Publish external links" setting decides whether it is written.
+//
 // A feature may also carry the project member it is assigned to
 // (project-settings.json in the data repo): one `**Assigned:** <name>` line
 // under the `#` heading, beside the link line. The parser lifts it into
@@ -105,6 +112,18 @@ export function externalLinkTypeOf(program: string): ExternalLinkType {
 }
 
 /**
+ * The program a qTest test case link is written under — `[qTest:TC-42](url)`
+ * (specs/external-links/qtest-test-cases.feature.md). A link line under this
+ * program is the test case, never the ticket, whatever the case it is in.
+ */
+export const QTEST_PROGRAM = "qTest";
+
+/** Whether a link is a qTest test case rather than a ticket. */
+export function isQtestLink(link: ExternalLink): boolean {
+  return link.program.trim().toLowerCase() === QTEST_PROGRAM.toLowerCase();
+}
+
+/**
  * A pull request implementing a feature or a scenario
  * (specs/external-links/related-pull-requests.feature.md). Held in the
  * Automerge document only — never parsed from or written to markdown.
@@ -167,6 +186,11 @@ export interface Scenario {
   /** The ticket tracking this scenario, if it has one. */
   link?: ExternalLink;
   /**
+   * The qTest test case covering this scenario, if it has one
+   * (specs/external-links/qtest-test-cases.feature.md) — program `qTest`.
+   */
+  qtest?: ExternalLink;
+  /**
    * The pull requests implementing this scenario. Document-only, like `id`:
    * carried on what the editor reads from the server, never serialized.
    */
@@ -201,6 +225,8 @@ export interface Feature {
   scenarios: Scenario[];
   /** The ticket tracking the feature as a whole, if it has one. */
   link?: ExternalLink;
+  /** The qTest test case covering the feature as a whole, if it has one. */
+  qtest?: ExternalLink;
   /** The pull requests implementing the feature as a whole; document-only. */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs; document-only. */
@@ -873,6 +899,23 @@ export function splitPageMeta(text: string): {
 }
 
 /**
+ * The link a metadata line holds, sorted by what it is: a `qTest` link is the
+ * test case (specs/external-links/qtest-test-cases.feature.md), any other the
+ * ticket. Each is taken once — a second line of a kind already lifted is not
+ * metadata, so it ends the metadata like any other content line.
+ */
+function metaLinks(
+  line: string,
+  link: ExternalLink | undefined,
+  qtest: ExternalLink | undefined,
+): { nextLink: ExternalLink | null; nextQtest: ExternalLink | null } {
+  const parsed = parseExternalLinkLine(line);
+  if (!parsed) return { nextLink: null, nextQtest: null };
+  if (isQtestLink(parsed)) return { nextLink: null, nextQtest: qtest === undefined ? parsed : null };
+  return { nextLink: link === undefined ? parsed : null, nextQtest: null };
+}
+
+/**
  * Lift a feature's metadata lines — its feature flags and custom attributes,
  * its ticket link, its assignment and its authorship — off the top of the
  * text under the `#` heading. They may come in any order, and anything else
@@ -882,6 +925,7 @@ export function splitPageMeta(text: string): {
 export function splitFeatureMeta(text: string): {
   text: string;
   link?: ExternalLink;
+  qtest?: ExternalLink;
   assigned?: string;
   createdBy?: string;
   updatedBy?: string;
@@ -890,6 +934,7 @@ export function splitFeatureMeta(text: string): {
 } {
   let rest = text;
   let link: ExternalLink | undefined;
+  let qtest: ExternalLink | undefined;
   let assigned: string | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
@@ -903,7 +948,7 @@ export function splitFeatureMeta(text: string): {
     if (at === -1) break;
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
-    const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
+    const { nextLink, nextQtest } = metaLinks(line, link, qtest);
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
@@ -911,6 +956,7 @@ export function splitFeatureMeta(text: string): {
       addFlags(flags, nextTokens.flags);
       addAttributes(attributes, nextTokens.attributes);
     } else if (nextLink) link = nextLink;
+    else if (nextQtest) qtest = nextQtest;
     else if (nextAssigned) assigned = nextAssigned;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
@@ -920,6 +966,7 @@ export function splitFeatureMeta(text: string): {
   return {
     text: rest,
     ...(link ? { link } : {}),
+    ...(qtest ? { qtest } : {}),
     ...(assigned ? { assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -936,6 +983,7 @@ export function splitFeatureMeta(text: string): {
 export function splitScenarioMeta(text: string): {
   text: string;
   link?: ExternalLink;
+  qtest?: ExternalLink;
   createdBy?: string;
   updatedBy?: string;
   flags?: FeatureFlag[];
@@ -943,6 +991,7 @@ export function splitScenarioMeta(text: string): {
 } {
   let rest = text;
   let link: ExternalLink | undefined;
+  let qtest: ExternalLink | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
   const flags: FeatureFlag[] = [];
@@ -954,13 +1003,14 @@ export function splitScenarioMeta(text: string): {
     if (at === -1) break;
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
-    const nextLink = link === undefined ? parseExternalLinkLine(line) : null;
+    const { nextLink, nextQtest } = metaLinks(line, link, qtest);
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
     if (nextTokens) {
       addFlags(flags, nextTokens.flags);
       addAttributes(attributes, nextTokens.attributes);
     } else if (nextLink) link = nextLink;
+    else if (nextQtest) qtest = nextQtest;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
     else break;
@@ -971,6 +1021,7 @@ export function splitScenarioMeta(text: string): {
   return {
     text: rest,
     ...(link ? { link } : {}),
+    ...(qtest ? { qtest } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
     ...(flags.length > 0 ? { flags } : {}),
@@ -1064,12 +1115,15 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(bodyLines.join("\n").trim());
-      const { text, link, createdBy, updatedBy, flags, attributes } = splitScenarioMeta(split.body);
+      const { text, link, qtest, createdBy, updatedBy, flags, attributes } = splitScenarioMeta(
+        split.body,
+      );
       current.body = text;
       current.tests = split.tests;
       if (flags) current.flags = flags;
       if (attributes) current.attributes = attributes;
       if (link) current.link = link;
+      if (qtest) current.qtest = qtest;
       if (createdBy) current.createdBy = createdBy;
       if (updatedBy) current.updatedBy = updatedBy;
       scenarios.push(current);
@@ -1104,12 +1158,13 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, assigned, createdBy, updatedBy, flags, attributes } =
+  const { text: description, link, qtest, assigned, createdBy, updatedBy, flags, attributes } =
     splitFeatureMeta(preamble.join("\n").trim());
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
   if (flags) feature.flags = flags;
   if (attributes) feature.attributes = attributes;
   if (link) feature.link = link;
+  if (qtest) feature.qtest = qtest;
   if (assigned) feature.assigned = assigned;
   if (createdBy) feature.createdBy = createdBy;
   if (updatedBy) feature.updatedBy = updatedBy;
@@ -1122,8 +1177,8 @@ function header(name: string, version: number, status: ScenarioStatus): string {
 
 export interface SerializeOptions {
   /**
-   * Whether the feature's and scenarios' external links are written
-   * (default true). The `.feature.md` projection passes the "Publish
+   * Whether the feature's and scenarios' external links — tickets and qTest
+   * test cases — are written (default true). The `.feature.md` projection passes the "Publish
    * external links" setting here; everything else — the editor wire format,
    * the conflict dialog — always carries the links.
    */
@@ -1145,6 +1200,7 @@ export function serializeFeature(
   const featureAttributes = formatAttributeLines(feature.attributes ?? []);
   if (featureAttributes) parts.push(featureAttributes);
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
+  if (links && feature.qtest) parts.push(formatExternalLink(feature.qtest));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));
   if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
   if (authors && feature.updatedBy) parts.push(formatUpdatedBy(feature.updatedBy));
@@ -1155,6 +1211,7 @@ export function serializeFeature(
     const attributes = formatAttributeLines(s.attributes ?? []);
     if (attributes) chunks.push(attributes);
     if (links && s.link) chunks.push(formatExternalLink(s.link));
+    if (links && s.qtest) chunks.push(formatExternalLink(s.qtest));
     if (authors && s.createdBy) chunks.push(formatCreatedBy(s.createdBy));
     if (authors && s.updatedBy) chunks.push(formatUpdatedBy(s.updatedBy));
     if (s.body) chunks.push(s.body);

@@ -70,6 +70,12 @@ export type SpecEntry = {
    */
   link?: ExternalLink;
   /**
+   * The qTest test case covering this spec
+   * (specs/external-links/qtest-test-cases.feature.md). Set whole, like
+   * `link`. Optional key, no migration.
+   */
+  qtest?: ExternalLink;
+  /**
    * The pull requests implementing this spec
    * (specs/external-links/related-pull-requests.feature.md). Document-only:
    * the projection never writes them, so nothing markdown-driven can drop
@@ -149,6 +155,8 @@ export type FeatureDoc = {
   specs: SpecEntry[];
   /** The ticket tracking the feature as a whole, if any (see SpecEntry.link). */
   link?: ExternalLink;
+  /** The qTest test case covering the feature as a whole (see SpecEntry.qtest). */
+  qtest?: ExternalLink;
   /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs (see SpecEntry.aha). */

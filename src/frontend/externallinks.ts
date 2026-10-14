@@ -5,7 +5,7 @@
 // yet) and for guessing the tool and ticket from a pasted url. Pure and
 // DOM-free so the rules can be tested on their own.
 
-import { isExternalLink } from "../server/parser";
+import { isExternalLink, isQtestLink, QTEST_PROGRAM } from "../server/parser";
 import { cleanLine } from "../server/text";
 import type { ExternalLink } from "../server/parser";
 
@@ -44,6 +44,15 @@ export interface ResolvedLink {
  * rather than being dropped or written half-done.
  */
 export function resolveLinkDraft(draft: LinkDraft): ResolvedLink {
+  // `qTest` is the test case's program (resolveQtestDraft): a ticket under
+  // it would read back as the test case.
+  if (isQtestLink({ program: draft.program, ticket: "", url: "" })) {
+    return { link: null, error: "qTest test cases have their own field — not a ticket tool." };
+  }
+  return resolveDraft(draft);
+}
+
+function resolveDraft(draft: LinkDraft): ResolvedLink {
   const program = cleanLine(draft.program);
   const ticket = draft.ticket.trim();
   const url = draft.url.trim();
@@ -193,4 +202,55 @@ export function withLinkUrl(draft: LinkDraft, url: string): LinkDraft {
     program: follow(draft.program, previous.program, guess.program),
     ticket: follow(draft.ticket, previous.ticket, guess.ticket),
   };
+}
+
+// qTest test cases (specs/external-links/qtest-test-cases.feature.md): the
+// same three-part link under the fixed program `qTest`, so the field asks
+// for the test case's url and its id (TC-42). A qTest url names the test
+// case by its internal object id, not by the TC-42 id people know it by, so
+// the id is read off the url only when the url spells it out.
+
+/** A qTest test case id: TC-42, as qTest mints them. */
+const QTEST_CASE_RE = /\b(TC-\d+)\b/i;
+
+/** The TC-42 id a qTest url gives away, or "" when it names none. */
+export function qtestCaseFromUrl(url: string): string {
+  let text = url.trim();
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // A malformed escape: read the url as typed.
+  }
+  return text.match(QTEST_CASE_RE)?.[1]?.toUpperCase() ?? "";
+}
+
+/**
+ * The draft with a new url: always under `qTest`, and the test case id
+ * following the url while it is still empty or still the one the old url
+ * gave — an id typed by hand stays.
+ */
+export function withQtestUrl(draft: LinkDraft, url: string): LinkDraft {
+  const derived = qtestCaseFromUrl(url);
+  const followed = !draft.ticket.trim() || draft.ticket === qtestCaseFromUrl(draft.url);
+  return { program: QTEST_PROGRAM, url, ticket: followed ? derived : draft.ticket };
+}
+
+/**
+ * The qTest link a draft makes, like resolveLinkDraft — the program is
+ * always `qTest`, and the messages speak of test cases, not tickets.
+ */
+export function resolveQtestDraft(draft: LinkDraft): ResolvedLink {
+  const ticket = draft.ticket.trim();
+  const url = draft.url.trim();
+  if (!ticket && !url) return { link: null };
+  if (!url) return { link: null, error: "Enter the test case's url." };
+  if (!ticket) return { link: null, error: "Enter the test case id (TC-42)." };
+  const resolved = resolveDraft({ program: QTEST_PROGRAM, ticket, url });
+  if (resolved.error && !resolved.error.startsWith("Not a web link")) {
+    return {
+      link: null,
+      error: "The test case id can't contain brackets, and the url can't contain spaces or parentheses.",
+    };
+  }
+  return resolved;
 }

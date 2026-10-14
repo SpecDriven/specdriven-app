@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeTextFile } from "./fsx";
 import type { GitEngine } from "./git";
+import { QTEST_PROGRAM } from "./parser";
 
 export interface SpecDrivenState {
   dataRepo?: string;
@@ -77,6 +78,14 @@ export interface SpecDrivenState {
   ahaLinks?: boolean;
   /** Offer Figma links on features and scenarios, the same way as `ahaLinks`. */
   figmaLinks?: boolean;
+  /**
+   * Offer qTest test case links on features and scenarios
+   * (specs/external-links/qtest-test-cases.feature.md); absent means OFF.
+   * Off hides the qTest chip and field; the links already recorded stay in
+   * the documents — and, like the ticket links, in the `.feature.md` while
+   * "Publish external links" is on.
+   */
+  qtestLinks?: boolean;
   /** Offer code gen sessions (specs/agents/claude.feature.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to a coding agent. */
@@ -370,6 +379,13 @@ export function normalizeResourceLinks(value: unknown): boolean {
   return value === true;
 }
 
+/** Effective qTest test case link setting
+    (specs/external-links/qtest-test-cases.feature.md): OFF unless explicitly
+    turned on, like the Aha! and Figma ones. */
+export function normalizeQtestLinks(value: unknown): boolean {
+  return value === true;
+}
+
 // Project management (specs/external-links/project-management-jira-linear-
 // etc.feature.md): which tool the tickets live in, chosen in Settings once
 // instead of on every link. Jira is the default so a fresh install can link
@@ -386,7 +402,11 @@ export function normalizeProjectManagement(value: unknown): boolean {
 export function normalizeProjectManagementTool(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PROJECT_MANAGEMENT_TOOL;
   const name = value.trim();
-  return name && !/[:[\]]/.test(name) ? name : DEFAULT_PROJECT_MANAGEMENT_TOOL;
+  // `qTest` is the program of the test case links
+  // (specs/external-links/qtest-test-cases.feature.md), never a ticket's.
+  return name && !/[:[\]]/.test(name) && name.toLowerCase() !== QTEST_PROGRAM.toLowerCase()
+    ? name
+    : DEFAULT_PROJECT_MANAGEMENT_TOOL;
 }
 
 /**

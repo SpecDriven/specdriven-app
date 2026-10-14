@@ -13,7 +13,9 @@
 // projection only while "Publish external links" is on in Settings. That
 // setting is per user, so peers can legitimately disagree on the bytes — a
 // file holding either form is a faithful projection (isProjectionOf), and
-// neither peer rewrites the other's form just to flip the links.
+// neither peer rewrites the other's form just to flip the links. qTest test
+// case links (specs/external-links/qtest-test-cases.feature.md) are external
+// links too, and follow the same setting.
 //
 // Authorship (specs/app/specs-authorship.feature.md) is the same kind of
 // exception, decided per data repo instead of per user: who created and last
@@ -120,6 +122,7 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
           tests: [...s.tests],
         };
         const link = plainLink(s.link);
+        const qtest = plainLink(s.qtest);
         const prs = plainPrs(s.prs);
         const aha = plainResources(s.aha);
         const figma = plainResources(s.figma);
@@ -131,6 +134,7 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
           ...(flags ? { flags } : {}),
           ...(attributes ? { attributes } : {}),
           ...(link ? { link } : {}),
+          ...(qtest ? { qtest } : {}),
           ...(prs ? { prs } : {}),
           ...(aha ? { aha } : {}),
           ...(figma ? { figma } : {}),
@@ -147,6 +151,8 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   if (attributes) feature.attributes = attributes;
   const link = plainLink(doc.link);
   if (link) feature.link = link;
+  const qtest = plainLink(doc.qtest);
+  if (qtest) feature.qtest = qtest;
   const prs = plainPrs(doc.prs);
   if (prs) feature.prs = prs;
   const aha = plainResources(doc.aha);

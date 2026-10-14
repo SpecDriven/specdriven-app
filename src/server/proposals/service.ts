@@ -108,7 +108,7 @@ export function proposedScenario(name: unknown, body: unknown): Scenario {
  * Whether markdown carries a scenario exactly as built — nothing in the
  * name or body was read back as something else (a version chip, a status,
  * a `**Created by:**` line that would sign it as someone other than the
- * visitor, a ticket link, a test link, a feature flag or attribute line).
+ * visitor, a ticket or qTest link, a test link, a feature flag or attribute line).
  */
 function sameScenario(parsed: Scenario | undefined, built: Scenario): boolean {
   return (
@@ -119,6 +119,7 @@ function sameScenario(parsed: Scenario | undefined, built: Scenario): boolean {
     parsed.body === built.body &&
     parsed.tests.length === 0 &&
     !parsed.link &&
+    !parsed.qtest &&
     !parsed.flags &&
     !parsed.attributes &&
     !parsed.createdBy &&
@@ -156,6 +157,7 @@ export function newFeatureText(name: unknown, description: unknown, scenario: Sc
     back.description !== desc ||
     back.assigned ||
     back.link ||
+    back.qtest ||
     back.flags ||
     back.attributes ||
     back.createdBy ||
