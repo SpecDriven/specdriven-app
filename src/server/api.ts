@@ -9,6 +9,7 @@ import {
   normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
   normalizeFeatureFlags,
+  normalizeQtestLinks,
   normalizeResourceLinks,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
@@ -126,7 +127,7 @@ import {
 } from "./scenarioFiles";
 import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
-import { extractScenarios } from "./parser";
+import { extractScenarios, QTEST_PROGRAM } from "./parser";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -428,6 +429,9 @@ async function stateFields(state: SpecDrivenState) {
     // .feature.md): each offered only once switched on.
     ahaLinks: normalizeResourceLinks(state.ahaLinks),
     figmaLinks: normalizeResourceLinks(state.figmaLinks),
+    // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
+    // offered only once switched on.
+    qtestLinks: normalizeQtestLinks(state.qtestLinks),
     codeGen: normalizeCodeGen(state.codeGen),
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
@@ -565,6 +569,7 @@ const putState: Handler = async (req) => {
     publishExternalLinks?: boolean;
     ahaLinks?: boolean;
     figmaLinks?: boolean;
+    qtestLinks?: boolean;
     codeGen?: boolean;
     codeGenTarget?: string;
     agentFirstResponseSeconds?: number;
@@ -600,6 +605,7 @@ const putState: Handler = async (req) => {
     body.publishExternalLinks === undefined &&
     body.ahaLinks === undefined &&
     body.figmaLinks === undefined &&
+    body.qtestLinks === undefined &&
     body.codeGen === undefined &&
     body.codeGenTarget === undefined &&
     body.agentFirstResponseSeconds === undefined &&
@@ -619,7 +625,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -784,6 +790,14 @@ const putState: Handler = async (req) => {
         400,
       );
     }
+    // `qTest` is the program the test case links are written under
+    // (specs/external-links/qtest-test-cases.feature.md).
+    if (tool.toLowerCase() === QTEST_PROGRAM.toLowerCase()) {
+      return json(
+        { error: "qTest links test cases, not tickets — switch on qTest links instead" },
+        400,
+      );
+    }
     if (tool === DEFAULT_PROJECT_MANAGEMENT_TOOL) delete state.projectManagementTool;
     else state.projectManagementTool = tool;
   }
@@ -803,7 +817,9 @@ const putState: Handler = async (req) => {
   // Aha! and Figma links (specs/external-links/aha-and-figma-links
   // .feature.md): opt-in — the default OFF is an absent key. Off only takes
   // the chips and fields away; links already recorded stay in the documents.
-  for (const key of ["ahaLinks", "figmaLinks"] as const) {
+  // qTest test case links (specs/external-links/qtest-test-cases.feature.md)
+  // switch the same way.
+  for (const key of ["ahaLinks", "figmaLinks", "qtestLinks"] as const) {
     const value = body[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") return json({ error: `${key} must be a boolean` }, 400);

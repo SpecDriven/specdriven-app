@@ -154,7 +154,8 @@ async function theirChunks(dataDir: string, docDir: string): Promise<Set<string>
  * links writes none, and a repo without `authors-in-markdown` no authorship.
  */
 function theirProjection(doc: A.Doc<FeatureDoc>, theirs: Feature): Feature {
-  const linked = !!theirs.link || theirs.scenarios.some((s) => s.link);
+  const linked =
+    !!(theirs.link || theirs.qtest) || theirs.scenarios.some((s) => s.link || s.qtest);
   const authored =
     !!(theirs.createdBy || theirs.updatedBy) ||
     theirs.scenarios.some((s) => s.createdBy || s.updatedBy);
