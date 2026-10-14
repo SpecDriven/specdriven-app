@@ -293,7 +293,7 @@ describe("the qTest fields", () => {
     expect(resolveQtestDraft({ ...linkDraftOf(QTEST), ticket: "TC[1]" }).error).toContain("brackets");
   });
 
-  test("the chip reads qTest:TC-42", () => {
+  test("the chip reads the program and the test case id", () => {
     expect(externalLinkLabel(QTEST)).toBe("qTest:TC-42");
   });
 
