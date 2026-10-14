@@ -352,7 +352,7 @@ async function signUpAdmin(email = "boss@example.com"): Promise<string> {
 
 const del = (path: string, cookie: string) => call(path, { method: "DELETE", cookie, headers: { origin: ORIGIN } });
 
-test("a new account is a user: no admin API, no admin page, and no invites to send", async () => {
+test("a new account is a user, with no admin API, no admin page and no invites to send", async () => {
   const cookie = await signUp("a@example.com");
   expect(((await (await call("/auth/me", { cookie })).json()) as { role: string }).role).toBe("user");
   expect((await call("/auth/admin", { cookie })).status).toBe(403);
