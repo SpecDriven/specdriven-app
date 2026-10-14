@@ -157,6 +157,13 @@ Under the header, chips summarise the feature:
   small form with the tracking tool, id and url, plus **Remove link**. The
   link is written into the file as a markdown link when **Publish external
   links** is on.
+- The **qTest** chip (`Link qTest`, or `qTest:TC-42` once linked) appears
+  when **qTest test cases** is on. It opens a small form with the test
+  case's url and id, plus **Remove link**. The id fills in from the url when
+  the url contains it (`TC-42`); a qTest url usually names the test case by
+  an internal number, so type the id otherwise. Like the ticket, the link is
+  written into the file as `[qTest:TC-42](url)` when **Publish external
+  links** is on.
 - The **Aha!** and **Figma** chips (`Link Aha!`, or `2 Aha! links` once
   linked) appear when **Aha! links** or **Figma links** is on. Each opens a
   list of the feature's links with ✕ to remove one, and a url and optional
@@ -274,6 +281,9 @@ Below, in one scrolling column:
   table** appears when the body has none.
 - **Ticket link**: the tracking tool (GitHub, Jira, Linear or Other), id and
   url.
+- **qTest test case** (when switched on in Settings): the url and id
+  (`TC-42`) of the qTest test case covering the scenario. Saved with the
+  scenario like the ticket link, and shown on its card as `qTest:TC-42`.
 - **Feature flags** (when switched on in Settings): the flags that gate the
   scenario, each with an on/off switch and ✕. To add one, type a name
   (letters, digits, `.`, `_` and `-`), set its switch, and press **Add**.
@@ -313,7 +323,7 @@ Below, in one scrolling column:
 
 A **published** scenario opens read-only: the title is fixed, the body is
 shown as source, the scenario table is hidden, and there is no save button,
-because nothing about a published scenario can change. Its ticket link,
+because nothing about a published scenario can change. Its ticket link, qTest test case,
 feature flags, custom attributes, automated tests, pull requests, Aha! and Figma links and files remain editable and are saved automatically, so developers
 can attach tests to a scenario long after it was published.
 
@@ -482,7 +492,8 @@ Open Settings with `⌘,` or `g s`.
 | **Scenario preview lines** | How many body lines a scenario card shows. |
 | **Show links to automated tests** | Shows or hides the Automated tests table on cards. Hiding never deletes the links. |
 | **Project management** and **Project management tool** | Whether features and scenarios offer a ticket link, and which tracker it names. |
-| **Publish external links** | Writes ticket links into the `.feature.md` file as markdown links. |
+| **Publish external links** | Writes ticket links and qTest test case links into the `.feature.md` file as markdown links. |
+| **qTest test cases** | Off by default. On, features and scenarios offer a link to the qTest test case covering them, written as `[qTest:TC-42](url)`. Off hides it; links already added are kept. |
 | **Feature flags** | Off by default. On, features and scenarios show their `[ff:<name>:on\|off]` flags as chips (red when off) and the editors add, toggle and remove them. Off hides them; the flag lines stay in the files. |
 | **Custom attributes** | A setting of the open data folder, shared with the team: its `custom-attributes.txt`, described below. |
 | **Aha! links** and **Figma links** | Each off by default. On, features and scenarios offer links to Aha! records or Figma designs. Off hides them; links already added are kept. |
@@ -587,6 +598,8 @@ On Windows and Linux `⌘` is `Ctrl`.
   with the test's name, that says which test automates a scenario.
 - **Ticket link** (external link): the tracker issue behind a feature or a
   scenario, such as `Jira:ABC-123`.
+- **qTest link**: the qTest test case covering a feature or a scenario,
+  such as `qTest:TC-42`.
 - **Aha! / Figma link**: a url to the product record or design behind a
   feature or a scenario, kept with the feature in the app only.
 - **Feature flag**: a named on/off switch in the product that gates a feature
