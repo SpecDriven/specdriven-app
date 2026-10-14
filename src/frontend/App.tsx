@@ -6498,7 +6498,10 @@ export function App() {
         { id: "settings-editor", title: "Specs" },
         ...(customAttributesText !== null ? [{ id: "settings-attributes", title: "Custom attributes" }] : []),
         { id: "settings-project", title: "Project management" },
-        { id: "settings-links", title: "Aha! & Figma" },
+        ...RESOURCE_LINK_KINDS.map((kind) => ({
+          id: `settings-links-${kind}`,
+          title: RESOURCE_LINK_TOOLS[kind].name,
+        })),
         { id: "settings-qtest", title: "qTest" },
         { id: "settings-workflow", title: "Workflow" },
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
@@ -6944,18 +6947,20 @@ export function App() {
           </>
         )}
       </PageSection>
-      <PageSection
-        id="settings-links"
-        title="Aha! & Figma"
-        hint="Links from features and scenarios to the product records and designs behind them."
-      >
-        {/* specs/external-links/aha-and-figma-links.feature.md: one opt-in
-            switch per tool. Off, nothing in the app shows or asks for
-            that tool's links; the ones already recorded are kept. */}
-        {RESOURCE_LINK_KINDS.map((kind) => {
-          const { name, noun } = RESOURCE_LINK_TOOLS[kind];
-          return (
-            <label className="settings-row" key={kind}>
+      {/* specs/external-links/aha-and-figma-links.feature.md: one opt-in
+          switch per tool, each in its own section. Off, nothing in the app
+          shows or asks for that tool's links; the ones already recorded are
+          kept. */}
+      {RESOURCE_LINK_KINDS.map((kind) => {
+        const { name, noun } = RESOURCE_LINK_TOOLS[kind];
+        return (
+          <PageSection
+            key={kind}
+            id={`settings-links-${kind}`}
+            title={name}
+            hint={`Links from features and scenarios to the ${name} ${noun}s behind them.`}
+          >
+            <label className="settings-row">
               <span className="settings-row-label">
                 {name} links
                 <span className="settings-row-hint">
@@ -6975,9 +6980,9 @@ export function App() {
                 <span className="switch-track" aria-hidden="true" />
               </span>
             </label>
-          );
-        })}
-      </PageSection>
+          </PageSection>
+        );
+      })}
       <PageSection
         id="settings-qtest"
         title="qTest"
