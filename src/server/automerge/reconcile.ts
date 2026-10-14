@@ -45,6 +45,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
     ...(feature.flags?.length ? { flags: plainFeatureFlags(feature.flags)! } : {}),
     ...(feature.attributes?.length ? { attributes: plainAttributes(feature.attributes)! } : {}),
     ...(feature.link ? { link: { ...feature.link } } : {}),
+    ...(feature.qtest ? { qtest: { ...feature.qtest } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -68,6 +69,7 @@ function newEntry(s: Scenario, author?: string): SpecEntry {
     ...(s.flags?.length ? { flags: plainFeatureFlags(s.flags)! } : {}),
     ...(s.attributes?.length ? { attributes: plainAttributes(s.attributes)! } : {}),
     ...(s.link ? { link: { ...s.link } } : {}),
+    ...(s.qtest ? { qtest: { ...s.qtest } } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
   };
@@ -97,18 +99,25 @@ function linkKey(link: ExternalLink | undefined): string {
 }
 
 /**
- * Set or clear a `link` key on a doc map. A link is replaced whole (it is
- * one ticket, not text to merge), and concurrent replacements resolve to
- * one winner the same way on every peer.
+ * Set or clear a `link` key — or the `qtest` one
+ * (specs/external-links/qtest-test-cases.feature.md) — on a doc map. A link
+ * is replaced whole (it is one ticket, not text to merge), and concurrent
+ * replacements resolve to one winner the same way on every peer.
  */
 function assignLink(
-  target: { link?: ExternalLink },
+  target: { link?: ExternalLink; qtest?: ExternalLink },
   before: ExternalLink | undefined,
   after: ExternalLink | undefined,
+  key: "link" | "qtest" = "link",
 ): void {
   if (linkKey(before) === linkKey(after)) return;
-  if (after) target.link = { program: after.program, ticket: after.ticket, url: after.url };
-  else delete target.link;
+  if (after) target[key] = { program: after.program, ticket: after.ticket, url: after.url };
+  else delete target[key];
+}
+
+/** A plain copy of a link held in the doc; undefined when none. */
+function plainLink(link: ExternalLink | undefined): ExternalLink | undefined {
+  return link ? { program: link.program, ticket: link.ticket, url: link.url } : undefined;
 }
 
 /**
@@ -235,15 +244,15 @@ export function reconcile(
     body: e.body,
     publishedBody: snapshotOf(e),
     tests: [...e.tests],
-    ...(e.link ? { link: { program: e.link.program, ticket: e.link.ticket, url: e.link.url } } : {}),
+    ...(e.link ? { link: plainLink(e.link)! } : {}),
+    ...(e.qtest ? { qtest: plainLink(e.qtest)! } : {}),
     ...(e.flags?.length ? { flags: plainFeatureFlags(e.flags)! } : {}),
     ...(e.attributes?.length ? { attributes: plainAttributes(e.attributes)! } : {}),
   }));
   // Read before any key is assigned below — schema.ts keeps them optional.
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
-  const docLink = doc.link
-    ? { program: doc.link.program, ticket: doc.link.ticket, url: doc.link.url }
-    : undefined;
+  const docLink = plainLink(doc.link);
+  const docQtest = plainLink(doc.qtest);
   const docAssigned = doc.assigned;
   const docFlags = plainFeatureFlags(doc.flags);
   const docAttributes = plainAttributes(doc.attributes);
@@ -290,6 +299,7 @@ export function reconcile(
     effectiveBody(entry) !== match.body ||
     entry.tests.join("\n") !== match.tests.join("\n") ||
     linkKey(entry.link) !== linkKey(match.link) ||
+    linkKey(entry.qtest) !== linkKey(match.qtest) ||
     featureFlagsKey(entry.flags) !== featureFlagsKey(match.flags) ||
     attributesKey(entry.attributes) !== attributesKey(match.attributes);
   const changedAt = new Set<number>();
@@ -299,6 +309,7 @@ export function reconcile(
     doc.name !== target.name ||
     doc.description !== target.description ||
     linkKey(docLink) !== linkKey(target.link) ||
+    linkKey(docQtest) !== linkKey(target.qtest) ||
     featureFlagsKey(docFlags) !== featureFlagsKey(target.flags) ||
     attributesKey(docAttributes) !== attributesKey(target.attributes) ||
     (docAssigned ?? "") !== (target.assigned ?? "") ||
@@ -312,6 +323,7 @@ export function reconcile(
       A.updateText(d, ["description"], target.description);
     }
     assignLink(d, docLink, target.link);
+    assignLink(d, docQtest, target.qtest, "qtest");
     assignFlags(d, docFlags, target.flags);
     assignAttributes(d, docAttributes, target.attributes);
     // The assignment is one member, not text to merge — replaced whole, the
@@ -342,6 +354,7 @@ export function reconcile(
         live.tests.splice(0, live.tests.length, ...match.tests);
       }
       assignLink(live, entry.link, match.link);
+      assignLink(live, entry.qtest, match.qtest, "qtest");
       assignFlags(live, entry.flags, match.flags);
       assignAttributes(live, entry.attributes, match.attributes);
       const before = authorsAt[i]!;

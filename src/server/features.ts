@@ -220,6 +220,9 @@ async function featureView(
   const ids = new Map(loaded.doc.specs.map((s) => [key(s), s.id] as const));
   // Plain copies of the document's links (docToFeature strips the proxies).
   const docLinks = new Map(inDoc.scenarios.map((s) => [key(s), s.link] as const));
+  // qTest test cases (specs/external-links/qtest-test-cases.feature.md) are
+  // external links too: the file holds them only while links are published.
+  const docQtests = new Map(inDoc.scenarios.map((s) => [key(s), s.qtest] as const));
   const docPrs = new Map(inDoc.scenarios.map((s) => [key(s), s.prs] as const));
   // Aha! and Figma links (specs/external-links/aha-and-figma-links.feature.md):
   // the document's alone, like the pull request links.
@@ -247,6 +250,7 @@ async function featureView(
     .filter((s) => s.status === "draft" && !have.has(key(s)))
     .map((s) => {
       const link = docLinks.get(key(s));
+      const qtest = docQtests.get(key(s));
       const prs = docPrs.get(key(s));
       const files = docFiles.get(key(s));
       const flags = docFlags.get(key(s));
@@ -261,6 +265,7 @@ async function featureView(
         ...(flags ? { flags } : {}),
         ...(attributes ? { attributes } : {}),
         ...(link ? { link } : {}),
+        ...(qtest ? { qtest } : {}),
         ...(prs ? { prs } : {}),
         ...docResources.get(key(s)),
         ...(files ? { files } : {}),
@@ -275,6 +280,8 @@ async function featureView(
     const id = ids.get(key(s));
     const link = s.link ?? docLinks.get(key(s));
     if (link && !s.link) linked++;
+    const qtest = s.qtest ?? docQtests.get(key(s));
+    if (qtest && !s.qtest) linked++;
     const prs = docPrs.get(key(s));
     const files = docFiles.get(key(s));
     const { createdBy: _c, updatedBy: _u, ...rest } = s;
@@ -282,6 +289,7 @@ async function featureView(
       ...rest,
       ...(id === undefined ? {} : { id }),
       ...(link ? { link } : {}),
+      ...(qtest ? { qtest } : {}),
       ...(prs ? { prs } : {}),
       ...docResources.get(key(s)),
       ...(files ? { files } : {}),
@@ -290,12 +298,15 @@ async function featureView(
   });
   const link = feature.link ?? inDoc.link;
   if (link && !feature.link) linked++;
+  const qtest = feature.qtest ?? inDoc.qtest;
+  if (qtest && !feature.qtest) linked++;
   // Pull request links are the document's alone: the file never holds them,
   // and serializeFeature never writes them, so `content` is unaffected.
   const { createdBy: _c, updatedBy: _u, ...featureRest } = feature;
   const parsed: Feature = {
     ...featureRest,
     ...(link ? { link } : {}),
+    ...(qtest ? { qtest } : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     ...resourcesOf(inDoc),
     ...authorsOf(inDoc),

@@ -98,6 +98,7 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   publishExternalLinks: true,
   ahaLinks: true,
   figmaLinks: true,
+  qtestLinks: true,
   openTestsInIdea: false,
 };
 

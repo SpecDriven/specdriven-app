@@ -36,6 +36,7 @@ import {
   Activity,
   ChevronDown,
   ChevronLeft,
+  ClipboardCheck,
   ChevronRight,
   Ellipsis,
   Pencil,
@@ -137,6 +138,7 @@ import {
   useAgentChat,
 } from "./agentChat";
 import { ExternalLinkField } from "./ExternalLinkField";
+import { QtestLinkField } from "./QtestLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
 import { AttributeChips, AttributesField } from "./AttributesField";
@@ -160,6 +162,7 @@ import {
   isBlankLinkDraft,
   linkDraftOf,
   resolveLinkDraft,
+  resolveQtestDraft,
 } from "./externallinks";
 import type { LinkDraft } from "./externallinks";
 import { ScenarioTable } from "./ScenarioTable";
@@ -480,6 +483,7 @@ export function scenarioSignature(s: Scenario, version: number): string {
     s.body,
     s.tests,
     s.link ?? null,
+    s.qtest ?? null,
     s.flags ?? null,
     s.attributes ?? null,
   ]);
@@ -1360,6 +1364,9 @@ export function App() {
   /** Which of Aha! and Figma features and scenarios link to
       (specs/external-links/aha-and-figma-links.feature.md). */
   const [resourceLinksOn, setResourceLinksOn] = useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
+  /** Whether features and scenarios link qTest test cases
+      (specs/external-links/qtest-test-cases.feature.md); default OFF. */
+  const [qtestLinks, setQtestLinks] = useState(false);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1467,6 +1474,7 @@ export function App() {
   const [settingsPublishLinksDraft, setSettingsPublishLinksDraft] = useState(true);
   const [settingsResourceLinksDraft, setSettingsResourceLinksDraft] =
     useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
+  const [settingsQtestLinksDraft, setSettingsQtestLinksDraft] = useState(false);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
@@ -1499,6 +1507,14 @@ export function App() {
   const [featureLinkDraft, setFeatureLinkDraft] = useState<LinkDraft | null>(null);
   const [featureLinkError, setFeatureLinkError] = useState<string | null>(null);
   const [featureLinkSaving, setFeatureLinkSaving] = useState(false);
+  /** The edit dialog's "qTest test case" fields as typed
+      (specs/external-links/qtest-test-cases.feature.md), and why the last
+      Save was blocked by them; then the feature's own qTest dialog. */
+  const [qtestDraft, setQtestDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
+  const [qtestError, setQtestError] = useState<string | null>(null);
+  const [featureQtestDraft, setFeatureQtestDraft] = useState<LinkDraft | null>(null);
+  const [featureQtestError, setFeatureQtestError] = useState<string | null>(null);
+  const [featureQtestSaving, setFeatureQtestSaving] = useState(false);
   /** The feature's "Pull requests" popover
       (specs/external-links/related-pull-requests.feature.md). */
   const [featurePrsOpen, setFeaturePrsOpen] = useState(false);
@@ -1665,6 +1681,7 @@ export function App() {
           setProjectManagementTool(state.projectManagementTool);
         }
         setResourceLinksOn(resourceLinkSwitches(state));
+        setQtestLinks(state.qtestLinks === true);
         if (typeof state.codeGen === "boolean") {
           setCodeGen(state.codeGen);
         }
@@ -1820,6 +1837,7 @@ export function App() {
     testLookup.current++;
     // The ticket-link fields open showing the scenario's link, if any.
     setLinkDraft(linkDraftOf(editing?.scenario.link));
+    setQtestDraft(linkDraftOf(editing?.scenario.qtest));
   }, [editingOpen]);
 
   // The tree reads the open feature's scenarios from its live state, every
@@ -1893,7 +1911,12 @@ export function App() {
     setLinkError(null);
   }, [editingOpen, linkDraft]);
 
+  useEffect(() => {
+    setQtestError(null);
+  }, [editingOpen, qtestDraft]);
+
   const featureLinkOpen = featureLinkDraft !== null;
+  const featureQtestOpen = featureQtestDraft !== null;
   // ESC (specs/ui/ui.feature.md "Dialogs", specs/editor/spec-editor.feature.md
   // "Spec editor pane", specs/ui/folders.feature.md): one key, closing whatever
   // is on top — see `closeTopmost` in the shortcut registry below. The menus
@@ -3353,6 +3376,13 @@ export function App() {
       setLinkError(link.error);
       return null;
     }
+    // The qTest test case fields gate it the same way
+    // (specs/external-links/qtest-test-cases.feature.md).
+    const qtest = resolveQtestDraft(qtestDraft);
+    if (qtest.error) {
+      setQtestError(qtest.error);
+      return null;
+    }
     const pending = resolvePendingTests(
       editing.scenario.tests,
       testEdit === null ? null : { index: testEdit, ...testEditDraft },
@@ -3696,6 +3726,7 @@ export function App() {
     setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
     setSettingsResourceLinksDraft(resourceLinksOn);
+    setSettingsQtestLinksDraft(qtestLinks);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
@@ -3857,6 +3888,7 @@ export function App() {
       setProjectManagementTool(data.projectManagementTool);
     }
     setResourceLinksOn(resourceLinkSwitches(data));
+    setQtestLinks(data.qtestLinks === true);
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -4032,6 +4064,13 @@ export function App() {
   // Aha! and Figma links (specs/external-links/aha-and-figma-links
   // .feature.md): off takes the tool's chip, field and lists away; the links
   // already recorded stay in the documents and come back when it is on again.
+  // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
+  // off takes the chip and field away; the links already recorded stay.
+  const toggleQtestLinks = async (on: boolean) => {
+    setSettingsQtestLinksDraft(on);
+    if (!(await patchSettings({ qtestLinks: on }))) setSettingsQtestLinksDraft(!on);
+  };
+
   const toggleResourceLinks = async (kind: ResourceLinkKind, on: boolean) => {
     setSettingsResourceLinksDraft((prev) => ({ ...prev, [kind]: on }));
     if (!(await patchSettings({ [RESOURCE_LINK_SETTING[kind]]: on }))) {
@@ -4194,6 +4233,18 @@ export function App() {
     setEditing({ ...editing, scenario: resolved.link ? { ...rest, link: resolved.link } : rest });
   };
 
+  // The dialog's "qTest test case" fields
+  // (specs/external-links/qtest-test-cases.feature.md), following the
+  // scenario the same way as the ticket link's.
+  const changeQtestDraft = (draft: LinkDraft) => {
+    setQtestDraft(draft);
+    if (!editing) return;
+    const resolved = resolveQtestDraft(draft);
+    if (resolved.error) return;
+    const { qtest: _previous, ...rest } = editing.scenario;
+    setEditing({ ...editing, scenario: resolved.link ? { ...rest, qtest: resolved.link } : rest });
+  };
+
   /**
    * Save the feature's own ticket link (specs/external-links/project-
    * management-jira-linear-etc.feature.md "Add link to feature"): the feature
@@ -4295,6 +4346,48 @@ export function App() {
       setFeatureLinkError("Could not save the ticket link — is the server running?");
     } finally {
       setFeatureLinkSaving(false);
+    }
+  };
+
+  /**
+   * Save the feature's own qTest test case link
+   * (specs/external-links/qtest-test-cases.feature.md), the way
+   * saveFeatureLink saves its ticket.
+   */
+  const saveFeatureQtest = async () => {
+    if (!feature || !selected || featureQtestDraft === null) return;
+    const resolved = resolveQtestDraft(featureQtestDraft);
+    if (resolved.error) {
+      setFeatureQtestError(resolved.error);
+      return;
+    }
+    const { qtest: _previous, ...rest } = feature;
+    const next: Feature = resolved.link ? { ...rest, qtest: resolved.link } : rest;
+    setFeatureQtestSaving(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeature(featureFromResponse(data, selected));
+        setDirty(false);
+        setFeatureQtestDraft(null);
+        toast.success(
+          resolved.link
+            ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
+            : `Test case link removed — ${data.message}.`,
+        );
+        markSaved();
+      } else {
+        setFeatureQtestError(data.error ?? "Could not save the test case link");
+      }
+    } catch {
+      setFeatureQtestError("Could not save the test case link — is the server running?");
+    } finally {
+      setFeatureQtestSaving(false);
     }
   };
 
@@ -5393,6 +5486,7 @@ export function App() {
     pomodoroSettings ||
     conflict !== null ||
     featureLinkOpen ||
+    featureQtestOpen ||
     featurePrsOpen ||
     featureFlagsOpen ||
     featureAttributesOpen ||
@@ -5516,6 +5610,7 @@ export function App() {
     }
     if (userInfoOpen) return setUserInfoOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
+    if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
     if (featureFlagsOpen) return setFeatureFlagsOpen(false);
     if (featureAttributesOpen) return setFeatureAttributesOpen(false);
@@ -6404,6 +6499,7 @@ export function App() {
         ...(customAttributesText !== null ? [{ id: "settings-attributes", title: "Custom attributes" }] : []),
         { id: "settings-project", title: "Project management" },
         { id: "settings-links", title: "Aha! & Figma" },
+        { id: "settings-qtest", title: "qTest" },
         { id: "settings-workflow", title: "Workflow" },
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
       ]}
@@ -6881,6 +6977,41 @@ export function App() {
             </label>
           );
         })}
+      </PageSection>
+      <PageSection
+        id="settings-qtest"
+        title="qTest"
+        hint="Links from features and scenarios to the qTest test cases covering them."
+      >
+        {/* specs/external-links/qtest-test-cases.feature.md: opt-in, like
+            the Aha! and Figma links. Off, nothing in the app shows or asks
+            for a test case; the links already recorded are kept. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            qTest test cases
+            <span className="settings-row-hint">
+              {settingsQtestLinksDraft ? (
+                <>
+                  Features and scenarios carry a link to the qTest test case covering them,
+                  written into the .feature.md as <code>[qTest:TC-42](url)</code> while Publish
+                  external links is on.
+                </>
+              ) : (
+                "qTest links are off: nothing in the app shows or asks for one. Links already recorded are kept."
+              )}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="qTest test cases"
+              checked={settingsQtestLinksDraft}
+              onChange={(e) => void toggleQtestLinks(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
       </PageSection>
       <PageSection
         id="settings-workflow"
@@ -8284,6 +8415,15 @@ export function App() {
                   />
                 </div>
               )}
+              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
+                  test case covering this scenario. Editable on a published
+                  scenario too, like the ticket link. */}
+              {qtestLinks && (
+                <div className="link-field">
+                  <span className="field-label">qTest test case</span>
+                  <QtestLinkField draft={qtestDraft} onChange={changeQtestDraft} error={qtestError} />
+                </div>
+              )}
               {/* specs/app/feature-flags.feature.md: the flags gating this
                   scenario, saved with it. Editable on a published scenario
                   too — like the ticket link, bookkeeping around the spec. */}
@@ -8844,6 +8984,89 @@ export function App() {
                   </Popover>
                 </span>
               )}
+              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
+                  test case covering the feature as a whole. */}
+              {qtestLinks && (
+                <span className="chip-anchor qtest-anchor">
+                  <button
+                    type="button"
+                    className={`chip${feature.qtest ? "" : " muted"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={featureQtestOpen}
+                    onClick={() => {
+                      if (featureQtestOpen) {
+                        setFeatureQtestDraft(null);
+                      } else {
+                        setFeatureQtestError(null);
+                        setFeatureQtestDraft(linkDraftOf(feature.qtest));
+                      }
+                    }}
+                  >
+                    <ClipboardCheck size={14} aria-hidden="true" />
+                    {feature.qtest ? externalLinkLabel(feature.qtest) : "Link qTest"}
+                  </button>
+                  {feature.qtest && (
+                    <a
+                      className="chip-ext"
+                      href={feature.qtest.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={feature.qtest.url}
+                      aria-label={`Open ${externalLinkLabel(feature.qtest)}`}
+                    >
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
+                  <Popover
+                    open={featureQtestOpen}
+                    onClose={() => setFeatureQtestDraft(null)}
+                    label="qTest test case for this feature"
+                    className="chip-popover"
+                    containerSelector=".qtest-anchor"
+                  >
+                    {featureQtestDraft !== null && (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void saveFeatureQtest();
+                        }}
+                      >
+                        <p className="hint">
+                          The qTest test case that covers this feature. Clear the fields to
+                          remove the link.
+                        </p>
+                        <div className="link-field">
+                          <QtestLinkField
+                            draft={featureQtestDraft}
+                            onChange={(draft) => {
+                              setFeatureQtestError(null);
+                              setFeatureQtestDraft(draft);
+                            }}
+                            error={featureQtestError}
+                            autoFocus
+                          />
+                        </div>
+                        <div className="dialog-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => setFeatureQtestDraft(null)}
+                          >
+                            Cancel
+                          </button>
+                          <button type="submit" disabled={featureQtestSaving}>
+                            {featureQtestSaving
+                              ? "Saving…"
+                              : feature.qtest && isBlankLinkDraft(featureQtestDraft)
+                                ? "Remove link"
+                                : "Save"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </Popover>
+                </span>
+              )}
               {/* specs/external-links/related-pull-requests.feature.md "Link
                   a pull request to a feature": the chip counts the feature's
                   pull requests; the popover lists them and takes another. */}
@@ -9158,6 +9381,19 @@ export function App() {
                           title={s.link.url}
                         >
                           {externalLinkLabel(s.link)}
+                        </a>
+                      )}
+                      {/* Its qTest test case (specs/external-links/qtest-test-
+                          cases.feature.md), opening in a new tab. */}
+                      {qtestLinks && s.qtest && (
+                        <a
+                          className="ext-link"
+                          href={s.qtest.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={s.qtest.url}
+                        >
+                          {externalLinkLabel(s.qtest)}
                         </a>
                       )}
                       {/* The flags gating it (specs/app/feature-flags.feature.md). */}
