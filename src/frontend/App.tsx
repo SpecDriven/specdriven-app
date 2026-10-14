@@ -205,7 +205,7 @@ import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
-import { CloneFromGitHub, GITHUB_HOST, PasteToken } from "./GitHubToken";
+import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import type { ScenarioRef } from "./route";
 
 interface Conflict {
@@ -232,6 +232,8 @@ interface GhInfo {
   available: boolean;
   signedIn: boolean;
   login: string | null;
+  /** Whether gh's account stands in while the app is signed out; signing out turns it off. */
+  inUse?: boolean;
 }
 
 /** A device flow in progress: the code to enter and where to enter it. */
@@ -1598,6 +1600,8 @@ export function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userInfoOpen, setUserInfoOpen] = useState(false);
+  // The user menu's token sign-in (specs/user-info-settings.feature.md).
+  const [tokenSignInOpen, setTokenSignInOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui/ui.feature.md "Dialogs") — the
   // desktop runtime has no window.prompt (specs/app/desktop-app.feature.md
   // "Dialogs").
@@ -1926,6 +1930,7 @@ export function App() {
   // The editor pane is part of the page, not a dialog — Tab reaches the sidebar
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
+  const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
@@ -3782,9 +3787,27 @@ export function App() {
     setGh(state.gh ?? null);
   };
 
+  // Signing out also stops the app using the GitHub CLI's account
+  // (specs/user-info-settings.feature.md); Settings can turn it back on.
   const signOutGitHub = async () => {
     await fetch("/api/auth/github", { method: "DELETE" });
     setAuth({ signedIn: false });
+    await refreshUser();
+  };
+
+  // A token pasted in Settings or the user menu's dialog is the sign-in now.
+  const signedInWithToken = (signedIn: AuthInfo) => {
+    setAuth(signedIn);
+    setAuthStatus(null);
+    void refreshUser();
+  };
+
+  const enableGhAccount = async () => {
+    await fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ useGhAccount: true }),
+    });
     await refreshUser();
   };
 
@@ -5479,6 +5502,7 @@ export function App() {
   // while typing in a field; ESC works everywhere.
   const dialogOpen =
     userInfoOpen ||
+    tokenSignInOpen ||
     foldersOpen ||
     switching !== null ||
     modalOpen ||
@@ -5609,6 +5633,7 @@ export function App() {
       return;
     }
     if (userInfoOpen) return setUserInfoOpen(false);
+    if (tokenSignInOpen) return setTokenSignInOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -7270,7 +7295,17 @@ export function App() {
                       as <strong>{gh.login}</strong>
                     </>
                   ) : null}
-                  .
+                  {gh.inUse === false && !auth?.signedIn ? (
+                    <>
+                      {" "}
+                      — not used since you signed out.{" "}
+                      <button className="link" onClick={() => void enableGhAccount()}>
+                        Use GitHub CLI account
+                      </button>
+                    </>
+                  ) : (
+                    "."
+                  )}
                 </>
               ) : (
                 <>
@@ -7323,14 +7358,7 @@ export function App() {
             </div>
           )}
           {!deviceFlow && !webConnecting && (
-            <PasteToken
-              replacing={Boolean(auth?.signedIn)}
-              onSignedIn={(signedIn) => {
-                setAuth(signedIn);
-                setAuthStatus(null);
-                void refreshUser();
-              }}
-            />
+            <PasteToken replacing={Boolean(auth?.signedIn)} onSignedIn={signedInWithToken} />
           )}
           {authStatus && <p className="error">{authStatus}</p>}
           <p className="hint">
@@ -8079,6 +8107,52 @@ export function App() {
                       },
                     },
                   ]),
+              // The desktop and local app's own GitHub sign-in
+              // (specs/user-info-settings.feature.md): paste a token, switch
+              // to another account's, or sign out.
+              ...(hosted || demo
+                ? []
+                : auth?.signedIn
+                  ? [
+                      {
+                        id: "switch-account",
+                        label: "Switch account…",
+                        icon: <KeyRound size={13} />,
+                        onSelect: () => {
+                          setDrawerOpen(false);
+                          setTokenSignInOpen(true);
+                        },
+                      },
+                      {
+                        id: "sign-out",
+                        label: "Sign out",
+                        icon: <LogOut size={13} />,
+                        onSelect: () => void signOutGitHub(),
+                      },
+                    ]
+                  : [
+                      {
+                        id: "sign-in",
+                        label: "Sign in with token…",
+                        icon: <KeyRound size={13} />,
+                        onSelect: () => {
+                          setDrawerOpen(false);
+                          setTokenSignInOpen(true);
+                        },
+                      },
+                      // The GitHub CLI's account stands in for a missing
+                      // sign-in: signing out stops the app using it.
+                      ...(gh?.inUse
+                        ? [
+                            {
+                              id: "sign-out",
+                              label: "Sign out",
+                              icon: <LogOut size={13} />,
+                              onSelect: () => void signOutGitHub(),
+                            },
+                          ]
+                        : []),
+                    ]),
               // The hosted gateway's own pages (src/gateway): the account
               // with its tokens and password, and signing out.
               ...(hosted
@@ -9727,6 +9801,17 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {tokenSignInOpen && (
+        <TokenSignInDialog
+          auth={auth}
+          trapRef={tokenSignInTrapRef}
+          onSignedIn={(signedIn) => {
+            signedInWithToken(signedIn);
+            setTokenSignInOpen(false);
+          }}
+          onClose={() => setTokenSignInOpen(false)}
+        />
       )}
       {userInfoOpen && (
         <div className="dialog-backdrop" onClick={() => setUserInfoOpen(false)}>
