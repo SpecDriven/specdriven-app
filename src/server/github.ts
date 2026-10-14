@@ -72,6 +72,15 @@ export function newTokenUrl(host: string = GITHUB_HOST): string {
   return `${webBase(host)}/settings/personal-access-tokens/new`;
 }
 
+/**
+ * Whether a sign-in made on `signInHost` (absent: github.com, as on every
+ * record saved before GitHub Enterprise) belongs to `host` — the only host
+ * its token may be sent to, by git or by an API call.
+ */
+export function sameHost(signInHost: string | undefined, host: string): boolean {
+  return (signInHost ?? GITHUB_HOST).toLowerCase() === host.toLowerCase();
+}
+
 /** Whether `url` points at `host` — the one place a sign-in's token may go. */
 export function urlOnHost(url: string, host: string = GITHUB_HOST): boolean {
   try {

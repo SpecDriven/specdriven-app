@@ -25,7 +25,7 @@
 import type { Database } from "bun:sqlite";
 import { authorizeUrl, exchangeCode, fetchIdentity, newWebFlowSecrets } from "../auth";
 import { listFeatures, listFolders, readFeature } from "../features";
-import { githubApiBase } from "../github";
+import { GITHUB_HOST, apiBase } from "../github";
 import { bodyOf, json } from "../http";
 import { PROPOSALS_REFUSAL, type ProposalsConfig } from "../proposalsMode";
 import { sourceUrl } from "../sourceUrl";
@@ -112,9 +112,12 @@ export function createProposalsApi(opts: ProposalsApiOptions): ProposalsApi {
       return user.contributor;
     }
     let contributor = false;
+    // The repo is owner/name on github.com (parseProposalsRepo), the host the
+    // bot token was checked against (setup.ts) — the only one it may go to.
+    const host = GITHUB_HOST;
     try {
       const res = await fetch(
-        `${githubApiBase()}/repos/${config.repo.owner}/${config.repo.name}/collaborators/${encodeURIComponent(user.login)}/permission`,
+        `${apiBase(host)}/repos/${config.repo.owner}/${config.repo.name}/collaborators/${encodeURIComponent(user.login)}/permission`,
         { headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${config.botToken}`, "User-Agent": "SpecDriven" } },
       );
       if (res.ok) {
