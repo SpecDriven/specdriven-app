@@ -33,6 +33,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readTextFile } from "../fsx";
+import { documentTooNew } from "../dataFormat";
 import { getLogger, withSpan } from "../telemetry";
 import {
   PAGE_SCHEMA_VERSION,
@@ -347,6 +348,27 @@ async function loadDoc<T>(
 }
 
 /**
+ * Refuse a document whose schema is newer than this app reads
+ * (specs/app/data-format.feature.md): migrating or projecting it would drop
+ * what this app does not know, and the tick would push the loss. The folder
+ * is flagged too, so the API and the sync tick stop writing to it.
+ */
+function notNewerThan<T>(
+  dataDir: string,
+  fileName: string,
+  known: number,
+  then: (doc: A.Doc<T>) => A.Doc<T> = (doc) => doc,
+): (doc: A.Doc<T>) => A.Doc<T> {
+  return (doc) => {
+    const version = (doc as { schemaVersion?: unknown }).schemaVersion;
+    if (typeof version === "number" && version > known) {
+      throw documentTooNew(dataDir, fileName, version, known);
+    }
+    return then(doc);
+  };
+}
+
+/**
  * Load a feature's document, or null when the feature has none yet (a
  * pre-migration repo, or a plain-md write from an older app version).
  */
@@ -354,7 +376,12 @@ export async function loadFeatureDoc(
   dataDir: string,
   fileName: string,
 ): Promise<LoadedDoc | null> {
-  return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated);
+  return loadDoc<FeatureDoc>(
+    dataDir,
+    "features",
+    fileName,
+    notNewerThan(dataDir, fileName, SCHEMA_VERSION, migrated),
+  );
 }
 
 /**
@@ -367,7 +394,13 @@ export async function loadFeatureDocFrom(
   fileName: string,
   include: (chunk: string) => boolean,
 ): Promise<LoadedDoc | null> {
-  return loadDoc<FeatureDoc>(dataDir, "features", fileName, migrated, include);
+  return loadDoc<FeatureDoc>(
+    dataDir,
+    "features",
+    fileName,
+    notNewerThan(dataDir, fileName, SCHEMA_VERSION, migrated),
+    include,
+  );
 }
 
 /** Load a page's document (specs/app/roadmap.feature.md, tasks.feature.md). */
@@ -375,7 +408,12 @@ export async function loadPageDoc(
   dataDir: string,
   fileName: string,
 ): Promise<LoadedDoc<PageDoc> | null> {
-  return loadDoc<PageDoc>(dataDir, "docs", fileName);
+  return loadDoc<PageDoc>(
+    dataDir,
+    "docs",
+    fileName,
+    notNewerThan(dataDir, fileName, PAGE_SCHEMA_VERSION),
+  );
 }
 
 /** loadFeatureDocFrom for a page's document. */
@@ -384,7 +422,13 @@ export async function loadPageDocFrom(
   fileName: string,
   include: (chunk: string) => boolean,
 ): Promise<LoadedDoc<PageDoc> | null> {
-  return loadDoc<PageDoc>(dataDir, "docs", fileName, undefined, include);
+  return loadDoc<PageDoc>(
+    dataDir,
+    "docs",
+    fileName,
+    notNewerThan(dataDir, fileName, PAGE_SCHEMA_VERSION),
+    include,
+  );
 }
 
 /**
@@ -405,7 +449,12 @@ export async function loadFileDoc<T>(
  * hook is where a later version's migration goes, like `migrated` above.
  */
 export async function loadTestingDoc(dataDir: string): Promise<LoadedDoc<TestingDoc> | null> {
-  return loadDoc<TestingDoc>(dataDir, "testing", TESTING_DOC_NAME);
+  return loadDoc<TestingDoc>(
+    dataDir,
+    "testing",
+    TESTING_DOC_NAME,
+    notNewerThan(dataDir, TESTING_DOC_NAME, TESTING_SCHEMA_VERSION),
+  );
 }
 
 /**

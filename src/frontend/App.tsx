@@ -98,6 +98,7 @@ import {
 } from "./excalidrawPref";
 import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
+import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
 import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
@@ -1641,6 +1642,11 @@ export function App() {
   // retried until the server answers.
   const [bootError, setBootError] = useState<BootError | null>(null);
   const booting = useRef(false);
+  // Data saved by a newer app (specs/app/data-format.feature.md): the
+  // version it asks for, while the server refuses to work on the folder.
+  const [outdated, setOutdated] = useState<{ minAppVersion: string | null } | null>(null);
+  const [checkingOutdated, setCheckingOutdated] = useState(false);
+  useEffect(() => watchDataTooNew((minAppVersion) => setOutdated({ minAppVersion })), []);
 
   const boot = useCallback(async () => {
     // The retry timer and the Retry button can both land here.
@@ -1733,7 +1739,9 @@ export function App() {
         setGh(state.gh ?? null);
         setAuth(state.auth ?? null);
         if (state.user) setUser(state.user);
-        if (!state.needsDataRepo) {
+        const tooNew = state.dataFormat?.ok === false;
+        setOutdated(tooNew ? { minAppVersion: state.dataFormat.minAppVersion ?? null } : null);
+        if (!state.needsDataRepo && !tooNew) {
           // The README rides along: a start on the bare url opens on it
           // (app-startup.md).
           await Promise.all([
@@ -1791,7 +1799,7 @@ export function App() {
   // feature list on the same cadence so pulled changes show up, without
   // clobbering an in-progress edit or conflict resolution.
   useEffect(() => {
-    if (loading || needsRepo || reloadSeconds <= 0) return;
+    if (loading || needsRepo || outdated || reloadSeconds <= 0) return;
     const id = setInterval(() => {
       void loadFeatures();
       // The description editor holding an edit that hasn't landed yet keeps
@@ -1813,6 +1821,7 @@ export function App() {
   }, [
     loading,
     needsRepo,
+    outdated,
     reloadSeconds,
     selected,
     dirty,
@@ -2040,6 +2049,11 @@ export function App() {
       if (res.ok) {
         applyRepos(state);
         setNeedsRepo(false);
+        // A folder a newer app wrote opens on the update screen instead.
+        if (state.dataFormat?.ok === false) {
+          setOutdated({ minAppVersion: state.dataFormat.minAppVersion ?? null });
+          return;
+        }
         // A freshly picked folder opens on its README, like a start does
         // (app-startup.md "A newly picked data folder opens on
         // its README") — unless there is a deep link to honor. The plugins —
@@ -6402,6 +6416,33 @@ export function App() {
           </button>
         </section>
       </main>
+    );
+
+  // specs/app/data-format.feature.md: the folder holds data a newer app
+  // wrote; nothing else is shown until the user updates or switches folders.
+  if (outdated && !needsRepo)
+    return (
+      <AppOutdated
+        appVersion={appVersion}
+        minAppVersion={outdated.minAppVersion}
+        checking={checkingOutdated}
+        onCheckAgain={async () => {
+          setCheckingOutdated(true);
+          try {
+            // One sync tick re-reads the marker after a pull; boot then
+            // reports the verdict and, if it cleared, loads the folder.
+            await fetch("/api/reload", { method: "POST" }).catch(() => {});
+            await boot();
+          } finally {
+            setCheckingOutdated(false);
+          }
+        }}
+        onOtherFolder={() => {
+          setOutdated(null);
+          setRepoError(null);
+          setNeedsRepo(true);
+        }}
+      />
     );
 
   if (needsRepo) {

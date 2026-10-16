@@ -30,7 +30,8 @@ import { readTextFile, writeTextFile } from "../fsx";
 import { featureTextError } from "../parser";
 import { absorbDrift } from "./driftSync";
 import { isProjectionOf, projectFeature, projectionFor } from "./project";
-import type { FeatureDoc } from "./schema";
+import { SCHEMA_VERSION, type FeatureDoc } from "./schema";
+import { documentTooNew, incompatibility } from "../dataFormat";
 import { docDir, listFeatureDocs, loadFeatureDoc, onDocSaved, saveFeatureDoc } from "./store";
 import { errorAttributes, getLogger, withSpan } from "../telemetry";
 
@@ -155,8 +156,15 @@ export async function startNetSync(
 
   /** Remote operations land in the chunk store and the markdown projection. */
   async function absorbRemote(docId: DocumentId, networkDoc: A.Doc<FeatureDoc>): Promise<void> {
+    // Nothing is written to a folder a newer app's data blocks.
+    if (incompatibility(dataDir)) return;
     const fileName = await fileNameFor(docId);
     if (fileName === null || writing.has(fileName)) return;
+    // A peer on a newer app (specs/app/data-format.feature.md): merging its
+    // document would hand this app a schema it cannot project.
+    if (typeof networkDoc.schemaVersion === "number" && networkDoc.schemaVersion > SCHEMA_VERSION) {
+      throw documentTooNew(dataDir, fileName, networkDoc.schemaVersion, SCHEMA_VERSION);
+    }
     const disk = await loadFeatureDoc(dataDir, fileName);
     if (disk === null) return;
     // The projection is about to be written over the file, so a local disk
