@@ -20,6 +20,7 @@ import { dirname } from "node:path";
 import { getAuth } from "../auth";
 import { writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
+import { isHostedMode } from "../hostedMode";
 import { run, which } from "../run";
 import type { RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
@@ -29,8 +30,16 @@ export function cliGitAvailable(): boolean {
   return which("git") !== null;
 }
 
-/** What a failed operation says when git had no usable GitHub credential. */
-export const SIGN_IN_HINT = "authentication required — sign in with GitHub in Settings";
+/**
+ * What a failed operation says when git had no usable GitHub credential. A
+ * hosted worker's token comes from the gateway's account page, not Settings
+ * (src/server/hostedMode.ts).
+ */
+export function signInHint(): string {
+  return isHostedMode()
+    ? "authentication required — add a GitHub token that can read and write it on your account page"
+    : "authentication required — sign in with GitHub in Settings";
+}
 
 /**
  * Per-command git configuration an engine runs with. Nothing here is written
@@ -109,7 +118,7 @@ export async function gitClone(git: GitRun, url: string, dir: string): Promise<v
   if (res.exitCode !== 0) {
     const output = res.stderr + res.stdout;
     throw new Error(
-      `Could not clone ${url}: ${isAuthFailure(output) ? SIGN_IN_HINT : output.trim()}`,
+      `Could not clone ${url}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
     );
   }
 }
@@ -190,7 +199,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     return {
       ok: false,
       conflictedFiles: conflicts,
-      message: conflicts.length === 0 && isAuthFailure(output) ? SIGN_IN_HINT : output,
+      message: conflicts.length === 0 && isAuthFailure(output) ? signInHint() : output,
     };
   }
 
@@ -262,7 +271,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     const output = (res.stderr + res.stdout).trim();
     return {
       pushed: false,
-      message: `push failed: ${isAuthFailure(output) ? SIGN_IN_HINT : output}`,
+      message: `push failed: ${isAuthFailure(output) ? signInHint() : output}`,
     };
   }
 
@@ -424,7 +433,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (fetched.exitCode !== 0) {
       const output = fetched.stderr + fetched.stdout;
       throw new Error(
-        `Could not fetch ${ref}: ${isAuthFailure(output) ? SIGN_IN_HINT : output.trim()}`,
+        `Could not fetch ${ref}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
       );
     }
     let res = await git(repoDir, "checkout", "--detach", `origin/${ref}`);

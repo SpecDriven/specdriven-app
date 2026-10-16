@@ -16,7 +16,7 @@ import { getAuth } from "../auth";
 import { run, which } from "../run";
 import type { GitBackend } from "./backend";
 import {
-  SIGN_IN_HINT,
+  signInHint,
   appContext,
   createGitBackend,
   gitClone,
@@ -175,7 +175,7 @@ async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   if (res.exitCode !== 0) {
     const output = res.stderr + res.stdout;
     throw new Error(
-      `Could not clone ${url}: ${isAuthFailure(output) ? SIGN_IN_HINT : output.trim()}`,
+      `Could not clone ${url}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
     );
   }
 }
