@@ -211,6 +211,43 @@ body {
   gap: 0.85rem;
 }
 
+/* Hosted start screens: the account, admin and sign-out links that stand in
+   for the user menu until a repo opens (HostedStartNav.tsx). */
+.repo-prompt .hosted-start-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.75rem;
+}
+
+.repo-prompt .hosted-start-links {
+  display: flex;
+  gap: 0.85rem;
+}
+
+.repo-prompt .hosted-start-nav a {
+  color: var(--accent-strong);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.repo-prompt .hosted-start-nav a:hover {
+  text-decoration: underline;
+}
+
+.repo-prompt .hosted-start-nav button.link,
+.repo-prompt .hosted-start-nav button.link:hover:not(:disabled) {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font-size: 0.75rem;
+}
+
 /* Settings → Git & GitHub: paste a token, for GitHub Enterprise above all. */
 .paste-token {
   display: flex;
