@@ -35,6 +35,13 @@
 // The parser lifts it into `qtest`; it is an external link like the ticket,
 // so the same "Publish external links" setting decides whether it is written.
 //
+// A feature may also link the Confluence page it was published to
+// (specs/external-links/confluence-wiki.feature.md): a third link line whose
+// program is `Confluence` and whose ticket is the page id, e.g.
+// `[Confluence:99999](https://wiki.acme.com/spaces/ABC/pages/99999/Quotes)`.
+// The parser lifts it into `confluence` — on the feature only; under a
+// scenario heading the line is ordinary content. Publishing writes it.
+//
 // A feature may also carry the project member it is assigned to
 // (project-settings.json in the data repo): one `**Assigned:** <name>` line
 // under the `#` heading, beside the link line. The parser lifts it into
@@ -121,6 +128,19 @@ export const QTEST_PROGRAM = "qTest";
 /** Whether a link is a qTest test case rather than a ticket. */
 export function isQtestLink(link: ExternalLink): boolean {
   return link.program.trim().toLowerCase() === QTEST_PROGRAM.toLowerCase();
+}
+
+/**
+ * The program the Confluence page a feature was published to is written
+ * under — `[Confluence:<page id>](url)`
+ * (specs/external-links/confluence-wiki.feature.md). A link line under this
+ * program is the page, never the ticket.
+ */
+export const CONFLUENCE_PROGRAM = "Confluence";
+
+/** Whether a link is a feature's Confluence page rather than a ticket. */
+export function isConfluenceLink(link: ExternalLink): boolean {
+  return link.program.trim().toLowerCase() === CONFLUENCE_PROGRAM.toLowerCase();
 }
 
 /**
@@ -227,6 +247,12 @@ export interface Feature {
   link?: ExternalLink;
   /** The qTest test case covering the feature as a whole, if it has one. */
   qtest?: ExternalLink;
+  /**
+   * The Confluence page the feature was published to, if it was
+   * (specs/external-links/confluence-wiki.feature.md) — program
+   * `Confluence`, the page id as the ticket.
+   */
+  confluence?: ExternalLink;
   /** The pull requests implementing the feature as a whole; document-only. */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs; document-only. */
@@ -900,19 +926,24 @@ export function splitPageMeta(text: string): {
 
 /**
  * The link a metadata line holds, sorted by what it is: a `qTest` link is the
- * test case (specs/external-links/qtest-test-cases.feature.md), any other the
- * ticket. Each is taken once — a second line of a kind already lifted is not
+ * test case (specs/external-links/qtest-test-cases.feature.md), a
+ * `Confluence` link the published page
+ * (specs/external-links/confluence-wiki.feature.md), any other the ticket.
+ * Each is taken once — a second line of a kind already lifted is not
  * metadata, so it ends the metadata like any other content line.
  */
 function metaLinks(
   line: string,
   link: ExternalLink | undefined,
   qtest: ExternalLink | undefined,
-): { nextLink: ExternalLink | null; nextQtest: ExternalLink | null } {
+  confluence: ExternalLink | undefined,
+): { nextLink: ExternalLink | null; nextQtest: ExternalLink | null; nextConfluence: ExternalLink | null } {
+  const none = { nextLink: null, nextQtest: null, nextConfluence: null };
   const parsed = parseExternalLinkLine(line);
-  if (!parsed) return { nextLink: null, nextQtest: null };
-  if (isQtestLink(parsed)) return { nextLink: null, nextQtest: qtest === undefined ? parsed : null };
-  return { nextLink: link === undefined ? parsed : null, nextQtest: null };
+  if (!parsed) return none;
+  if (isQtestLink(parsed)) return { ...none, nextQtest: qtest === undefined ? parsed : null };
+  if (isConfluenceLink(parsed)) return { ...none, nextConfluence: confluence === undefined ? parsed : null };
+  return { ...none, nextLink: link === undefined ? parsed : null };
 }
 
 /**
@@ -926,6 +957,7 @@ export function splitFeatureMeta(text: string): {
   text: string;
   link?: ExternalLink;
   qtest?: ExternalLink;
+  confluence?: ExternalLink;
   assigned?: string;
   createdBy?: string;
   updatedBy?: string;
@@ -935,6 +967,7 @@ export function splitFeatureMeta(text: string): {
   let rest = text;
   let link: ExternalLink | undefined;
   let qtest: ExternalLink | undefined;
+  let confluence: ExternalLink | undefined;
   let assigned: string | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
@@ -948,7 +981,7 @@ export function splitFeatureMeta(text: string): {
     if (at === -1) break;
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
-    const { nextLink, nextQtest } = metaLinks(line, link, qtest);
+    const { nextLink, nextQtest, nextConfluence } = metaLinks(line, link, qtest, confluence);
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
@@ -957,6 +990,7 @@ export function splitFeatureMeta(text: string): {
       addAttributes(attributes, nextTokens.attributes);
     } else if (nextLink) link = nextLink;
     else if (nextQtest) qtest = nextQtest;
+    else if (nextConfluence) confluence = nextConfluence;
     else if (nextAssigned) assigned = nextAssigned;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
@@ -967,6 +1001,7 @@ export function splitFeatureMeta(text: string): {
     text: rest,
     ...(link ? { link } : {}),
     ...(qtest ? { qtest } : {}),
+    ...(confluence ? { confluence } : {}),
     ...(assigned ? { assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -1003,7 +1038,8 @@ export function splitScenarioMeta(text: string): {
     if (at === -1) break;
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
-    const { nextLink, nextQtest } = metaLinks(line, link, qtest);
+    // A Confluence line belongs to the feature: under a scenario it is content.
+    const { nextLink, nextQtest } = metaLinks(line, link, qtest, undefined);
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
     if (nextTokens) {
@@ -1158,13 +1194,14 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, qtest, assigned, createdBy, updatedBy, flags, attributes } =
+  const { text: description, link, qtest, confluence, assigned, createdBy, updatedBy, flags, attributes } =
     splitFeatureMeta(preamble.join("\n").trim());
   const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
   if (flags) feature.flags = flags;
   if (attributes) feature.attributes = attributes;
   if (link) feature.link = link;
   if (qtest) feature.qtest = qtest;
+  if (confluence) feature.confluence = confluence;
   if (assigned) feature.assigned = assigned;
   if (createdBy) feature.createdBy = createdBy;
   if (updatedBy) feature.updatedBy = updatedBy;
@@ -1201,6 +1238,7 @@ export function serializeFeature(
   if (featureAttributes) parts.push(featureAttributes);
   if (links && feature.link) parts.push(formatExternalLink(feature.link));
   if (links && feature.qtest) parts.push(formatExternalLink(feature.qtest));
+  if (links && feature.confluence) parts.push(formatExternalLink(feature.confluence));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));
   if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
   if (authors && feature.updatedBy) parts.push(formatUpdatedBy(feature.updatedBy));

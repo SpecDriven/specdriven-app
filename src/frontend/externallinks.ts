@@ -5,7 +5,7 @@
 // yet) and for guessing the tool and ticket from a pasted url. Pure and
 // DOM-free so the rules can be tested on their own.
 
-import { isExternalLink, isQtestLink, QTEST_PROGRAM } from "../server/parser";
+import { isConfluenceLink, isExternalLink, isQtestLink, QTEST_PROGRAM } from "../server/parser";
 import { cleanLine } from "../server/text";
 import type { ExternalLink } from "../server/parser";
 
@@ -48,6 +48,11 @@ export function resolveLinkDraft(draft: LinkDraft): ResolvedLink {
   // it would read back as the test case.
   if (isQtestLink({ program: draft.program, ticket: "", url: "" })) {
     return { link: null, error: "qTest test cases have their own field — not a ticket tool." };
+  }
+  // `Confluence` is the published page's program
+  // (specs/external-links/confluence-wiki.feature.md).
+  if (isConfluenceLink({ program: draft.program, ticket: "", url: "" })) {
+    return { link: null, error: "The Confluence page link is set by Publish to Confluence — not a ticket tool." };
   }
   return resolveDraft(draft);
 }

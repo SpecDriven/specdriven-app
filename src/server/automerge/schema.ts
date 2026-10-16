@@ -157,6 +157,12 @@ export type FeatureDoc = {
   link?: ExternalLink;
   /** The qTest test case covering the feature as a whole (see SpecEntry.qtest). */
   qtest?: ExternalLink;
+  /**
+   * The Confluence page the feature was published to
+   * (specs/external-links/confluence-wiki.feature.md). Set whole, like the
+   * links above; optional, so documents from before it need no migration.
+   */
+  confluence?: ExternalLink;
   /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs (see SpecEntry.aha). */

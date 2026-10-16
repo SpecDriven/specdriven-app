@@ -46,6 +46,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
     ...(feature.attributes?.length ? { attributes: plainAttributes(feature.attributes)! } : {}),
     ...(feature.link ? { link: { ...feature.link } } : {}),
     ...(feature.qtest ? { qtest: { ...feature.qtest } } : {}),
+    ...(feature.confluence ? { confluence: { ...feature.confluence } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
@@ -100,15 +101,17 @@ function linkKey(link: ExternalLink | undefined): string {
 
 /**
  * Set or clear a `link` key — or the `qtest` one
- * (specs/external-links/qtest-test-cases.feature.md) — on a doc map. A link
+ * (specs/external-links/qtest-test-cases.feature.md), or a feature's
+ * `confluence` one (specs/external-links/confluence-wiki.feature.md) — on a
+ * doc map. A link
  * is replaced whole (it is one ticket, not text to merge), and concurrent
  * replacements resolve to one winner the same way on every peer.
  */
 function assignLink(
-  target: { link?: ExternalLink; qtest?: ExternalLink },
+  target: { link?: ExternalLink; qtest?: ExternalLink; confluence?: ExternalLink },
   before: ExternalLink | undefined,
   after: ExternalLink | undefined,
-  key: "link" | "qtest" = "link",
+  key: "link" | "qtest" | "confluence" = "link",
 ): void {
   if (linkKey(before) === linkKey(after)) return;
   if (after) target[key] = { program: after.program, ticket: after.ticket, url: after.url };
@@ -253,6 +256,7 @@ export function reconcile(
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
   const docLink = plainLink(doc.link);
   const docQtest = plainLink(doc.qtest);
+  const docConfluence = plainLink(doc.confluence);
   const docAssigned = doc.assigned;
   const docFlags = plainFeatureFlags(doc.flags);
   const docAttributes = plainAttributes(doc.attributes);
@@ -310,6 +314,7 @@ export function reconcile(
     doc.description !== target.description ||
     linkKey(docLink) !== linkKey(target.link) ||
     linkKey(docQtest) !== linkKey(target.qtest) ||
+    linkKey(docConfluence) !== linkKey(target.confluence) ||
     featureFlagsKey(docFlags) !== featureFlagsKey(target.flags) ||
     attributesKey(docAttributes) !== attributesKey(target.attributes) ||
     (docAssigned ?? "") !== (target.assigned ?? "") ||
@@ -324,6 +329,7 @@ export function reconcile(
     }
     assignLink(d, docLink, target.link);
     assignLink(d, docQtest, target.qtest, "qtest");
+    assignLink(d, docConfluence, target.confluence, "confluence");
     assignFlags(d, docFlags, target.flags);
     assignAttributes(d, docAttributes, target.attributes);
     // The assignment is one member, not text to merge — replaced whole, the
