@@ -159,6 +159,24 @@ body {
   font-size: 0.8125rem;
 }
 
+/* Update screen (specs/app/data-format.feature.md): the installer
+   one-liner, selectable and wrapping rather than overflowing the card. */
+.repo-prompt.app-outdated {
+  max-width: 32rem;
+}
+
+.repo-prompt .upgrade-command {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 /* First-run choice (specs/ui/app-start.feature.md): a folder on this
    computer, or a GitHub clone with a personal access token. The segments
    reuse the issue filter's look; the prompt's accent buttons stay for the
