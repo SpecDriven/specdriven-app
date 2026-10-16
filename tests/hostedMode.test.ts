@@ -12,6 +12,7 @@ import { agentKey, agentKeyEnvName, agentKeys } from "../src/server/agentKeys";
 import { handleApi } from "../src/server/api";
 import { normalizeCodeRepo } from "../src/server/members";
 import { currentEngine, setGitEngine } from "../src/server/git";
+import { signInHint } from "../src/server/git/cli";
 import { createEnvBackend, TOKEN_ENV } from "../src/server/tokenStore";
 
 let root: string;
@@ -148,4 +149,11 @@ test("a data repo's code-repo path is ignored, so it cannot point into another u
   expect(normalizeCodeRepo({ "code-repo": "../../../other" }, "/data/users/me/repos/specs")).toBeNull();
   delete process.env.SPECDRIVEN_HOSTED;
   expect(normalizeCodeRepo({ "code-repo": "/code" }, "/data")).toBe("/code");
+});
+
+test("a refused clone points at the account page's token, not Settings", () => {
+  expect(signInHint()).toContain("account page");
+  expect(signInHint()).not.toContain("Settings");
+  delete process.env.SPECDRIVEN_HOSTED;
+  expect(signInHint()).toContain("sign in with GitHub in Settings");
 });
