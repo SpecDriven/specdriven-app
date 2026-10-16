@@ -300,6 +300,8 @@ async function featureView(
   if (link && !feature.link) linked++;
   const qtest = feature.qtest ?? inDoc.qtest;
   if (qtest && !feature.qtest) linked++;
+  const confluence = feature.confluence ?? inDoc.confluence;
+  if (confluence && !feature.confluence) linked++;
   // Pull request links are the document's alone: the file never holds them,
   // and serializeFeature never writes them, so `content` is unaffected.
   const { createdBy: _c, updatedBy: _u, ...featureRest } = feature;
@@ -307,6 +309,7 @@ async function featureView(
     ...featureRest,
     ...(link ? { link } : {}),
     ...(qtest ? { qtest } : {}),
+    ...(confluence ? { confluence } : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     ...resourcesOf(inDoc),
     ...authorsOf(inDoc),

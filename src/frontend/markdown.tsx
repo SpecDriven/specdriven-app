@@ -1,7 +1,20 @@
 import type { ReactNode } from "react";
 import { MarkdownImage } from "./MarkdownImage";
-import { TEST_REF_RE, renderTestInEditor } from "./testref";
-import { WEB_URL_RE, webLinkEnd } from "./weblinks";
+import {
+  BLOCK_START,
+  HR,
+  INLINE,
+  OL_ITEM,
+  TABLE_DIVIDER,
+  TASK_ITEM,
+  UL_ITEM,
+  encodeAttr,
+  imageTagAttrs,
+  safeUrl,
+  type ImageAttrs,
+} from "./markdownSyntax";
+import { renderTestInEditor } from "./testref";
+import { webLinkEnd } from "./weblinks";
 
 // Markdown support for the scenario edit dialog (specs/ui/ui.feature.md
 // "Scenario edit dialog"). The preview is built from React elements — never
@@ -24,63 +37,6 @@ import { WEB_URL_RE, webLinkEnd } from "./weblinks";
 // The renderer also notes where each image sits in the source (imageRefs),
 // so the handle on the nth image on screen edits the nth reference in the
 // text — whatever code blocks, quotes or tables lie between.
-
-/** Only these destinations are allowed for links/images in the preview. */
-function safeUrl(url: string): string | null {
-  return /^(https?:|mailto:|#|\/|\.\/|\.\.\/)/i.test(url.trim()) ? url.trim() : null;
-}
-
-const INLINE = new RegExp(
-  [
-    "(?<tick>`+)(?<code>.+?)\\k<tick>",
-    "<(?<angle>https?://[^\\s<>]+)>",
-    `(?<!\\w)(?<web>${WEB_URL_RE.source})`,
-    "(?<bmark>\\*\\*|__)(?<bold>.+?)\\k<bmark>",
-    "\\*(?<star>[^*]+?)\\*",
-    "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
-    "~~(?<strike>.+?)~~",
-    "!\\[(?<alt>[^\\]]*)\\]\\((?<src>[^)]+)\\)",
-    "<img\\s+(?<tag>[^<>]*)>",
-    TEST_REF_RE.source.replace("(?<url>", "(?<test>").replace("(?<name>", "(?<testname>"),
-    "\\[(?<text>[^\\]]+)\\]\\((?<href>[^)]+)\\)",
-  ].join("|"),
-);
-
-// ---- The <img> tag: its attributes, read and written ----
-
-/** `name="value"`, `name='value'` or `name=value`, as attributes are written. */
-const ATTR = /([a-zA-Z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+))/g;
-
-const ENTITIES: Record<string, string> = {
-  quot: '"',
-  apos: "'",
-  "#39": "'",
-  lt: "<",
-  gt: ">",
-  amp: "&",
-};
-
-function decodeAttr(value: string): string {
-  return value.replace(/&(quot|apos|#39|lt|gt|amp);/g, (_, e: string) => ENTITIES[e]!);
-}
-
-function encodeAttr(value: string): string {
-  return value.replace(/[&"<>]/g, (c) => `&${{ "&": "amp", '"': "quot", "<": "lt", ">": "gt" }[c]};`);
-}
-
-interface ImageAttrs {
-  src?: string;
-  alt?: string;
-  width?: string;
-  height?: string;
-}
-
-/** The attributes the preview honours, off the inside of an `<img …>` tag. */
-function imageTagAttrs(tag: string): ImageAttrs {
-  const a: Record<string, string> = {};
-  for (const m of tag.matchAll(ATTR)) a[m[1]!.toLowerCase()] = decodeAttr(m[2] ?? m[3] ?? m[4] ?? "");
-  return { src: a.src, alt: a.alt, width: a.width, height: a.height };
-}
 
 /**
  * A width or height as the attribute takes it: whole pixels (a "px" someone
@@ -234,12 +190,6 @@ function parseInline(
   }
   return out;
 }
-
-const UL_ITEM = /^\s*[-*+]\s+(.*)$/;
-const OL_ITEM = /^\s*\d+[.)]\s+(.*)$/;
-const TASK_ITEM = /^\[([ xX])\]\s+(.*)$/;
-const HR = /^ {0,3}(-{3,}|\*{3,}|_{3,})\s*$/;
-const TABLE_DIVIDER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
 
 /** The rest of a line after a prefix the block syntax owns (`## `, `- `, `> `). */
 function tail(line: Span, text: string): Span {
@@ -396,7 +346,7 @@ function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
     while (
       i < lines.length &&
       lines[i]!.text.trim() !== "" &&
-      !/^(#{1,6}\s|```|\s*>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(lines[i]!.text)
+      !BLOCK_START.test(lines[i]!.text)
     )
       buf.push(lines[i++]!);
     if (buf.length === 0) buf.push(lines[i++]!);

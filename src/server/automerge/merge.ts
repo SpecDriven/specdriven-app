@@ -255,6 +255,7 @@ export function threeWayFeature(
   }
   const link = mergeLink(base.link, ours.link, theirs.link);
   const qtest = mergeLink(base.qtest, ours.qtest, theirs.qtest);
+  const confluence = mergeLink(base.confluence, ours.confluence, theirs.confluence);
   const flags = mergeFlags(base.flags, ours.flags, theirs.flags);
   const attributes = mergeAttributes(base.attributes, ours.attributes, theirs.attributes);
   // The assignment merges like a link: one value, the side that changed it
@@ -273,6 +274,7 @@ export function threeWayFeature(
       ...(attributes ? { attributes } : {}),
       ...(link ? { link } : {}),
       ...(qtest ? { qtest } : {}),
+      ...(confluence ? { confluence } : {}),
       ...(assigned ? { assigned } : {}),
       ...mergeAuthors(base, ours, theirs),
     },

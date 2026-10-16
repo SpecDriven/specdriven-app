@@ -32,6 +32,7 @@ import {
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
   DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
+  normalizeConfluenceParentUrl,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
@@ -130,7 +131,17 @@ import {
 } from "./scenarioFiles";
 import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
-import { extractScenarios, QTEST_PROGRAM } from "./parser";
+import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
+import type { Feature } from "./parser";
+import { ConfluenceError, publishFeaturePage, resolveParent, validateToken } from "./confluence";
+import { normalizeConfluenceBase, onBase, parseParentPageUrl } from "./confluenceUrl";
+import { isPublishScope, renderFeatureStorage } from "./confluenceStorage";
+import {
+  clearConfluenceToken,
+  confluenceToken,
+  listConfluenceTokens,
+  saveConfluenceToken,
+} from "./confluenceTokens";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -462,6 +473,9 @@ async function stateFields(state: SpecDrivenState) {
     // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
     // offered only once switched on.
     qtestLinks: normalizeQtestLinks(state.qtestLinks),
+    // The publish dialog's last parent page
+    // (specs/external-links/confluence-wiki.feature.md).
+    confluenceParentUrl: normalizeConfluenceParentUrl(state.confluenceParentUrl),
     codeGen: normalizeCodeGen(state.codeGen),
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
@@ -1152,6 +1166,97 @@ function normalizeGitHubHost(value: unknown): string | null {
   if (host === "www.github.com") return GITHUB_HOST;
   return /^[a-z0-9.-]+(:\d+)?$/.test(host) ? host : null;
 }
+
+// Confluence (specs/external-links/confluence-wiki.feature.md): one personal
+// access token per wiki, kept on this device (src/server/confluenceTokens.ts),
+// checked against the wiki before it is kept. The list never carries a token.
+const getConfluenceTokens: Handler = async () => json({ tokens: await listConfluenceTokens() });
+
+const postConfluenceToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
+  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+    return json({ error: "Paste a Confluence personal access token" }, 400);
+  }
+  const base = typeof body.base === "string" ? normalizeConfluenceBase(body.base) : null;
+  if (!base) {
+    return json({ error: "Enter the wiki's url, like https://wiki.acme.com or https://acme.com/wiki" }, 400);
+  }
+  try {
+    const { user } = await validateToken(base, body.token.trim());
+    await saveConfluenceToken({ base, token: body.token.trim(), user });
+    return json({ base, user });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+};
+
+const deleteConfluenceToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown };
+  if (typeof body.base !== "string" || !body.base.trim()) return json({ error: "base is required" }, 400);
+  await clearConfluenceToken(body.base);
+  return json({ tokens: await listConfluenceTokens() });
+};
+
+// Publish a feature as a Confluence page under a parent page: created the
+// first time, a new version after that. The page is then linked from the
+// feature — a `[Confluence:<id>](url)` line under its heading, saved the way
+// the editor saves the qTest link — and the parent remembered for next time.
+const postPublishConfluence = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { parentUrl?: unknown; scope?: unknown };
+  const scope = body.scope ?? "all";
+  if (!isPublishScope(scope)) return json({ error: "scope must be all or published" }, 400);
+  const parentUrl = typeof body.parentUrl === "string" ? body.parentUrl.trim() : "";
+  const ref = parseParentPageUrl(parentUrl);
+  if (!ref) {
+    return json(
+      { error: "Paste the parent page's url, like https://wiki.acme.com/spaces/ABC/pages/99999/Parent" },
+      400,
+    );
+  }
+  const record = await confluenceToken(ref.base);
+  if (!record) {
+    return json({ error: `No Confluence token for ${ref.base} — add one in Settings → Confluence` }, 401);
+  }
+  const view = await readFeatureView(dir, params.file!);
+  if (!view) return json({ error: "Feature not found" }, 404);
+  const feature = view.parsed;
+  const title = (feature.name.trim() || titleFromFileName(params.file!)).slice(0, 255);
+  const linked = feature.confluence;
+  const existingPageId =
+    linked && /^\d+$/.test(linked.ticket) && onBase(linked.url, ref.base) ? linked.ticket : undefined;
+  let page: { id: string; url: string; created: boolean };
+  try {
+    const parent = await resolveParent(ref.base, record.token, ref);
+    page = await publishFeaturePage({
+      base: ref.base,
+      token: record.token,
+      parent,
+      title,
+      body: renderFeatureStorage(feature, scope),
+      existingPageId,
+    });
+  } catch (e) {
+    if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 502);
+  }
+  const state = await readState(getAppRoot());
+  if (state.confluenceParentUrl !== parentUrl) {
+    state.confluenceParentUrl = parentUrl;
+    await writeState(state, getAppRoot());
+  }
+  const result = { id: page.id, url: page.url, created: page.created, title, parentUrl };
+  const link = { program: CONFLUENCE_PROGRAM, ticket: page.id, url: page.url };
+  if (linked && linked.ticket === link.ticket && linked.url === link.url) {
+    return json({ ...view, ...result, message: "page link unchanged" });
+  }
+  try {
+    const next: Feature = { ...feature, confluence: link };
+    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...result });
+  } catch (e) {
+    // The page is in Confluence; only the link back could not be written.
+    return json({ ...view, ...result, warning: `The page link was not saved: ${(e as Error).message}` });
+  }
+});
 
 // Signing out (specs/user-info-settings.feature.md "sign out from the user
 // menu") also stops the app falling back to the GitHub CLI's account, so the
@@ -2366,6 +2471,9 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
   ["POST", "/api/choose-folder", unlessHosted(postChooseFolder)],
+  ["GET", "/api/confluence/tokens", unlessHosted(getConfluenceTokens)],
+  ["POST", "/api/confluence/tokens", unlessHosted(postConfluenceToken)],
+  ["DELETE", "/api/confluence/tokens", unlessHosted(deleteConfluenceToken)],
   ["POST", "/api/reload", postReload],
   // Observability (src/server/logs.ts): the app's own log, and its verbosity.
   ["GET", "/api/logs", getLogs],
@@ -2395,6 +2503,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/code-repo/submodule", unlessHosted(postCodeRepoSubmodule)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
+  ["POST", "/api/features/:file/confluence", unlessHosted(postPublishConfluence)],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
   ["POST", "/api/folders", postFolders],
   ["DELETE", "/api/folders/:path", deleteFolderRoute],

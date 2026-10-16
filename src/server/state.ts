@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeTextFile } from "./fsx";
 import type { GitEngine } from "./git";
-import { QTEST_PROGRAM } from "./parser";
+import { CONFLUENCE_PROGRAM, QTEST_PROGRAM } from "./parser";
 
 export interface SpecDrivenState {
   dataRepo?: string;
@@ -93,6 +93,12 @@ export interface SpecDrivenState {
    * "Publish external links" is on.
    */
   qtestLinks?: boolean;
+  /**
+   * The last parent page a feature was published under in Confluence
+   * (specs/external-links/confluence-wiki.feature.md), offered again by the
+   * publish dialog. Per device, like the Confluence tokens it goes with.
+   */
+  confluenceParentUrl?: string;
   /** Offer code gen sessions (specs/agents/claude.feature.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to a coding agent. */
@@ -392,6 +398,13 @@ export function normalizeResourceLinks(value: unknown): boolean {
   return value === true;
 }
 
+/** The remembered Confluence parent page url, or null when there is none usable. */
+export function normalizeConfluenceParentUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const url = value.trim();
+  return url.length <= 2048 && /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
 /** Effective qTest test case link setting
     (specs/external-links/qtest-test-cases.feature.md): OFF unless explicitly
     turned on, like the Aha! and Figma ones. */
@@ -416,10 +429,11 @@ export function normalizeProjectManagementTool(value: unknown): string {
   if (typeof value !== "string") return DEFAULT_PROJECT_MANAGEMENT_TOOL;
   const name = value.trim();
   // `qTest` is the program of the test case links
-  // (specs/external-links/qtest-test-cases.feature.md), never a ticket's.
-  return name && !/[:[\]]/.test(name) && name.toLowerCase() !== QTEST_PROGRAM.toLowerCase()
-    ? name
-    : DEFAULT_PROJECT_MANAGEMENT_TOOL;
+  // (specs/external-links/qtest-test-cases.feature.md) and `Confluence` that
+  // of a published page (specs/external-links/confluence-wiki.feature.md),
+  // never a ticket's.
+  const reserved = [QTEST_PROGRAM, CONFLUENCE_PROGRAM].some((p) => p.toLowerCase() === name.toLowerCase());
+  return name && !/[:[\]]/.test(name) && !reserved ? name : DEFAULT_PROJECT_MANAGEMENT_TOOL;
 }
 
 /**

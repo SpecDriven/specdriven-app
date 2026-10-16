@@ -73,6 +73,7 @@ import {
   LogOut,
   PenTool,
   ShieldCheck,
+  BookOpen,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -207,6 +208,8 @@ import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
+import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
+import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 
@@ -1373,6 +1376,12 @@ export function App() {
   /** Whether features and scenarios link qTest test cases
       (specs/external-links/qtest-test-cases.feature.md); default OFF. */
   const [qtestLinks, setQtestLinks] = useState(false);
+  /** Confluence (specs/external-links/confluence-wiki.feature.md): the wikis
+      this device holds a token for, the last parent page published under,
+      and whether the publish dialog is open. */
+  const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
+  const [confluenceParentUrl, setConfluenceParentUrl] = useState("");
+  const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1695,6 +1704,7 @@ export function App() {
         }
         setResourceLinksOn(resourceLinkSwitches(state));
         setQtestLinks(state.qtestLinks === true);
+        setConfluenceParentUrl(typeof state.confluenceParentUrl === "string" ? state.confluenceParentUrl : "");
         if (typeof state.codeGen === "boolean") {
           setCodeGen(state.codeGen);
         }
@@ -1951,6 +1961,7 @@ export function App() {
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
+  const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
@@ -3737,6 +3748,18 @@ export function App() {
   // the state the boot just loaded. A layout effect, so the fields never
   // paint with their defaults first.
   const settingsShown = appPage === "settings";
+  // The Confluence wikis this device holds a token for: read when Settings
+  // or the publish dialog opens, so a token added in one shows in the other.
+  useEffect(() => {
+    if (hosted || (!settingsShown && !confluencePublishOpen)) return;
+    let live = true;
+    void fetchConfluenceTokens().then((wikis) => {
+      if (live) setConfluenceWikis(wikis);
+    });
+    return () => {
+      live = false;
+    };
+  }, [hosted, settingsShown, confluencePublishOpen]);
   useLayoutEffect(() => {
     if (!settingsShown) return;
     // A stored 0 means autosync is off; the field keeps a usable frequency so
@@ -3937,6 +3960,7 @@ export function App() {
     }
     setResourceLinksOn(resourceLinkSwitches(data));
     setQtestLinks(data.qtestLinks === true);
+    setConfluenceParentUrl(typeof data.confluenceParentUrl === "string" ? data.confluenceParentUrl : "");
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -5659,6 +5683,7 @@ export function App() {
     }
     if (userInfoOpen) return setUserInfoOpen(false);
     if (tokenSignInOpen) return setTokenSignInOpen(false);
+    if (confluencePublishOpen) return setConfluencePublishOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -6587,6 +6612,7 @@ export function App() {
           title: RESOURCE_LINK_TOOLS[kind].name,
         })),
         { id: "settings-qtest", title: "qTest" },
+        ...(demo || hosted ? [] : [{ id: "settings-confluence", title: "Confluence" }]),
         { id: "settings-workflow", title: "Workflow" },
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
       ]}
@@ -7102,6 +7128,18 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {/* specs/external-links/confluence-wiki.feature.md: a personal access
+          token per wiki, kept on this device; features publish from their
+          ⋯ menu. Not in the hosted app, which keeps no device secrets. */}
+      {!demo && !hosted && (
+        <PageSection
+          id="settings-confluence"
+          title="Confluence"
+          hint="Publish features as pages of a Confluence wiki, from a feature's ⋯ menu. One personal access token per wiki, kept on this device."
+        >
+          <ConfluenceTokens wikis={confluenceWikis} onChange={setConfluenceWikis} />
+        </PageSection>
+      )}
       <PageSection
         id="settings-workflow"
         title="Workflow"
@@ -8938,6 +8976,16 @@ export function App() {
                         keys: "mod+shift+c",
                         onSelect: () => void copyLink(featurePath(selected)),
                       },
+                      ...(demo || hosted
+                        ? []
+                        : [
+                            {
+                              id: "confluence",
+                              label: "Publish to Confluence…",
+                              icon: <BookOpen size={13} />,
+                              onSelect: () => setConfluencePublishOpen(true),
+                            },
+                          ]),
                       {
                         id: "delete",
                         label: "Delete feature",
@@ -9199,6 +9247,24 @@ export function App() {
                       </form>
                     )}
                   </Popover>
+                </span>
+              )}
+              {/* specs/external-links/confluence-wiki.feature.md: the page the
+                  feature was published to. Read-only — publishing sets it. */}
+              {feature.confluence && (
+                <span className="chip-anchor confluence-anchor">
+                  <a
+                    className="chip"
+                    href={feature.confluence.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={feature.confluence.url}
+                    aria-label="Open the Confluence page"
+                  >
+                    <BookOpen size={14} aria-hidden="true" />
+                    Confluence
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </a>
                 </span>
               )}
               {/* specs/external-links/related-pull-requests.feature.md "Link
@@ -9856,6 +9922,27 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {confluencePublishOpen && selected && feature && (
+        <ConfluencePublishDialog
+          file={selected}
+          featureName={feature.name}
+          linkedUrl={feature.confluence?.url}
+          initialParentUrl={confluenceParentUrl}
+          wikis={confluenceWikis}
+          trapRef={confluenceTrapRef}
+          onClose={() => setConfluencePublishOpen(false)}
+          onPublished={(data) => {
+            setFeature(featureFromResponse(data, selected));
+            setDirty(false);
+            markSaved();
+            setConfluenceParentUrl(data.parentUrl);
+            setConfluencePublishOpen(false);
+            const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
+            toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
+            if (data.warning) toast.error(data.warning);
+          }}
+        />
       )}
       {tokenSignInOpen && (
         <TokenSignInDialog
