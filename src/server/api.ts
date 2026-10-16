@@ -159,6 +159,12 @@ import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
 import { version as appVersion } from "../../package.json";
 import { sourceUrl } from "./sourceUrl";
+import {
+  anyIncompatible,
+  checkDataFormat,
+  DATA_TOO_NEW_HEADER,
+  incompatibility,
+} from "./dataFormat";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
@@ -369,6 +375,24 @@ function withDataDir(
   };
 }
 
+/**
+ * The open folder's data format verdict for /api/state: ok, or what to
+ * install (specs/app/data-format.feature.md).
+ */
+async function dataFormatField(state: SpecDrivenState) {
+  if (!anyIncompatible() || needsDataRepo(state)) return { ok: true as const };
+  let dir: string;
+  try {
+    dir = await resolveDataRepo(state.dataRepo!, getAppRoot());
+  } catch {
+    return { ok: true as const };
+  }
+  const found = incompatibility(dir);
+  return found
+    ? { ok: false as const, minAppVersion: found.minAppVersion, reason: found.reason }
+    : { ok: true as const };
+}
+
 /** The resolved data dir, or null while none is configured or reachable. */
 async function currentDataDir(): Promise<string | null> {
   const state = await readState(getAppRoot());
@@ -498,6 +522,9 @@ async function stateFields(state: SpecDrivenState) {
     // The running build's source (src/server/sourceUrl.ts): the AGPL asks a
     // network-served copy to offer it, so the user menu links to it.
     sourceUrl: sourceUrl(),
+    // Whether this app may work on the open folder
+    // (specs/app/data-format.feature.md): data a newer app wrote blocks it.
+    dataFormat: await dataFormatField(state),
     ...gitEngineFields(state),
     ...(await authFields()),
   };
@@ -699,6 +726,9 @@ const putState: Handler = async (req) => {
       // A path that names no folder is refused rather than made — unless
       // the client asked first (specs/app/spec-folders.feature.md).
       await ensureDataRepoFolder(pickedDir, body.createDataRepo === true);
+      // Data a newer app wrote (specs/app/data-format.feature.md) is flagged
+      // before anything below writes to it; the pull further down re-checks.
+      await checkDataFormat(pickedDir);
     } catch (e) {
       if (e instanceof MissingDataRepoError) {
         return json({ error: e.message, missing: true, path: e.dir }, 404);
@@ -1027,6 +1057,7 @@ const putState: Handler = async (req) => {
   if (turnedOn.length > 0 && !needsDataRepo(state)) {
     try {
       const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
+      if (incompatibility(dir)) throw new Error(incompatibility(dir)!.reason);
       for (const kind of turnedOn) {
         if (await ensurePageFolder(dir, kind)) {
           reloadLog.info(`created the ${kind.folder} folder`);
@@ -1041,6 +1072,7 @@ const putState: Handler = async (req) => {
     // cron commits and pushes the rewritten files like any saved change.
     try {
       const dir = pickedDir ?? (await resolveDataRepo(state.dataRepo!, getAppRoot()));
+      if (incompatibility(dir)) throw new Error(incompatibility(dir)!.reason);
       const changed = await reprojectFeatures(dir);
       reloadLog.info(
         `external links ${state.publishExternalLinks === false ? "withheld from" : "written into"} ${changed} feature file(s)`,
@@ -2400,8 +2432,42 @@ export function matchApi(method: string, pathname: string) {
   return routeRegistry.match(method, pathname);
 }
 
+/**
+ * Requests that still work while the open folder holds data a newer app
+ * wrote: switching folders, re-checking, signing in, and the app's own log —
+ * none of them writes to the data repo.
+ */
+const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|logs|auth)(\/|$)/;
+
 /** Serve an API request, or null when the path is not an API route. */
 export async function handleApi(req: Request): Promise<Response | null> {
-  const match = matchApi(req.method, new URL(req.url).pathname);
-  return match ? match.handler(req, match.params) : null;
+  const pathname = new URL(req.url).pathname;
+  const match = matchApi(req.method, pathname);
+  if (!match) return null;
+  if (!anyIncompatible()) return match.handler(req, match.params);
+  // specs/app/data-format.feature.md: nothing writes to data a newer app
+  // wrote, and every answer says so in a header, so the client's routine
+  // reads find out too and put up the blocking screen.
+  const dir = await currentDataDir();
+  const found = dir ? incompatibility(dir) : null;
+  if (!found) return match.handler(req, match.params);
+  // The requests that still work answer as usual: /api/state says it in
+  // its body, and a folder switch must not read as the old folder's verdict.
+  if (OUTDATED_ALLOWED.test(pathname)) return match.handler(req, match.params);
+  const header = { [DATA_TOO_NEW_HEADER]: found.minAppVersion ?? "" };
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return Response.json(
+      {
+        status: "app-outdated",
+        error: found.reason,
+        minAppVersion: found.minAppVersion,
+        appVersion: found.appVersion,
+      },
+      { status: 409, headers: header },
+    );
+  }
+  const res = await match.handler(req, match.params);
+  const marked = new Response(res.body, res);
+  marked.headers.set(DATA_TOO_NEW_HEADER, header[DATA_TOO_NEW_HEADER]);
+  return marked;
 }

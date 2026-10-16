@@ -17,6 +17,7 @@ import { NOTEBOOK, importPageDrift } from "./pages";
 import { ensureSpecsFolder } from "./features";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo } from "./state";
+import { checkDataFormat, stampDataFormat } from "./dataFormat";
 import { getLogger, withSpan } from "./telemetry";
 import { sync as pluginSync } from "../plugins/host/loader";
 
@@ -55,6 +56,15 @@ export async function syncDataDir(dir: string): Promise<string> {
       });
     }
     const parts = [pulled.message];
+    // Data written by a newer app (specs/app/data-format.feature.md): stop
+    // before anything below rewrites it, and push nothing. Later ticks keep
+    // pulling, so a folder rolled back to a format this app reads recovers.
+    const tooNew = await checkDataFormat(dir);
+    if (tooNew) {
+      span.setAttributes({ "sync.pull.ok": pulled.ok, "sync.data_too_new": true });
+      parts.push(`${tooNew.reason}; skipped sync`);
+      return parts.filter(Boolean).join("; ");
+    }
     if (!pulled.ok && pulled.conflictedFiles.length > 0) {
       parts.push((await autoResolveMergeConflicts(dir, pulled.conflictedFiles)).message);
     }
@@ -97,6 +107,9 @@ export async function syncDataDir(dir: string): Promise<string> {
       // (src/plugins/builtin/pages/host.ts), and an installed plugin's, the
       // Event Models' among them.
       parts.push(...(await pluginSync.run(dir)));
+      // The format marker, so an older app stops at this folder; written
+      // after the passes above have brought the data up to this format.
+      if (await stampDataFormat(dir)) parts.push("wrote the data format marker");
     }
     const synced = await syncSavedChanges(dir);
     parts.push(synced.message);
