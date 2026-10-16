@@ -16,7 +16,7 @@
 
 import { lstat, realpath } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
-import { appContext, isAuthFailure, SIGN_IN_HINT, subprocessRun } from "./git/cli";
+import { appContext, isAuthFailure, signInHint, subprocessRun } from "./git/cli";
 import type { GitRun } from "./git/cli";
 import { githubRepoOfRemote, originUrl } from "./issues";
 import { directoryExists } from "./fsx";
@@ -133,7 +133,7 @@ export async function addSpecsSubmodule(
   if (added.exitCode !== 0) {
     const output = (added.stderr + added.stdout).trim();
     throw new SubmoduleError(
-      `git submodule add failed: ${isAuthFailure(output) ? SIGN_IN_HINT : output}`,
+      `git submodule add failed: ${isAuthFailure(output) ? signInHint() : output}`,
       502,
     );
   }

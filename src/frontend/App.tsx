@@ -206,6 +206,7 @@ import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
+import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 
 interface Conflict {
@@ -1114,9 +1115,11 @@ export function App() {
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
   const [hosted, setHosted] = useState(false);
-  // Whether the signed-in hosted account is an admin (src/gateway/admin.ts),
-  // which puts Admin beside Settings in the user menu.
-  const [hostedAdmin, setHostedAdmin] = useState(false);
+  // The signed-in hosted account (src/gateway): its email and whether it is
+  // an admin (src/gateway/admin.ts), which puts Admin beside Settings in the
+  // user menu. Null outside the hosted app, or until the gateway answers.
+  const [hostedAccount, setHostedAccount] = useState<HostedAccount | null>(null);
+  const hostedAdmin = hostedAccount?.admin ?? false;
   // The running app's version, shown beside the user name in demo mode.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Where that version's source lives — the user menu links to it.
@@ -1765,20 +1768,28 @@ export function App() {
     void boot();
   }, [boot]);
 
-  // The account's role is the gateway's, not the worker's: ask it.
+  // The account's role is the gateway's, not the worker's: ask it. A worker
+  // that does not answer leaves `hosted` unknown, so a failed start asks too:
+  // only the hosted gateway answers with an account.
+  const askGateway = hosted || bootError !== null;
   useEffect(() => {
-    if (!hosted) return;
+    if (!askGateway) return;
     let live = true;
     fetch("/auth/me")
       .then((res) => (res.ok ? res.json() : null))
-      .then((me: { role?: string } | null) => {
-        if (live) setHostedAdmin(me?.role === "admin");
+      .then((me: { email?: unknown; role?: unknown } | null) => {
+        if (!live || typeof me?.email !== "string") return;
+        setHostedAccount({ email: me.email, admin: me.role === "admin" });
       })
       .catch(() => {});
     return () => {
       live = false;
     };
-  }, [hosted]);
+  }, [askGateway]);
+
+  const signOutHosted = () => {
+    void fetch("/auth/logout", { method: "POST" }).finally(() => window.location.assign("/login"));
+  };
 
   // Each failed try sets a fresh error, which schedules the next one.
   useEffect(() => {
@@ -6400,6 +6411,7 @@ export function App() {
           <button type="button" onClick={() => void boot()}>
             Retry now
           </button>
+          {hostedAccount && <HostedStartNav account={hostedAccount} onSignOut={signOutHosted} />}
         </section>
       </main>
     );
@@ -6436,6 +6448,11 @@ export function App() {
           {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
         </button>
         {repoError && <p className="error">{repoError}</p>}
+        {hosted && auth?.signedIn && hostedCloneHint(repoError) && (
+          <p className="hint">
+            {hostedCloneHint(repoError)} <a href="/account">Open your account page</a>.
+          </p>
+        )}
       </>
     );
     return (
@@ -6487,6 +6504,7 @@ export function App() {
               )}
             </>
           )}
+          {hostedAccount && <HostedStartNav account={hostedAccount} onSignOut={signOutHosted} />}
         </form>
       </main>
     );
@@ -8167,11 +8185,7 @@ export function App() {
                       id: "sign-out",
                       label: "Sign out",
                       icon: <LogOut size={13} />,
-                      onSelect: () => {
-                        void fetch("/auth/logout", { method: "POST" }).finally(() =>
-                          window.location.assign("/login"),
-                        );
-                      },
+                      onSelect: signOutHosted,
                     },
                   ]
                 : []),
