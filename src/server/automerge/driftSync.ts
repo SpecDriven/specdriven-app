@@ -155,7 +155,7 @@ async function theirChunks(dataDir: string, docDir: string): Promise<Set<string>
  */
 function theirProjection(doc: A.Doc<FeatureDoc>, theirs: Feature): Feature {
   const linked =
-    !!(theirs.link || theirs.qtest) || theirs.scenarios.some((s) => s.link || s.qtest);
+    !!(theirs.link || theirs.qtest || theirs.confluence) || theirs.scenarios.some((s) => s.link || s.qtest);
   const authored =
     !!(theirs.createdBy || theirs.updatedBy) ||
     theirs.scenarios.some((s) => s.createdBy || s.updatedBy);
