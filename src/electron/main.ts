@@ -24,6 +24,7 @@ import { applyStartupState, handleApi } from "../server/api";
 import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
+import { setConfluenceTokenBackend } from "../server/confluenceTokens";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
@@ -33,7 +34,7 @@ import {
   windowOpenTarget,
   type LinkWindow,
 } from "./linkRouting";
-import { createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
+import { createConfluenceSafeStorageBackend, createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 import {
   DEFAULT_HEIGHT,
@@ -354,11 +355,12 @@ if (!app.requestSingleInstanceLock()) {
       respond(permission === "clipboard-sanitized-write");
     });
     protocol.handle("app", serveApp);
-    // GitHub token storage (specs/app/desktop-app.feature.md): OS-encrypted via
+    // GitHub and Confluence token storage (specs/app/desktop-app.feature.md): OS-encrypted via
     // safeStorage; without a key store the server's 0600-file backend
     // stays in place. safeStorage needs the ready app, hence here.
     if (safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
+      setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
     }
     // Data-directory picker (specs/ui/app-start.feature.md): replace the
     // server's osascript fallback with the native dialog, parented to the

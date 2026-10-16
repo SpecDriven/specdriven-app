@@ -1,36 +1,50 @@
-// GitHub token storage for the desktop app (specs/app/desktop-app.feature.md):
-// Electron safeStorage encrypts with the OS keychain, so the token never
-// sits on disk in plain text. When the OS offers no key store (some Linux
-// setups), the caller falls back to the server's 0600-file backend.
+// Token storage for the desktop app (specs/app/desktop-app.feature.md,
+// specs/external-links/confluence-wiki.feature.md): Electron safeStorage
+// encrypts with the OS keychain, so a token never sits on disk in plain text.
+// When the OS offers no key store (some Linux setups), the caller falls back
+// to the server's 0600-file backends.
 
 import { safeStorage } from "electron";
 import { readFile, rm } from "node:fs/promises";
 import { writeTextFile } from "../server/fsx";
+import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
 export function safeStorageAvailable(): boolean {
   return safeStorage.isEncryptionAvailable();
 }
 
-/** TokenBackend on safeStorage; tokenFile is base64 of the ciphertext. */
-export function createSafeStorageBackend(tokenFile: string): TokenBackend {
+/**
+ * A value kept encrypted in `file` (base64 of the ciphertext). Missing,
+ * corrupt or undecryptable (e.g. keychain reset) reads as `empty` — never a
+ * startup crash.
+ */
+function encryptedFile<T>(file: string, parse: (raw: string) => T | null, empty: T) {
   return {
-    async load() {
+    async load(): Promise<T> {
       try {
-        const encrypted = Buffer.from(await readFile(tokenFile, "utf8"), "base64");
-        return parseRecord(safeStorage.decryptString(encrypted));
+        const encrypted = Buffer.from(await readFile(file, "utf8"), "base64");
+        return parse(safeStorage.decryptString(encrypted)) ?? empty;
       } catch {
-        // Missing, corrupt or undecryptable (e.g. keychain reset) reads as
-        // signed out — never a startup crash.
-        return null;
+        return empty;
       }
     },
-    async save(record) {
-      const encrypted = safeStorage.encryptString(JSON.stringify(record));
-      await writeTextFile(tokenFile, encrypted.toString("base64"));
+    async save(value: T): Promise<void> {
+      const encrypted = safeStorage.encryptString(JSON.stringify(value));
+      await writeTextFile(file, encrypted.toString("base64"));
     },
-    async clear() {
-      await rm(tokenFile, { force: true });
+    async clear(): Promise<void> {
+      await rm(file, { force: true });
     },
   };
+}
+
+/** The GitHub sign-in on safeStorage. */
+export function createSafeStorageBackend(tokenFile: string): TokenBackend {
+  return encryptedFile(tokenFile, parseRecord, null);
+}
+
+/** The Confluence tokens on safeStorage. */
+export function createConfluenceSafeStorageBackend(file: string): ConfluenceTokenBackend {
+  return encryptedFile(file, parseConfluenceRecords, []);
 }

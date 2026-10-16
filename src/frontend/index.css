@@ -269,6 +269,52 @@ body {
   flex: 0 1 10rem;
 }
 
+/* Settings → Confluence (specs/external-links/confluence-wiki.feature.md):
+   the wikis with a token, each with Remove. */
+.confluence-wikis {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.confluence-wikis li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+/* The publish dialog: wide enough for a page url. */
+.dialog.modal-dialog.confluence-dialog {
+  width: min(34rem, 90vw);
+}
+
+/* The header chip linking the published page reads like the other chips. */
+a.chip {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a.chip:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
+/* Url and token share the row, wrapping before either gets too narrow. */
+.confluence-tokens .auth-row {
+  flex-wrap: wrap;
+}
+
+.confluence-tokens .auth-row input,
+.confluence-tokens input.paste-token-host {
+  flex: 1 1 11rem;
+}
+
 /* Path field + native "Browse…" chooser (specs/app-start.spec.md), used in
    the first-run form and the Data directory dialog. Secondary styling: the
    picker fills the field, it never submits. */
