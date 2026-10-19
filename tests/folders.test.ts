@@ -11,10 +11,11 @@ import {
   moveFeature,
   readFeature,
   renameFeature,
+  renameFolder,
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
-import { buildTree } from "../src/frontend/tree";
+import { buildTree, featuresBeneath, findFolder, folderOptions, folderRenamed } from "../src/frontend/tree";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
@@ -132,6 +133,102 @@ test("deleteFolder deletes empty folders only", async () => {
   expect(await readFeature(root, "specs/full/one.feature.md")).toBe("# One\n");
 });
 
+// specs/ui/folders.feature.md "delete a folder with features in it": without
+// force the refusal stands; with it the folder, its features and their
+// documents go, and what git never tracked is swept away after.
+test("deleteFolder with force removes a folder with features in it", async () => {
+  await mkdir(join(root, "specs/full/sub"), { recursive: true });
+  await mkdir(join(root, ".specdriven/automerge/specs/full/one.feature.md"), { recursive: true });
+  await Bun.write(join(root, "specs/full/one.feature.md"), "# One\n");
+  await Bun.write(join(root, "specs/full/sub/two.feature.md"), "# Two\n");
+  await Bun.write(join(root, "specs/full/sub/.DS_Store"), "junk");
+  await Bun.write(join(root, "specs/keep.feature.md"), "# Keep\n");
+  expect(deleteFolder(root, "specs/full")).rejects.toThrow("not empty");
+  const result = await deleteFolder(root, "specs/full", { force: true });
+  expect(result.features).toBe(2);
+  expect(await listFolders(root)).toEqual([]);
+  expect(await listFeatures(root)).toEqual([{ fileName: "specs/keep.feature.md", name: "Keep", scenarios: [] }]);
+  expect(await Bun.file(join(root, ".specdriven/automerge/specs/full")).exists()).toBe(false);
+  // the root is never a folder to delete, forced or not
+  expect(deleteFolder(root, "specs", { force: true })).rejects.toThrow("required");
+});
+
+// specs/ui/folders.feature.md "rename a folder": the last segment changes,
+// slugified; the folder keeps its parent; an empty one is renamed on disk.
+test("renameFolder renames in place, slugified, refusing collisions", async () => {
+  await mkdir(join(root, "specs/billing/sub"), { recursive: true });
+  await mkdir(join(root, "specs/taken"), { recursive: true });
+  expect(await renameFolder(root, "specs/billing/sub", "Old Quotes!")).toEqual({
+    path: "specs/billing/old-quotes",
+    message: "renamed locally (git does not track an empty folder)",
+  });
+  expect(await listFolders(root)).toEqual(["specs/billing", "specs/billing/old-quotes", "specs/taken"]);
+  expect(await renameFolder(root, "billing", "billing")).toEqual({ path: "specs/billing", message: "already named that" });
+  expect(renameFolder(root, "specs/billing", "taken")).rejects.toThrow("already exists");
+  expect(renameFolder(root, "specs/ghost", "x")).rejects.toThrow("Folder not found");
+  expect(renameFolder(root, "specs/billing", "  ")).rejects.toThrow("required");
+  expect(renameFolder(root, "", "x")).rejects.toThrow("required");
+  expect(renameFolder(root, "..", "x")).rejects.toThrow("Invalid folder");
+  // a `/` in the new name does not move the folder elsewhere: the last segment is the name
+  expect(await renameFolder(root, "specs/taken", "a/b")).toEqual({
+    path: "specs/b",
+    message: "renamed locally (git does not track an empty folder)",
+  });
+});
+
+test("renameFolder works in a plain directory with features (no git repo)", async () => {
+  await mkdir(join(root, "specs/billing"), { recursive: true });
+  await Bun.write(join(root, "specs/billing/one.feature.md"), "# One\n");
+  const result = await renameFolder(root, "specs/billing", "invoices");
+  expect(result.path).toBe("specs/invoices");
+  expect(await readFeature(root, "specs/invoices/one.feature.md")).toBe("# One\n");
+  expect(await readFeature(root, "specs/billing/one.feature.md")).toBeNull();
+});
+
+// The sidebar's folder helpers (src/frontend/tree.ts): what a folder holds,
+// where paths land after a rename, and the list "Move to folder…" offers.
+test("featuresBeneath, folderRenamed and folderOptions", () => {
+  const tree = buildTree(
+    ["specs/billing", "specs/billing/sub", "specs/empty"],
+    [
+      { fileName: "specs/top.feature.md", name: "Top", scenarios: [] },
+      { fileName: "specs/billing/quotes.feature.md", name: "Quotes", scenarios: [] },
+      { fileName: "specs/billing/sub/deep.feature.md", name: "Deep", scenarios: [] },
+    ],
+  );
+  expect(featuresBeneath(tree)).toBe(3);
+  expect(featuresBeneath(findFolder(tree, "specs/billing")!)).toBe(2);
+  expect(featuresBeneath(findFolder(tree, "specs/empty")!)).toBe(0);
+  expect(findFolder(tree, "specs/ghost")).toBeNull();
+
+  expect(folderRenamed("specs/billing", "specs/billing", "specs/invoices")).toBe("specs/invoices");
+  expect(folderRenamed("specs/billing/sub/deep.feature.md", "specs/billing", "specs/invoices")).toBe(
+    "specs/invoices/sub/deep.feature.md",
+  );
+  // a sibling that merely shares the prefix is not beneath it
+  expect(folderRenamed("specs/billing-old/x.feature.md", "specs/billing", "specs/invoices")).toBe(
+    "specs/billing-old/x.feature.md",
+  );
+
+  expect(folderOptions(tree)).toEqual([
+    { value: "specs", label: "Top level", hint: "" },
+    { value: "specs/billing", label: "billing", hint: "" },
+    { value: "specs/billing/sub", label: "sub", hint: "billing" },
+    { value: "specs/empty", label: "empty", hint: "" },
+  ]);
+  // the folder the feature is in is not offered
+  expect(folderOptions(tree, "specs/billing").map((o) => o.value)).toEqual([
+    "specs",
+    "specs/billing/sub",
+    "specs/empty",
+  ]);
+  expect(folderOptions(tree, "specs").map((o) => o.value)).toEqual([
+    "specs/billing",
+    "specs/billing/sub",
+    "specs/empty",
+  ]);
+});
+
 // specs/ui/folders.feature.md: the Edit link edits the feature name only — the
 // file keeps its name and folder.
 test("renameFeature edits the name in place, keeping file and folder", async () => {
@@ -201,6 +298,50 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       const back = await moveFeature(a, "specs/billing/seed.feature.md", "");
       expect(back.fileName).toBe("specs/seed.feature.md");
       expect(await readFeature(a, "specs/seed.feature.md")).toBe("# Seed\n");
+    });
+
+    // specs/ui/folders.feature.md "rename a folder": one `git mv` of the
+    // directory carries every feature and its document; the other clone
+    // sees the new folder on pull and nothing of the old one.
+    test("renameFolder git-mvs the directory and its documents, commits and pushes", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+        "specs/billing/sub/deep.feature.md": "# Deep\n",
+        ".specdriven/automerge/specs/billing/quotes.feature.md/snapshot.bin": "doc",
+      });
+      const result = await renameFolder(a, "specs/billing", "Invoices");
+      expect(result).toEqual({ path: "specs/invoices", message: "renamed, committed and pushed" });
+      expect(await listFolders(a)).toEqual(["specs/invoices", "specs/invoices/sub"]);
+      expect(await readFeature(a, "specs/invoices/sub/deep.feature.md")).toBe("# Deep\n");
+      expect(
+        await Bun.file(join(a, ".specdriven/automerge/specs/invoices/quotes.feature.md/snapshot.bin")).exists(),
+      ).toBe(true);
+      expect(await Bun.file(join(a, ".specdriven/automerge/specs/billing")).exists()).toBe(false);
+      const log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Rename folder: specs/billing -> specs/invoices");
+      await git(b, "pull");
+      expect(await listFolders(b)).toEqual(["specs/invoices", "specs/invoices/sub"]);
+      expect(await readFeature(b, "specs/invoices/quotes.feature.md")).toBe("# Quotes\n");
+    });
+
+    // specs/ui/folders.feature.md "delete a folder with features in it": a
+    // forced delete is a `git rm -r`, committed and pushed.
+    test("deleteFolder with force git-rms the directory, commits and pushes", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/keep.feature.md": "# Keep\n",
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+        "specs/billing/sub/deep.feature.md": "# Deep\n",
+        ".specdriven/automerge/specs/billing/quotes.feature.md/snapshot.bin": "doc",
+      });
+      const result = await deleteFolder(a, "specs/billing", { force: true });
+      expect(result).toEqual({ features: 2, message: "deleted, committed and pushed" });
+      expect(await listFolders(a)).toEqual([]);
+      expect(await Bun.file(join(a, ".specdriven/automerge/specs/billing")).exists()).toBe(false);
+      const log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Delete folder: specs/billing (2 features)");
+      await git(b, "pull");
+      expect(await listFolders(b)).toEqual([]);
+      expect(await readFeature(b, "specs/keep.feature.md")).toBe("# Keep\n");
     });
   });
 }

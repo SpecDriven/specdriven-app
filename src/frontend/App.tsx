@@ -198,6 +198,10 @@ import {
 } from "./testlinks";
 import {
   buildTree,
+  featuresBeneath,
+  findFolder,
+  folderOptions,
+  folderRenamed,
   scenarioNeighbors,
   scenarioRows,
   scenarioSequence,
@@ -2551,8 +2555,9 @@ export function App() {
   // With a folder selected, the new feature is created inside it — the same
   // insertion point "+ New folder" uses; `folder/name` nests further below
   // it (specs/ui/folders.feature.md).
-  const createFeature = async () => {
-    const parent = selectedFolder;
+  const createFeature = () => createFeatureIn(selectedFolder);
+  /** `parent` is a repo-relative folder path, or null for the top level. */
+  const createFeatureIn = async (parent: string | null) => {
     const input = await prompt({
       title: parent ? `New feature in "${parent}"` : "New feature",
       hint: parent ? undefined : "Use folder/name to create inside a folder.",
@@ -2903,8 +2908,9 @@ export function App() {
 
   // Folders (specs/ui/folders.feature.md): plain directories in the data repo.
   // With a folder selected, the new folder is created inside it.
-  const createFolder = async () => {
-    const parent = selectedFolder;
+  const createFolder = () => createFolderIn(selectedFolder);
+  /** `parent` is a repo-relative folder path, or null for the top level. */
+  const createFolderIn = async (parent: string | null) => {
     const input = await prompt({
       title: parent ? `New folder in "${parent}"` : "New folder",
       hint: parent ? undefined : "Use / for nesting.",
@@ -2933,26 +2939,102 @@ export function App() {
     }
   };
 
-  // Only empty folders can be deleted (specs/ui/folders.feature.md) — the
-  // server refuses otherwise, and the refusal lands in the status line.
+  // Delete from a folder's ⋯ menu (specs/ui/folders.feature.md "delete a
+  // folder" / "delete a folder with features in it"): an empty folder goes
+  // at once, with Undo; one with features asks again, naming how many, and
+  // then goes with them — a `git rm -r` on the server, committed and pushed.
   const removeFolder = async (path: string) => {
+    const node = findFolder(buildTree(folders, features), path);
+    const count = node ? featuresBeneath(node) : 0;
     const ok = await confirm({
       title: "Delete folder",
-      body: `Delete "${path}"? Only empty folders can be deleted.`,
-      confirmLabel: "Delete folder",
+      body:
+        count === 0
+          ? `Delete the empty folder "${path}"?`
+          : `Delete "${path}" and the ${count} feature${count === 1 ? "" : "s"} in it? They are removed from the repository, committed and pushed.`,
+      confirmLabel: count === 0 ? "Delete folder" : `Delete folder and ${count} feature${count === 1 ? "" : "s"}`,
     });
     if (!ok) return;
-    const res = await fetch(`/api/folders/${encodeURIComponent(path)}`, { method: "DELETE" });
-    const data = await res.json();
-    if (res.ok) {
-      // A selection under the deleted folder points nowhere — drop it.
-      setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
-      await loadFeatures();
-      toast.success(`Deleted folder "${path}".`, {
-        action: { label: "Undo", run: () => void restoreFolder(path) },
+    // An editor open on a feature beneath the folder has nothing left to save
+    // into — the same seal as deleting that feature from its own menu.
+    const retiring = selected !== null && selected.startsWith(`${path}/`);
+    if (retiring) {
+      featureEditorsRetiring.current = true;
+      await scenarioSaveQueue.current.idle();
+      await descSaveQueue.current.idle();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(path)}${count > 0 ? "?force=true" : ""}`, {
+        method: "DELETE",
       });
-    } else {
-      toast.error(data.error ?? "Could not delete the folder");
+      const data = await res.json();
+      if (res.ok) {
+        if (retiring) {
+          setEditing(null);
+          setSelected(null);
+          setFeature(null);
+          setSelectedScenario(null);
+        }
+        // A selection under the deleted folder points nowhere — drop it.
+        setSelectedFolder((f) => (f === path || f?.startsWith(`${path}/`) ? null : f));
+        await loadFeatures();
+        if (count === 0) {
+          toast.success(`Deleted folder "${path}".`, {
+            action: { label: "Undo", run: () => void restoreFolder(path) },
+          });
+        } else {
+          toast.success(`Deleted folder "${path}" and ${count} feature${count === 1 ? "" : "s"} — ${data.message}.`);
+        }
+      } else {
+        toast.error(data.error ?? "Could not delete the folder");
+      }
+    } finally {
+      if (retiring) unsealFeatureEditors();
+    }
+  };
+
+  // Rename from a folder's ⋯ menu (specs/ui/folders.feature.md "rename a
+  // folder"): the last segment changes, the server git-mvs the directory, and
+  // everything keyed by a path beneath it — the open feature, the selected
+  // folder, the collapsed set — follows to the new path.
+  const renameFolder = async (path: string) => {
+    const current = path.split("/").pop()!;
+    const name = await prompt({
+      title: "Rename folder",
+      hint: "The folder keeps its place in the tree; names are slugified like file names.",
+      initial: current,
+      confirmLabel: "Rename",
+    });
+    if (!name || cleanLine(name) === current) return;
+    // The editors over a feature in the folder flush, then seal, before the
+    // git mv — the same pair renameFile uses, so no save names the old path.
+    const retiring = selected !== null && selected.startsWith(`${path}/`);
+    if (retiring) {
+      await editorRef.current.flush();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: cleanLine(name) }),
+      });
+      const data = (await res.json()) as { path?: string; message?: string; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Rename failed");
+        return;
+      }
+      const to = data.path!;
+      if (to === path) return;
+      setSelectedFolder((f) => (f === null ? f : folderRenamed(f, path, to)));
+      setCollapsed((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
+      setOutlined((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
+      await loadFeatures();
+      if (selected !== null && retiring) await openFeature(folderRenamed(selected, path, to));
+      toast.success(`Renamed folder to ${to.split("/").pop()} — ${data.message}.`);
+    } finally {
+      if (retiring) unsealFeatureEditors();
     }
   };
 
@@ -3049,6 +3131,8 @@ export function App() {
       the `.feature.md` extension is hidden (specs/ui/ui.feature.md "Feature
       entry menu"). */
   const fileStem = (fileName: string) => fileName.split("/").pop()!.split(".")[0]!;
+  /** A folder's entry in `treeMenu` — a NUL keeps it apart from file names. */
+  const folderMenuKey = (path: string) => `folder\u0000${path}`;
 
   // File → Rename (specs/ui/ui.feature.md "Feature entry menu"): renames the
   // underlying file. The extension stays; a selected feature follows its
@@ -5376,6 +5460,12 @@ export function App() {
               ],
             },
             {
+              id: "move",
+              label: "Move to folder…",
+              icon: <FolderInput size={13} />,
+              onSelect: () => void moveFeaturePrompt(f.fileName),
+            },
+            {
               id: "delete",
               label: "Delete",
               icon: <Trash2 size={13} />,
@@ -5526,16 +5616,59 @@ export function App() {
               </span>{" "}
               {child.name}
             </button>
-            <Tooltip label="Delete folder">
-              <button
-                type="button"
-                className="folder-delete"
-                aria-label={`Delete folder ${child.path}`}
-                onClick={() => void removeFolder(child.path)}
-              >
-                <X size={13} aria-hidden="true" />
-              </button>
-            </Tooltip>
+            {/* The folder's own ⋯ (specs/ui/folders.feature.md "Folder
+                menu"): create inside it, rename it, delete it — the same
+                quiet button a feature row carries, keyboard included. */}
+            <span className="tree-row-menu">
+              <Tooltip label="More actions">
+                <button
+                  type="button"
+                  className="tree-menu-btn"
+                  aria-label={`Menu for folder ${child.path}`}
+                  aria-haspopup="menu"
+                  aria-expanded={treeMenu === folderMenuKey(child.path)}
+                  onClick={() =>
+                    setTreeMenu((m) => (m === folderMenuKey(child.path) ? null : folderMenuKey(child.path)))
+                  }
+                >
+                  <Ellipsis size={14} aria-hidden="true" />
+                </button>
+              </Tooltip>
+              <Menu
+                open={treeMenu === folderMenuKey(child.path)}
+                onClose={() => setTreeMenu(null)}
+                label={`Menu for folder ${child.path}`}
+                className="tree-menu"
+                containerSelector=".tree-row-menu"
+                items={[
+                  {
+                    id: "new-feature",
+                    label: "New feature here",
+                    icon: <NewFeatureIcon size={13} />,
+                    onSelect: () => void createFeatureIn(child.path),
+                  },
+                  {
+                    id: "new-folder",
+                    label: "New folder here",
+                    icon: <NewFolderIcon size={13} />,
+                    onSelect: () => void createFolderIn(child.path),
+                  },
+                  {
+                    id: "rename",
+                    label: `Rename “${child.name}”`,
+                    icon: <Pencil size={13} />,
+                    onSelect: () => void renameFolder(child.path),
+                  },
+                  {
+                    id: "delete",
+                    label: "Delete",
+                    icon: <Trash2 size={13} />,
+                    danger: true,
+                    onSelect: () => void removeFolder(child.path),
+                  },
+                ]}
+              />
+            </span>
           </div>
           {!collapsed.has(child.path) && <div role="group">{renderTree(child, depth + 1)}</div>}
         </div>
@@ -6021,15 +6154,22 @@ export function App() {
       run: () => void s.run(new KeyboardEvent("keydown", { key: "Enter" })),
     };
   };
-  const moveFeaturePrompt = async () => {
-    if (!selected) return;
-    const target = await prompt({
-      title: "Move to folder",
-      hint: "The folder's path, e.g. billing/renewals. Use / for nesting.",
-      confirmLabel: "Move",
+  // Move to folder… (specs/ui/folders.feature.md "move a feature from its
+  // menu"): the keyboard's way to what a drag does — pick a folder from the
+  // list, the top level included, and the same git mv runs.
+  const moveFeaturePrompt = async (fileName: string | null = selected) => {
+    if (!fileName) return;
+    const from = fileName.slice(0, fileName.lastIndexOf("/"));
+    const options = folderOptions(buildTree(folders, features), from);
+    const to = await pick({
+      title: `Move “${fileStem(fileName)}”`,
+      hint: "To another folder — a git mv, committed and pushed.",
+      placeholder: "Find a folder…",
+      options,
+      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
     });
-    if (!target) return;
-    await moveTo(selected, target.trim().replace(/^\/+|\/+$/g, ""));
+    if (to === null) return;
+    await moveTo(fileName, to);
   };
   const action = (
     id: string,
@@ -6042,6 +6182,16 @@ export function App() {
   const paletteActions: PaletteItem[] = [
     shortcutAction("create", onFeaturePage ? <Plus size={14} /> : <NewFeatureIcon size={14} />),
     action("new-folder", "New folder", <NewFolderIcon size={14} />, () => void createFolder()),
+    ...(selectedFolder
+      ? [
+          action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
+            void renameFolder(selectedFolder),
+          ),
+          action("delete-folder", `Delete folder “${selectedFolder.split("/").pop()}”`, <Trash2 size={14} />, () =>
+            void removeFolder(selectedFolder),
+          ),
+        ]
+      : []),
     shortcutAction("publish", <StatusIcon status="published" size={14} />),
     shortcutAction("copy-link", <Link size={14} />),
     ...(selected && feature
@@ -6400,14 +6550,17 @@ export function App() {
         return;
       }
       case "F10":
-        if (!e.shiftKey || !t.dataset.file) return;
+        if (!e.shiftKey) return;
+        if (t.dataset.file) setTreeMenu(t.dataset.file);
+        else if (folderPath !== undefined) setTreeMenu(folderMenuKey(folderPath));
+        else return;
         e.preventDefault();
-        setTreeMenu(t.dataset.file);
         return;
       case "ContextMenu":
-        if (!t.dataset.file) return;
+        if (t.dataset.file) setTreeMenu(t.dataset.file);
+        else if (folderPath !== undefined) setTreeMenu(folderMenuKey(folderPath));
+        else return;
         e.preventDefault();
-        setTreeMenu(t.dataset.file);
         return;
     }
   };

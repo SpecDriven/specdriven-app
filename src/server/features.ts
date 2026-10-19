@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
@@ -416,13 +416,21 @@ export async function createFolder(dataDir: string, path: string): Promise<strin
 }
 
 /**
- * specs/ui/folders.feature.md: only an empty folder can be deleted — one with
- * no files anywhere beneath it (macOS `.DS_Store` junk doesn't count). This
- * keeps folder deletion non-destructive: features must be moved out first.
- * Empty directories are untracked by git, so removal is a local fs operation.
+ * specs/ui/folders.feature.md "delete a folder": an empty folder — one with
+ * no files anywhere beneath it (macOS `.DS_Store` junk doesn't count) — is
+ * removed as a local fs operation, git never having tracked it. A folder
+ * with files beneath it is refused unless `force` is set: then it goes the
+ * way a feature does ("delete a folder with features in it"), a `git rm -r`
+ * of the folder and of its features' Automerge documents, committed and
+ * pushed, and whatever git did not track is swept off disk after. The
+ * client asks for confirmation first, naming how many features go.
  * The spec tree's own root is not a folder anyone may delete.
  */
-export async function deleteFolder(dataDir: string, path: string): Promise<void> {
+export async function deleteFolder(
+  dataDir: string,
+  path: string,
+  { force = false }: { force?: boolean } = {},
+): Promise<{ message: string; features: number }> {
   const folder = safeFolder(path);
   if (folder === SPECS_FOLDER) throw new Error("Folder name is required");
   const full = `${dataDir}/${folder}`;
@@ -435,12 +443,59 @@ export async function deleteFolder(dataDir: string, path: string): Promise<void>
   if (!s.isDirectory()) throw new Error(`Folder not found: ${folder}`);
   const contents = (await readdir(full, { recursive: true })) as string[];
   const blocking = contents.filter((entry) => entry.split("/").pop() !== ".DS_Store");
+  let files = 0;
   for (const entry of blocking) {
-    if (!(await stat(`${full}/${entry}`)).isDirectory()) {
-      throw new Error(`Folder is not empty: ${folder} — move its features out first`);
-    }
+    if (!(await stat(`${full}/${entry}`)).isDirectory()) files += 1;
   }
-  await rm(full, { recursive: true });
+  if (files === 0) {
+    await rm(full, { recursive: true });
+    return { message: "folder deleted", features: 0 };
+  }
+  if (!force) throw new Error(`Folder is not empty: ${folder} — move its features out first`);
+  const features = (await walk(dataDir, folder)).files.length;
+  const docFolder = docDirRel(folder);
+  const paths = [folder, ...((await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : [])];
+  const sync = await removeAndPush(
+    dataDir,
+    paths,
+    `Delete folder: ${folder} (${features} feature${features === 1 ? "" : "s"})`,
+  );
+  // git rm leaves behind what it never tracked — an empty subfolder, a
+  // .DS_Store, a feature whose commit failed — and the folder with them.
+  for (const p of paths) await rm(`${dataDir}/${p}`, { recursive: true, force: true });
+  return { message: sync.message, features };
+}
+
+/**
+ * specs/ui/folders.feature.md "rename a folder": the folder keeps its place
+ * in the tree and takes a new last segment, slugified like a file stem. With
+ * features beneath it the rename is a `git mv` of the whole directory —
+ * their Automerge documents, which mirror the tree under
+ * `.specdriven/automerge/specs/`, move in the same commit — committed and
+ * pushed; every feature's url follows. An empty folder is renamed on disk
+ * alone, git never having tracked it.
+ */
+export async function renameFolder(
+  dataDir: string,
+  path: string,
+  name: string,
+): Promise<{ path: string; message: string }> {
+  const from = safeFolder(path);
+  if (from === SPECS_FOLDER) throw new Error("Folder name is required");
+  if (!(await isDirectory(`${dataDir}/${from}`))) throw new Error(`Folder not found: ${from}`);
+  const stem = slugify(cleanLine(name).split("/").pop() ?? "");
+  if (!stem) throw new Error("Folder name is required");
+  const to = [...from.split("/").slice(0, -1), stem].join("/");
+  if (to === from) return { path: from, message: "already named that" };
+  if (await exists(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
+  if ((await walk(dataDir, from)).files.length === 0) {
+    await rename(`${dataDir}/${from}`, `${dataDir}/${to}`);
+    return { path: to, message: "renamed locally (git does not track an empty folder)" };
+  }
+  const docFrom = docDirRel(from);
+  const docMoves = (await isDirectory(`${dataDir}/${docFrom}`)) ? [{ from: docFrom, to: docDirRel(to) }] : [];
+  const sync = await moveAndPush(dataDir, from, to, `Rename folder: ${from} -> ${to}`, docMoves);
+  return { path: to, message: sync.message };
 }
 
 /**

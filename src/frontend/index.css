@@ -963,25 +963,15 @@ a.page-entry.done {
   color: var(--text-3);
 }
 
-/* Deleting is a quiet affordance: visible while on the row, by pointer or
-   by keyboard focus. Faded rather than hidden — a hidden control could not
-   take focus at all. */
-.folder-delete {
-  opacity: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  padding: 0.2rem 0.5rem;
-  border-radius: var(--radius-sm);
+/* The folder's ⋯ shares .tree-menu-btn with the feature rows below: a quiet
+   affordance, visible while on the row by pointer or keyboard focus. */
+.folder-row {
+  position: relative;
 }
 
-.folder-row:hover .folder-delete,
-.folder-row:focus-within .folder-delete {
+.folder-row:hover .tree-menu-btn,
+.folder-row:focus-within .tree-menu-btn {
   opacity: 1;
-}
-
-.folder-delete:hover {
-  color: var(--danger-fg);
 }
 
 /* One row per feature: the link plus its "⋯" menu button
@@ -1005,7 +995,7 @@ a.page-entry.done {
   white-space: nowrap;
 }
 
-/* Like folder-delete, a quiet affordance: visible on the row, while it has
+/* A quiet affordance: visible on the row, while it has
    keyboard focus, or while its menu is open. */
 .tree-menu-btn {
   opacity: 0;
@@ -5638,8 +5628,7 @@ aside header .collapse-btn {
    finger's width; keyboard hints go, since there is no keyboard to press. */
 @media (hover: none), (pointer: coarse) {
   .card-actions,
-  .tree-menu-btn,
-  .folder-delete {
+  .tree-menu-btn {
     opacity: 1;
   }
 
