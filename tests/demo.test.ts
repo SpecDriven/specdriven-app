@@ -178,6 +178,7 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
     ["notebook", false, false],
     ["issues", false, false],
     ["tests", false, false],
+    ["self-fix", false, false],
   ]);
 });
 

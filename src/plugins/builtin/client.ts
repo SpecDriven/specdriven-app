@@ -7,6 +7,8 @@ import issues from "./issues/client";
 import { manifest as issuesManifest } from "./issues/manifest";
 import { pagesClient } from "./pages/client";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
+import selfFix from "./self-fix/client";
+import { manifest as selfFixManifest } from "./self-fix/manifest";
 import tests from "./tests/client";
 import { manifest as testsManifest } from "./tests/manifest";
 import { NOTEBOOK_TAB, ROADMAP_TAB, TASKS_TAB } from "../../frontend/pages/pages";
@@ -23,4 +25,5 @@ export const builtinClientPlugins: ClientPlugin[] = [
   { manifest: notebookManifest, plugin: pagesClient(NOTEBOOK_TAB) as Plugin<Context> },
   { manifest: issuesManifest, plugin: issues },
   { manifest: testsManifest, plugin: tests },
+  { manifest: selfFixManifest, plugin: selfFix },
 ];

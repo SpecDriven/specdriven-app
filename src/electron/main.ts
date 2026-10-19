@@ -19,9 +19,11 @@ import { readFile } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { endAllChatSessions } from "../server/agentChat";
 import { applyStartupState, handleApi } from "../server/api";
 import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
+import { setRelauncher } from "../server/relaunch";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
@@ -81,11 +83,18 @@ app.on("will-quit", (event) => {
 // A packaged macOS app launches with a minimal PATH; append the usual
 // Homebrew locations so git and gh can be found there — every git operation
 // needs the one, the default engine needs the other
-// (specs/app/desktop-app.feature.md "Git") — and ~/.local/bin, where the native
-// Claude installer puts `claude` (specs/agents/agent-pane.feature.md).
+// (specs/app/desktop-app.feature.md "Git") — ~/.local/bin, where the native
+// Claude installer puts `claude` (specs/agents/agent-pane.feature.md), and
+// ~/.bun/bin, where install.sh puts the bun a self-fix rebuilds with
+// (specs/app/self-healing.feature.md).
 if (process.platform === "darwin") {
   const parts = (process.env.PATH || "").split(":");
-  for (const dir of ["/usr/local/bin", "/opt/homebrew/bin", join(homedir(), ".local", "bin")]) {
+  for (const dir of [
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+    join(homedir(), ".local", "bin"),
+    join(homedir(), ".bun", "bin"),
+  ]) {
     if (!parts.includes(dir)) parts.push(dir);
   }
   process.env.PATH = parts.join(":");
@@ -115,8 +124,11 @@ if (process.defaultApp) {
 }
 
 // The built frontend sits next to the built main process: dist/renderer
-// relative to the app root (the project in dev, app.asar when packaged).
-const rendererDir = join(app.getAppPath(), "dist", "renderer");
+// beside dist/electron, found from this module's own location rather than
+// the app root — so the same bundle serves its own renderer whether it runs
+// from inside app.asar, from the project in dev, or from the installed
+// source a self-fix rebuilt it under (src/electron/boot.ts).
+const rendererDir = fileURLToPath(new URL("../renderer/", import.meta.url));
 
 async function serveShell(): Promise<Response> {
   const shellHtml = await readFile(join(rendererDir, "index.html"));
@@ -378,6 +390,13 @@ if (!app.requestSingleInstanceLock()) {
       return picked.canceled ? null : (picked.filePaths[0] ?? null);
     });
     if (!app.isPackaged) installDebugMenu();
+    // A self-fix's "Rebuild & restart" (specs/app/self-healing.feature.md):
+    // the next launch goes through the boot shim, which picks the bundle.
+    setRelauncher(() => {
+      app.relaunch();
+      // quit, not exit: will-quit still ends the agent sessions and flushes.
+      app.quit();
+    });
     await applyStartupState();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
     links.holdLaunchLink(process.argv);

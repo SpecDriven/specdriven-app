@@ -9,6 +9,8 @@ import issues from "./issues/host";
 import { manifest as issuesManifest } from "./issues/manifest";
 import { pagesHost } from "./pages/host";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
+import selfFix from "./self-fix/host";
+import { manifest as selfFixManifest } from "./self-fix/manifest";
 import tests from "./tests/host";
 import { manifest as testsManifest } from "./tests/manifest";
 import { NOTEBOOK, ROADMAP, TASKS } from "../../server/pages";
@@ -25,4 +27,5 @@ export const builtinHostPlugins: HostPlugin[] = [
   { manifest: notebookManifest, plugin: pagesHost(NOTEBOOK) },
   { manifest: issuesManifest, plugin: issues },
   { manifest: testsManifest, plugin: tests },
+  { manifest: selfFixManifest, plugin: selfFix },
 ];
