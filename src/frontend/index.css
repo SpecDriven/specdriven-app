@@ -929,9 +929,17 @@ a.page-entry.done {
   border-radius: var(--radius-sm);
 }
 
+/* The name truncates like a feature's does (.tree-row > a.tree-feature):
+   a flex item's default min-width is its content, so without this a long
+   folder name widens the button past the sidebar and carries the ⋯ menu
+   out of reach with it — a folder nobody could delete. */
 .folder-toggle {
   flex: 1;
+  min-width: 0;
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-align: left;
   padding: 0.38rem 0.3rem;
   border: none;

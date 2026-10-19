@@ -449,6 +449,12 @@ export async function deleteFolder(
   }
   if (files === 0) {
     await rm(full, { recursive: true });
+    // Moving the last feature out leaves the folder's Automerge mirror
+    // (.specdriven/automerge/<folder>) behind, empty: git mv moves the
+    // documents but not their parent. It goes with the folder when nothing
+    // is left in it — a document still there belongs to a feature git
+    // knows nothing about, and stays.
+    await rmIfEmpty(`${dataDir}/${docDirRel(folder)}`);
     return { message: "folder deleted", features: 0 };
   }
   if (!force) throw new Error(`Folder is not empty: ${folder} — move its features out first`);
@@ -1337,4 +1343,14 @@ async function isDirectory(path: string): Promise<boolean> {
     (s) => s.isDirectory(),
     () => false,
   );
+}
+
+/** Remove a directory that holds nothing but empty directories; leave any other alone. */
+async function rmIfEmpty(path: string): Promise<void> {
+  if (!(await isDirectory(path))) return;
+  const entries = (await readdir(path, { recursive: true })) as string[];
+  for (const entry of entries) {
+    if (!(await stat(`${path}/${entry}`)).isDirectory()) return;
+  }
+  await rm(path, { recursive: true, force: true });
 }

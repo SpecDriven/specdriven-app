@@ -5453,7 +5453,10 @@ export function App() {
               items: [
                 {
                   id: "rename",
-                  label: `Rename “${fileStem(f.fileName)}”`,
+                  // Plain "Rename" (ui.feature.md "Feature entry menu"): the
+                  // name belongs to the row, and a long one would widen the
+                  // menu past the sidebar's left edge.
+                  label: "Rename",
                   icon: <Pencil size={13} />,
                   onSelect: () => void renameFile(f.fileName),
                 },
@@ -5655,7 +5658,7 @@ export function App() {
                   },
                   {
                     id: "rename",
-                    label: `Rename “${child.name}”`,
+                    label: "Rename",
                     icon: <Pencil size={13} />,
                     onSelect: () => void renameFolder(child.path),
                   },

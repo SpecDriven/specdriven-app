@@ -122,9 +122,20 @@ test("deleteFolder deletes empty folders only", async () => {
   await Bun.write(join(root, "specs/empty/nested/.DS_Store"), "junk");
   await mkdir(join(root, "specs/full"), { recursive: true });
   await Bun.write(join(root, "specs/full/one.feature.md"), "# One\n");
+  // What moving the last feature out leaves behind: the folder's empty
+  // Automerge mirror. It goes with the folder.
+  await mkdir(join(root, ".specdriven/automerge/specs/empty"), { recursive: true });
+  // A mirror that still holds a document is not ours to sweep.
+  await mkdir(join(root, "specs/orphan"), { recursive: true });
+  await mkdir(join(root, ".specdriven/automerge/specs/orphan/gone.feature.md"), { recursive: true });
+  await Bun.write(join(root, ".specdriven/automerge/specs/orphan/gone.feature.md/docid"), "id");
 
   await deleteFolder(root, "specs/empty");
+  expect(await listFolders(root)).toEqual(["specs/full", "specs/orphan"]);
+  expect(await Bun.file(join(root, ".specdriven/automerge/specs/empty")).exists()).toBe(false);
+  await deleteFolder(root, "specs/orphan");
   expect(await listFolders(root)).toEqual(["specs/full"]);
+  expect(await Bun.file(join(root, ".specdriven/automerge/specs/orphan/gone.feature.md/docid")).exists()).toBe(true);
 
   expect(deleteFolder(root, "specs/full")).rejects.toThrow("not empty");
   expect(deleteFolder(root, "specs/ghost")).rejects.toThrow("Folder not found");
