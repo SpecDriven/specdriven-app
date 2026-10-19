@@ -11,6 +11,12 @@
  *                                    platform and architecture, as the
  *                                    AppImage (Linux), .dmg (macOS) or
  *                                    unpacked SpecDriven.exe (Windows)
+ *   bun run build:desktop --bundle-only [--fix <id>]
+ *                                    the bundles alone, no installer: what a
+ *                                    self-fix rebuilds under the installed
+ *                                    source, with dist/patch.json naming the
+ *                                    fix so the boot shim picks it up
+ *                                    (specs/app/self-healing.feature.md)
  *
  * Three steps: bundle the frontend into static files (served over the
  * app:// protocol), bundle the Electron main process, then hand both to
@@ -41,7 +47,10 @@
  *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
  */
 import { $ } from "bun";
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { version } from "../package.json";
+import type { PatchManifest } from "../src/electron/bootPolicy";
 
 export type Platform = "mac" | "linux" | "win";
 
@@ -115,22 +124,65 @@ export function electronBuilderArgs(platforms: Platform[], local: boolean, osArc
   return [`--${platform}`, LOCAL_TARGET[platform!], archFlag(osArch)];
 }
 
+/** `--bundle-only [--fix <id>]`, parsed; the rest of the arguments follow. */
+export function bundleOptions(args: string[]): { bundleOnly: boolean; fixId: string | null; rest: string[] } {
+  const rest: string[] = [];
+  let bundleOnly = false;
+  let fixId: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--bundle-only") bundleOnly = true;
+    else if (arg === "--fix") {
+      const id = args[++i];
+      if (!id || id.startsWith("--")) throw new Error("--fix needs the fix's id");
+      fixId = id;
+    } else rest.push(arg);
+  }
+  if (fixId !== null && !bundleOnly) throw new Error("--fix goes with --bundle-only");
+  return { bundleOnly, fixId, rest };
+}
+
+/** What dist/patch.json says of a self-fix bundle (src/electron/bootPolicy.ts). */
+export function patchManifest(appVersion: string, fixId: string, now: Date = new Date()): PatchManifest {
+  return { appVersion, builtAt: now.toISOString(), fixId };
+}
+
+/** Where the manifest goes, under a dist directory. */
+export const PATCH_MANIFEST_FILE = "patch.json";
+
 /**
- * The first two steps — the renderer bundle and the main-process bundle —
- * which is all a local launch needs (scripts/crash-test-desktop.ts runs them
- * without the installers).
+ * The bundles — the renderer, the main process and the boot shim that
+ * picks between this main process and a self-fix's — which is all a local
+ * launch needs (scripts/crash-test-desktop.ts runs them without the
+ * installers). A self-fix's rebuild (`--fix`) leaves dist/patch.json for the
+ * shim; any other build removes a stale one, so a fresh install never boots
+ * the bundle of a fix made for the version before it.
  */
-export async function bundleDesktop(): Promise<void> {
+export async function bundleDesktop(opts: { fixId?: string | null; distDir?: string } = {}): Promise<void> {
+  const dist = opts.distDir ?? "dist";
   console.log("Building renderer…");
-  await rm("dist/renderer", { recursive: true, force: true });
-  await $`bun build src/index.html --outdir dist/renderer --production`.quiet();
+  await rm(join(dist, "renderer"), { recursive: true, force: true });
+  await $`bun build src/index.html --outdir ${join(dist, "renderer")} --production`.quiet();
 
   console.log("Building main process…");
-  await rm("dist/electron", { recursive: true, force: true });
+  await rm(join(dist, "electron"), { recursive: true, force: true });
   // The Claude Agent SDK's optional per-platform binaries stay out: the app
   // runs the developer's own `claude` (src/server/agentChat.ts).
   const sdkBinaries = "@anthropic-ai/claude-agent-sdk-*";
-  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir dist/electron`.quiet();
+  const outdir = join(dist, "electron");
+  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir ${outdir}`.quiet();
+  // The shim is its own file: it imports main.js by a computed path, so the
+  // bundler leaves the two apart (src/electron/boot.ts).
+  await $`bun build src/electron/boot.ts --target=node --format=esm --external electron --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir ${outdir}`.quiet();
+
+  await writePatchManifest(dist, opts.fixId ?? null);
+}
+
+/** dist/patch.json for a fix's bundle; none otherwise. */
+export async function writePatchManifest(dist: string, fixId: string | null, appVersion: string = version): Promise<void> {
+  const file = join(dist, PATCH_MANIFEST_FILE);
+  await rm(file, { force: true });
+  if (fixId) await writeFile(file, JSON.stringify(patchManifest(appVersion, fixId), null, 2) + "\n");
 }
 
 async function build(builderArgs: string[]): Promise<void> {
@@ -143,7 +195,23 @@ async function build(builderArgs: string[]): Promise<void> {
 }
 
 if (import.meta.main) {
-  const args = process.argv.slice(2);
+  let bundle: ReturnType<typeof bundleOptions>;
+  try {
+    bundle = bundleOptions(process.argv.slice(2));
+  } catch (e) {
+    console.error(`build:desktop: ${(e as Error).message}`);
+    process.exit(1);
+  }
+  if (bundle.bundleOnly) {
+    if (bundle.rest.length > 0) {
+      console.error(`build:desktop: --bundle-only takes no platform (got ${bundle.rest.join(" ")})`);
+      process.exit(1);
+    }
+    await bundleDesktop({ fixId: bundle.fixId });
+    console.log(bundle.fixId ? `Done — dist/ carries fix ${bundle.fixId}` : "Done — bundles in dist/");
+    process.exit(0);
+  }
+  const args = bundle.rest;
   const local = args.includes("--local");
   let builderArgs: string[];
   try {

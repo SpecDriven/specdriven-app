@@ -51,6 +51,7 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   };
   expect(pluginStates()).toEqual([
     row("notebook", true),
+    row("self-fix", true),
     row("roadmap", false),
     row("tasks", false),
     row("issues", false),
@@ -58,6 +59,7 @@ test("the Tests switch mounts the plugin's routes and unmounts them again", asyn
   ]);
   expect(pluginStates().map((p) => [p.displayName, p.description])).toEqual([
     ["Engineering notebook", "A shared, dated log of observations and decisions"],
+    ["Fix this app", "Describe a bug; a coding agent fixes the app's own source, and the app rebuilds and restarts into the fix"],
     ["Roadmap", "Markdown roadmap pages on their own tab"],
     ["Tasks", "Tasks to assign, tick off and put on the calendar"],
     ["GitHub issues", "The code repo's GitHub issues on their own tab"],
@@ -90,7 +92,7 @@ test("a settings file from before plugins is read as the matching profile", () =
   // The legacy switches, in load order whatever order the file had them in.
   expect(
     readProfile({ testing: true, notebook: false, roadmap: true, models: "yes" }, builtinManifests),
-  ).toEqual({ enabled: ["roadmap", "tests"], migrated: true });
+  ).toEqual({ enabled: ["roadmap", "tests", "self-fix"], migrated: true });
   // The list, once there, is the whole truth: order kept, legacy keys ignored,
   // an id nothing provides kept for Settings to report, junk dropped.
   const state: Record<string, unknown> = {
@@ -140,6 +142,7 @@ test("the profile's order is the tab order, and an id nothing provides is report
     ["roadmap", false, false, true],
     ["tasks", false, false, true],
     ["issues", false, false, true],
+    ["self-fix", false, false, true],
   ]);
   expect(pluginStates()[1]!.error).toMatch(/No installed plugin has this id/);
   expect(matchApi("GET", "/api/tests")).not.toBeNull();
@@ -291,12 +294,12 @@ test("an older device-wide list is copied to the folders the file knows", () => 
   expect(legacy).toEqual({
     dataRepo: "/a",
     recentDataRepos: ["/b"],
-    plugins: { repos: { "/a": { enabled: ["notebook", "tests"] }, "/b": { enabled: ["notebook", "tests"] } } },
+    plugins: { repos: { "/a": { enabled: ["notebook", "tests", "self-fix"] }, "/b": { enabled: ["notebook", "tests", "self-fix"] } } },
   });
   // No folder known yet: the list stays device-wide, the switches still go.
   const early: Record<string, unknown> = { roadmap: true };
   expect(migrateProfile(early, builtinManifests)).toBe(true);
-  expect(early).toEqual({ plugins: { enabled: ["roadmap", "notebook"] } });
+  expect(early).toEqual({ plugins: { enabled: ["roadmap", "notebook", "self-fix"] } });
 });
 
 // An older file naming folders but holding no list and none of the switches
@@ -304,11 +307,11 @@ test("an older device-wide list is copied to the folders the file knows", () => 
 // file with `repos`, even empty, was written by this app and is not older.
 test("an older file with folders but no list gives them the defaults; one with repos does not", () => {
   const older: Record<string, unknown> = { dataRepo: "/a", recentDataRepos: ["/a", "/b"], plugins: { seen: ["hello"] } };
-  expect(readProfile(older, builtinManifests)).toEqual({ enabled: ["notebook"], migrated: true });
+  expect(readProfile(older, builtinManifests)).toEqual({ enabled: ["notebook", "self-fix"], migrated: true });
   expect(migrateProfile(older, builtinManifests)).toBe(true);
   expect(older.plugins).toEqual({
     seen: ["hello"],
-    repos: { "/a": { enabled: ["notebook"] }, "/b": { enabled: ["notebook"] } },
+    repos: { "/a": { enabled: ["notebook", "self-fix"] }, "/b": { enabled: ["notebook", "self-fix"] } },
   });
   older.dataRepo = "/c";
   expect(readProfile(older, builtinManifests).enabled).toEqual([]);
@@ -325,7 +328,7 @@ test("an older file with folders but no list gives them the defaults; one with r
 // Settings → Plugins names it and says to install it.
 test("the retired Models switch lists the plugin, which reports as not installed", async () => {
   expect(readProfile({ models: true }, profileManifests)).toEqual({
-    enabled: ["notebook", "models"],
+    enabled: ["notebook", "self-fix", "models"],
     migrated: true,
   });
   // Not a built-in's switch: the file holds no older list of built-ins.
