@@ -72,6 +72,7 @@ import {
   createFeature,
   createFolder,
   deleteFolder,
+  renameFolder,
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
@@ -1655,10 +1656,24 @@ const postFolders = withDataDir(async (dir, req) => {
   }
 });
 
-const deleteFolderRoute = withDataDir(async (dir, _req, params) => {
+// `?force=true` deletes a folder with features in it — a `git rm -r`,
+// committed and pushed (specs/ui/folders.feature.md "delete a folder with
+// features in it"); without it only an empty folder goes.
+const deleteFolderRoute = withDataDir(async (dir, req, params) => {
   try {
-    await deleteFolder(dir, params.path!);
-    return json({ message: "folder deleted" });
+    const force = new URL(req.url).searchParams.get("force") === "true";
+    return json(await deleteFolder(dir, params.path!, { force }));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// Rename a folder (specs/ui/folders.feature.md "rename a folder"): a `git
+// mv` of the directory and its features' documents, committed and pushed.
+const postRenameFolder = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { name?: string };
+  try {
+    return json(await renameFolder(dir, params.path!, body.name ?? ""));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -2507,6 +2522,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
   ["POST", "/api/folders", postFolders],
   ["DELETE", "/api/folders/:path", deleteFolderRoute],
+  ["POST", "/api/folders/:path/rename", postRenameFolder],
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
