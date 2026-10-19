@@ -207,7 +207,8 @@ function createWindow(): void {
     // white while the renderer loads.
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1F1E1D" : "#F0EEE6",
     // specs/app/desktop-app.feature.md "Window": traffic lights sit inside the
-    // sidebar header, which doubles as the drag region (CSS app-region).
+    // sidebar header; it, the editor pane's header row and strips along the
+    // window's edges are the drag regions (CSS app-region).
     ...(process.platform === "darwin"
       ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 21 } }
       : {}),
