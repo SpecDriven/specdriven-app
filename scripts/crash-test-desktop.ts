@@ -732,7 +732,11 @@ async function main(argv: string[]): Promise<number> {
       throw new Error(`${binary} is missing — run without --no-build, or bun run build:desktop first`);
     }
   } else {
-    if (!existsSync("dist/electron/main.js") || !existsSync("dist/renderer/index.html")) {
+    if (
+      !existsSync("dist/electron/main.js") ||
+      !existsSync("dist/electron/boot.js") ||
+      !existsSync("dist/renderer/index.html")
+    ) {
       throw new Error("dist/electron and dist/renderer are missing — run without --no-build");
     }
     binary = developmentElectron();
