@@ -178,6 +178,20 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/features/billing/quote.feature.md")).toBeNull();
   });
 
+  // Folders (specs/ui/folders.feature.md): a folder is deleted by path and
+  // renamed by a POST under it, the way a feature file is.
+  test("folder routes match by method", () => {
+    expect(matchApi("POST", "/api/folders")).not.toBeNull();
+    expect(matchApi("GET", "/api/folders")).toBeNull();
+    const del = matchApi("DELETE", "/api/folders/specs%2Fbilling");
+    expect(del).not.toBeNull();
+    expect(del!.params).toEqual({ path: "specs/billing" });
+    const rename = matchApi("POST", "/api/folders/specs%2Fbilling/rename");
+    expect(rename).not.toBeNull();
+    expect(rename!.params).toEqual({ path: "specs/billing" });
+    expect(matchApi("DELETE", "/api/folders/specs%2Fbilling/rename")).toBeNull();
+  });
+
   test("nested feature routes are distinct", () => {
     const move = matchApi("POST", "/api/features/quote.feature.md/move");
     const rename = matchApi("POST", "/api/features/quote.feature.md/rename");

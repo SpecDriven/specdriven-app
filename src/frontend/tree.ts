@@ -172,3 +172,60 @@ export function scenarioNeighbors(
   if (i < 0) return { prev: null, next: null };
   return { prev: sequence[i - 1] ?? null, next: sequence[i + 1] ?? null };
 }
+
+/** How many features a folder holds, its subfolders included. */
+export function featuresBeneath(node: FolderNode): number {
+  return node.features.length + node.folders.reduce((n, child) => n + featuresBeneath(child), 0);
+}
+
+/** The node for a folder path, or null when the tree has no such folder. */
+export function findFolder(root: FolderNode, path: string): FolderNode | null {
+  if (root.path === path) return root;
+  for (const child of root.folders) {
+    const found = findFolder(child, path);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Where a path lands once the folder `from` is renamed to `to`
+ * (specs/ui/folders.feature.md "rename a folder"): the folder itself, a
+ * feature or folder beneath it, or — untouched — anything else. Keyed state
+ * (the open feature, the collapsed set, the selected folder) is remapped
+ * with it, so nothing points at the retired path.
+ */
+export function folderRenamed(path: string, from: string, to: string): string {
+  if (path === from) return to;
+  return path.startsWith(`${from}/`) ? `${to}${path.slice(from.length)}` : path;
+}
+
+/** One entry of the "Move to folder…" list. */
+export interface FolderOption {
+  /** Repo-relative folder path; `specs` for the top level. */
+  value: string;
+  label: string;
+  /** Where it sits: the parent path within the tree, blank at the top level. */
+  hint: string;
+}
+
+/**
+ * Every folder a feature can move to, depth first in tree order, with the
+ * top level first (specs/ui/folders.feature.md "move a feature from its
+ * menu"). The folder the feature is in is left out: moving there is no move.
+ */
+export function folderOptions(root: FolderNode, except: string | null = null): FolderOption[] {
+  const out: FolderOption[] = [];
+  const walk = (node: FolderNode) => {
+    if (node.path !== except) {
+      out.push(
+        node === root
+          ? { value: root.path, label: "Top level", hint: "" }
+          : { value: node.path, label: node.name, hint: node.path.slice(root.path.length + 1, -node.name.length - 1) },
+      );
+    }
+    for (const child of node.folders) walk(child);
+  };
+  walk(root);
+  return out;
+}
