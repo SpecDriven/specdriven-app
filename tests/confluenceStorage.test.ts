@@ -1,7 +1,7 @@
 // Automates specs/external-links/confluence-wiki.feature.md "What the page
 // contains": a feature becomes Confluence storage format — its description,
-// then each scenario under its name with a status lozenge, its version, its
-// steps and its tests — with everything taken from the feature escaped.
+// then each scenario under its name with its steps and its tests, but not its
+// status or version — with everything taken from the feature escaped.
 
 import { test, expect, describe } from "bun:test";
 import {
@@ -107,16 +107,14 @@ describe("blocks", () => {
 });
 
 describe("the feature", () => {
-  test("description, then each scenario with its status, version, steps and tests", () => {
+  test("description, then each scenario with its steps and tests, no status or version", () => {
     const xhtml = renderFeatureStorage(parseFeature(SAMPLE), "all");
     expect(xhtml).toBe(
       "<p>Quotes for <strong>potential</strong> customers.</p>" +
         "<h2>Basic Quote</h2>" +
-        '<p><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">proposed</ac:parameter></ac:structured-macro> <em>v1</em></p>' +
         "<ul><li><strong>Given</strong> a potential customer has an account</li><li><strong>Then</strong> a quote is provided</li></ul>" +
         `<p><strong>Tests</strong></p><ul><li><a href="${TEST_URL}" title="${TEST_URL}">gives a quote</a></li></ul>` +
         "<h2>Declined Quote</h2>" +
-        '<p><ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">published</ac:parameter></ac:structured-macro> <em>v2</em></p>' +
         "<p>Given the customer has no account<br />Then the quote is declined</p>",
     );
   });
@@ -130,12 +128,12 @@ describe("the feature", () => {
     expect(xhtml).not.toContain("Basic Quote");
   });
 
-  test("a draft is grey, and a scenario name is escaped", () => {
+  test("a draft shows no status or version, and a scenario name is escaped", () => {
     const feature = parseFeature("# F\n");
     feature.scenarios.push({ name: "A <b> & B", version: 3, status: "draft", body: "", tests: [] });
     const xhtml = renderFeatureStorage(feature, "all");
     expect(xhtml).toContain("<h2>A &lt;b&gt; &amp; B</h2>");
-    expect(xhtml).toContain('<ac:parameter ac:name="colour">Grey</ac:parameter>');
+    expect(xhtml).toBe("<h2>A &lt;b&gt; &amp; B</h2>");
   });
 
   test("says so when no scenario is in scope", () => {

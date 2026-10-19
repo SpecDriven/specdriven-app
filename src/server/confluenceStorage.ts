@@ -25,7 +25,7 @@ import {
 } from "../frontend/markdownSyntax";
 import { renderTestInEditor } from "../frontend/testref";
 import { webLinkEnd } from "../frontend/weblinks";
-import { parseTestRef, type Feature, type Scenario, type ScenarioStatus } from "./parser";
+import { parseTestRef, type Feature, type Scenario } from "./parser";
 
 /** Which scenarios a page holds: every one, or only the published. */
 export type PublishScope = "all" | "published";
@@ -214,24 +214,15 @@ function renderBlocks(lines: string[], shift: number): string {
   return out.join("");
 }
 
-const STATUS_COLOUR: Record<ScenarioStatus, string> = {
-  published: "Green",
-  proposed: "Yellow",
-  draft: "Grey",
-};
-
-/** Confluence's status lozenge. */
-function statusMacro(status: ScenarioStatus): string {
-  return `<ac:structured-macro ac:name="status" ac:schema-version="1"><ac:parameter ac:name="colour">${STATUS_COLOUR[status]}</ac:parameter><ac:parameter ac:name="title">${status}</ac:parameter></ac:structured-macro>`;
-}
-
 /** The scenarios a page in this scope holds, in the feature's order. */
 export function scenariosInScope(feature: Feature, scope: PublishScope): Scenario[] {
   return scope === "published" ? feature.scenarios.filter((s) => s.status === "published") : feature.scenarios;
 }
 
+// A scenario's status and version are the app's bookkeeping, not part of the
+// spec a wiki reader needs, so the page shows neither.
 function scenarioStorage(s: Scenario): string {
-  const parts = [`<h2>${escapeXml(s.name)}</h2>`, `<p>${statusMacro(s.status)} <em>v${s.version}</em></p>`];
+  const parts = [`<h2>${escapeXml(s.name)}</h2>`];
   if (s.body.trim()) parts.push(renderMarkdownStorage(s.body, 2));
   if (s.tests.length > 0) {
     const items = s.tests.map((t) => {
