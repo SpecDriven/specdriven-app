@@ -23,5 +23,7 @@ try {
 }
 
 await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
+// The entry is the boot shim (src/electron/boot.ts), built apart from main.js.
+await $`bun build src/electron/boot.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
 
 await $`bunx electron .`.env({ ...process.env, ELECTRON_DEV: "1" });

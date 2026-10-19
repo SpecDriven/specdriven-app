@@ -6,6 +6,7 @@
 import type { PluginManifest } from "../manifest";
 import { manifest as issues } from "./issues/manifest";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
+import { manifest as selfFix } from "./self-fix/manifest";
 import { manifest as tests } from "./tests/manifest";
 
 export const builtinManifests: readonly PluginManifest[] = [
@@ -14,6 +15,7 @@ export const builtinManifests: readonly PluginManifest[] = [
   notebookManifest,
   issues,
   tests,
+  selfFix,
 ];
 
 /** The manifest of a built-in plugin, by id. */

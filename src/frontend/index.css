@@ -8449,3 +8449,142 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   align-items: center;
   gap: 0.3rem;
 }
+
+/* --- Fix this app (specs/app/self-healing.feature.md) --------------------------- */
+
+.self-fix-form {
+  flex: 1;
+  gap: 0.75rem;
+}
+
+.self-fix-description {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 12rem;
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-1);
+  resize: vertical;
+}
+
+.self-fix-description:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.self-fix-drop {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: 0.875rem;
+}
+
+.self-fix-drop.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.self-fix-shots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.self-fix-shots li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-start;
+}
+
+.self-fix-shots img {
+  max-width: 14rem;
+  max-height: 10rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.self-fix-hints {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-2);
+}
+
+.self-fix-hints li.blocking {
+  color: var(--text-1);
+}
+
+.self-fix-banner {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.875rem;
+}
+
+.self-fix-banner.warn {
+  background: light-dark(rgba(220, 120, 0, 0.12), rgba(255, 170, 60, 0.18));
+  color: light-dark(#8a4b00, #ffc879);
+}
+
+.self-fix-status {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.self-fix-error {
+  color: var(--danger-fg);
+}
+
+.self-fix-view section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.self-fix-words,
+.self-fix-diff {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.self-fix-diff {
+  max-height: 32rem;
+  overflow: auto;
+  white-space: pre;
+}
+
+.self-fix-changes ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.self-fix-chip {
+  margin-left: 0.5rem;
+  font-size: 0.6875rem;
+}

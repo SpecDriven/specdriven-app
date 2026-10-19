@@ -65,7 +65,7 @@ test("a settings file with the old switches is rewritten as the profile on start
   await applyStartupState();
 
   const file = await settingsFile();
-  expect(file.plugins).toEqual({ enabled: ["roadmap", "tests"] });
+  expect(file.plugins).toEqual({ enabled: ["roadmap", "tests", "self-fix"] });
   for (const key of ["testing", "roadmap", "notebook", "tasks", "models", "issues"]) {
     expect(key in file).toBe(false);
   }
@@ -77,6 +77,7 @@ test("a settings file with the old switches is rewritten as the profile on start
   expect(s.plugins.map((p) => [p.id, p.enabled])).toEqual([
     ["roadmap", true],
     ["tests", true],
+    ["self-fix", true],
     ["tasks", false],
     ["notebook", false],
     ["issues", false],
@@ -93,6 +94,7 @@ test("a fresh install shows Specs alone without a settings write", async () => {
     ["notebook", false],
     ["issues", false],
     ["tests", false],
+    ["self-fix", false],
   ]);
 });
 
@@ -153,10 +155,10 @@ test("an older file with a folder but no plugin list keeps the Notebook on in th
   await mkdir(a);
   await writeState({ reloadFrequencySeconds: 0, dataRepo: a }, root);
   await applyStartupState();
-  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["notebook"] } } });
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["notebook", "self-fix"] } } });
   expect(
     (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
-  ).toEqual(["notebook"]);
+  ).toEqual(["notebook", "self-fix"]);
 });
 
 // The file this app writes when it records a folder says it keeps
