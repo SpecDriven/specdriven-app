@@ -1,11 +1,12 @@
-// The macOS drag region (specs/app/desktop-app.feature.md "Window"): with the
-// title bar hidden, the sidebar header doubles as the window drag region. A
-// drag region swallows the clicks of everything inside it, so each control in
-// the header has to opt back out with `-webkit-app-region: no-drag` — and a
-// control that forgets is not subtly off, it is dead: clicking it drags the
-// window instead. That is desktop-only and macOS-only, which is exactly the
-// path no browser test covers, so the header's icons stayed broken while the
-// same buttons worked in the web app.
+// The macOS drag regions (specs/app/desktop-app.feature.md "Window"): with the
+// title bar hidden, the sidebar header and the editor pane's header row double
+// as the window drag regions, so the window moves from the top of either pane
+// alike. A drag region swallows the clicks of everything inside it, so each
+// control in those headers has to opt back out with `-webkit-app-region:
+// no-drag` — and a control that forgets is not subtly off, it is dead:
+// clicking it drags the window instead. That is desktop-only and macOS-only,
+// which is exactly the path no browser test covers, so the sidebar header's
+// icons stayed broken while the same buttons worked in the web app.
 //
 // happy-dom parses selectors but drops `-webkit-app-region` from its CSSOM
 // entirely, so the stylesheet's declarations are read from the file and the
@@ -105,10 +106,44 @@ const HEADER = `
   </aside>
 `;
 
-function headerDocument(desktop: string | null) {
+/**
+ * The editor pane's header as App.tsx renders a feature on macOS: the trail
+ * (folder link, folder button, the feature's name as the rename button), then
+ * the action icons with the More menu — and, below the header, the page body
+ * with an icon button of its own, which is not window chrome.
+ */
+const EDITOR_HEADER = `
+  <main>
+    <section class="editor">
+      <header class="editor-bar page-header">
+        <nav class="crumbs" aria-label="Breadcrumb">
+          <ol>
+            <li><a class="crumb" href="/">specs-demo</a></li>
+            <li><button type="button" class="crumb">a folder</button></li>
+            <li class="crumb-tail" aria-current="page">
+              <button type="button" class="crumb current">A feature</button>
+            </li>
+          </ol>
+        </nav>
+        <div class="editor-actions page-actions">
+          <button type="button" class="ibtn" aria-label="Edit description">pencil</button>
+          <span class="page-more">
+            <button type="button" class="ibtn" aria-label="More actions">more</button>
+            <div role="menu" class="page-menu"><button type="button" role="menuitem">Rename feature</button></div>
+          </span>
+        </div>
+      </header>
+      <div class="feature-body">
+        <button type="button" class="ibtn" aria-label="Add scenario">plus</button>
+      </div>
+    </section>
+  </main>
+`;
+
+function headerDocument(desktop: string | null, markup = HEADER) {
   const document = new Window().document as unknown as Document;
   if (desktop !== null) document.documentElement.setAttribute("data-desktop", desktop);
-  document.body.innerHTML = HEADER;
+  document.body.innerHTML = markup;
   return document;
 }
 
@@ -153,16 +188,42 @@ describe("the macOS drag region", () => {
     }
   });
 
-  // `.ibtn` is the app's icon-button styling, used all over the page. Only
-  // the ones in the drag-region header need the opt-out; a blanket rule on
-  // `.ibtn` would be a claim about buttons that have nothing to do with the
-  // window chrome.
-  test("the opt-out is scoped to the header", () => {
-    const document = headerDocument("darwin");
-    document.body.insertAdjacentHTML(
-      "beforeend",
-      `<main><div class="editor-bar"><button type="button" class="ibtn">elsewhere</button></div></main>`,
+  // The right pane's top used to be dead: the breadcrumb row began below the
+  // top edge strip and neither it nor the gap above it moved the window, so
+  // a grab near the top worked on the sidebar and failed on the editor.
+  test("the editor pane's header is a drag region too", () => {
+    const document = headerDocument("darwin", EDITOR_HEADER);
+    expect(appRegionOf(document.querySelector(".editor .page-header")!)).toBe("drag");
+  });
+
+  test("every control in the editor header stays clickable", () => {
+    const document = headerDocument("darwin", EDITOR_HEADER);
+    const controls = document.querySelectorAll(
+      ".page-header button, .page-header a, .page-header input, .page-header [role='menu']",
     );
-    expect(appRegionOf(document.querySelector("main .ibtn")!)).toBe("inherit");
+    expect(controls.length).toBe(7);
+    for (const control of controls) {
+      const name = control.getAttribute("aria-label") ?? control.className ?? control.tagName;
+      expect(`${name}: ${appRegionOf(control)}`).toBe(`${name}: no-drag`);
+    }
+  });
+
+  test("off macOS the editor header is not a drag region", () => {
+    for (const desktop of ["other", null]) {
+      const document = headerDocument(desktop, EDITOR_HEADER);
+      expect(appRegionOf(document.querySelector(".editor .page-header")!)).toBe("inherit");
+      for (const icon of document.querySelectorAll(".page-header .ibtn")) {
+        expect(appRegionOf(icon)).toBe("inherit");
+      }
+    }
+  });
+
+  // `.ibtn` is the app's icon-button styling, used all over the page. Only
+  // the ones in the two drag-region headers need the opt-out; a blanket rule
+  // on `.ibtn` would be a claim about buttons that have nothing to do with
+  // the window chrome.
+  test("the opt-out is scoped to the two headers", () => {
+    const document = headerDocument("darwin", EDITOR_HEADER);
+    expect(appRegionOf(document.querySelector(".feature-body .ibtn")!)).toBe("inherit");
   });
 });
