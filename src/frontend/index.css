@@ -441,11 +441,35 @@ aside header {
   -webkit-app-region: no-drag;
 }
 
+/* The editor pane's header row — the trail, the page's title, its actions —
+   is a drag region too, so the window moves from the top of either pane
+   alike (specs/app/desktop-app.feature.md "Window"). Without it the right
+   pane's top is dead: the breadcrumb row starts below the top edge strip and
+   nothing between them or on them moves the window. */
+:root[data-desktop="darwin"] .editor .page-header {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* The sidebar header's opt-out-as-a-class rule again: every control the row
+   holds — the crumbs, the rename button and its input, the icon buttons, the
+   More menu — stays clickable instead of dragging the window. */
+:root[data-desktop="darwin"] .editor .page-header button,
+:root[data-desktop="darwin"] .editor .page-header a,
+:root[data-desktop="darwin"] .editor .page-header input,
+:root[data-desktop="darwin"] .editor .page-header select,
+:root[data-desktop="darwin"] .editor .page-header textarea,
+:root[data-desktop="darwin"] .editor .page-header [role="menu"] {
+  -webkit-app-region: no-drag;
+}
+
 /* Window edge drag strips (specs/desktop-app.spec.md "Window"): with the
    title bar hidden, thin strips along the four borders let the window be
-   moved by grabbing any edge, not just the sidebar header. They cover only
+   moved by grabbing any edge, not just the pane headers. They cover only
    the panes' padding; the outermost pixels still act as native resize
-   handles, which take priority over the drag region. */
+   handles, which take priority over the drag region. The top strip is as
+   tall as the editor pane's top padding so it meets the pane's header with
+   no dead band in between. */
 :root[data-desktop="darwin"] .window-edge {
   position: fixed;
   z-index: 99;
@@ -456,7 +480,7 @@ aside header {
   top: 0;
   left: 0;
   right: 0;
-  height: 10px;
+  height: 1.1rem;
 }
 
 :root[data-desktop="darwin"] .window-edge[data-edge="bottom"] {
