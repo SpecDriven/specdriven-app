@@ -70,6 +70,9 @@ const SHIFTED = new Set(["?", "+", "_", "{", "}", "|", ":", '"', "<", ">", "~"])
 const BASE_OF: Record<string, string> = { "?": "/", "+": "=", "_": "-", ":": ";", "<": ",", ">": "." };
 
 function matches(e: KeyboardEvent, c: Combo): boolean {
+  // A browser's autofill (an email field, a password manager) fires a
+  // keydown with no key at all; it is nobody's shortcut.
+  if (typeof e.key !== "string") return false;
   const key = e.key.toLowerCase();
   if (key !== c.key && !(SHIFTED.has(c.key) && e.shiftKey && key === BASE_OF[c.key])) return false;
   const mod = e.metaKey || e.ctrlKey;

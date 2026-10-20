@@ -213,6 +213,7 @@ import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
+import { ClaudeSettings } from "./ClaudeSettings";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
@@ -6770,6 +6771,7 @@ export function App() {
         { id: "settings-qtest", title: "qTest" },
         ...(demo || hosted ? [] : [{ id: "settings-confluence", title: "Confluence" }]),
         { id: "settings-workflow", title: "Workflow" },
+        ...(demo || hosted ? [] : [{ id: "settings-claude", title: "Claude" }]),
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
       ]}
       onClose={closeAppPage}
@@ -7327,34 +7329,6 @@ export function App() {
           </span>
         </label>
         )}
-        {/* The pane's first-response wait (specs/agents/agent-pane.feature.md
-            "A Claude turn fails fast when the API proxy does not answer"):
-            only a Claude whose API goes through a proxy is held to it. */}
-        {!demo && settingsCodeGenDraft && (
-        <label className="settings-row">
-          <span className="settings-row-label">
-            Claude API proxy timeout (seconds)
-            <span className="settings-row-hint">
-              When Claude Code&apos;s API goes through a proxy (ANTHROPIC_BASE_URL), a turn
-              in the coding agent pane that gets no response from the API in this time is
-              stopped with an error, instead of retrying for minutes while the proxy is
-              down. 0 waits as long as Claude Code retries; the default is{" "}
-              {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the
-              change.
-            </span>
-          </span>
-          <input
-            type="number"
-            min={0}
-            value={settingsFirstResponseDraft}
-            onChange={(e) => setSettingsFirstResponseDraft(e.target.value)}
-            onBlur={() => void commitFirstResponseSeconds()}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") e.currentTarget.blur();
-            }}
-          />
-        </label>
-        )}
         {/* Authorship (specs/app/specs-authorship.feature.md): a setting
             of the open data folder, kept in its project-settings.json —
             the app records who created and last updated every feature and
@@ -7450,6 +7424,45 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {/* Claude sign-in (specs/agents/claude.feature.md "Choose how Claude
+          signs in"): the account or proxy every Claude the app starts uses —
+          the coding agent pane, task estimates, self-fix. A local Claude
+          only, so hidden in the demo and the hosted app. */}
+      {!demo && !hosted && (
+      <PageSection
+        id="settings-claude"
+        title="Claude"
+        hint="How the Claude the app starts signs in: your Claude account, or an API proxy with a token kept on this device."
+      >
+        <ClaudeSettings patchSettings={patchSettings}>
+          {/* The pane's first-response wait (specs/agents/agent-pane.feature.md
+              "A Claude turn fails fast when the API proxy does not answer"):
+              only a Claude whose API goes through a proxy is held to it. */}
+          <label className="settings-row">
+            <span className="settings-row-label">
+              Proxy timeout (seconds)
+              <span className="settings-row-hint">
+                A turn in the coding agent pane that gets no response from the API through the
+                proxy in this time is stopped with an error, instead of retrying for minutes
+                while the proxy is down. 0 waits as long as Claude Code retries; the default is{" "}
+                {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the
+                change.
+              </span>
+            </span>
+            <input
+              type="number"
+              min={0}
+              value={settingsFirstResponseDraft}
+              onChange={(e) => setSettingsFirstResponseDraft(e.target.value)}
+              onBlur={() => void commitFirstResponseSeconds()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
+            />
+          </label>
+        </ClaudeSettings>
+      </PageSection>
+      )}
       {/* Git engine (git-operations.md): which one carries
           the operations out and who supplies GitHub credentials.
           Hidden in demo mode along with the sign-in — the demo

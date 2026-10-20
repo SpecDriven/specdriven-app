@@ -124,6 +124,22 @@ export interface SpecDrivenState {
    */
   agentFirstResponseSeconds?: number;
   /**
+   * How the app's Claude signs in (specs/agents/claude.feature.md "Choose
+   * how Claude signs in"): "login" is the claude.ai account the Claude CLI
+   * is signed in to, "proxy" an API proxy at claudeProxyUrl. Absent means
+   * proxy when Claude Code's own settings files or the environment name a
+   * base url (src/server/claudeAuth.ts detectClaudeProxy), else login. The
+   * proxy's token is not here — settings are shareable, a credential never
+   * is (src/server/claudeToken.ts).
+   */
+  claudeAuth?: ClaudeAuthMode;
+  /**
+   * The API proxy's base url (what ANTHROPIC_BASE_URL would be) in proxy
+   * mode; absent means the one Claude Code's settings or the environment
+   * name.
+   */
+  claudeProxyUrl?: string;
+  /**
    * Offer feature assignment — the "Assigned" dropdown of project members
    * (src/server/members.ts); absent means OFF. Off hides the dropdown; an
    * assignment already written into a `.feature.md` is left alone, so
@@ -343,6 +359,32 @@ export const CODE_GEN_TARGET_LIST = "desktop, pane, pi or codex";
     then picks desktop when Claude.app is installed, else the pane. */
 export function normalizeCodeGenTarget(value: unknown): CodeGenTarget | null {
   return (CODE_GEN_TARGETS as readonly unknown[]).includes(value) ? (value as CodeGenTarget) : null;
+}
+
+/** How the app's Claude signs in (specs/agents/claude.feature.md "Choose how
+    Claude signs in"): the claude.ai login, or an API proxy. */
+export type ClaudeAuthMode = "login" | "proxy";
+
+export const CLAUDE_AUTH_MODES: readonly ClaudeAuthMode[] = ["login", "proxy"];
+
+/** Stored sign-in choice, or null when absent or unusable — the server then
+    infers one from Claude Code's own settings (src/server/claudeAuth.ts). */
+export function normalizeClaudeAuth(value: unknown): ClaudeAuthMode | null {
+  return (CLAUDE_AUTH_MODES as readonly unknown[]).includes(value) ? (value as ClaudeAuthMode) : null;
+}
+
+/** Stored proxy base url — an http(s) url, kept as typed (a trailing slash
+    is Claude Code's to interpret) — or null when absent or not a url. */
+export function normalizeClaudeProxyUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const url = value.trim();
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

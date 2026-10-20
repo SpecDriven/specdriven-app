@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "../src/server/api";
 import { setClaudeAvailability } from "../src/server/agent";
+import { createClaudeFileBackend, saveClaudeToken, setClaudeTokenBackend } from "../src/server/claudeToken";
 import {
   InputQueue,
   claudeBaseUrl,
@@ -119,6 +120,7 @@ afterEach(async () => {
   reloader.stop();
   setClaudeAvailability(null);
   setQueryFactory(null);
+  setClaudeTokenBackend(createClaudeFileBackend());
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -936,4 +938,33 @@ test("the first-response wait is a setting, 15 seconds unless changed", async ()
   expect("agentFirstResponseSeconds" in (await readState(root))).toBe(false);
   const bad = await api("/api/state", "PUT", { agentFirstResponseSeconds: -1 });
   expect(bad.status).toBe(400);
+});
+
+test("the sign-in Settings chose reaches Claude as a --settings override (src/server/claudeAuth.ts)", async () => {
+  // The proxy: the app's url and token, over whatever Claude Code's files say.
+  await writeState({ dataRepo: data, claudeAuth: "proxy", claudeProxyUrl: "http://proxy.test:9/" }, root);
+  await saveClaudeToken({ token: "app-token" });
+  fakeAccount = { apiProvider: "firstParty" };
+  const proxied = await api("/api/agent/chat", "POST", { name: "proxied" });
+  expect(proxied.status).toBe(200);
+  const proxy = fakes.at(-1)!.options;
+  expect(JSON.parse(proxy.extraArgs!.settings!)).toEqual({
+    env: { ANTHROPIC_BASE_URL: "http://proxy.test:9/", ANTHROPIC_AUTH_TOKEN: "app-token", ANTHROPIC_API_KEY: "" },
+  });
+  expect(proxy.env?.CLAUDECODE).toBeUndefined();
+  const meta = (await proxied.json()) as ChatSessionMeta;
+  fakes.at(-1)!.emit(init());
+  const ready = await untilStatus(meta.id, "idle");
+  // The chip names the proxy the app chose, not one from a settings file.
+  expect(ready.meta.account?.label).toBe("API:proxy.test");
+
+  // The account: the proxy is set aside, so Claude Code's own login answers.
+  await writeState({ dataRepo: data, claudeAuth: "login" }, root);
+  const account = await api("/api/agent/chat", "POST", { name: "account" });
+  expect(account.status).toBe(200);
+  const login = fakes.at(-1)!.options;
+  expect(JSON.parse(login.extraArgs!.settings!)).toEqual({
+    env: { ANTHROPIC_BASE_URL: "", ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "" },
+  });
+  expect(login.env?.ANTHROPIC_BASE_URL).toBeUndefined();
 });
