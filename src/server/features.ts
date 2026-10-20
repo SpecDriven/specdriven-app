@@ -155,6 +155,39 @@ export async function listFolders(dataDir: string): Promise<string[]> {
   return (await walk(dataDir)).folders.sort();
 }
 
+/**
+ * A folder's description (specs/ui/folders.feature.md "describe a folder"):
+ * a `description.txt` inside it, whose first non-blank line the sidebar
+ * shows in place of the folder name. Plain text, one line; anything past
+ * the first line is left for whoever reads the file on GitHub.
+ */
+export const FOLDER_DESCRIPTION_FILE = "description.txt";
+
+/** The description a folder's description.txt gives it, or null without one. */
+export async function readFolderDescription(dataDir: string, folder: string): Promise<string | null> {
+  const text = await readTextFile(`${dataDir}/${safeFolder(folder)}/${FOLDER_DESCRIPTION_FILE}`);
+  if (text === null) return null;
+  const line = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  return line ?? null;
+}
+
+/**
+ * Every described folder's description, keyed by folder path — what the
+ * listing carries beside the folder list, so the tree can label a folder
+ * by its description without a fetch per folder.
+ */
+export async function listFolderDescriptions(dataDir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const folder of await listFolders(dataDir)) {
+    const description = await readFolderDescription(dataDir, folder);
+    if (description !== null) out[folder] = description;
+  }
+  return out;
+}
+
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
   return readTextFile(`${dataDir}/${safe(fileName)}`);
 }
@@ -441,13 +474,8 @@ export async function deleteFolder(
     throw new Error(`Folder not found: ${folder}`);
   }
   if (!s.isDirectory()) throw new Error(`Folder not found: ${folder}`);
-  const contents = (await readdir(full, { recursive: true })) as string[];
-  const blocking = contents.filter((entry) => entry.split("/").pop() !== ".DS_Store");
-  let files = 0;
-  for (const entry of blocking) {
-    if (!(await stat(`${full}/${entry}`)).isDirectory()) files += 1;
-  }
-  if (files === 0) {
+  const files = await filesBeneath(full);
+  if (files.length === 0) {
     await rm(full, { recursive: true });
     // Moving the last feature out leaves the folder's Automerge mirror
     // (.specdriven/automerge/<folder>) behind, empty: git mv moves the
@@ -457,8 +485,14 @@ export async function deleteFolder(
     await rmIfEmpty(`${dataDir}/${docDirRel(folder)}`);
     return { message: "folder deleted", features: 0 };
   }
-  if (!force) throw new Error(`Folder is not empty: ${folder} — move its features out first`);
   const features = (await walk(dataDir, folder)).files.length;
+  // A folder holding nothing but descriptions ("describe a folder") has no
+  // feature to lose, so it needs no second confirmation — but git tracks
+  // those files, so it goes the committed way, not off the disk alone.
+  const onlyDescriptions = files.every((entry) => entry.split("/").pop() === FOLDER_DESCRIPTION_FILE);
+  if (!force && !onlyDescriptions) {
+    throw new Error(`Folder is not empty: ${folder} — move its features out first`);
+  }
   const docFolder = docDirRel(folder);
   const paths = [folder, ...((await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : [])];
   const sync = await removeAndPush(
@@ -494,7 +528,7 @@ export async function renameFolder(
   const to = [...from.split("/").slice(0, -1), stem].join("/");
   if (to === from) return { path: from, message: "already named that" };
   if (await exists(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
-  if ((await walk(dataDir, from)).files.length === 0) {
+  if ((await filesBeneath(`${dataDir}/${from}`)).length === 0) {
     await rename(`${dataDir}/${from}`, `${dataDir}/${to}`);
     return { path: to, message: "renamed locally (git does not track an empty folder)" };
   }
@@ -1323,6 +1357,22 @@ function safe(fileName: string): string {
  * and an empty path is the top of the tree, `specs/` itself — so a caller that
  * thinks in tree-relative terms and one echoing back a listed path both work.
  */
+/**
+ * The files anywhere beneath a directory, relative to it, macOS `.DS_Store`
+ * junk left out: what decides whether git could know the folder at all. A
+ * folder with none is untracked by construction, so it can be renamed or
+ * removed on disk alone; one with a description.txt and no feature is not.
+ */
+async function filesBeneath(full: string): Promise<string[]> {
+  const contents = (await readdir(full, { recursive: true })) as string[];
+  const files: string[] = [];
+  for (const entry of contents) {
+    if (entry.split("/").pop() === ".DS_Store") continue;
+    if (!(await stat(`${full}/${entry}`)).isDirectory()) files.push(entry);
+  }
+  return files;
+}
+
 function safeFolder(path: string): string {
   const trimmed = path.trim().replace(/^\/+|\/+$/g, "");
   if (!trimmed) return SPECS_FOLDER;

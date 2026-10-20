@@ -200,6 +200,7 @@ import {
   buildTree,
   featuresBeneath,
   findFolder,
+  folderLabel,
   folderOptions,
   folderRenamed,
   scenarioNeighbors,
@@ -888,6 +889,8 @@ interface OpenOptions {
 interface Listing {
   features: FeatureListing[];
   folders: string[];
+  /** Folder path → what its description.txt says (specs/ui/folders.feature.md "describe a folder"). */
+  folderDescriptions: Record<string, string>;
   members: ProjectMember[];
   codeRepo: string | null;
   /** Whether the repo writes authorship into its feature files
@@ -969,6 +972,10 @@ export async function fetchListing(
         listing: {
           features: (data.features as FeatureListing[]) ?? [],
           folders: (data.folders as string[]) ?? [],
+          folderDescriptions:
+            data.folderDescriptions && typeof data.folderDescriptions === "object"
+              ? (data.folderDescriptions as Record<string, string>)
+              : {},
           members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
           codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
           authorsInMarkdown: data.authorsInMarkdown === true,
@@ -1162,6 +1169,8 @@ export function App() {
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
+  /** Folder path → description, for the folders that have a description.txt. */
+  const [folderDescriptions, setFolderDescriptions] = useState<Record<string, string>>({});
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /**
@@ -1635,6 +1644,7 @@ export function App() {
     const { listing } = result;
     setFeatures(listing.features);
     setFolders(listing.folders);
+    setFolderDescriptions(listing.folderDescriptions);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
@@ -2945,7 +2955,7 @@ export function App() {
   // at once, with Undo; one with features asks again, naming how many, and
   // then goes with them — a `git rm -r` on the server, committed and pushed.
   const removeFolder = async (path: string) => {
-    const node = findFolder(buildTree(folders, features), path);
+    const node = findFolder(buildTree(folders, features, folderDescriptions), path);
     const count = node ? featuresBeneath(node) : 0;
     const ok = await confirm({
       title: "Delete folder",
@@ -5606,6 +5616,7 @@ export function App() {
               aria-level={depth + 1}
               aria-expanded={!collapsed.has(child.path)}
               data-folder={child.path}
+              title={child.description ? child.path : undefined}
               onClick={() => {
                 setSelectedFolder(child.path);
                 toggleFolder(child.path);
@@ -5618,7 +5629,10 @@ export function App() {
                   <ChevronDown size={12} aria-hidden="true" />
                 )}
               </span>{" "}
-              {child.name}
+              {/* The description.txt's line when the folder has one
+                  (specs/ui/folders.feature.md "describe a folder"); the
+                  folder's own name is then a hover away. */}
+              {folderLabel(child)}
             </button>
             {/* The folder's own ⋯ (specs/ui/folders.feature.md "Folder
                 menu"): create inside it, rename it, delete it — the same
@@ -5857,7 +5871,7 @@ export function App() {
   const scenarioNav =
     selected && editedEntry
       ? scenarioNeighbors(
-          scenarioSequence(buildTree(folders, features), selected, feature),
+          scenarioSequence(buildTree(folders, features, folderDescriptions), selected, feature),
           selected,
           editedEntry,
         )
@@ -6164,7 +6178,7 @@ export function App() {
   const moveFeaturePrompt = async (fileName: string | null = selected) => {
     if (!fileName) return;
     const from = fileName.slice(0, fileName.lastIndexOf("/"));
-    const options = folderOptions(buildTree(folders, features), from);
+    const options = folderOptions(buildTree(folders, features, folderDescriptions), from);
     const to = await pick({
       title: `Move “${fileStem(fileName)}”`,
       hint: "To another folder — a git mv, committed and pushed.",
@@ -8285,7 +8299,7 @@ export function App() {
               void moveTo(dragging, "");
             }}
           >
-            {renderTree(buildTree(folders, features), 0)}
+            {renderTree(buildTree(folders, features, folderDescriptions), 0)}
             {features.length === 0 && folders.length === 0 && (
               <p className="empty">No feature files yet</p>
             )}

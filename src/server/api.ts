@@ -82,6 +82,7 @@ import { getAppRoot } from "./paths";
 import {
   listFeatures,
   listFolders,
+  listFolderDescriptions,
   readFeatureForEditor,
   readFeatureView,
   createFeature,
@@ -1496,6 +1497,9 @@ const getFeatures = withDataDir(async (dir) => {
     // `roadmap/`, `tasks/`, a plugin's `models/`, each listed on its own tab
     // — are out of range by construction rather than subtracted here.
     folders: await listFolders(dir),
+    // What each described folder's description.txt says (specs/ui/
+    // folders.feature.md "describe a folder") — the sidebar's label for it.
+    folderDescriptions: await listFolderDescriptions(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
     // Authorship in the feature files (specs/app/specs-authorship.feature.md)
