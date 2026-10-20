@@ -7,6 +7,7 @@
 import { safeStorage } from "electron";
 import { readFile, rm } from "node:fs/promises";
 import { writeTextFile } from "../server/fsx";
+import { parseClaudeRecord, type ClaudeTokenBackend } from "../server/claudeToken";
 import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
@@ -47,4 +48,9 @@ export function createSafeStorageBackend(tokenFile: string): TokenBackend {
 /** The Confluence tokens on safeStorage. */
 export function createConfluenceSafeStorageBackend(file: string): ConfluenceTokenBackend {
   return encryptedFile(file, parseConfluenceRecords, []);
+}
+
+/** The Claude API proxy's token on safeStorage (src/server/claudeToken.ts). */
+export function createClaudeSafeStorageBackend(file: string): ClaudeTokenBackend {
+  return encryptedFile(file, parseClaudeRecord, null);
 }

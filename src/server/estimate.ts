@@ -10,8 +10,12 @@ import type { Options, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_BIN, claudeAvailable } from "./agent";
 import { InputQueue, currentQueryFactory, userMessage } from "./agentChat";
 import { MAX_ESTIMATE_MINUTES } from "./calendar";
+import { claudeLaunch } from "./claudeAuth";
+import type { ClaudeLaunch } from "./claudeAuth";
 import type { MarkdownPage } from "./parser";
+import { getAppRoot } from "./paths";
 import { which } from "./run";
+import { readState } from "./state";
 
 /** Why an estimate could not be had, with the HTTP status the route answers. */
 export class EstimateError extends Error {
@@ -70,12 +74,9 @@ export function minutesFromResult(result: SDKResultMessage): number | null {
 export function estimateOptions(
   cwd: string,
   abortController: AbortController,
+  // The sign-in Settings chose (src/server/claudeAuth.ts), as the pane gets it.
+  launch: ClaudeLaunch,
 ): Options {
-  // A dev server started from inside a Claude Code terminal inherits the
-  // marker that makes a nested `claude` refuse to start (agentChat.ts).
-  const env: Record<string, string | undefined> = { ...process.env };
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
   return {
     cwd,
     pathToClaudeCodeExecutable: which(CLAUDE_BIN) ?? undefined,
@@ -99,7 +100,8 @@ export function estimateOptions(
       },
     },
     abortController,
-    env,
+    env: launch.env,
+    ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
   };
 }
 
@@ -122,7 +124,7 @@ export async function estimateMinutes(
   try {
     const query = await currentQueryFactory()({
       prompt,
-      options: estimateOptions(cwd, abortController),
+      options: estimateOptions(cwd, abortController, await claudeLaunch(await readState(getAppRoot()), cwd)),
     });
     for await (const msg of query) {
       if (msg.type !== "result") continue;
