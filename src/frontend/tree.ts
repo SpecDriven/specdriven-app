@@ -11,8 +11,18 @@ export interface FolderNode {
   name: string;
   /** Full folder path relative to the repo root; `specs` for the root node. */
   path: string;
+  /**
+   * What the folder's description.txt says (specs/ui/folders.feature.md
+   * "describe a folder"): the sidebar shows it in place of `name`.
+   */
+  description?: string;
   folders: FolderNode[];
   features: FeatureListing[];
+}
+
+/** The sidebar's label for a folder: its description when it has one, else its name. */
+export function folderLabel(node: Pick<FolderNode, "name" | "description">): string {
+  return node.description ?? node.name;
 }
 
 /**
@@ -24,8 +34,16 @@ export interface FolderNode {
  * The root node *is* `specs/`, so the storage prefix never shows up as a
  * folder of its own in the sidebar, while every `path` stays repo-relative —
  * which is what a drop target hands back to the move API.
+ *
+ * `descriptions` is the listing's folder-path → description map; a folder
+ * in it carries its description on its node. Order is by folder name still —
+ * the description is a label, not the folder's place in the tree.
  */
-export function buildTree(folders: string[], features: FeatureListing[]): FolderNode {
+export function buildTree(
+  folders: string[],
+  features: FeatureListing[],
+  descriptions: Record<string, string> = {},
+): FolderNode {
   const root: FolderNode = { name: "", path: SPECS_FOLDER, folders: [], features: [] };
   const nodes = new Map<string, FolderNode>([[SPECS_FOLDER, root]]);
 
@@ -37,7 +55,14 @@ export function buildTree(folders: string[], features: FeatureListing[]): Folder
     // must not become a phantom top-level folder.
     if (!path.startsWith(`${SPECS_FOLDER}/`)) return root;
     const segments = path.split("/");
-    const node: FolderNode = { name: segments[segments.length - 1]!, path, folders: [], features: [] };
+    const description = descriptions[path];
+    const node: FolderNode = {
+      name: segments[segments.length - 1]!,
+      path,
+      ...(description ? { description } : {}),
+      folders: [],
+      features: [],
+    };
     nodes.set(path, node);
     folderNode(segments.slice(0, -1).join("/")).folders.push(node);
     return node;
