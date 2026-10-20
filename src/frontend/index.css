@@ -1749,7 +1749,11 @@ button.link:disabled {
 }
 
 .scenario-pane input.scenario-pane-name {
-  flex: 0 1 22rem;
+  /* The field is as wide as the name it holds — a long name gets the room
+     beside it instead of an early cut-off — and only shrinks when the row
+     really runs out of width. Browsers without field-sizing fall back to a
+     fixed-width field that grows with the row. */
+  flex: 1 1 22rem;
   min-width: 8rem;
   font-size: 1rem;
   font-weight: 600;
@@ -1759,6 +1763,14 @@ button.link:disabled {
   border-bottom: 1px dashed var(--border-strong);
   border-radius: 0;
   background: transparent;
+}
+
+@supports (field-sizing: content) {
+  .scenario-pane input.scenario-pane-name {
+    field-sizing: content;
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
 }
 
 .scenario-pane input.scenario-pane-name:focus {
