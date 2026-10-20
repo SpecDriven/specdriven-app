@@ -7,15 +7,24 @@ import {
   createFolder,
   deleteFolder,
   listFeatures,
+  listFolderDescriptions,
   listFolders,
   moveFeature,
+  readFolderDescription,
   readFeature,
   renameFeature,
   renameFolder,
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
-import { buildTree, featuresBeneath, findFolder, folderOptions, folderRenamed } from "../src/frontend/tree";
+import {
+  buildTree,
+  featuresBeneath,
+  findFolder,
+  folderLabel,
+  folderOptions,
+  folderRenamed,
+} from "../src/frontend/tree";
 import { installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
 import { git, stopServers, twoClones } from "./helpers/fixtures";
@@ -278,6 +287,52 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
 });
 
+// specs/ui/folders.feature.md "describe a folder": a description.txt in a
+// folder gives it a description — its first non-blank line, trimmed. A
+// folder without one, or with a blank one, has none.
+test("readFolderDescription and listFolderDescriptions read description.txt", async () => {
+  await mkdir(join(root, "specs/billing/sub"), { recursive: true });
+  await mkdir(join(root, "specs/plain"), { recursive: true });
+  await mkdir(join(root, "specs/blank"), { recursive: true });
+  await Bun.write(join(root, "specs/billing/description.txt"), "Billing and invoicing\n");
+  // leading blank lines and surrounding space are not part of the description,
+  // and only the first line counts
+  await Bun.write(join(root, "specs/billing/sub/description.txt"), "\r\n  Sub-ledgers  \r\nmore words\n");
+  await Bun.write(join(root, "specs/blank/description.txt"), "\n   \n");
+  expect(await readFolderDescription(root, "specs/billing")).toBe("Billing and invoicing");
+  expect(await readFolderDescription(root, "billing/sub")).toBe("Sub-ledgers");
+  expect(await readFolderDescription(root, "specs/plain")).toBeNull();
+  expect(await readFolderDescription(root, "specs/blank")).toBeNull();
+  expect(await readFolderDescription(root, "specs/ghost")).toBeNull();
+  expect(await listFolderDescriptions(root)).toEqual({
+    "specs/billing": "Billing and invoicing",
+    "specs/billing/sub": "Sub-ledgers",
+  });
+  // the description file is not a feature, and does not make the folder one
+  expect(await listFeatures(root)).toEqual([]);
+  expect(await listFolders(root)).toEqual(["specs/billing", "specs/billing/sub", "specs/blank", "specs/plain"]);
+});
+
+// The sidebar labels a described folder by its description and every other
+// by its name; the order stays the folders' own.
+test("buildTree carries folder descriptions; folderLabel falls back to the name", () => {
+  const tree = buildTree(
+    ["specs/billing", "specs/billing/sub", "specs/empty"],
+    [{ fileName: "specs/billing/quotes.feature.md", name: "Quotes", scenarios: [] }],
+    { "specs/billing": "Billing and invoicing", "specs/ghost": "Not in the tree" },
+  );
+  const billing = findFolder(tree, "specs/billing")!;
+  expect(billing.description).toBe("Billing and invoicing");
+  expect(folderLabel(billing)).toBe("Billing and invoicing");
+  const sub = findFolder(tree, "specs/billing/sub")!;
+  expect(sub.description).toBeUndefined();
+  expect(folderLabel(sub)).toBe("sub");
+  expect(folderLabel(findFolder(tree, "specs/empty")!)).toBe("empty");
+  expect(tree.folders.map((f) => f.path)).toEqual(["specs/billing", "specs/empty"]);
+  // without a map, nothing changes
+  expect(findFolder(buildTree(["specs/billing"], []), "specs/billing")!.description).toBeUndefined();
+});
+
 // The move flow runs on all three git engines (git-operations.md).
 for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
@@ -350,6 +405,39 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       expect(await Bun.file(join(a, ".specdriven/automerge/specs/billing")).exists()).toBe(false);
       const log = await git(a, "log", "-1", "--pretty=%s");
       expect(log.stdout.toString()).toContain("Delete folder: specs/billing (2 features)");
+      await git(b, "pull");
+      expect(await listFolders(b)).toEqual([]);
+      expect(await readFeature(b, "specs/keep.feature.md")).toBe("# Keep\n");
+    });
+
+    // specs/ui/folders.feature.md "describe a folder": a folder with no
+    // feature but a description.txt is one git tracks, so renaming it is a
+    // `git mv`, committed and pushed, and the description comes along.
+    test("renameFolder git-mvs a folder holding only a description.txt", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/keep.feature.md": "# Keep\n",
+        "specs/billing/description.txt": "Billing and invoicing\n",
+      });
+      const result = await renameFolder(a, "specs/billing", "Invoices");
+      expect(result).toEqual({ path: "specs/invoices", message: "renamed, committed and pushed" });
+      expect(await listFolderDescriptions(a)).toEqual({ "specs/invoices": "Billing and invoicing" });
+      await git(b, "pull");
+      expect(await listFolders(b)).toEqual(["specs/invoices"]);
+      expect(await listFolderDescriptions(b)).toEqual({ "specs/invoices": "Billing and invoicing" });
+    });
+
+    // ...and deleting it needs no "and its features" confirmation — there
+    // are none — but is a `git rm -r` all the same, not a local sweep.
+    test("deleteFolder removes a folder holding only a description.txt, committed and pushed", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/keep.feature.md": "# Keep\n",
+        "specs/billing/description.txt": "Billing and invoicing\n",
+      });
+      const result = await deleteFolder(a, "specs/billing");
+      expect(result).toEqual({ features: 0, message: "deleted, committed and pushed" });
+      expect(await listFolders(a)).toEqual([]);
+      const log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Delete folder: specs/billing (0 features)");
       await git(b, "pull");
       expect(await listFolders(b)).toEqual([]);
       expect(await readFeature(b, "specs/keep.feature.md")).toBe("# Keep\n");
