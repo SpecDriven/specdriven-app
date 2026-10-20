@@ -28,8 +28,6 @@
 // the server, `bun test` and the desktop shell never pay for it.
 
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
   Options,
@@ -41,6 +39,9 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { CLAUDE_BIN, CODEX_PANE_AGENT, PANE_AGENT, PI_PANE_AGENT, sessionWorkDir } from "./agent";
 import type { SessionPlace } from "./agent";
+import { claudeLaunch, detectClaudeProxy } from "./claudeAuth";
+import { getAppRoot } from "./paths";
+import { readState } from "./state";
 import {
   CODEX_CLIENT_INFO,
   CODEX_TOOL,
@@ -139,31 +140,18 @@ const OAUTH_TOKEN_SOURCES = new Set([
 ]);
 
 /**
- * Where Claude Code sends its API calls when something moved them:
- * ANTHROPIC_BASE_URL from the environment it inherits, overridden by the
- * `env` block of each settings file it loads (settingSources: user, then
- * project, then local — the later one wins). Claude Code's account answer
- * does not say, so the pane reads the same files.
+ * Where Claude Code sends its API calls when its own configuration moved
+ * them: ANTHROPIC_BASE_URL from the environment it inherits, overridden by
+ * the `env` block of each settings file it loads (settingSources: user, then
+ * project, then local — the later one wins). The sign-in Settings chose
+ * (src/server/claudeAuth.ts) decides what a session actually uses.
  */
 export async function claudeBaseUrl(
   cwd: string,
   env: Record<string, string | undefined> = process.env,
-  configDir: string = env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
+  configDir?: string,
 ): Promise<string | undefined> {
-  let url = env.ANTHROPIC_BASE_URL || undefined;
-  for (const file of [
-    join(configDir, "settings.json"),
-    join(cwd, ".claude", "settings.json"),
-    join(cwd, ".claude", "settings.local.json"),
-  ]) {
-    try {
-      const value = JSON.parse(await readFile(file, "utf8"))?.env?.ANTHROPIC_BASE_URL;
-      if (typeof value === "string" && value) url = value;
-    } catch {
-      // Missing or unreadable settings add nothing.
-    }
-  }
-  return url;
+  return (await detectClaudeProxy(cwd, env, configDir)).url ?? undefined;
 }
 
 const LOCAL_HOSTS = /^(localhost|.*\.localhost|127(\.\d+){3}|\[::1\]|0\.0\.0\.0)$/i;
@@ -615,13 +603,11 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     return { ...session.meta };
   }
 
-  // A dev server started from inside a Claude Code terminal inherits the
-  // marker that makes a nested `claude` refuse to start; the chat is not
-  // nested in any sense that matters.
-  const env: Record<string, string | undefined> = { ...process.env };
-  delete env.CLAUDECODE;
-  delete env.CLAUDE_CODE_ENTRYPOINT;
-  session.apiBaseUrl = await claudeBaseUrl(cwd);
+  // The sign-in Settings chose (src/server/claudeAuth.ts): the environment
+  // to inherit, and the `--settings` override that makes Claude Code honor
+  // the choice over its own settings files.
+  const launch = await claudeLaunch(await readState(getAppRoot()), cwd);
+  session.apiBaseUrl = launch.apiBaseUrl;
 
   const options: Options = {
     cwd,
@@ -639,7 +625,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     settingSources: ["user", "project", "local"],
     // With a code repo the specs live elsewhere; let Claude read them.
     ...(opts.place.codeRepo ? { additionalDirectories: [opts.place.dataRepo] } : {}),
-    env,
+    env: launch.env,
+    ...(Object.keys(launch.extraArgs).length ? { extraArgs: launch.extraArgs } : {}),
     stderr: (data) => {
       const line = data.trim();
       if (!line) return;
