@@ -214,3 +214,28 @@ test("Claude exiting without an answer is 502, and the prompt asks for minutes o
   expect(estimatePrompt({ name: "Ship v2", body: "" })).toContain("(no further description)");
   expect(estimatePrompt({ name: "", body: "x" })).toContain("Task: (untitled)");
 });
+
+test("the estimate's Claude gets the sign-in Settings chose, like the pane (src/server/claudeAuth.ts)", async () => {
+  // This test's Claude config, not the machine's, and no proxy token from
+  // the shell — either would be picked up as the proxy's.
+  const saved = Object.fromEntries(
+    ["CLAUDE_CONFIG_DIR", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"].map((n) => [n, process.env[n]]),
+  );
+  process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
+  delete process.env.ANTHROPIC_AUTH_TOKEN;
+  delete process.env.ANTHROPIC_BASE_URL;
+  try {
+    await writeState(
+      { dataRepo: data, tasks: true, googleCalendar: true, claudeAuth: "proxy", claudeProxyUrl: "http://proxy.test:9/" },
+      root,
+    );
+    const res = await estimate();
+    expect(res.status).toBe(200);
+    expect(JSON.parse(fakes[0]!.options.extraArgs!.settings!)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://proxy.test:9/" } });
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});

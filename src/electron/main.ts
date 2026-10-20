@@ -27,6 +27,7 @@ import { setRelauncher } from "../server/relaunch";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
+import { setClaudeTokenBackend } from "../server/claudeToken";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
@@ -36,7 +37,7 @@ import {
   windowOpenTarget,
   type LinkWindow,
 } from "./linkRouting";
-import { createConfluenceSafeStorageBackend, createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
+import { createClaudeSafeStorageBackend, createConfluenceSafeStorageBackend, createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 import {
   DEFAULT_HEIGHT,
@@ -368,12 +369,13 @@ if (!app.requestSingleInstanceLock()) {
       respond(permission === "clipboard-sanitized-write");
     });
     protocol.handle("app", serveApp);
-    // GitHub and Confluence token storage (specs/app/desktop-app.feature.md): OS-encrypted via
+    // GitHub, Confluence and Claude proxy token storage (specs/app/desktop-app.feature.md): OS-encrypted via
     // safeStorage; without a key store the server's 0600-file backend
     // stays in place. safeStorage needs the ready app, hence here.
     if (safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
+      setClaudeTokenBackend(createClaudeSafeStorageBackend(join(userData, "claude-token.enc")));
     }
     // Data-directory picker (specs/ui/app-start.feature.md): replace the
     // server's osascript fallback with the native dialog, parented to the
