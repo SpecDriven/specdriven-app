@@ -168,7 +168,7 @@ describe("project-settings.json", () => {
 
 describe("the assigned line", () => {
   test("parses off the top of a feature and serializes back", () => {
-    const text = `# Bind Policy\n\n${formatAssigned(DANA)}\n\nTurning a quote into a policy.\n\n## Bind @v1 [published]\n\n- **Then** it is bound\n`;
+    const text = `# Bind Policy\n\n${formatAssigned(DANA)}\n\nTurning a quote into a policy.\n\n## S1: Bind @v1 [published]\n\n- **Then** it is bound\n`;
     const feature = parseFeature(text);
     expect(feature.assigned).toBe(DANA);
     expect(feature.description).toBe("Turning a quote into a policy.");

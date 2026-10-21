@@ -55,7 +55,7 @@ test("Delete removes the draft spec", async () => {
   expect(result.content).not.toContain("Idea");
   expect(await readFeatureForEditor(root, "specs/quote.feature.md")).not.toContain("Idea");
   // The scenario beside it is untouched.
-  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## S1: Basic @v1 [proposed]");
 });
 
 // "Propose" — the explicit action that moves the draft into the .feature.md
@@ -66,7 +66,7 @@ test("Propose lands the draft in the feature file as [proposed]", async () => {
   // The dialog's Propose saves the same scenario with the proposed status.
   await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1\n\nwip\n");
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Idea @v1 [proposed]");
+  expect(text).toContain("## S1: Idea @v1 [proposed]");
   // The draft entry did not survive alongside its proposed self.
   const editor = await readFeatureForEditor(root, "specs/quote.feature.md");
   expect(editor).not.toContain("[draft]");
@@ -89,9 +89,9 @@ test("Publish promotes a draft scenario straight to [published]", async () => {
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Idea @v1 [published]");
+  expect(text).toContain("## S2: Idea @v1 [published]");
   // Only the targeted scenario was published.
-  expect(text).toContain("## Basic @v1 [proposed]");
+  expect(text).toContain("## S1: Basic @v1 [proposed]");
 });
 
 // What the editor reads carries the document's id for every scenario — its
@@ -140,7 +140,7 @@ test("Publish of a renamed draft publishes that draft, not a second spec beside 
   );
   expect(result.status).toBe("published");
   expect(await readFeature(root, "specs/quote.feature.md")).toContain(
-    "## Spec goes under the highlighted folder @v1 [published]",
+    "## S1: Spec goes under the highlighted folder @v1 [published]",
   );
   // Nothing left under the old title — in the editor's view or the document.
   const editor = await readFeatureForEditor(root, "specs/quote.feature.md");
@@ -166,7 +166,7 @@ test("an autosave after a retyped title rewrites the draft instead of filing a s
     { id, name: "Better Idea", version: 1 },
   );
   expect(result.content).toContain("## Better Idea @v1 [draft]");
-  expect(result.content).not.toContain("## Idea @v1");
+  expect(result.content).not.toContain(": Idea @v1");
   expect(result.parsed.scenarios.map((s) => [s.name, s.status, s.id])).toEqual([
     ["Better Idea", "draft", id],
   ]);

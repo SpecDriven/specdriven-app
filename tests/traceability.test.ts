@@ -118,7 +118,8 @@ test("test links are written as test lines and survive a round trip", () => {
   const feature = parseFeature(`# F\n\n## S @v1 [published]\n\nbody\n`);
   feature.scenarios[0]!.tests = [NAMED_A, URL_B];
   const text = serializeFeature(feature);
-  expect(text).toBe(`# F\n\n## S @v1 [published]\n\nbody\n\n[test: ${NAMED_A} ]\n[test: ${URL_B} ]\n`);
+  // Written back numbered by position (parser.ts `S<n>:`).
+  expect(text).toBe(`# F\n\n## S1: S @v1 [published]\n\nbody\n\n[test: ${NAMED_A} ]\n[test: ${URL_B} ]\n`);
   expect(text).not.toContain("### Tests");
   expect(parseFeature(text)).toEqual(feature);
 });
@@ -127,7 +128,7 @@ test("a legacy table moves to test lines the first time the file is written", ()
   const legacy = `# F\n\n## S @v1 [published]\n\nbody\n\n### Tests\n\n| Test |\n| --- |\n| ${URL_A} |\n`;
   const feature = parseFeature(legacy);
   const text = serializeFeature(feature);
-  expect(text).toBe(`# F\n\n## S @v1 [published]\n\nbody\n\n[test: ${URL_A} ]\n`);
+  expect(text).toBe(`# F\n\n## S1: S @v1 [published]\n\nbody\n\n[test: ${URL_A} ]\n`);
   expect(parseFeature(text)).toEqual(feature);
 });
 

@@ -60,7 +60,7 @@ test("editing the description keeps the scenarios and their status", async () =>
     ["Basic Quote", 1, "proposed", "- Given a customer"],
   ]);
   expect(await readFeature(root, fileName)).toBe(
-    "# Quote Policy\n\nSecond draft.\n\n## Basic Quote @v1 [proposed]\n\n- Given a customer\n",
+    "# Quote Policy\n\nSecond draft.\n\n## S1: Basic Quote @v1 [proposed]\n\n- Given a customer\n",
   );
 });
 

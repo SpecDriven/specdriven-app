@@ -24,6 +24,7 @@ import {
   type SpecAttribute,
 } from "../parser";
 import type { ResourceLinkKind } from "../resourceLinks";
+import { compareSpecs, interleaveDrafts } from "./project";
 import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
 import { newFeatureDoc } from "./store";
 
@@ -41,7 +42,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
   return newFeatureDoc({
     name: feature.name,
     description: feature.description,
-    specs: feature.scenarios.map((s) => newEntry(s, author)),
+    specs: feature.scenarios.map((s, i) => newEntry(s, author, i + 1)),
     ...(feature.flags?.length ? { flags: plainFeatureFlags(feature.flags)! } : {}),
     ...(feature.attributes?.length ? { attributes: plainAttributes(feature.attributes)! } : {}),
     ...(feature.link ? { link: { ...feature.link } } : {}),
@@ -53,7 +54,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
   });
 }
 
-function newEntry(s: Scenario, author?: string): SpecEntry {
+function newEntry(s: Scenario, author: string | undefined, rank: number): SpecEntry {
   const createdBy = s.createdBy ?? author;
   const updatedBy = author ?? s.updatedBy;
   return {
@@ -63,6 +64,7 @@ function newEntry(s: Scenario, author?: string): SpecEntry {
     version: s.version,
     status: s.status,
     body: s.body,
+    rank,
     // A scenario imported already published records its body (schema.ts
     // `publishedBody`), the same as one published through reconcile.
     ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
@@ -238,13 +240,14 @@ export function reconcile(
 ): A.Doc<FeatureDoc> {
   if (!force) assertPublishedKept(doc, target);
 
-  const entries: (Scenario & { publishedBody?: string })[] = doc.specs.map((e) => ({
+  const entries: (Scenario & { publishedBody?: string; rank?: number })[] = doc.specs.map((e) => ({
     id: e.id,
     name: e.name,
     version: e.version,
     status: e.status,
     body: e.body,
     publishedBody: snapshotOf(e),
+    ...(e.rank === undefined ? {} : { rank: e.rank }),
     tests: [...e.tests],
     ...(e.link ? { link: plainLink(e.link)! } : {}),
     ...(e.qtest ? { qtest: plainLink(e.qtest)! } : {}),
@@ -293,8 +296,36 @@ export function reconcile(
 
   const additions = target.scenarios.filter((s) => !matched.has(s));
 
+  // The order this write leaves (schema.ts `rank`): the target's, with the
+  // document's unclaimed drafts — kept below, invisible to a markdown-derived
+  // target — placed next to where they were (project.ts interleaveDrafts).
+  // A rank is 1-based, like the `S<n>:` the projection writes for it.
+  type Slot = { entry: number } | { add: Scenario };
+  const entryOf = new Map<Scenario, number>();
+  for (const [i, match] of matchAt) entryOf.set(match, i);
+  const held: Slot[] = target.scenarios.map((s) => {
+    const at = entryOf.get(s);
+    return at === undefined ? { add: s } : { entry: at };
+  });
+  const docOrder: Slot[] = entries
+    .map((e, i) => ({ e, i }))
+    .filter(({ e, i }) => matchAt.has(i) || e.status === "draft")
+    .sort((a, b) => compareSpecs(a.e, b.e))
+    .map(({ i }) => ({ entry: i }));
+  const slotKey = (slot: Slot) =>
+    "entry" in slot ? `entry:${slot.entry}` : `add:${additions.indexOf(slot.add)}`;
+  const rankAt = new Map<number, number>();
+  const rankOf = new Map<Scenario, number>();
+  interleaveDrafts(held, docOrder, slotKey).forEach((slot, i) => {
+    if ("entry" in slot) rankAt.set(slot.entry, i + 1);
+    else rankOf.set(slot.add, i + 1);
+  });
+  const moved = [...rankAt].some(([i, rank]) => entries[i]!.rank !== rank);
+
   // What this write changes, for the authorship stamps: a matched entry
-  // whose projection moves, and the feature when anything in it does.
+  // whose projection moves, and the feature when anything in it does. A
+  // move is the feature's change, not the scenarios': their ranks shift
+  // without a word of them changing, so no scenario gets stamped for it.
   const entryChanged = (entry: (typeof entries)[number], match: Scenario) =>
     entry.name !== match.name ||
     entry.version !== match.version ||
@@ -319,6 +350,7 @@ export function reconcile(
     (docAssigned ?? "") !== (target.assigned ?? "") ||
     changedAt.size > 0 ||
     removed ||
+    moved ||
     additions.length > 0;
 
   return A.change(doc, (d) => {
@@ -375,10 +407,13 @@ export function reconcile(
       if (holder.createdBy !== before.createdBy) d.createdBy = holder.createdBy!;
       if (holder.updatedBy !== before.updatedBy) d.updatedBy = holder.updatedBy!;
     }
+    for (const [i, rank] of rankAt) {
+      if (entries[i]!.rank !== rank) d.specs[i]!.rank = rank;
+    }
     for (let i = entries.length - 1; i >= 0; i--) {
       if (!matchAt.has(i) && entries[i]!.status !== "draft") A.deleteAt(d.specs, i);
     }
-    for (const s of additions) d.specs.push(newEntry(s, author));
+    for (const s of additions) d.specs.push(newEntry(s, author, rankOf.get(s)!));
   });
 }
 

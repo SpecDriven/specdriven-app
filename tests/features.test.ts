@@ -111,8 +111,9 @@ test("renameFeature works in a plain directory (no git repo)", async () => {
   ]);
 });
 
-// Scenarios and description survive a rename untouched; a file without a
-// `# <name>` heading gains one.
+// Scenarios and description survive a rename untouched — the write numbers
+// the headings by position (parser.ts `S<n>:`), nothing more; a file without
+// a `# <name>` heading gains one.
 test("renameFeature only touches the heading, adding one when missing", async () => {
   await Bun.write(
     join(root, "specs/one.feature.md"),
@@ -120,7 +121,7 @@ test("renameFeature only touches the heading, adding one when missing", async ()
   );
   await renameFeature(root, "specs/one.feature.md", "Uno");
   expect(await readFeature(root, "specs/one.feature.md")).toBe(
-    "# Uno\n\nsome description\n\n## First @v1 [published]\n\nbody\n",
+    "# Uno\n\nsome description\n\n## S1: First @v1 [published]\n\nbody\n",
   );
   await Bun.write(join(root, "specs/bare.feature.md"), "just text\n");
   await renameFeature(root, "specs/bare.feature.md", "Named Now");
@@ -214,7 +215,8 @@ test("saveFeature refuses to demote a published scenario", async () => {
 // next sync tick; an editor save landing first must not write over it.
 describe("a save racing an unsynced disk edit", () => {
   const file = "specs/race.feature.md";
-  const seed = "# Race\n\n## Hello @v1 [proposed]\n\n- **Given** x\n";
+  // The file as the app writes it: headings numbered by position.
+  const seed = "# Race\n\n## S1: Hello @v1 [proposed]\n\n- **Given** x\n";
 
   beforeEach(async () => {
     await createFeature(root, "Race", seed);
@@ -231,7 +233,10 @@ describe("a save racing an unsynced disk edit", () => {
     const md = (await readFeature(root, file))!;
     expect(md).toContain("described on disk");
     expect(md).toContain("x edited here");
-    expect(md).toContain("## Disk only @v1 [proposed]");
+    // The disk edit carried no numbers, so it reads in the legacy order —
+    // by name — and the write numbers what it kept.
+    expect(md).toContain("## S1: Disk only @v1 [proposed]");
+    expect(md).toContain("## S2: Hello @v1 [proposed]");
     expect(saved.content).toBe(md);
     expect(projectFeature((await loadFeatureDoc(root, file))!.doc)).toBe(md);
   });
@@ -273,8 +278,8 @@ describe("a save racing an unsynced disk edit", () => {
 describe("a save whose text ends inside a code fence", () => {
   const file = "specs/fence.feature.md";
   const closed =
-    "# Fence\n\n## Context @v1 [proposed]\n\n```gherkin\nGiven a priority context\n```\n\n" +
-    "## Selecting a priority segment @v1 [proposed]\n\nGiven a segment <Priority>\n\n" +
+    "# Fence\n\n## S1: Context @v1 [proposed]\n\n```gherkin\nGiven a priority context\n```\n\n" +
+    "## S2: Selecting a priority segment @v1 [proposed]\n\nGiven a segment <Priority>\n\n" +
     "Examples:\n| Priority |\n| high |\n";
   // The closing fence of the first scenario is momentarily missing.
   const open = closed.replace("Given a priority context\n```\n", "Given a priority context\n");
@@ -327,7 +332,7 @@ test("publishFeature upgrades proposed scenarios to published", async () => {
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Basic @v1 [published]");
+  expect(text).toContain("## S1: Basic @v1 [published]");
   expect(text).not.toContain("[proposed]");
 });
 
@@ -348,8 +353,8 @@ test("publishFeature with a scenario target publishes only that scenario", async
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Basic @v1 [published]");
-  expect(text).toContain("## Extra @v1 [proposed]");
+  expect(text).toContain("## S1: Basic @v1 [published]");
+  expect(text).toContain("## S2: Extra @v1 [proposed]");
 });
 
 // crud-feature.md "Scenario status": a scenario saved with an
@@ -364,10 +369,12 @@ test("saveFeature keeps a [draft] scenario out of the file but not out of the ed
     "# Quote\n\n## Basic @v1\n\nbody\n\n## Idea @v1 [draft]\n\nwip\n",
   );
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Basic @v1 [proposed]");
+  expect(text).toContain("## S1: Basic @v1 [proposed]");
   expect(text).not.toContain("Idea");
   const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => `${s.name}:${s.status}`)).toContain("Idea:draft");
+  // The editor's wire format numbers by position in the text it carries,
+  // drafts included (serializeFeature); the file above holds only S1.
   expect(result.content).toContain("## Idea @v1 [draft]");
   expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
@@ -397,12 +404,12 @@ test("deleteDraftScenario removes the draft from the document", async () => {
   const result = await deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 1 });
   expect(result.status).toBe("saved");
   expect(result.content).not.toContain("Idea");
-  expect(result.content).toContain("## Basic @v1 [proposed]");
+  expect(result.content).toContain("## S1: Basic @v1 [proposed]");
   const loaded = await loadFeatureDoc(root, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Basic"]);
   expect(await readFeatureForEditor(root, "specs/quote.feature.md")).not.toContain("Idea");
   // The scenario the file does hold is untouched.
-  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## S1: Basic @v1 [proposed]");
 });
 
 // The delete is version-specific: two drafts under one name are two scenarios.
@@ -414,7 +421,7 @@ test("deleteDraftScenario deletes only the targeted version", async () => {
     "# Quote\n\n## Idea @v1 [draft]\n\nold\n\n## Idea @v2 [draft]\n\nnew\n",
   );
   const result = await deleteDraftScenario(root, "specs/quote.feature.md", { name: "Idea", version: 1 });
-  expect(result.content).not.toContain("## Idea @v1");
+  expect(result.content).not.toContain("Idea @v1");
   expect(result.content).toContain("## Idea @v2 [draft]");
 });
 
@@ -426,7 +433,7 @@ test("deleteDraftScenario refuses a scenario that is not a draft", async () => {
   expect(
     deleteDraftScenario(root, "specs/quote.feature.md", { name: "Basic", version: 1 }),
   ).rejects.toThrow(/not found/);
-  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v1 [proposed]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## S1: Basic @v1 [proposed]");
 });
 
 test("deleteDraftScenario reports an unknown scenario rather than deleting nothing quietly", async () => {
@@ -453,7 +460,7 @@ test("publishFeature leaves drafts unpublished and out of the file", async () =>
   );
   expect(result.status).toBe("published");
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Basic @v1 [published]");
+  expect(text).toContain("## S1: Basic @v1 [published]");
   expect(text).not.toContain("Idea");
   expect(await readFeatureForEditor(root, "specs/quote.feature.md")).toContain("## Idea @v1 [draft]");
 });
@@ -474,7 +481,7 @@ test("a draft publishes when targeted individually", async () => {
     { name: "Idea", version: 1 },
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Idea @v1 [published]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## S1: Idea @v1 [published]");
 });
 
 // Same scenario name, different versions: only the targeted version flips.
@@ -492,15 +499,15 @@ test("publishFeature with a scenario target is version-specific", async () => {
     { name: "Basic", version: 2 },
   );
   const text = await readFeature(root, "specs/quote.feature.md");
-  expect(text).toContain("## Basic @v1 [proposed]");
-  expect(text).toContain("## Basic @v2 [published]");
+  expect(text).toContain("## S1: Basic @v1 [proposed]");
+  expect(text).toContain("## S2: Basic @v2 [published]");
 });
 
 // crud-feature.md "Feature file format": content that is not a
 // well-formed feature file never reaches the data repo — the file on disk is
 // left exactly as it was, so there is nothing for the next sync to push.
 describe("content is validated before it is written to the data repo", () => {
-  const GOOD = "# Quote\n\n## Basic @v1 [published]\n\nbody\n";
+  const GOOD = "# Quote\n\n## S1: Basic @v1 [published]\n\nbody\n";
   const BROKEN: Record<string, string> = {
     "the heading lost its name": "# \n\n## Basic @v1 [published]\n\nbody\n",
     "text sits above the heading": "git diff# Quote\n\n## Basic @v1 [published]\n\nbody\n",
@@ -567,7 +574,7 @@ test("published scenarios are immutable, but new versions may be added", async (
     "# Quote\n\n## Basic @v1\n\nold body\n",
   );
   expect(await readFeature(root, "specs/quote.feature.md")).toContain(
-    "## Basic @v1 [published]",
+    "## S1: Basic @v1 [published]",
   );
 
   // changing a published scenario's body is rejected
@@ -588,7 +595,7 @@ test("published scenarios are immutable, but new versions may be added", async (
     "# Quote\n\n## Basic @v1 [published]\n\nold body\n\n## Basic @v2\n\nnew body\n",
   );
   expect(result.status).toBe("published");
-  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## Basic @v2 [published]");
+  expect(await readFeature(root, "specs/quote.feature.md")).toContain("## S2: Basic @v2 [published]");
 });
 
 // Every push/pull flow runs against a local-path origin on the system-git
@@ -666,8 +673,8 @@ for (const engine of gitEngines()) {
         "# Seed\n\n## One @v1\n\nbody\n",
       );
       expect(result.status).toBe("saved");
-      expect(result.content).toContain("## One @v1 [proposed]");
-      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## One @v1 [proposed]");
+      expect(result.content).toContain("## S1: One @v1 [proposed]");
+      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## S1: One @v1 [proposed]");
       // not committed: the working tree is dirty until the reload cron syncs
       const status = await git(a, "status", "--porcelain");
       expect(status.stdout.toString()).toContain("specs/seed.feature.md");
@@ -686,8 +693,8 @@ for (const engine of gitEngines()) {
       expect(result.message).toBe("committed and pushed");
       await git(b, "pull");
       const text = await readFeature(b, "specs/seed.feature.md");
-      expect(text).toContain("## One @v1 [published]");
-      expect(text).not.toContain("## Two @v1 [published]");
+      expect(text).toContain("## S1: One @v1 [published]");
+      expect(text).not.toContain("Two @v1 [published]");
     });
 
     // Scenario: Publish feature with successful merge — pull, then save.
@@ -706,7 +713,7 @@ for (const engine of gitEngines()) {
       );
       expect(result.status).toBe("published");
       expect(await readFeature(a, "specs/other.feature.md")).toBe("# Other\n");
-      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## One @v1 [published]");
+      expect(await readFeature(a, "specs/seed.feature.md")).toContain("## S1: One @v1 [published]");
     });
 
     // crud-feature.spec.md "Publish feature with successful merge": after saving,
@@ -891,6 +898,8 @@ describe("a write over a file edited on disk since the last sync tick", () => {
   const seed = async () => {
     await Bun.write(join(root, file), start);
     await importDrift(root);
+    // A file written before the scenario numbers is adopted as it is
+    // (driftSync importDrift, project.ts isProjectionOf): no rewrite.
     expect(await readFeature(root, file)).toBe(start);
   };
 
@@ -907,9 +916,11 @@ describe("a write over a file edited on disk since the last sync tick", () => {
     await Bun.write(join(root, file), start + "\n## Disk-only @v1 [proposed]\n\nfrom disk\n");
     const result = await publishFeature(root, file, start, { name: "Hello", version: 1 });
     expect(result.status).toBe("published");
+    // The disk edit carried no numbers, so it reads in the legacy order —
+    // by name — and the publish writes the numbers.
     expect(await inLockstep()).toBe(
-      "# Race\n\n## Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
-        "## Hello @v1 [published]\n\n- **Given** x\n",
+      "# Race\n\n## S1: Disk-only @v1 [proposed]\n\nfrom disk\n\n" +
+        "## S2: Hello @v1 [published]\n\n- **Given** x\n",
     );
   });
 

@@ -116,7 +116,7 @@ test("with the setting off, the delete route refuses", async () => {
   const res = await deleteViaApi({ name: "Basic", version: 1 });
   expect(res.status).toBe(403);
   expect((await res.json()).error).toContain("switched off");
-  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## Basic @v1 [published]");
+  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## S1: Basic @v1 [published]");
 });
 
 // "If confirmed, the spec is deleted." — the published scenario leaves the
@@ -129,8 +129,9 @@ test("with the setting on, a confirmed delete removes the published spec", async
   const body = (await res.json()) as { content: string };
   expect(body.content).not.toContain("Basic");
   expect(await readFeature(data, "specs/quote.feature.md")).not.toContain("Basic");
+  // Extra is the only scenario left, so it is numbered first.
   expect(await readFeatureForEditor(data, "specs/quote.feature.md")).toContain(
-    "## Extra @v1 [proposed]",
+    "## S1: Extra @v1 [proposed]",
   );
   const loaded = await loadFeatureDoc(data, "specs/quote.feature.md");
   expect(loaded!.doc.specs.map((s) => s.name)).toEqual(["Extra"]);
@@ -159,5 +160,5 @@ test("deleting one published scenario leaves other published scenarios intact", 
     { name: "Extra", version: 1 },
   );
   await deletePublishedScenario(data, "specs/quote.feature.md", { name: "Basic", version: 1 });
-  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## Extra @v1 [published]");
+  expect(await readFeature(data, "specs/quote.feature.md")).toContain("## S1: Extra @v1 [published]");
 });

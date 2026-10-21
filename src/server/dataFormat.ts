@@ -28,7 +28,7 @@ import { version as appVersion } from "../../package.json";
 const log = getLogger("data-format");
 
 /** The data format this app reads and writes. */
-export const DATA_FORMAT = 1;
+export const DATA_FORMAT = 2;
 
 /**
  * Set on every API answer while the open folder is blocked, to the app

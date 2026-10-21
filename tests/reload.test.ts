@@ -146,6 +146,12 @@ for (const engine of gitEngines()) {
       await git(data, "config", "user.email", "test@example.com");
       await git(data, "config", "user.name", "Test");
       await writeState({ dataRepo: "data" }, dir);
+      // The first tick stamps the folder's data format marker
+      // (specs/app/data-format.feature.md) and commits it; after that a
+      // clean tree has nothing to sync.
+      const first = await reloadData(dir);
+      expect(first).toContain("wrote the data format marker");
+      expect(first).toContain("saved scenarios committed");
       expect(await reloadData(dir)).toContain("no saved changes");
     });
   });

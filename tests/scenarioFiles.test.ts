@@ -53,6 +53,12 @@ Quotes for potential customers.
 
 - **Given** the customer has no account
 `;
+// What the app writes: the same text with each scenario numbered by its
+// position (parser.ts `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = SAMPLE.replace("## Basic Quote", "## S1: Basic Quote").replace(
+  "## Declined Quote",
+  "## S2: Declined Quote",
+);
 const BASIC = { name: "Basic Quote", version: 1 };
 const XML = new TextEncoder().encode("<policy><holder>Ann</holder></policy>\n");
 const CSV = new TextEncoder().encode("name,age\nAnn,41\n");
@@ -225,8 +231,8 @@ describe("saveScenarioFiles", () => {
     const saved = await saveScenarioFiles(data, FILE, BASIC, files);
     expect(saved.status).toBe("saved");
     expect(saved.parsed.scenarios[0]!.files).toEqual(files);
-    expect(saved.content).toBe(SAMPLE);
-    expect(await readFeature(data, FILE)).toBe(SAMPLE);
+    expect(saved.content).toBe(WRITTEN);
+    expect(await readFeature(data, FILE)).toBe(WRITTEN);
     const view = (await readFeatureView(data, FILE))!;
     expect(view.parsed.scenarios[0]!.files).toEqual(files);
     expect(view.parsed.scenarios[1]!.files).toBeUndefined();
@@ -312,7 +318,7 @@ describe("the scenario files routes", () => {
     expect(files).toEqual([{ name: "policy.xml", file: expect.stringMatching(/^policy-[0-9a-f]{16}\.xml$/), size: XML.byteLength }]);
     files = await filesOf((await upload(CSV, "people.csv", BASIC))!);
     expect(files.map((f) => f.name)).toEqual(["policy.xml", "people.csv"]);
-    expect(await readFeature(data, FILE)).toBe(SAMPLE);
+    expect(await readFeature(data, FILE)).toBe(WRITTEN);
 
     // Read — downloaded as an attachment under its listed name.
     const download = (await handleApi(
@@ -340,7 +346,7 @@ describe("the scenario files routes", () => {
     // Delete.
     files = await filesOf((await put({ scenario: BASIC, files: files.slice(1) }))!);
     expect(files.map((f) => f.name)).toEqual(["holders.csv"]);
-    expect(await readFeature(data, FILE)).toBe(SAMPLE);
+    expect(await readFeature(data, FILE)).toBe(WRITTEN);
   });
 
   test("a non-ASCII name downloads under its UTF-8 name", async () => {

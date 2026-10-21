@@ -61,6 +61,18 @@ export type SpecEntry = {
   /** GitHub urls of the automated tests covering this spec. */
   tests: string[];
   /**
+   * The spec's position among the feature's specs
+   * (specs/ui/ui.feature.md "number scenarios"): the projection orders by
+   * it and numbers the headings `S1:`, `S2:`, … in that order. A scalar set
+   * whole, last writer wins, so two peers moving scenarios concurrently
+   * resolve to one order (ties break by name, then version — project.ts
+   * `orderSpecs`), and the list itself is never spliced: the entry keeps
+   * its object, and every concurrent edit to it. Optional key, no
+   * migration: a document from before the numbers sorts by name until its
+   * next reconcile stamps it.
+   */
+  rank?: number;
+  /**
    * The ticket tracking this scenario in a project management tool
    * (specs/external-links/project-management-jira-linear-etc.feature.md).
    * Absent when there is none; set whole, so concurrent edits resolve to

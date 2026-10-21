@@ -9,7 +9,6 @@ import {
   parseFeature,
   serializeFeature,
   slugify,
-  sortScenarios,
   titleFromFileName,
   unclosedFence,
 } from "../server/parser";
@@ -67,6 +66,7 @@ import {
   UserRound,
   X,
   ArrowDown,
+  ArrowUp,
   ArrowRightLeft,
   Bot,
   KeyRound,
@@ -452,6 +452,11 @@ export interface EditState {
    * re-derives the version, and the Draft checkbox stays unlocked.
    */
   isNew?: boolean;
+  /**
+   * Where a new scenario goes in the feature once a save places it (a new
+   * version: right after the version it continues). Appended without.
+   */
+  insertAt?: number;
 }
 
 /**
@@ -526,18 +531,50 @@ export function namingInProgress(nameField: Element | null, active: Element | nu
 
 /**
  * The feature with the editor's scenario written in — over the entry the
- * editor opened on (or the one a previous save placed), or appended when it
- * has none — in canonical order, which is where its card will be. Every save
- * places the scenario this way, so the way back (specs/editor/spec-editor
- * .feature.md "Spec editor pane") can predict where to land.
+ * editor opened on (or the one a previous save placed), else at `insertAt`
+ * (a new version goes right after its source), else appended — which is
+ * where its card will be: scenarios keep their order
+ * (specs/ui/ui.feature.md "number scenarios"). Every save places the
+ * scenario this way, so the way back (specs/editor/spec-editor.feature.md
+ * "Spec editor pane") can predict where to land.
  */
-export function withScenario(feature: Feature, at: number | null, s: Scenario): Feature {
-  return {
-    ...feature,
-    scenarios: sortScenarios(
-      at === null ? [...feature.scenarios, s] : feature.scenarios.map((sc, i) => (i === at ? s : sc)),
-    ),
-  };
+export function withScenario(
+  feature: Feature,
+  at: number | null,
+  s: Scenario,
+  insertAt?: number,
+): Feature {
+  if (at !== null) {
+    return { ...feature, scenarios: feature.scenarios.map((sc, i) => (i === at ? s : sc)) };
+  }
+  const scenarios = [...feature.scenarios];
+  scenarios.splice(Math.min(insertAt ?? scenarios.length, scenarios.length), 0, s);
+  return { ...feature, scenarios };
+}
+
+/**
+ * The feature with the scenario at `from` moved to `to` (specs/ui/
+ * ui.feature.md "number scenarios": Move up, Move down), the rest keeping
+ * their order. Out-of-range positions leave the feature as it is.
+ */
+export function withScenarioMoved(feature: Feature, from: number, to: number): Feature {
+  const n = feature.scenarios.length;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return feature;
+  const scenarios = [...feature.scenarios];
+  const [moved] = scenarios.splice(from, 1);
+  scenarios.splice(to, 0, moved!);
+  return { ...feature, scenarios };
+}
+
+/**
+ * Each scenario's number — `S1`, `S2`, … by position among the scenarios
+ * the file holds (specs/ui/ui.feature.md "number scenarios") — or null for
+ * a draft, which lives in the document only and has no place in the file.
+ * Computed over the whole list, so a filtered view shows the same numbers.
+ */
+export function scenarioNumbers(scenarios: readonly Pick<Scenario, "status">[]): (number | null)[] {
+  let n = 0;
+  return scenarios.map((s) => (s.status === "draft" ? null : ++n));
 }
 
 /**
@@ -562,7 +599,13 @@ export function nextVersionIn(
  * queued behind another places itself here rather than where the render
  * that queued it thought the scenario was.
  */
-export type Placement = { feature: Feature; index: number | null; id?: string };
+export type Placement = {
+  feature: Feature;
+  index: number | null;
+  id?: string;
+  /** Where a scenario not yet in the feature goes (withScenario); appended without. */
+  insertAt?: number;
+};
 
 /**
  * The editor's scenario written into the feature at `placement`: over the
@@ -573,7 +616,7 @@ export type Placement = { feature: Feature; index: number | null; id?: string };
  */
 export function placeScenario(
   draft: Scenario,
-  { feature, index, id }: Placement,
+  { feature, index, id, insertAt }: Placement,
   derived: boolean,
 ): { s: Scenario; next: Feature } {
   const version =
@@ -583,7 +626,7 @@ export function placeScenario(
   // (savedScenarioName): the scenario the save lands is then the one this
   // save names, and the editor finds it again (landedScenario).
   const s: Scenario = { ...draft, name: savedScenarioName(draft), version, id: draft.id ?? id };
-  return { s, next: withScenario(feature, index, s) };
+  return { s, next: withScenario(feature, index, s, insertAt) };
 }
 
 /**
@@ -3410,7 +3453,7 @@ export function App() {
     // second time, or write over the neighbour a rename re-sorted into its
     // old slot.
     const ahead = autosaveInFlight.current;
-    const known: Placement = { feature, index: editing.index, id: draft.id };
+    const known: Placement = { feature, index: editing.index, id: draft.id, insertAt: editing.insertAt };
     const place = (at: Placement) => placeScenario(draft, at, derived);
     if (!ahead) setFeature(place(known).next);
     if (close) setEditing(null);
@@ -3574,7 +3617,7 @@ export function App() {
     const draft = { ...editing.scenario, tests };
     const derived = editing.isNew === true;
     const ahead = autosaveInFlight.current;
-    const known: Placement = { feature, index: editing.index, id: draft.id };
+    const known: Placement = { feature, index: editing.index, id: draft.id, insertAt: editing.insertAt };
     const place = (at: Placement) => placeScenario(draft, at, derived);
     const shown = place(known);
     if (!ahead) {
@@ -3630,7 +3673,12 @@ export function App() {
     const signature = scenarioSignature(editing.scenario, draftVersion);
     if (signature === autosaved.current) return;
     const session = editorSession.current;
-    const before: Placement = { feature, index: editing.index, id: editing.scenario.id };
+    const before: Placement = {
+      feature,
+      index: editing.index,
+      id: editing.scenario.id,
+      insertAt: editing.insertAt,
+    };
     const run = saveScenario(editing.scenario.tests, false);
     if (!run) return;
     // A save that meets this tick still away (the pane's parting save,
@@ -5135,6 +5183,50 @@ export function App() {
     };
   });
 
+  /**
+   * Move the scenario at `i` one place up or down (specs/ui/ui.feature.md
+   * "number scenarios") and save the feature in its new order — a save like
+   * any other, through the queue so it goes out after a tick already away.
+   * The highlight follows the scenario. Not while the editor pane is open:
+   * its index into the feature would go stale under it.
+   */
+  const reorderScenario = async (i: number, delta: -1 | 1) => {
+    if (!feature || !selected || editing !== null || featureEditorsSealed.current) return;
+    const to = i + delta;
+    if (to < 0 || to >= feature.scenarios.length) return;
+    const before = feature;
+    const next = withScenarioMoved(feature, i, to);
+    const file = selected;
+    setFeature(next);
+    setSelectedScenario(to);
+    setCardMenu(null);
+    await scenarioSaveQueue.current.run(async () => {
+      try {
+        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        });
+        const data = await res.json();
+        if (selectedRef.current !== file) return;
+        if (res.ok) {
+          setFeature(featureFromResponse(data, file));
+          setDirty(false);
+          markSaved();
+        } else {
+          setFeature(before);
+          setSelectedScenario(i);
+          toast.error(data.error ?? "Could not move the scenario");
+        }
+      } catch {
+        if (selectedRef.current !== file) return;
+        setFeature(before);
+        setSelectedScenario(i);
+        toast.error("Could not move the scenario — is the server running?");
+      }
+    });
+  };
+
   /** Draft the next version of a published scenario as a new, editable scenario. */
   const newVersion = (i: number) => {
     if (!feature) return;
@@ -5143,6 +5235,8 @@ export function App() {
       index: null,
       // isNew marks it as new, so the version is derived on save.
       isNew: true,
+      // Right after the version it continues, where the reader looks for it.
+      insertAt: i + 1,
       // Draft like any other new scenario, so autosave can't propose the next
       // version of a published scenario on the user's behalf — and without
       // the source's document id: this is a new scenario, not that one renamed.
@@ -5532,6 +5626,9 @@ export function App() {
                     title={`${s.name} v${s.version}`}
                     onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
                   >
+                    {scenarioNumbers(rows)[rows.indexOf(s)] !== null && (
+                      <span className="scenario-number">S{scenarioNumbers(rows)[rows.indexOf(s)]}</span>
+                    )}
                     <StatusIcon status={s.status} size={12} />
                     <span className="tree-scenario-name">{s.name}</span>
                     <span className="version">v{s.version}</span>
@@ -6059,6 +6156,22 @@ export function App() {
       group: "Scenarios",
       when: () => !quiet && onFeaturePage && feature !== null && feature.scenarios.length > 0,
       run: (e) => moveScenarioSelection(e, -1),
+    },
+    {
+      id: "move-up",
+      keys: "alt+arrowup",
+      label: "Move the selected scenario up",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
+      run: () => void reorderScenario(selectedScenario!, -1),
+    },
+    {
+      id: "move-down",
+      keys: "alt+arrowdown",
+      label: "Move the selected scenario down",
+      group: "Scenarios",
+      when: () => !quiet && onFeaturePage && editing === null && selectedScenario !== null,
+      run: () => void reorderScenario(selectedScenario!, 1),
     },
     {
       id: "open",
@@ -8678,6 +8791,13 @@ export function App() {
                 kept out of the .feature.md — until Propose or Publish advances
                 it. */}
             <div className="scenario-pane-head">
+              {editing.index !== null &&
+                feature !== null &&
+                scenarioNumbers(feature.scenarios)[editing.index] != null && (
+                  <span className="scenario-number">
+                    S{scenarioNumbers(feature.scenarios)[editing.index]}
+                  </span>
+                )}
               {editingPublished ? (
                 <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
               ) : (
@@ -9751,6 +9871,13 @@ export function App() {
                           (specs/ui/navigation.feature.md "share a link"). */}
                       {/* Status as a glyph, not a word (specs/ui/ui.feature.md
                           "Design system"): draft, proposed or published. */}
+                      {/* Its number — its place in the file (specs/ui/
+                          ui.feature.md "number scenarios"); a draft has none. */}
+                      {scenarioNumbers(feature.scenarios)[i] !== null && (
+                        <span className="scenario-number">
+                          S{scenarioNumbers(feature.scenarios)[i]}
+                        </span>
+                      )}
                       <StatusIcon status={s.status} />
                       <a
                         href={scenarioPath(selected, s)}
@@ -9853,6 +9980,25 @@ export function App() {
                             label: copied === scenarioPath(selected, s) ? "Copied" : "Copy link",
                             icon: <Link size={13} />,
                             onSelect: () => void copyLink(scenarioPath(selected, s)),
+                          },
+                          // Move up / Move down (specs/ui/ui.feature.md
+                          // "number scenarios"): the order is the user's,
+                          // saved like any other change to the feature.
+                          {
+                            id: "move-up",
+                            label: "Move up",
+                            icon: <ArrowUp size={13} />,
+                            keys: "alt+arrowup",
+                            disabled: i === 0 || editing !== null,
+                            onSelect: () => void reorderScenario(i, -1),
+                          },
+                          {
+                            id: "move-down",
+                            label: "Move down",
+                            icon: <ArrowDown size={13} />,
+                            keys: "alt+arrowdown",
+                            disabled: i === feature.scenarios.length - 1 || editing !== null,
+                            onSelect: () => void reorderScenario(i, 1),
                           },
                         ]}
                       />
