@@ -237,28 +237,22 @@ function numberAnchor(n: number): string {
 }
 
 /**
- * The scenario's polarity as a Confluence status lozenge
- * (specs/ui/scenario-polarity.feature.md): green `Positive` or red
- * `Negative`, next to the heading's text as the pill is next to the title
- * in the app.
+ * The heading of a polarity section (specs/ui/scenario-polarity.feature.md):
+ * its title in green for Positive and red for Negative — Atlassian's own
+ * green and red, those of its status lozenges — so the colour, not a marker
+ * on every scenario, says which side a scenario is on.
  */
-function polarityLozenge(negative: boolean): string {
-  const colour = negative ? "Red" : "Green";
+function polaritySectionHeading(negative: boolean): string {
+  const colour = negative ? "rgb(222,53,11)" : "rgb(0,135,90)";
   const title = negative ? "Negative" : "Positive";
-  return (
-    `<ac:structured-macro ac:name="status" ac:schema-version="1">` +
-    `<ac:parameter ac:name="colour">${colour}</ac:parameter>` +
-    `<ac:parameter ac:name="title">${title}</ac:parameter>` +
-    `</ac:structured-macro>`
-  );
+  return `<h1><span style="color: ${colour};">${title}</span></h1>`;
 }
 
 /** What a page may show beyond the scenarios themselves. */
 export interface RenderOptions {
   /**
-   * Whether the scenarios are grouped into a Positive and a Negative section,
-   * each heading carrying its polarity lozenge (specs/ui/
-   * scenario-polarity.feature.md) — the "Positive and negative scenarios"
+   * Whether the scenarios are grouped into a green Positive and a red
+   * Negative section (specs/ui/scenario-polarity.feature.md) — the "Positive and negative scenarios"
    * setting. Default false: the page is one run of scenarios.
    */
   polarity?: boolean;
@@ -267,8 +261,8 @@ export interface RenderOptions {
 // A scenario's status and version are the app's bookkeeping, not part of the
 // spec a wiki reader needs, so the page shows neither. Its number, a draft
 // aside, leads its heading, as on its card in the app.
-function scenarioStorage(s: Scenario, number: number | null, polarity: boolean): string {
-  const label = (number === null ? "" : `${numberAnchor(number)} · `) + (polarity ? `${polarityLozenge(!!s.negative)} ` : "");
+function scenarioStorage(s: Scenario, number: number | null): string {
+  const label = number === null ? "" : `${numberAnchor(number)} · `;
   const parts = [`<h2>${label}${escapeXml(s.name)}</h2>`];
   if (s.body.trim()) parts.push(renderMarkdownStorage(s.body, 2));
   if (s.tests.length > 0) {
@@ -285,9 +279,9 @@ function scenarioStorage(s: Scenario, number: number | null, polarity: boolean):
  * A feature as the body of its Confluence page: its description, then its
  * scenarios. They are numbered over the whole feature, so a page of the
  * published ones alone keeps the numbers — and the anchors — the app shows.
- * With `polarity` on, the scenarios come in a Positive section and then a
- * Negative one, in the feature's order within each; a section with no
- * scenario in scope is left out.
+ * With `polarity` on, the scenarios come in a green Positive section and
+ * then a red Negative one, in the feature's order within each; a section
+ * with no scenario in scope is left out.
  */
 export function renderFeatureStorage(
   feature: Feature,
@@ -301,18 +295,15 @@ export function renderFeatureStorage(
     parts.push(`<p><em>${scope === "published" ? "No published scenarios yet." : "No scenarios yet."}</em></p>`);
   }
   const numbers = scenarioNumbers(feature.scenarios);
-  const render = (s: Scenario) => scenarioStorage(s, numbers[feature.scenarios.indexOf(s)] ?? null, polarity);
+  const render = (s: Scenario) => scenarioStorage(s, numbers[feature.scenarios.indexOf(s)] ?? null);
   if (!polarity) {
     for (const s of scenarios) parts.push(render(s));
     return parts.join("");
   }
-  const sections: [string, Scenario[]][] = [
-    ["Positive", scenarios.filter((s) => !s.negative)],
-    ["Negative", scenarios.filter((s) => s.negative)],
-  ];
-  for (const [title, held] of sections) {
+  for (const negative of [false, true]) {
+    const held = scenarios.filter((s) => !!s.negative === negative);
     if (held.length === 0) continue;
-    parts.push(`<h1>${title}</h1>`);
+    parts.push(polaritySectionHeading(negative));
     for (const s of held) parts.push(render(s));
   }
   return parts.join("");
