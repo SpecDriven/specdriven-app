@@ -121,10 +121,10 @@ test("publishing records the body as an immutable string", () => {
   expect(snapshotOf(basic)).toBe(basic.body);
 });
 
-// H2 in verification/lean/REPORT.md: two peers absorbing the same markdown
-// edit each splice it in, and the CRDT merge keeps both copies. The entry is
-// held to and rendered as its recorded body, so the merged file still reads
-// as a projection, the gate still passes, and the live text heals.
+// Two peers absorbing the same markdown edit each splice it in, and the CRDT
+// merge keeps both copies. The entry is held to and rendered as its recorded
+// body, so the merged file still reads as a projection, the gate still
+// passes, and the live text heals.
 function doubled() {
   const doc = importFeatureDoc(parseFeature(SAMPLE));
   const i = doc.specs.findIndex((e) => e.name === "Declined Quote");
