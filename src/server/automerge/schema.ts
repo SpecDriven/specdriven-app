@@ -49,10 +49,9 @@ export type SpecEntry = {
    * renders and is held to while it stays published (`effectiveBody`). A
    * scalar set whole and never spliced, so concurrent publishes resolve to
    * one text the same way on every peer, and a merge artifact in the live
-   * `body` (two peers absorbing the same markdown edit into it, H2 in
-   * verification/lean/REPORT.md) can neither pass the published gate nor
-   * leak into the file: the drift pass drives `body` back to it
-   * (reconcile.ts `healPublished`). Absent on entries published before the
+   * `body` (two peers absorbing the same markdown edit into it) can neither
+   * pass the published gate nor leak into the file: the drift pass drives
+   * `body` back to it (reconcile.ts `healPublished`). Absent on entries published before the
    * key existed — held to `body` until their next reconcile stamps them —
    * and cleared when a forced resolution demotes the entry. Automerge
    * stores it as a `str` scalar (one op, last writer wins) and hands it

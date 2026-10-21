@@ -221,10 +221,9 @@ test("drift that demotes, edits, then republishes is repaired from the doc", asy
   expect(entry.body).toContain("the unearned premium is refunded");
 });
 
-// H2 in verification/lean/REPORT.md: a CRDT merge of two peers' identical
-// absorbs leaves a published spec's live text doubled. The spec is held to
-// and rendered as the body it was published with, so a file carrying that
-// body is a projection, and the drift pass heals the live text before it
+// A CRDT merge of two peers' identical absorbs leaves a published spec's live
+// text doubled. The spec is held to and rendered as the body it was published
+// with, so a file carrying that body is a projection, and the drift pass heals the live text before it
 // looks at the file. A peer still rendering the doubled text (an older build)
 // pushes a doubled file; that is drift against the recorded body, refused and
 // repaired, with the heal saved in the same tick so the old peer stops.

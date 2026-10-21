@@ -6,7 +6,7 @@
 //   in the same pull — so the merged document already holds both sides, and
 //   the conflicted markdown is just the projection needing to be rewritten,
 //   plus whatever the other side's markdown holds beyond its own document's
-//   projection: a hand edit that rode the same push (Lean H1).
+//   projection: a hand edit that rode the same push.
 //   Plain-markdown edits (older app versions, GitHub PRs) have no ops to
 //   merge, so they go through a scenario-level three-way merge against the
 //   git merge base. Only both-sides-edited-the-same-scenario remains a human
@@ -173,8 +173,8 @@ function theirProjection(doc: A.Doc<FeatureDoc>, theirs: Feature): Feature {
  *   and its projection is the resolution. This is the common case, and it
  *   merges concurrent edits to the same scenario at character level. Their
  *   markdown can still carry a hand edit that rode the same push, which has
- *   no operations (Lean H1): it folds in three-way against their own
- *   document's projection, so nothing of theirs that the document already
+ *   no operations: it folds in three-way against their own document's
+ *   projection, so nothing of theirs that the document already
  *   holds — an edit, a rename, a move — replays a second time.
  * - The other peer sent only markdown (older app version, GitHub edit): its
  *   changes have no operations to merge, so they fold in through a

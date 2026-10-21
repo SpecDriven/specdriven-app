@@ -164,12 +164,11 @@ const sameScenario = (a: ScenarioPick, b: ScenarioPick) =>
  * doc: every published scenario must survive reconciliation under its (name,
  * version) identity, still published, with its body intact — the body as it was
  * published (`effectiveBody`), not the live collaborative text, which a CRDT
- * merge of two peers' identical absorbs can leave doubled (H2 in
- * verification/lean/REPORT.md); that artifact is the doc's to heal
- * (`healPublished`), never the file's fault. A status marker edited down to
- * [proposed] or [draft] is refused too: the demoted scenario would otherwise be
- * free to change (or, as a doc-only draft, drop out of the markdown) and be
- * published again under the same version. Same rule and message as
+ * merge of two peers' identical absorbs can leave doubled; that artifact is
+ * the doc's to heal (`healPublished`), never the file's fault. A status marker
+ * edited down to [proposed] or [draft] is refused too: the demoted scenario
+ * would otherwise be free to change (or, as a doc-only draft, drop out of the
+ * markdown) and be published again under the same version. Same rule and message as
  * assertPublishedUnchanged in features.ts, checked here so a drifted markdown
  * file can never rewrite published history through the reconciliation door.
  */
@@ -421,11 +420,11 @@ export function reconcile(
 /**
  * Drive each published entry's live text back to its recorded body. Two
  * peers absorbing the same markdown edit each splice it in, and the CRDT
- * merge keeps both copies (H2 in verification/lean/REPORT.md); the file,
- * the API and the gate already read the recorded body, so this only tidies
- * the collaborative text so a later demotion or edit starts from what was
- * published. Returns the doc itself — no change minted, nothing to save —
- * when every published entry is already tidy.
+ * merge keeps both copies; the file, the API and the gate already read the
+ * recorded body, so this only tidies the collaborative text so a later
+ * demotion or edit starts from what was published. Returns the doc itself —
+ * no change minted, nothing to save — when every published entry is already
+ * tidy.
  */
 export function healPublished(doc: A.Doc<FeatureDoc>): A.Doc<FeatureDoc> {
   const stale: [number, string][] = [];
