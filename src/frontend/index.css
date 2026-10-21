@@ -4640,6 +4640,66 @@ button.chip:disabled {
   color: var(--text-2);
 }
 
+/* The polarity pill (specs/ui/scenario-polarity.feature.md): green for a
+   positive scenario, red for a negative one, a dot leading the word. */
+.polarity-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.polarity-pill.positive {
+  color: var(--status-published);
+  border-color: var(--status-published);
+  background: light-dark(rgba(63, 165, 107, 0.08), rgba(76, 194, 131, 0.12));
+}
+
+.polarity-pill.negative {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+}
+
+/* On a card the polarity is only the dot: a small round button beside the
+   title, coloured as the pill is. */
+.polarity-dot-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.polarity-dot-button .polarity-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+}
+
+.polarity-dot-button.positive {
+  color: var(--status-published);
+}
+
+.polarity-dot-button.negative {
+  color: var(--danger-fg);
+}
+
+.polarity-dot-button:hover:not(:disabled),
+.polarity-dot-button:focus-visible {
+  background: var(--hover);
+}
+
+.polarity-dot-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* The Done chip of a finished task: ticked off, and coloured like it. */
 .chip.page-done.is-done {
   color: var(--status-published);
