@@ -6,7 +6,7 @@
 // records what it was sent.
 
 import { test, expect, beforeEach, afterEach, describe } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
@@ -49,6 +49,8 @@ interface StubPage {
 let server: ReturnType<typeof Bun.serve>;
 let wiki: string;
 let pages: Map<string, StubPage>;
+/** Attachments by page id: each file's bytes and content type under its name. */
+let attachments: Map<string, Map<string, { bytes: Uint8Array; type: string }>>;
 let nextId: number;
 let seen: { method: string; path: string; auth: string | null; body: unknown }[];
 
@@ -77,8 +79,30 @@ function stubConfluence(): string {
     async fetch(req) {
       const url = new URL(req.url);
       const auth = req.headers.get("authorization");
-      const body = req.method === "GET" ? undefined : await req.json().catch(() => undefined);
+      const multipart = req.headers.get("content-type")?.startsWith("multipart/form-data") ?? false;
+      const body = req.method === "GET" || multipart ? undefined : await req.json().catch(() => undefined);
       seen.push({ method: req.method, path: url.pathname + url.search, auth, body });
+      const att = url.pathname.match(/^\/rest\/api\/content\/(\d+)\/child\/attachment$/);
+      if (att && auth === `Bearer ${GOOD}`) {
+        if (!pages.has(att[1]!)) return problem(404, "No content found");
+        const held = attachments.get(att[1]!) ?? new Map();
+        attachments.set(att[1]!, held);
+        if (req.method === "GET") {
+          const results = [...held.keys()].map((title, i) => ({ id: `att${i}`, type: "attachment", title }));
+          return Response.json({ results, size: results.length, _links: {} });
+        }
+        if (req.method === "POST") {
+          // Confluence refuses an upload without this header (XSRF check).
+          if (req.headers.get("x-atlassian-token") !== "nocheck") return problem(403, "XSRF check failed");
+          if (!multipart) return problem(400, "No file");
+          const form = await req.formData();
+          for (const file of form.getAll("file")) {
+            if (!(file instanceof File)) continue;
+            held.set(file.name, { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type });
+          }
+          return Response.json({ results: [...held.keys()].map((title) => ({ title })) });
+        }
+      }
       if (url.pathname === "/rest/api/user/current") {
         if (auth === `Bearer ${ANON}`) return Response.json({ type: "anonymous", username: "anonymous" });
         if (auth !== `Bearer ${GOOD}`) return problem(401, "Unauthorized");
@@ -149,6 +173,7 @@ beforeEach(async () => {
   await saveFeature(data, FILE, SAMPLE);
   await writeState({ dataRepo: data }, root);
   pages = new Map();
+  attachments = new Map();
   nextId = 100;
   seen = [];
   wiki = stubConfluence();
@@ -379,5 +404,49 @@ describe("publishing a feature", () => {
     expect((await saveToken()).status).toBe(403);
     expect((await publish(parentUrl())).status).toBe(403);
     expect(seen).toHaveLength(0);
+  });
+
+  test("the images a page shows are uploaded as its attachments, once", async () => {
+    await saveToken();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    await mkdir(join(data, ".images"), { recursive: true });
+    await writeFile(join(data, ".images", "flow-0a1b2c3d.png"), png);
+    const images = "![the flow](/api/images/flow-0a1b2c3d.png)\n\n![gone](/api/images/gone-ffffffff.png)\n\n";
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic", `${images}## Basic`));
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(200);
+    const xhtml = pages.get("100")!.body;
+    expect(xhtml).toContain('<ac:image ac:alt="the flow"><ri:attachment ri:filename="flow-0a1b2c3d.png" /></ac:image>');
+    expect(xhtml).not.toContain("/api/images/");
+    expect(attachments.get("100")!.get("flow-0a1b2c3d.png")).toEqual({ bytes: png, type: "image/png" });
+    // One the data repo does not hold cannot go up; the page is published anyway.
+    expect(attachments.get("100")!.has("gone-ffffffff.png")).toBe(false);
+    expect(res.body.warning).toContain("gone-ffffffff.png");
+    const uploads = () => seen.filter((r) => r.method === "POST" && r.path.endsWith("/child/attachment")).length;
+    expect(uploads()).toBe(1);
+    // Published again, the attachment is already there — nothing is sent twice.
+    await publish(parentUrl());
+    expect(uploads()).toBe(1);
+    expect(pages.get("100")!.version).toBe(2);
+  });
+
+  test("a page whose images cannot be attached is still published, with a warning", async () => {
+    await saveToken();
+    await mkdir(join(data, ".images"), { recursive: true });
+    await writeFile(join(data, ".images", "flow-0a1b2c3d.png"), new Uint8Array([1]));
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic", "![flow](/api/images/flow-0a1b2c3d.png)\n\n## Basic"));
+    const inner = server;
+    server = Bun.serve({
+      port: 0,
+      fetch: (req) => (req.url.includes("/child/attachment") ? problem(500, "disk full") : inner.fetch(req)),
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    await saveToken(GOOD, `${base}/spaces/ABC/pages/1/Specs`);
+    const res = await publish(`${base}/spaces/ABC/pages/1/Specs`);
+    inner.stop(true);
+    expect(res.status).toBe(200);
+    expect(pages.get("100")!.body).toContain("ri:attachment");
+    expect(res.body.warning).toContain("images were not attached");
+    expect(res.body.warning).toContain("disk full");
   });
 });
