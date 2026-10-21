@@ -162,11 +162,8 @@ describe("the feature", () => {
 // specs/ui/scenario-polarity.feature.md "The Confluence page groups
 // scenarios by polarity".
 describe("polarity", () => {
-  const lozenge = (negative: boolean) =>
-    `<ac:structured-macro ac:name="status" ac:schema-version="1">` +
-    `<ac:parameter ac:name="colour">${negative ? "Red" : "Green"}</ac:parameter>` +
-    `<ac:parameter ac:name="title">${negative ? "Negative" : "Positive"}</ac:parameter>` +
-    `</ac:structured-macro> `;
+  const POSITIVE = '<h1><span style="color: rgb(0,135,90);">Positive</span></h1>';
+  const NEGATIVE = '<h1><span style="color: rgb(222,53,11);">Negative</span></h1>';
   const MIXED = SAMPLE.replace(
     "## Declined Quote @v2 [published]\n",
     "## Declined Quote @v2 [published]\n\n[negative]\n",
@@ -177,16 +174,16 @@ describe("polarity", () => {
     expect(renderFeatureStorage(parseFeature(MIXED), "all", { polarity: false })).not.toContain("Negative");
   });
 
-  test("with it on, a Positive section then a Negative one, each heading with its lozenge after the number", () => {
+  test("with it on, a green Positive section then a red Negative one, and no marker on the scenarios", () => {
     const xhtml = renderFeatureStorage(parseFeature(MIXED), "all", { polarity: true });
     expect(xhtml).toBe(
       "<p>Quotes for <strong>potential</strong> customers.</p>" +
-        "<h1>Positive</h1>" +
-        `<h2>${anchored(1)}${lozenge(false)}Basic Quote</h2>` +
+        POSITIVE +
+        `<h2>${anchored(1)}Basic Quote</h2>` +
         "<ul><li><strong>Given</strong> a potential customer has an account</li><li><strong>Then</strong> a quote is provided</li></ul>" +
         `<p><strong>Tests</strong></p><ul><li><a href="${TEST_URL}" title="${TEST_URL}">gives a quote</a></li></ul>` +
-        "<h1>Negative</h1>" +
-        `<h2>${anchored(2)}${lozenge(true)}Declined Quote</h2>` +
+        NEGATIVE +
+        `<h2>${anchored(2)}Declined Quote</h2>` +
         "<p>Given the customer has no account<br />Then the quote is declined</p>",
     );
   });
@@ -194,14 +191,14 @@ describe("polarity", () => {
   test("a section with no scenario in scope is left out, and the numbers stay the feature's", () => {
     const feature = parseFeature(MIXED);
     const published = renderFeatureStorage(feature, "published", { polarity: true });
-    expect(published).not.toContain("<h1>Positive</h1>");
-    expect(published).toContain(`<h1>Negative</h1><h2>${anchored(2)}${lozenge(true)}Declined Quote</h2>`);
+    expect(published).not.toContain("Positive");
+    expect(published).toContain(`${NEGATIVE}<h2>${anchored(2)}Declined Quote</h2>`);
     const all = renderFeatureStorage(parseFeature(SAMPLE), "all", { polarity: true });
-    expect(all).toContain("<h1>Positive</h1>");
-    expect(all).not.toContain("<h1>Negative</h1>");
-    // A draft takes a lozenge but no number; an empty scope still says so.
+    expect(all).toContain(POSITIVE);
+    expect(all).not.toContain("Negative");
+    // A draft has no number; an empty scope still says so.
     feature.scenarios.push({ name: "Idea", version: 1, status: "draft", body: "", tests: [], negative: true });
-    expect(renderFeatureStorage(feature, "all", { polarity: true })).toContain(`<h2>${lozenge(true)}Idea</h2>`);
+    expect(renderFeatureStorage(feature, "all", { polarity: true })).toContain("<h2>Idea</h2>");
     expect(renderFeatureStorage(parseFeature("# F\n"), "all", { polarity: true })).toBe("<p><em>No scenarios yet.</em></p>");
   });
 });
