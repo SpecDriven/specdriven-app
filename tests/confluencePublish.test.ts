@@ -6,6 +6,7 @@
 // records what it was sent.
 
 import { test, expect, beforeEach, afterEach, describe } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,8 +97,16 @@ function stubConfluence(): string {
           if (req.headers.get("x-atlassian-token") !== "nocheck") return problem(403, "XSRF check failed");
           if (!multipart) return problem(400, "No file");
           const form = await req.formData();
-          for (const file of form.getAll("file")) {
-            if (!(file instanceof File)) continue;
+          const files = form.getAll("file").filter((f): f is File => f instanceof File);
+          const flags = form.getAll("minorEdit").length;
+          if (flags !== 0 && flags !== files.length) {
+            return problem(400, "Must have the same number of attachment files and minorEdits flag, or not have any minorEdits flags at all");
+          }
+          // Confluence refuses a new attachment under a name the page already has.
+          if (files.some((f) => held.has(f.name))) {
+            return problem(400, "Cannot add a new attachment with same file name as an existing attachment");
+          }
+          for (const file of files) {
             held.set(file.name, { bytes: new Uint8Array(await file.arrayBuffer()), type: file.type });
           }
           return Response.json({ results: [...held.keys()].map((title) => ({ title })) });
@@ -406,23 +415,27 @@ describe("publishing a feature", () => {
     expect(seen).toHaveLength(0);
   });
 
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  /** The name storeImage gives these bytes: the stem and the first 8 hex digits of their SHA-256. */
+  const stored = (stem: string, bytes: Uint8Array) => `${stem}-${createHash("sha256").update(bytes).digest("hex").slice(0, 8)}.png`;
+  const uploads = () => seen.filter((r) => r.method === "POST" && r.path.endsWith("/child/attachment")).length;
+
   test("the images a page shows are uploaded as its attachments, once", async () => {
     await saveToken();
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const flow = stored("flow", PNG);
     await mkdir(join(data, ".images"), { recursive: true });
-    await writeFile(join(data, ".images", "flow-0a1b2c3d.png"), png);
-    const images = "![the flow](/api/images/flow-0a1b2c3d.png)\n\n![gone](/api/images/gone-ffffffff.png)\n\n";
+    await writeFile(join(data, ".images", flow), PNG);
+    const images = `![the flow](/api/images/${flow})\n\n![gone](/api/images/gone-ffffffff.png)\n\n`;
     await saveFeature(data, FILE, SAMPLE.replace("## Basic", `${images}## Basic`));
     const res = await publish(parentUrl());
     expect(res.status).toBe(200);
     const xhtml = pages.get("100")!.body;
-    expect(xhtml).toContain('<ac:image ac:alt="the flow"><ri:attachment ri:filename="flow-0a1b2c3d.png" /></ac:image>');
+    expect(xhtml).toContain(`<ac:image ac:alt="the flow"><ri:attachment ri:filename="${flow}" /></ac:image>`);
     expect(xhtml).not.toContain("/api/images/");
-    expect(attachments.get("100")!.get("flow-0a1b2c3d.png")).toEqual({ bytes: png, type: "image/png" });
+    expect(attachments.get("100")!.get(flow)).toEqual({ bytes: PNG, type: "image/png" });
     // One the data repo does not hold cannot go up; the page is published anyway.
     expect(attachments.get("100")!.has("gone-ffffffff.png")).toBe(false);
     expect(res.body.warning).toContain("gone-ffffffff.png");
-    const uploads = () => seen.filter((r) => r.method === "POST" && r.path.endsWith("/child/attachment")).length;
     expect(uploads()).toBe(1);
     // Published again, the attachment is already there — nothing is sent twice.
     await publish(parentUrl());
@@ -430,11 +443,57 @@ describe("publishing a feature", () => {
     expect(pages.get("100")!.version).toBe(2);
   });
 
+  test("several images go up in one upload", async () => {
+    await saveToken();
+    const other = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]);
+    const [flow, map] = [stored("flow", PNG), stored("map", other)];
+    await mkdir(join(data, ".images"), { recursive: true });
+    await writeFile(join(data, ".images", flow), PNG);
+    await writeFile(join(data, ".images", map), other);
+    const images = `![flow](/api/images/${flow})\n\n![map](/api/images/${map})\n\n`;
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic", `${images}## Basic`));
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toBeUndefined();
+    expect(uploads()).toBe(1);
+    expect([...attachments.get("100")!.keys()].sort()).toEqual([flow, map].sort());
+  });
+
+  test("an image edited in place since it was stored is attached again under the name its bytes earn", async () => {
+    await saveToken();
+    const flow = stored("flow", PNG);
+    await mkdir(join(data, ".images"), { recursive: true });
+    await writeFile(join(data, ".images", flow), PNG);
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic", `![the flow](/api/images/${flow})\n\n## Basic`));
+    expect((await publish(parentUrl())).status).toBe(200);
+    expect(uploads()).toBe(1);
+    // A touch-up saved over the file keeps its name in the repo, so the name
+    // no longer says what the page's attachment holds: the page now refers
+    // to the file by the name of its current bytes, uploaded alongside.
+    const touched = new Uint8Array([...PNG, 9]);
+    await writeFile(join(data, ".images", flow), touched);
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toBeUndefined();
+    const renamed = stored("flow", touched);
+    expect(renamed).not.toBe(flow);
+    const xhtml = pages.get("100")!.body;
+    expect(xhtml).toContain(`<ri:attachment ri:filename="${renamed}" />`);
+    expect(xhtml).not.toContain(`"${flow}"`);
+    expect(attachments.get("100")!.get(renamed)).toEqual({ bytes: touched, type: "image/png" });
+    expect(attachments.get("100")!.get(flow)).toEqual({ bytes: PNG, type: "image/png" });
+    expect(uploads()).toBe(2);
+    // Unchanged since, it is not sent again.
+    await publish(parentUrl());
+    expect(uploads()).toBe(2);
+  });
+
   test("a page whose images cannot be attached is still published, with a warning", async () => {
     await saveToken();
     await mkdir(join(data, ".images"), { recursive: true });
-    await writeFile(join(data, ".images", "flow-0a1b2c3d.png"), new Uint8Array([1]));
-    await saveFeature(data, FILE, SAMPLE.replace("## Basic", "![flow](/api/images/flow-0a1b2c3d.png)\n\n## Basic"));
+    const flow = stored("flow", PNG);
+    await writeFile(join(data, ".images", flow), PNG);
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic", `![flow](/api/images/${flow})\n\n## Basic`));
     const inner = server;
     server = Bun.serve({
       port: 0,

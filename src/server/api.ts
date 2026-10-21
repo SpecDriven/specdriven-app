@@ -139,7 +139,7 @@ import {
 } from "./agentChat";
 import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
 import { directoryExists } from "./fsx";
-import { imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
+import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import {
   FILES_DIR,
   MAX_FILE_BYTES,
@@ -153,7 +153,7 @@ import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, 
 import type { Feature } from "./parser";
 import { attachFiles, ConfluenceError, publishFeaturePage, resolveParent, validateToken } from "./confluence";
 import { normalizeConfluenceBase, onBase, parseParentPageUrl } from "./confluenceUrl";
-import { attachmentNames, isPublishScope, renderFeatureStorage } from "./confluenceStorage";
+import { attachmentNames, isPublishScope, renameAttachments, renderFeatureStorage } from "./confluenceStorage";
 import {
   clearConfluenceToken,
   confluenceToken,
@@ -1407,7 +1407,21 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   // (specs/ui/scenario-polarity.feature.md).
   const state = await readState(getAppRoot());
   const polarity = normalizeScenarioPolarity(state.scenarioPolarity);
-  const xhtml = renderFeatureStorage(feature, scope, { polarity });
+  // The images the page shows (specs/images.feature.md) go up as its
+  // attachments, each named by the bytes it holds: a stored name carries a
+  // hash of the file as it was stored, and one edited in place since keeps
+  // that name, so the page refers to such a file by the name its current
+  // bytes earn. An attachment already there under the name is the same
+  // file and is left alone.
+  const rendered = renderFeatureStorage(feature, scope, { polarity });
+  const images = await Promise.all(
+    attachmentNames(rendered).map(async (stored) => {
+      const bytes = await readImage(dir, stored);
+      const name = bytes ? currentImageName(stored, bytes) : stored;
+      return { stored, name, mime: imageMime(name), bytes };
+    }),
+  );
+  const xhtml = renameAttachments(rendered, new Map(images.map((i) => [i.stored, i.name])));
   let page: { id: string; url: string; created: boolean };
   try {
     const parent = await resolveParent(ref.base, record.token, ref);
@@ -1423,14 +1437,10 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
     if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
     return json({ error: (e as Error).message }, 502);
   }
-  // The images the page shows (specs/images.feature.md) go up as its
-  // attachments, the ones already there left alone. The page is published
-  // either way: a failure here is reported as a warning, not an error.
+  // The page is published whether or not its images can be attached: a
+  // failure here is reported as a warning, not an error.
   const warnings: string[] = [];
-  const images = await Promise.all(
-    attachmentNames(xhtml).map(async (name) => ({ name, mime: imageMime(name), bytes: await readImage(dir, name) })),
-  );
-  const missing = images.filter((i) => i.bytes === null).map((i) => i.name);
+  const missing = images.filter((i) => i.bytes === null).map((i) => i.stored);
   if (missing.length > 0) warnings.push(`Not stored in the data repo, so not attached: ${missing.join(", ")}`);
   try {
     await attachFiles(

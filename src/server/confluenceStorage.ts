@@ -14,7 +14,8 @@
 //
 // An image the app stores (specs/images.feature.md) is out of Confluence's
 // reach by url, so the page refers to it as an attachment of its own name,
-// and the publish route uploads the file (attachmentNames says which).
+// and the publish route uploads the file (attachmentNames says which; the
+// route renames one whose bytes have moved on with renameAttachments).
 
 import {
   BLOCK_START,
@@ -58,7 +59,8 @@ function link(href: string, text: string): string {
 /**
  * An image: one on the web is embedded by url; one the app stores
  * (`/api/images/<name>`) as the page's attachment of that name, which the
- * publish route uploads. Any other relative path is nothing Confluence can
+ * publish route uploads (under another name when the file's bytes have
+ * changed since it was named). Any other relative path is nothing Confluence can
  * show, so its alt text stands in for it.
  */
 function image(src: string | undefined, alt: string, snippet: string): string {
@@ -81,6 +83,19 @@ export function attachmentNames(body: string): string[] {
   // A stored name is letters, digits, dashes and a dot, so none was escaped.
   for (const m of body.matchAll(/<ri:attachment ri:filename="([^"]+)" \/>/g)) names.add(m[1]!);
   return [...names];
+}
+
+/**
+ * The body with its attachments renamed: `names` maps a stored image's name
+ * to the one it is attached under (images.ts currentImageName — the name
+ * its bytes go by, which differs once the file was edited in place). A name
+ * not in the map stays.
+ */
+export function renameAttachments(body: string, names: ReadonlyMap<string, string>): string {
+  return body.replace(/<ri:attachment ri:filename="([^"]+)" \/>/g, (tag, name: string) => {
+    const attached = names.get(name);
+    return attached === undefined || attached === name ? tag : `<ri:attachment ri:filename="${escapeXml(attached)}" />`;
+  });
 }
 
 /** A `[test: … ]` reference as a link named after the test. */
