@@ -327,14 +327,15 @@ describe("publishing a feature", () => {
     await saveToken();
     await saveFeature(data, FILE, SAMPLE.replace("## Basic Quote @v1 [proposed]\n", "## Basic Quote @v1 [proposed]\n\n[negative]\n"));
     await publish(parentUrl());
-    expect(pages.get("100")!.body).not.toContain("<h1>Negative</h1>");
+    expect(pages.get("100")!.body).not.toContain("Negative");
     await writeState({ ...(await readState(root)), scenarioPolarity: true }, root);
     await publish(parentUrl());
     const xhtml = pages.get("100")!.body;
-    expect(xhtml.indexOf("<h1>Positive</h1>")).toBeLessThan(xhtml.indexOf("Declined Quote"));
-    expect(xhtml.indexOf("Declined Quote")).toBeLessThan(xhtml.indexOf("<h1>Negative</h1>"));
-    expect(xhtml.indexOf("<h1>Negative</h1>")).toBeLessThan(xhtml.indexOf("Basic Quote"));
-    expect(xhtml).toContain('<ac:parameter ac:name="colour">Red</ac:parameter>');
+    expect(xhtml.indexOf(">Positive<")).toBeLessThan(xhtml.indexOf("Declined Quote"));
+    expect(xhtml.indexOf("Declined Quote")).toBeLessThan(xhtml.indexOf(">Negative<"));
+    expect(xhtml.indexOf(">Negative<")).toBeLessThan(xhtml.indexOf("Basic Quote"));
+    expect(xhtml).toContain('<h1><span style="color: rgb(222,53,11);">Negative</span></h1>');
+    expect(xhtml).not.toContain('ac:name="status"');
     // The parent is still remembered on the way.
     expect((await readState(root)).confluenceParentUrl).toBe(parentUrl());
   });
