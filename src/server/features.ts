@@ -1194,8 +1194,10 @@ async function assertPublishedUnchanged(dataDir: string, fileName: string, next:
 /**
  * The one door into the data repo for feature content. The text is checked
  * against the file format first, so a malformed feature — a lost `# <name>`
- * heading, junk above it — is an error the user sees rather than a file the
- * next sync commits and pushes. Then the Automerge document (the system of
+ * heading, junk above it, a code fence left open (parser.ts unclosedFence:
+ * every scenario heading after it would be swallowed into the body above and
+ * reconciled as a deletion) — is an error the user sees rather than a file
+ * the next sync commits and pushes. Then the Automerge document (the system of
  * record) absorbs the edit — reconciled as CRDT operations, or imported
  * whole for a feature that predates its document — and what lands in the
  * `.feature.md` is the document's projection: parse-equal to the input,

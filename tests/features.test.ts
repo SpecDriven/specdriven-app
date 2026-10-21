@@ -264,6 +264,58 @@ describe("a save racing an unsynced disk edit", () => {
   });
 });
 
+// specs/editor/editor-autosave.feature.md "Autosave Waits While a Code Fence
+// Is Open": the editor buffer ends inside a fence for a few keystrokes
+// whenever one is typed. Parsed as is, every scenario heading after the open
+// fence is fenced content, so the scenarios under them vanish from the text
+// and reconcile would delete them from the document as if the user had — the
+// way a [proposed] scenario was once erased. The save is refused instead.
+describe("a save whose text ends inside a code fence", () => {
+  const file = "specs/fence.feature.md";
+  const closed =
+    "# Fence\n\n## Context @v1 [proposed]\n\n```gherkin\nGiven a priority context\n```\n\n" +
+    "## Selecting a priority segment @v1 [proposed]\n\nGiven a segment <Priority>\n\n" +
+    "Examples:\n| Priority |\n| high |\n";
+  // The closing fence of the first scenario is momentarily missing.
+  const open = closed.replace("Given a priority context\n```\n", "Given a priority context\n");
+
+  beforeEach(async () => {
+    await createFeature(root, "Fence", closed);
+  });
+
+  test("is refused, and keeps the scenario the open fence would swallow", async () => {
+    expect(saveFeature(root, file, open)).rejects.toThrow(
+      "Refusing to write specs/fence.feature.md — the code fence opened on line 5 is never closed",
+    );
+    expect(await readFeature(root, file)).toBe(closed);
+    const doc = (await loadFeatureDoc(root, file))!.doc;
+    expect(doc.specs.map((e) => e.name)).toEqual(["Context", "Selecting a priority segment"]);
+    expect(projectFeature(doc)).toBe(closed);
+  });
+
+  test("lands once the fence is closed again", async () => {
+    const edited = closed.replace("Given a priority context", "Given a priority context typed");
+    expect(saveFeature(root, file, open)).rejects.toThrow("never closed");
+    await saveFeature(root, file, edited);
+    expect(await readFeature(root, file)).toBe(edited);
+    expect((await loadFeatureDoc(root, file))!.doc.specs).toHaveLength(2);
+  });
+
+  test("a publish is refused the same way", async () => {
+    expect(publishFeature(root, file, open)).rejects.toThrow("never closed");
+    expect(await readFeature(root, file)).toBe(closed);
+  });
+
+  test("a file left open on disk is not absorbed by the drift pass", async () => {
+    await Bun.write(join(root, file), open);
+    expect(await importDrift(root)).toBe("");
+    const doc = (await loadFeatureDoc(root, file))!.doc;
+    expect(doc.specs.map((e) => e.name)).toEqual(["Context", "Selecting a priority segment"]);
+    // The disk file is left for whoever is mid-edit there to finish.
+    expect(await Bun.file(join(root, file)).text()).toBe(open);
+  });
+});
+
 // Publishing a proposed scenario upgrades the proposed chip to published.
 test("publishFeature upgrades proposed scenarios to published", async () => {
   await createFeature(root, "Quote");

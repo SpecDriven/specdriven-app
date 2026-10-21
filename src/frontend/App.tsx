@@ -11,6 +11,7 @@ import {
   slugify,
   sortScenarios,
   titleFromFileName,
+  unclosedFence,
 } from "../server/parser";
 import type {
   Feature,
@@ -3620,6 +3621,12 @@ export function App() {
     // A scenario with no name has nothing to be saved under; the Save button
     // is disabled for the same reason.
     if (!editing.scenario.name.trim()) return;
+    // A code fence is still being typed: the body ends inside it, so every
+    // scenario heading after it would read as fenced content and the server
+    // refuses the save rather than drop those scenarios
+    // (specs/editor/editor-autosave.feature.md "Autosave Waits While a Code
+    // Fence Is Open"). The tick after the fence closes saves it.
+    if (unclosedFence(editing.scenario.body) !== null) return;
     const signature = scenarioSignature(editing.scenario, draftVersion);
     if (signature === autosaved.current) return;
     const session = editorSession.current;
