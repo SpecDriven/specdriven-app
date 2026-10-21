@@ -7,6 +7,7 @@ import type {
 } from "react";
 import {
   parseFeature,
+  scenarioNumbers,
   serializeFeature,
   slugify,
   titleFromFileName,
@@ -566,16 +567,9 @@ export function withScenarioMoved(feature: Feature, from: number, to: number): F
   return { ...feature, scenarios };
 }
 
-/**
- * Each scenario's number — `S1`, `S2`, … by position among the scenarios
- * the file holds (specs/ui/ui.feature.md "number scenarios") — or null for
- * a draft, which lives in the document only and has no place in the file.
- * Computed over the whole list, so a filtered view shows the same numbers.
- */
-export function scenarioNumbers(scenarios: readonly Pick<Scenario, "status">[]): (number | null)[] {
-  let n = 0;
-  return scenarios.map((s) => (s.status === "draft" ? null : ++n));
-}
+// Each scenario's number lives beside the file format it labels, so the
+// Confluence page numbers its scenarios as the cards do.
+export { scenarioNumbers };
 
 /**
  * The version a scenario takes in `feature` when its version is derived

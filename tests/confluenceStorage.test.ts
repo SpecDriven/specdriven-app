@@ -13,6 +13,11 @@ import {
 } from "../src/server/confluenceStorage";
 import { parseFeature } from "../src/server/parser";
 
+/** The number a scenario heading leads with: an anchor and a link to it. */
+const anchored = (n: number) =>
+  `<ac:structured-macro ac:name="anchor" ac:schema-version="1"><ac:parameter ac:name="">S${n}</ac:parameter></ac:structured-macro>` +
+  `<ac:link ac:anchor="S${n}"><ac:plain-text-link-body><![CDATA[S${n}]]></ac:plain-text-link-body></ac:link> · `;
+
 const TEST_URL = "https://github.com/acme/app/blob/main/tests/quote.test.ts#L12";
 
 const SAMPLE = `# Quote Policy
@@ -111,10 +116,10 @@ describe("the feature", () => {
     const xhtml = renderFeatureStorage(parseFeature(SAMPLE), "all");
     expect(xhtml).toBe(
       "<p>Quotes for <strong>potential</strong> customers.</p>" +
-        "<h2>Basic Quote</h2>" +
+        `<h2>${anchored(1)}Basic Quote</h2>` +
         "<ul><li><strong>Given</strong> a potential customer has an account</li><li><strong>Then</strong> a quote is provided</li></ul>" +
         `<p><strong>Tests</strong></p><ul><li><a href="${TEST_URL}" title="${TEST_URL}">gives a quote</a></li></ul>` +
-        "<h2>Declined Quote</h2>" +
+        `<h2>${anchored(2)}Declined Quote</h2>` +
         "<p>Given the customer has no account<br />Then the quote is declined</p>",
     );
   });
@@ -124,8 +129,21 @@ describe("the feature", () => {
     expect(scenariosInScope(feature, "published").map((s) => s.name)).toEqual(["Declined Quote"]);
     expect(scenariosInScope(feature, "all")).toHaveLength(2);
     const xhtml = renderFeatureStorage(feature, "published");
-    expect(xhtml).toContain("<h2>Declined Quote</h2>");
+    expect(xhtml).toContain(`<h2>${anchored(2)}Declined Quote</h2>`);
     expect(xhtml).not.toContain("Basic Quote");
+  });
+
+  test("each scenario leads with its number, an anchor linking to itself, as in the app", () => {
+    const feature = parseFeature(SAMPLE);
+    feature.scenarios.splice(1, 0, { name: "Idea", version: 1, status: "draft", body: "", tests: [] });
+    const headings = renderFeatureStorage(feature, "all").match(/<h2>.*?<\/h2>/g);
+    expect(headings).toEqual([
+      `<h2>${anchored(1)}Basic Quote</h2>`,
+      "<h2>Idea</h2>",
+      `<h2>${anchored(2)}Declined Quote</h2>`,
+    ]);
+    // A page of the published alone keeps the numbers, so a deep link reads the same.
+    expect(renderFeatureStorage(feature, "published")).toContain(`<h2>${anchored(2)}Declined Quote</h2>`);
   });
 
   test("a draft shows no status or version, and a scenario name is escaped", () => {
