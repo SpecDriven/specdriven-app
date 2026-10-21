@@ -22,6 +22,8 @@ export class ConfluenceError extends Error {
 interface Init {
   method?: string;
   json?: unknown;
+  /** A multipart body (an attachment upload); fetch writes its content type. */
+  form?: FormData;
 }
 
 /** One request to a wiki's REST API, with the token and headers it wants. */
@@ -32,12 +34,14 @@ export async function confluenceRequest(base: string, path: string, token: strin
     Authorization: `Bearer ${token}`,
   };
   if (init.json !== undefined) headers["Content-Type"] = "application/json";
+  // Confluence refuses a multipart upload without this (XSRF protection).
+  if (init.form !== undefined) headers["X-Atlassian-Token"] = "nocheck";
   let res: Response;
   try {
     res = await fetch(`${base}${path}`, {
       method: init.method ?? "GET",
       headers,
-      body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
+      body: init.json !== undefined ? JSON.stringify(init.json) : init.form,
       redirect: "manual",
     });
   } catch (e) {
@@ -281,4 +285,49 @@ export async function publishFeaturePage(p: {
   }
   const page = await createPage(p.base, p.token, fields);
   return { id: page.id, url: page.url, created: true };
+}
+
+/** A file to attach to a page: the name the page's body refers to it by. */
+export interface AttachmentFile {
+  name: string;
+  mime: string;
+  bytes: Uint8Array;
+}
+
+/** The names of a page's current attachments. */
+async function attachmentNamesOf(base: string, token: string, pageId: string): Promise<Set<string>> {
+  const names = new Set<string>();
+  const path = `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`;
+  for (let start = 0; ; ) {
+    const page = await confluence<{ results?: { title?: string }[]; size?: number; _links?: { next?: string } }>(
+      base,
+      `${path}?limit=200&start=${start}`,
+      token,
+    );
+    for (const a of page.results ?? []) if (a.title) names.add(a.title);
+    if (!page._links?.next || !page.results?.length) break;
+    start += page.results.length;
+  }
+  return names;
+}
+
+/**
+ * Attach the files a page's body refers to (confluenceStorage's
+ * attachmentNames). A stored image's name carries a hash of its bytes, so an
+ * attachment already there under the name is the same file and is left
+ * alone; only the missing ones are uploaded. Returns how many were.
+ */
+export async function attachFiles(base: string, token: string, pageId: string, files: AttachmentFile[]): Promise<number> {
+  if (files.length === 0) return 0;
+  const present = await attachmentNamesOf(base, token, pageId);
+  const missing = files.filter((f) => !present.has(f.name));
+  if (missing.length === 0) return 0;
+  const form = new FormData();
+  for (const f of missing) form.append("file", new Blob([f.bytes as BlobPart], { type: f.mime }), f.name);
+  form.append("minorEdit", "true");
+  await confluenceRequest(base, `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, token, {
+    method: "POST",
+    form,
+  });
+  return missing.length;
 }
