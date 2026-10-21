@@ -91,6 +91,7 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   },
   assignments: true,
   featureFlags: true,
+  scenarioPolarity: true,
   deletePublished: true,
   googleCalendar: true,
   showTestLinks: true,

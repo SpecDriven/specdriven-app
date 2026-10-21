@@ -243,6 +243,12 @@ export interface Scenario {
   flags?: FeatureFlag[];
   /** Its custom attributes (specs/app/custom-attributes.feature.md), in written order. */
   attributes?: SpecAttribute[];
+  /**
+   * Whether the scenario is a negative one (specs/ui/scenario-polarity.feature.md):
+   * a `[negative]` line under its heading. Absent means positive — the
+   * marker is binary and only the negative side is ever written.
+   */
+  negative?: true;
 }
 
 export interface Feature {
@@ -990,6 +996,24 @@ function metaLinks(
 }
 
 /**
+ * The negative marker (specs/ui/scenario-polarity.feature.md): a line of
+ * nothing but `[negative]`. It has no `:` segment, so the attribute grammar
+ * (parseMetadataTokens) never claims it, and a release from before the
+ * marker reads it as the first line of the body.
+ */
+const NEGATIVE_LINE_RE = /^\s{0,3}\[negative\]\s*$/i;
+
+/** Whether a line is the negative marker. */
+export function parseNegativeLine(line: string): boolean {
+  return NEGATIVE_LINE_RE.test(line);
+}
+
+/** The negative marker as serializeFeature writes it. */
+export function formatNegative(): string {
+  return "[negative]";
+}
+
+/**
  * Lift a feature's metadata lines — its feature flags and custom attributes,
  * its ticket link, its assignment and its authorship — off the top of the
  * text under the `#` heading. They may come in any order, and anything else
@@ -1055,8 +1079,8 @@ export function splitFeatureMeta(text: string): {
 
 /**
  * Lift a scenario's metadata lines — its feature flags and custom
- * attributes, its ticket link and its authorship — off the top of its body,
- * in any order; the rest is the body.
+ * attributes, its negative marker, its ticket link and its authorship — off
+ * the top of its body, in any order; the rest is the body.
  */
 export function splitScenarioMeta(text: string): {
   text: string;
@@ -1066,12 +1090,14 @@ export function splitScenarioMeta(text: string): {
   updatedBy?: string;
   flags?: FeatureFlag[];
   attributes?: SpecAttribute[];
+  negative?: true;
 } {
   let rest = text;
   let link: ExternalLink | undefined;
   let qtest: ExternalLink | undefined;
   let createdBy: string | undefined;
   let updatedBy: string | undefined;
+  let negative: true | undefined;
   const flags: FeatureFlag[] = [];
   const attributes: SpecAttribute[] = [];
   let lifted = false;
@@ -1085,6 +1111,8 @@ export function splitScenarioMeta(text: string): {
     const { nextLink, nextQtest } = metaLinks(line, link, qtest, undefined);
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
+    // Taken once, like the links: a second marker is content.
+    const nextNegative = negative === undefined && parseNegativeLine(line);
     if (nextTokens) {
       addFlags(flags, nextTokens.flags);
       addAttributes(attributes, nextTokens.attributes);
@@ -1092,6 +1120,7 @@ export function splitScenarioMeta(text: string): {
     else if (nextQtest) qtest = nextQtest;
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
+    else if (nextNegative) negative = true;
     else break;
     lifted = true;
     rest = trimBlankLines(lines.slice(at + 1).join("\n"));
@@ -1105,6 +1134,7 @@ export function splitScenarioMeta(text: string): {
     ...(updatedBy ? { updatedBy } : {}),
     ...(flags.length > 0 ? { flags } : {}),
     ...(attributes.length > 0 ? { attributes } : {}),
+    ...(negative ? { negative } : {}),
   };
 }
 
@@ -1238,11 +1268,11 @@ export function parseFeature(text: string): Feature {
   const flush = () => {
     if (current) {
       const split = splitTests(trimBlankLines(bodyLines.join("\n")));
-      const { text, link, qtest, createdBy, updatedBy, flags, attributes } = splitScenarioMeta(
-        split.body,
-      );
+      const { text, link, qtest, createdBy, updatedBy, flags, attributes, negative } =
+        splitScenarioMeta(split.body);
       current.body = text;
       current.tests = split.tests;
+      if (negative) current.negative = true;
       if (flags) current.flags = flags;
       if (attributes) current.attributes = attributes;
       if (link) current.link = link;
@@ -1363,6 +1393,8 @@ export function serializeFeature(
   for (const s of scenarios) {
     const number = numbers && s.status !== "draft" ? ++position : undefined;
     const chunks = [header(s.name, s.version, s.status, number)];
+    // The negative marker leads the metadata (specs/ui/scenario-polarity.feature.md).
+    if (s.negative) chunks.push(formatNegative());
     if (s.flags?.length) chunks.push(formatFeatureFlags(s.flags));
     const attributes = formatAttributeLines(s.attributes ?? []);
     if (attributes) chunks.push(attributes);

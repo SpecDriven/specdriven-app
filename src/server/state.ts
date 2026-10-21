@@ -152,6 +152,13 @@ export interface SpecDrivenState {
    * hides them: flag lines already in a `.feature.md` are kept as written.
    */
   featureFlags?: boolean;
+  /**
+   * Mark scenarios positive or negative (specs/ui/scenario-polarity.feature.md)
+   * — the green/red pill on each scenario and the Positive / Negative
+   * sections of its Confluence page; absent means OFF. Off only hides the
+   * pill: a `[negative]` line already in a `.feature.md` is kept as written.
+   */
+  scenarioPolarity?: boolean;
   /** Allow deleting or moving published scenarios (specs/editor/spec-editor.feature.md
       "Delete Published Spec"); absent means OFF — published scenarios are
       immutable unless this is explicitly turned on. */
@@ -418,6 +425,12 @@ export function normalizeAssignments(value: unknown): boolean {
 /** Effective feature-flags setting: OFF unless explicitly turned on
     (specs/app/feature-flags.feature.md). */
 export function normalizeFeatureFlags(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective scenario-polarity setting: OFF unless explicitly turned on
+    (specs/ui/scenario-polarity.feature.md). */
+export function normalizeScenarioPolarity(value: unknown): boolean {
   return value === true;
 }
 
