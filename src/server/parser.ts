@@ -1123,16 +1123,42 @@ export function sortScenarios(scenarios: Scenario[]): Scenario[] {
 /**
  * Why a text is not a well-formed feature file, or null when it is
  * (crud-feature.md "Feature file format"): it opens with the
- * feature heading — `# ` followed by the feature name — and nothing above it.
- * Reading stays lenient (a file with no heading still lists, named after its
- * stem); writing does not, so a bug upstream cannot commit a broken file.
+ * feature heading — `# ` followed by the feature name — and nothing above it,
+ * and every code fence it opens is closed (unclosedFence). Reading stays
+ * lenient (a file with no heading still lists, named after its stem); writing
+ * does not, so a bug upstream cannot commit a broken file.
  */
 export function featureTextError(text: string): string | null {
   const first = text.split("\n").find((line) => line.trim() !== "");
   if (first === undefined) return "the file is empty";
-  if (FEATURE_RE.test(first)) return null;
-  if (/^#\s*$/.test(first)) return "the feature heading has no name";
-  return `it must start with the feature heading "# <name>", not ${JSON.stringify(clip(first))}`;
+  if (!FEATURE_RE.test(first)) {
+    if (/^#\s*$/.test(first)) return "the feature heading has no name";
+    return `it must start with the feature heading "# <name>", not ${JSON.stringify(clip(first))}`;
+  }
+  const open = unclosedFence(text);
+  if (open !== null) return `the code fence opened on line ${open} is never closed`;
+  return null;
+}
+
+/**
+ * The line (1-based) of a code fence that is still open at the end of the
+ * text, or null when every fence is closed — by the same rule parseFeature
+ * reads fences with (FENCE_RE toggles on every fence line).
+ *
+ * Text ending inside a fence is not a feature the app can safely absorb:
+ * every `## …` heading after the open fence reads as fenced content, so the
+ * scenarios under them are swallowed into the body above and reconcile would
+ * delete them from the document as if the user had removed them. The editor
+ * buffer passes through that state for a few keystrokes whenever a fence is
+ * typed, which is how a transient typo once erased a proposed scenario.
+ */
+export function unclosedFence(text: string): number | null {
+  let openedAt: number | null = null;
+  text.split("\n").forEach((line, i) => {
+    if (!FENCE_RE.test(line)) return;
+    openedAt = openedAt === null ? i + 1 : null;
+  });
+  return openedAt;
 }
 
 /** Enough of a line to recognize it in an error message. */

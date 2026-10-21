@@ -9,6 +9,7 @@ import {
   markScenarioPublished,
   renameFeatureName,
   titleFromFileName,
+  unclosedFence,
 } from "../src/server/parser";
 
 const SAMPLE = `# Quote Policy
@@ -51,6 +52,25 @@ test("featureTextError names what is wrong with a malformed feature file", () =>
   expect(featureTextError("git diff# Quote Policy\n")).toContain('"git diff# Quote Policy"');
   expect(featureTextError("## Basic @v1\n\nbody\n")).toContain("must start with");
   expect(featureTextError("#Onboard Employee\n")).toContain("must start with");
+});
+
+// specs/editor/editor-autosave.feature.md "Autosave Waits While a Code Fence
+// Is Open": text ending inside a fence swallows every scenario heading after
+// the fence into the body above it, so it is not a feature the app may write.
+test("unclosedFence reports the line of a fence left open at the end", () => {
+  expect(unclosedFence(SAMPLE)).toBeNull();
+  expect(unclosedFence("# X\n\n## A @v1\n\n```gherkin\nGiven x\n```\n")).toBeNull();
+  expect(unclosedFence("# X\n\n## A @v1\n\n```gherkin\nGiven x\n")).toBe(5);
+  expect(unclosedFence("# X\n\n~~~\na\n~~~\n\n## B @v1\n\n   ```\n")).toBe(9);
+  expect(unclosedFence("")).toBeNull();
+});
+
+test("featureTextError refuses a feature whose last code fence is never closed", () => {
+  const open = "# X\n\n## A @v1\n\n```gherkin\nGiven x\n\n## B @v1\n\nbody\n";
+  expect(featureTextError(open)).toBe("the code fence opened on line 5 is never closed");
+  expect(featureTextError(open.replace("Given x\n", "Given x\n```\n"))).toBeNull();
+  // The reason the check exists: parsed as is, the fence swallows scenario B.
+  expect(parseFeature(open).scenarios.map((s) => s.name)).toEqual(["A"]);
 });
 
 test("parses feature name, description, and versioned scenarios", () => {
