@@ -353,3 +353,38 @@ test("showTestLinks defaults to ON and only an explicit false turns it off", () 
   expect(normalizeShowTestLinks("no")).toBe(true);
   expect(normalizeShowTestLinks(false)).toBe(false);
 });
+
+// Only a trailing table of GitHub links is the legacy section
+// (specs/external-links/test-traceability.feature.md "a Tests heading over
+// the author's own notes stays in the body"): a `### Tests` heading over
+// prose, steps or a url to somewhere else is the author's own section. Read
+// as the table, everything under it that was not a url used to vanish on
+// save — once, with no error, a checklist and the steps after it.
+test("a Tests heading over notes or steps stays in the body", () => {
+  const body =
+    "Given x\n\n### Tests\n\nManual checklist:\n- open the app\n- see https://example.com/dash\n\nAnd then more steps";
+  const { body: kept, tests } = splitTests(body);
+  expect(kept).toBe(body);
+  expect(tests).toEqual([]);
+  const feature = parseFeature(`# F\n\n## S @v1 [proposed]\n\n${body}\n`);
+  expect(feature.scenarios[0]!.body).toBe(body);
+  const text = serializeFeature(feature);
+  expect(parseFeature(text)).toEqual(feature);
+  expect(serializeFeature(parseFeature(text))).toBe(text);
+});
+
+test("a Tests heading followed by another scenario-like section keeps both", () => {
+  const body = `steps\n\n### Tests\n\nkept\n\n### Tests\n\n| ${URL_A} |`;
+  // The last heading opens a legacy table; the first, over prose, is content.
+  const { body: kept, tests } = splitTests(body);
+  expect(kept).toBe("steps\n\n### Tests\n\nkept");
+  expect(tests).toEqual([URL_A]);
+  // Written back, the body no longer holds a table, so the next read is stable.
+  const text = serializeFeature(parseFeature(`# F\n\n## S @v1 [proposed]\n\n${body}\n`));
+  expect(serializeFeature(parseFeature(text))).toBe(text);
+});
+
+test("a Tests section whose only link points off GitHub is content", () => {
+  const body = "steps\n\n### Tests\n\n| Test |\n| --- |\n| https://example.com/run |";
+  expect(splitTests(body)).toEqual({ body, tests: [] });
+});

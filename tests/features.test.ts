@@ -944,3 +944,42 @@ describe("a write over a file edited on disk since the last sync tick", () => {
     expect(await readFeature(root, file)).toBe(broken);
   });
 });
+
+// The two ways a save once lost scenario text with no error, now kept
+// (parser.ts splitTests, trimBlankLines) and checked here through the whole
+// write: parse, reconcile into the document, project, write.
+describe("a save keeps body text the parser once dropped", () => {
+  const file = "specs/kept.feature.md";
+  const start = "# Kept\n\n## S1: A @v1 [proposed]\n\nGiven x\n\n## S2: B @v1 [proposed]\n\nGiven y\n";
+
+  beforeEach(async () => {
+    await createFeature(root, "Kept", start);
+  });
+
+  // specs/external-links/test-traceability.feature.md "a Tests heading over
+  // the author's own notes stays in the body"
+  test("a Tests heading with notes under it survives the save", async () => {
+    const edited = start.replace(
+      "Given x\n",
+      "Given x\n\n### Tests\n\nManual checklist:\n- open the app\n- see https://example.com/dash\n\nAnd then more steps\n",
+    );
+    await saveFeature(root, file, edited);
+    expect(await readFeature(root, file)).toBe(edited);
+    const doc = (await loadFeatureDoc(root, file))!.doc;
+    expect(doc.specs[0]!.body).toContain("And then more steps");
+    expect([...doc.specs[0]!.tests]).toEqual([]);
+  });
+
+  // specs/editor/editor-autosave.feature.md "Autosave Waits While a Code
+  // Fence Is Open": the indented fence line is content, not a fence, and
+  // the file written says so too — the next save is not refused.
+  test("a body opening with an indented fence line saves, and saves again", async () => {
+    const edited = start.replace("Given x\n", "    ```\n    indented code\n");
+    await saveFeature(root, file, edited);
+    expect(await readFeature(root, file)).toBe(edited);
+    const again = (await readFeatureForEditor(root, file))!;
+    await saveFeature(root, file, again.replace("Given y", "Given y edited"));
+    const doc = (await loadFeatureDoc(root, file))!.doc;
+    expect(doc.specs.map((e) => e.body)).toEqual(["    ```\n    indented code", "Given y edited"]);
+  });
+});
