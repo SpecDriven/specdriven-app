@@ -37,6 +37,11 @@ The data folder's `README.md` is the app's home page. It is editable in
 place; the first time you open a folder with no README the page invites you
 to write one.
 
+The folder also gets an `AGENTS.md` the first time the app syncs it: a guide
+for AI agents (and people) to the `.feature.md` format, with a section at
+the end for the project's own conventions. Edit it freely; the app writes it
+only into a folder that has none, and never over an existing one.
+
 Inside the folder:
 
 - A **feature** is one file, `<slug>.feature.md`, in any folder. It has a
