@@ -245,8 +245,8 @@ describe("publishing a feature", () => {
       body: { storage: { representation: "storage" } },
     });
     const xhtml = pages.get("100")!.body;
-    expect(xhtml).toContain("<h2>Basic Quote</h2>");
-    expect(xhtml).toContain("<h2>Declined Quote</h2>");
+    expect(xhtml).toContain("</ac:link> · Basic Quote</h2>");
+    expect(xhtml).toContain("</ac:link> · Declined Quote</h2>");
 
     const line = `[Confluence:100](${pageUrl})`;
     expect(await readFeature(data, FILE)).toContain(`# Quote Policy\n\n${line}\n\nQuotes for potential customers.`);

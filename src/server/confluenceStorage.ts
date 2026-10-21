@@ -25,7 +25,7 @@ import {
 } from "../frontend/markdownSyntax";
 import { renderTestInEditor } from "../frontend/testref";
 import { webLinkEnd } from "../frontend/weblinks";
-import { parseTestRef, type Feature, type Scenario } from "./parser";
+import { parseTestRef, scenarioNumbers, type Feature, type Scenario } from "./parser";
 
 /** Which scenarios a page holds: every one, or only the published. */
 export type PublishScope = "all" | "published";
@@ -219,10 +219,29 @@ export function scenariosInScope(feature: Feature, scope: PublishScope): Scenari
   return scope === "published" ? feature.scenarios.filter((s) => s.status === "published") : feature.scenarios;
 }
 
+/**
+ * A scenario's number as its heading's anchor (specs/external-links/
+ * confluence-wiki.feature.md "Each scenario is numbered and can be linked
+ * to"): an anchor macro named `S<n>`, and the number as a link to it, so a
+ * reader clicks the number to put the scenario's deep link in the address
+ * bar. Confluence writes the anchor's fragment itself — page-title-prefixed
+ * on Server and Data Center, bare on Cloud — so the link names the anchor
+ * rather than a fragment.
+ */
+function numberAnchor(n: number): string {
+  const name = `S${n}`;
+  return (
+    `<ac:structured-macro ac:name="anchor" ac:schema-version="1"><ac:parameter ac:name="">${name}</ac:parameter></ac:structured-macro>` +
+    `<ac:link ac:anchor="${name}"><ac:plain-text-link-body><![CDATA[${name}]]></ac:plain-text-link-body></ac:link>`
+  );
+}
+
 // A scenario's status and version are the app's bookkeeping, not part of the
-// spec a wiki reader needs, so the page shows neither.
-function scenarioStorage(s: Scenario): string {
-  const parts = [`<h2>${escapeXml(s.name)}</h2>`];
+// spec a wiki reader needs, so the page shows neither. Its number, a draft
+// aside, leads its heading, as on its card in the app.
+function scenarioStorage(s: Scenario, number: number | null): string {
+  const label = number === null ? "" : `${numberAnchor(number)} · `;
+  const parts = [`<h2>${label}${escapeXml(s.name)}</h2>`];
   if (s.body.trim()) parts.push(renderMarkdownStorage(s.body, 2));
   if (s.tests.length > 0) {
     const items = s.tests.map((t) => {
@@ -234,7 +253,11 @@ function scenarioStorage(s: Scenario): string {
   return parts.join("");
 }
 
-/** A feature as the body of its Confluence page: its description, then its scenarios. */
+/**
+ * A feature as the body of its Confluence page: its description, then its
+ * scenarios. They are numbered over the whole feature, so a page of the
+ * published ones alone keeps the numbers — and the anchors — the app shows.
+ */
 export function renderFeatureStorage(feature: Feature, scope: PublishScope): string {
   const parts: string[] = [];
   if (feature.description.trim()) parts.push(renderMarkdownStorage(feature.description, 1));
@@ -242,6 +265,7 @@ export function renderFeatureStorage(feature: Feature, scope: PublishScope): str
   if (scenarios.length === 0) {
     parts.push(`<p><em>${scope === "published" ? "No published scenarios yet." : "No scenarios yet."}</em></p>`);
   }
-  for (const s of scenarios) parts.push(scenarioStorage(s));
+  const numbers = scenarioNumbers(feature.scenarios);
+  for (const s of scenarios) parts.push(scenarioStorage(s, numbers[feature.scenarios.indexOf(s)] ?? null));
   return parts.join("");
 }
