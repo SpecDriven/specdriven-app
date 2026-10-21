@@ -59,6 +59,25 @@ export function storedImageName(url: string): string | null {
   return safeImageName(name);
 }
 
+/** The part of a stored name that says which bytes it holds. */
+function contentHash(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex").slice(0, 8);
+}
+
+/**
+ * The name these bytes earn under a stored image's name: the name itself
+ * while they are the ones it was given for, else its stem with their own
+ * hash. A file edited in place — an agent touching up a screenshot, a save
+ * over it — keeps its name in the repo, so anything that takes the name as
+ * proof of the content (a Confluence attachment of that name, say) asks
+ * here which name the current bytes go by.
+ */
+export function currentImageName(name: string, bytes: Uint8Array): string {
+  const m = name.match(/^(.*?)(?:-[0-9a-f]{8})?\.([a-z0-9]+)$/);
+  if (!m) return name;
+  return `${m[1]}-${contentHash(bytes)}.${m[2]}`;
+}
+
 /**
  * Store an uploaded or pasted image in the data repo, committed and pushed
  * like a feature edit. Returns the stored file name. The original file name
@@ -79,8 +98,7 @@ export async function storeImage(
     throw new Error(`Unsupported image type: ${originalName} — use ${EXTENSIONS.replaceAll("|", ", ")}`);
   }
   const stem = slugify(originalName.replace(/\.[^.]*$/, "")) || "image";
-  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 8);
-  const name = `${stem}-${hash}.${ext}`;
+  const name = `${stem}-${contentHash(bytes)}.${ext}`;
   const relPath = `${IMAGES_DIR}/${name}`;
   const path = `${dataDir}/${relPath}`;
   // Same name = same content (the hash covers the bytes): nothing to write.

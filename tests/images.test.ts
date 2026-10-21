@@ -6,7 +6,7 @@ import { test, expect, beforeEach, afterEach, describe } from "bun:test";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { imageMime, readImage, storeImage, IMAGES_DIR, MAX_IMAGE_BYTES } from "../src/server/images";
+import { currentImageName, imageMime, readImage, storeImage, IMAGES_DIR, MAX_IMAGE_BYTES } from "../src/server/images";
 
 let root: string;
 
@@ -56,6 +56,20 @@ describe("storeImage", () => {
     expect(
       storeImage(root, "big.png", new Uint8Array(MAX_IMAGE_BYTES + 1)),
     ).rejects.toThrow("too large");
+  });
+});
+
+describe("currentImageName", () => {
+  test("a stored name while the bytes are the ones it was given for; its stem with their hash once they differ", async () => {
+    const name = await storeImage(root, "flow chart.png", PNG);
+    expect(currentImageName(name, PNG)).toBe(name);
+    const touched = new Uint8Array([...PNG, 4]);
+    const renamed = currentImageName(name, touched);
+    expect(renamed).not.toBe(name);
+    expect(renamed).toMatch(/^flow-chart-[0-9a-f]{8}\.png$/);
+    // The renamed one is what storing the touched bytes would be called.
+    expect(renamed).toBe(await storeImage(root, "flow chart.png", touched));
+    expect(currentImageName(renamed, PNG)).toBe(name);
   });
 });
 

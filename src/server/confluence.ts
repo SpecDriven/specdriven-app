@@ -322,9 +322,13 @@ export async function attachFiles(base: string, token: string, pageId: string, f
   const present = await attachmentNamesOf(base, token, pageId);
   const missing = files.filter((f) => !present.has(f.name));
   if (missing.length === 0) return 0;
+  // Confluence takes a minorEdit flag per file, or none at all — one for a
+  // whole upload of several is refused.
   const form = new FormData();
-  for (const f of missing) form.append("file", new Blob([f.bytes as BlobPart], { type: f.mime }), f.name);
-  form.append("minorEdit", "true");
+  for (const f of missing) {
+    form.append("file", new Blob([f.bytes as BlobPart], { type: f.mime }), f.name);
+    form.append("minorEdit", "true");
+  }
   await confluenceRequest(base, `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`, token, {
     method: "POST",
     form,
