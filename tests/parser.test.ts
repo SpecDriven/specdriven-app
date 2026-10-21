@@ -9,6 +9,7 @@ import {
   markScenarioPublished,
   renameFeatureName,
   titleFromFileName,
+  trimBlankLines,
   unclosedFence,
 } from "../src/server/parser";
 
@@ -357,4 +358,36 @@ test("extractScenarios throws when a pick names a missing scenario", () => {
   expect(() => extractScenarios(SAMPLE, [{ name: "Nope", version: 1 }])).toThrow(
     "scenario not found: Nope @v1",
   );
+});
+
+// crud-feature.md "Feature file format": a body is any markdown up to the
+// next heading, indentation included. The parser used to `trim()` it, which
+// took the indentation off the first line — an indented code block became
+// prose, a nested list item a top-level one — and a first line of `    ```
+// that lost its four spaces became a fence opener: the projection landed on
+// disk with a fence never closed, every later save of the feature was
+// refused, and the scenario under it vanished from the editor.
+test("a body's first-line indentation survives the round trip", () => {
+  const bodies = ["    ```\n    indented code", "  - nested\n- top", "\tcode", "line one  \nline two  "];
+  for (const body of bodies) {
+    const text = `# X\n\n## S1: A @v1 [proposed]\n\n${body}\n\n## S2: B @v1 [proposed]\n\nb\n`;
+    const feature = parseFeature(text);
+    expect(feature.scenarios.map((s) => s.body)).toEqual([body, "b"]);
+    expect(serializeFeature(feature)).toBe(text);
+    expect(featureTextError(serializeFeature(feature))).toBeNull();
+  }
+});
+
+test("a description's first-line indentation survives too", () => {
+  const text = "# X\n\n    code in the description\n\n## S1: A @v1 [proposed]\n\na\n";
+  const feature = parseFeature(text);
+  expect(feature.description).toBe("    code in the description");
+  expect(serializeFeature(feature)).toBe(text);
+});
+
+test("trimBlankLines drops blank edge lines and nothing else", () => {
+  expect(trimBlankLines("\n  \n  x  \n\ty\n \n\n")).toBe("  x  \n\ty");
+  expect(trimBlankLines("   ")).toBe("");
+  expect(trimBlankLines("")).toBe("");
+  expect(trimBlankLines("a")).toBe("a");
 });

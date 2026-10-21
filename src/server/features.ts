@@ -1265,11 +1265,14 @@ async function absorbIntoDoc(
       // by whoever happens to save it next — and this write reconciled on top.
       const disk = drift ? await readTextFile(`${dataDir}/${fileName}`) : null;
       if (disk === null || featureTextError(disk) !== null) {
-        const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(feature, author));
+        const fresh = importFeatureDoc(feature, author);
+        assertProjection(fileName, projectFeature(fresh, options));
+        const created = await createFeatureDoc(dataDir, fileName, fresh);
         return projectFeature(created.doc, options);
       }
       const imported = importFeatureDoc(parseFeature(disk));
       const next = reconcile(imported, feature, { force, scenario, author });
+      assertProjection(fileName, projectFeature(next, options));
       const created = await createFeatureDoc(dataDir, fileName, next);
       return projectFeature(created.doc, options);
     }
@@ -1280,8 +1283,12 @@ async function absorbIntoDoc(
       ({ doc, feature } = foldDrift(fileName, doc, disk, feature));
     }
     const next = reconcile(doc, feature, { force, scenario, author });
+    // Checked before the document is saved: a projection that would not read
+    // back as this feature must not become the system of record either.
+    const projection = projectFeature(next, options);
+    assertProjection(fileName, projection);
     await saveFeatureDoc(dataDir, fileName, next, loaded.heads);
-    return projectFeature(next, options);
+    return projection;
   });
 }
 
@@ -1338,6 +1345,22 @@ async function featurePaths(dataDir: string, fileName: string): Promise<string[]
 function assertFeatureText(fileName: string, text: string): void {
   const problem = featureTextError(text);
   if (problem) throw new Error(`Refusing to write ${fileName} — ${problem}`);
+}
+
+/**
+ * The same check on what the document projects to, run before the document
+ * is saved and its projection written. The text a user sends is checked on
+ * the way in (assertFeatureText), but the projection is a different text:
+ * the parser's reading of it, written back. Should that reading ever open a
+ * fence the input did not — as a body whose first line lost its indentation
+ * once did — the file on disk would refuse every later save, and the
+ * document would already hold the broken body. Neither is allowed to land.
+ */
+function assertProjection(fileName: string, projection: string): void {
+  const problem = featureTextError(projection);
+  if (problem) {
+    throw new Error(`Refusing to write ${fileName} — its projection would not read back (${problem})`);
+  }
 }
 
 /** Segments that would escape or hide inside the data repo are rejected. */
