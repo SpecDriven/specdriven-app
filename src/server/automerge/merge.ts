@@ -21,6 +21,7 @@ import {
   type SpecAttribute,
   type Supersedes,
 } from "../parser";
+import { interleaveDrafts } from "./project";
 
 export type ThreeWayResult =
   | { ok: true; feature: Feature }
@@ -212,6 +213,33 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
 }
 
 /**
+ * The order the merged scenarios take (specs/ui/ui.feature.md "number
+ * scenarios": the order is the user's, so a merge must not undo a move).
+ * One value, like a link: the side that moved a scenario — whose order of
+ * the scenarios it shares with the base differs from the base's — wins,
+ * ours when both did. The other side's additions go in next to where it put
+ * them (project.ts interleaveDrafts), each after the nearest scenario before
+ * it in that side's list. Keys are the sides' scenarios in their order;
+ * `kept` are the ones the merge keeps.
+ */
+export function mergeOrder(
+  base: string[],
+  ours: string[],
+  theirs: string[],
+  kept: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+): string[] {
+  const inBase = new Set(base);
+  const shared = (side: string[]) => side.filter((k) => kept.has(k) && inBase.has(k)).join("\n");
+  const oursMoved = shared(ours) !== shared(base);
+  const [winner, other] = oursMoved ? [ours, theirs] : [theirs, ours];
+  return interleaveDrafts(
+    winner.filter((k) => kept.has(k)),
+    other.filter((k) => kept.has(k)),
+    (k) => k,
+  );
+}
+
+/**
  * Merge two descendants of a common base. Text merges character-level (see
  * mergeText); structure merges per scenario. What still needs a human — one
  * side deleting a scenario the other edited — is a conflict, reported instead
@@ -228,16 +256,16 @@ export function threeWayFeature(
   const b = byKey(base);
   const o = byKey(ours);
   const t = byKey(theirs);
-  const scenarios: Scenario[] = [];
+  const merged = new Map<string, Scenario>();
   for (const k of new Set([...b.keys(), ...o.keys(), ...t.keys()])) {
     const inBase = b.get(k);
     const inOurs = o.get(k);
     const inTheirs = t.get(k);
     if (inOurs && inTheirs) {
-      scenarios.push(mergeScenario(inBase, inOurs, inTheirs));
+      merged.set(k, mergeScenario(inBase, inOurs, inTheirs));
     } else if (inOurs && !inTheirs) {
       if (!inBase) {
-        scenarios.push(inOurs); // we added it
+        merged.set(k, inOurs); // we added it
       } else if (sameScenario(inOurs, inBase)) {
         // they deleted it and we left it alone: the deletion stands
       } else {
@@ -245,7 +273,7 @@ export function threeWayFeature(
       }
     } else if (inTheirs && !inOurs) {
       if (!inBase) {
-        scenarios.push(inTheirs); // they added it
+        merged.set(k, inTheirs); // they added it
       } else if (sameScenario(inTheirs, inBase)) {
         // we deleted it and they left it alone: the deletion stands
       } else {
@@ -253,6 +281,9 @@ export function threeWayFeature(
       }
     }
   }
+  const scenarios = mergeOrder([...b.keys()], [...o.keys()], [...t.keys()], merged).map(
+    (k) => merged.get(k)!,
+  );
   const link = mergeLink(base.link, ours.link, theirs.link);
   const qtest = mergeLink(base.qtest, ours.qtest, theirs.qtest);
   const confluence = mergeLink(base.confluence, ours.confluence, theirs.confluence);

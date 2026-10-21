@@ -332,8 +332,13 @@ export async function importDrift(dataDir: string): Promise<string> {
       const loaded = await loadFeatureDoc(dataDir, fileName);
       if (loaded === null) {
         const created = await createFeatureDoc(dataDir, fileName, importFeatureDoc(parseFeature(text)));
-        const projection = projectFeature(created.doc, options);
-        if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
+        // A file in one of the document's other forms — links or authors
+        // the other way, or written before the scenario numbers — is left
+        // as it is (project.ts isProjectionOf): adopting a repo rewrites
+        // nothing it does not have to.
+        if (!isProjectionOf(text, created.doc)) {
+          await writeTextFile(`${dataDir}/${fileName}`, projectFeature(created.doc, options));
+        }
         imported++;
         log.debug(`imported ${fileName} into a document`);
         continue;

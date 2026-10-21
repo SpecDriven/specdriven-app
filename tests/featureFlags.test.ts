@@ -46,6 +46,10 @@ Pay for what is in the cart.
 - Then: I can pay by card
 `;
 
+// What the app writes: the scenario numbered by its position (parser.ts
+// `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = FLAGGED.replace("## Pay by card", "## S1: Pay by card");
+
 test("flag lines under the headings are lifted into flags and written back as they were", () => {
   const feature = parseFeature(FLAGGED);
   expect(feature.flags).toEqual([{ name: "new-checkout", on: true }]);
@@ -56,7 +60,7 @@ test("flag lines under the headings are lifted into flags and written back as th
     { name: "card-v2", on: false },
   ]);
   expect(feature.scenarios[0]!.body).toBe("- Given: a cart\n- Then: I can pay by card");
-  expect(serializeFeature(feature)).toBe(FLAGGED);
+  expect(serializeFeature(feature)).toBe(WRITTEN);
 });
 
 test("flag lines mix with the link and authorship lines in any order, and several lines add up", () => {
@@ -74,7 +78,7 @@ test("flag lines mix with the link and authorship lines in any order, and severa
   expect(s.body).toBe("body");
   // Written as one line, right under the heading, in lower case.
   expect(serializeFeature(feature)).toBe(
-    "# F\n\n## S @v1 [proposed]\n\n[ff:a:on] [ff:b:off]\n\n[Jira:X-1](https://x.test/X-1)\n\n**Created by:** ada\n\nbody\n",
+    "# F\n\n## S1: S @v1 [proposed]\n\n[ff:a:on] [ff:b:off]\n\n[Jira:X-1](https://x.test/X-1)\n\n**Created by:** ada\n\nbody\n",
   );
 });
 
@@ -100,7 +104,7 @@ test("the document carries the flags and projects them back", () => {
   const doc = importFeatureDoc(parseFeature(FLAGGED));
   expect(doc.flags).toEqual([{ name: "new-checkout", on: true }]);
   expect(docToFeature(doc).scenarios[0]!.flags?.map((f) => f.name)).toEqual(["new-checkout", "card-v2"]);
-  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(FLAGGED);
+  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(WRITTEN);
 });
 
 test("a three-way merge keeps the side that changed the flags", () => {
@@ -154,15 +158,15 @@ test("a flag on a published scenario changes without a new version", async () =>
   await createFeature(data, "Quote");
   await saveFeature(data, file, "# Quote\n\n## Basic @v1\n\nbody\n");
   await publishFeature(data, file, (await readFeature(data, file))!, { name: "Basic", version: 1 });
-  expect(await readFeature(data, file)).toContain("## Basic @v1 [published]");
+  expect(await readFeature(data, file)).toContain("## S1: Basic @v1 [published]");
 
   const flagged = (await readFeature(data, file))!.replace(
-    "## Basic @v1 [published]\n",
-    "## Basic @v1 [published]\n\n[ff:quotes-v2:off]\n",
+    "## S1: Basic @v1 [published]\n",
+    "## S1: Basic @v1 [published]\n\n[ff:quotes-v2:off]\n",
   );
   await saveFeature(data, file, flagged);
   const text = (await readFeature(data, file))!;
-  expect(text).toContain("## Basic @v1 [published]\n\n[ff:quotes-v2:off]\n\nbody");
+  expect(text).toContain("## S1: Basic @v1 [published]\n\n[ff:quotes-v2:off]\n\nbody");
   const doc = (await loadFeatureDoc(data, file))!.doc;
   expect(doc.specs[0]!.flags).toEqual([{ name: "quotes-v2", on: false }]);
   expect(doc.specs[0]!.version).toBe(1);

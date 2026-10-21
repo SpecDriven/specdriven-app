@@ -55,6 +55,13 @@ Quotes for potential customers.
 - **Given** the customer has no account
 `;
 
+// What the app writes: the same text with each scenario numbered by its
+// position (parser.ts `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = SAMPLE.replace("## Basic Quote", "## S1: Basic Quote").replace(
+  "## Declined Quote",
+  "## S2: Declined Quote",
+);
+
 let root: string;
 let home: string;
 let data: string;
@@ -219,7 +226,7 @@ describe("savePullRequests", () => {
     const view = (await readFeatureView(data, FILE))!;
     expect(view.parsed.prs).toEqual([PR1]);
     expect(view.parsed.scenarios.every((s) => s.prs === undefined)).toBe(true);
-    expect(await readFeature(data, FILE)).toBe(SAMPLE);
+    expect(await readFeature(data, FILE)).toBe(WRITTEN);
   });
 
   test("a scenario the document lacks is refused", async () => {
@@ -283,10 +290,10 @@ describe("the links survive everything the markdown does", () => {
   });
 
   test("an outside edit absorbed as drift", async () => {
-    const edited = SAMPLE.replace("is provided", "is mailed");
-    await Bun.write(join(data, FILE), edited);
+    await Bun.write(join(data, FILE), SAMPLE.replace("is provided", "is mailed"));
     expect(await importDrift(data)).toContain("absorbed 1");
-    expect(await readFeature(data, FILE)).toBe(edited);
+    // Absorbed, and written back in the app's form: the scenarios numbered.
+    expect(await readFeature(data, FILE)).toBe(WRITTEN.replace("is provided", "is mailed"));
     const view = (await readFeatureView(data, FILE))!;
     expect(view.parsed.scenarios[0]!.prs).toEqual([PR1]);
     expect(view.parsed.prs).toEqual([PR2]);
@@ -338,7 +345,7 @@ describe("PUT /api/features/:file/pull-requests", () => {
     const feature = (await put({ prs: [PR2] }))!;
     expect(feature.status).toBe(200);
     expect(((await feature.json()) as { parsed: { prs?: unknown } }).parsed.prs).toEqual([PR2]);
-    expect(await readFeature(data, FILE)).toBe(SAMPLE);
+    expect(await readFeature(data, FILE)).toBe(WRITTEN);
   });
 
   test("a bad list, a half-named scenario and an unknown scenario are 400s", async () => {

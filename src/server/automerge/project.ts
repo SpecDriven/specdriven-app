@@ -34,7 +34,6 @@ import {
   plainAttributes,
   plainFeatureFlags,
   serializeFeature,
-  sortScenarios,
   type ExternalLink,
   type Feature,
   type PullRequestLink,
@@ -100,18 +99,69 @@ function plainFiles(files: ScenarioFile[] | undefined): ScenarioFile[] | undefin
     : undefined;
 }
 
+/** What orders a spec among its feature's: its rank, then the legacy keys. */
+export interface Ranked {
+  rank?: number;
+  name: string;
+  version: number;
+}
+
 /**
- * The doc's view of the domain model — drafts included — in canonical order.
- * Pull request, Aha! and Figma links and stored files come along (the editor
- * shows them) but
- * serializeFeature never writes them, so the projection below stays free of them.
+ * The order of a feature's specs (specs/ui/ui.feature.md "number
+ * scenarios"): by `rank` — the position the last write stamped (schema.ts) —
+ * then by name and version, which is the whole order for a document from
+ * before the ranks and the tie-break when two peers moved scenarios
+ * concurrently. Unranked specs sort after ranked ones.
+ */
+export function compareSpecs(a: Ranked, b: Ranked): number {
+  const ra = a.rank ?? Number.POSITIVE_INFINITY;
+  const rb = b.rank ?? Number.POSITIVE_INFINITY;
+  return (ra - rb || 0) || a.name.localeCompare(b.name) || a.version - b.version;
+}
+
+export function orderSpecs<T extends Ranked>(specs: readonly T[]): T[] {
+  return [...specs].sort(compareSpecs);
+}
+
+/**
+ * One order for the scenarios a file holds and the document's drafts, which
+ * it does not: the file's order stands for what it holds (a hand edit that
+ * moved a heading is the user's order, absorbed or not), and each draft goes
+ * right after the nearest entry before it in the document's order that the
+ * file holds — at the front when there is none. The editor's view
+ * (features.ts featureView) and reconcile both place drafts through this,
+ * so a draft the editor opened next to its source stays there across saves.
+ * `held` is the file's scenarios in file order, `docOrder` the document's
+ * specs in rank order — drafts included — and `key` identifies one across
+ * both lists.
+ */
+export function interleaveDrafts<T>(held: T[], docOrder: T[], key: (s: T) => string): T[] {
+  const result = [...held];
+  const heldKeys = new Set(held.map(key));
+  let insertAt = 0;
+  for (const entry of docOrder) {
+    const k = key(entry);
+    if (heldKeys.has(k)) {
+      insertAt = result.findIndex((s) => key(s) === k) + 1;
+    } else {
+      result.splice(insertAt, 0, entry);
+      insertAt++;
+    }
+  }
+  return result;
+}
+
+/**
+ * The doc's view of the domain model — drafts included — in rank order
+ * (orderSpecs). Pull request, Aha! and Figma links and stored files come
+ * along (the editor shows them) but serializeFeature never writes them, so
+ * the projection below stays free of them.
  */
 export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   const feature: Feature = {
     name: doc.name,
     description: doc.description,
-    scenarios: sortScenarios(
-      doc.specs.map((s) => {
+    scenarios: orderSpecs(doc.specs).map((s) => {
         const scenario = {
           name: s.name,
           version: s.version,
@@ -143,7 +193,6 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
           ...(s.updatedBy ? { updatedBy: s.updatedBy } : {}),
         };
       }),
-    ),
   };
   const flags = plainFeatureFlags(doc.flags);
   if (flags) feature.flags = flags;
@@ -167,10 +216,15 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   return feature;
 }
 
-/** The `.feature.md` text this document projects to (drafts left out). */
+/**
+ * The `.feature.md` text this document projects to (drafts left out), the
+ * scenarios numbered by position. `numbers: false` is the form a file
+ * written before the numbers has — isProjectionOf's business only.
+ */
 export function projectFeature(
   doc: A.Doc<FeatureDoc>,
   { publishExternalLinks, publishAuthors = false }: ProjectionOptions = projection,
+  numbers = true,
 ): string {
   const feature = docToFeature(doc);
   return serializeFeature(
@@ -178,22 +232,29 @@ export function projectFeature(
       ...feature,
       scenarios: feature.scenarios.filter((s) => s.status !== "draft"),
     },
-    { links: publishExternalLinks, authors: publishAuthors },
+    { links: publishExternalLinks, authors: publishAuthors, numbers },
   );
 }
 
 /**
  * Whether `text` is what this document projects to — in this peer's form or
- * another one, links written or not, authors written or not. The drift pass
- * asks this before absorbing a file, so a peer whose "Publish external
- * links" setting differs — or one that has not seen the repo's
- * `authors-in-markdown` change yet — is not read as an external edit, and
- * the two never take turns rewriting the same file.
+ * another one, links written or not, authors written or not, scenarios
+ * numbered or not. The drift pass asks this before absorbing a file, so a
+ * peer whose "Publish external links" setting differs — or one that has not
+ * seen the repo's `authors-in-markdown` change yet — is not read as an
+ * external edit, and the two never take turns rewriting the same file. The
+ * numberless form is the file as written before the scenario numbers: it is
+ * not an edit either, and keeps its form until something in it is saved
+ * (parser.ts: numbers are a label for the order, regenerated on write).
  */
 export function isProjectionOf(text: string, doc: A.Doc<FeatureDoc>): boolean {
   for (const publishExternalLinks of [true, false]) {
     for (const publishAuthors of [false, true]) {
-      if (text === projectFeature(doc, { publishExternalLinks, publishAuthors })) return true;
+      for (const numbers of [true, false]) {
+        if (text === projectFeature(doc, { publishExternalLinks, publishAuthors }, numbers)) {
+          return true;
+        }
+      }
     }
   }
   return false;

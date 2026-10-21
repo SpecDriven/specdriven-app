@@ -5,10 +5,17 @@
 //
 //   <optional feature description — any markdown>
 //
-//   ## <name of scenario> @vNNN              (draft, editable; NNN positive int)
-//   ## <name of scenario> @vNNN [draft]      (draft the user chose to keep)
-//   ## <name of scenario> @vNNN [proposed]   (saved, not yet published)
-//   ## <name of scenario> @vNNN [published]  (published, immutable)
+//   ## S1: <name of scenario> @vNNN              (draft, editable; NNN positive int)
+//   ## S2: <name of scenario> @vNNN [draft]      (draft the user chose to keep)
+//   ## S3: <name of scenario> @vNNN [proposed]   (saved, not yet published)
+//   ## S4: <name of scenario> @vNNN [published]  (published, immutable)
+//
+// `S<n>:` numbers the scenario by its position in the file, 1..N, and is
+// regenerated on every write (specs/ui/ui.feature.md "number scenarios"): the
+// order of the headings is the order of the scenarios, and the number is a
+// label for it, not part of the name. A file written before the numbers
+// (no heading carries one) is read in the old canonical order — by name,
+// then version — and gains numbers the next time it is written.
 //
 // Only [published] and [proposed] scenarios belong in a `.feature.md` on
 // disk: draft is an internal status that lives in the Automerge document
@@ -1066,14 +1073,21 @@ export function splitScenarioMeta(text: string): {
 }
 
 const FEATURE_RE = /^#\s+(.+?)\s*$/;
-const SCENARIO_RE = /^##\s+(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved|draft)\])?\s*$/;
+// Every heading form takes the optional `S<n>:` position prefix first, so
+// the capture groups line up: 1 number, 2 name, 3 version, 4 status.
+const SCENARIO_RE =
+  /^##\s+(?:S([1-9]\d*):\s+)?(.+?)\s+@v([1-9]\d*)(?:\s+\[(published|proposed|saved|draft)\])?\s*$/;
 /** Feature files written before the `@` version prefix: ``## <name> v1 [published]``. */
-const LEGACY_PLAIN_SCENARIO_RE = /^##\s+(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
+const LEGACY_PLAIN_SCENARIO_RE =
+  /^##\s+(?:S([1-9]\d*):\s+)?(.+?)\s+v([1-9]\d*)(?:\s+\[(published|proposed|saved)\])?\s*$/;
 /** Feature files written before the bracket syntax: ``## <name> `v1` `published` ``. */
-const LEGACY_SCENARIO_RE = /^##\s+(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|proposed|saved)`)?\s*$/;
+const LEGACY_SCENARIO_RE =
+  /^##\s+(?:S([1-9]\d*):\s+)?(.+?)\s+`v([1-9]\d*)`(?:\s+`(published|proposed|saved)`)?\s*$/;
 const FENCE_RE = /^\s{0,3}(?:```|~~~)/;
 
 interface HeadingMatch {
+  /** The `S<n>:` position prefix, when the heading carries one. */
+  number?: number;
   name: string;
   version: number;
   status: ScenarioStatus;
@@ -1099,22 +1113,25 @@ function matchScenario(line: string): HeadingMatch | null {
     line.match(LEGACY_PLAIN_SCENARIO_RE);
   if (!m) return null;
   return {
-    name: m[1]!,
-    version: Number(m[2]),
+    ...(m[1] === undefined ? {} : { number: Number(m[1]) }),
+    name: m[2]!,
+    version: Number(m[3]),
     status:
-      m[3] === "published"
+      m[4] === "published"
         ? "published"
-        : m[3] === "proposed" || m[3] === "saved"
+        : m[4] === "proposed" || m[4] === "saved"
           ? "proposed"
           : "draft",
-    explicit: m[3] !== undefined,
+    explicit: m[4] !== undefined,
   };
 }
 
 /**
- * Canonical scenario order (specs/ui/ui.feature.md): by name, then by version.
- * parseFeature returns scenarios in this order, so lists always render
- * sorted and a save writes the file back in canonical order.
+ * The legacy canonical order (specs/ui/ui.feature.md): by name, then by
+ * version. Scenarios keep the order of their file now, numbered by position
+ * (`S<n>:`); parseFeature falls back to this order for a file written before
+ * the numbers, and `serializeFeature({ numbers: false })` writes that legacy
+ * form, so the drift pass can tell such a file from an edit.
  */
 export function sortScenarios(scenarios: Scenario[]): Scenario[] {
   return [...scenarios].sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version);
@@ -1173,6 +1190,14 @@ export function parseFeature(text: string): Feature {
   let current: Scenario | null = null;
   const bodyLines: string[] = [];
   let inFence = false;
+  // Whether the text is in the numbered form: then the file's order is the
+  // scenarios' order. Any `S<n>:` prefix says so — the numbers themselves
+  // are not trusted (a hand edit or a textual merge can leave them wrong or
+  // doubled); position is — and so does an explicit [draft] chip, which no
+  // file from before the numbers ever carried (the chip is the editor's wire
+  // form, and a draft takes no number), so a text of drafts alone keeps its
+  // order too.
+  let numbered = false;
 
   const flush = () => {
     if (current) {
@@ -1205,6 +1230,8 @@ export function parseFeature(text: string): Feature {
       const scenarioMatch = matchScenario(line);
       if (scenarioMatch) {
         flush();
+        if (scenarioMatch.number !== undefined) numbered = true;
+        if (scenarioMatch.status === "draft" && scenarioMatch.explicit) numbered = true;
         current = {
           name: scenarioMatch.name,
           version: scenarioMatch.version,
@@ -1222,7 +1249,11 @@ export function parseFeature(text: string): Feature {
 
   const { text: description, link, qtest, confluence, assigned, createdBy, updatedBy, flags, attributes } =
     splitFeatureMeta(preamble.join("\n").trim());
-  const feature: Feature = { name, description, scenarios: sortScenarios(scenarios) };
+  const feature: Feature = {
+    name,
+    description,
+    scenarios: numbered ? scenarios : sortScenarios(scenarios),
+  };
   if (flags) feature.flags = flags;
   if (attributes) feature.attributes = attributes;
   if (link) feature.link = link;
@@ -1234,11 +1265,20 @@ export function parseFeature(text: string): Feature {
   return feature;
 }
 
-function header(name: string, version: number, status: ScenarioStatus): string {
-  return `## ${name} @v${version} [${status}]`;
+function header(name: string, version: number, status: ScenarioStatus, number?: number): string {
+  const prefix = number === undefined ? "" : `S${number}: `;
+  return `## ${prefix}${name} @v${version} [${status}]`;
 }
 
 export interface SerializeOptions {
+  /**
+   * Whether the scenario headings carry their `S<n>:` position number
+   * (default true), numbered 1..N in the order written. `false` writes the
+   * legacy form — no numbers, scenarios in the legacy name-then-version
+   * order — which only the projection check uses (project.ts isProjectionOf)
+   * to recognize a file written before the numbers.
+   */
+  numbers?: boolean;
   /**
    * Whether the feature's and scenarios' external links — tickets and qTest
    * test cases — are written (default true). The `.feature.md` projection passes the "Publish
@@ -1256,7 +1296,7 @@ export interface SerializeOptions {
 
 export function serializeFeature(
   feature: Feature,
-  { links = true, authors = true }: SerializeOptions = {},
+  { links = true, authors = true, numbers = true }: SerializeOptions = {},
 ): string {
   const parts = [`# ${feature.name}`];
   if (feature.flags?.length) parts.push(formatFeatureFlags(feature.flags));
@@ -1269,8 +1309,13 @@ export function serializeFeature(
   if (authors && feature.createdBy) parts.push(formatCreatedBy(feature.createdBy));
   if (authors && feature.updatedBy) parts.push(formatUpdatedBy(feature.updatedBy));
   if (feature.description) parts.push(feature.description);
-  for (const s of feature.scenarios) {
-    const chunks = [header(s.name, s.version, s.status)];
+  const scenarios = numbers ? feature.scenarios : sortScenarios(feature.scenarios);
+  // A draft has no place in the file, so it takes no number — the editor's
+  // wire form numbers its scenarios as the file and the cards do.
+  let position = 0;
+  for (const s of scenarios) {
+    const number = numbers && s.status !== "draft" ? ++position : undefined;
+    const chunks = [header(s.name, s.version, s.status, number)];
     if (s.flags?.length) chunks.push(formatFeatureFlags(s.flags));
     const attributes = formatAttributeLines(s.attributes ?? []);
     if (attributes) chunks.push(attributes);
@@ -1376,7 +1421,9 @@ function rewriteHeaders(text: string, next: (m: HeadingMatch) => ScenarioStatus)
       if (inFence) return line;
       const m = matchScenario(line);
       if (!m) return line;
-      return header(m.name, m.version, next(m));
+      // The position prefix is kept as it is: the write that follows
+      // renumbers, and until then the text keeps its order.
+      return header(m.name, m.version, next(m), m.number);
     })
     .join("\n");
 }

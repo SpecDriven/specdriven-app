@@ -3,7 +3,7 @@ import { FOLDER_DESCRIPTION_FILE, SPECS_FOLDER, isFeatureFile, isSpecsFolderPath
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
-import { docToFeature, isProjectionOf, projectFeature, projectionFor } from "./automerge/project";
+import { docToFeature, interleaveDrafts, isProjectionOf, projectFeature, projectionFor } from "./automerge/project";
 import {
   assertPublishedKept,
   importFeatureDoc,
@@ -39,7 +39,6 @@ import {
   markProposed,
   markScenarioPublished,
   serializeFeature,
-  sortScenarios,
   renameFeatureName,
   slugify,
   titleFromFileName,
@@ -346,7 +345,18 @@ async function featureView(
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     ...resourcesOf(inDoc),
     ...authorsOf(inDoc),
-    scenarios: sortScenarios([...scenarios, ...drafts]),
+    // The file's order for what the file holds, each draft next to where the
+    // document has it (project.ts interleaveDrafts): what the editor shows
+    // is what its save sends back, drafts and all, in one order.
+    scenarios: interleaveDrafts(
+      scenarios,
+      inDoc.scenarios.flatMap((s) => {
+        if (have.has(key(s))) return [s];
+        const draft = drafts.find((d) => key(d) === key(s));
+        return draft ? [draft] : [];
+      }),
+      key,
+    ),
   };
   // The text keeps the file's form for authorship: lines only where the
   // file has them, the parsed view carrying the document's record always.
@@ -998,14 +1008,14 @@ export async function moveScenario(
     throw new Error(`"${destName}" already has "${target.name}" v${target.version}`);
   }
 
-  // Into the target: a fresh document entry there (no id — ids belong to the
-  // source's document), then its pull request, Aha! and Figma links and
-  // stored files, which only the document holds.
+  // Into the target, last in its order: a fresh document entry there (no id
+  // — ids belong to the source's document), then its pull request, Aha! and
+  // Figma links and stored files, which only the document holds.
   const { id: _id, prs, aha, figma, files, ...carried } = moving;
   await saveFeature(
     dataDir,
     to,
-    serializeFeature({ ...dest.parsed, scenarios: sortScenarios([...dest.parsed.scenarios, carried]) }),
+    serializeFeature({ ...dest.parsed, scenarios: [...dest.parsed.scenarios, carried] }),
   );
   if (prs && prs.length > 0) {
     await savePullRequests(dataDir, to, { name: moving.name, version: moving.version }, prs);
