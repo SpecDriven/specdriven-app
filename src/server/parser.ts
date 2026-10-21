@@ -331,6 +331,21 @@ export function titleFromFileName(fileName: string): string {
  * scenario: it stays in the body and the preview renders it where it stands.
  */
 const TESTS_HEADING_RE = /^###\s+Tests\s*$/i;
+/** A markdown table row that carries no url — the `| Test |` header and its
+    `| --- |` rule — which is all a legacy Tests section may hold besides links. */
+const TABLE_FRAME_RE = /^\s*\|[^|]*\|?\s*$/;
+
+/**
+ * Drop the blank lines above and below a text, and nothing else. `trim()`
+ * would also take the indentation off the first line, which is content in
+ * markdown: an indented code block, a nested list item — and a first line of
+ * `    \`\`\`` that loses its four spaces becomes a fence opener that swallows
+ * every scenario after it on the next read.
+ */
+export function trimBlankLines(text: string): string {
+  const inner = text.replace(/^(?:[ \t]*\n)+/, "").replace(/(?:\n[ \t]*)+$/, "");
+  return inner.trim() === "" ? "" : inner;
+}
 const URL_RE = /https?:\/\/\S+/;
 /**
  * What sits inside one token: an optional name (anything but `:` and `]`),
@@ -394,11 +409,16 @@ export function formatTestRef(ref: TestRef): string {
 /**
  * Split a scenario body into its content and its test links: every line
  * made only of `[test: <url> ]` tokens, plus — in older files — a trailing
- * `### Tests` section, one url per table row (or list item; anything with a
- * url on the line counts, markdown punctuation trimmed). Lines and headings
- * inside fenced code blocks are content. Links are returned in the order
- * met, in their canonical `<name> : <url>` spelling, one per url — the
- * first mention of a url wins.
+ * `### Tests` section, one url per table row (or list item; markdown
+ * punctuation around the url is trimmed). The section is the legacy table
+ * only when it is the last thing in the body and every line under it is a
+ * GitHub link or table framing (specs/traceability.feature.md): a `### Tests`
+ * heading over prose, or with steps after it, is the author's own section
+ * and stays in the body — read as the table, everything under it that was
+ * not a url used to be dropped on save. Lines and headings inside fenced
+ * code blocks are content. Links are returned in the order met, in their
+ * canonical `<name> : <url>` spelling, one per url — the first mention of a
+ * url wins.
  */
 export function splitTests(body: string): { body: string; tests: string[] } {
   const lines = body.split("\n");
@@ -408,6 +428,7 @@ export function splitTests(body: string): { body: string; tests: string[] } {
     if (FENCE_RE.test(lines[i]!)) inFence = !inFence;
     else if (!inFence && TESTS_HEADING_RE.test(lines[i]!)) headingAt = i;
   }
+  if (headingAt !== -1 && !isLegacyTestsSection(lines.slice(headingAt + 1))) headingAt = -1;
   const tests: string[] = [];
   const kept: string[] = [];
   let lifted = false;
@@ -429,13 +450,28 @@ export function splitTests(body: string): { body: string; tests: string[] } {
   }
   if (!lifted && headingAt === -1) return { body, tests: [] };
   // Removing a token line can leave two blank lines back to back.
-  const text = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const text = trimBlankLines(kept.join("\n").replace(/\n{3,}/g, "\n\n"));
   const byUrl = new Map<string, string>();
   for (const t of tests) {
     const url = parseTestRef(t).url;
     if (!byUrl.has(url)) byUrl.set(url, t);
   }
   return { body: text, tests: [...byUrl.values()] };
+}
+
+/**
+ * Whether what follows a `### Tests` heading is the legacy table: nothing but
+ * blank lines, table framing and lines carrying a GitHub url. Any other line
+ * — prose, a step, a second heading, a url to somewhere else — makes the
+ * heading ordinary content.
+ */
+function isLegacyTestsSection(lines: string[]): boolean {
+  return lines.every((line) => {
+    if (line.trim() === "") return true;
+    const m = line.match(URL_RE);
+    if (m) return isTestLink(m[0]!.replace(/[|)\]>,.]+$/, ""));
+    return TABLE_FRAME_RE.test(line);
+  });
 }
 
 /** The lines a scenario's test links are written as. */
@@ -497,7 +533,7 @@ export function splitExternalLink(text: string): { text: string; link?: External
   if (at === -1) return { text };
   const link = parseExternalLinkLine(lines[at]!);
   if (!link) return { text };
-  return { text: lines.slice(at + 1).join("\n").trim(), link };
+  return { text: trimBlankLines(lines.slice(at + 1).join("\n")), link };
 }
 
 /**
@@ -917,7 +953,7 @@ export function splitPageMeta(text: string): {
     else if (nextSupersedes) supersedes = nextSupersedes;
     else if (!done && parseDoneLine(line)) done = true;
     else break;
-    rest = lines.slice(at + 1).join("\n").trim();
+    rest = trimBlankLines(lines.slice(at + 1).join("\n"));
   }
   return {
     text: rest,
@@ -1002,7 +1038,7 @@ export function splitFeatureMeta(text: string): {
     else if (nextCreated) createdBy = nextCreated;
     else if (nextUpdated) updatedBy = nextUpdated;
     else break;
-    rest = lines.slice(at + 1).join("\n").trim();
+    rest = trimBlankLines(lines.slice(at + 1).join("\n"));
   }
   return {
     text: rest,
@@ -1058,7 +1094,7 @@ export function splitScenarioMeta(text: string): {
     else if (nextUpdated) updatedBy = nextUpdated;
     else break;
     lifted = true;
-    rest = lines.slice(at + 1).join("\n").trim();
+    rest = trimBlankLines(lines.slice(at + 1).join("\n"));
   }
   if (!lifted) return { text };
   return {
@@ -1201,7 +1237,7 @@ export function parseFeature(text: string): Feature {
 
   const flush = () => {
     if (current) {
-      const split = splitTests(bodyLines.join("\n").trim());
+      const split = splitTests(trimBlankLines(bodyLines.join("\n")));
       const { text, link, qtest, createdBy, updatedBy, flags, attributes } = splitScenarioMeta(
         split.body,
       );
@@ -1248,7 +1284,7 @@ export function parseFeature(text: string): Feature {
   flush();
 
   const { text: description, link, qtest, confluence, assigned, createdBy, updatedBy, flags, attributes } =
-    splitFeatureMeta(preamble.join("\n").trim());
+    splitFeatureMeta(trimBlankLines(preamble.join("\n")));
   const feature: Feature = {
     name,
     description,
@@ -1521,7 +1557,7 @@ export function parsePage(text: string): MarkdownPage {
   const lines = text.split("\n");
   const at = lines.findIndex((line) => line.trim() !== "");
   const heading = at === -1 ? null : lines[at]!.match(PAGE_HEADING_RE);
-  const rest = heading ? lines.slice(at + 1).join("\n").trim() : text.trim();
+  const rest = trimBlankLines(heading ? lines.slice(at + 1).join("\n") : text);
   const { text: body, assigned, estimate, done, author, date, kind, supersedes } =
     splitPageMeta(rest);
   return {
