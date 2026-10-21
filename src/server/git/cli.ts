@@ -15,16 +15,19 @@
 // a GitRun — a subprocess here and in gh.ts, the bundled implementation in
 // js.ts. Every command it issues is therefore one all three understand.
 
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { getAuth } from "../auth";
-import { writeTextFile } from "../fsx";
+import { readTextFile, writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
 import { isHostedMode } from "../hostedMode";
 import { run, which } from "../run";
+import { getLogger } from "../telemetry";
 import type { RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { isRepoRoot } from "./repoRoot";
+import { FALLBACK_TITLE, pathsInStatus, summarizeSavedChanges } from "./saveSummary";
+import type { ChangedFile } from "./saveSummary";
 
 export function cliGitAvailable(): boolean {
   return which("git") !== null;
@@ -53,6 +56,14 @@ export interface GitContext {
 
 /** Runs one git command; `null` repoDir means "outside any repository". */
 export type GitRun = (repoDir: string | null, ...args: string[]) => Promise<RunResult>;
+
+/** How many changed files a save reads to describe; the rest are counted. */
+const SUMMARY_READ_LIMIT = 40;
+
+/** The files the auto-save summary reads: markdown specs and pages, folder descriptions. */
+function isSpecText(path: string): boolean {
+  return path.endsWith(".md") || path.endsWith(".txt");
+}
 
 /** Commit-author overrides for a known GitHub identity. */
 export function identityConfig(name: string, email: string): string[] {
@@ -320,8 +331,9 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (status.exitCode !== 0 || status.stdout.trim() === "") {
       return { pushed: false, message: "no saved changes" };
     }
+    const message = await saveMessage(repoDir, status.stdout);
     await git(repoDir, "add", "-A");
-    await commit(repoDir, "-m", "Auto-save scenarios");
+    await commit(repoDir, "-m", message);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,
@@ -329,6 +341,53 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
         ? "saved scenarios committed and pushed"
         : `saved scenarios committed; ${res.message}`,
     };
+  }
+
+  /**
+   * The commit message for what the working tree holds (saveSummary.ts):
+   * each changed spec file read as HEAD has it and as the disk has it now,
+   * for the summary to tell what changed. The save itself must never wait
+   * on its own wording, so a failure here falls back to the fixed title.
+   */
+  async function saveMessage(repoDir: string, porcelain: string): Promise<string> {
+    try {
+      const files: ChangedFile[] = [];
+      for (const path of await expandFolders(repoDir, pathsInStatus(porcelain))) {
+        if (files.length >= SUMMARY_READ_LIMIT || !isSpecText(path)) {
+          files.push({ path });
+          continue;
+        }
+        const shown = await git(repoDir, "show", `HEAD:${path}`);
+        files.push({
+          path,
+          before: shown.exitCode === 0 ? shown.stdout : null,
+          after: await readTextFile(`${repoDir}/${path}`),
+        });
+      }
+      const { title, body } = summarizeSavedChanges(files);
+      return `${title}\n\n${body}`;
+    } catch (e) {
+      getLogger("git").warn(`auto-save summary failed: ${(e as Error).message}`);
+      return FALLBACK_TITLE;
+    }
+  }
+
+  /** git lists a whole untracked folder as one entry; its files are what changed. */
+  async function expandFolders(repoDir: string, paths: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const path of paths) {
+      if (!path.endsWith("/")) {
+        out.push(path);
+        continue;
+      }
+      const entries = await readdir(`${repoDir}/${path}`, { recursive: true, withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const parent = entry.parentPath.slice(repoDir.length + 1).replace(/\/$/, "");
+        out.push(parent ? `${parent}/${entry.name}` : entry.name);
+      }
+    }
+    return out;
   }
 
   /**

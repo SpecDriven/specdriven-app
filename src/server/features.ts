@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
-import { SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
+import { FOLDER_DESCRIPTION_FILE, SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
@@ -160,7 +160,7 @@ export async function listFolders(dataDir: string): Promise<string[]> {
  * shows in place of the folder name. Plain text, one line; anything past
  * the first line is left for whoever reads the file on GitHub.
  */
-export const FOLDER_DESCRIPTION_FILE = "description.txt";
+export { FOLDER_DESCRIPTION_FILE } from "./walk";
 
 /** The description a folder's description.txt gives it, or null without one. */
 export async function readFolderDescription(dataDir: string, folder: string): Promise<string | null> {

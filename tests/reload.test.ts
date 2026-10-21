@@ -117,7 +117,27 @@ for (const engine of gitEngines()) {
       const status = await $`git -C ${data} status --porcelain`.quiet();
       expect(status.stdout.toString().trim()).toBe("");
       const originLog = await $`git -C ${originDir} log --oneline -1`.quiet();
-      expect(originLog.stdout.toString()).toContain("Auto-save scenarios");
+      expect(originLog.stdout.toString()).toContain("Add scenario to Seed: One");
+    });
+
+    // specs/ui/ui.feature.md "Auto-save commits say what changed": the title
+    // names the feature and the scenario; the body says what happened and
+    // ends with the auto-save trailer.
+    test("the auto-save commit names the feature and the scenarios that changed", async () => {
+      const { a: data, originDir } = await twoClones(dir);
+      await writeState({ dataRepo: "a" }, dir);
+      const file = join(data, "specs/seed.feature.md");
+      await Bun.write(file, "# Seed\n\n## One @v1 [proposed]\n\nbody\n\n## Two @v1 [proposed]\n\nbody\n");
+      await git(data, "add", "-A");
+      await git(data, "commit", "-m", "seed");
+
+      await Bun.write(file, "# Seed\n\n## One @v1 [proposed]\n\nchanged\n\n## Three @v1 [proposed]\n\nnew\n");
+      await reloadData(dir);
+      const log = await $`git -C ${originDir} log --format=%s%n%b -1`.quiet();
+      const lines = log.stdout.toString().trim().split("\n");
+      expect(lines[0]).toBe("Edit Seed: One, Three, Two");
+      expect(lines).toContain('- Edit feature: Seed (edit "One"; add "Three"; remove "Two")');
+      expect(lines.at(-1)).toBe("Auto-saved by SpecDriven");
     });
 
     test("reload with a clean tree has nothing to sync", async () => {
