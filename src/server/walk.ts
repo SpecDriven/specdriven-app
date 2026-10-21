@@ -57,3 +57,10 @@ export async function walk(
   }
   return { files, folders };
 }
+
+/**
+ * The file a spec folder's description lives in
+ * (specs/ui/folders.feature.md): its first non-blank line is what the
+ * sidebar shows under the folder's name.
+ */
+export const FOLDER_DESCRIPTION_FILE = "description.txt";
