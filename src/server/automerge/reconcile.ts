@@ -69,6 +69,7 @@ function newEntry(s: Scenario, author: string | undefined, rank: number): SpecEn
     // `publishedBody`), the same as one published through reconcile.
     ...(s.status === "published" ? { publishedBody: new A.ImmutableString(s.body) } : {}),
     tests: [...s.tests],
+    ...(s.negative ? { negative: true as const } : {}),
     ...(s.flags?.length ? { flags: plainFeatureFlags(s.flags)! } : {}),
     ...(s.attributes?.length ? { attributes: plainAttributes(s.attributes)! } : {}),
     ...(s.link ? { link: { ...s.link } } : {}),
@@ -76,6 +77,21 @@ function newEntry(s: Scenario, author: string | undefined, rank: number): SpecEn
     ...(createdBy ? { createdBy } : {}),
     ...(updatedBy ? { updatedBy } : {}),
   };
+}
+
+/**
+ * Set or clear the negative marker on a spec entry
+ * (specs/ui/scenario-polarity.feature.md). One scalar set whole, like a
+ * link: concurrent flips resolve to one winner the same way on every peer.
+ */
+function assignNegative(
+  target: { negative?: true },
+  before: true | undefined,
+  after: true | undefined,
+): void {
+  if (!!before === !!after) return;
+  if (after) target.negative = true;
+  else delete target.negative;
 }
 
 /**
@@ -253,6 +269,7 @@ export function reconcile(
     ...(e.qtest ? { qtest: plainLink(e.qtest)! } : {}),
     ...(e.flags?.length ? { flags: plainFeatureFlags(e.flags)! } : {}),
     ...(e.attributes?.length ? { attributes: plainAttributes(e.attributes)! } : {}),
+    ...(e.negative ? { negative: true as const } : {}),
   }));
   // Read before any key is assigned below — schema.ts keeps them optional.
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
@@ -335,7 +352,8 @@ export function reconcile(
     linkKey(entry.link) !== linkKey(match.link) ||
     linkKey(entry.qtest) !== linkKey(match.qtest) ||
     featureFlagsKey(entry.flags) !== featureFlagsKey(match.flags) ||
-    attributesKey(entry.attributes) !== attributesKey(match.attributes);
+    attributesKey(entry.attributes) !== attributesKey(match.attributes) ||
+    !!entry.negative !== !!match.negative;
   const changedAt = new Set<number>();
   for (const [i, match] of matchAt) if (entryChanged(entries[i]!, match)) changedAt.add(i);
   const removed = entries.some((e, i) => !matchAt.has(i) && e.status !== "draft");
@@ -394,6 +412,7 @@ export function reconcile(
       assignLink(live, entry.qtest, match.qtest, "qtest");
       assignFlags(live, entry.flags, match.flags);
       assignAttributes(live, entry.attributes, match.attributes);
+      assignNegative(live, entry.negative, match.negative);
       const before = authorsAt[i]!;
       const holder = { ...before };
       assignAuthors(holder, match, changedAt.has(i) ? author : undefined);

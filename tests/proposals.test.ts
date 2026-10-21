@@ -106,6 +106,10 @@ describe("building a proposal", () => {
     expect(() => newFeatureText("Flagged", "[ff:beta:on]", proposedScenario("A", "- Then: x"))).toThrow(/read back/);
   });
 
+  test("a body that would mark the scenario negative is refused", () => {
+    expect(() => appendScenario(FEATURE, proposedScenario("Sad", "[negative]\n\n- Then: x"))).toThrow(/read back/);
+  });
+
   test("a body that would add a custom attribute line is refused", () => {
     expect(() => appendScenario(FEATURE, proposedScenario("Ruled", "[br:max-claims:3]\n\n- Then: x"))).toThrow(/read back/);
     expect(() => newFeatureText("Ruled", "[line:auto]", proposedScenario("A", "- Then: x"))).toThrow(/read back/);

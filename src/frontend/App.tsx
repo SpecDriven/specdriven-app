@@ -145,6 +145,7 @@ import { ExternalLinkField } from "./ExternalLinkField";
 import { QtestLinkField } from "./QtestLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
+import { PolarityPill } from "./PolarityPill";
 import { AttributeChips, AttributesField } from "./AttributesField";
 import {
   NO_FILTER,
@@ -506,6 +507,7 @@ export function scenarioSignature(s: Scenario, version: number): string {
     s.qtest ?? null,
     s.flags ?? null,
     s.attributes ?? null,
+    s.negative ?? null,
   ]);
 }
 
@@ -565,6 +567,23 @@ export function withScenarioMoved(feature: Feature, from: number, to: number): F
   const [moved] = scenarios.splice(from, 1);
   scenarios.splice(to, 0, moved!);
   return { ...feature, scenarios };
+}
+
+/**
+ * The scenario with its polarity set (specs/ui/scenario-polarity.feature.md):
+ * the `negative` key when negative, no key at all when positive, so the
+ * markdown and the autosave signature never see an undefined marker.
+ */
+export function withPolarity(s: Scenario, negative: boolean): Scenario {
+  const { negative: _previous, ...rest } = s;
+  return negative ? { ...rest, negative: true } : rest;
+}
+
+/** The feature with the scenario at `i` marked negative or positive. */
+export function withScenarioPolarity(feature: Feature, i: number, negative: boolean): Feature {
+  const s = feature.scenarios[i];
+  if (!s) return feature;
+  return withScenario(feature, i, withPolarity(s, negative));
 }
 
 // Each scenario's number lives beside the file format it labels, so the
@@ -1480,6 +1499,9 @@ export function App() {
   // Feature flags (specs/app/feature-flags.feature.md): opt-in — the flag
   // chips and editors show only once the Settings switch turns them on.
   const [featureFlags, setFeatureFlags] = useState(false);
+  // Scenario polarity (specs/ui/scenario-polarity.feature.md): opt-in — the
+  // Positive / Negative pill shows only once the Settings switch turns it on.
+  const [scenarioPolarity, setScenarioPolarity] = useState(false);
   // The plugins (specs/app/plugins.feature.md) as `GET /api/state` lists
   // them: the profile's entries in tab order, then the built-ins it leaves
   // off — what Settings → Plugins renders, each with its switch. Every
@@ -1546,6 +1568,7 @@ export function App() {
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsFeatureFlagsDraft, setSettingsFeatureFlagsDraft] = useState(false);
+  const [settingsScenarioPolarityDraft, setSettingsScenarioPolarityDraft] = useState(false);
   const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
@@ -1779,6 +1802,9 @@ export function App() {
         }
         if (typeof state.featureFlags === "boolean") {
           setFeatureFlags(state.featureFlags);
+        }
+        if (typeof state.scenarioPolarity === "boolean") {
+          setScenarioPolarity(state.scenarioPolarity);
         }
         setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
         setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
@@ -3928,6 +3954,7 @@ export function App() {
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
     setSettingsFeatureFlagsDraft(featureFlags);
+    setSettingsScenarioPolarityDraft(scenarioPolarity);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
@@ -4122,6 +4149,7 @@ export function App() {
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
     setFeatureFlags(data.featureFlags === true);
+    setScenarioPolarity(data.scenarioPolarity === true);
     // The profile's plugins mount and unmount to match, in its order — a
     // tab appears, goes or moves before this returns (src/plugins/client/
     // loader.ts).
@@ -4371,6 +4399,11 @@ export function App() {
   const toggleFeatureFlags = async (on: boolean) => {
     setSettingsFeatureFlagsDraft(on);
     if (!(await patchSettings({ featureFlags: on }))) setSettingsFeatureFlagsDraft(!on);
+  };
+
+  const toggleScenarioPolarity = async (on: boolean) => {
+    setSettingsScenarioPolarityDraft(on);
+    if (!(await patchSettings({ scenarioPolarity: on }))) setSettingsScenarioPolarityDraft(!on);
   };
 
   // The profile (specs/app/plugins.feature.md "Turning a plugin off unwinds
@@ -5217,6 +5250,45 @@ export function App() {
         setFeature(before);
         setSelectedScenario(i);
         toast.error("Could not move the scenario — is the server running?");
+      }
+    });
+  };
+
+  /**
+   * Flip the polarity of the scenario at `i` from its card
+   * (specs/ui/scenario-polarity.feature.md): bookkeeping around the spec,
+   * so a published scenario takes it too. Saved like a move — the whole
+   * feature, optimistically, rolled back if the save fails.
+   */
+  const toggleScenarioPolarityAt = async (i: number) => {
+    if (!feature || !selected || editing !== null || featureEditorsSealed.current) return;
+    const current = feature.scenarios[i];
+    if (!current) return;
+    const before = feature;
+    const next = withScenarioPolarity(feature, i, !current.negative);
+    const file = selected;
+    setFeature(next);
+    await scenarioSaveQueue.current.run(async () => {
+      try {
+        const res = await fetch(`/api/features/${encodeURIComponent(file)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        });
+        const data = await res.json();
+        if (selectedRef.current !== file) return;
+        if (res.ok) {
+          setFeature(featureFromResponse(data, file));
+          setDirty(false);
+          markSaved();
+        } else {
+          setFeature(before);
+          toast.error(data.error ?? "Could not change the scenario's polarity");
+        }
+      } catch {
+        if (selectedRef.current !== file) return;
+        setFeature(before);
+        toast.error("Could not change the scenario's polarity — is the server running?");
       }
     });
   };
@@ -7224,6 +7296,39 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
+        {/* specs/ui/scenario-polarity.feature.md: opt-in — with the switch
+            off no pill shows and the Confluence page is one run of
+            scenarios; a `[negative]` line already in a feature file stays
+            as written. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Positive and negative scenarios
+            <span className="settings-row-hint">
+              {settingsScenarioPolarityDraft ? (
+                <>
+                  Each scenario shows a green Positive or red Negative pill that flips on a click, written{" "}
+                  <code>[negative]</code> under its heading; its Confluence page groups the scenarios into a
+                  Positive and a Negative section.
+                </>
+              ) : (
+                <>
+                  Scenarios carry no polarity; any <code>[negative]</code> line already in a feature file stays
+                  there.
+                </>
+              )}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Positive and negative scenarios"
+              checked={settingsScenarioPolarityDraft}
+              onChange={(e) => void toggleScenarioPolarity(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
       </PageSection>
       {/* specs/app/custom-attributes.feature.md "Custom attributes are
           defined in Settings": the data repo's definitions, shared with the
@@ -8813,6 +8918,19 @@ export function App() {
                   }
                 />
               )}
+              {/* Its polarity (specs/ui/scenario-polarity.feature.md),
+                  flipped in the draft; the pane's save writes it. */}
+              {scenarioPolarity && (
+                <PolarityPill
+                  negative={!!editing.scenario.negative}
+                  onToggle={() =>
+                    setEditing({
+                      ...editing,
+                      scenario: withPolarity(editing.scenario, !editing.scenario.negative),
+                    })
+                  }
+                />
+              )}
               <p className="version-field">
                 Version <span className="version">v{draftVersion}</span>
                 <span className="status-field">
@@ -9909,6 +10027,18 @@ export function App() {
                       )}
                       {/* The flags gating it (specs/app/feature-flags.feature.md). */}
                       {featureFlags && <FeatureFlagChips flags={s.flags} />}
+                      {/* Its polarity (specs/ui/scenario-polarity.feature.md),
+                          a dot on the card: a click flips it; still while
+                          the editor is open, as Move is, so the pane's copy
+                          cannot go stale. */}
+                      {scenarioPolarity && (
+                        <PolarityPill
+                          compact
+                          negative={!!s.negative}
+                          disabled={editing !== null}
+                          onToggle={() => void toggleScenarioPolarityAt(i)}
+                        />
+                      )}
                     </span>
                     <span className="card-actions">
                       {/* Edit up front, the rest behind ⋯ — Publish or New

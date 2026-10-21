@@ -133,6 +133,15 @@ export type SpecEntry = {
    * Optional key, no migration.
    */
   attributes?: SpecAttribute[];
+  /**
+   * Whether the spec is a negative scenario
+   * (specs/ui/scenario-polarity.feature.md): the `[negative]` line under its
+   * heading. Bookkeeping around the spec, editable while published, like
+   * `flags`; a scalar set whole, last writer wins, so two peers flipping it
+   * concurrently resolve to one side. Absent means positive. Optional key,
+   * no migration.
+   */
+  negative?: true;
 };
 
 /** The recorded published body as a plain string, or undefined when the entry
