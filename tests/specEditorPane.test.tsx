@@ -28,17 +28,29 @@ describe("the way back lands on the scenario's card", () => {
     expect(cardOfScenario(feature.scenarios, { name: "Alpha", version: 1 })).toBe(0);
   });
 
-  test("a new scenario lands in canonical order and its card is found there", () => {
+  // specs/ui/ui.feature.md "number scenarios": scenarios keep their order,
+  // so a new one is appended — or placed at `insertAt`, where a new version
+  // goes right after its source — rather than sorted into place.
+  test("a new scenario is appended (or placed at insertAt) and its card is found there", () => {
     const landed = withScenario(feature, null, sc("Beta", 1, "draft"));
-    expect(landed.scenarios.map((s) => s.name)).toEqual(["Alpha", "Beta", "Gamma", "Gamma"]);
-    expect(cardOfScenario(landed.scenarios, { name: "Beta", version: 1 })).toBe(1);
+    expect(landed.scenarios.map((s) => s.name)).toEqual(["Alpha", "Gamma", "Gamma", "Beta"]);
+    expect(cardOfScenario(landed.scenarios, { name: "Beta", version: 1 })).toBe(3);
+    const placed = withScenario(feature, null, sc("Gamma", 3), 2);
+    expect(placed.scenarios.map((s) => `${s.name} v${s.version}`)).toEqual([
+      "Alpha v1",
+      "Gamma v1",
+      "Gamma v3",
+      "Gamma v2",
+    ]);
+    expect(cardOfScenario(placed.scenarios, { name: "Gamma", version: 3 })).toBe(2);
   });
 
   test("a renamed scenario is replaced, never duplicated, and found under its new name", () => {
     const landed = withScenario(feature, 0, sc("Zulu", 1));
     expect(landed.scenarios).toHaveLength(3);
-    expect(landed.scenarios.map((s) => s.name)).toEqual(["Gamma", "Gamma", "Zulu"]);
-    expect(cardOfScenario(landed.scenarios, { name: "Zulu", version: 1 })).toBe(2);
+    // The rename keeps the scenario's place: no re-sorting.
+    expect(landed.scenarios.map((s) => s.name)).toEqual(["Zulu", "Gamma", "Gamma"]);
+    expect(cardOfScenario(landed.scenarios, { name: "Zulu", version: 1 })).toBe(0);
     expect(cardOfScenario(landed.scenarios, { name: "Alpha", version: 1 })).toBeNull();
   });
 

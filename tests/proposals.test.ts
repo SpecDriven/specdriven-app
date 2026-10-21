@@ -139,7 +139,7 @@ describe("building a proposal", () => {
   test("a new feature holds its name, description and one proposed scenario", () => {
     const { name, text } = newFeatureText(" Dark   mode ", "For night owls.", proposedScenario("Toggle", "- Then: dark"));
     expect(name).toBe("Dark mode");
-    expect(text).toBe("# Dark mode\n\nFor night owls.\n\n## Toggle @v1 [proposed]\n\n- Then: dark\n");
+    expect(text).toBe("# Dark mode\n\nFor night owls.\n\n## S1: Toggle @v1 [proposed]\n\n- Then: dark\n");
   });
 
   test("a new feature name with a slash, or no letters, is refused", () => {

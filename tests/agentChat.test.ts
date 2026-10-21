@@ -642,7 +642,7 @@ test("Start session can open the generated prompt in the pane", async () => {
   const first = await fake.input(1);
   expect(first.message.content).toContain("SpecDriven code gen session: implement quotes");
   expect(first.message.content).toContain("## Spec: specs/quote.feature.md");
-  expect(first.message.content).toContain("## Basic @v1");
+  expect(first.message.content).toContain("## S1: Basic @v1");
   const snap = await snapshot(body.id);
   expect(snap.meta.name).toBe("implement quotes");
   expect(snap.events.find((e) => e.kind === "user")).toMatchObject({

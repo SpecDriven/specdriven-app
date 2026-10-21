@@ -6,7 +6,7 @@
 // render's index and (for a new scenario) its missing document id predate the
 // tick's answer. Publish used to skip this and PUT from the render.
 import { describe, expect, test } from "bun:test";
-import { placeScenario, type Placement } from "../src/frontend/App";
+import { placeScenario, withScenarioMoved, type Placement } from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";
 
 const sc = (name: string, version: number, extra: Partial<Scenario> = {}): Scenario => ({
@@ -54,14 +54,20 @@ describe("a renamed scenario saved behind a tick still away", () => {
     description: "",
     scenarios: [sc("Alpha", 1, { id: "a" }), sc("Gamma", 1, { id: "g" }), sc("Gamma", 2, { id: "g2" })],
   };
-  // The tick renamed Alpha to Hotel: in canonical order it moved to the end,
-  // while the editor's index still says 0.
+  // The tick renamed Alpha to Hotel. Scenarios keep their order (specs/ui/
+  // ui.feature.md "number scenarios"), so a rename alone leaves it at 0 —
+  // but it was moved to the end before the tick answered (Move down, or a
+  // teammate's reorder), while the editor's index still says 0.
   const renamed = sc("Hotel", 1, { id: "a", body: "Given more" });
-  const optimistic = placeScenario(sc("Hotel", 1, { id: "a" }), { feature: before, index: 0 }, false).next;
+  const optimistic = withScenarioMoved(
+    placeScenario(sc("Hotel", 1, { id: "a" }), { feature: before, index: 0 }, false).next,
+    0,
+    2,
+  );
 
   test("placed at the render's stale index, it writes over its neighbour — the bug", () => {
     const { next } = placeScenario(renamed, { feature: optimistic, index: 0 }, false);
-    expect(names(next)).toEqual(["Gamma v2", "Hotel v1", "Hotel v1"]);
+    expect(names(next)).toEqual(["Hotel v1", "Gamma v2", "Hotel v1"]);
   });
 
   test("placed where the tick landed, it replaces its own entry and keeps every neighbour", () => {

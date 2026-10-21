@@ -81,7 +81,8 @@ test("a proposed scenario moves with its body and tests, and leaves the source",
   expect(await names(QUOTE)).toEqual(["Basic v1 proposed", "Idea v1 draft"]);
   expect(await names(ORDER)).toEqual(["Checkout v1 proposed", "Extra v1 proposed"]);
   const order = (await readFeature(data, ORDER))!;
-  expect(order).toContain("## Extra @v1 [proposed]");
+  // Last in the destination, numbered after what was there (parser.ts `S<n>:`).
+  expect(order).toContain("## S2: Extra @v1 [proposed]");
   expect(order).toContain("more");
   expect(order).toContain("[test: extra works : https://github.com/a/b/blob/main/t.test.ts#L3 ]");
   // The documents agree with the files.
@@ -138,7 +139,7 @@ test("with deleting published specs off, a published scenario does not move", as
   await publishBasic();
   const res = await moveViaApi({ name: "Basic", version: 1 }, ORDER);
   expect(res.status).toBe(403);
-  expect(await readFeature(data, QUOTE)).toContain("## Basic @v1 [published]");
+  expect(await readFeature(data, QUOTE)).toContain("## S1: Basic @v1 [published]");
   expect(await readFeature(data, ORDER)).not.toContain("Basic");
 });
 
@@ -151,7 +152,7 @@ test("with deleting published specs on, a published scenario moves and stays pub
   expect(body.movedTo).toBe(ORDER);
   expect(body.content).not.toContain("Basic");
   expect(await readFeature(data, QUOTE)).not.toContain("Basic");
-  expect(await readFeature(data, ORDER)).toContain("## Basic @v1 [published]");
+  expect(await readFeature(data, ORDER)).toContain("## S2: Basic @v1 [published]");
   const basic = (await loadFeatureDoc(data, ORDER))!.doc.specs.find((s) => s.name === "Basic")!;
   expect(basic.status).toBe("published");
 });

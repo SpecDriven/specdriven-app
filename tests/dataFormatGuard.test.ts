@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { version as appVersion } from "../package.json";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import {
   DATA_FORMAT,
@@ -83,13 +84,16 @@ test("a blocked app does not push", async () => {
   expect(status).toContain("specs/local.feature.md");
 });
 
-test("a compatible tick leaves a first-format folder as it was", async () => {
+test("a compatible tick raises a first-format folder to this app's", async () => {
   const message = await syncDataDir(repos.a);
-  expect(message).not.toContain("data format marker");
-  expect(await readDataFormat(repos.a)).toBeNull();
-  // Whatever else the tick pushed, the teammate pulls no marker.
+  expect(message).toContain("wrote the data format marker");
+  const marker = { format: DATA_FORMAT, minAppVersion: appVersion };
+  expect(await readDataFormat(repos.a)).toEqual(marker);
+  // The tick pushed it, so the teammate pulls the marker with the rest.
   await git(repos.b, "pull");
-  expect(await readDataFormat(repos.b)).toBeNull();
+  expect(await readDataFormat(repos.b)).toEqual(marker);
+  // A second tick finds the folder in this format and leaves it alone.
+  expect(await syncDataDir(repos.a)).not.toContain("data format marker");
 });
 
 test("the API refuses writes to a blocked folder and marks its reads", async () => {

@@ -60,6 +60,10 @@ Price a policy.
 - Then: the premium carries a surcharge
 `;
 
+// What the app writes: the scenario numbered by its position (parser.ts
+// `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = RULED.replace("## Young driver", "## S1: Young driver");
+
 test("attribute lines under the headings are lifted into attributes and written back as they were", () => {
   const feature = parseFeature(RULED);
   expect(feature.attributes).toEqual([
@@ -75,7 +79,7 @@ test("attribute lines under the headings are lifted into attributes and written 
     { key: "br-sub", names: ["young-driver-surcharge", "under-21"], value: "1.5" },
   ]);
   expect(s.body).toBe("- Given: a driver under 21\n- Then: the premium carries a surcharge");
-  expect(serializeFeature(feature)).toBe(RULED);
+  expect(serializeFeature(feature)).toBe(WRITTEN);
 });
 
 test("a line may mix flag and attribute tokens, among the link and authorship lines in any order", () => {
@@ -94,7 +98,7 @@ test("a line may mix flag and attribute tokens, among the link and authorship li
   expect(s.body).toBe("body");
   // Flags on their line, then the attributes, a new line wherever the key changes.
   expect(serializeFeature(feature)).toBe(
-    "# F\n\n## S @v1 [proposed]\n\n[ff:a:on]\n\n[br:Young driver:on]\n[line:boat]\n\n[Jira:X-1](https://x.test/X-1)\n\n**Created by:** ada\n\nbody\n",
+    "# F\n\n## S1: S @v1 [proposed]\n\n[ff:a:on]\n\n[br:Young driver:on]\n[line:boat]\n\n[Jira:X-1](https://x.test/X-1)\n\n**Created by:** ada\n\nbody\n",
   );
 });
 
@@ -168,7 +172,7 @@ test("the document carries the attributes and projects them back", () => {
     "[line:auto]",
   ]);
   expect(docToFeature(doc).scenarios[0]!.attributes?.map((a) => a.key)).toEqual(["br", "br-sub"]);
-  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(RULED);
+  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(WRITTEN);
   // Changing them is an edit the document records.
   const edited = parseFeature(RULED.replace("[br:max-claims:3]", "[br:max-claims:4]"));
   const next = reconcile(doc, edited);
@@ -255,12 +259,12 @@ test("an attribute on a published scenario changes without a new version", async
   await publishFeature(data, file, (await readFeature(data, file))!, { name: "Basic", version: 1 });
 
   const ruled = (await readFeature(data, file))!.replace(
-    "## Basic @v1 [published]\n",
-    "## Basic @v1 [published]\n\n[br:max-claims:3]\n",
+    "## S1: Basic @v1 [published]\n",
+    "## S1: Basic @v1 [published]\n\n[br:max-claims:3]\n",
   );
   await saveFeature(data, file, ruled);
   const text = (await readFeature(data, file))!;
-  expect(text).toContain("## Basic @v1 [published]\n\n[br:max-claims:3]\n\nbody");
+  expect(text).toContain("## S1: Basic @v1 [published]\n\n[br:max-claims:3]\n\nbody");
   const doc = (await loadFeatureDoc(data, file))!.doc;
   expect(doc.specs[0]!.attributes).toEqual([{ key: "br", names: ["max-claims"], value: "3" }]);
   expect(doc.specs[0]!.version).toBe(1);

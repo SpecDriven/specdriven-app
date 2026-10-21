@@ -272,7 +272,7 @@ test("a draft promotes to proposed when the markdown claims it", () => {
   const after = next.specs.find((s) => s.name === "Idea")!;
   expect(after.id).toBe(idBefore);
   expect(after.status).toBe("proposed");
-  expect(projectFeature(next)).toContain("## Idea @v1 [proposed]");
+  expect(projectFeature(next)).toContain("## S3: Idea @v1 [proposed]");
 });
 
 // The editor names the scenario it is saving by the document's id for it

@@ -53,7 +53,7 @@ test("the data format is pinned to the schema versions", () => {
     PAGE_SCHEMA_VERSION,
     TESTING_SCHEMA_VERSION,
   }).toEqual({
-    DATA_FORMAT: 1,
+    DATA_FORMAT: 2,
     SCHEMA_VERSION: 3,
     PAGE_SCHEMA_VERSION: 1,
     TESTING_SCHEMA_VERSION: 1,
@@ -70,10 +70,14 @@ test("a folder with no marker is in the first format", async () => {
   expect(incompatibility(dir)).toBeNull();
 });
 
-test("a folder in the first format gets no marker", async () => {
-  expect(DATA_FORMAT).toBe(1);
+test("a folder in the first format is raised to this app's", async () => {
+  // Format 2 numbers the scenario headings (parser.ts), which a format-1 app
+  // would read as part of the name: the marker is written on the first tick.
+  expect(DATA_FORMAT).toBe(2);
+  expect(await stampDataFormat(dir)).toBe(true);
+  expect(await readDataFormat(dir)).toEqual({ format: 2, minAppVersion: appVersion });
+  // Once there, it is left alone.
   expect(await stampDataFormat(dir)).toBe(false);
-  expect(await readDataFormat(dir)).toBeNull();
 });
 
 test("the format marker is written on first sync", async () => {

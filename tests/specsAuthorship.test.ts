@@ -39,11 +39,12 @@ import { authorshipLine } from "../src/frontend/authorship";
 const ADA = "ada";
 const GRACE = "grace";
 
+// The file as the app writes it: scenario headings numbered by position.
 const PLAIN = `# Quote Policy
 
 Quotes for potential customers.
 
-## Request Quote @v1 [proposed]
+## S1: Request Quote @v1 [proposed]
 
 - **Given** a potential customer
 - **Then** a quote is provided

@@ -76,6 +76,13 @@ Quotes for potential customers.
 - **Given** the customer has no account
 `;
 
+// What the app writes: the same text with each scenario numbered by its
+// position (parser.ts `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = SAMPLE.replace("## Basic Quote", "## S1: Basic Quote").replace(
+  "## Declined Quote",
+  "## S2: Declined Quote",
+);
+
 const defaults = projectionOptions();
 let root: string;
 
@@ -107,7 +114,7 @@ describe("the qTest line", () => {
 
   test("survives a parse/serialize round trip", () => {
     const feature = parseFeature(SAMPLE);
-    expect(serializeFeature(feature)).toBe(SAMPLE);
+    expect(serializeFeature(feature)).toBe(WRITTEN);
     expect(parseFeature(serializeFeature(feature))).toEqual(feature);
   });
 
@@ -116,7 +123,7 @@ describe("the qTest line", () => {
     const feature = parseFeature(swapped);
     expect(feature.link).toEqual(JIRA);
     expect(feature.qtest).toEqual(QTEST);
-    expect(serializeFeature(feature)).toBe(SAMPLE);
+    expect(serializeFeature(feature)).toBe(WRITTEN);
   });
 
   test("is told from a ticket by its program, whatever its case", () => {
@@ -149,7 +156,7 @@ describe("the document", () => {
     const feature = parseFeature(SAMPLE);
     const doc = importFeatureDoc(feature);
     expect(docToFeature(doc)).toEqual(feature);
-    expect(projectFeature(doc)).toBe(SAMPLE);
+    expect(projectFeature(doc)).toBe(WRITTEN);
   });
 
   test("keeps them out of the projection while Publish external links is off", () => {
@@ -216,7 +223,7 @@ describe("saving a feature", () => {
   test("writes the test cases into the file while links are published", async () => {
     const file = await createFeature(root, "Quote Policy");
     await saveFeature(root, file, SAMPLE);
-    expect(await readFeature(root, file)).toBe(SAMPLE);
+    expect(await readFeature(root, file)).toBe(WRITTEN);
     expect(docToFeature((await loadFeatureDoc(root, file))!.doc).qtest).toEqual(QTEST);
   });
 
@@ -224,9 +231,9 @@ describe("saving a feature", () => {
     setProjectionOptions({ publishExternalLinks: false });
     const file = await createFeature(root, "Quote Policy");
     const saved = await saveFeature(root, file, SAMPLE);
-    expect(saved.content).toBe(SAMPLE);
+    expect(saved.content).toBe(WRITTEN);
     expect(await readFeature(root, file)).not.toContain("[qTest:");
-    expect(await readFeatureForEditor(root, file)).toBe(SAMPLE);
+    expect(await readFeatureForEditor(root, file)).toBe(WRITTEN);
     const view = (await readFeatureView(root, file))!;
     expect(view.parsed.qtest).toEqual(QTEST);
     expect(view.parsed.scenarios[0]!.qtest).toEqual(SCENARIO_QTEST);
