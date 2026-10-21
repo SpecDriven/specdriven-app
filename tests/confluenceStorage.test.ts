@@ -5,7 +5,7 @@
 
 import { test, expect, describe } from "bun:test";
 import {
-  escapeXml,
+  attachmentNames, escapeXml,
   renderFeatureStorage,
   renderInlineStorage,
   renderMarkdownStorage,
@@ -67,14 +67,14 @@ describe("inline", () => {
     );
   });
 
-  test("an image on the web is embedded; one the app stores is its alt text", () => {
-    expect(renderInlineStorage("![chart](https://acme.com/c.png)")).toBe(
-      '<ac:image ac:alt="chart"><ri:url ri:value="https://acme.com/c.png" /></ac:image>',
-    );
-    expect(renderInlineStorage("![diagram](/api/images/abc.png)")).toBe("<em>diagram</em>");
-    expect(renderInlineStorage('<img src="https://acme.com/d.png" alt="d" width="200">')).toContain(
-      '<ri:url ri:value="https://acme.com/d.png" />',
-    );
+  test("an image on the web is embedded by url; one the app stores as the page's attachment", () => {
+    const web = '<ac:image ac:alt="chart"><ri:url ri:value="https://acme.com/c.png" /></ac:image>';
+    expect(renderInlineStorage("![chart](https://acme.com/c.png)")).toBe(web);
+    const stored = '<ac:image ac:alt="flow"><ri:attachment ri:filename="flow-1a2b3c4d.png" /></ac:image>';
+    expect(renderInlineStorage("![flow](/api/images/flow-1a2b3c4d.png)")).toBe(stored);
+    expect(renderInlineStorage('<img src="/api/images/flow-1a2b3c4d.png" alt="flow" width="200">')).toBe(stored);
+    expect(renderInlineStorage('<img src="https://acme.com/d.png" alt="d">')).toContain('<ri:url ri:value="https://acme.com/d.png" />');
+    expect(renderInlineStorage("![other](/static/x.png) ![odd](/api/images/../x.png)")).toBe("<em>other</em> <em>odd</em>");
   });
 });
 
@@ -200,5 +200,16 @@ describe("polarity", () => {
     feature.scenarios.push({ name: "Idea", version: 1, status: "draft", body: "", tests: [], negative: true });
     expect(renderFeatureStorage(feature, "all", { polarity: true })).toContain("<h2>Idea</h2>");
     expect(renderFeatureStorage(parseFeature("# F\n"), "all", { polarity: true })).toBe("<p><em>No scenarios yet.</em></p>");
+  });
+});
+
+describe("attachments", () => {
+  test("names each stored image a page shows once, in order; escaped text is not one", () => {
+    const body = renderMarkdownStorage(
+      "![a](/api/images/a-11111111.png) ![b](/api/images/b-22222222.svg)\n\n![a](/api/images/a-11111111.png)\n\n" +
+        '<ri:attachment ri:filename="nope.png" /> ![web](https://acme.com/w.png)',
+      1,
+    );
+    expect(attachmentNames(body)).toEqual(["a-11111111.png", "b-22222222.svg"]);
   });
 });

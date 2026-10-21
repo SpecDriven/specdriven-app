@@ -40,6 +40,25 @@ function safeImageName(name: string): string | null {
   return SAFE_NAME.test(name) ? name : null;
 }
 
+/** The route the app serves stored images on; a body references one as `![alt](/api/images/<name>)`. */
+export const IMAGES_ROUTE = "/api/images/";
+
+/**
+ * The stored image a url in a body names — `/api/images/<name>`, the name
+ * one storeImage generates — or null for any other url.
+ */
+export function storedImageName(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed.startsWith(IMAGES_ROUTE)) return null;
+  let name: string;
+  try {
+    name = decodeURIComponent(trimmed.slice(IMAGES_ROUTE.length));
+  } catch {
+    return null;
+  }
+  return safeImageName(name);
+}
+
 /**
  * Store an uploaded or pasted image in the data repo, committed and pushed
  * like a feature edit. Returns the stored file name. The original file name
