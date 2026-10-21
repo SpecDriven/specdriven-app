@@ -11,13 +11,15 @@
 // see src/server/automerge/driftSync.ts.
 
 import { autoResolveMergeConflicts, importDrift, mergeInProgress } from "./automerge/driftSync";
-import { pull, syncSavedChanges } from "./git";
+import { commitAndPush, pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { NOTEBOOK, importPageDrift } from "./pages";
 import { ensureSpecsFolder } from "./features";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo } from "./state";
 import { checkDataFormat, stampDataFormat } from "./dataFormat";
+import { AGENTS_FILE, installAgentsFile } from "./agentsFile";
+import { isDemoMode } from "./demoMode";
 import { getLogger, withSpan } from "./telemetry";
 import { sync as pluginSync } from "../plugins/host/loader";
 
@@ -110,6 +112,16 @@ export async function syncDataDir(dir: string): Promise<string> {
       // The format marker, so an older app stops at this folder; written
       // after the passes above have brought the data up to this format.
       if (await stampDataFormat(dir)) parts.push("wrote the data format marker");
+      // The agents' guide to the folder (specs/agents/agents-md.feature.md):
+      // the app's template, installed once into a folder that has none and
+      // never written over, since the team edits it. It goes in a commit of
+      // its own, so the auto-save commit below still says what the user
+      // changed rather than "1 feature, 1 file". The demo's copy is reseeded
+      // on every page load from demo-data, which carries the file itself.
+      if (!isDemoMode() && (await installAgentsFile(dir))) {
+        await commitAndPush(dir, AGENTS_FILE, `Add ${AGENTS_FILE}`);
+        parts.push(`installed ${AGENTS_FILE}`);
+      }
     }
     const synced = await syncSavedChanges(dir);
     parts.push(synced.message);
