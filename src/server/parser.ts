@@ -1265,6 +1265,17 @@ export function parseFeature(text: string): Feature {
   return feature;
 }
 
+/**
+ * Each scenario's number — `S1`, `S2`, … by position among the scenarios
+ * the file holds (specs/ui/ui.feature.md "number scenarios") — or null for
+ * a draft, which lives in the document only and has no place in the file.
+ * Computed over the whole list, so a filtered view shows the same numbers.
+ */
+export function scenarioNumbers(scenarios: readonly Pick<Scenario, "status">[]): (number | null)[] {
+  let n = 0;
+  return scenarios.map((s) => (s.status === "draft" ? null : ++n));
+}
+
 function header(name: string, version: number, status: ScenarioStatus, number?: number): string {
   const prefix = number === undefined ? "" : `S${number}: `;
   return `## ${prefix}${name} @v${version} [${status}]`;
