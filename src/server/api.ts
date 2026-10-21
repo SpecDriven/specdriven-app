@@ -151,9 +151,9 @@ import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
 import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
 import type { Feature } from "./parser";
-import { ConfluenceError, publishFeaturePage, resolveParent, validateToken } from "./confluence";
+import { attachFiles, ConfluenceError, publishFeaturePage, resolveParent, validateToken } from "./confluence";
 import { normalizeConfluenceBase, onBase, parseParentPageUrl } from "./confluenceUrl";
-import { isPublishScope, renderFeatureStorage } from "./confluenceStorage";
+import { attachmentNames, isPublishScope, renderFeatureStorage } from "./confluenceStorage";
 import {
   clearConfluenceToken,
   confluenceToken,
@@ -1407,6 +1407,7 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   // (specs/ui/scenario-polarity.feature.md).
   const state = await readState(getAppRoot());
   const polarity = normalizeScenarioPolarity(state.scenarioPolarity);
+  const xhtml = renderFeatureStorage(feature, scope, { polarity });
   let page: { id: string; url: string; created: boolean };
   try {
     const parent = await resolveParent(ref.base, record.token, ref);
@@ -1415,12 +1416,31 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
       token: record.token,
       parent,
       title,
-      body: renderFeatureStorage(feature, scope, { polarity }),
+      body: xhtml,
       existingPageId,
     });
   } catch (e) {
     if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
     return json({ error: (e as Error).message }, 502);
+  }
+  // The images the page shows (specs/images.feature.md) go up as its
+  // attachments, the ones already there left alone. The page is published
+  // either way: a failure here is reported as a warning, not an error.
+  const warnings: string[] = [];
+  const images = await Promise.all(
+    attachmentNames(xhtml).map(async (name) => ({ name, mime: imageMime(name), bytes: await readImage(dir, name) })),
+  );
+  const missing = images.filter((i) => i.bytes === null).map((i) => i.name);
+  if (missing.length > 0) warnings.push(`Not stored in the data repo, so not attached: ${missing.join(", ")}`);
+  try {
+    await attachFiles(
+      ref.base,
+      record.token,
+      page.id,
+      images.flatMap((i) => (i.bytes ? [{ name: i.name, mime: i.mime, bytes: i.bytes }] : [])),
+    );
+  } catch (e) {
+    warnings.push(`The page's images were not attached: ${(e as Error).message}`);
   }
   if (state.confluenceParentUrl !== parentUrl) {
     state.confluenceParentUrl = parentUrl;
@@ -1428,15 +1448,17 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   }
   const result = { id: page.id, url: page.url, created: page.created, title, parentUrl };
   const link = { program: CONFLUENCE_PROGRAM, ticket: page.id, url: page.url };
+  const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
   if (linked && linked.ticket === link.ticket && linked.url === link.url) {
-    return json({ ...view, ...result, message: "page link unchanged" });
+    return json({ ...view, ...result, ...warned(), message: "page link unchanged" });
   }
   try {
     const next: Feature = { ...feature, confluence: link };
-    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...result });
+    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...result, ...warned() });
   } catch (e) {
     // The page is in Confluence; only the link back could not be written.
-    return json({ ...view, ...result, warning: `The page link was not saved: ${(e as Error).message}` });
+    warnings.push(`The page link was not saved: ${(e as Error).message}`);
+    return json({ ...view, ...result, ...warned() });
   }
 });
 
