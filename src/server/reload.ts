@@ -19,6 +19,7 @@ import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo } from "./state";
 import { checkDataFormat, stampDataFormat } from "./dataFormat";
 import { AGENTS_FILE, installAgentsFile } from "./agentsFile";
+import { isDemoMode } from "./demoMode";
 import { getLogger, withSpan } from "./telemetry";
 import { sync as pluginSync } from "../plugins/host/loader";
 
@@ -115,8 +116,9 @@ export async function syncDataDir(dir: string): Promise<string> {
       // the app's template, installed once into a folder that has none and
       // never written over, since the team edits it. It goes in a commit of
       // its own, so the auto-save commit below still says what the user
-      // changed rather than "1 feature, 1 file".
-      if (await installAgentsFile(dir)) {
+      // changed rather than "1 feature, 1 file". The demo's copy is reseeded
+      // on every page load from demo-data, which carries the file itself.
+      if (!isDemoMode() && (await installAgentsFile(dir))) {
         await commitAndPush(dir, AGENTS_FILE, `Add ${AGENTS_FILE}`);
         parts.push(`installed ${AGENTS_FILE}`);
       }
