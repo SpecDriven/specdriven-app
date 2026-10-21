@@ -136,12 +136,16 @@ describe("[test:<name>:<url>] in markdown", () => {
   });
 });
 
+// What the app writes back: the heading numbered by position (parser.ts
+// `S<n>:`), the rest of the text as it was.
+const written = (text: string) => text.replace("## S @v1", "## S1: S @v1");
+
 test("a named reference inside a rule stays in the scenario body across a parse/serialize round trip", () => {
   const text = `# F\n\n## S @v1 [published]\n\n- **Then** the quote is priced [test: quotesAHomeownersPolicy : ${URL} ]\n`;
   const feature = parseFeature(text);
   expect(feature.scenarios[0]!.body).toContain(`[test: quotesAHomeownersPolicy : ${URL} ]`);
   expect(feature.scenarios[0]!.tests).toEqual([]);
-  expect(serializeFeature(feature)).toBe(text);
+  expect(serializeFeature(feature)).toBe(written(text));
 });
 
 test("a named reference on a line of its own is the scenario's test link, written back as that line", () => {
@@ -149,7 +153,7 @@ test("a named reference on a line of its own is the scenario's test link, writte
   const feature = parseFeature(text);
   expect(feature.scenarios[0]!.body).toBe("- **Then** the quote is priced");
   expect(feature.scenarios[0]!.tests).toEqual([`quotesAHomeownersPolicy : ${URL}`]);
-  expect(serializeFeature(feature)).toBe(text);
+  expect(serializeFeature(feature)).toBe(written(text));
 });
 
 test("a reference inside a rule stays in the scenario body across a parse/serialize round trip", () => {
@@ -157,7 +161,7 @@ test("a reference inside a rule stays in the scenario body across a parse/serial
   const feature = parseFeature(text);
   expect(feature.scenarios[0]!.body).toContain(`[test: ${URL} ]`);
   expect(feature.scenarios[0]!.tests).toEqual([]);
-  expect(serializeFeature(feature)).toBe(text);
+  expect(serializeFeature(feature)).toBe(written(text));
 });
 
 test("a reference on a line of its own is the scenario's test link, written back as that line", () => {
@@ -165,5 +169,5 @@ test("a reference on a line of its own is the scenario's test link, written back
   const feature = parseFeature(text);
   expect(feature.scenarios[0]!.body).toBe("- **Then** the quote is priced");
   expect(feature.scenarios[0]!.tests).toEqual([URL]);
-  expect(serializeFeature(feature)).toBe(text);
+  expect(serializeFeature(feature)).toBe(written(text));
 });

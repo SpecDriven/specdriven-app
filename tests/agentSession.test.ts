@@ -103,7 +103,7 @@ test("a desktop session saves the prompt beside the settings and opens Claude.ap
   const prompt = await readFile(body.promptPath, "utf8");
   expect(prompt).toContain("SpecDriven code gen session: implement quotes");
   expect(prompt).toContain("## Spec: specs/quote.feature.md");
-  expect(prompt).toContain("## Basic @v1");
+  expect(prompt).toContain("## S1: Basic @v1");
   const record = JSON.parse(
     await readFile(join(root, ".specdriven", "sessions", body.id, "session.json"), "utf8"),
   );
@@ -243,7 +243,7 @@ test("the prompt route returns the session prompt and runs nothing", async () =>
   expect(body.name).toBe("implement quotes");
   expect(body.prompt).toContain("SpecDriven code gen session: implement quotes");
   expect(body.prompt).toContain("## Spec: specs/quote.feature.md");
-  expect(body.prompt).toContain("## Basic @v1");
+  expect(body.prompt).toContain("## S1: Basic @v1");
   expect(calls).toHaveLength(0);
   // Nothing recorded either — a copied prompt is not a session.
   await expect(stat(join(root, ".specdriven", "sessions"))).rejects.toThrow();

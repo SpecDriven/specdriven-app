@@ -182,7 +182,10 @@ test("H2: concurrent absorbs double the text in the document, and the next drift
   await git(b, "pull", "--no-rebase");
   const merged = (await loadFeatureDoc(b, FILE))!.doc;
   expect(merged.specs[0]!.body).toBe("- line one\n- line two, edited on GitHub, edited on GitHub");
-  expect(await readFeature(b, FILE)).toBe(ONE.replace("- line two", "- line two, edited on GitHub"));
+  // The absorb wrote the file back, so its heading carries its number now.
+  expect(await readFeature(b, FILE)).toBe(
+    ONE.replace("## Story", "## S1: Story").replace("- line two", "- line two, edited on GitHub"),
+  );
 
   await syncDataDir(b); // the drift pass: the file is not a projection, absorb
   await syncDataDir(a);

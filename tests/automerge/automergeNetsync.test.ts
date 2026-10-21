@@ -173,7 +173,7 @@ test("a remote absorb keeps a local disk edit the sync tick has not absorbed", a
 
   const md = (await readFeature(b, FILE))!;
   expect(md).toContain("edited on A");
-  expect(md).toContain("## Disk only @v1 [proposed]");
+  expect(md).toContain("## S1: Disk only @v1 [proposed]");
   expect(projectFeature((await loadFeatureDoc(b, FILE))!.doc)).toBe(md);
   // The disk edit is in the document now — the next tick must not see leftover drift,
   // and must not be the only thing that could have recovered it.
@@ -181,7 +181,7 @@ test("a remote absorb keeps a local disk edit the sync tick has not absorbed", a
   // B handed the absorbed disk edit to the network, and it reached A that
   // way, not only through git.
   const fromB = server.pushes.filter((p) => p.peer === "b");
-  expect(fromB.some((p) => projectFeature(p.doc).includes("## Disk only"))).toBe(true);
+  expect(fromB.some((p) => projectFeature(p.doc).includes(": Disk only @v1"))).toBe(true);
   expect(await readFeature(a, FILE)).toBe(md);
 });
 

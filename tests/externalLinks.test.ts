@@ -82,6 +82,14 @@ Quotes for potential customers.
 - **Given** the customer has no account
 `;
 
+// What the app writes: the same text with each scenario numbered by its
+// position (parser.ts `S<n>:`) — the number is a label for the order, not
+// part of the name, so parsing either form gives the same feature.
+const WRITTEN = SAMPLE.replace("## Basic Quote", "## S1: Basic Quote").replace(
+  "## Declined Quote",
+  "## S2: Declined Quote",
+);
+
 let root: string;
 const defaults = projectionOptions();
 
@@ -151,7 +159,7 @@ test("the parser lifts the feature's and each scenario's link out of the text", 
 test("links survive a parse/serialize round trip, under the heading they belong to", () => {
   const feature = parseFeature(SAMPLE);
   const text = serializeFeature(feature);
-  expect(text).toBe(SAMPLE);
+  expect(text).toBe(WRITTEN);
   expect(parseFeature(text)).toEqual(feature);
 });
 
@@ -180,7 +188,7 @@ test("an imported document holds the links and projects them back", () => {
   const feature = parseFeature(SAMPLE);
   const doc = importFeatureDoc(feature);
   expect(docToFeature(doc)).toEqual(feature);
-  expect(projectFeature(doc)).toBe(SAMPLE);
+  expect(projectFeature(doc)).toBe(WRITTEN);
 });
 
 test("with Publish external links off, the projection leaves the links out", () => {
@@ -191,7 +199,7 @@ test("with Publish external links off, the projection leaves the links out", () 
   // The document still has them: the setting is about the markdown only.
   expect(docToFeature(doc).link).toEqual(JIRA);
   // An explicit option overrides the setting.
-  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(SAMPLE);
+  expect(projectFeature(doc, { publishExternalLinks: true })).toBe(WRITTEN);
 });
 
 test("either form of the projection counts as the document's projection", () => {
@@ -212,7 +220,7 @@ test("reconcile sets, replaces and clears links", () => {
   doc = reconcile(doc, parseFeature(SAMPLE));
   expect(docToFeature(doc).link).toEqual(JIRA);
   expect(docToFeature(doc).scenarios[0]!.link).toEqual(LINEAR);
-  expect(projectFeature(doc)).toBe(SAMPLE);
+  expect(projectFeature(doc)).toBe(WRITTEN);
 
   const moved = { ...JIRA, ticket: "ABC-999", url: "https://acme.atlassian.net/browse/ABC-999" };
   const retargeted = parseFeature(SAMPLE);
@@ -270,7 +278,7 @@ test("when both sides change a link, ours wins; a removal on one side stands", (
 test("a saved link lands in the document and, with the setting on, in the file", async () => {
   const file = await createFeature(root, "Quote Policy");
   await saveFeature(root, file, SAMPLE);
-  expect(await readFeature(root, file)).toBe(SAMPLE);
+  expect(await readFeature(root, file)).toBe(WRITTEN);
   const loaded = await loadFeatureDoc(root, file);
   expect(docToFeature(loaded!.doc).link).toEqual(JIRA);
 });
@@ -279,13 +287,13 @@ test("with the setting off, the file has no links but the editor still sees them
   setProjectionOptions({ publishExternalLinks: false });
   const file = await createFeature(root, "Quote Policy");
   const saved = await saveFeature(root, file, SAMPLE);
-  // The save answers with the editor's view: links included.
-  expect(saved.content).toBe(SAMPLE);
+  // The save answers with the editor's view: links included, scenarios numbered.
+  expect(saved.content).toBe(WRITTEN);
   const onDisk = (await readFeature(root, file))!;
   expect(onDisk).not.toContain("[Jira:");
   expect(onDisk).not.toContain("[Linear:");
   // Reading for the editor folds the document's links back in.
-  expect(await readFeatureForEditor(root, file)).toBe(SAMPLE);
+  expect(await readFeatureForEditor(root, file)).toBe(WRITTEN);
   // And a later save that still carries them keeps them.
   const again = await saveFeature(root, file, SAMPLE.replace("is provided", "is emailed"));
   expect(parseFeature(again.content).link).toEqual(JIRA);
@@ -313,11 +321,11 @@ test("flipping the setting rewrites every feature file to the new form", async (
   setProjectionOptions({ publishExternalLinks: false });
   expect(await reprojectFeatures(root)).toBe(1);
   expect(await readFeature(root, file)).toBe(serializeFeature(parseFeature(SAMPLE), { links: false }));
-  expect(await readFeature(root, other)).toBe("# Plain\n\n## S @v1 [proposed]\n\nbody\n");
+  expect(await readFeature(root, other)).toBe("# Plain\n\n## S1: S @v1 [proposed]\n\nbody\n");
 
   setProjectionOptions({ publishExternalLinks: true });
   expect(await reprojectFeatures(root)).toBe(1);
-  expect(await readFeature(root, file)).toBe(SAMPLE);
+  expect(await readFeature(root, file)).toBe(WRITTEN);
   expect(await reprojectFeatures(root)).toBe(0);
 });
 
@@ -331,16 +339,17 @@ test("a file in the other form is not drift: peers with different settings leave
   expect(await readFeature(root, file)).toBe(withoutLinks);
   expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toEqual(JIRA);
   // The editor still sees the links.
-  expect(await readFeatureForEditor(root, file)).toBe(SAMPLE);
+  expect(await readFeatureForEditor(root, file)).toBe(WRITTEN);
 });
 
 test("an outside edit that changes a link is absorbed like any other drift", async () => {
   const file = await createFeature(root, "Quote Policy");
   await saveFeature(root, file, SAMPLE);
-  const edited = SAMPLE.replace(JIRA_LINE, "[Jira:ABC-777](https://acme.atlassian.net/browse/ABC-777)");
-  await Bun.write(join(root, file), edited);
+  const retargeted = "[Jira:ABC-777](https://acme.atlassian.net/browse/ABC-777)";
+  await Bun.write(join(root, file), SAMPLE.replace(JIRA_LINE, retargeted));
   expect(await importDrift(root)).toContain("absorbed 1");
-  expect(await readFeature(root, file)).toBe(edited);
+  // Absorbed, and written back in the app's form: the scenarios numbered.
+  expect(await readFeature(root, file)).toBe(WRITTEN.replace(JIRA_LINE, retargeted));
   expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toEqual({
     program: "Jira",
     ticket: "ABC-777",

@@ -110,9 +110,10 @@ test("parses the published chip", () => {
 });
 
 // crud-feature.spec.md "Feature file format": a [proposed] chip marks a
-// saved, not-yet-published scenario.
+// saved, not-yet-published scenario. The heading is written back with its
+// `S<n>:` position number (specs/ui/ui.feature.md "number scenarios").
 test("parses and serializes the proposed chip", () => {
-  const text = "# X\n\n## Draft @v2 [proposed]\n\nbody\n";
+  const text = "# X\n\n## S1: Draft @v2 [proposed]\n\nbody\n";
   const feature = parseFeature(text);
   expect(feature.scenarios[0]).toMatchObject({
     name: "Draft",
@@ -127,7 +128,7 @@ test("parses and serializes the proposed chip", () => {
 test("legacy [saved] chips parse as proposed and normalize on write", () => {
   const feature = parseFeature("# X\n\n## Kept @v3 [saved]\n\nbody\n");
   expect(feature.scenarios[0]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
-  expect(serializeFeature(feature)).toContain("## Kept @v3 [proposed]");
+  expect(serializeFeature(feature)).toContain("## S1: Kept @v3 [proposed]");
 });
 
 // Feature files written before the `@` version prefix still read, and are
@@ -142,8 +143,8 @@ test("legacy un-prefixed versions still parse and normalize on write", () => {
   expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, status: "draft" });
   expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
   const text = serializeFeature(feature);
-  expect(text).toContain("## Done @v1 [published]");
-  expect(text).toContain("## Kept @v3 [proposed]");
+  expect(text).toContain("## S1: Done @v1 [published]");
+  expect(text).toContain("## S2: Kept @v3 [proposed]");
   expect(text).toContain("## Draft @v2 [draft]");
 });
 
@@ -157,8 +158,8 @@ test("legacy backtick headings still parse and normalize on write", () => {
   expect(feature.scenarios[1]).toMatchObject({ name: "Draft", version: 2, status: "draft" });
   expect(feature.scenarios[2]).toMatchObject({ name: "Kept", version: 3, status: "proposed" });
   const text = serializeFeature(feature);
-  expect(text).toContain("## Done @v1 [published]");
-  expect(text).toContain("## Kept @v3 [proposed]");
+  expect(text).toContain("## S1: Done @v1 [published]");
+  expect(text).toContain("## S2: Kept @v3 [proposed]");
   expect(text).toContain("## Draft @v2 [draft]");
   expect(text).not.toContain("`v");
 });
@@ -173,7 +174,8 @@ test("extra spaces before the version and chip are tolerated", () => {
 });
 
 // specs/ui/ui.feature.md: "Scenarios are ordered by name, then by version" —
-// regardless of the order they appear in the file.
+// regardless of the order they appear in the file — for a file written
+// before the `S<n>:` position numbers (no heading carries one).
 test("scenarios are ordered by name, then by version", () => {
   const feature = parseFeature(
     "# X\n\n## Hotline @v1 [published]\n\nbody\n\n## Decline @v1 [published]\n\nbody\n\n## Hotline @v2 [published]\n\nbody\n",
@@ -190,12 +192,25 @@ test("serialize emits the markdown format and round-trips exactly", () => {
   // Chipless headings are drafts; serializing writes the status back as an
   // explicit [draft] chip — the editor wire format. (The on-disk projection
   // filters drafts out before serializing, so the chip never hits a file.)
+  // Every heading also gains its `S<n>:` position number
+  // (specs/ui/ui.feature.md "number scenarios"), so a legacy numberless
+  // text is not a fixed point of parse∘serialize — its numbered form is.
   const chipped = SAMPLE.replace(
     "## Basic Quote @v1",
     "## Basic Quote @v1 [draft]",
   ).replace("## Declined Quote @v2", "## Declined Quote @v2 [draft]");
-  expect(serializeFeature(feature)).toBe(chipped);
-  expect(parseFeature(serializeFeature(feature))).toEqual(feature);
+  const text = serializeFeature(feature);
+  expect(text).toBe(chipped);
+  expect(parseFeature(text)).toEqual(feature);
+  expect(serializeFeature(parseFeature(text))).toBe(text);
+  // The legacy form is still available on request, for the projection check
+  // that recognizes a file written before the numbers.
+  expect(serializeFeature(feature, { numbers: false })).toBe(
+    SAMPLE.replace("## Basic Quote @v1", "## Basic Quote @v1 [draft]").replace(
+      "## Declined Quote @v2",
+      "## Declined Quote @v2 [draft]",
+    ),
+  );
 });
 
 test("a scenario with an empty body serializes as a bare heading", () => {

@@ -59,6 +59,13 @@ def readVectors (α : Type) [FromJson α] (file : String) : IO (List α) := do
   | .ok v => pure v
   | .error e => throw (IO.userError s!"{file}: {e}")
 
+/-- Scenarios compared in the model's canonical order: the TypeScript keeps
+    the order the user gave them (schema.ts `rank`, specs/ui/ui.feature.md
+    "Number scenarios and move them up or down"), which the model does not
+    mirror (README "Not mirrored yet"); the sets and every field still must
+    agree. -/
+def canon (f : Feature) : Feature := { f with scenarios := sortScenarios f.scenarios }
+
 def checkThreeWay (strict : Bool) (file : String) : IO Nat := do
   let vs ← readVectors ThreeWayVector file
   let mut bad := 0
@@ -67,7 +74,7 @@ def checkThreeWay (strict : Bool) (file : String) : IO Nat := do
                else threeWayFeature 0 v.base v.ours v.theirs
     match got, v.result.ok, v.result.feature with
     | .ok f, true, some want =>
-      if !v.textClash && f != want then
+      if !v.textClash && canon f != canon want then
         bad := bad + 1
         IO.println s!"{file}[{i}]: result differs\n  model: {repr f}\n  ts:    {repr want}"
     | .error _, false, _ => pure ()
@@ -99,13 +106,13 @@ def checkReconcile (file : String) : IO Nat := do
     match got, v.result.ok with
     | .ok (d, _), true =>
       let proj := projectFeature d true
-      if some proj != v.result.projection then
+      if some (canon proj) != v.result.projection.map canon then
         bad := bad + 1
         IO.println s!"{file}[{i}]: projection differs\n  model: {repr proj}\n  ts:    {repr v.result.projection}"
       if some d.specs != v.result.specs then
         bad := bad + 1
         IO.println s!"{file}[{i}]: specs differ\n  model: {repr d.specs}\n  ts:    {repr v.result.specs}"
-      if some (docToFeature d) != v.result.feature then
+      if some (canon (docToFeature d)) != v.result.feature.map canon then
         bad := bad + 1
         IO.println s!"{file}[{i}]: docToFeature differs\n  model: {repr (docToFeature d)}\n  ts:    {repr v.result.feature}"
     | .error _, false => pure ()

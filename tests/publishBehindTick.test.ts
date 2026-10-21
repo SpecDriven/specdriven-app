@@ -5,7 +5,7 @@
 // and `placeScenario`, so a new scenario is published once, under the id
 // the tick gave it, and a rename does not overwrite its neighbour.
 import { describe, expect, test } from "bun:test";
-import { placeScenario, type Placement } from "../src/frontend/App";
+import { placeScenario, withScenarioMoved, type Placement } from "../src/frontend/App";
 import { createPromiseQueue } from "../src/frontend/promiseQueue";
 import type { Feature, Scenario } from "../src/server/parser";
 
@@ -86,13 +86,19 @@ describe("a renamed scenario published behind a tick still away", () => {
     description: "",
     scenarios: [sc("Alpha", 1, { id: "a" }), sc("Gamma", 1, { id: "g" }), sc("Gamma", 2, { id: "g2" })],
   };
+  // The tick renamed Alpha to Hotel, and it was moved to the end before the
+  // tick answered (scenarios keep their order, specs/ui/ui.feature.md
+  // "number scenarios"), while the editor's index still says 0.
   const renamed = sc("Hotel", 1, { id: "a", body: "Given more" });
-  const optimistic = placeScenario(sc("Hotel", 1, { id: "a" }), { feature: before, index: 0 }, false)
-    .next;
+  const optimistic = withScenarioMoved(
+    placeScenario(sc("Hotel", 1, { id: "a" }), { feature: before, index: 0 }, false).next,
+    0,
+    2,
+  );
 
   test("placed at the render's stale index, Publish writes over its neighbour — the bug", () => {
     const { next } = placeScenario(renamed, { feature: optimistic, index: 0 }, false);
-    expect(names(next)).toEqual(["Gamma v2", "Hotel v1", "Hotel v1"]);
+    expect(names(next)).toEqual(["Hotel v1", "Gamma v2", "Hotel v1"]);
   });
 
   test("queued after the tick, it publishes its own entry and keeps every neighbour", async () => {

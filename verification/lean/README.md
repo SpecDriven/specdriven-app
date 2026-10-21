@@ -20,6 +20,15 @@ The one change the verification led to under `src/` is the fix for H2's
 published case (REPORT.md section 2): `schema.ts` `publishedBody`,
 `effectiveBody`, `reconcile.ts` `healPublished`, mirrored here.
 
+Not mirrored yet: scenario order. The TypeScript keeps the order the user
+gave the scenarios (`schema.ts` `rank`, `project.ts` `orderSpecs`,
+`merge.ts` `mergeOrder`; specs/ui/ui.feature.md "Number scenarios and move
+them up or down") and numbers the headings by position; the model still
+sorts by name and version everywhere. None of the theorems depend on the
+order — they are about which entries survive and what their bodies are —
+so `Vectors.lean` compares the lists in the model's canonical order
+(`canon`) and the differential test stays blind to a reorder.
+
 Not mirrored yet: `assertPublishedKept` (T10) also accepts a target body
 equal to the recorded body with its leading metadata lines read off
 (`reconcile.ts` `keptBody`, specs/app/custom-attributes.feature.md). A body

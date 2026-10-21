@@ -135,7 +135,8 @@ export function appendScenario(text: string, scenario: Scenario): string {
   }
   const next = serializeFeature({ ...feature, scenarios: [...feature.scenarios, scenario] });
   const back = parseFeature(next);
-  // The parser lists scenarios in its own order, so the new one is found by name.
+  // The new scenario comes last, but it is found by name all the same: a
+  // feature file from before the scenario numbers reads back in name order.
   const added = back.scenarios.filter((s) => s.name === scenario.name);
   if (back.scenarios.length !== feature.scenarios.length + 1 || added.length !== 1 || !sameScenario(added[0], scenario)) {
     throw new ProposalError("The scenario's name or text would not read back as written — simplify it", 400);

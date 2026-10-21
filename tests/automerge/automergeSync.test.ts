@@ -86,8 +86,9 @@ test("a concurrent first import (two minted lineages) converges", async () => {
 
   const mdA = await readFeature(a, "specs/seed.feature.md");
   expect(mdA).toBe((await readFeature(b, "specs/seed.feature.md"))!);
-  expect(mdA).toContain("## From A @v1");
-  expect(mdA).toContain("## From B @v1");
+  // Which lineage won decides the order, so the numbers are not pinned.
+  expect(mdA).toMatch(/## S[12]: From A @v1/);
+  expect(mdA).toMatch(/## S[12]: From B @v1/);
   const docA = (await loadFeatureDoc(a, "specs/seed.feature.md"))!;
   const docB = (await loadFeatureDoc(b, "specs/seed.feature.md"))!;
   expect(docA.doc.id).toBe(docB.doc.id);
@@ -202,16 +203,19 @@ test("drift that demotes, edits, then republishes is repaired from the doc", asy
       "- **Then** the unearned premium is refunded\n",
   );
   await importDrift(dir);
+  // Adopting the file rewrites nothing: it keeps its numberless headings
+  // until a repair writes the document's projection, which numbers them.
   const published = (await readFeature(dir, file))!;
   expect(published).toContain("## Refund @v1 [published]");
+  const repaired = published.replace("## Refund", "## S1: Refund");
 
   await Bun.write(join(dir, file), published.replace("[published]", "[proposed]"));
   expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents");
-  expect(await readFeature(dir, file)).toBe(published);
+  expect(await readFeature(dir, file)).toBe(repaired);
 
   await Bun.write(join(dir, file), published.replace("the unearned premium is refunded", "nothing is refunded"));
   expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents");
-  expect(await readFeature(dir, file)).toBe(published);
+  expect(await readFeature(dir, file)).toBe(repaired);
   const entry = (await loadFeatureDoc(dir, file))!.doc.specs[0]!;
   expect(entry.status).toBe("published");
   expect(entry.body).toContain("the unearned premium is refunded");
@@ -262,7 +266,8 @@ test("a file holding the doubled text of a published spec is repaired to the rec
   await Bun.write(join(dir, file), published.replace("- line two\n", "- line two\n- line two\n"));
 
   expect(await importDrift(dir)).toBe("repaired 1 file(s) from their documents; healed 1 published scenario(s)");
-  expect(await readFeature(dir, file)).toBe(published);
+  // The repair writes the projection, which numbers the heading.
+  expect(await readFeature(dir, file)).toBe(published.replace("## Refund", "## S1: Refund"));
   expect((await loadFeatureDoc(dir, file))!.doc.specs[i]!.body).toBe("- line one\n- line two");
   expect(await importDrift(dir)).toBe("");
 });
@@ -321,8 +326,8 @@ test("a rename racing an in-app edit of the same line merges with no conflict di
   expect(await conflictedFiles(a)).toEqual([]);
 
   const mdA = (await readFeature(a, "specs/seed.feature.md"))!;
-  expect(mdA).toContain("## Story renamed @v1");
-  expect(mdA).not.toContain("## Story @v1");
+  expect(mdA).toContain("## S1: Story renamed @v1");
+  expect(mdA).not.toContain(": Story @v1");
   expect(mdA).toContain("from A");
   expect(mdA).toContain("from B");
 });
@@ -342,5 +347,5 @@ test("a move racing an in-app edit of the moved scenario merges with no conflict
   await moveScenario(a, "specs/seed.feature.md", { name: "Story", version: 1 }, other);
   await settle(a);
   expect(await conflictedFiles(a)).toEqual([]);
-  expect(await readFeature(a, other)).toContain("## Story @v1");
+  expect(await readFeature(a, other)).toContain("## S2: Story @v1");
 });

@@ -50,6 +50,10 @@ Quotes for potential customers.
 - **Then** a quote is provided
 `;
 
+// What the app writes: the same text with the scenario numbered by its
+// position (parser.ts `S<n>:`); parsing either form gives the same feature.
+const WRITTEN = SAMPLE.replace("## Basic Quote", "## S1: Basic Quote");
+
 const defaults = projectionOptions();
 let root: string;
 
@@ -72,9 +76,9 @@ describe("the Confluence line", () => {
   });
 
   test("survives a round trip, written after the ticket and test case whatever the order", () => {
-    expect(serializeFeature(parseFeature(SAMPLE))).toBe(SAMPLE);
+    expect(serializeFeature(parseFeature(SAMPLE))).toBe(WRITTEN);
     const first = SAMPLE.replace(`${JIRA_LINE}\n\n${QTEST_LINE}\n\n${PAGE_LINE}`, `${PAGE_LINE}\n\n${JIRA_LINE}\n\n${QTEST_LINE}`);
-    expect(serializeFeature(parseFeature(first))).toBe(SAMPLE);
+    expect(serializeFeature(parseFeature(first))).toBe(WRITTEN);
   });
 
   test("is the page and never the ticket, whatever its case", () => {
@@ -109,7 +113,7 @@ describe("the document", () => {
   test("holds the page link and projects it back, or leaves it out with links off", () => {
     const doc = importFeatureDoc(parseFeature(SAMPLE));
     expect(docToFeature(doc).confluence).toEqual(PAGE);
-    expect(projectFeature(doc)).toBe(SAMPLE);
+    expect(projectFeature(doc)).toBe(WRITTEN);
     const without = projectFeature(doc, { publishExternalLinks: false });
     expect(without).not.toContain("[Confluence:");
     expect(isProjectionOf(without, doc)).toBe(true);
@@ -152,7 +156,7 @@ describe("saving a feature", () => {
   test("writes the line while links are published; with links off the editor still sees it", async () => {
     const file = await createFeature(root, "Quote Policy");
     await saveFeature(root, file, SAMPLE);
-    expect(await readFeature(root, file)).toBe(SAMPLE);
+    expect(await readFeature(root, file)).toBe(WRITTEN);
 
     setProjectionOptions({ publishExternalLinks: false });
     const other = await createFeature(root, "Other Policy");

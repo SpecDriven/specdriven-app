@@ -8600,3 +8600,25 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   margin-left: 0.5rem;
   font-size: 0.6875rem;
 }
+
+/* The scenario's number — its place in the file (specs/ui/ui.feature.md
+   "number scenarios") — ahead of its status glyph on the card, in the tree
+   and in the editor pane's head. */
+.scenario-number {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-right: 0.375rem;
+}
+
+.tree a.tree-scenario .scenario-number {
+  font-size: 0.6875rem;
+  margin-right: 0.25rem;
+}
+
+.scenario-pane-head .scenario-number {
+  font-size: 0.875rem;
+  align-self: baseline;
+}
