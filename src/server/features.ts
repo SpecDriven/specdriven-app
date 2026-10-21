@@ -294,6 +294,7 @@ async function featureView(
         status: s.status,
         body: s.body,
         tests: [...s.tests],
+        ...(s.negative ? { negative: true as const } : {}),
         ...(flags ? { flags } : {}),
         ...(attributes ? { attributes } : {}),
         ...(link ? { link } : {}),

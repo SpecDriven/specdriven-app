@@ -108,7 +108,8 @@ export function proposedScenario(name: unknown, body: unknown): Scenario {
  * Whether markdown carries a scenario exactly as built — nothing in the
  * name or body was read back as something else (a version chip, a status,
  * a `**Created by:**` line that would sign it as someone other than the
- * visitor, a ticket or qTest link, a test link, a feature flag or attribute line).
+ * visitor, a ticket or qTest link, a test link, a feature flag or attribute
+ * line, the negative marker).
  */
 function sameScenario(parsed: Scenario | undefined, built: Scenario): boolean {
   return (
@@ -118,6 +119,7 @@ function sameScenario(parsed: Scenario | undefined, built: Scenario): boolean {
     parsed.status === "proposed" &&
     parsed.body === built.body &&
     parsed.tests.length === 0 &&
+    !parsed.negative &&
     !parsed.link &&
     !parsed.qtest &&
     !parsed.flags &&

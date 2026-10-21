@@ -9,6 +9,7 @@ import {
   normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
   normalizeFeatureFlags,
+  normalizeScenarioPolarity,
   normalizeQtestLinks,
   normalizeResourceLinks,
   normalizeAutosaveSeconds,
@@ -522,6 +523,7 @@ async function stateFields(state: SpecDrivenState) {
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     featureFlags: normalizeFeatureFlags(state.featureFlags),
+    scenarioPolarity: normalizeScenarioPolarity(state.scenarioPolarity),
     // The plugins (specs/app/plugins.feature.md): the profile's entries in
     // tab order, then the built-ins it leaves off — what Settings → Plugins
     // lists — with the per-module switches they replaced (`roadmap`,
@@ -654,6 +656,7 @@ const putState: Handler = async (req) => {
     deletePublished?: boolean;
     assignments?: boolean;
     featureFlags?: boolean;
+    scenarioPolarity?: boolean;
     /**
      * The profile: the enabled plugins, in tab order; the explicit plugin
      * folders; a data-repo plugin folder to trust from now on.
@@ -693,6 +696,7 @@ const putState: Handler = async (req) => {
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.featureFlags === undefined &&
+    body.scenarioPolarity === undefined &&
     body.plugins === undefined &&
     body.roadmap === undefined &&
     body.notebook === undefined &&
@@ -706,7 +710,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1001,6 +1005,13 @@ const putState: Handler = async (req) => {
     }
     if (body.featureFlags) state.featureFlags = true;
     else delete state.featureFlags;
+  }
+  if (body.scenarioPolarity !== undefined) {
+    if (typeof body.scenarioPolarity !== "boolean") {
+      return json({ error: "scenarioPolarity must be a boolean" }, 400);
+    }
+    if (body.scenarioPolarity) state.scenarioPolarity = true;
+    else delete state.scenarioPolarity;
   }
   // The profile (specs/app/plugins.feature.md "The profile lists enabled
   // plugins in tab order"): the open data folder's ordered list of enabled
@@ -1392,6 +1403,10 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   const linked = feature.confluence;
   const existingPageId =
     linked && /^\d+$/.test(linked.ticket) && onBase(linked.url, ref.base) ? linked.ticket : undefined;
+  // The page groups by polarity when the setting says so
+  // (specs/ui/scenario-polarity.feature.md).
+  const state = await readState(getAppRoot());
+  const polarity = normalizeScenarioPolarity(state.scenarioPolarity);
   let page: { id: string; url: string; created: boolean };
   try {
     const parent = await resolveParent(ref.base, record.token, ref);
@@ -1400,14 +1415,13 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
       token: record.token,
       parent,
       title,
-      body: renderFeatureStorage(feature, scope),
+      body: renderFeatureStorage(feature, scope, { polarity }),
       existingPageId,
     });
   } catch (e) {
     if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
     return json({ error: (e as Error).message }, 502);
   }
-  const state = await readState(getAppRoot());
   if (state.confluenceParentUrl !== parentUrl) {
     state.confluenceParentUrl = parentUrl;
     await writeState(state, getAppRoot());

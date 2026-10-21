@@ -181,6 +181,7 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
         const attributes = plainAttributes(s.attributes);
         return {
           ...scenario,
+          ...(s.negative ? { negative: true as const } : {}),
           ...(flags ? { flags } : {}),
           ...(attributes ? { attributes } : {}),
           ...(link ? { link } : {}),

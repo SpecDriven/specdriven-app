@@ -323,6 +323,22 @@ describe("publishing a feature", () => {
     expect(xhtml).not.toContain("Basic Quote");
   });
 
+  test("with the Positive and negative scenarios setting on the page is split by polarity", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, SAMPLE.replace("## Basic Quote @v1 [proposed]\n", "## Basic Quote @v1 [proposed]\n\n[negative]\n"));
+    await publish(parentUrl());
+    expect(pages.get("100")!.body).not.toContain("<h1>Negative</h1>");
+    await writeState({ ...(await readState(root)), scenarioPolarity: true }, root);
+    await publish(parentUrl());
+    const xhtml = pages.get("100")!.body;
+    expect(xhtml.indexOf("<h1>Positive</h1>")).toBeLessThan(xhtml.indexOf("Declined Quote"));
+    expect(xhtml.indexOf("Declined Quote")).toBeLessThan(xhtml.indexOf("<h1>Negative</h1>"));
+    expect(xhtml.indexOf("<h1>Negative</h1>")).toBeLessThan(xhtml.indexOf("Basic Quote"));
+    expect(xhtml).toContain('<ac:parameter ac:name="colour">Red</ac:parameter>');
+    // The parent is still remembered on the way.
+    expect((await readState(root)).confluenceParentUrl).toBe(parentUrl());
+  });
+
   test("with Publish external links off the file has no line, but the feature keeps the link", async () => {
     setProjectionOptions({ publishExternalLinks: false });
     await saveToken();

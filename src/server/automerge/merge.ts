@@ -185,6 +185,18 @@ function mergeAuthors(
   };
 }
 
+/**
+ * The negative marker (specs/ui/scenario-polarity.feature.md) merges like a
+ * link: one value, the side that flipped it wins, ours when both did.
+ */
+function mergeNegative(
+  base: true | undefined,
+  ours: true | undefined,
+  theirs: true | undefined,
+): true | undefined {
+  return !!theirs !== !!base && !!ours === !!base ? theirs : ours;
+}
+
 /** Merge one scenario present on both sides. */
 function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scenario): Scenario {
   const baseTests = (base?.tests ?? []).join("\n");
@@ -196,6 +208,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
   const qtest = mergeLink(base?.qtest, ours.qtest, theirs.qtest);
   const flags = mergeFlags(base?.flags, ours.flags, theirs.flags);
   const attributes = mergeAttributes(base?.attributes, ours.attributes, theirs.attributes);
+  const negative = mergeNegative(base?.negative, ours.negative, theirs.negative);
   return {
     name: ours.name,
     version: ours.version,
@@ -204,6 +217,7 @@ function mergeScenario(base: Scenario | undefined, ours: Scenario, theirs: Scena
     status: STATUS_RANK[ours.status] >= STATUS_RANK[theirs.status] ? ours.status : theirs.status,
     body: mergeText(base?.body ?? "", ours.body, theirs.body),
     tests: [...tests],
+    ...(negative ? { negative } : {}),
     ...(flags ? { flags } : {}),
     ...(attributes ? { attributes } : {}),
     ...(link ? { link } : {}),
@@ -320,7 +334,8 @@ function sameScenario(a: Scenario, b: Scenario): boolean {
     linkKey(a.link) === linkKey(b.link) &&
     linkKey(a.qtest) === linkKey(b.qtest) &&
     featureFlagsKey(a.flags) === featureFlagsKey(b.flags) &&
-    attributesKey(a.attributes) === attributesKey(b.attributes)
+    attributesKey(a.attributes) === attributesKey(b.attributes) &&
+    !!a.negative === !!b.negative
   );
 }
 
