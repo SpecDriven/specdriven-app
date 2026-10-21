@@ -5,7 +5,7 @@
 
 import { test, expect, describe } from "bun:test";
 import {
-  attachmentNames, escapeXml,
+  attachmentNames, escapeXml, renameAttachments,
   renderFeatureStorage,
   renderInlineStorage,
   renderMarkdownStorage,
@@ -211,5 +211,13 @@ describe("attachments", () => {
       1,
     );
     expect(attachmentNames(body)).toEqual(["a-11111111.png", "b-22222222.svg"]);
+  });
+
+  test("renames the attachments it is told to, every use of each, and leaves the rest", () => {
+    const body = renderMarkdownStorage("![a](/api/images/a-11111111.png) ![b](/api/images/b-22222222.svg)\n\n![a](/api/images/a-11111111.png)", 1);
+    const renamed = renameAttachments(body, new Map([["a-11111111.png", "a-33333333.png"], ["b-22222222.svg", "b-22222222.svg"]]));
+    expect(attachmentNames(renamed)).toEqual(["a-33333333.png", "b-22222222.svg"]);
+    expect(renamed).not.toContain("a-11111111.png");
+    expect(renameAttachments(body, new Map())).toBe(body);
   });
 });
