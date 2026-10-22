@@ -164,6 +164,10 @@ import {
 import { publishFeatureTestCases, QtestError, validateToken as validateQtestToken } from "./qtest";
 import { moduleIdFromUrl, normalizeQtestBase, onQtestBase, parseModuleUrl } from "./qtestUrl";
 import { clearQtestToken, listQtestTokens, qtestToken, saveQtestToken } from "./qtestTokens";
+import { AhaError, getAhaFeature, validateAhaKey } from "./aha";
+import { normalizeAhaBase, parseAhaRecordUrl, parseAhaRef } from "./ahaUrl";
+import { ahaToken, clearAhaToken, listAhaTokens, saveAhaToken } from "./ahaTokens";
+import { isAhaImportScope, planAhaImport } from "./ahaImport";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -1300,6 +1304,118 @@ const deleteQtestToken: Handler = async (req) => {
   await clearQtestToken(body.base);
   return json({ tokens: await listQtestTokens() });
 };
+
+// Aha! (specs/external-links/aha-import.feature.md "An Aha! API key is kept
+// per site on this device"): one API key per Aha! site, kept on this device
+// (src/server/ahaTokens.ts), checked against the site before it is kept.
+// The list never carries a key.
+const getAhaTokens: Handler = async () => json({ tokens: await listAhaTokens() });
+
+const postAhaToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
+  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+    return json({ error: "Paste an Aha! API key" }, 400);
+  }
+  const base = typeof body.base === "string" ? normalizeAhaBase(body.base) : null;
+  if (!base) {
+    return json({ error: "Enter the Aha! site's url, like https://acme.aha.io" }, 400);
+  }
+  try {
+    const { user } = await validateAhaKey(base, body.token.trim());
+    await saveAhaToken({ base, token: body.token.trim(), user });
+    return json({ base, user });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+};
+
+const deleteAhaToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown };
+  if (typeof body.base !== "string" || !body.base.trim()) return json({ error: "base is required" }, 400);
+  await clearAhaToken(body.base);
+  return json({ tokens: await listAhaTokens() });
+};
+
+// (specs/external-links/aha-import.feature.md "Import a feature by its url",
+// "Requirements become scenarios", "The feature links its Aha! record"): the
+// Aha! feature the user names by its url — or its reference number against
+// a site with a key — becomes a new feature file in the chosen folder, its
+// requirements the scenarios, written the way createFeature writes a
+// plugin's scaffold. The feature and each scenario then link their Aha!
+// record on the document, like links added by hand, and Aha! links are
+// switched on so the chips show.
+const postAhaImport = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => ({}))) as {
+    url?: unknown;
+    base?: unknown;
+    folder?: unknown;
+    scope?: unknown;
+  };
+  const scope = body.scope ?? "requirements";
+  if (!isAhaImportScope(scope)) return json({ error: "scope must be requirements or description" }, 400);
+  const raw = typeof body.url === "string" ? body.url.trim() : "";
+  const ref = parseAhaRecordUrl(raw) ?? (typeof body.base === "string" ? parseAhaRef(raw, body.base) : null);
+  if (!ref) {
+    return json({ error: "Paste an Aha! feature url, like https://acme.aha.io/features/APP-123" }, 400);
+  }
+  if (ref.kind !== "feature") {
+    return json({ error: `Only Aha! features can be imported for now; ${ref.ref} is an ${ref.kind}` }, 400);
+  }
+  const record = await ahaToken(ref.base);
+  if (!record) {
+    return json({ error: `No Aha! API key for ${ref.base} — add one in Settings → Aha!` }, 401);
+  }
+  const folder = typeof body.folder === "string" ? body.folder.trim().replace(/^\/+|\/+$/g, "") : "";
+  let ahaFeature: Awaited<ReturnType<typeof getAhaFeature>>;
+  try {
+    ahaFeature = await getAhaFeature(ref.base, record.token, ref.ref);
+  } catch (e) {
+    if (e instanceof AhaError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 502);
+  }
+  const plan = planAhaImport(ahaFeature, scope);
+  let fileName: string;
+  try {
+    fileName = await createFeature(
+      dir,
+      folder ? `${folder}/${plan.name}` : plan.name,
+      plan.text,
+      (n) => `Import feature from Aha!: ${n} (${ahaFeature.referenceNum})`,
+    );
+  } catch (e) {
+    const message = (e as Error).message;
+    const exists = message.match(/^Feature file already exists: (.+)$/);
+    if (exists) return json({ error: `Already imported as ${exists[1]} — open it instead.`, fileName: exists[1] }, 409);
+    return json({ error: message }, 400);
+  }
+  const warnings: string[] = [];
+  try {
+    await saveResourceLinks(dir, fileName, null, "aha", [plan.featureLink]);
+    for (const s of plan.scenarioLinks) {
+      await saveResourceLinks(dir, fileName, { name: s.name, version: s.version }, "aha", [s.link]);
+    }
+  } catch (e) {
+    // The file is there; only the links back could not be written.
+    warnings.push(`The Aha! links were not saved: ${(e as Error).message}`);
+  }
+  const state = await readState(getAppRoot());
+  if (state.ahaLinks !== true) {
+    state.ahaLinks = true;
+    await writeState(state, getAppRoot());
+  }
+  return json(
+    {
+      fileName,
+      title: plan.name,
+      url: ahaFeature.url,
+      reference: ahaFeature.referenceNum,
+      scenarios: plan.scenarioLinks.length,
+      ahaLinks: true,
+      ...(warnings.length > 0 ? { warning: warnings.join(" ") } : {}),
+    },
+    201,
+  );
+});
 
 // Claude sign-in (specs/agents/claude.feature.md "Choose how Claude signs
 // in", src/server/claudeAuth.ts): how the app's Claude authenticates, what
@@ -2843,6 +2959,10 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/qtest/tokens", unlessHosted(getQtestTokens)],
   ["POST", "/api/qtest/tokens", unlessHosted(postQtestToken)],
   ["DELETE", "/api/qtest/tokens", unlessHosted(deleteQtestToken)],
+  ["GET", "/api/aha/tokens", unlessHosted(getAhaTokens)],
+  ["POST", "/api/aha/tokens", unlessHosted(postAhaToken)],
+  ["DELETE", "/api/aha/tokens", unlessHosted(deleteAhaToken)],
+  ["POST", "/api/aha/import", unlessHosted(postAhaImport)],
   // Claude sign-in (src/server/claudeAuth.ts): a local Claude only, so off
   // in the hosted app and the demo.
   ["GET", "/api/claude/auth", unlessHosted(unlessDemoClaude(getClaudeAuth))],

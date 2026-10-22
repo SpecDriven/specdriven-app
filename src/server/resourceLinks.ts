@@ -64,7 +64,7 @@ export function isOwnResourceUrl(kind: ResourceLinkKind, url: string): boolean {
 }
 
 /** An Aha! reference number: APP-123, APP-E-12 (epic), APP-I-7 (idea), APP-123-1 (requirement). */
-const AHA_REF_RE = /^[A-Z][A-Z0-9]*(?:-[A-Z]+)?-\d+(?:-\d+)?$/;
+export const AHA_REF_RE = /^[A-Z][A-Z0-9]*(?:-[A-Z]+)?-\d+(?:-\d+)?$/;
 
 /** The Figma paths a file lives under: `/design/<key>/<name>` and the like. */
 const FIGMA_KINDS = new Set(["file", "design", "proto", "board", "slides", "make", "deck", "site"]);
