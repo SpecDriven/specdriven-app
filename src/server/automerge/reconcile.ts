@@ -12,6 +12,7 @@ import {
   plainAttributes,
   plainFeatureFlags,
   splitScenarioMeta,
+  type ConfluencePage,
   type ExternalLink,
   type Feature,
   type FeatureFlag,
@@ -500,6 +501,21 @@ export function setPullRequests(
   prs: PullRequestLink[],
 ): A.Doc<FeatureDoc> | null {
   return setLinkList(doc, target, "prs", prs);
+}
+
+/**
+ * Record the version of the feature's Confluence page as the app just
+ * published it (specs/external-links/confluence-wiki.feature.md "Changes
+ * made in Confluence are not overwritten unnoticed"). A direct document
+ * operation like setPullRequests: the version is never in the markdown, so
+ * no save can express it, and reconcile never touches it. Set whole — one
+ * value, so two peers publishing at once end with one of theirs, not a mix.
+ */
+export function setConfluencePage(doc: A.Doc<FeatureDoc>, page: ConfluencePage): A.Doc<FeatureDoc> {
+  if (doc.confluencePage?.id === page.id && doc.confluencePage.version === page.version) return doc;
+  return A.change(doc, (d) => {
+    d.confluencePage = { id: page.id, version: page.version };
+  });
 }
 
 /**

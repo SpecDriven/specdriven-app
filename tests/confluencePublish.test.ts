@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { createFeature, readFeature, readFeatureView, saveFeature } from "../src/server/features";
+import { createFeature, readFeature, readFeatureView, saveConfluencePage, saveFeature } from "../src/server/features";
 import { readState, writeState } from "../src/server/state";
 import { setProjectionOptions, projectionOptions } from "../src/server/automerge/project";
 import {
@@ -43,6 +43,10 @@ interface StubPage {
   title: string;
   spaceKey: string;
   version: number;
+  /** The current version's author, time and message, as Confluence keeps them. */
+  by?: string;
+  when?: string;
+  message?: string;
   ancestors: string[];
   body: string;
 }
@@ -53,6 +57,8 @@ let pages: Map<string, StubPage>;
 /** Attachments by page id: each file's bytes and content type under its name. */
 let attachments: Map<string, Map<string, { bytes: Uint8Array; type: string }>>;
 let nextId: number;
+/** The next PUT finds the page a version on — someone saved it in between. */
+let bumpOnPut = false;
 let seen: { method: string; path: string; auth: string | null; body: unknown }[];
 
 function rawPage(p: StubPage) {
@@ -61,7 +67,12 @@ function rawPage(p: StubPage) {
     type: "page",
     title: p.title,
     space: { key: p.spaceKey },
-    version: { number: p.version },
+    version: {
+      number: p.version,
+      ...(p.by ? { by: { type: "known", username: p.by.toLowerCase(), displayName: p.by } } : {}),
+      ...(p.when ? { when: p.when } : {}),
+      ...(p.message !== undefined ? { message: p.message } : {}),
+    },
     ancestors: p.ancestors.map((id) => ({ id })),
     _links: { base: wiki, webui: `/spaces/${p.spaceKey}/pages/${p.id}/${encodeURIComponent(p.title)}` },
   };
@@ -146,11 +157,23 @@ function stubConfluence(): string {
         if (!page) return problem(404, "No content found");
         if (req.method === "GET") return Response.json(rawPage(page));
         if (req.method === "PUT") {
-          const b = body as { title: string; version: { number: number }; ancestors: { id: string }[]; body: { storage: { value: string } } };
+          const b = body as {
+            title: string;
+            version: { number: number; message?: string };
+            ancestors: { id: string }[];
+            body: { storage: { value: string } };
+          };
+          if (bumpOnPut) {
+            bumpOnPut = false;
+            page.version += 1;
+          }
           if (b.version.number !== page.version + 1) return problem(409, "Version must be incremented");
           Object.assign(page, {
             title: b.title,
             version: b.version.number,
+            by: "David V",
+            when: new Date().toISOString(),
+            message: b.version.message ?? "",
             ancestors: ancestorsOf(b.ancestors[0]!.id),
             body: b.body.storage.value,
           });
@@ -184,6 +207,7 @@ beforeEach(async () => {
   pages = new Map();
   attachments = new Map();
   nextId = 100;
+  bumpOnPut = false;
   seen = [];
   wiki = stubConfluence();
   pages.set("1", { id: "1", title: "Specs", spaceKey: "ABC", version: 1, ancestors: [], body: "" });
@@ -219,9 +243,21 @@ const call = async (method: string, path: string, body?: unknown) => {
 };
 
 const saveToken = (token = GOOD, base = wiki) => call("POST", "/api/confluence/tokens", { base, token });
-const publish = (parentUrl: string, scope: string = "all") =>
-  call("POST", `/api/features/${encodeURIComponent(FILE)}/confluence`, { parentUrl, scope });
+const publish = (parentUrl: string, scope: string = "all", force?: boolean) =>
+  call("POST", `/api/features/${encodeURIComponent(FILE)}/confluence`, {
+    parentUrl,
+    scope,
+    ...(force === undefined ? {} : { force }),
+  });
 const parentUrl = () => `${wiki}/spaces/ABC/pages/1/Specs`;
+/** The page's version as the app last published it, from the feature's document. */
+const recordedVersion = async () => (await readFeatureView(data, FILE))!.parsed.confluencePage;
+/** Someone edits the page in Confluence itself: a new version by them, with no message. */
+const EDITED_AT = "2026-10-21T15:04:05.000+0000";
+function editedInConfluence(id: string, by = "Jane Doe") {
+  const page = pages.get(id)!;
+  Object.assign(page, { version: page.version + 1, by, when: EDITED_AT, message: "", body: `${page.body}<p>edited</p>` });
+}
 
 describe("Confluence tokens", () => {
   test("a token Confluence accepts is kept, owner-only, and listed without the token", async () => {
@@ -507,5 +543,129 @@ describe("publishing a feature", () => {
     expect(pages.get("100")!.body).toContain("ri:attachment");
     expect(res.body.warning).toContain("images were not attached");
     expect(res.body.warning).toContain("disk full");
+  });
+});
+
+// "Changes made in Confluence are not overwritten unnoticed": the page's
+// version is recorded in the feature's document after each publish, and a
+// page past it — changed in Confluence itself since — is left alone until
+// the user says Publish anyway.
+describe("a page changed in Confluence since the last publish", () => {
+  test("publishing records the page's version in the feature's document", async () => {
+    await saveToken();
+    const first = await publish(parentUrl());
+    expect(first.body).toMatchObject({ id: "100", version: 1 });
+    expect(await recordedVersion()).toEqual({ id: "100", version: 1 });
+    const again = await publish(parentUrl());
+    expect(again.body).toMatchObject({ id: "100", version: 2, message: "page link unchanged" });
+    expect(await recordedVersion()).toEqual({ id: "100", version: 2 });
+    // The record is the document's alone: the file holds only the link line.
+    expect(await readFeature(data, FILE)).not.toContain("version");
+  });
+
+  test("a page changed in Confluence since the last publish is not overwritten without confirmation", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    editedInConfluence("100");
+    seen = [];
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("changed in Confluence");
+    expect(res.body.conflict).toEqual({
+      pageId: "100",
+      url: `${wiki}/spaces/ABC/pages/100/Quote%20Policy`,
+      version: 2,
+      lastVersion: 1,
+      by: "Jane Doe",
+      when: EDITED_AT,
+    });
+    expect(seen.some((r) => r.method === "PUT" || r.method === "POST")).toBe(false);
+    expect(pages.get("100")!.body).toContain("<p>edited</p>");
+    expect(await recordedVersion()).toEqual({ id: "100", version: 1 });
+  });
+
+  test("Publish anyway replaces the changes and records the new version", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    editedInConfluence("100");
+    seen = [];
+    const res = await publish(parentUrl(), "all", true);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: "100", created: false, version: 3 });
+    const put = seen.find((r) => r.method === "PUT")!;
+    expect(put.body).toMatchObject({ version: { number: 3 } });
+    expect(pages.get("100")!.body).not.toContain("<p>edited</p>");
+    expect(await recordedVersion()).toEqual({ id: "100", version: 3 });
+  });
+
+  test("a version recorded by a teammate's publish is no conflict", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    // A teammate published version 2 from their device; the record came
+    // over with the data repo, as the page's version did in Confluence.
+    Object.assign(pages.get("100")!, { version: 2, by: "Jane Doe", when: EDITED_AT, message: "Published from SpecDriven" });
+    await saveConfluencePage(data, FILE, { id: "100", version: 2 });
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ version: 3 });
+    expect(await recordedVersion()).toEqual({ id: "100", version: 3 });
+  });
+
+  test("a page published before versions were recorded publishes and starts recording", async () => {
+    await saveToken();
+    // The feature links a page the app published before it kept versions,
+    // since changed in Confluence: nothing to compare against, so it is
+    // updated as before, and the record starts now.
+    pages.set("100", {
+      id: "100",
+      title: "Quote Policy",
+      spaceKey: "ABC",
+      version: 3,
+      by: "Jane Doe",
+      when: EDITED_AT,
+      ancestors: ["1"],
+      body: "<p>old</p>",
+    });
+    await saveFeature(
+      data,
+      FILE,
+      SAMPLE.replace("# Quote Policy\n", `# Quote Policy\n\n[Confluence:100](${wiki}/spaces/ABC/pages/100/Quote+Policy)\n`),
+    );
+    expect(await recordedVersion()).toBeUndefined();
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ id: "100", created: false, version: 4 });
+    expect(await recordedVersion()).toEqual({ id: "100", version: 4 });
+  });
+
+  test("the app's versions carry a message in the page history", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    await publish(parentUrl());
+    const put = seen.find((r) => r.method === "PUT")!;
+    expect(put.body).toMatchObject({ version: { number: 2, message: "Published from SpecDriven" } });
+    expect(pages.get("100")!.message).toBe("Published from SpecDriven");
+  });
+
+  test("saving the file keeps the recorded version", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    await saveFeature(data, FILE, (await readFeature(data, FILE))!.replace("is provided", "is emailed"));
+    expect(await recordedVersion()).toEqual({ id: "100", version: 1 });
+  });
+
+  test("a page changed between the version check and the update is reported, not replaced", async () => {
+    await saveToken();
+    await publish(parentUrl());
+    // Confluence itself refuses a stale version number: the page moves on
+    // just as the update arrives.
+    bumpOnPut = true;
+    seen = [];
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("changed while it was being published");
+    expect(res.body.conflict).toBeUndefined();
+    expect(pages.get("100")!.version).toBe(2);
+    expect(await recordedVersion()).toEqual({ id: "100", version: 1 });
   });
 });

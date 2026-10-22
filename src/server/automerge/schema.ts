@@ -9,6 +9,7 @@
 
 import type { ImmutableString } from "@automerge/automerge";
 import type {
+  ConfluencePage,
   EntryKind,
   ExternalLink,
   FeatureFlag,
@@ -183,6 +184,15 @@ export type FeatureDoc = {
    * links above; optional, so documents from before it need no migration.
    */
   confluence?: ExternalLink;
+  /**
+   * That page's version as the app last published it, so a publish can tell
+   * a page changed in Confluence since (specs/external-links/
+   * confluence-wiki.feature.md "Changes made in Confluence are not
+   * overwritten unnoticed"). Document-only, never in the markdown; set
+   * whole, like `confluence`; optional, so documents from before it need no
+   * migration — a feature without it publishes unchecked and starts keeping it.
+   */
+  confluencePage?: ConfluencePage;
   /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs (see SpecEntry.aha). */
