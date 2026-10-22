@@ -27,6 +27,7 @@ import { setRelauncher } from "../server/relaunch";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
+import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setClaudeTokenBackend } from "../server/claudeToken";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
@@ -37,7 +38,13 @@ import {
   windowOpenTarget,
   type LinkWindow,
 } from "./linkRouting";
-import { createClaudeSafeStorageBackend, createConfluenceSafeStorageBackend, createSafeStorageBackend, safeStorageAvailable } from "./secureToken";
+import {
+  createClaudeSafeStorageBackend,
+  createConfluenceSafeStorageBackend,
+  createQtestSafeStorageBackend,
+  createSafeStorageBackend,
+  safeStorageAvailable,
+} from "./secureToken";
 import { mimeType, staticFilePath } from "./static";
 import {
   DEFAULT_HEIGHT,
@@ -375,6 +382,7 @@ if (!app.requestSingleInstanceLock()) {
     if (safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
+      setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
       setClaudeTokenBackend(createClaudeSafeStorageBackend(join(userData, "claude-token.enc")));
     }
     // Data-directory picker (specs/ui/app-start.feature.md): replace the

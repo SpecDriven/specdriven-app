@@ -34,6 +34,7 @@ import {
   MIN_AUTOSAVE_SECONDS,
   DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
   normalizeConfluenceParentUrl,
+  normalizeQtestParentUrl,
   normalizeClaudeAuth,
   normalizeClaudeProxyUrl,
 } from "./state";
@@ -160,6 +161,9 @@ import {
   listConfluenceTokens,
   saveConfluenceToken,
 } from "./confluenceTokens";
+import { publishFeatureTestCases, QtestError, validateToken as validateQtestToken } from "./qtest";
+import { moduleIdFromUrl, normalizeQtestBase, onQtestBase, parseModuleUrl } from "./qtestUrl";
+import { clearQtestToken, listQtestTokens, qtestToken, saveQtestToken } from "./qtestTokens";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -494,6 +498,9 @@ async function stateFields(state: SpecDrivenState) {
     // The publish dialog's last parent page
     // (specs/external-links/confluence-wiki.feature.md).
     confluenceParentUrl: normalizeConfluenceParentUrl(state.confluenceParentUrl),
+    // The qTest dialog's last parent module
+    // (specs/external-links/qtest-test-cases.feature.md).
+    qtestParentUrl: normalizeQtestParentUrl(state.qtestParentUrl),
     codeGen: normalizeCodeGen(state.codeGen),
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
@@ -1263,6 +1270,37 @@ const deleteConfluenceToken: Handler = async (req) => {
   return json({ tokens: await listConfluenceTokens() });
 };
 
+// qTest (specs/external-links/qtest-test-cases.feature.md "A qTest token is
+// kept per site on this device"): one bearer token per qTest site, kept on
+// this device (src/server/qtestTokens.ts), checked against the site before
+// it is kept. The list never carries a token.
+const getQtestTokens: Handler = async () => json({ tokens: await listQtestTokens() });
+
+const postQtestToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
+  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+    return json({ error: "Paste a qTest API token" }, 400);
+  }
+  const base = typeof body.base === "string" ? normalizeQtestBase(body.base) : null;
+  if (!base) {
+    return json({ error: "Enter the qTest site's url, like https://acme.qtestnet.com" }, 400);
+  }
+  try {
+    const { user } = await validateQtestToken(base, body.token.trim());
+    await saveQtestToken({ base, token: body.token.trim(), user });
+    return json({ base, user });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+};
+
+const deleteQtestToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown };
+  if (typeof body.base !== "string" || !body.base.trim()) return json({ error: "base is required" }, 400);
+  await clearQtestToken(body.base);
+  return json({ tokens: await listQtestTokens() });
+};
+
 // Claude sign-in (specs/agents/claude.feature.md "Choose how Claude signs
 // in", src/server/claudeAuth.ts): how the app's Claude authenticates, what
 // Claude Code's own settings say of a proxy, the login driven from Settings,
@@ -1469,6 +1507,95 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
     // The page is in Confluence; only the link back could not be written.
     warnings.push(`The page link was not saved: ${(e as Error).message}`);
     return json({ ...view, ...result, ...warned() });
+  }
+});
+
+// Create a feature's scenarios as qTest test cases
+// (specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
+// from a feature"): one module named after the feature under the parent
+// module the user names by its url, one test case per scenario — created
+// the first time, updated after that. Each scenario then links its test
+// case, and the feature its module, as `[qTest:…](url)` lines, saved the way
+// the editor saves those links; the parent is remembered for next time.
+const postPublishQtest = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { parentUrl?: unknown; scope?: unknown };
+  const scope = body.scope ?? "all";
+  if (!isPublishScope(scope)) return json({ error: "scope must be all or published" }, 400);
+  const parentUrl = typeof body.parentUrl === "string" ? body.parentUrl.trim() : "";
+  const ref = parseModuleUrl(parentUrl);
+  if (!ref) {
+    return json(
+      {
+        error:
+          "Paste the parent module's url from qTest, like https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901",
+      },
+      400,
+    );
+  }
+  const record = await qtestToken(ref.base);
+  if (!record) {
+    return json({ error: `No qTest token for ${ref.base} — add one in Settings → qTest` }, 401);
+  }
+  const view = await readFeatureView(dir, params.file!);
+  if (!view) return json({ error: "Feature not found" }, 404);
+  const feature = view.parsed;
+  const title = (feature.name.trim() || titleFromFileName(params.file!)).slice(0, 255);
+  const linked = feature.qtest;
+  const existingModuleId =
+    linked && onQtestBase(linked.url, ref.base) ? (moduleIdFromUrl(linked.url) ?? undefined) : undefined;
+  let result: Awaited<ReturnType<typeof publishFeatureTestCases>>;
+  try {
+    result = await publishFeatureTestCases({
+      base: ref.base,
+      token: record.token,
+      projectId: ref.projectId,
+      parentModuleId: ref.moduleId,
+      feature,
+      file: params.file!,
+      title,
+      scope,
+      existingModuleId,
+    });
+  } catch (e) {
+    if (e instanceof QtestError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 502);
+  }
+  const state = await readState(getAppRoot());
+  if (state.qtestParentUrl !== parentUrl) {
+    state.qtestParentUrl = parentUrl;
+    await writeState(state, getAppRoot());
+  }
+  const warnings: string[] = [];
+  if (result.failed) {
+    warnings.push(
+      `${result.cases.length} of the test cases were written; “${result.failed.scenarioName}” was not: ${result.failed.error}`,
+    );
+  }
+  const summary = {
+    module: { id: result.module.id, pid: result.module.pid, url: result.module.url, created: result.module.created },
+    cases: result.cases.map(({ scenarioName, id, pid, url, created }) => ({ scenarioName, id, pid, url, created })),
+    created: result.cases.filter((c) => c.created).length,
+    updated: result.cases.filter((c) => !c.created).length,
+    title,
+    parentUrl,
+  };
+  const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
+  // The links back: the module on the feature, each test case on its scenario.
+  const moduleLink = { program: QTEST_PROGRAM, ticket: result.module.pid, url: result.module.url };
+  const scenarios = feature.scenarios.map((s, index) => {
+    const written = result.cases.find((c) => c.index === index);
+    return written ? { ...s, qtest: { program: QTEST_PROGRAM, ticket: written.pid, url: written.url } } : s;
+  });
+  const next: Feature = { ...feature, qtest: moduleLink, scenarios };
+  if (serializeFeature(next) === serializeFeature(feature)) {
+    return json({ ...view, ...summary, ...warned(), message: "test case links unchanged" });
+  }
+  try {
+    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...summary, ...warned() });
+  } catch (e) {
+    // The test cases are in qTest; only the links back could not be written.
+    warnings.push(`The test case links were not saved: ${(e as Error).message}`);
+    return json({ ...view, ...summary, ...warned() });
   }
 });
 
@@ -2713,6 +2840,9 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/confluence/tokens", unlessHosted(getConfluenceTokens)],
   ["POST", "/api/confluence/tokens", unlessHosted(postConfluenceToken)],
   ["DELETE", "/api/confluence/tokens", unlessHosted(deleteConfluenceToken)],
+  ["GET", "/api/qtest/tokens", unlessHosted(getQtestTokens)],
+  ["POST", "/api/qtest/tokens", unlessHosted(postQtestToken)],
+  ["DELETE", "/api/qtest/tokens", unlessHosted(deleteQtestToken)],
   // Claude sign-in (src/server/claudeAuth.ts): a local Claude only, so off
   // in the hosted app and the demo.
   ["GET", "/api/claude/auth", unlessHosted(unlessDemoClaude(getClaudeAuth))],
@@ -2754,6 +2884,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["POST", "/api/features/:file/confluence", unlessHosted(postPublishConfluence)],
+  ["POST", "/api/features/:file/qtest", unlessHosted(postPublishQtest)],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
   ["POST", "/api/folders", postFolders],
   ["DELETE", "/api/folders/:path", deleteFolderRoute],

@@ -220,6 +220,8 @@ import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./G
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { ClaudeSettings } from "./ClaudeSettings";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
+import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
+import { QtestPublishDialog } from "./QtestPublishDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 
@@ -1454,6 +1456,12 @@ export function App() {
   const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
   const [confluenceParentUrl, setConfluenceParentUrl] = useState("");
   const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
+  /** qTest (specs/external-links/qtest-test-cases.feature.md "Create qTest
+      test cases from a feature"): the sites this device holds a token for,
+      the last parent module created under, and whether the dialog is open. */
+  const [qtestSites, setQtestSites] = useState<QtestSite[]>([]);
+  const [qtestParentUrl, setQtestParentUrl] = useState("");
+  const [qtestPublishOpen, setQtestPublishOpen] = useState(false);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1782,6 +1790,7 @@ export function App() {
         setResourceLinksOn(resourceLinkSwitches(state));
         setQtestLinks(state.qtestLinks === true);
         setConfluenceParentUrl(typeof state.confluenceParentUrl === "string" ? state.confluenceParentUrl : "");
+        setQtestParentUrl(typeof state.qtestParentUrl === "string" ? state.qtestParentUrl : "");
         if (typeof state.codeGen === "boolean") {
           setCodeGen(state.codeGen);
         }
@@ -2042,6 +2051,7 @@ export function App() {
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
   const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
+  const qtestTrapRef = useFocusTrap(qtestPublishOpen);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
@@ -3931,6 +3941,17 @@ export function App() {
       live = false;
     };
   }, [hosted, settingsShown, confluencePublishOpen]);
+  // The qTest sites this device holds a token for, read the same way.
+  useEffect(() => {
+    if (hosted || (!settingsShown && !qtestPublishOpen)) return;
+    let live = true;
+    void fetchQtestTokens().then((sites) => {
+      if (live) setQtestSites(sites);
+    });
+    return () => {
+      live = false;
+    };
+  }, [hosted, settingsShown, qtestPublishOpen]);
   useLayoutEffect(() => {
     if (!settingsShown) return;
     // A stored 0 means autosync is off; the field keeps a usable frequency so
@@ -4133,6 +4154,7 @@ export function App() {
     setResourceLinksOn(resourceLinkSwitches(data));
     setQtestLinks(data.qtestLinks === true);
     setConfluenceParentUrl(typeof data.confluenceParentUrl === "string" ? data.confluenceParentUrl : "");
+    setQtestParentUrl(typeof data.qtestParentUrl === "string" ? data.qtestParentUrl : "");
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
     if (data.codeGen === false) setSpecSelection(new Map());
@@ -6006,6 +6028,7 @@ export function App() {
     if (userInfoOpen) return setUserInfoOpen(false);
     if (tokenSignInOpen) return setTokenSignInOpen(false);
     if (confluencePublishOpen) return setConfluencePublishOpen(false);
+    if (qtestPublishOpen) return setQtestPublishOpen(false);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -7519,6 +7542,22 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
+        {/* specs/external-links/qtest-test-cases.feature.md "A qTest token is
+            kept per site on this device": the token that lets a feature's
+            scenarios be created as test cases, from its ⋯ menu. Not in the
+            hosted app, which keeps no device secrets. */}
+        {!demo && !hosted && settingsQtestLinksDraft && (
+          <div className="settings-row">
+            <span className="settings-row-label">
+              Create test cases from a feature
+              <span className="settings-row-hint">
+                With a token for the site, a feature's ⋯ menu offers "Create qTest test cases…": one module
+                named after the feature under a parent module you pick, one test case per scenario.
+              </span>
+              <QtestTokens sites={qtestSites} onChange={setQtestSites} />
+            </span>
+          </div>
+        )}
       </PageSection>
       {/* specs/external-links/confluence-wiki.feature.md: a personal access
           token per wiki, kept on this device; features publish from their
@@ -9431,6 +9470,16 @@ export function App() {
                               onSelect: () => setConfluencePublishOpen(true),
                             },
                           ]),
+                      ...(demo || hosted || !qtestLinks
+                        ? []
+                        : [
+                            {
+                              id: "qtest",
+                              label: "Create qTest test cases…",
+                              icon: <ClipboardCheck size={13} />,
+                              onSelect: () => setQtestPublishOpen(true),
+                            },
+                          ]),
                       {
                         id: "delete",
                         label: "Delete feature",
@@ -10423,6 +10472,33 @@ export function App() {
             setConfluencePublishOpen(false);
             const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
             toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
+            if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {qtestPublishOpen && selected && feature && (
+        <QtestPublishDialog
+          file={selected}
+          featureName={feature.name}
+          linkedUrl={feature.qtest?.url}
+          initialParentUrl={qtestParentUrl}
+          sites={qtestSites}
+          trapRef={qtestTrapRef}
+          onClose={() => setQtestPublishOpen(false)}
+          onPublished={(data) => {
+            setFeature(featureFromResponse(data, selected));
+            setDirty(false);
+            markSaved();
+            setQtestParentUrl(data.parentUrl);
+            setQtestPublishOpen(false);
+            const open = { label: "Open module", run: () => window.open(data.module.url, "_blank", "noreferrer") };
+            const what = [
+              data.created > 0 ? `created ${data.created}` : "",
+              data.updated > 0 ? `updated ${data.updated}` : "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+            toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
             if (data.warning) toast.error(data.warning);
           }}
         />

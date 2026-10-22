@@ -9,6 +9,7 @@ import { readFile, rm } from "node:fs/promises";
 import { writeTextFile } from "../server/fsx";
 import { parseClaudeRecord, type ClaudeTokenBackend } from "../server/claudeToken";
 import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
+import { parseQtestRecords, type QtestTokenBackend } from "../server/qtestTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
 export function safeStorageAvailable(): boolean {
@@ -48,6 +49,11 @@ export function createSafeStorageBackend(tokenFile: string): TokenBackend {
 /** The Confluence tokens on safeStorage. */
 export function createConfluenceSafeStorageBackend(file: string): ConfluenceTokenBackend {
   return encryptedFile(file, parseConfluenceRecords, []);
+}
+
+/** The qTest tokens on safeStorage. */
+export function createQtestSafeStorageBackend(file: string): QtestTokenBackend {
+  return encryptedFile(file, parseQtestRecords, []);
 }
 
 /** The Claude API proxy's token on safeStorage (src/server/claudeToken.ts). */
