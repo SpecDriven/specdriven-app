@@ -99,6 +99,7 @@ import {
   renameFeature,
   renameFeatureFile,
   reprojectFeatures,
+  saveConfluencePage,
   saveFeature,
   savePullRequests,
   saveResourceLinks,
@@ -152,7 +153,15 @@ import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
 import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
 import type { Feature } from "./parser";
-import { attachFiles, ConfluenceError, publishFeaturePage, resolveParent, validateToken } from "./confluence";
+import {
+  attachFiles,
+  ConfluenceConflict,
+  ConfluenceError,
+  publishFeaturePage,
+  resolveParent,
+  validateToken,
+  type PublishedPage,
+} from "./confluence";
 import { normalizeConfluenceBase, onBase, parseParentPageUrl } from "./confluenceUrl";
 import { attachmentNames, isPublishScope, renameAttachments, renderFeatureStorage } from "./confluenceStorage";
 import {
@@ -1418,9 +1427,14 @@ const postClaudeLogout: Handler = async () => {
 // first time, a new version after that. The page is then linked from the
 // feature — a `[Confluence:<id>](url)` line under its heading, saved the way
 // the editor saves the qTest link — and the parent remembered for next time.
+// The page's version is recorded in the feature's document, so a page
+// changed in Confluence since (its version past the record) is not replaced
+// unless `force` says the user chose to: the conflict is answered as a 409
+// the dialog turns into a question.
 const postPublishConfluence = withDataDir(async (dir, req, params) => {
-  const body = (await req.json().catch(() => ({}))) as { parentUrl?: unknown; scope?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { parentUrl?: unknown; scope?: unknown; force?: unknown };
   const scope = body.scope ?? "all";
+  const force = body.force === true;
   if (!isPublishScope(scope)) return json({ error: "scope must be all or published" }, 400);
   const parentUrl = typeof body.parentUrl === "string" ? body.parentUrl.trim() : "";
   const ref = parseParentPageUrl(parentUrl);
@@ -1441,6 +1455,11 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   const linked = feature.confluence;
   const existingPageId =
     linked && /^\d+$/.test(linked.ticket) && onBase(linked.url, ref.base) ? linked.ticket : undefined;
+  // The version the app last published, when the record is that page's.
+  const lastVersion =
+    existingPageId !== undefined && feature.confluencePage?.id === existingPageId
+      ? feature.confluencePage.version
+      : undefined;
   // The page groups by polarity when the setting says so
   // (specs/ui/scenario-polarity.feature.md).
   const state = await readState(getAppRoot());
@@ -1460,7 +1479,7 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
     }),
   );
   const xhtml = renameAttachments(rendered, new Map(images.map((i) => [i.stored, i.name])));
-  let page: { id: string; url: string; created: boolean };
+  let page: PublishedPage;
   try {
     const parent = await resolveParent(ref.base, record.token, ref);
     page = await publishFeaturePage({
@@ -1470,8 +1489,11 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
       title,
       body: xhtml,
       existingPageId,
+      lastVersion,
+      force,
     });
   } catch (e) {
+    if (e instanceof ConfluenceConflict) return json({ error: e.message, conflict: e.conflict }, 409);
     if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
     return json({ error: (e as Error).message }, 502);
   }
@@ -1494,15 +1516,19 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
     state.confluenceParentUrl = parentUrl;
     await writeState(state, getAppRoot());
   }
-  const result = { id: page.id, url: page.url, created: page.created, title, parentUrl };
+  const result = { id: page.id, url: page.url, created: page.created, version: page.version, title, parentUrl };
   const link = { program: CONFLUENCE_PROGRAM, ticket: page.id, url: page.url };
   const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
-  if (linked && linked.ticket === link.ticket && linked.url === link.url) {
-    return json({ ...view, ...result, ...warned(), message: "page link unchanged" });
-  }
+  // The page's version now, kept in the document for the next publish's
+  // check; the link line is saved first, as before, when it changed.
+  const recorded = () => saveConfluencePage(dir, params.file!, { id: page.id, version: page.version });
   try {
+    if (linked && linked.ticket === link.ticket && linked.url === link.url) {
+      return json({ ...(await recorded()), ...result, ...warned(), message: "page link unchanged" });
+    }
     const next: Feature = { ...feature, confluence: link };
-    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...result, ...warned() });
+    const saved = await saveFeature(dir, params.file!, serializeFeature(next));
+    return json({ ...saved, ...(await recorded()), ...result, ...warned() });
   } catch (e) {
     // The page is in Confluence; only the link back could not be written.
     warnings.push(`The page link was not saved: ${(e as Error).message}`);

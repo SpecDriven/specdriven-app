@@ -9,6 +9,7 @@ import {
   importFeatureDoc,
   reconcile,
   removeDraftScenario,
+  setConfluencePage,
   setPullRequests,
   setResourceLinks,
   setScenarioFiles,
@@ -44,6 +45,7 @@ import {
   titleFromFileName,
 } from "./parser";
 import type {
+  ConfluencePage,
   Feature,
   PullRequestLink,
   ResourceLink,
@@ -343,6 +345,7 @@ async function featureView(
     ...(link ? { link } : {}),
     ...(qtest ? { qtest } : {}),
     ...(confluence ? { confluence } : {}),
+    ...(inDoc.confluencePage ? { confluencePage: inDoc.confluencePage } : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     ...resourcesOf(inDoc),
     ...authorsOf(inDoc),
@@ -815,6 +818,28 @@ export async function savePullRequests(
     ...(await featureView(dataDir, name, content)),
     message: "pull requests saved locally",
   };
+}
+
+/**
+ * Record the version of the feature's Confluence page as the app just
+ * published it (specs/external-links/confluence-wiki.feature.md "Changes
+ * made in Confluence are not overwritten unnoticed") — a direct document
+ * operation like savePullRequests, as the version is never in the markdown.
+ * A feature with no document yet gets one minted from the file first.
+ */
+export async function saveConfluencePage(dataDir: string, fileName: string, page: ConfluencePage): Promise<FeatureView> {
+  const name = safe(fileName);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  let loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) {
+    await createFeatureDoc(dataDir, name, importFeatureDoc(parseFeature(content)));
+    loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Could not create a document for ${name}`);
+  }
+  const next = setConfluencePage(loaded.doc, page);
+  if (next !== loaded.doc) await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  return featureView(dataDir, name, content);
 }
 
 /**

@@ -294,6 +294,23 @@ body {
   width: min(34rem, 90vw);
 }
 
+/* The page was changed in Confluence since the last publish: said before
+   Publish anyway replaces it. */
+.confluence-conflict {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--status-proposed) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--status-proposed) 12%, transparent);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.confluence-conflict p {
+  margin: 0;
+}
+
 /* The header chip linking the published page reads like the other chips. */
 a.chip {
   text-decoration: none;

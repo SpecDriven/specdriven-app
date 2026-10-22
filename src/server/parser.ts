@@ -145,6 +145,17 @@ export function isQtestLink(link: ExternalLink): boolean {
  */
 export const CONFLUENCE_PROGRAM = "Confluence";
 
+/**
+ * The Confluence page a feature was published to, at the version the app
+ * last wrote (specs/external-links/confluence-wiki.feature.md): `id` is the
+ * page's, the same as the link's ticket, so a record left by an earlier page
+ * never stands for the page linked now.
+ */
+export interface ConfluencePage {
+  id: string;
+  version: number;
+}
+
 /** Whether a link is a feature's Confluence page rather than a ticket. */
 export function isConfluenceLink(link: ExternalLink): boolean {
   return link.program.trim().toLowerCase() === CONFLUENCE_PROGRAM.toLowerCase();
@@ -266,6 +277,12 @@ export interface Feature {
    * `Confluence`, the page id as the ticket.
    */
   confluence?: ExternalLink;
+  /**
+   * That page's version as the app last published it; document-only, like
+   * the pull requests below — the file never holds it, and serializeFeature
+   * never writes it.
+   */
+  confluencePage?: ConfluencePage;
   /** The pull requests implementing the feature as a whole; document-only. */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs; document-only. */
