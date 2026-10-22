@@ -35,6 +35,7 @@ import type { CodeGenTarget } from "../server/state";
 import { Logo } from "./Logo";
 import {
   Activity,
+  Check,
   ChevronDown,
   ChevronLeft,
   ClipboardCheck,
@@ -8837,6 +8838,28 @@ export function App() {
                     </button>
                   </Tooltip>
                 </span>
+                {/* Copy link (specs/ui/navigation.feature.md "share a link"):
+                    the scenario's versioned url, as the card's ⋯ menu and
+                    mod+shift+c copy it. A scenario with no name has no url
+                    yet. */}
+                <Tooltip
+                  label={copied === scenarioPath(selected, editing.scenario) ? "Copied" : "Copy link"}
+                  keys="mod+shift+c"
+                >
+                  <button
+                    type="button"
+                    className="scenario-nav-btn"
+                    aria-label="Copy link"
+                    disabled={!editing.scenario.name.trim()}
+                    onClick={() => void copyLink(scenarioPath(selected, editing.scenario))}
+                  >
+                    {copied === scenarioPath(selected, editing.scenario) ? (
+                      <Check size={16} aria-hidden="true" />
+                    ) : (
+                      <Link size={16} aria-hidden="true" />
+                    )}
+                  </button>
+                </Tooltip>
                 <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
                 {/* Proposed scenarios and drafts can be deleted
                     (specs/editor/spec-editor.feature.md) — published ones too
