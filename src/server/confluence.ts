@@ -85,7 +85,41 @@ async function describeFailure(res: Response): Promise<ConfluenceError> {
   if (res.status === 413) {
     return new ConfluenceError("The page is too large for Confluence to accept.", 413);
   }
+  if (res.status === 409) {
+    // A stale version number: the page changed between the version check
+    // and the update.
+    return new ConfluenceError("Confluence reports the page changed while it was being published — publish again.", 409);
+  }
   return new ConfluenceError(`Confluence answered HTTP ${res.status}${detail ? `: ${detail}` : ""}`, 502);
+}
+
+/**
+ * The page was changed in Confluence since the app last published it
+ * (specs/external-links/confluence-wiki.feature.md "Changes made in
+ * Confluence are not overwritten unnoticed"): its version is past the one
+ * recorded, so publishing would replace what was changed. The route hands
+ * the details to the dialog, which asks before going ahead.
+ */
+export class ConfluenceConflict extends ConfluenceError {
+  constructor(
+    public readonly conflict: {
+      pageId: string;
+      url: string;
+      /** The page's version in Confluence now. */
+      version: number;
+      /** The version the app last published. */
+      lastVersion: number;
+      /** Who made the current version, and when, as Confluence reports them. */
+      by?: string;
+      when?: string;
+    },
+  ) {
+    const who = conflict.by ? ` by ${conflict.by}` : "";
+    super(
+      `The page was changed in Confluence since it was last published from here (version ${conflict.version}${who}); publishing would replace those changes.`,
+      409,
+    );
+  }
 }
 
 // --- Shapes ------------------------------------------------------------------------
@@ -101,7 +135,8 @@ interface RawPage {
   id: string;
   title: string;
   space?: { key?: string };
-  version?: { number?: number };
+  /** The current version: its number, who made it and when (`expand=version`). */
+  version?: { number?: number; when?: string; by?: RawUser; message?: string };
   ancestors?: { id: string }[];
   _links?: { base?: string; webui?: string };
 }
@@ -112,10 +147,16 @@ export interface PageInfo {
   title: string;
   spaceKey: string;
   version: number;
+  /** Who made the current version, and when (ISO 8601), when Confluence says. */
+  by?: string;
+  when?: string;
   /** Ancestor page ids, the root first; the last is the parent. */
   ancestors: string[];
   url: string;
 }
+
+/** The message each version the app publishes carries in the page's history. */
+export const VERSION_MESSAGE = "Published from SpecDriven";
 
 function pageUrl(base: string, raw: RawPage): string {
   const webui = raw._links?.webui;
@@ -125,11 +166,15 @@ function pageUrl(base: string, raw: RawPage): string {
 }
 
 function pageInfo(base: string, raw: RawPage, spaceKey?: string): PageInfo {
+  const by = raw.version?.by;
+  const who = by?.displayName || by?.username || by?.userKey;
   return {
     id: String(raw.id),
     title: raw.title,
     spaceKey: raw.space?.key ?? spaceKey ?? "",
     version: raw.version?.number ?? 1,
+    ...(who ? { by: who } : {}),
+    ...(raw.version?.when ? { when: raw.version.when } : {}),
     ancestors: (raw.ancestors ?? []).map((a) => String(a.id)),
     url: pageUrl(base, raw),
   };
@@ -229,8 +274,9 @@ export async function createPage(base: string, token: string, p: PageFields): Pr
 }
 
 /**
- * A new version of a page. Naming the parent as the ancestor moves the page
- * under it when it sat elsewhere.
+ * A new version of a page, carrying the app's message in the page's history.
+ * Naming the parent as the ancestor moves the page under it when it sat
+ * elsewhere.
  */
 export async function updatePage(
   base: string,
@@ -239,9 +285,17 @@ export async function updatePage(
 ): Promise<PageInfo> {
   const raw = await confluence<RawPage>(base, `/rest/api/content/${encodeURIComponent(p.id)}`, token, {
     method: "PUT",
-    json: { id: p.id, ...contentBody(p), version: { number: p.version + 1 } },
+    json: { id: p.id, ...contentBody(p), version: { number: p.version + 1, message: VERSION_MESSAGE } },
   });
   return pageInfo(base, raw, p.spaceKey);
+}
+
+/** What a publish leaves: the page, whether it was created, and its version now. */
+export interface PublishedPage {
+  id: string;
+  url: string;
+  created: boolean;
+  version: number;
 }
 
 /**
@@ -250,6 +304,12 @@ export async function updatePage(
  * same title under that parent, else create one. A page of the same title
  * elsewhere in the space is refused rather than taken over — Confluence keeps
  * titles unique per space, so creating one would fail anyway.
+ *
+ * The linked page is checked against `lastVersion`, the version the app
+ * last published: a page past it was changed in Confluence since, and is
+ * left alone — a ConfluenceConflict, naming who changed it — unless `force`
+ * says the user chose to replace those changes. No record (a page from
+ * before versions were kept, or one found by its title) means no check.
  */
 export async function publishFeaturePage(p: {
   base: string;
@@ -258,18 +318,36 @@ export async function publishFeaturePage(p: {
   title: string;
   body: string;
   existingPageId?: string;
-}): Promise<{ id: string; url: string; created: boolean }> {
+  lastVersion?: number;
+  force?: boolean;
+}): Promise<PublishedPage> {
   const fields: PageFields = { title: p.title, spaceKey: p.parent.spaceKey, parentId: p.parent.id, body: p.body };
+  const published = (page: PageInfo, created: boolean): PublishedPage => ({
+    id: page.id,
+    url: page.url,
+    created,
+    version: page.version,
+  });
   if (p.existingPageId) {
     const linked = await getPage(p.base, p.token, p.existingPageId);
     if (linked) {
+      if (p.lastVersion !== undefined && linked.version > p.lastVersion && !p.force) {
+        throw new ConfluenceConflict({
+          pageId: linked.id,
+          url: linked.url,
+          version: linked.version,
+          lastVersion: p.lastVersion,
+          ...(linked.by ? { by: linked.by } : {}),
+          ...(linked.when ? { when: linked.when } : {}),
+        });
+      }
       const page = await updatePage(p.base, p.token, {
         ...fields,
         spaceKey: linked.spaceKey || fields.spaceKey,
         id: linked.id,
         version: linked.version,
       });
-      return { id: page.id, url: page.url, created: false };
+      return published(page, false);
     }
   }
   const same = await findPageByTitle(p.base, p.token, p.parent.spaceKey, p.title);
@@ -281,10 +359,10 @@ export async function publishFeaturePage(p: {
       );
     }
     const page = await updatePage(p.base, p.token, { ...fields, id: same.id, version: same.version });
-    return { id: page.id, url: page.url, created: false };
+    return published(page, false);
   }
   const page = await createPage(p.base, p.token, fields);
-  return { id: page.id, url: page.url, created: true };
+  return published(page, true);
 }
 
 /** A file to attach to a page: the name the page's body refers to it by. */
