@@ -1,0 +1,404 @@
+// Tricentis qTest Manager REST client (specs/external-links/qtest-test-cases
+// .feature.md "Create qTest test cases from a feature"), API v3:
+// https://docs.tricentis.com/qtest-saas/content/apis/apis/test_case_apis.htm
+//
+// Every call carries a bearer token. A feature's scenarios are published as
+// test cases of one module named after the feature, under the parent module
+// the user names: each test case created the first time and updated after
+// that — found by the test case its scenario already links.
+
+import type { Feature, Scenario } from "./parser";
+import { scenarioNumbers } from "./parser";
+import { scenarioToTestCase, type TestCaseDraft } from "./qtestSteps";
+import { moduleWebUrl, onQtestBase, testCaseIdFromUrl, testCaseWebUrl } from "./qtestUrl";
+
+/** A failed qTest call, with the HTTP status so the route can pass it on. */
+export class QtestError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+interface Init {
+  method?: string;
+  json?: unknown;
+}
+
+/** One request to a qTest site's REST API, with the token and headers it wants. */
+export async function qtestRequest(base: string, path: string, token: string, init: Init = {}): Promise<Response> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "User-Agent": "SpecDriven",
+    Authorization: `bearer ${token}`,
+  };
+  if (init.json !== undefined) headers["Content-Type"] = "application/json";
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: init.method ?? "GET",
+      headers,
+      body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
+      redirect: "manual",
+    });
+  } catch (e) {
+    throw new QtestError(`Could not reach qTest at ${base}: ${(e as Error).message}`, 502);
+  }
+  if (res.status >= 300 && res.status < 400) {
+    // A redirect from the REST API is a sign-in page or SSO, never data.
+    throw new QtestError("qTest redirected the request — check the site url, and that the token is an API token", 401);
+  }
+  if (!res.ok) throw await describeFailure(res);
+  return res;
+}
+
+async function qtest<T>(base: string, path: string, token: string, init: Init = {}): Promise<T> {
+  const res = await qtestRequest(base, path, token, init);
+  try {
+    return (await res.json()) as T;
+  } catch {
+    throw new QtestError("qTest answered with something that is not JSON — check the site url", 502);
+  }
+}
+
+/** A qTest failure as one sentence the dialog can show, with the status kept. */
+async function describeFailure(res: Response): Promise<QtestError> {
+  const detail = ((await res.json().catch(() => null)) as { message?: string } | null)?.message;
+  if (res.status === 401) {
+    return new QtestError("qTest rejected the token; save a new one in Settings → qTest.", 401);
+  }
+  if (res.status === 403) {
+    return new QtestError(
+      `qTest refused the request — the token cannot write to this project${detail ? `: ${detail}` : ""}`,
+      403,
+    );
+  }
+  if (res.status === 404) {
+    return new QtestError("qTest reports no such project or module, or the token cannot see it.", 404);
+  }
+  return new QtestError(`qTest answered HTTP ${res.status}${detail ? `: ${detail}` : ""}`, 502);
+}
+
+// --- Shapes ------------------------------------------------------------------------
+
+interface RawProject {
+  id: number;
+  name?: string;
+}
+
+interface RawModule {
+  id: number;
+  pid?: string;
+  name: string;
+  parent_id?: number | null;
+}
+
+interface RawField {
+  id: number;
+  label?: string;
+  required?: boolean;
+  constrained?: boolean;
+  allowed_values?: { value: number | string; label?: string; is_default?: boolean }[];
+}
+
+interface RawTestCase {
+  id: number;
+  pid?: string;
+  parent_id?: number;
+  web_url?: string;
+}
+
+/** A field-value pair as qTest's test case API takes it. */
+export interface Property {
+  field_id: number;
+  field_value: number | string;
+}
+
+/** A module as the publish flow needs it. */
+export interface ModuleInfo {
+  id: string;
+  pid: string;
+  name: string;
+  parentId: string | null;
+  url: string;
+}
+
+/** A test case as the publish flow needs it. */
+export interface TestCaseInfo {
+  id: string;
+  pid: string;
+  url: string;
+}
+
+function moduleInfo(base: string, projectId: string, raw: RawModule): ModuleInfo {
+  return {
+    id: String(raw.id),
+    pid: raw.pid ?? `MD-${raw.id}`,
+    name: raw.name,
+    parentId: raw.parent_id === null || raw.parent_id === undefined ? null : String(raw.parent_id),
+    url: moduleWebUrl(base, projectId, String(raw.id)),
+  };
+}
+
+function testCaseInfo(base: string, projectId: string, raw: RawTestCase): TestCaseInfo {
+  return {
+    id: String(raw.id),
+    pid: raw.pid ?? `TC-${raw.id}`,
+    url: raw.web_url && /^https?:\/\//.test(raw.web_url) ? raw.web_url : testCaseWebUrl(base, projectId, String(raw.id)),
+  };
+}
+
+const project = (projectId: string) => `/api/v3/projects/${encodeURIComponent(projectId)}`;
+
+// --- Calls -------------------------------------------------------------------------
+
+/**
+ * What a token can see, or a 401 QtestError: the projects it lists. qTest
+ * answers an unknown token with 401, so the list itself is the check; a
+ * token that sees no project at all is refused too, since nothing could be
+ * published with it.
+ */
+export async function validateToken(base: string, token: string): Promise<{ user: string }> {
+  const refused = new QtestError("qTest did not accept this token — check it and its expiry", 401);
+  let projects: RawProject[];
+  try {
+    projects = await qtest<RawProject[]>(base, "/api/v3/projects", token);
+  } catch (e) {
+    throw e instanceof QtestError && e.status === 401 ? refused : e;
+  }
+  if (!Array.isArray(projects)) throw refused;
+  if (projects.length === 0) throw new QtestError("The token sees no qTest project, so nothing could be published with it", 403);
+  return { user: `${projects.length} project${projects.length === 1 ? "" : "s"}` };
+}
+
+/** A module by id, or null when qTest has none (a deleted module). */
+export async function getModule(base: string, token: string, projectId: string, id: string): Promise<ModuleInfo | null> {
+  try {
+    const raw = await qtest<RawModule>(base, `${project(projectId)}/modules/${encodeURIComponent(id)}`, token);
+    return moduleInfo(base, projectId, raw);
+  } catch (e) {
+    if (e instanceof QtestError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** The modules right under a parent module. */
+export async function listChildModules(
+  base: string,
+  token: string,
+  projectId: string,
+  parentId: string,
+): Promise<ModuleInfo[]> {
+  const raw = await qtest<RawModule[]>(base, `${project(projectId)}/modules?parentId=${encodeURIComponent(parentId)}`, token);
+  return (Array.isArray(raw) ? raw : []).map((m) => moduleInfo(base, projectId, m));
+}
+
+/** A new module under a parent. */
+export async function createModule(
+  base: string,
+  token: string,
+  projectId: string,
+  parentId: string,
+  name: string,
+): Promise<ModuleInfo> {
+  const raw = await qtest<RawModule>(base, `${project(projectId)}/modules?parentId=${encodeURIComponent(parentId)}`, token, {
+    method: "POST",
+    json: { name },
+  });
+  return moduleInfo(base, projectId, raw);
+}
+
+/** Move a module under another parent, keeping its name. */
+export async function moveModule(
+  base: string,
+  token: string,
+  projectId: string,
+  module: ModuleInfo,
+  parentId: string,
+): Promise<ModuleInfo> {
+  const raw = await qtest<RawModule>(
+    base,
+    `${project(projectId)}/modules/${encodeURIComponent(module.id)}?parentId=${encodeURIComponent(parentId)}`,
+    token,
+    { method: "PUT", json: { name: module.name } },
+  );
+  return moduleInfo(base, projectId, raw);
+}
+
+// The fields a test case is given directly rather than as properties.
+const DIRECT_FIELDS = new Set(["name", "description", "precondition"]);
+
+/**
+ * The properties a new test case must carry: every required field of the
+ * project's test cases, at its default value — the allowed value flagged as
+ * default, else the first allowed one, else blank. Field ids differ per
+ * project, so they are read, never assumed.
+ */
+export async function requiredProperties(base: string, token: string, projectId: string): Promise<Property[]> {
+  const fields = await qtest<RawField[]>(base, `${project(projectId)}/settings/test-cases/fields`, token);
+  return (Array.isArray(fields) ? fields : []).flatMap((f) => {
+    if (!f.required || DIRECT_FIELDS.has((f.label ?? "").trim().toLowerCase())) return [];
+    const values = f.allowed_values ?? [];
+    const pick = values.find((v) => v.is_default) ?? values[0];
+    return [{ field_id: f.id, field_value: pick ? pick.value : "" }];
+  });
+}
+
+/** A test case by id, or null when qTest has none (a deleted test case). */
+export async function getTestCase(
+  base: string,
+  token: string,
+  projectId: string,
+  id: string,
+): Promise<TestCaseInfo | null> {
+  try {
+    const raw = await qtest<RawTestCase>(base, `${project(projectId)}/test-cases/${encodeURIComponent(id)}`, token);
+    return testCaseInfo(base, projectId, raw);
+  } catch (e) {
+    if (e instanceof QtestError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+interface TestCaseFields extends TestCaseDraft {
+  parent_id: string;
+  properties: Property[];
+}
+
+export async function createTestCase(
+  base: string,
+  token: string,
+  projectId: string,
+  fields: TestCaseFields,
+): Promise<TestCaseInfo> {
+  const raw = await qtest<RawTestCase>(base, `${project(projectId)}/test-cases`, token, { method: "POST", json: fields });
+  return testCaseInfo(base, projectId, raw);
+}
+
+/** A new version of a test case; naming the parent moves it there when it sat elsewhere. */
+export async function updateTestCase(
+  base: string,
+  token: string,
+  projectId: string,
+  id: string,
+  fields: TestCaseFields,
+): Promise<TestCaseInfo> {
+  const raw = await qtest<RawTestCase>(base, `${project(projectId)}/test-cases/${encodeURIComponent(id)}`, token, {
+    method: "PUT",
+    json: fields,
+  });
+  return testCaseInfo(base, projectId, raw);
+}
+
+// --- Publishing a feature ------------------------------------------------------------
+
+/** One scenario's test case after a publish. */
+export interface PublishedCase {
+  /** The scenario's index in the feature, so the route can link it back. */
+  index: number;
+  scenarioName: string;
+  id: string;
+  pid: string;
+  url: string;
+  created: boolean;
+}
+
+export interface PublishResult {
+  module: ModuleInfo & { created: boolean };
+  cases: PublishedCase[];
+  /** The scenario whose test case could not be written, when one could not. */
+  failed?: { index: number; scenarioName: string; error: string };
+}
+
+/**
+ * The feature's module under the parent: the one the feature already links
+ * (`existingModuleId`) when it still exists — moved under the parent when it
+ * sat elsewhere — else the child of the parent with the feature's name, else
+ * a new one.
+ */
+async function featureModule(p: {
+  base: string;
+  token: string;
+  projectId: string;
+  parentId: string;
+  name: string;
+  existingModuleId?: string;
+}): Promise<ModuleInfo & { created: boolean }> {
+  if (p.existingModuleId) {
+    const linked = await getModule(p.base, p.token, p.projectId, p.existingModuleId);
+    if (linked) {
+      if (linked.parentId === p.parentId) return { ...linked, created: false };
+      return { ...(await moveModule(p.base, p.token, p.projectId, linked, p.parentId)), created: false };
+    }
+  }
+  const same = (await listChildModules(p.base, p.token, p.projectId, p.parentId)).find(
+    (m) => m.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
+  );
+  if (same) return { ...same, created: false };
+  return { ...(await createModule(p.base, p.token, p.projectId, p.parentId, p.name)), created: true };
+}
+
+/** The test case a scenario already links on this site, by its numeric id, if any. */
+function linkedTestCaseId(scenario: Scenario, base: string): string | null {
+  const link = scenario.qtest;
+  if (!link || !onQtestBase(link.url, base)) return null;
+  return testCaseIdFromUrl(link.url);
+}
+
+/**
+ * Publish a feature's scenarios as test cases: one module named after the
+ * feature under the parent, one test case per scenario in scope. A scenario
+ * whose link names a test case still in qTest is updated there (and moved
+ * into the module when it sat elsewhere); any other gets a new one. Stops
+ * at the first test case qTest refuses, reporting it with what was done —
+ * the route links those back so a second run carries on from there.
+ */
+export async function publishFeatureTestCases(p: {
+  base: string;
+  token: string;
+  projectId: string;
+  parentModuleId: string;
+  feature: Feature;
+  file: string;
+  title: string;
+  scope: "all" | "published";
+  existingModuleId?: string;
+}): Promise<PublishResult> {
+  const parent = await getModule(p.base, p.token, p.projectId, p.parentModuleId);
+  if (!parent) {
+    throw new QtestError(
+      `qTest has no module ${p.parentModuleId} in project ${p.projectId}, or the token cannot see it.`,
+      404,
+    );
+  }
+  const module = await featureModule({
+    base: p.base,
+    token: p.token,
+    projectId: p.projectId,
+    parentId: parent.id,
+    name: p.title,
+    existingModuleId: p.existingModuleId,
+  });
+  const properties = await requiredProperties(p.base, p.token, p.projectId);
+  const numbers = scenarioNumbers(p.feature.scenarios);
+  const cases: PublishedCase[] = [];
+  for (const [index, scenario] of p.feature.scenarios.entries()) {
+    if (p.scope === "published" && scenario.status !== "published") continue;
+    const draft = scenarioToTestCase(scenario, numbers[index] ?? null, { featureName: p.title, file: p.file });
+    const fields: TestCaseFields = { ...draft, parent_id: module.id, properties };
+    try {
+      const linkedId = linkedTestCaseId(scenario, p.base);
+      const existing = linkedId ? await getTestCase(p.base, p.token, p.projectId, linkedId) : null;
+      const written = existing
+        ? await updateTestCase(p.base, p.token, p.projectId, existing.id, fields)
+        : await createTestCase(p.base, p.token, p.projectId, fields);
+      cases.push({ index, scenarioName: scenario.name, ...written, created: !existing });
+    } catch (e) {
+      const error = e instanceof QtestError ? e.message : (e as Error).message;
+      return { module, cases, failed: { index, scenarioName: scenario.name, error } };
+    }
+  }
+  return { module, cases };
+}

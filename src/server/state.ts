@@ -99,6 +99,12 @@ export interface SpecDrivenState {
    * publish dialog. Per device, like the Confluence tokens it goes with.
    */
   confluenceParentUrl?: string;
+  /**
+   * The last parent module a feature's test cases were created under in
+   * qTest (specs/external-links/qtest-test-cases.feature.md), offered again
+   * by the dialog. Per device, like the qTest tokens it goes with.
+   */
+  qtestParentUrl?: string;
   /** Offer code gen sessions (specs/agents/claude.feature.md); absent means ON.
       Off hides the selection checkboxes and refuses the session endpoint, so
       nothing in the app can hand a spec to a coding agent. */
@@ -458,6 +464,11 @@ export function normalizeConfluenceParentUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const url = value.trim();
   return url.length <= 2048 && /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
+/** The remembered qTest parent module url, or null when there is none usable. */
+export function normalizeQtestParentUrl(value: unknown): string | null {
+  return normalizeConfluenceParentUrl(value);
 }
 
 /** Effective qTest test case link setting
