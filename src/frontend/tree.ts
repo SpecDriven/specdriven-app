@@ -254,3 +254,31 @@ export function folderOptions(root: FolderNode, except: string | null = null): F
   walk(root);
   return out;
 }
+
+/**
+ * Where a scenario dragged in the sidebar outline lands
+ * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in the
+ * tree"): dropped on the upper half of `target` it goes just before it, on
+ * the lower half just after. Scenarios are found by name and version, so the
+ * same drop places it in the open feature (drafts and all) or in the server's
+ * copy of another one. The answer is the `from` / `to` pair withScenarioMoved
+ * takes, or null when the scenario would stay where it is or either one is
+ * not in `scenarios`.
+ */
+export function scenarioDrop(
+  scenarios: readonly { name: string; version: number }[],
+  dragged: { name: string; version: number },
+  target: { name: string; version: number },
+  after: boolean,
+): { from: number; to: number } | null {
+  const at = (x: { name: string; version: number }) =>
+    scenarios.findIndex((s) => s.name === x.name && s.version === x.version);
+  const from = at(dragged);
+  const over = at(target);
+  if (from < 0 || over < 0) return null;
+  // The slot in the list as it stands, then one less once the dragged
+  // scenario has left a place ahead of it.
+  const slot = over + (after ? 1 : 0);
+  const to = slot > from ? slot - 1 : slot;
+  return to === from ? null : { from, to };
+}
