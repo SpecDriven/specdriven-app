@@ -208,6 +208,7 @@ import {
   folderLabel,
   folderOptions,
   folderRenamed,
+  scenarioDrop,
   scenarioNeighbors,
   scenarioRows,
   scenarioSequence,
@@ -1279,6 +1280,20 @@ export function App() {
   /** True while the File submenu of the open tree menu is expanded. */
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /**
+   * A scenario being dragged in the sidebar outline
+   * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
+   * the tree"), and the row edge it would land on. Apart from `dragging`, so
+   * the folders' drop zones never take it for a feature.
+   */
+  const [scenarioDrag, setScenarioDrag] = useState<{ file: string; name: string; version: number } | null>(
+    null,
+  );
+  const [scenarioDropAt, setScenarioDropAt] = useState<{
+    name: string;
+    version: number;
+    after: boolean;
+  } | null>(null);
   // Full-text search (specs/search.feature.md) lives in the command palette
   // (⌘K, src/frontend/CommandPalette.tsx): open, with the text it starts on.
   const [palette, setPalette] = useState<{ query: string } | null>(null);
@@ -5260,10 +5275,15 @@ export function App() {
    * The highlight follows the scenario. Not while the editor pane is open:
    * its index into the feature would go stale under it.
    */
-  const reorderScenario = async (i: number, delta: -1 | 1) => {
+  const reorderScenario = (i: number, delta: -1 | 1) => moveScenarioTo(i, i + delta);
+
+  /**
+   * Move the open feature's scenario at `i` to `to` — one place for Move up
+   * / Move down, anywhere for a drop in the sidebar outline — and save it.
+   */
+  const moveScenarioTo = async (i: number, to: number) => {
     if (!feature || !selected || editing !== null || featureEditorsSealed.current) return;
-    const to = i + delta;
-    if (to < 0 || to >= feature.scenarios.length) return;
+    if (to < 0 || to >= feature.scenarios.length || to === i) return;
     const before = feature;
     const next = withScenarioMoved(feature, i, to);
     const file = selected;
@@ -5546,6 +5566,78 @@ export function App() {
     toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
   };
 
+  /**
+   * A scenario dropped on another row of its feature's outline
+   * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
+   * the tree"): it lands before or after that row and the feature is saved
+   * in its new order, as Move up / Move down save it. The open feature with
+   * no editor pane moves in place. Any other feature moves in the server's
+   * copy, the way the tree's Delete edits it; an editor pane open on that
+   * feature is left first, autosaving like any navigation away, and opens
+   * again on the scenario it showed — its index would go stale under it.
+   */
+  const dropTreeScenario = async (
+    file: string,
+    dragged: { name: string; version: number },
+    target: { name: string; version: number },
+    after: boolean,
+  ) => {
+    if (file === selected && feature && editing === null) {
+      const move = scenarioDrop(feature.scenarios, dragged, target, after);
+      if (move) await moveScenarioTo(move.from, move.to);
+      return;
+    }
+    if (file === selected && featureEditorsSealed.current) return;
+    const reopen = file === selected ? paneScenario : null;
+    if (file === selected && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    await scenarioSaveQueue.current.idle();
+    const url = `/api/features/${encodeURIComponent(file)}`;
+    const reopenPane = () =>
+      reopen && selectedRef.current === file
+        ? openFeature(file, {
+            scenario: { slug: slugify(reopen.name), version: reopen.version },
+            pane: true,
+          })
+        : undefined;
+    try {
+      const got = await fetch(url);
+      if (!got.ok) throw new Error("Could not move the scenario");
+      const current = featureFromResponse(await got.json(), file);
+      const move = scenarioDrop(current.scenarios, dragged, target, after);
+      if (!move) {
+        await reopenPane();
+        return;
+      }
+      const next = withScenarioMoved(current, move.from, move.to);
+      // The outline shows the new order while the save is out.
+      setFeatures((prev) => withOpenScenarios(prev, file, next));
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not move the scenario");
+      if (reopen) await reopenPane();
+      else if (selectedRef.current === file) {
+        setFeature(featureFromResponse(data, file));
+        markSaved();
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof TypeError
+          ? "Could not move the scenario — is the server running?"
+          : (e as Error).message,
+      );
+      await reopenPane();
+    }
+    await loadFeatures();
+  };
+
   /** One sidebar entry per feature; the entry is the drag source. */
   const featureItem = (f: FeatureListing, depth: number) => {
     const entry = specSelection.get(f.fileName);
@@ -5720,8 +5812,52 @@ export function App() {
               // Settings allows it.
               const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
               const deletable = s.status !== "published" || deletePublished;
+              // Drag to reorder (specs/ui/navigation.feature.md "reorder
+              // scenarios by dragging them in the tree"): within this
+              // feature only, landing before or after the row it is over.
+              const same = (x: { name: string; version: number } | null) =>
+                x !== null && x.name === s.name && x.version === s.version;
+              const draggingHere = scenarioDrag !== null && scenarioDrag.file === f.fileName;
+              const dropEdge =
+                draggingHere && same(scenarioDropAt) && !same(scenarioDrag)
+                  ? scenarioDropAt!.after
+                    ? " drop-after"
+                    : " drop-before"
+                  : "";
+              const endScenarioDrag = () => {
+                setScenarioDrag(null);
+                setScenarioDropAt(null);
+              };
               return (
-                <div key={`${s.name}-v${s.version}`} className="tree-scenario-row">
+                <div
+                  key={`${s.name}-v${s.version}`}
+                  className={`tree-scenario-row${dropEdge}${draggingHere && same(scenarioDrag) ? " dragging" : ""}`}
+                  onDragOver={(e) => {
+                    if (!draggingHere) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = "move";
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const after = e.clientY > box.top + box.height / 2;
+                    if (!same(scenarioDropAt) || scenarioDropAt!.after !== after) {
+                      setScenarioDropAt({ name: s.name, version: s.version, after });
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!draggingHere) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const dragged = scenarioDrag!;
+                    endScenarioDrag();
+                    void dropTreeScenario(
+                      f.fileName,
+                      dragged,
+                      { name: s.name, version: s.version },
+                      e.clientY > box.top + box.height / 2,
+                    );
+                  }}
+                >
                   <a
                     href={scenarioPath(f.fileName, s)}
                     className={`tree-scenario${here ? " active" : ""}`}
@@ -5733,6 +5869,14 @@ export function App() {
                        the whole row, so it is not added twice. */
                     style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
                     title={`${s.name} v${s.version}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      e.dataTransfer.setData("text/plain", scenarioPath(f.fileName, s));
+                      e.dataTransfer.effectAllowed = "move";
+                      setScenarioDrag({ file: f.fileName, name: s.name, version: s.version });
+                    }}
+                    onDragEnd={endScenarioDrag}
                     onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
                   >
                     {scenarioNumbers(rows)[rows.indexOf(s)] !== null && (
