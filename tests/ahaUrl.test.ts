@@ -13,7 +13,7 @@ import {
 } from "../src/server/ahaUrl";
 
 describe("an Aha! record url", () => {
-  test("names the site and the record: a feature, an epic, a requirement, an idea", () => {
+  test("names the site and the record, be it a feature, an epic, a requirement or an idea", () => {
     expect(parseAhaRecordUrl("https://acme.aha.io/features/APP-123")).toEqual({
       base: "https://acme.aha.io",
       kind: "feature",
