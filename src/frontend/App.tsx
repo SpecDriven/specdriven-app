@@ -9015,6 +9015,9 @@ export function App() {
                   readOnly={editingPublished}
                   highlight={searchTerms ?? undefined}
                   placeholder="Describe the scenario in Markdown…"
+                  // Opens rendered, like the feature description; a new
+                  // scenario's blank body opens ready to type into instead.
+                  initialTab={editing.scenario.body.trim() ? "preview" : "write"}
                   onChange={(body) =>
                     setEditing({ ...editing, scenario: { ...editing.scenario, body } })
                   }
