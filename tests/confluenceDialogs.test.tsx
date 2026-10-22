@@ -4,7 +4,7 @@
 // App.tsx owns the open state, the menu entry and the chip.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ConfluencePublishDialog, parentUrlProblem } from "../src/frontend/ConfluencePublishDialog";
+import { ConfluenceConflictNotice, ConfluencePublishDialog, parentUrlProblem } from "../src/frontend/ConfluencePublishDialog";
 import { ConfluenceTokens } from "../src/frontend/ConfluenceToken";
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -49,6 +49,32 @@ describe("ConfluencePublishDialog", () => {
     );
     expect(markup).toContain("publishing again updates");
     expect(markup).toContain('href="https://wiki.acme.com/spaces/ABC/pages/5/F"');
+  });
+
+  test("says who changed the page in Confluence and offers to publish anyway", () => {
+    const markup = html(
+      <ConfluenceConflictNotice
+        conflict={{
+          pageId: "5",
+          url: "https://wiki.acme.com/spaces/ABC/pages/5/F",
+          version: 7,
+          lastVersion: 6,
+          by: "Jane Doe",
+          when: "2026-10-21T15:04:05.000+0000",
+        }}
+      />,
+    );
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("changed in Confluence");
+    expect(markup).toContain("version 7 by Jane Doe on ");
+    expect(markup).toContain("wrote version 6");
+    expect(markup).toContain("Publishing will replace those changes");
+    expect(markup).toContain('href="https://wiki.acme.com/spaces/ABC/pages/5/F"');
+    // Without an author or a time, Confluence's answer is still a sentence.
+    const bare = html(
+      <ConfluenceConflictNotice conflict={{ pageId: "5", url: "https://w/5", version: 7, lastVersion: 6 }} />,
+    );
+    expect(bare).toContain("version 7 (the last publish wrote version 6)");
   });
 
   test("Publish waits for a page url on a wiki with a token, and says what is missing", () => {
