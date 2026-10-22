@@ -10,6 +10,7 @@ import { writeTextFile } from "../server/fsx";
 import { parseClaudeRecord, type ClaudeTokenBackend } from "../server/claudeToken";
 import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
 import { parseQtestRecords, type QtestTokenBackend } from "../server/qtestTokens";
+import { parseAhaRecords, type AhaTokenBackend } from "../server/ahaTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
 export function safeStorageAvailable(): boolean {
@@ -54,6 +55,11 @@ export function createConfluenceSafeStorageBackend(file: string): ConfluenceToke
 /** The qTest tokens on safeStorage. */
 export function createQtestSafeStorageBackend(file: string): QtestTokenBackend {
   return encryptedFile(file, parseQtestRecords, []);
+}
+
+/** The Aha! API keys on safeStorage. */
+export function createAhaSafeStorageBackend(file: string): AhaTokenBackend {
+  return encryptedFile(file, parseAhaRecords, []);
 }
 
 /** The Claude API proxy's token on safeStorage (src/server/claudeToken.ts). */
