@@ -28,6 +28,7 @@ import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/tel
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
+import { setAhaTokenBackend } from "../server/ahaTokens";
 import { setClaudeTokenBackend } from "../server/claudeToken";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
@@ -42,6 +43,7 @@ import {
   createClaudeSafeStorageBackend,
   createConfluenceSafeStorageBackend,
   createQtestSafeStorageBackend,
+  createAhaSafeStorageBackend,
   createSafeStorageBackend,
   safeStorageAvailable,
 } from "./secureToken";
@@ -383,6 +385,7 @@ if (!app.requestSingleInstanceLock()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
       setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
+      setAhaTokenBackend(createAhaSafeStorageBackend(join(userData, "aha-tokens.enc")));
       setClaudeTokenBackend(createClaudeSafeStorageBackend(join(userData, "claude-token.enc")));
     }
     // Data-directory picker (specs/ui/app-start.feature.md): replace the

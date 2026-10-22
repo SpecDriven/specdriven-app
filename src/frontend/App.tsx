@@ -39,6 +39,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ClipboardCheck,
+  Import,
   ChevronRight,
   Ellipsis,
   Pencil,
@@ -222,6 +223,8 @@ import { ClaudeSettings } from "./ClaudeSettings";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
 import { QtestPublishDialog } from "./QtestPublishDialog";
+import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
+import { AhaImportDialog } from "./AhaImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 
@@ -1462,6 +1465,11 @@ export function App() {
   const [qtestSites, setQtestSites] = useState<QtestSite[]>([]);
   const [qtestParentUrl, setQtestParentUrl] = useState("");
   const [qtestPublishOpen, setQtestPublishOpen] = useState(false);
+  /** Aha! (specs/external-links/aha-import.feature.md): the sites this
+      device holds an API key for, and the folder an open import lands in
+      (null for the top level) — or null while the dialog is closed. */
+  const [ahaSites, setAhaSites] = useState<AhaSite[]>([]);
+  const [ahaImportOpen, setAhaImportOpen] = useState<{ folder: string | null } | null>(null);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -2052,6 +2060,7 @@ export function App() {
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
   const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
   const qtestTrapRef = useFocusTrap(qtestPublishOpen);
+  const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
@@ -3952,6 +3961,17 @@ export function App() {
       live = false;
     };
   }, [hosted, settingsShown, qtestPublishOpen]);
+  // The Aha! sites this device holds an API key for, read the same way.
+  useEffect(() => {
+    if (hosted || (!settingsShown && ahaImportOpen === null)) return;
+    let live = true;
+    void fetchAhaTokens().then((sites) => {
+      if (live) setAhaSites(sites);
+    });
+    return () => {
+      live = false;
+    };
+  }, [hosted, settingsShown, ahaImportOpen]);
   useLayoutEffect(() => {
     if (!settingsShown) return;
     // A stored 0 means autosync is off; the field keeps a usable frequency so
@@ -5858,6 +5878,19 @@ export function App() {
                     icon: <NewFeatureIcon size={13} />,
                     onSelect: () => void createFeatureIn(child.path),
                   },
+                  // Import from Aha! (specs/external-links/aha-import
+                  // .feature.md): the feature lands in this folder. Not in
+                  // the demo or the hosted app, which keep no API key.
+                  ...(demo || hosted
+                    ? []
+                    : [
+                        {
+                          id: "import-aha",
+                          label: "Import from Aha! here…",
+                          icon: <Import size={13} />,
+                          onSelect: () => setAhaImportOpen({ folder: child.path }),
+                        },
+                      ]),
                   {
                     id: "new-folder",
                     label: "New folder here",
@@ -6029,6 +6062,7 @@ export function App() {
     if (tokenSignInOpen) return setTokenSignInOpen(false);
     if (confluencePublishOpen) return setConfluencePublishOpen(false);
     if (qtestPublishOpen) return setQtestPublishOpen(false);
+    if (ahaImportOpen !== null) return setAhaImportOpen(null);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -6221,6 +6255,15 @@ export function App() {
         if (onFeaturePage) void newScenario();
         else void createFeature();
       },
+    },
+    {
+      id: "import-aha",
+      keys: [],
+      label: selectedFolder ? `Import from Aha! into "${selectedFolder}"…` : "Import from Aha!…",
+      group: "Create",
+      when: () => !quiet && !demo && !hosted && editing === null,
+      palette: () => !quietBehindPalette && !demo && !hosted && editing === null,
+      run: () => setAhaImportOpen({ folder: selectedFolder }),
     },
     {
       id: "pomodoro",
@@ -7505,6 +7548,24 @@ export function App() {
                 <span className="switch-track" aria-hidden="true" />
               </span>
             </label>
+            {/* specs/external-links/aha-import.feature.md "An Aha! API key is
+                kept per site on this device": the key that lets a feature be
+                imported from Aha!, from the folder menu, the "+" button or
+                the palette. Not in the hosted app, which keeps no device
+                secrets. */}
+            {kind === "aha" && !demo && !hosted && (
+              <div className="settings-row">
+                <span className="settings-row-label">
+                  Import features from Aha!
+                  <span className="settings-row-hint">
+                    With a key for the site, "Import from Aha!…" turns an Aha! feature into a feature here: its
+                    name and description, its requirements as scenarios, each linking its Aha! record. Importing
+                    switches Aha! links on.
+                  </span>
+                  <AhaTokens sites={ahaSites} onChange={setAhaSites} />
+                </span>
+              </div>
+            )}
           </PageSection>
         );
       })}
@@ -8456,6 +8517,18 @@ export function App() {
                 <NewFeatureIcon size={15} />
               </button>
             </Tooltip>
+            {!demo && !hosted && (
+              <Tooltip label={selectedFolder ? `Import from Aha! into "${selectedFolder}"` : "Import from Aha!"}>
+                <button
+                  type="button"
+                  className="ibtn"
+                  aria-label="Import from Aha!"
+                  onClick={() => setAhaImportOpen({ folder: selectedFolder })}
+                >
+                  <Import size={15} />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip
               label={
                 sessionRunning
@@ -10499,6 +10572,36 @@ export function App() {
               .filter(Boolean)
               .join(", ");
             toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
+            if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {ahaImportOpen !== null && (
+        <AhaImportDialog
+          folder={ahaImportOpen.folder}
+          sites={ahaSites}
+          trapRef={ahaTrapRef}
+          onClose={() => setAhaImportOpen(null)}
+          onImported={(data) => {
+            const { folder } = ahaImportOpen;
+            setAhaImportOpen(null);
+            // The import switched Aha! links on server-side, so the chips show.
+            if (data.ahaLinks) setResourceLinksOn((prev) => ({ ...prev, aha: true }));
+            // Reveal the new feature: a selected folder may be collapsed.
+            if (folder) {
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                next.delete(folder);
+                return next;
+              });
+            }
+            void (async () => {
+              await loadFeatures();
+              await openFeature(data.fileName, { push: true });
+            })();
+            const open = { label: "Open in Aha!", run: () => window.open(data.url, "_blank", "noreferrer") };
+            const what = data.scenarios > 0 ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : "";
+            toast.success(`Imported “${data.title}” from Aha!${what}`, { action: open });
             if (data.warning) toast.error(data.warning);
           }}
         />
