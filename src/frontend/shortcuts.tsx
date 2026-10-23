@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import { X } from "lucide-react";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -239,7 +240,7 @@ export function ShortcutSheet({
     }
   };
   return (
-    <div className="dialog-backdrop" onClick={onClose} onKeyDown={onKeyDown}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)} onKeyDown={onKeyDown}>
       <div
         className="dialog shortcut-sheet"
         role="dialog"

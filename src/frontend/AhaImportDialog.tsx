@@ -1,4 +1,5 @@
 import { useState, type Ref } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import { parseAhaRecordUrl, parseAhaRef, sameAhaBase } from "../server/ahaUrl";
 import type { AhaSite } from "./AhaToken";
 import { PromptChoices } from "./ModalPrompts";
@@ -115,7 +116,7 @@ export function AhaImportDialog({
   };
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="dialog modal-dialog confluence-dialog aha-dialog"
         role="dialog"

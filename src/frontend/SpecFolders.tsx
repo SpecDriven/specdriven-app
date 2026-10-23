@@ -5,6 +5,7 @@
 // can be checked on its own (tests/specFolders.test.tsx).
 
 import { FolderOpen, Trash2 } from "lucide-react";
+import { backdropDismiss } from "./backdropDismiss";
 import type { KeyboardEvent, RefObject } from "react";
 import { repoDisplayName } from "./route";
 
@@ -128,7 +129,7 @@ export function SpecFoldersDialog({
   trapRef?: RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="dialog spec-folders-dialog"
         role="dialog"
