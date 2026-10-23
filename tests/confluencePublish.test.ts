@@ -252,8 +252,13 @@ const publish = (parentUrl: string, scope: string = "all", force?: boolean) =>
     ...(force === undefined ? {} : { force }),
   });
 const parentUrl = () => `${wiki}/spaces/ABC/pages/1/Specs`;
+/** The feature's Confluence record — page, version and parent — from its document. */
+const recorded = async (file = FILE) => (await readFeatureView(data, file))!.parsed.confluencePage;
 /** The page's version as the app last published it, from the feature's document. */
-const recordedVersion = async () => (await readFeatureView(data, FILE))!.parsed.confluencePage;
+const recordedVersion = async () => {
+  const page = await recorded();
+  return page && { id: page.id, version: page.version };
+};
 /** Someone edits the page in Confluence itself: a new version by them, with no message. */
 const EDITED_AT = "2026-10-21T15:04:05.000+0000";
 function editedInConfluence(id: string, by = "Jane Doe") {
@@ -323,9 +328,34 @@ describe("publishing a feature", () => {
     const line = `[Confluence:100](${pageUrl})`;
     expect(await readFeature(data, FILE)).toContain(`# Quote Policy\n\n${line}\n\nQuotes for potential customers.`);
     expect((res.body.parsed as { confluence: unknown }).confluence).toEqual({ program: "Confluence", ticket: "100", url: pageUrl });
-    expect((await readState(root)).confluenceParentUrl).toBe(parentUrl());
+    // The parent is remembered in the feature's document only.
+    expect((await recorded())?.parentUrl).toBe(parentUrl());
+    expect(await readFeature(data, FILE)).not.toContain("/pages/1/");
+    expect(await readState(root)).not.toHaveProperty("confluenceParentUrl");
     const state = await call("GET", "/api/state");
-    expect(state.body.confluenceParentUrl).toBe(parentUrl());
+    expect(state.body).not.toHaveProperty("confluenceParentUrl");
+  });
+
+  test("each feature remembers the parent it was last published under", async () => {
+    await saveToken();
+    const other = "specs/claims.feature.md";
+    await createFeature(data, "Claims", "# Claims\n\n## File a Claim @v1 [proposed]\n\n- **Given** a policy\n");
+    const otherParent = `${wiki}/pages/viewpage.action?pageId=2`;
+    await publish(parentUrl());
+    const res = await call("POST", `/api/features/${encodeURIComponent(other)}/confluence`, {
+      parentUrl: otherParent,
+      scope: "all",
+    });
+    expect(res.status).toBe(200);
+    expect((res.body.parsed as { confluencePage?: { parentUrl?: string } }).confluencePage?.parentUrl).toBe(otherParent);
+    expect((await recorded())?.parentUrl).toBe(parentUrl());
+    expect((await recorded(other))?.parentUrl).toBe(otherParent);
+    // Publishing under a new parent replaces the one remembered.
+    await publish(otherParent);
+    expect((await recorded())?.parentUrl).toBe(otherParent);
+    // Saving the file leaves the record alone.
+    await saveFeature(data, FILE, (await readFeature(data, FILE))!.replace("is provided", "is emailed"));
+    expect((await recorded())?.parentUrl).toBe(otherParent);
   });
 
   test("publishing again updates the page it links, as a new version", async () => {
@@ -409,7 +439,7 @@ describe("publishing a feature", () => {
     expect(xhtml).toContain('<h1><span style="color: rgb(222,53,11);">Negative</span></h1>');
     expect(xhtml).not.toContain('ac:name="status"');
     // The parent is still remembered on the way.
-    expect((await readState(root)).confluenceParentUrl).toBe(parentUrl());
+    expect((await recorded())?.parentUrl).toBe(parentUrl());
   });
 
   test("with Publish external links off the file has no line, but the feature keeps the link", async () => {

@@ -149,11 +149,15 @@ export const CONFLUENCE_PROGRAM = "Confluence";
  * The Confluence page a feature was published to, at the version the app
  * last wrote (specs/external-links/confluence-wiki.feature.md): `id` is the
  * page's, the same as the link's ticket, so a record left by an earlier page
- * never stands for the page linked now.
+ * never stands for the page linked now. `parentUrl` is the parent page url
+ * the feature was last published under, as the user pasted it, offered
+ * again by the publish dialog — each feature its own, as features may live
+ * under different parents; absent in records from before it was kept.
  */
 export interface ConfluencePage {
   id: string;
   version: number;
+  parentUrl?: string;
 }
 
 /** Whether a link is a feature's Confluence page rather than a ticket. */
