@@ -173,7 +173,6 @@ import {
   resolveQtestDraft,
 } from "./externallinks";
 import type { LinkDraft } from "./externallinks";
-import { ScenarioTable } from "./ScenarioTable";
 import {
   appPagePath,
   featurePath,
@@ -9243,14 +9242,17 @@ export function App() {
                   // Opens rendered, like the feature description; a new
                   // scenario's blank body opens ready to type into instead.
                   initialTab={editing.scenario.body.trim() ? "preview" : "write"}
+                  // specs/editor/table-editor.feature.md "variable creates a
+                  // column": a {var} in the body names an example column.
+                  tableVariables
                   onChange={(body) =>
                     setEditing({ ...editing, scenario: { ...editing.scenario, body } })
                   }
                 />
                 {/* The body's lower boundary is a grab strip like the
                     description editor's: drag it to give the body more room
-                    when the table, ticket and test links crowd it, double-
-                    click to restore the default. */}
+                    when the ticket and test links crowd it, double-click to
+                    restore the default. */}
                 <HeightResizer
                   label="Resize the body editor"
                   min={BODY_MIN}

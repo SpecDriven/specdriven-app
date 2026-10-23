@@ -14,6 +14,7 @@ import {
   ListOrdered,
   PencilRuler,
   Quote,
+  Table,
 } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import {
@@ -32,6 +33,10 @@ import type { Edit } from "./markdown";
 import { diagramName, isDiagram, isExcalidrawFile } from "./excalidraw/diagram";
 import type { ExcalidrawEdit } from "./excalidraw/ExcalidrawPane";
 import { markNodes, markText } from "./highlight";
+import { TableEditContext } from "./MarkdownTable";
+import { TableDialog } from "./TableDialog";
+import { extractVars, findTables, insertTable, replaceTableBlock, tableAt, withVarColumns } from "./mdtable";
+import type { TableBlock } from "./mdtable";
 import { ImageSizingContext } from "./MarkdownImage";
 import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
@@ -81,6 +86,13 @@ interface MarkdownEditorProps {
    * feature description opens rendered, and Write is a click away.
    */
   initialTab?: "write" | "preview";
+  /**
+   * The text's {var} variables each own a table column (specs/editor/
+   * table-editor.feature.md "variable creates a column"): the scenario body,
+   * where a variable names an example column. Elsewhere tables and text
+   * are unrelated.
+   */
+  tableVariables?: boolean;
 }
 
 type Tab = "write" | "vim" | "preview";
@@ -99,6 +111,7 @@ export function MarkdownEditor({
   placeholder,
   highlight,
   initialTab,
+  tableVariables = false,
 }: MarkdownEditorProps) {
   const vimOn = useVimMode();
   const fontScale = useFontScale();
@@ -137,6 +150,12 @@ export function MarkdownEditor({
   // whether it is over a diagram's link. Only followed while the switch is
   // on: nothing else in the toolbar cares where the caret is.
   const [caret, setCaret] = useState(0);
+  // The table dialog (specs/editor/table-editor.feature.md): opened on the
+  // table the caret is in, or on one in the preview, to rewrite it — or,
+  // with the caret in ordinary text, on a blank grid to insert at the caret.
+  const [table, setTable] = useState<{ mode: "new" } | { mode: "edit"; block: TableBlock } | null>(
+    null,
+  );
 
   // Entity-field completion (specs/editor/data-model-integration-in-editor
   // .feature.md): Tab at the end of an `@…` run opens a list of the code
@@ -441,6 +460,59 @@ export function MarkdownEditor({
     [editing, readOnly, value, caret],
   );
 
+  // The table the caret is in, for the toolbar's table button: edit it, or
+  // insert a new one anywhere else. Every table has a pipe, so a text
+  // without one is never parsed.
+  const tables = useMemo(
+    () => (editing && !readOnly && value.includes("|") ? findTables(value) : []),
+    [editing, readOnly, value],
+  );
+  const caretTable = useMemo(
+    () => tables.find((t) => caret >= t.start && caret <= t.end) ?? null,
+    [tables, caret],
+  );
+  // Each table in the editable preview carries an Edit button opening the
+  // same dialog on it; the index counts the preview's tables, which are the
+  // text's in order.
+  const tableEditing = useMemo(
+    () => ({
+      editTable: (index: number) => {
+        const block = findTables(latest.current.value)[index];
+        if (block) setTable({ mode: "edit", block });
+      },
+    }),
+    [],
+  );
+  // Apply from the dialog: a new table lands at the caret through apply(),
+  // like any toolbar edit; an edited one goes over the block it was opened
+  // on, found again in case the text moved under it. Each column a {var}
+  // owns is locked in the dialog, and the grid opens with one for each.
+  const tableVars = table && tableVariables ? extractVars(value) : [];
+  const closeTable = () => setTable(null);
+  const applyTable = (next: Parameters<typeof replaceTableBlock>[2]) => {
+    const open = table;
+    closeTable();
+    if (!open) return;
+    if (open.mode === "new") {
+      if (next) apply((t, s, e) => insertTable(t, s, e, next));
+      return;
+    }
+    const text = latest.current.value;
+    const block = tableAt(text, open.block.start) ?? open.block;
+    const r = replaceTableBlock(text, block, next);
+    latest.current.onChange(r.text);
+    if (editing) {
+      sel.current = { start: r.start, end: r.end };
+      setCaret(r.start);
+    }
+  };
+  const tableWasOpen = useRef(false);
+  useEffect(() => {
+    if (tableWasOpen.current && !table && editing) surface()?.focus();
+    tableWasOpen.current = table !== null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table]);
+
   const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
     if (tab === "write" && !readOnly) {
       if (popup) {
@@ -527,6 +599,13 @@ export function MarkdownEditor({
     { icon: <List size={size} />, title: "Bullet list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "- ", /^[-*+] /)) },
     { icon: <ListOrdered size={size} />, title: "Numbered list", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, (i) => `${i + 1}. `, /^\d+[.)] /)) },
     { icon: <Link size={size} />, title: "Link", keys: "⌘K", run: () => apply(insertLink) },
+    // One table button, doing whichever the caret asks for: with it inside a
+    // table, that table; anywhere else, a new one at the caret.
+    {
+      icon: <Table size={size} />,
+      title: caretTable ? "Edit table" : "Insert table",
+      run: () => setTable(caretTable ? { mode: "edit", block: caretTable } : { mode: "new" }),
+    },
     {
       icon: <Image size={size} />,
       title: excalidrawOn ? "Image or .excalidraw file (or paste an image)" : "Image (or paste one)",
@@ -637,6 +716,15 @@ export function MarkdownEditor({
             addPicked(Array.from(e.target.files ?? []));
             e.target.value = ""; // allow re-picking the same file
           }}
+        />
+      )}
+      {table && !readOnly && (
+        <TableDialog
+          mode={table.mode}
+          initial={withVarColumns(table.mode === "edit" ? table.block : null, tableVars)}
+          locked={tableVars}
+          onApply={applyTable}
+          onCancel={closeTable}
         />
       )}
       {diagram && !readOnly && (
@@ -751,7 +839,9 @@ export function MarkdownEditor({
           ) : (
             // A published (read-only) body keeps its images as they are.
             <ImageSizingContext.Provider value={readOnly ? null : sizing}>
-              {marks ? markNodes(preview, marks) : preview}
+              <TableEditContext.Provider value={readOnly ? null : tableEditing}>
+                {marks ? markNodes(preview, marks) : preview}
+              </TableEditContext.Provider>
             </ImageSizingContext.Provider>
           )}
         </div>
