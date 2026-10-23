@@ -508,13 +508,20 @@ export function setPullRequests(
  * published it (specs/external-links/confluence-wiki.feature.md "Changes
  * made in Confluence are not overwritten unnoticed"). A direct document
  * operation like setPullRequests: the version is never in the markdown, so
- * no save can express it, and reconcile never touches it. Set whole — one
+ * no save can express it, and reconcile never touches it. The parent page
+ * url published under rides along, so the dialog offers each feature its
+ * own parent next time. Set whole — one
  * value, so two peers publishing at once end with one of theirs, not a mix.
  */
 export function setConfluencePage(doc: A.Doc<FeatureDoc>, page: ConfluencePage): A.Doc<FeatureDoc> {
-  if (doc.confluencePage?.id === page.id && doc.confluencePage.version === page.version) return doc;
+  const current = doc.confluencePage;
+  if (current?.id === page.id && current.version === page.version && current.parentUrl === page.parentUrl) return doc;
   return A.change(doc, (d) => {
-    d.confluencePage = { id: page.id, version: page.version };
+    d.confluencePage = {
+      id: page.id,
+      version: page.version,
+      ...(page.parentUrl !== undefined ? { parentUrl: page.parentUrl } : {}),
+    };
   });
 }
 

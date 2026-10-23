@@ -33,7 +33,6 @@ import {
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
   DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
-  normalizeConfluenceParentUrl,
   normalizeQtestParentUrl,
   normalizeClaudeAuth,
   normalizeClaudeProxyUrl,
@@ -509,9 +508,6 @@ async function stateFields(state: SpecDrivenState) {
     // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
     // offered only once switched on.
     qtestLinks: normalizeQtestLinks(state.qtestLinks),
-    // The publish dialog's last parent page
-    // (specs/external-links/confluence-wiki.feature.md).
-    confluenceParentUrl: normalizeConfluenceParentUrl(state.confluenceParentUrl),
     // The qTest dialog's last parent module
     // (specs/external-links/qtest-test-cases.feature.md).
     qtestParentUrl: normalizeQtestParentUrl(state.qtestParentUrl),
@@ -1543,8 +1539,9 @@ const postClaudeLogout: Handler = async () => {
 // Publish a feature as a Confluence page under a parent page: created the
 // first time, a new version after that. The page is then linked from the
 // feature — a `[Confluence:<id>](url)` line under its heading, saved the way
-// the editor saves the qTest link — and the parent remembered for next time.
-// The page's version is recorded in the feature's document, so a page
+// the editor saves the qTest link. The page's version, and the parent it
+// went under, are recorded in the feature's document — each feature its
+// own parent, offered again next time, never in the markdown — so a page
 // changed in Confluence since (its version past the record) is not replaced
 // unless `force` says the user chose to: the conflict is answered as a 409
 // the dialog turns into a question.
@@ -1632,16 +1629,13 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   } catch (e) {
     warnings.push(`The page's images were not attached: ${(e as Error).message}`);
   }
-  if (state.confluenceParentUrl !== parentUrl) {
-    state.confluenceParentUrl = parentUrl;
-    await writeState(state, getAppRoot());
-  }
   const result = { id: page.id, url: page.url, created: page.created, version: page.version, title, parentUrl };
   const link = { program: CONFLUENCE_PROGRAM, ticket: page.id, url: page.url };
   const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
   // The page's version now, kept in the document for the next publish's
-  // check; the link line is saved first, as before, when it changed.
-  const recorded = () => saveConfluencePage(dir, params.file!, { id: page.id, version: page.version });
+  // check, with the parent for the next dialog; the link line is saved
+  // first, as before, when it changed.
+  const recorded = () => saveConfluencePage(dir, params.file!, { id: page.id, version: page.version, parentUrl });
   try {
     if (linked && linked.ticket === link.ticket && linked.url === link.url) {
       return json({ ...(await recorded()), ...result, ...warned(), message: "page link unchanged" });

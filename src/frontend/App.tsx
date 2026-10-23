@@ -1473,7 +1473,6 @@ export function App() {
       this device holds a token for, the last parent page published under,
       and whether the publish dialog is open. */
   const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
-  const [confluenceParentUrl, setConfluenceParentUrl] = useState("");
   const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
   /** qTest (specs/external-links/qtest-test-cases.feature.md "Create qTest
       test cases from a feature"): the sites this device holds a token for,
@@ -1813,7 +1812,6 @@ export function App() {
         }
         setResourceLinksOn(resourceLinkSwitches(state));
         setQtestLinks(state.qtestLinks === true);
-        setConfluenceParentUrl(typeof state.confluenceParentUrl === "string" ? state.confluenceParentUrl : "");
         setQtestParentUrl(typeof state.qtestParentUrl === "string" ? state.qtestParentUrl : "");
         if (typeof state.codeGen === "boolean") {
           setCodeGen(state.codeGen);
@@ -4194,7 +4192,6 @@ export function App() {
     }
     setResourceLinksOn(resourceLinkSwitches(data));
     setQtestLinks(data.qtestLinks === true);
-    setConfluenceParentUrl(typeof data.confluenceParentUrl === "string" ? data.confluenceParentUrl : "");
     setQtestParentUrl(typeof data.qtestParentUrl === "string" ? data.qtestParentUrl : "");
     // Switched off, a selection left over from before must not linger as a
     // session waiting to be started.
@@ -10691,7 +10688,7 @@ export function App() {
           file={selected}
           featureName={feature.name}
           linkedUrl={feature.confluence?.url}
-          initialParentUrl={confluenceParentUrl}
+          initialParentUrl={feature.confluencePage?.parentUrl ?? ""}
           wikis={confluenceWikis}
           trapRef={confluenceTrapRef}
           onClose={() => setConfluencePublishOpen(false)}
@@ -10703,7 +10700,6 @@ export function App() {
             setFeature(featureFromResponse(data, selected));
             setDirty(false);
             markSaved();
-            setConfluenceParentUrl(data.parentUrl);
             setConfluencePublishOpen(false);
             const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
             toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
