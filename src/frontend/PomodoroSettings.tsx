@@ -12,6 +12,7 @@
 // DOM (tests/pomodoroSettings.test.tsx).
 
 import { useState } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import { Play } from "lucide-react";
 import { clampMinutes } from "./pomodoro";
 import type { PomodoroPrefs } from "./pomodoro";
@@ -180,7 +181,7 @@ export function PomodoroSettingsDialog({ prefs, running, onSave, onClose }: Pomo
   return (
     <div
       className="dialog-backdrop"
-      onClick={onClose}
+      {...backdropDismiss(onClose)}
       onKeyDown={(e) => {
         // ESC closes only this dialog (specs/ui/ui.feature.md "Dialogs").
         if (e.key === "Escape") {

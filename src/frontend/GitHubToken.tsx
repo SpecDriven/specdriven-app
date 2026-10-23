@@ -7,6 +7,7 @@
 // so nothing has to be installed.
 
 import { useState, type Ref } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 
 export const GITHUB_HOST = "github.com";
 
@@ -260,7 +261,7 @@ export function TokenSignInDialog({
 }) {
   const signedIn = Boolean(auth?.signedIn);
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="dialog"
         role="dialog"
