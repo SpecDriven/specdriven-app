@@ -239,6 +239,7 @@ import {
 
 const reloadLog = getLogger("reload");
 const netsyncLog = getLogger("netsync");
+const confluenceLog = getLogger("confluence");
 
 /** One sync tick (pull + push saved), logged; a failed tick never throws. */
 async function syncTick(run: () => Promise<string>): Promise<void> {
@@ -1610,7 +1611,10 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
     });
   } catch (e) {
     if (e instanceof ConfluenceConflict) return json({ error: e.message, conflict: e.conflict }, 409);
-    if (e instanceof ConfluenceError) return json({ error: e.message }, e.status);
+    // The client already logged the call that failed; the details go to the
+    // dialog's detail box.
+    if (e instanceof ConfluenceError) return json({ error: e.message, ...(e.details ? { details: e.details } : {}) }, e.status);
+    confluenceLog.error("Publishing to Confluence failed", { "feature.file": params.file!, ...errorAttributes(e) });
     return json({ error: (e as Error).message }, 502);
   }
   // The page is published whether or not its images can be attached: a

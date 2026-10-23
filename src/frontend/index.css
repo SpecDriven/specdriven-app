@@ -311,6 +311,78 @@ body {
   margin: 0;
 }
 
+/* A failure with details reads as the error line, and opens them on click. */
+button.error-link {
+  background: none;
+  border: none;
+  padding: 0;
+  justify-self: start;
+  align-self: flex-start;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+button.error-link:hover {
+  text-decoration-style: solid;
+}
+
+.confluence-failure {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--danger-fg) 40%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger-fg) 8%, transparent);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.confluence-failure dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.2rem 0.875rem;
+  margin: 0;
+}
+
+.confluence-failure dt {
+  color: var(--text-3);
+}
+
+.confluence-failure dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.confluence-failure code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.confluence-failure-label {
+  margin: 0;
+  color: var(--text-3);
+}
+
+.confluence-failure-body {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.confluence-failure button.link {
+  justify-self: start;
+}
+
 /* The header chip linking the published page reads like the other chips. */
 a.chip {
   text-decoration: none;

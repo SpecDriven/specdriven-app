@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import { createFeature, readFeature, readFeatureView, saveConfluencePage, saveFeature } from "../src/server/features";
 import { readState, writeState } from "../src/server/state";
+import { queryLogs } from "../src/server/logs";
+import { BODY_EXCERPT_CHARS, bodyExcerpt } from "../src/server/confluence";
 import { setProjectionOptions, projectionOptions } from "../src/server/automerge/project";
 import {
   confluenceToken,
@@ -667,5 +669,96 @@ describe("a page changed in Confluence since the last publish", () => {
     expect(res.body.conflict).toBeUndefined();
     expect(pages.get("100")!.version).toBe(2);
     expect(await recordedVersion()).toEqual({ id: "100", version: 1 });
+  });
+});
+
+// A Confluence failure is never only a line in the dialog: the call that
+// failed — the request, Confluence's status and its answer — goes back with
+// the error for the dialog's detail box, and into the app's log under
+// "confluence", where the Observability page shows it.
+describe("a failed Confluence call", () => {
+  const ERROR_PAGE = `<!DOCTYPE html><html><head><title>Oops</title><style>body{color:red}</style></head>
+<body><h1>System Error</h1><p>java.lang.NullPointerException &amp; friends</p></body></html>`;
+
+  /** Confluence answers creating a page with its HTML error page. */
+  function failingCreate(): string {
+    const inner = server;
+    server = Bun.serve({
+      port: 0,
+      fetch: (req) =>
+        req.method === "POST" && new URL(req.url).pathname === "/rest/api/content"
+          ? new Response(ERROR_PAGE, { status: 500, headers: { "content-type": "text/html;charset=UTF-8" } })
+          : inner.fetch(req),
+    });
+    const stop = server.stop.bind(server);
+    server.stop = (force?: boolean) => {
+      inner.stop(true);
+      return stop(force);
+    };
+    return `http://127.0.0.1:${server.port}`;
+  }
+
+  test("answers the request, the status and Confluence's answer as details", async () => {
+    const base = failingCreate();
+    await saveToken(GOOD, `${base}/spaces/ABC/pages/1/Specs`);
+    const res = await publish(`${base}/spaces/ABC/pages/1/Specs`);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("Confluence answered HTTP 500");
+    const details = res.body.details as Record<string, unknown>;
+    expect(details).toMatchObject({
+      method: "POST",
+      url: `${base}/rest/api/content`,
+      status: 500,
+      contentType: "text/html;charset=UTF-8",
+    });
+    // The error page reads as text: no markup, no stylesheet, entities decoded.
+    expect(details.body).toBe("Oops\nSystem Error java.lang.NullPointerException & friends");
+    expect(Number.isNaN(Date.parse(details.time as string))).toBe(false);
+    expect(JSON.stringify(res.body)).not.toContain(GOOD);
+  });
+
+  test("is recorded in the log under confluence, with what Confluence answered", async () => {
+    const base = failingCreate();
+    await saveToken(GOOD, `${base}/spaces/ABC/pages/1/Specs`);
+    await publish(`${base}/spaces/ABC/pages/1/Specs`);
+    const { entries } = await queryLogs({ components: ["confluence"], q: base });
+    const entry = entries.find((e) => e.message === "Confluence answered HTTP 500");
+    expect(entry).toBeDefined();
+    expect(entry!.level).toBe("error");
+    expect(entry!.attributes).toMatchObject({
+      "http.request.method": "POST",
+      "url.full": `${base}/rest/api/content`,
+      "http.response.status_code": "500",
+    });
+    expect(entry!.attributes["http.response.body"]).toContain("NullPointerException");
+    expect(JSON.stringify(entries)).not.toContain(GOOD);
+  });
+
+  test("a refusal Confluence explains is logged as a warning", async () => {
+    await saveToken();
+    const res = await publish(`${wiki}/spaces/ABC/pages/404/Nowhere`);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain("no page 404");
+    const { entries } = await queryLogs({ components: ["confluence"], q: `${wiki}/rest/api/content/404` });
+    expect(entries[0]?.level).toBe("warn");
+  });
+
+  test("an unreachable wiki is logged with the network error, and no status", async () => {
+    const base = failingCreate();
+    await saveToken(GOOD, `${base}/spaces/ABC/pages/1/Specs`);
+    server.stop(true);
+    const res = await publish(`${base}/spaces/ABC/pages/1/Specs`);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain(`Could not reach Confluence at ${base}`);
+    const details = res.body.details as Record<string, unknown>;
+    expect(details.status).toBeUndefined();
+    expect(details.cause).toBeTruthy();
+    // Restart something for afterEach to stop.
+    wiki = stubConfluence();
+  });
+
+  test("a long answer is cut to a readable length", () => {
+    const cut = bodyExcerpt("x".repeat(BODY_EXCERPT_CHARS + 10), "application/json");
+    expect(cut).toBe(`${"x".repeat(BODY_EXCERPT_CHARS)}… (10 more characters)`);
   });
 });
