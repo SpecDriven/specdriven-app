@@ -9266,86 +9266,11 @@ export function App() {
                   onResizing={setResizingBody}
                 />
               </div>
-              {!editingPublished && (
-                // specs/scenario-table.feature.md: structured view over the
-                // markdown table stored in the body.
-                <div className="table-field">
-                  <span className="field-label">Scenario table</span>
-                  <ScenarioTable
-                    body={editing.scenario.body}
-                    onChange={(body) =>
-                      setEditing({ ...editing, scenario: { ...editing.scenario, body } })
-                    }
-                  />
-                </div>
-              )}
               {/* specs/traceability.feature.md: GitHub links to the automated
                   tests covering this scenario — added, corrected in place (✎)
                   and removed (✕). Editable even for a published scenario: the
                   links track the tests, not the immutable spec. Hidden
                   entirely when the Settings toggle is off. */}
-              {/* specs/external-links/project-management-jira-linear-etc.
-                  feature.md "Add link at spec level": the ticket tracking this
-                  scenario. Editable on a published scenario too — like the test
-                  links, it is bookkeeping around the spec, not the spec. */}
-              {projectManagement && (
-                <div className="link-field">
-                  <span className="field-label">Ticket link</span>
-                  <ExternalLinkField
-                    draft={linkDraft}
-                    onChange={changeLinkDraft}
-                    error={linkError}
-                    tool={projectManagementTool}
-                  />
-                </div>
-              )}
-              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
-                  test case covering this scenario. Editable on a published
-                  scenario too, like the ticket link. */}
-              {qtestLinks && (
-                <div className="link-field">
-                  <span className="field-label">qTest test case</span>
-                  <QtestLinkField draft={qtestDraft} onChange={changeQtestDraft} error={qtestError} />
-                </div>
-              )}
-              {/* specs/app/feature-flags.feature.md: the flags gating this
-                  scenario, saved with it. Editable on a published scenario
-                  too — like the ticket link, bookkeeping around the spec. */}
-              {featureFlags && (
-                <div className="feature-flags-field-wrap">
-                  <span className="field-label">Feature flags</span>
-                  <FeatureFlagsField
-                    flags={editing.scenario.flags ?? []}
-                    onChange={(flags) => {
-                      const { flags: _previous, ...rest } = editing.scenario;
-                      setEditing({ ...editing, scenario: flags.length > 0 ? { ...rest, flags } : rest });
-                    }}
-                  />
-                </div>
-              )}
-              {/* specs/app/custom-attributes.feature.md: the scenario's custom
-                  attributes, saved with it — editable on a published
-                  scenario too, like the flags. Shown once the data repo
-                  defines attributes for scenarios, or while it has some. */}
-              {(definitionsFor(attributeDefs, "scenario").length > 0 ||
-                (editing.scenario.attributes?.length ?? 0) > 0) && (
-                <div className="attributes-field-wrap">
-                  <span className="field-label">Attributes</span>
-                  <AttributesField
-                    attributes={editing.scenario.attributes ?? []}
-                    where="scenario"
-                    defs={attributeDefs}
-                    known={knownAttributes}
-                    onChange={(attributes) => {
-                      const { attributes: _previous, ...rest } = editing.scenario;
-                      setEditing({
-                        ...editing,
-                        scenario: attributes.length > 0 ? { ...rest, attributes } : rest,
-                      });
-                    }}
-                  />
-                </div>
-              )}
               {showTestLinks && (
                 <div className="tests-field">
                   <span className="field-label">Automated tests</span>
@@ -9486,6 +9411,81 @@ export function App() {
                   </form>
                   {testNameHint && <p className="test-name-hint">{testNameHint}</p>}
                   {testsError && <p className="error">{testsError}</p>}
+                </div>
+              )}
+              {!editingPublished && (
+                // specs/scenario-table.feature.md: structured view over the
+                // markdown table stored in the body.
+                <div className="table-field">
+                  <span className="field-label">Scenario table</span>
+                  <ScenarioTable
+                    body={editing.scenario.body}
+                    onChange={(body) =>
+                      setEditing({ ...editing, scenario: { ...editing.scenario, body } })
+                    }
+                  />
+                </div>
+              )}
+              {/* specs/external-links/project-management-jira-linear-etc.
+                  feature.md "Add link at spec level": the ticket tracking this
+                  scenario. Editable on a published scenario too — like the test
+                  links, it is bookkeeping around the spec, not the spec. */}
+              {projectManagement && (
+                <div className="link-field">
+                  <span className="field-label">Ticket link</span>
+                  <ExternalLinkField
+                    draft={linkDraft}
+                    onChange={changeLinkDraft}
+                    error={linkError}
+                    tool={projectManagementTool}
+                  />
+                </div>
+              )}
+              {/* specs/external-links/qtest-test-cases.feature.md: the qTest
+                  test case covering this scenario. Editable on a published
+                  scenario too, like the ticket link. */}
+              {qtestLinks && (
+                <div className="link-field">
+                  <span className="field-label">qTest test case</span>
+                  <QtestLinkField draft={qtestDraft} onChange={changeQtestDraft} error={qtestError} />
+                </div>
+              )}
+              {/* specs/app/feature-flags.feature.md: the flags gating this
+                  scenario, saved with it. Editable on a published scenario
+                  too — like the ticket link, bookkeeping around the spec. */}
+              {featureFlags && (
+                <div className="feature-flags-field-wrap">
+                  <span className="field-label">Feature flags</span>
+                  <FeatureFlagsField
+                    flags={editing.scenario.flags ?? []}
+                    onChange={(flags) => {
+                      const { flags: _previous, ...rest } = editing.scenario;
+                      setEditing({ ...editing, scenario: flags.length > 0 ? { ...rest, flags } : rest });
+                    }}
+                  />
+                </div>
+              )}
+              {/* specs/app/custom-attributes.feature.md: the scenario's custom
+                  attributes, saved with it — editable on a published
+                  scenario too, like the flags. Shown once the data repo
+                  defines attributes for scenarios, or while it has some. */}
+              {(definitionsFor(attributeDefs, "scenario").length > 0 ||
+                (editing.scenario.attributes?.length ?? 0) > 0) && (
+                <div className="attributes-field-wrap">
+                  <span className="field-label">Attributes</span>
+                  <AttributesField
+                    attributes={editing.scenario.attributes ?? []}
+                    where="scenario"
+                    defs={attributeDefs}
+                    known={knownAttributes}
+                    onChange={(attributes) => {
+                      const { attributes: _previous, ...rest } = editing.scenario;
+                      setEditing({
+                        ...editing,
+                        scenario: attributes.length > 0 ? { ...rest, attributes } : rest,
+                      });
+                    }}
+                  />
                 </div>
               )}
               {/* specs/external-links/related-pull-requests.feature.md: the
