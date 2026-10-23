@@ -2498,6 +2498,51 @@ button.link:disabled {
   margin-left: -1.2em;
 }
 
+/* A table in an editable preview (specs/editor/table-editor.feature.md)
+   reopens in the dialog from a button in its top-right corner, on hover. */
+.md-table {
+  position: relative;
+  display: inline-block;
+  max-width: calc(100% - 0.8rem);
+  margin-right: 0.8rem;
+}
+
+/* Straddling the corner, so it covers no cell of a narrow table. */
+.md-table-edit {
+  position: absolute;
+  top: -0.55rem;
+  right: -0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  color: var(--text-2);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 120ms ease, color 120ms ease;
+}
+
+.md-table:hover .md-table-edit,
+.md-table-edit:focus-visible {
+  opacity: 1;
+}
+
+.md-table-edit:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.md-table-edit:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
 .md-preview table {
   border-collapse: collapse;
   margin: 0.5em 0;
@@ -2990,18 +3035,15 @@ aside > .user-corner {
   }
 }
 
-/* Scenario table widget (specs/scenario-table.spec.md): a grid over the
-   markdown table in the body. Sits below the flexing body editor. */
-.dialog .table-field,
-.scenario-pane .table-field {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
+/* The table dialog (specs/editor/table-editor.feature.md): a grid over one
+   markdown table, wide enough for an examples table of several columns. */
+.dialog.table-dialog {
+  width: min(80rem, 92vw);
 }
 
-.scenario-table {
-  max-height: 13rem;
+.table-grid {
+  max-height: 55vh;
+  max-height: 55dvh;
   overflow: auto;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -3009,85 +3051,130 @@ aside > .user-corner {
   background: var(--surface-2);
 }
 
-.scenario-table table {
+.table-grid table {
   border-collapse: collapse;
-  width: 100%;
+  min-width: 100%;
 }
 
-.scenario-table th,
-.scenario-table td {
+.table-grid th,
+.table-grid td {
   border: 1px solid var(--border);
   padding: 0;
+  vertical-align: top;
 }
 
-.scenario-table th {
+.table-grid th {
   background: var(--surface-1);
+  text-align: left;
 }
 
-.scenario-table th .cell {
+.table-grid th .cell {
   display: flex;
   align-items: center;
 }
 
-.dialog .scenario-table input,
-.scenario-pane .scenario-table input {
+.dialog .table-grid input {
   width: 100%;
-  min-width: 4rem;
+  min-width: 6rem;
   border: none;
   border-radius: 0;
   background: transparent;
   padding: 0.32rem 0.5rem;
   font-size: 0.84rem;
+  text-align: inherit;
 }
 
-.scenario-table th input {
+.table-grid th input {
   font-weight: 550;
 }
 
-/* Var-backed columns are owned by the {var} in the body. */
-.scenario-table th input:read-only {
+/* Var-backed columns are owned by the {var} in the text. */
+.table-grid th input:read-only {
   color: var(--accent-strong);
   font-family: var(--font-mono);
   font-weight: 500;
 }
 
-.dialog .scenario-table input:focus,
-.scenario-pane .scenario-table input:focus {
+.dialog .table-grid input:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   box-shadow: none;
   border: none;
 }
 
-.scenario-table .edge {
+/* Per-column alignment, move and remove buttons under the name; shown on
+   the column's hover or when one of them has focus. */
+.table-grid .column-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.1rem;
+  padding: 0 0.2rem 0.15rem;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.table-grid th:hover .column-tools,
+.table-grid .column-tools:focus-within {
+  opacity: 1;
+}
+
+.table-grid .edge {
   border: none;
   background: none;
   width: 1.8rem;
   text-align: center;
+  white-space: nowrap;
 }
 
-.scenario-table button.ghost {
+.table-grid .row-tools {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.table-grid tr:hover .row-tools,
+.table-grid .row-tools:focus-within {
+  opacity: 1;
+}
+
+.table-grid button.ghost {
   border: none;
   background: none;
   color: var(--text-3);
   cursor: pointer;
-  padding: 0.15rem 0.4rem;
+  padding: 0.15rem 0.3rem;
   font-size: 0.75rem;
   border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
 }
 
-.scenario-table button.ghost:hover:not(:disabled) {
+.table-grid button.ghost.on {
+  color: var(--accent-strong);
+}
+
+.table-grid button.ghost:hover:not(:disabled) {
+  color: var(--accent-strong);
+  background: var(--surface-1);
+}
+
+.table-grid button.ghost.danger:hover:not(:disabled) {
   color: var(--danger-fg);
   background: var(--danger-bg);
 }
 
-.scenario-table button.ghost:disabled {
+.table-grid button.ghost:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
 
-.scenario-table .table-actions {
+.table-grid .table-actions {
   margin-top: 0.3rem;
+}
+
+.table-dialog .table-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-3);
 }
 
 button.table-add {
@@ -3099,6 +3186,7 @@ button.table-add {
   font-size: 0.75rem;
   cursor: pointer;
   align-self: flex-start;
+  white-space: nowrap;
   transition: color 120ms ease, border-color 120ms ease;
 }
 
