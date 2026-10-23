@@ -206,7 +206,8 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   const confluence = plainLink(doc.confluence);
   if (confluence) feature.confluence = confluence;
   if (doc.confluencePage) {
-    feature.confluencePage = { id: doc.confluencePage.id, version: doc.confluencePage.version };
+    const { id, version, parentUrl } = doc.confluencePage;
+    feature.confluencePage = { id, version, ...(typeof parentUrl === "string" ? { parentUrl } : {}) };
   }
   const prs = plainPrs(doc.prs);
   if (prs) feature.prs = prs;
