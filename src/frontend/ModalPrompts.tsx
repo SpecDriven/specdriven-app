@@ -4,6 +4,7 @@
 // "Dialogs"), and the native boxes never matched the design system anyway.
 
 import { useEffect, useRef, useState } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import type { ReactNode } from "react";
 import { useFocusTrap } from "./useFocusTrap";
 
@@ -238,7 +239,7 @@ function ModalDialog({
   return (
     <div
       className="dialog-backdrop"
-      onClick={cancel}
+      {...backdropDismiss(cancel)}
       onKeyDown={(e) => {
         // ESC closes only this dialog — never the one it may be stacked on
         // (specs/ui/ui.feature.md "Dialogs").
@@ -358,7 +359,7 @@ function PickDialog({
   return (
     <div
       className="dialog-backdrop"
-      onClick={cancel}
+      {...backdropDismiss(cancel)}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();

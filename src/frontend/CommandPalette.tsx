@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import { Search } from "lucide-react";
 import { Keys } from "./shortcuts";
 import { useFocusTrap } from "./useFocusTrap";
@@ -226,7 +227,7 @@ export function CommandPalette({
   });
 
   return (
-    <div className="dialog-backdrop palette-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop palette-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="palette"
         role="dialog"
