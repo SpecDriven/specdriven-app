@@ -8,15 +8,91 @@
 // else by its title, which Confluence keeps unique within a space.
 
 import type { ParentPageRef } from "./confluenceUrl";
+import { getLogger } from "./telemetry";
+
+const log = getLogger("confluence");
+
+/**
+ * What went wrong on the wire, for the dialog's detail box and the log: the
+ * request (never its token), and Confluence's answer when there was one.
+ */
+export interface ConfluenceFailureDetails {
+  method: string;
+  url: string;
+  /** The HTTP status Confluence answered; absent when it could not be reached. */
+  status?: number;
+  statusText?: string;
+  contentType?: string;
+  /** Where a redirect pointed. */
+  location?: string;
+  /** Confluence's response body, as text and cut to a readable length. */
+  body?: string;
+  /** Why the request never got an answer (a network error). */
+  cause?: string;
+  /** When the call failed, ISO 8601. */
+  time: string;
+}
 
 /** A failed Confluence call, with the HTTP status so the route can pass it on. */
 export class ConfluenceError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly details?: ConfluenceFailureDetails,
   ) {
     super(message);
   }
+}
+
+/** Response bodies are kept to this many characters in details and the log. */
+export const BODY_EXCERPT_CHARS = 4000;
+
+/**
+ * A response body as text a person can read: an HTML error page loses its
+ * markup, whitespace collapses, and the rest is cut to BODY_EXCERPT_CHARS.
+ */
+export function bodyExcerpt(text: string, contentType = ""): string {
+  let out = text;
+  if (/html/i.test(contentType) || /^\s*<(!doctype|html)/i.test(text)) {
+    out = text
+      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\s*\n\s*/g, "\n")
+      .trim();
+  } else {
+    out = text.trim();
+  }
+  return out.length > BODY_EXCERPT_CHARS ? `${out.slice(0, BODY_EXCERPT_CHARS)}… (${out.length - BODY_EXCERPT_CHARS} more characters)` : out;
+}
+
+/**
+ * Record a failed call in the app's log (the Observability page) with
+ * everything the dialog's detail box shows: server errors and unreachable
+ * wikis as errors, refusals Confluence explains (401, 404, 409…) as warnings.
+ */
+function logFailure(error: ConfluenceError): ConfluenceError {
+  const d = error.details;
+  const attributes = d
+    ? {
+        "http.request.method": d.method,
+        "url.full": d.url,
+        ...(d.status !== undefined ? { "http.response.status_code": d.status } : {}),
+        ...(d.contentType ? { "http.response.content_type": d.contentType } : {}),
+        ...(d.location ? { "http.response.location": d.location } : {}),
+        ...(d.body ? { "http.response.body": d.body } : {}),
+        ...(d.cause ? { "error.cause": d.cause } : {}),
+      }
+    : undefined;
+  const serious = d?.status === undefined || d.status >= 500;
+  log[serious ? "error" : "warn"](error.message, attributes);
+  return error;
 }
 
 interface Init {
@@ -36,61 +112,106 @@ export async function confluenceRequest(base: string, path: string, token: strin
   if (init.json !== undefined) headers["Content-Type"] = "application/json";
   // Confluence refuses a multipart upload without this (XSRF protection).
   if (init.form !== undefined) headers["X-Atlassian-Token"] = "nocheck";
+  const method = init.method ?? "GET";
+  const url = `${base}${path}`;
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, {
-      method: init.method ?? "GET",
+    res = await fetch(url, {
+      method,
       headers,
       body: init.json !== undefined ? JSON.stringify(init.json) : init.form,
       redirect: "manual",
     });
   } catch (e) {
-    throw new ConfluenceError(`Could not reach Confluence at ${base}: ${(e as Error).message}`, 502);
+    const cause = (e as Error).message;
+    throw logFailure(
+      new ConfluenceError(`Could not reach Confluence at ${base}: ${cause}`, 502, {
+        method,
+        url,
+        cause,
+        time: new Date().toISOString(),
+      }),
+    );
   }
   if (res.status >= 300 && res.status < 400) {
     // A redirect from the REST API is a sign-in page or SSO, never data.
-    throw new ConfluenceError(
-      "Confluence redirected the request — check the wiki url, and that the token is a personal access token",
-      401,
+    throw logFailure(
+      new ConfluenceError(
+        "Confluence redirected the request — check the wiki url, and that the token is a personal access token",
+        401,
+        { ...(await answered(method, url, res)), location: res.headers.get("location") ?? undefined },
+      ),
     );
   }
-  if (!res.ok) throw await describeFailure(res);
+  if (!res.ok) throw logFailure(await describeFailure(res, await answered(method, url, res)));
   return res;
+}
+
+/** The details of a response Confluence answered, its body read as text. */
+async function answered(method: string, url: string, res: Response): Promise<ConfluenceFailureDetails> {
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text().catch(() => "");
+  return {
+    method,
+    url,
+    status: res.status,
+    ...(res.statusText ? { statusText: res.statusText } : {}),
+    ...(contentType ? { contentType } : {}),
+    ...(text ? { body: bodyExcerpt(text, contentType) } : {}),
+    time: new Date().toISOString(),
+  };
 }
 
 async function confluence<T>(base: string, path: string, token: string, init: Init = {}): Promise<T> {
   const res = await confluenceRequest(base, path, token, init);
+  const text = await res.text();
   try {
-    return (await res.json()) as T;
+    return JSON.parse(text) as T;
   } catch {
-    throw new ConfluenceError("Confluence answered with something that is not JSON — check the wiki url", 502);
+    const contentType = res.headers.get("content-type") ?? "";
+    throw logFailure(
+      new ConfluenceError("Confluence answered with something that is not JSON — check the wiki url", 502, {
+        method: init.method ?? "GET",
+        url: `${base}${path}`,
+        status: res.status,
+        ...(contentType ? { contentType } : {}),
+        ...(text ? { body: bodyExcerpt(text, contentType) } : {}),
+        time: new Date().toISOString(),
+      }),
+    );
   }
 }
 
-/** A Confluence failure as one sentence the dialog can show, with the status kept. */
-async function describeFailure(res: Response): Promise<ConfluenceError> {
-  const detail = ((await res.json().catch(() => null)) as { message?: string } | null)?.message;
+/** A Confluence failure as one sentence the dialog can show, with the status and details kept. */
+function describeFailure(res: Response, details: ConfluenceFailureDetails): ConfluenceError {
+  const err = (message: string, status: number) => new ConfluenceError(message, status, details);
+  let detail: string | undefined;
+  try {
+    detail = (JSON.parse(details.body ?? "") as { message?: string } | null)?.message;
+  } catch {
+    // Not JSON (an HTML error page, say): the detail box shows the body.
+  }
   if (res.status === 401) {
-    return new ConfluenceError("Confluence rejected the token; save a new one in Settings → Confluence.", 401);
+    return err("Confluence rejected the token; save a new one in Settings → Confluence.", 401);
   }
   if (res.status === 403) {
-    return new ConfluenceError(
+    return err(
       `Confluence refused the request — the token cannot write to this space${detail ? `: ${detail}` : ""}`,
       403,
     );
   }
   if (res.status === 404) {
-    return new ConfluenceError("Confluence reports no such page, or the token cannot see it.", 404);
+    return err("Confluence reports no such page, or the token cannot see it.", 404);
   }
   if (res.status === 413) {
-    return new ConfluenceError("The page is too large for Confluence to accept.", 413);
+    return err("The page is too large for Confluence to accept.", 413);
   }
   if (res.status === 409) {
     // A stale version number: the page changed between the version check
     // and the update.
-    return new ConfluenceError("Confluence reports the page changed while it was being published — publish again.", 409);
+    return err("Confluence reports the page changed while it was being published — publish again.", 409);
   }
-  return new ConfluenceError(`Confluence answered HTTP ${res.status}${detail ? `: ${detail}` : ""}`, 502);
+  return err(`Confluence answered HTTP ${res.status}${detail ? `: ${detail}` : ""}`, 502);
 }
 
 /**
