@@ -253,9 +253,11 @@ export interface ObservabilityPageProps {
   fetcher?: Fetcher;
   /** Text onto the clipboard, false when that fails. */
   copyText?: (text: string) => Promise<boolean>;
+  /** The component the Logs tab starts narrowed to — "confluence" from a failed publish. */
+  initialComponent?: string;
 }
 
-export function ObservabilityPage({ onClose, fetcher, copyText }: ObservabilityPageProps) {
+export function ObservabilityPage({ onClose, fetcher, copyText, initialComponent }: ObservabilityPageProps) {
   const doFetch: Fetcher = fetcher ?? ((url, init) => fetch(url, init));
   const fetchRef = useRef(doFetch);
   fetchRef.current = doFetch;
@@ -264,7 +266,7 @@ export function ObservabilityPage({ onClose, fetcher, copyText }: ObservabilityP
   const [savingVerbosity, setSavingVerbosity] = useState(false);
   const [verbosityError, setVerbosityError] = useState<string | null>(null);
 
-  const [filter, setFilter] = useState<LogFilter>(DEFAULT_FILTER);
+  const [filter, setFilter] = useState<LogFilter>(() => ({ ...DEFAULT_FILTER, component: initialComponent ?? "" }));
   // What the search box holds; it reaches the filter after the debounce.
   const [draft, setDraft] = useState("");
   const [page, setPage] = useState<LogPage | null>(null);

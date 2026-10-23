@@ -2534,7 +2534,12 @@ export function App() {
   };
   const openSettings = () => openAppPage("settings");
   const openPlugins = () => openAppPage("plugins");
-  const openObservability = () => openAppPage("observability");
+  /** The component the Observability page opens narrowed to, when a dialog sent the user there. */
+  const [observabilityComponent, setObservabilityComponent] = useState("");
+  const openObservability = (component = "") => {
+    setObservabilityComponent(component);
+    openAppPage("observability");
+  };
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -9024,7 +9029,12 @@ export function App() {
         ) : appPage === "observability" ? (
           /* Observability: browse and search the app's own logs, and set
              how verbose they are. */
-          <ObservabilityPage onClose={closeAppPage} copyText={copyText} />
+          <ObservabilityPage
+            key={observabilityComponent}
+            onClose={closeAppPage}
+            copyText={copyText}
+            initialComponent={observabilityComponent}
+          />
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
@@ -10684,6 +10694,10 @@ export function App() {
           wikis={confluenceWikis}
           trapRef={confluenceTrapRef}
           onClose={() => setConfluencePublishOpen(false)}
+          onOpenLogs={() => {
+            setConfluencePublishOpen(false);
+            openObservability("confluence");
+          }}
           onPublished={(data) => {
             setFeature(featureFromResponse(data, selected));
             setDirty(false);
