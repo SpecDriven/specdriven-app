@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { MarkdownImage } from "./MarkdownImage";
+import { MarkdownTable } from "./MarkdownTable";
 import {
   BLOCK_START,
   HR,
@@ -61,9 +62,11 @@ export interface ImageRef {
   height: string | null;
 }
 
-/** What one render accumulates: its images, in the order they appear. */
+/** What one render accumulates: its images and tables, in the order they appear. */
 interface Ctx {
   images: ImageRef[];
+  /** Tables rendered so far, numbering each for its Edit button. */
+  tables: number;
 }
 
 /** A run of source text and the offset of its first character in the source. */
@@ -228,7 +231,7 @@ function spans(src: string): Span[] {
 
 /** Render markdown as React elements. Returns null for blank input. */
 export function renderMarkdown(src: string): ReactNode {
-  return renderBlocks(spans(src), { images: [] });
+  return renderBlocks(spans(src), { images: [], tables: 0 });
 }
 
 function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
@@ -313,17 +316,28 @@ function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
     }
     if (line.text.includes("|") && i + 1 < lines.length && TABLE_DIVIDER.test(lines[i + 1]!.text)) {
       const headers = tableCells(line);
+      const divider = lines[i + 1]!;
       i += 2;
       const rows: Span[][] = [];
       while (i < lines.length && lines[i]!.text.includes("|") && lines[i]!.text.trim() !== "")
         rows.push(tableCells(lines[i++]!));
       const kk = key();
+      // The divider row's `:` marks align a column, as on GitHub.
+      const align = tableCells(divider).map((d): CSSProperties["textAlign"] => {
+        const left = d.text.startsWith(":");
+        const right = d.text.endsWith(":");
+        return left && right ? "center" : left ? "left" : right ? "right" : undefined;
+      });
+      const style = (j: number): CSSProperties | undefined =>
+        align[j] ? { textAlign: align[j] } : undefined;
       out.push(
-        <table key={kk}>
+        <MarkdownTable key={kk} index={ctx.tables++}>
           <thead>
             <tr>
               {headers.map((c, j) => (
-                <th key={j}>{inline(c, `${kk}h${j}`)}</th>
+                <th key={j} style={style(j)}>
+                  {inline(c, `${kk}h${j}`)}
+                </th>
               ))}
             </tr>
           </thead>
@@ -331,12 +345,14 @@ function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
             {rows.map((r, ri) => (
               <tr key={ri}>
                 {r.map((c, ci) => (
-                  <td key={ci}>{inline(c, `${kk}r${ri}c${ci}`)}</td>
+                  <td key={ci} style={style(ci)}>
+                    {inline(c, `${kk}r${ri}c${ci}`)}
+                  </td>
                 ))}
               </tr>
             ))}
           </tbody>
-        </table>,
+        </MarkdownTable>,
       );
       continue;
     }
@@ -370,7 +386,7 @@ function renderBlocks(lines: Span[], ctx: Ctx): ReactNode {
  * the renderer itself, so the nth image on screen is always refs[n].
  */
 export function imageRefs(src: string): ImageRef[] {
-  const ctx: Ctx = { images: [] };
+  const ctx: Ctx = { images: [], tables: 0 };
   renderBlocks(spans(src), ctx);
   return ctx.images;
 }
