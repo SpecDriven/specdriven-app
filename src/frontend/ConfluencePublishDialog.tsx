@@ -1,4 +1,5 @@
 import { useState, type Ref } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import type { Feature } from "../server/parser";
 import { parseParentPageUrl, sameBase } from "../server/confluenceUrl";
 import type { ConfluenceWiki } from "./ConfluenceToken";
@@ -149,7 +150,7 @@ export function ConfluencePublishDialog({
   };
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="dialog modal-dialog confluence-dialog"
         role="dialog"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -10590,7 +10591,7 @@ export function App() {
           resolutions stay pinned at the bottom (specs/ui/ui.feature.md "Merge
           conflict dialog"). */}
       {conflict && (
-        <div className="dialog-backdrop" onClick={() => resolving === null && dismissConflict()}>
+        <div className="dialog-backdrop" {...backdropDismiss(() => resolving === null && dismissConflict())}>
           <div
             className="dialog conflict-dialog"
             role="dialog"
@@ -10765,7 +10766,7 @@ export function App() {
         />
       )}
       {userInfoOpen && (
-        <div className="dialog-backdrop" onClick={() => setUserInfoOpen(false)}>
+        <div className="dialog-backdrop" {...backdropDismiss(() => setUserInfoOpen(false))}>
           <div
             className="dialog"
             role="dialog"
@@ -10822,7 +10823,7 @@ export function App() {
       {/* Error box (specs/agents/claude.feature.md): what the coding agent said
           when it exited with an error code. */}
       {sessionError && (
-        <div className="dialog-backdrop" onClick={() => setSessionError(null)}>
+        <div className="dialog-backdrop" {...backdropDismiss(() => setSessionError(null))}>
           <div
             className="dialog"
             role="alertdialog"

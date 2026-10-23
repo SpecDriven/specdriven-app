@@ -1,4 +1,5 @@
 import { useState, type Ref } from "react";
+import { backdropDismiss } from "./backdropDismiss";
 import type { Feature } from "../server/parser";
 import { parseModuleUrl, sameQtestBase } from "../server/qtestUrl";
 import type { QtestSite } from "./QtestToken";
@@ -95,7 +96,7 @@ export function QtestPublishDialog({
   };
 
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
+    <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
         className="dialog modal-dialog confluence-dialog qtest-dialog"
         role="dialog"
