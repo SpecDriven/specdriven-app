@@ -8,6 +8,9 @@ import {
   devToolsPort,
   inspectorUrl,
   judge,
+  linkLaunch,
+  linkPath,
+  LINK_PATH,
   packagedBinary,
   parseArgs,
   scanLog,
@@ -26,6 +29,8 @@ const cleanRun = (overrides: Partial<RunResult> = {}): RunResult => ({
   mainWatched: true,
   mainExceptions: [],
   screen: "SpecDriven No spec data directory configured yet.",
+  link: null,
+  entry: "app://specdriven/",
   findings: [],
   crashDumps: 0,
   log: "dist/crash-test/run-1.log",
@@ -47,6 +52,33 @@ test("dying before being asked to quit fails, naming how it died", () => {
 
   const bailed = cleanRun({ readyMs: 900, quitMs: null, exitCode: 1, exitedEarly: true });
   expect(judge(bailed, timeouts)[0]).toMatch(/exit code 1/);
+});
+
+// specs/ui/navigation.feature.md "links from outside the app": the last of
+// several launches arrives by a specdriven:// link to a nested page.
+test("the last of two or more launches is by link to a nested page; a lone launch is plain", () => {
+  expect(linkLaunch(1, 3)).toBeNull();
+  expect(linkLaunch(2, 3)).toBeNull();
+  expect(linkLaunch(3, 3)).toBe("specdriven://features/app/desktop-app");
+  expect(linkLaunch(1, 1)).toBeNull();
+  expect(linkPath(linkLaunch(3, 3)!)).toBe(LINK_PATH);
+  expect(LINK_PATH.split("/").filter(Boolean).length).toBeGreaterThan(1);
+});
+
+test("a launch by link must have loaded the window at the linked path", () => {
+  const link = "specdriven://features/app/desktop-app";
+  const atLink = cleanRun({ link, entry: "app://specdriven/features/app/desktop-app?link" });
+  expect(judge(atLink, timeouts)).toEqual([]);
+  // The app drops the ?link flag and may rewrite the path once mounted; the
+  // document's own url is what is judged, so a later replaceState is fine.
+  const atRoot = cleanRun({ link, entry: "app://specdriven/" });
+  expect(judge(atRoot, timeouts)).toEqual([
+    "launched by link to /features/app/desktop-app but the window loaded app://specdriven/",
+  ]);
+  // A window that never rendered is already a failure; no second complaint.
+  expect(judge(cleanRun({ link, entry: null, readyMs: null }), timeouts)).toEqual([
+    "window did not render within 60s",
+  ]);
 });
 
 test("a window that never renders fails even when the quit is clean", () => {

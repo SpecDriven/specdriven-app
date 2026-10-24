@@ -13,12 +13,18 @@ Chromium's DevTools protocol: document loaded and the app mounted under
 `#root`), holds five seconds, then sends SIGTERM, which Electron turns into
 `app.quit()`. Launches 2 and 3 are restarts: they load the window geometry
 and settings the previous launch saved, which is where "works the first
-time, crashes on the second" bugs live.
+time, crashes on the second" bugs live. The last launch is by link: the
+binary gets `specdriven://features/app/desktop-app` as its argument, the way
+the OS starts the app for a link clicked while it is closed, and its window
+must load at that nested path — where the shell's asset urls once resolved
+under the path and the window stayed blank (`src/electron/static.ts`
+`shellHtml`).
 
 A launch fails when
 
 - the process ends before it is asked to (a crash, `process.exit`, a bail-out);
-- the window never renders, or stops answering during the hold;
+- the window never renders, or stops answering during the hold, or the
+  launch by link loaded it at some other path than the link's;
 - the main process throws an uncaught exception or leaves a promise
   rejection unhandled — after startup Electron only shows those in a modal
   dialog and prints nothing, so the test installs a recording listener in
