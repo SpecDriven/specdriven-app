@@ -1484,6 +1484,11 @@ export function App() {
       (null for the top level) — or null while the dialog is closed. */
   const [ahaSites, setAhaSites] = useState<AhaSite[]>([]);
   const [ahaImportOpen, setAhaImportOpen] = useState<{ folder: string | null } | null>(null);
+  /** Whether "Import from Aha!" is offered at all — switched on in Settings
+      → Aha!, default OFF. Never in the demo or the hosted app, which keep
+      no API key. */
+  const [ahaImportOn, setAhaImportOn] = useState(false);
+  const ahaImport = ahaImportOn && !demo && !hosted;
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1595,6 +1600,7 @@ export function App() {
   const [settingsResourceLinksDraft, setSettingsResourceLinksDraft] =
     useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
   const [settingsQtestLinksDraft, setSettingsQtestLinksDraft] = useState(false);
+  const [settingsAhaImportDraft, setSettingsAhaImportDraft] = useState(false);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
@@ -1810,6 +1816,7 @@ export function App() {
           setProjectManagementTool(state.projectManagementTool);
         }
         setResourceLinksOn(resourceLinkSwitches(state));
+        setAhaImportOn(state.ahaImport === true);
         setQtestLinks(state.qtestLinks === true);
         setQtestParentUrl(typeof state.qtestParentUrl === "string" ? state.qtestParentUrl : "");
         if (typeof state.codeGen === "boolean") {
@@ -4010,6 +4017,7 @@ export function App() {
     setSettingsPublishLinksDraft(publishExternalLinks);
     setSettingsResourceLinksDraft(resourceLinksOn);
     setSettingsQtestLinksDraft(qtestLinks);
+    setSettingsAhaImportDraft(ahaImportOn);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
@@ -4190,6 +4198,7 @@ export function App() {
       setProjectManagementTool(data.projectManagementTool);
     }
     setResourceLinksOn(resourceLinkSwitches(data));
+    setAhaImportOn(data.ahaImport === true);
     setQtestLinks(data.qtestLinks === true);
     setQtestParentUrl(typeof data.qtestParentUrl === "string" ? data.qtestParentUrl : "");
     // Switched off, a selection left over from before must not linger as a
@@ -4373,6 +4382,14 @@ export function App() {
   const toggleQtestLinks = async (on: boolean) => {
     setSettingsQtestLinksDraft(on);
     if (!(await patchSettings({ qtestLinks: on }))) setSettingsQtestLinksDraft(!on);
+  };
+
+  // Import from Aha! (specs/external-links/aha-import.feature.md "Import from
+  // Aha! is switched on in Settings"): off takes the folder menu item, the
+  // header button and the palette command away; the API keys stay.
+  const toggleAhaImport = async (on: boolean) => {
+    setSettingsAhaImportDraft(on);
+    if (!(await patchSettings({ ahaImport: on }))) setSettingsAhaImportDraft(!on);
   };
 
   const toggleResourceLinks = async (kind: ResourceLinkKind, on: boolean) => {
@@ -6025,9 +6042,10 @@ export function App() {
                     onSelect: () => void createFeatureIn(child.path),
                   },
                   // Import from Aha! (specs/external-links/aha-import
-                  // .feature.md): the feature lands in this folder. Not in
-                  // the demo or the hosted app, which keep no API key.
-                  ...(demo || hosted
+                  // .feature.md): the feature lands in this folder. Only
+                  // while switched on in Settings; never in the demo or the
+                  // hosted app, which keep no API key.
+                  ...(!ahaImport
                     ? []
                     : [
                         {
@@ -6407,8 +6425,8 @@ export function App() {
       keys: [],
       label: selectedFolder ? `Import from Aha! into "${selectedFolder}"…` : "Import from Aha!…",
       group: "Create",
-      when: () => !quiet && !demo && !hosted && editing === null,
-      palette: () => !quietBehindPalette && !demo && !hosted && editing === null,
+      when: () => !quiet && ahaImport && editing === null,
+      palette: () => !quietBehindPalette && ahaImport && editing === null,
       run: () => setAhaImportOpen({ folder: selectedFolder }),
     },
     {
@@ -6599,6 +6617,9 @@ export function App() {
   const paletteActions: PaletteItem[] = [
     shortcutAction("create", onFeaturePage ? <Plus size={14} /> : <NewFeatureIcon size={14} />),
     action("new-folder", "New folder", <NewFolderIcon size={14} />, () => void createFolder()),
+    // Only while Import from Aha! is switched on in Settings
+    // (specs/external-links/aha-import.feature.md).
+    shortcutAction("import-aha", <Import size={14} />),
     ...(selectedFolder
       ? [
           action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
@@ -7694,23 +7715,43 @@ export function App() {
                 <span className="switch-track" aria-hidden="true" />
               </span>
             </label>
-            {/* specs/external-links/aha-import.feature.md "An Aha! API key is
-                kept per site on this device": the key that lets a feature be
-                imported from Aha!, from the folder menu, the "+" button or
-                the palette. Not in the hosted app, which keeps no device
-                secrets. */}
+            {/* specs/external-links/aha-import.feature.md "Import from Aha!
+                is switched on in Settings": opt-in, like the links. On, it
+                offers "Import from Aha!…" in the folder menu, beside "New
+                feature" and in the palette, and the key form ("An Aha! API
+                key is kept per site on this device"). Not in the demo or the
+                hosted app, which keep no device secrets. */}
             {kind === "aha" && !demo && !hosted && (
-              <div className="settings-row">
-                <span className="settings-row-label">
-                  Import features from Aha!
-                  <span className="settings-row-hint">
-                    With a key for the site, "Import from Aha!…" turns an Aha! feature into a feature here: its
-                    name and description, its requirements as scenarios, each linking its Aha! record. Importing
-                    switches Aha! links on.
+              <>
+                <label className="settings-row">
+                  <span className="settings-row-label">
+                    Import features from Aha!
+                    <span className="settings-row-hint">
+                      {settingsAhaImportDraft
+                        ? `With a key for the site, "Import from Aha!…" turns an Aha! feature into a feature here: its name and description, its requirements as scenarios, each linking its Aha! record. Importing switches Aha! links on.`
+                        : "Import from Aha! is off: nothing in the app offers it. Keys already saved are kept."}
+                    </span>
                   </span>
-                  <AhaTokens sites={ahaSites} onChange={setAhaSites} />
-                </span>
-              </div>
+                  <span className="switch">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-label="Import features from Aha!"
+                      checked={settingsAhaImportDraft}
+                      onChange={(e) => void toggleAhaImport(e.target.checked)}
+                    />
+                    <span className="switch-track" aria-hidden="true" />
+                  </span>
+                </label>
+                {settingsAhaImportDraft && (
+                  <div className="settings-row">
+                    <span className="settings-row-label">
+                      Aha! API keys
+                      <AhaTokens sites={ahaSites} onChange={setAhaSites} />
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </PageSection>
         );
@@ -8663,7 +8704,7 @@ export function App() {
                 <NewFeatureIcon size={15} />
               </button>
             </Tooltip>
-            {!demo && !hosted && (
+            {ahaImport && (
               <Tooltip label={selectedFolder ? `Import from Aha! into "${selectedFolder}"` : "Import from Aha!"}>
                 <button
                   type="button"
