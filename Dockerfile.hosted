@@ -23,6 +23,8 @@ COPY src ./src
 # The demo dataset: a DEMO_MODE=1 service built from this image runs the public
 # demo instead of the gateway (src/gateway/demo.ts).
 COPY demo-data ./demo-data
+# The app icon src/index.html links as its favicon; the bundler resolves it.
+COPY build/icon.svg ./build/icon.svg
 # The frontend, bundled once for every user: the gateway serves it, so the
 # per-user workers never bundle it themselves (src/gateway/appShell.ts).
 RUN bun build src/index.html --outdir dist/app --production --public-path /_app/
