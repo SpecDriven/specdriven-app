@@ -4,7 +4,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { mimeType, staticFilePath } from "../src/electron/static";
+import { mimeType, shellHtml, staticFilePath } from "../src/electron/static";
 
 const ROOT = "/pkg/dist/renderer";
 
@@ -45,5 +45,38 @@ describe("staticFilePath", () => {
     expect(staticFilePath(ROOT, "/a//b.js")).toBeNull();
     expect(staticFilePath(ROOT, "/a%5Cb.js")).toBeNull();
     expect(staticFilePath(ROOT, "/%ZZ")).toBeNull();
+  });
+});
+
+// specs/ui/navigation.feature.md "links from outside the app": the shell
+// is served at deep links too, where index.html-relative asset urls would
+// resolve under the link's path and come back as the shell itself.
+describe("shellHtml", () => {
+  const built =
+    '<link rel="icon" type="image/svg+xml" href="./icon-hyx7xsma.svg" />\n' +
+    '<link rel="stylesheet" crossorigin href="./index-kj5vcw85.css">' +
+    '<script type="module" crossorigin src="./index-s1502frg.js"></script>';
+
+  test("the built shell's ./ asset urls become root-relative, so they load at any path", () => {
+    const html = shellHtml(built);
+    expect(html).toContain('href="/icon-hyx7xsma.svg"');
+    expect(html).toContain('href="/index-kj5vcw85.css"');
+    expect(html).toContain('src="/index-s1502frg.js"');
+    expect(html).not.toContain('"./');
+    // Which is what the module script at app://specdriven/features/app/desktop-app resolves against.
+    expect(new URL("/index-s1502frg.js", "app://specdriven/features/app/desktop-app").href).toBe(
+      "app://specdriven/index-s1502frg.js",
+    );
+  });
+
+  test("absolute, remote and parent-relative urls pass through untouched", () => {
+    const html =
+      '<script src="/already.js"></script><a href="https://example.com/./x">x</a>' +
+      '<img src=\'../up.png\'><link href="data:text/css,./y">';
+    expect(shellHtml(html)).toBe(html);
+  });
+
+  test("single-quoted attributes are rewritten too", () => {
+    expect(shellHtml("<script src='./a.js'></script>")).toBe("<script src='/a.js'></script>");
   });
 });
