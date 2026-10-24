@@ -12,7 +12,7 @@ import { STATE_DIR } from "../state";
 import { parseFeature, parsePage, titleFromFileName } from "../parser";
 import type { Feature, Scenario } from "../parser";
 import { PAGE_FOLDERS, isPageFile } from "../pageFolders";
-import { FOLDER_DESCRIPTION_FILE, isFeatureFile } from "../walk";
+import { isFeatureFile, isFolderDisplayNameFile } from "../walk";
 
 /** One file the working tree holds differently from HEAD. */
 export interface ChangedFile {
@@ -93,7 +93,7 @@ function entryFor(file: ChangedFile): Entry {
       return { ...blank, verb };
     }
   }
-  if (base === FOLDER_DESCRIPTION_FILE) {
+  if (isFolderDisplayNameFile(base)) {
     const folder = path.slice(0, -(base.length + 1)) || ".";
     return { ...blank, verb: after === null ? "Delete" : "Describe", noun: "folder description", name: folder };
   }

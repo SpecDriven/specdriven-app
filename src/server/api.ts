@@ -91,6 +91,7 @@ import {
   createFolder,
   deleteFolder,
   renameFolder,
+  setFolderDescription,
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
@@ -1821,7 +1822,7 @@ const getFeatures = withDataDir(async (dir) => {
     // `roadmap/`, `tasks/`, a plugin's `models/`, each listed on its own tab
     // — are out of range by construction rather than subtracted here.
     folders: await listFolders(dir),
-    // What each described folder's description.txt says (specs/ui/
+    // What each described folder's display-name.txt says (specs/ui/
     // folders.feature.md "describe a folder") — the sidebar's label for it.
     folderDescriptions: await listFolderDescriptions(dir),
     members: settings.members,
@@ -2168,6 +2169,18 @@ const postRenameFolder = withDataDir(async (dir, req, params) => {
   const body = (await req.json()) as { name?: string };
   try {
     return json(await renameFolder(dir, params.path!, body.name ?? ""));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/ui/folders.feature.md "edit a folder's display name": writes the
+// folder's display-name.txt (or removes it for a blank name), committed and
+// pushed.
+const putFolderDescription = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { description?: string };
+  try {
+    return json(await setFolderDescription(dir, params.path!, body.description ?? ""));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -3044,6 +3057,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/folders", postFolders],
   ["DELETE", "/api/folders/:path", deleteFolderRoute],
   ["POST", "/api/folders/:path/rename", postRenameFolder],
+  ["PUT", "/api/folders/:path/description", putFolderDescription],
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
