@@ -51,3 +51,19 @@ export function staticFilePath(rootDir: string, urlPath: string): string | null 
   if (segments.some(bad)) return null;
   return join(rootDir, ...segments);
 }
+
+/**
+ * The shell as it is served, at `/` and at every deep link. The renderer
+ * build writes its asset urls relative to index.html — `./index-<hash>.js`
+ * — which resolve correctly at `/` and nowhere else: at
+ * `/features/app/desktop-app` the window asked for
+ * `/features/app/index-<hash>.js`, no file, so the shell came back as the
+ * script (a module script with a text/html MIME type, refused) and the
+ * window stayed blank. Root-relative urls load from any path, so a launch
+ * by `specdriven://` link (specs/ui/navigation.feature.md "links from
+ * outside the app") renders like a launch at `/`. Only the leading `./` is
+ * touched; absolute and remote urls pass through.
+ */
+export function shellHtml(html: string): string {
+  return html.replace(/\b(src|href)=(["'])\.\//g, "$1=$2/");
+}

@@ -48,7 +48,7 @@ import {
   createSafeStorageBackend,
   safeStorageAvailable,
 } from "./secureToken";
-import { mimeType, staticFilePath } from "./static";
+import { mimeType, shellHtml, staticFilePath } from "./static";
 import {
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
@@ -150,8 +150,10 @@ const iconFile = fileURLToPath(new URL("../icon.png", import.meta.url));
 const iconOption = process.platform === "linux" && existsSync(iconFile) ? { icon: iconFile } : {};
 
 async function serveShell(): Promise<Response> {
-  const shellHtml = await readFile(join(rendererDir, "index.html"));
-  return new Response(shellHtml, {
+  // Served for deep links too, so its asset urls must not depend on the
+  // path (static.ts shellHtml).
+  const shell = await readFile(join(rendererDir, "index.html"), "utf8");
+  return new Response(shellHtml(shell), {
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 }
