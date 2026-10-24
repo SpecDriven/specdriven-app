@@ -54,3 +54,29 @@ test("the installed app declares the specdriven scheme to the OS", () => {
   const schemes = (build.protocols as { schemes: string[] }[]).flatMap((p) => p.schemes);
   expect(schemes).toEqual([DESKTOP_SCHEME]);
 });
+
+// The main process and the renderer are bundled under dist/ before packaging
+// (scripts/build-desktop.ts), so the package carries those bundles and
+// nothing of the dependency tree they were built from: shipping node_modules
+// as well once put 300 MB of never-loaded code into app.asar. dist/ is named
+// piece by piece because the web build (dist/specdriven, 90 MB) and the crash
+// test (dist/crash-test, a user profile) leave their output beside the bundles.
+test("the package ships the bundles, not node_modules or the rest of dist/", () => {
+  const files = build.files as string[];
+  expect(files).toContain("dist/electron/**");
+  expect(files).toContain("dist/renderer/**");
+  expect(files).toContain("dist/icon.png");
+  expect(files).toContain("dist/patch.json");
+  expect(files).not.toContain("dist/**/*");
+  expect(files).toContain("!node_modules/**");
+});
+
+test("source maps stay out of the package", () => {
+  expect(build.files as string[]).toContain("!dist/**/*.map");
+});
+
+test("only the English Chromium locale ships", () => {
+  // The app's own UI is English; the other locale packs only translate
+  // Chromium's context menus and cost ~47 MB per install.
+  expect(build.electronLanguages).toEqual(["en"]);
+});
