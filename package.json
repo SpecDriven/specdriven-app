@@ -23,6 +23,7 @@
     "build:all": "bun scripts/build.ts --all",
     "dev:electron": "bun scripts/dev-electron.ts",
     "build:desktop": "bun scripts/build-desktop.ts",
+    "build:icons": "bun scripts/build-icons.ts",
     "test:desktop": "bun scripts/crash-test-desktop.ts",
     "bump": "bun scripts/bump-version.ts",
     "test": "bun test"
@@ -73,6 +74,7 @@
       }
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "notarize": false,
       "target": [
@@ -91,6 +93,7 @@
       ]
     },
     "linux": {
+      "icon": "build/icons",
       "category": "Development",
       "maintainer": "SpecDriven <hello@specdriven.app>",
       "executableName": "specdriven",
@@ -113,6 +116,7 @@
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

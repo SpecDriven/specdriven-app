@@ -47,7 +47,7 @@
  *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
  */
 import { $ } from "bun";
-import { rm, writeFile } from "node:fs/promises";
+import { copyFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { version } from "../package.json";
 import type { PatchManifest } from "../src/electron/bootPolicy";
@@ -151,8 +151,8 @@ export function patchManifest(appVersion: string, fixId: string, now: Date = new
 export const PATCH_MANIFEST_FILE = "patch.json";
 
 /**
- * The bundles — the renderer, the main process and the boot shim that
- * picks between this main process and a self-fix's — which is all a local
+ * The bundles — the renderer, the app icon beside it, the main process and
+ * the boot shim that picks between this main process and a self-fix's — all a local
  * launch needs (scripts/crash-test-desktop.ts runs them without the
  * installers). A self-fix's rebuild (`--fix`) leaves dist/patch.json for the
  * shim; any other build removes a stale one, so a fresh install never boots
@@ -163,6 +163,7 @@ export async function bundleDesktop(opts: { fixId?: string | null; distDir?: str
   console.log("Building renderer…");
   await rm(join(dist, "renderer"), { recursive: true, force: true });
   await $`bun build src/index.html --outdir ${join(dist, "renderer")} --production`.quiet();
+  await copyFile(APP_ICON, join(dist, "icon.png"));
 
   console.log("Building main process…");
   await rm(join(dist, "electron"), { recursive: true, force: true });
@@ -177,6 +178,9 @@ export async function bundleDesktop(opts: { fixId?: string | null; distDir?: str
 
   await writePatchManifest(dist, opts.fixId ?? null);
 }
+
+/** The 1024px app icon (`bun run build:icons`), shipped as dist/icon.png for src/electron/main.ts. */
+export const APP_ICON = "build/icon.png";
 
 /** dist/patch.json for a fix's bundle; none otherwise. */
 export async function writePatchManifest(dist: string, fixId: string | null, appVersion: string = version): Promise<void> {
