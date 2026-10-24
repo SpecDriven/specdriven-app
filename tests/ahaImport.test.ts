@@ -123,7 +123,7 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_HOME = home;
   setAhaTokenBackend(createAhaFileBackend(join(home, "aha-tokens.json")));
   data = join(root, "data");
-  await writeState({ dataRepo: data }, root);
+  await writeState({ dataRepo: data, ahaImport: true }, root);
   seen = [];
   revoked = false;
   site = stubAha();
@@ -194,6 +194,36 @@ describe("Aha! API keys", () => {
     const gone = await call("DELETE", "/api/aha/tokens", { base: site });
     expect(gone.body).toEqual({ tokens: [] });
     expect(await ahaToken(site)).toBeNull();
+  });
+});
+
+describe("Import from Aha! is switched on in Settings", () => {
+  const settings = (patch: Record<string, unknown>) => call("PUT", "/api/state", patch);
+
+  test("is off until switched on, and off is an absent key", async () => {
+    await writeState({ dataRepo: data }, root);
+    expect((await call("GET", "/api/state")).body.ahaImport).toBe(false);
+    const on = await settings({ ahaImport: true });
+    expect(on.status).toBe(200);
+    expect(on.body.ahaImport).toBe(true);
+    expect((await readState(root)).ahaImport).toBe(true);
+    const off = await settings({ ahaImport: false });
+    expect(off.body.ahaImport).toBe(false);
+    expect((await readState(root)).ahaImport).toBeUndefined();
+    expect((await settings({ ahaImport: "yes" })).status).toBe(400);
+  });
+
+  test("while off the import is refused before Aha! is asked, and the keys stay", async () => {
+    await saveKey();
+    seen = [];
+    await settings({ ahaImport: false });
+    const res = await importFrom(`${site}/features/APP-123`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Import from Aha! is off; switch it on in Settings → Aha!.");
+    expect(seen).toHaveLength(0);
+    expect((await call("GET", "/api/aha/tokens")).body.tokens).toHaveLength(1);
+    await settings({ ahaImport: true });
+    expect((await importFrom(`${site}/features/APP-123`)).status).toBe(201);
   });
 });
 
