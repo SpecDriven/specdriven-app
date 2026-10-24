@@ -59,11 +59,18 @@
       "appimage": "1.0.3"
     },
     "files": [
-      "dist/**/*",
+      "dist/electron/**",
+      "dist/renderer/**",
+      "dist/icon.png",
+      "dist/patch.json",
+      "!dist/**/*.map",
       "package.json",
       "LICENSE.md",
       "NOTICE.md",
-      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**"
+      "!node_modules/**"
+    ],
+    "electronLanguages": [
+      "en"
     ],
     "protocols": [
       {
@@ -92,6 +99,9 @@
           ]
         }
       ]
+    },
+    "dmg": {
+      "format": "ULFO"
     },
     "linux": {
       "icon": "build/icons",
