@@ -15,7 +15,10 @@
  * protocol: document complete and something mounted under #root), a hold,
  * then SIGTERM — which Electron turns into app.quit(), so a clean shutdown
  * exits 0. Every run after the first is a restart on the same profile, so
- * remembered state (window geometry, settings) is loaded back. A run fails
+ * remembered state (window geometry, settings) is loaded back. The last of
+ * two or more runs is launched by a `specdriven://` link to a nested page
+ * (LINK_PATH), the way the OS starts the app for a link clicked while it
+ * is closed: its window must render at that path, not just at `/`. A run fails
  * when the process dies before it is asked to, the window never renders or
  * stops answering, the quit hangs or exits non-zero, the main process
  * throws an uncaught exception or leaves a promise rejection unhandled (a
@@ -131,6 +134,34 @@ export function parseArgs(argv: string[]): Options {
 }
 
 // ---------------------------------------------------------------------------
+// The launch by link
+
+/**
+ * The page the link launch opens: nested, so the shell's asset urls get
+ * resolved against a path that is not `/` (src/electron/static.ts
+ * shellHtml). The app renders it with or without a data repo — without
+ * one the repo prompt shows first (specs/ui/navigation.feature.md "deep
+ * link before a data repo is configured"), which still mounts under #root.
+ */
+export const LINK_PATH = "/features/app/desktop-app";
+
+/**
+ * The `specdriven://` url the given run is launched with, or null for a
+ * plain launch: the last of two or more runs arrives by link, so the first
+ * launch and at least one restart stay plain. A lone run is plain too.
+ */
+export function linkLaunch(run: number, runs: number): string | null {
+  if (runs < 2 || run !== runs) return null;
+  return `specdriven:/${LINK_PATH}`;
+}
+
+/** The path a `specdriven://` launch url asks for (the url's host + path). */
+export function linkPath(url: string): string {
+  const u = new URL(url);
+  return `/${u.host}${u.pathname}`.replace(/\/{2,}/g, "/");
+}
+
+// ---------------------------------------------------------------------------
 // Crash signatures in the app's output
 
 export interface Signature {
@@ -227,6 +258,10 @@ export interface RunResult {
   mainExceptions: string[];
   /** The first words on screen once rendered — which screen came up. */
   screen: string;
+  /** The `specdriven://` url this run was launched with, if any. */
+  link: string | null;
+  /** The url the document was loaded at (before the app rewrote it), once rendered. */
+  entry: string | null;
   findings: Finding[];
   /** Crash dumps that appeared in the profile's Crashpad directory. */
   crashDumps: number;
@@ -253,6 +288,20 @@ export function judge(
   for (const e of r.mainExceptions) problems.push(`main process ${e}`);
   if (r.rendererCrashed) {
     problems.push(`window stopped answering during the ${o.uptime}s hold (renderer crash, or a main process stuck in a dialog?)`);
+  }
+  // A launch by link must have rendered at the linked path — the document
+  // url as loaded, since the app itself drops the link flag and may move on.
+  if (r.link && r.readyMs !== null) {
+    const wanted = linkPath(r.link);
+    let loaded: string | null = null;
+    try {
+      loaded = r.entry ? new URL(r.entry).pathname : null;
+    } catch {
+      loaded = r.entry;
+    }
+    if (loaded !== wanted) {
+      problems.push(`launched by link to ${wanted} but the window loaded ${r.entry ?? "nothing"}`);
+    }
   }
   if (!r.exitedEarly) {
     if (r.quitMs === null) {
@@ -419,12 +468,15 @@ interface PageState {
   title: string;
   children: number;
   text: string;
+  /** The document's url as navigated to — what a replaceState can't change. */
+  entry: string;
 }
 
 const PAGE_STATE = `(() => {
   const root = document.getElementById("root");
   const text = root ? (root.innerText || "").trim().replace(/\\s+/g, " ").slice(0, 120) : "";
-  return { ready: document.readyState, title: document.title, children: root ? root.childElementCount : -1, text };
+  const nav = performance.getEntriesByType("navigation")[0];
+  return { ready: document.readyState, title: document.title, children: root ? root.childElementCount : -1, text, entry: (nav && nav.name) || location.href };
 })()`;
 
 async function findPage(port: number): Promise<string | null> {
@@ -535,7 +587,8 @@ async function ensureDisplay(): Promise<Display> {
 
 interface Launch {
   binary: string;
-  args: string[];
+  /** The app's arguments; a link launch appends its url (linkLaunch). */
+  args: (link: string | null) => string[];
   env: Record<string, string | undefined>;
   profile: string;
   outDir: string;
@@ -563,6 +616,8 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
     mainWatched: false,
     mainExceptions: [],
     screen: "",
+    link: linkLaunch(run, opts.runs),
+    entry: null,
     findings: [],
     crashDumps: 0,
     log: join(launch.outDir, `run-${run}.log`),
@@ -572,7 +627,7 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
 
   const chunks: string[] = [];
   const started = performance.now();
-  const proc = Bun.spawn([launch.binary, ...launch.args], {
+  const proc = Bun.spawn([launch.binary, ...launch.args(result.link)], {
     env: launch.env,
     stdout: "pipe",
     stderr: "pipe",
@@ -628,6 +683,7 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
         if (state && state.ready === "complete" && state.children > 0) {
           result.readyMs = Math.round(performance.now() - started);
           result.screen = state.text;
+          result.entry = state.entry;
           break;
         }
       }
@@ -755,7 +811,10 @@ async function main(argv: string[]): Promise<number> {
   // throwaway, so plain-text safeStorage is fine.
   if (process.platform === "linux") args.push("--password-store=basic");
   args.push(...opts.appArgs);
+  // Unpackaged: `electron <app dir> [args]`; the app's own arguments — a
+  // link among them — follow the directory.
   if (opts.mode === "unpackaged") args.push(resolve("."));
+  const launchArgs = (link: string | null): string[] => (link ? [...args, link] : args);
 
   display = await ensureDisplay();
   const env: Record<string, string | undefined> = {
@@ -774,10 +833,11 @@ async function main(argv: string[]): Promise<number> {
   let failed = 0;
   try {
     for (let run = 1; run <= opts.runs; run++) {
-      const r = await launchOnce(run, { binary, args, env, profile, outDir, opts });
+      const r = await launchOnce(run, { binary, args: launchArgs, env, profile, outDir, opts });
       results.push(r);
       const problems = judge(r, opts);
       const timing = [
+        r.link ? `by link to ${linkPath(r.link)}` : null,
         r.readyMs === null ? "no window" : `rendered in ${seconds(r.readyMs)}`,
         r.readyMs === null ? null : `held ${opts.uptime}s`,
         r.exitedEarly ? describeExit(r) : r.quitMs === null ? "killed" : `quit in ${seconds(r.quitMs)} (${describeExit(r)})`,
