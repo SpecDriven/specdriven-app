@@ -132,12 +132,16 @@ describe("pages and folders", () => {
     );
   });
 
-  test("a folder description names the folder", () => {
+  test("a folder display name names the folder", () => {
     const { title, body } = summarizeSavedChanges([
-      { path: "specs/app/description.txt", before: null, after: "The app itself\n" },
+      { path: "specs/app/display-name.txt", before: null, after: "The app itself\n" },
     ]);
     expect(title).toBe("Describe folder: specs/app");
     expect(body).toContain("- Describe folder: specs/app");
+    // and so does the file's legacy name
+    expect(
+      summarizeSavedChanges([{ path: "specs/app/description.txt", before: null, after: "The app\n" }]).title,
+    ).toBe("Describe folder: specs/app");
   });
 
   test("a markdown file outside the special folders is saved by path", () => {

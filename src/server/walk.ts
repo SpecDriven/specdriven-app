@@ -59,8 +59,20 @@ export async function walk(
 }
 
 /**
- * The file a spec folder's description lives in
+ * The file a spec folder's display name lives in
  * (specs/ui/folders.feature.md): its first non-blank line is what the
- * sidebar shows under the folder's name.
+ * sidebar shows in place of the folder's name.
  */
-export const FOLDER_DESCRIPTION_FILE = "description.txt";
+export const FOLDER_DISPLAY_NAME_FILE = "display-name.txt";
+
+/**
+ * What that file was called before — still read when a folder has no
+ * display-name.txt, so data repos written earlier keep their labels;
+ * editing the display name moves it over.
+ */
+export const LEGACY_FOLDER_DISPLAY_NAME_FILE = "description.txt";
+
+/** Whether a file's base name is a folder's display-name file, current or legacy. */
+export function isFolderDisplayNameFile(base: string): boolean {
+  return base === FOLDER_DISPLAY_NAME_FILE || base === LEGACY_FOLDER_DISPLAY_NAME_FILE;
+}

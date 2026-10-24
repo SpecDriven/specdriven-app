@@ -178,8 +178,9 @@ describe("matchApi", () => {
     expect(matchApi("GET", "/api/features/billing/quote.feature.md")).toBeNull();
   });
 
-  // Folders (specs/ui/folders.feature.md): a folder is deleted by path and
-  // renamed by a POST under it, the way a feature file is.
+  // Folders (specs/ui/folders.feature.md): a folder is deleted by path,
+  // renamed by a POST under it the way a feature file is, and given a
+  // display name by a PUT.
   test("folder routes match by method", () => {
     expect(matchApi("POST", "/api/folders")).not.toBeNull();
     expect(matchApi("GET", "/api/folders")).toBeNull();
@@ -190,6 +191,10 @@ describe("matchApi", () => {
     expect(rename).not.toBeNull();
     expect(rename!.params).toEqual({ path: "specs/billing" });
     expect(matchApi("DELETE", "/api/folders/specs%2Fbilling/rename")).toBeNull();
+    const displayName = matchApi("PUT", "/api/folders/specs%2Fbilling/description");
+    expect(displayName).not.toBeNull();
+    expect(displayName!.params).toEqual({ path: "specs/billing" });
+    expect(matchApi("POST", "/api/folders/specs%2Fbilling/description")).toBeNull();
   });
 
   test("nested feature routes are distinct", () => {
