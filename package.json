@@ -26,7 +26,8 @@
     "build:icons": "bun scripts/build-icons.ts",
     "test:desktop": "bun scripts/crash-test-desktop.ts",
     "bump": "bun scripts/bump-version.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p ."
   },
   "devDependencies": {
     "@types/bun": "latest",
