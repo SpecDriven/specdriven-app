@@ -9501,19 +9501,6 @@ export function App() {
                   {testsError && <p className="error">{testsError}</p>}
                 </div>
               )}
-              {!editingPublished && (
-                // specs/scenario-table.feature.md: structured view over the
-                // markdown table stored in the body.
-                <div className="table-field">
-                  <span className="field-label">Scenario table</span>
-                  <ScenarioTable
-                    body={editing.scenario.body}
-                    onChange={(body) =>
-                      setEditing({ ...editing, scenario: { ...editing.scenario, body } })
-                    }
-                  />
-                </div>
-              )}
               {/* specs/external-links/project-management-jira-linear-etc.
                   feature.md "Add link at spec level": the ticket tracking this
                   scenario. Editable on a published scenario too — like the test
