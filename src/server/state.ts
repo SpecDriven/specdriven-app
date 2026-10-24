@@ -83,6 +83,13 @@ export interface SpecDrivenState {
    * stay in the documents.
    */
   ahaLinks?: boolean;
+  /**
+   * Offer "Import from Aha!" (specs/external-links/aha-import.feature.md
+   * "Import from Aha! is switched on in Settings"); absent means OFF. Off
+   * hides the import from the folder menu, the header and the palette, and
+   * the import route refuses; the API keys already kept stay.
+   */
+  ahaImport?: boolean;
   /** Offer Figma links on features and scenarios, the same way as `ahaLinks`. */
   figmaLinks?: boolean;
   /**
@@ -450,6 +457,13 @@ export function normalizePublishExternalLinks(value: unknown): boolean {
     (specs/external-links/aha-and-figma-links.feature.md): OFF unless
     explicitly turned on — a team that doesn't use the tool never sees it. */
 export function normalizeResourceLinks(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective "Import from Aha!" setting
+    (specs/external-links/aha-import.feature.md): OFF unless explicitly
+    turned on, like the Aha! links. */
+export function normalizeAhaImport(value: unknown): boolean {
   return value === true;
 }
 
