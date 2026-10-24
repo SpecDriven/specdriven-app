@@ -15,6 +15,7 @@ import {
   session,
   shell,
 } from "electron";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
@@ -140,6 +141,14 @@ if (process.defaultApp) {
 // source a self-fix rebuilt it under (src/electron/boot.ts).
 const rendererDir = fileURLToPath(new URL("../renderer/", import.meta.url));
 
+// The application icon, dist/icon.png beside the bundles (build/icon.png,
+// copied there by scripts/build-desktop.ts and scripts/dev-electron.ts).
+// Packaged macOS and Windows apps carry theirs in the bundle and the
+// executable; Linux window managers take the window's from here, and the
+// dev run on macOS would otherwise show Electron's own in the dock.
+const iconFile = fileURLToPath(new URL("../icon.png", import.meta.url));
+const iconOption = process.platform === "linux" && existsSync(iconFile) ? { icon: iconFile } : {};
+
 async function serveShell(): Promise<Response> {
   const shellHtml = await readFile(join(rendererDir, "index.html"));
   return new Response(shellHtml, {
@@ -223,6 +232,7 @@ function createWindow(): void {
     width: saved?.width ?? DEFAULT_WIDTH,
     height: saved?.height ?? DEFAULT_HEIGHT,
     ...(saved ? { x: saved.x, y: saved.y } : {}),
+    ...iconOption,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     // Matches the design system's --surface-1 so the window never flashes
@@ -402,7 +412,10 @@ if (!app.requestSingleInstanceLock()) {
           : await dialog.showOpenDialog(opts);
       return picked.canceled ? null : (picked.filePaths[0] ?? null);
     });
-    if (!app.isPackaged) installDebugMenu();
+    if (!app.isPackaged) {
+      installDebugMenu();
+      if (process.platform === "darwin" && existsSync(iconFile)) app.dock?.setIcon(iconFile);
+    }
     // A self-fix's "Rebuild & restart" (specs/app/self-healing.feature.md):
     // the next launch goes through the boot shim, which picks the bundle.
     setRelauncher(() => {

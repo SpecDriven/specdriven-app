@@ -11,6 +11,8 @@
  * edits hot-reload inside the desktop window.
  */
 import { $ } from "bun";
+import { copyFile, mkdir } from "node:fs/promises";
+import { APP_ICON } from "./build-desktop";
 
 const port = process.env.PORT || "3000";
 const devUrl = `http://localhost:${port}`;
@@ -22,6 +24,8 @@ try {
   process.exit(1);
 }
 
+await mkdir("dist", { recursive: true });
+await copyFile(APP_ICON, "dist/icon.png");
 await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
 // The entry is the boot shim (src/electron/boot.ts), built apart from main.js.
 await $`bun build src/electron/boot.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
