@@ -11,6 +11,7 @@ import {
   normalizeFeatureFlags,
   normalizeScenarioPolarity,
   normalizeQtestLinks,
+  normalizeAhaImport,
   normalizeResourceLinks,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
@@ -505,6 +506,9 @@ async function stateFields(state: SpecDrivenState) {
     // .feature.md): each offered only once switched on.
     ahaLinks: normalizeResourceLinks(state.ahaLinks),
     figmaLinks: normalizeResourceLinks(state.figmaLinks),
+    // Import from Aha! (specs/external-links/aha-import.feature.md): offered
+    // only once switched on.
+    ahaImport: normalizeAhaImport(state.ahaImport),
     // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
     // offered only once switched on.
     qtestLinks: normalizeQtestLinks(state.qtestLinks),
@@ -663,6 +667,7 @@ const putState: Handler = async (req) => {
     projectManagementTool?: string;
     publishExternalLinks?: boolean;
     ahaLinks?: boolean;
+    ahaImport?: boolean;
     figmaLinks?: boolean;
     qtestLinks?: boolean;
     codeGen?: boolean;
@@ -703,6 +708,7 @@ const putState: Handler = async (req) => {
     body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
     body.ahaLinks === undefined &&
+    body.ahaImport === undefined &&
     body.figmaLinks === undefined &&
     body.qtestLinks === undefined &&
     body.codeGen === undefined &&
@@ -727,7 +733,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -938,8 +944,9 @@ const putState: Handler = async (req) => {
   // .feature.md): opt-in — the default OFF is an absent key. Off only takes
   // the chips and fields away; links already recorded stay in the documents.
   // qTest test case links (specs/external-links/qtest-test-cases.feature.md)
-  // switch the same way.
-  for (const key of ["ahaLinks", "figmaLinks", "qtestLinks"] as const) {
+  // and Import from Aha! (specs/external-links/aha-import.feature.md) switch
+  // the same way.
+  for (const key of ["ahaLinks", "ahaImport", "figmaLinks", "qtestLinks"] as const) {
     const value = body[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") return json({ error: `${key} must be a boolean` }, 400);
@@ -1349,8 +1356,12 @@ const deleteAhaToken: Handler = async (req) => {
 // requirements the scenarios, written the way createFeature writes a
 // plugin's scaffold. The feature and each scenario then link their Aha!
 // record on the document, like links added by hand, and Aha! links are
-// switched on so the chips show.
+// switched on so the chips show. Only while Import from Aha! is switched on
+// in Settings.
 const postAhaImport = withDataDir(async (dir, req) => {
+  if (!normalizeAhaImport((await readState(getAppRoot())).ahaImport)) {
+    return json({ error: "Import from Aha! is off; switch it on in Settings → Aha!." }, 403);
+  }
   const body = (await req.json().catch(() => ({}))) as {
     url?: unknown;
     base?: unknown;
