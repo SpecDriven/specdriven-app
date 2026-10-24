@@ -953,7 +953,7 @@ interface OpenOptions {
 interface Listing {
   features: FeatureListing[];
   folders: string[];
-  /** Folder path → what its description.txt says (specs/ui/folders.feature.md "describe a folder"). */
+  /** Folder path → what its display-name.txt says (specs/ui/folders.feature.md "describe a folder"). */
   folderDescriptions: Record<string, string>;
   members: ProjectMember[];
   codeRepo: string | null;
@@ -1233,7 +1233,7 @@ export function App() {
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
-  /** Folder path → description, for the folders that have a description.txt. */
+  /** Folder path → description, for the folders that have a display-name.txt. */
   const [folderDescriptions, setFolderDescriptions] = useState<Record<string, string>>({});
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -3156,6 +3156,39 @@ export function App() {
     } finally {
       if (retiring) unsealFeatureEditors();
     }
+  };
+
+  // Display name from a folder's ⋯ menu (specs/ui/folders.feature.md "edit a
+  // folder's display name"): the label the sidebar shows in place of the
+  // folder name, kept in the folder's display-name.txt. The folder — and every
+  // path beneath it — stays put; a blank name clears the label.
+  const editFolderDisplayName = async (path: string) => {
+    const current = folderDescriptions[path] ?? "";
+    const name = await prompt({
+      title: "Edit display name",
+      hint: "Shown in the tree in place of the folder name. Leave blank to show the folder name.",
+      initial: current,
+      placeholder: path.split("/").pop(),
+      confirmLabel: "Save",
+      allowEmpty: true,
+    });
+    if (name === null || cleanLine(name) === current) return;
+    const res = await fetch(`/api/folders/${encodeURIComponent(path)}/description`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: cleanLine(name) }),
+    });
+    const data = (await res.json()) as { description?: string | null; message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not save the display name");
+      return;
+    }
+    await loadFeatures();
+    toast.success(
+      data.description
+        ? `Folder display name set to "${data.description}" — ${data.message}.`
+        : `Cleared the folder's display name — ${data.message}.`,
+    );
   };
 
   /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
@@ -6005,7 +6038,7 @@ export function App() {
                   <ChevronDown size={12} aria-hidden="true" />
                 )}
               </span>{" "}
-              {/* The description.txt's line when the folder has one
+              {/* The display-name.txt's line when the folder has one
                   (specs/ui/folders.feature.md "describe a folder"); the
                   folder's own name is then a hover away. */}
               {folderLabel(child)}
@@ -6066,6 +6099,12 @@ export function App() {
                     label: "Rename",
                     icon: <Pencil size={13} />,
                     onSelect: () => void renameFolder(child.path),
+                  },
+                  {
+                    id: "display-name",
+                    label: "Edit display name",
+                    icon: <Tag size={13} />,
+                    onSelect: () => void editFolderDisplayName(child.path),
                   },
                   {
                     id: "delete",
@@ -6624,6 +6663,12 @@ export function App() {
       ? [
           action("rename-folder", `Rename folder “${selectedFolder.split("/").pop()}”`, <Pencil size={14} />, () =>
             void renameFolder(selectedFolder),
+          ),
+          action(
+            "folder-display-name",
+            `Edit display name of folder “${selectedFolder.split("/").pop()}”`,
+            <Tag size={14} />,
+            () => void editFolderDisplayName(selectedFolder),
           ),
           action("delete-folder", `Delete folder “${selectedFolder.split("/").pop()}”`, <Trash2 size={14} />, () =>
             void removeFolder(selectedFolder),

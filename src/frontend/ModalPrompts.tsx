@@ -15,6 +15,8 @@ export interface PromptOptions {
   initial?: string;
   placeholder?: string;
   confirmLabel?: string;
+  /** Confirming a blank field answers "" rather than staying disabled — for clearing a value. */
+  allowEmpty?: boolean;
   /**
    * Native picker (specs/ui/app-start.feature.md "picking the data directory
    * with the native folder chooser"): shown as a Browse… button beside the
@@ -227,7 +229,7 @@ function ModalDialog({
     else request.resolve(false);
   };
   const confirm = () => {
-    if (request.kind === "prompt" && !draft.trim()) return;
+    if (request.kind === "prompt" && !draft.trim() && !request.opts.allowEmpty) return;
     close();
     // Trimmed for every caller (specs/ui/ui.feature.md "User-entered text is
     // cleaned up"); only trimmed, as a prompt also takes paths and urls —
@@ -300,7 +302,7 @@ function ModalDialog({
                 <button type="button" className="secondary" onClick={cancel}>
                   Cancel
                 </button>
-                <button type="submit" disabled={!draft.trim()}>
+                <button type="submit" disabled={!draft.trim() && !request.opts.allowEmpty}>
                   {confirmLabelOf(request.opts, choice)}
                 </button>
               </div>
