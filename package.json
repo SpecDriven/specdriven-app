@@ -34,10 +34,10 @@
     "@types/ws": "^8.18.2",
     "@typescript-eslint/eslint-plugin": "^8.72.0",
     "@typescript-eslint/parser": "^8.72.0",
-    "electron": "^43.7.7",
+    "electron": "^43.8.3",
     "electron-builder": "^26.15.3",
     "eslint": "^10.13.0",
-    "happy-dom": "^20.14.5",
+    "happy-dom": "^21.0.4",
     "jscpd": "^5.4.1",
     "knip": "^6.42.1",
     "ts-morph": "^28.0.0",
@@ -185,6 +185,8 @@
     "katex": "^0.18.11",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "dompurify": "^3.4.17",
-    "ip-address": "^10.7.4"
+    "ip-address": "^10.7.4",
+    "body-parser": "^2.4.0",
+    "fast-uri": "^3.1.9"
   }
 }
