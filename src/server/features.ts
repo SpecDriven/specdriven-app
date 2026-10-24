@@ -1,5 +1,13 @@
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
-import { FOLDER_DESCRIPTION_FILE, SPECS_FOLDER, isFeatureFile, isSpecsFolderPath, walk } from "./walk";
+import {
+  FOLDER_DISPLAY_NAME_FILE,
+  LEGACY_FOLDER_DISPLAY_NAME_FILE,
+  SPECS_FOLDER,
+  isFeatureFile,
+  isFolderDisplayNameFile,
+  isSpecsFolderPath,
+  walk,
+} from "./walk";
 import type * as A from "@automerge/automerge";
 import { absorbDrift, autoResolveMergeConflicts, mergeInProgress } from "./automerge/driftSync";
 import { threeWayFeature, threeWayFeatureStrict } from "./automerge/merge";
@@ -157,22 +165,74 @@ export async function listFolders(dataDir: string): Promise<string[]> {
 }
 
 /**
- * A folder's description (specs/ui/folders.feature.md "describe a folder"):
- * a `description.txt` inside it, whose first non-blank line the sidebar
- * shows in place of the folder name. Plain text, one line; anything past
- * the first line is left for whoever reads the file on GitHub.
+ * A folder's display name (specs/ui/folders.feature.md "describe a folder"):
+ * a `display-name.txt` inside it — or, in a data repo written before that
+ * name, a `description.txt` — whose first non-blank line the sidebar shows
+ * in place of the folder name. Plain text, one line; anything past the
+ * first line is left for whoever reads the file on GitHub.
  */
-export { FOLDER_DESCRIPTION_FILE } from "./walk";
+export { FOLDER_DISPLAY_NAME_FILE } from "./walk";
 
-/** The description a folder's description.txt gives it, or null without one. */
+/** The display name a folder's display-name file gives it, or null without one. */
 export async function readFolderDescription(dataDir: string, folder: string): Promise<string | null> {
-  const text = await readTextFile(`${dataDir}/${safeFolder(folder)}/${FOLDER_DESCRIPTION_FILE}`);
+  const dir = `${dataDir}/${safeFolder(folder)}`;
+  const text =
+    (await readTextFile(`${dir}/${FOLDER_DISPLAY_NAME_FILE}`)) ??
+    (await readTextFile(`${dir}/${LEGACY_FOLDER_DISPLAY_NAME_FILE}`));
   if (text === null) return null;
+  return firstLine(text);
+}
+
+function firstLine(text: string): string | null {
   const line = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .find((l) => l.length > 0);
   return line ?? null;
+}
+
+/**
+ * specs/ui/folders.feature.md "edit a folder's display name": the folder's
+ * display-name.txt gets the new name as its first non-blank line — any
+ * lines past it stay — committed and pushed. A legacy description.txt is
+ * moved over in the same commit. A blank name clears the display name: the
+ * file goes, a `git rm`, and the folder shows its name.
+ */
+export async function setFolderDescription(
+  dataDir: string,
+  path: string,
+  name: string,
+): Promise<{ description: string | null; message: string }> {
+  const folder = safeFolder(path);
+  if (folder === SPECS_FOLDER) throw new Error("Folder name is required");
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
+  const description = cleanLine(name);
+  const file = `${folder}/${FOLDER_DISPLAY_NAME_FILE}`;
+  const legacy = `${folder}/${LEGACY_FOLDER_DISPLAY_NAME_FILE}`;
+  const current = await readTextFile(`${dataDir}/${file}`);
+  const legacyText = await readTextFile(`${dataDir}/${legacy}`);
+  const present = [...(current !== null ? [file] : []), ...(legacyText !== null ? [legacy] : [])];
+  if (!description) {
+    if (present.length === 0) return { description: null, message: "no display name to clear" };
+    const sync = await removeAndPush(dataDir, present, `Clear folder display name: ${folder}`);
+    return { description: null, message: sync.message };
+  }
+  const base = current ?? legacyText;
+  if (legacyText === null && base !== null && firstLine(base) === description) {
+    return { description, message: "display name unchanged" };
+  }
+  const lines = (base ?? "").split(/\r?\n/);
+  const first = lines.findIndex((l) => l.trim().length > 0);
+  const text =
+    first === -1 ? `${description}\n` : [...lines.slice(0, first), description, ...lines.slice(first + 1)].join("\n");
+  await writeTextFile(`${dataDir}/${file}`, text);
+  if (legacyText !== null) await rm(`${dataDir}/${legacy}`, { force: true });
+  const sync = await commitAndPush(
+    dataDir,
+    legacyText !== null ? [file, legacy] : file,
+    `Set folder display name: ${folder} -> ${description}`,
+  );
+  return { description, message: sync.message };
 }
 
 /**
@@ -503,7 +563,7 @@ export async function deleteFolder(
   // A folder holding nothing but descriptions ("describe a folder") has no
   // feature to lose, so it needs no second confirmation — but git tracks
   // those files, so it goes the committed way, not off the disk alone.
-  const onlyDescriptions = files.every((entry) => entry.split("/").pop() === FOLDER_DESCRIPTION_FILE);
+  const onlyDescriptions = files.every((entry) => isFolderDisplayNameFile(entry.split("/").pop() ?? ""));
   if (!force && !onlyDescriptions) {
     throw new Error(`Folder is not empty: ${folder} — move its features out first`);
   }
@@ -1422,7 +1482,7 @@ function safe(fileName: string): string {
  * The files anywhere beneath a directory, relative to it, macOS `.DS_Store`
  * junk left out: what decides whether git could know the folder at all. A
  * folder with none is untracked by construction, so it can be renamed or
- * removed on disk alone; one with a description.txt and no feature is not.
+ * removed on disk alone; one with a display-name.txt and no feature is not.
  */
 async function filesBeneath(full: string): Promise<string[]> {
   const contents = (await readdir(full, { recursive: true })) as string[];

@@ -14,6 +14,7 @@ import {
   readFeature,
   renameFeature,
   renameFolder,
+  setFolderDescription,
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
@@ -287,30 +288,83 @@ test("buildTree arranges folders and features, folders first, sorted", () => {
   expect(billing.folders[0]!.features.map((f) => f.name)).toEqual(["Deep"]);
 });
 
-// specs/ui/folders.feature.md "describe a folder": a description.txt in a
-// folder gives it a description — its first non-blank line, trimmed. A
-// folder without one, or with a blank one, has none.
-test("readFolderDescription and listFolderDescriptions read description.txt", async () => {
+// specs/ui/folders.feature.md "describe a folder": a display-name.txt in a
+// folder gives it a display name — its first non-blank line, trimmed. A
+// folder without one, or with a blank one, has none. A description.txt — the
+// file's name before display-name.txt — still counts when there is no
+// display-name.txt.
+test("readFolderDescription and listFolderDescriptions read display-name.txt", async () => {
   await mkdir(join(root, "specs/billing/sub"), { recursive: true });
   await mkdir(join(root, "specs/plain"), { recursive: true });
   await mkdir(join(root, "specs/blank"), { recursive: true });
-  await Bun.write(join(root, "specs/billing/description.txt"), "Billing and invoicing\n");
-  // leading blank lines and surrounding space are not part of the description,
+  await mkdir(join(root, "specs/legacy"), { recursive: true });
+  await mkdir(join(root, "specs/both"), { recursive: true });
+  await Bun.write(join(root, "specs/billing/display-name.txt"), "Billing and invoicing\n");
+  // leading blank lines and surrounding space are not part of the name,
   // and only the first line counts
-  await Bun.write(join(root, "specs/billing/sub/description.txt"), "\r\n  Sub-ledgers  \r\nmore words\n");
-  await Bun.write(join(root, "specs/blank/description.txt"), "\n   \n");
+  await Bun.write(join(root, "specs/billing/sub/display-name.txt"), "\r\n  Sub-ledgers  \r\nmore words\n");
+  await Bun.write(join(root, "specs/blank/display-name.txt"), "\n   \n");
+  await Bun.write(join(root, "specs/legacy/description.txt"), "Old style\n");
+  await Bun.write(join(root, "specs/both/description.txt"), "Old\n");
+  await Bun.write(join(root, "specs/both/display-name.txt"), "New\n");
   expect(await readFolderDescription(root, "specs/billing")).toBe("Billing and invoicing");
   expect(await readFolderDescription(root, "billing/sub")).toBe("Sub-ledgers");
   expect(await readFolderDescription(root, "specs/plain")).toBeNull();
   expect(await readFolderDescription(root, "specs/blank")).toBeNull();
   expect(await readFolderDescription(root, "specs/ghost")).toBeNull();
+  expect(await readFolderDescription(root, "specs/legacy")).toBe("Old style");
+  expect(await readFolderDescription(root, "specs/both")).toBe("New");
   expect(await listFolderDescriptions(root)).toEqual({
     "specs/billing": "Billing and invoicing",
     "specs/billing/sub": "Sub-ledgers",
+    "specs/both": "New",
+    "specs/legacy": "Old style",
   });
-  // the description file is not a feature, and does not make the folder one
+  // the display-name file is not a feature, and does not make the folder one
   expect(await listFeatures(root)).toEqual([]);
-  expect(await listFolders(root)).toEqual(["specs/billing", "specs/billing/sub", "specs/blank", "specs/plain"]);
+  expect(await listFolders(root)).toEqual([
+    "specs/billing",
+    "specs/billing/sub",
+    "specs/blank",
+    "specs/both",
+    "specs/legacy",
+    "specs/plain",
+  ]);
+});
+
+// specs/ui/folders.feature.md "edit a folder's display name": outside a git
+// repository the file is written (and removed) all the same; the folder
+// itself never moves.
+test("setFolderDescription writes, keeps extra lines, and clears display-name.txt", async () => {
+  await mkdir(join(root, "specs/billing"), { recursive: true });
+  expect(await setFolderDescription(root, "specs/billing", "  Billing  ")).toEqual({
+    description: "Billing",
+    message: "saved locally (not a git repository)",
+  });
+  expect(await Bun.file(join(root, "specs/billing/display-name.txt")).text()).toBe("Billing\n");
+  expect(await setFolderDescription(root, "specs/billing", "Billing")).toEqual({
+    description: "Billing",
+    message: "display name unchanged",
+  });
+  // only the first non-blank line is the name; the rest is kept
+  await Bun.write(join(root, "specs/billing/display-name.txt"), "\nBilling\nNotes for GitHub readers\n");
+  await setFolderDescription(root, "billing", "Invoices");
+  expect(await Bun.file(join(root, "specs/billing/display-name.txt")).text()).toBe(
+    "\nInvoices\nNotes for GitHub readers\n",
+  );
+  expect(await listFolders(root)).toEqual(["specs/billing"]);
+  expect(await setFolderDescription(root, "specs/billing", "   ")).toEqual({
+    description: null,
+    message: "deleted locally (not a git repository)",
+  });
+  expect(await Bun.file(join(root, "specs/billing/display-name.txt")).exists()).toBe(false);
+  expect(await readFolderDescription(root, "specs/billing")).toBeNull();
+  expect(await setFolderDescription(root, "specs/billing", "")).toEqual({
+    description: null,
+    message: "no display name to clear",
+  });
+  await expect(setFolderDescription(root, "specs/ghost", "Ghost")).rejects.toThrow("Folder not found: specs/ghost");
+  await expect(setFolderDescription(root, "specs", "Root")).rejects.toThrow("Folder name is required");
 });
 
 // The sidebar labels a described folder by its description and every other
@@ -411,12 +465,12 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
     });
 
     // specs/ui/folders.feature.md "describe a folder": a folder with no
-    // feature but a description.txt is one git tracks, so renaming it is a
+    // feature but a display-name.txt is one git tracks, so renaming it is a
     // `git mv`, committed and pushed, and the description comes along.
-    test("renameFolder git-mvs a folder holding only a description.txt", async () => {
+    test("renameFolder git-mvs a folder holding only a display-name.txt", async () => {
       const { a, b } = await twoClones(root, {
         "specs/keep.feature.md": "# Keep\n",
-        "specs/billing/description.txt": "Billing and invoicing\n",
+        "specs/billing/display-name.txt": "Billing and invoicing\n",
       });
       const result = await renameFolder(a, "specs/billing", "Invoices");
       expect(result).toEqual({ path: "specs/invoices", message: "renamed, committed and pushed" });
@@ -428,10 +482,10 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
 
     // ...and deleting it needs no "and its features" confirmation — there
     // are none — but is a `git rm -r` all the same, not a local sweep.
-    test("deleteFolder removes a folder holding only a description.txt, committed and pushed", async () => {
+    test("deleteFolder removes a folder holding only a display-name.txt, committed and pushed", async () => {
       const { a, b } = await twoClones(root, {
         "specs/keep.feature.md": "# Keep\n",
-        "specs/billing/description.txt": "Billing and invoicing\n",
+        "specs/billing/display-name.txt": "Billing and invoicing\n",
       });
       const result = await deleteFolder(a, "specs/billing");
       expect(result).toEqual({ features: 0, message: "deleted, committed and pushed" });
@@ -441,6 +495,44 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       await git(b, "pull");
       expect(await listFolders(b)).toEqual([]);
       expect(await readFeature(b, "specs/keep.feature.md")).toBe("# Keep\n");
+    });
+
+    // specs/ui/folders.feature.md "edit a folder's display name": the new
+    // name lands in display-name.txt, committed and pushed; clearing it is a
+    // `git rm`. The other clone sees each on pull.
+    test("setFolderDescription commits and pushes display-name.txt, and git-rms it when cleared", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+      });
+      const set = await setFolderDescription(a, "specs/billing", "Billing and invoicing");
+      expect(set).toEqual({ description: "Billing and invoicing", message: "committed and pushed" });
+      let log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Set folder display name: specs/billing -> Billing and invoicing");
+      await git(b, "pull");
+      expect(await listFolderDescriptions(b)).toEqual({ "specs/billing": "Billing and invoicing" });
+
+      const cleared = await setFolderDescription(a, "specs/billing", "");
+      expect(cleared).toEqual({ description: null, message: "deleted, committed and pushed" });
+      log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Clear folder display name: specs/billing");
+      await git(b, "pull");
+      expect(await listFolderDescriptions(b)).toEqual({});
+      expect(await listFolders(b)).toEqual(["specs/billing"]);
+    });
+
+    // A legacy description.txt moves over to display-name.txt in the same
+    // commit, its extra lines with it.
+    test("setFolderDescription moves a legacy description.txt to display-name.txt", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+        "specs/billing/description.txt": "Billing\nMore about billing\n",
+      });
+      await setFolderDescription(a, "specs/billing", "Invoices");
+      await git(b, "pull");
+      expect(await Bun.file(join(b, "specs/billing/description.txt")).exists()).toBe(false);
+      expect(await Bun.file(join(b, "specs/billing/display-name.txt")).text()).toBe("Invoices\nMore about billing\n");
+      const status = await git(a, "status", "--porcelain");
+      expect(status.stdout.toString()).toBe("");
     });
   });
 }

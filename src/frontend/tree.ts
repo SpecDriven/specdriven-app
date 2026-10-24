@@ -12,7 +12,7 @@ export interface FolderNode {
   /** Full folder path relative to the repo root; `specs` for the root node. */
   path: string;
   /**
-   * What the folder's description.txt says (specs/ui/folders.feature.md
+   * What the folder's display-name.txt says (specs/ui/folders.feature.md
    * "describe a folder"): the sidebar shows it in place of `name`.
    */
   description?: string;
