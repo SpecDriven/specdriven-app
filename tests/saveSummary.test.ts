@@ -172,10 +172,12 @@ describe("batches", () => {
       { path: "specs/app/plugins.feature.md", before: null, after: "# Plugins\n" },
       { path: "notebook/2026-10-17-x.md", before: "# X\n", after: "# X\n\nmore\n" },
       { path: "specs/app/description.txt", before: null, after: "The app\n" },
+      { path: "specs/folder-order.txt", before: "app\nui\n", after: "ui\napp\n" },
     ]);
-    expect(title).toBe("Edit 2 features, 1 notebook entry, 1 folder description");
+    expect(title).toBe("Edit 2 features, 1 notebook entry, 1 folder description, 1 folder order");
     expect(body).toContain("- Edit notebook entry: X");
     expect(body).toContain("- Describe folder: specs/app");
+    expect(body).toContain("- Reorder folders in: specs");
   });
 
   test("the same verb everywhere keeps it", () => {

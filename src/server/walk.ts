@@ -76,3 +76,25 @@ export const LEGACY_FOLDER_DISPLAY_NAME_FILE = "description.txt";
 export function isFolderDisplayNameFile(base: string): boolean {
   return base === FOLDER_DISPLAY_NAME_FILE || base === LEGACY_FOLDER_DISPLAY_NAME_FILE;
 }
+
+/**
+ * The file a folder's subfolder order lives in (specs/ui/folders.feature.md
+ * "order folders"): one subfolder name per line, in the order the sidebar
+ * shows them. A subfolder it does not name sorts after the named ones, by
+ * name. It sits in the parent folder — `specs/` itself for the top level.
+ */
+export const FOLDER_ORDER_FILE = "folder-order.txt";
+
+/** Whether a file's base name is a folder's order file. */
+export function isFolderOrderFile(base: string): boolean {
+  return base === FOLDER_ORDER_FILE;
+}
+
+/**
+ * Whether a file is one of a folder's own metadata files — a display name
+ * or a subfolder order — rather than content: a folder holding nothing else
+ * loses no feature when it goes.
+ */
+export function isFolderMetadataFile(base: string): boolean {
+  return isFolderDisplayNameFile(base) || isFolderOrderFile(base);
+}
