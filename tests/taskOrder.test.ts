@@ -20,7 +20,7 @@ import {
   parseOrder,
 } from "../src/server/pageOrder";
 import {
-  ROADMAP,
+  NOTEBOOK,
   TASKS,
   createPage,
   createPageFolder,
@@ -109,7 +109,7 @@ test("tasks list in name order until moved, and a move keeps its place", async (
   ]);
 
   // Only an ordered folder's pages move, and only before a page of the folder.
-  await expect(movePage(root, ROADMAP, "roadmap/x.md", "roadmap")).rejects.toThrow("name order");
+  await expect(movePage(root, NOTEBOOK, "notebook/x.md", "notebook")).rejects.toThrow("name order");
   await expect(movePage(root, TASKS, "tasks/alpha.md", "tasks", "tasks/sub/x.md")).rejects.toThrow(
     "is not in tasks",
   );
