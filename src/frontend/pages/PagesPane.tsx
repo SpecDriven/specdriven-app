@@ -10,14 +10,17 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ArrowDown,
+  ArrowUp,
   CalendarPlus,
   Check,
   CheckCircle2,
   Circle,
   Ellipsis,
   Eye,
+  FolderInput,
   Gavel,
   Link,
+  ListPlus,
   Pencil,
   Trash2,
   UserRound,
@@ -39,6 +42,7 @@ import { AddToCalendarForm, type EstimateProposal } from "../AddToCalendarForm";
 import { Breadcrumbs } from "../Breadcrumbs";
 import { MarkdownEditor } from "../MarkdownEditor";
 import { Menu } from "../Menu";
+import { NewFolderIcon } from "../ActionIcons";
 import { Popover } from "../Popover";
 import { PageSkeleton } from "../Skeleton";
 import { SaveIndicator, toast } from "../Toasts";
@@ -48,10 +52,13 @@ import { createPromiseQueue } from "../promiseQueue";
 import { shareUrl } from "../shareLink";
 import { cleanLine } from "../../server/text";
 import {
+  dropPlacement,
+  pageFolderOf,
   pageGroups,
   pageListingMetaEqual,
   pageListingOf,
   pageRowTitle,
+  stepPlacement,
   usePageSettings,
   usePages,
   type PageTab,
@@ -810,16 +817,21 @@ export async function newPageFlow(
   store: PagesStore,
   promptWithChoice: PromptWithChoice,
   navigate: Navigate<PageRoute>,
+  /** The subfolder under the tab's folder to create it in — a folder's
+      "New task here" — or the top level. */
+  inFolder = "",
 ): Promise<void> {
   // A notebook entry is an observation or a decision
   // (specs/app/engineering-notebook.feature.md), so its dialog asks which
   // before it asks anything else; the folder is flat, so it says nothing
   // about subfolders. Every other page tab keeps the plain name prompt.
   const result = await promptWithChoice({
-    title: tab.dated ? "New entry" : `New ${tab.noun}`,
+    title: tab.dated ? "New entry" : inFolder ? `New ${tab.noun} in “${inFolder}”` : `New ${tab.noun}`,
     hint: tab.dated
       ? "Today's date goes in front of the file name, so the notebook reads in order."
-      : `Use folder/name to create inside a subfolder of ${tab.folder}.`,
+      : inFolder
+        ? undefined
+        : `Use folder/name to create inside a subfolder of ${tab.folder}.`,
     placeholder: tab.dated
       ? "A spec change lands before the code"
       : tab.folder === "tasks"
@@ -849,7 +861,10 @@ export async function newPageFlow(
   const res = await fetch(`/api/${tab.folder}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: input, ...(result?.choice ? { kind: result.choice } : {}) }),
+    body: JSON.stringify({
+      name: inFolder ? `${inFolder}/${input}` : input,
+      ...(result?.choice ? { kind: result.choice } : {}),
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
   if (!res.ok || !data.fileName) {
@@ -865,7 +880,11 @@ export async function newPageFlow(
  * then the pages grouped by their subfolder under the folder — the
  * notebook's entries by the month they were written in instead
  * (specs/app/engineering-notebook.feature.md) — each with a ⋯ menu: Rename,
- * Copy link, Delete.
+ * Copy link, Delete. An ordered tab — the tasks (specs/app/tasks.feature.md
+ * "Reorder tasks by dragging", "Task folder menu") — also lets a row be
+ * dragged into place, adds Move up, Move down and Move to folder… to its
+ * menu, and gives each subfolder the ⋯ menu a Specs folder has: New task
+ * here, New folder here, Rename, Delete.
  */
 export function PagesSidebar({
   tab,
@@ -884,9 +903,24 @@ export function PagesSidebar({
   /** The open page's editor, if the pane holds one of this tab's pages. */
   openPage: () => OpenPageHandle | null;
 }) {
-  const { pages, supersededBy } = usePages(store);
-  /** A row's ⋯ menu (file name), if open. */
+  const { pages, supersededBy, folders } = usePages(store);
+  /** A row's ⋯ menu (file name, or `folder:<path>` for a folder's), if open. */
   const [menu, setMenu] = useState<string | null>(null);
+  /** The page being dragged, if any — an ordered tab's only. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  /** Where it would land: on the edge of a row, or into a folder's top. */
+  const [dropAt, setDropAt] = useState<
+    { row: string; after: boolean } | { folder: string } | null
+  >(null);
+  const ordered = Boolean(tab.ordered);
+  const groups = tab.dated ? entryGroups(pages) : pageGroups(pages, ordered ? folders : []);
+  const folderPath = (dir: string) => (dir ? `${tab.folder}/${dir}` : tab.folder);
+  const folderMenuKey = (dir: string) => `folder:${dir}`;
+
+  const endDrag = () => {
+    setDragging(null);
+    setDropAt(null);
+  };
 
   /**
    * Rename a page: its `# heading` and its file both, so the url follows the
@@ -951,6 +985,158 @@ export function PagesSidebar({
     await store.load();
   };
 
+  /**
+   * Put a page in a folder before another of its pages, or last with null —
+   * what a drop, Move up, Move down and Move to folder… all come to. Within
+   * its folder only the order changes; into another the file moves, so the
+   * open editor lands what it holds first and follows it to its new url.
+   */
+  const placePage = async (fileName: string, folder: string, before: string | null) => {
+    const moving = pageFolderOf(fileName) !== folder;
+    const open = openPage();
+    if (moving && open?.fileName === fileName) await open.flush();
+    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(fileName)}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder, before }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
+    if (!res.ok || !data.fileName) {
+      toast.error(data.error ?? `Could not move the ${tab.noun}`);
+      return;
+    }
+    await store.load();
+    if (moving && openPage()?.fileName === fileName) navigate({ fileName: data.fileName });
+  };
+
+  /** The pages of one folder — its own, not its subfolders' — in order. */
+  const pagesIn = (folder: string) => pages.filter((p) => pageFolderOf(p.fileName) === folder);
+
+  /** Drop the dragged page on a row's edge, or into a folder's top. */
+  const dropOn = (target: { row: string; after: boolean } | { folder: string }) => {
+    const dragged = dragging;
+    endDrag();
+    if (dragged === null) return;
+    if ("folder" in target) {
+      const group = pagesIn(target.folder);
+      if (group[0]?.fileName === dragged) return;
+      void placePage(dragged, target.folder, group.find((p) => p.fileName !== dragged)?.fileName ?? null);
+      return;
+    }
+    const folder = pageFolderOf(target.row);
+    const before = dropPlacement(pagesIn(folder), dragged, target.row, target.after);
+    if (before !== undefined) void placePage(dragged, folder, before);
+  };
+
+  /** Move up / Move down: one step within the page's own folder. */
+  const stepPage = (page: PageListing, step: -1 | 1) => {
+    const folder = pageFolderOf(page.fileName);
+    const before = stepPlacement(pagesIn(folder), page.fileName, step);
+    if (before !== undefined) void placePage(page.fileName, folder, before);
+  };
+
+  /** Move to folder…: any other folder of the tab, the top level included. */
+  const movePagePrompt = async (page: PageListing) => {
+    const from = pageFolderOf(page.fileName);
+    const options = [tab.folder, ...folders]
+      .filter((f) => f !== from)
+      .map((f) => ({ value: f, label: f === tab.folder ? `Top of ${tab.title}` : f.slice(tab.folder.length + 1) }));
+    const to = await app.pick({
+      title: `Move “${page.name}”`,
+      hint: "To another folder — a git mv, committed and pushed.",
+      placeholder: "Find a folder…",
+      options,
+      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
+    });
+    if (to === null) return;
+    await placePage(page.fileName, to, null);
+  };
+
+  /** New folder: at the top level from the sidebar's button, else inside one. */
+  const createFolderIn = async (dir: string) => {
+    const input = await app.prompt({
+      title: dir ? `New folder in “${dir}”` : "New folder",
+      hint: dir ? undefined : "Use / for nesting.",
+      confirmLabel: "Create folder",
+    });
+    if (!input) return;
+    const res = await fetch(`/api/${tab.folder}-folders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: dir ? `${dir}/${input}` : input }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not create the folder");
+      return;
+    }
+    await store.load();
+  };
+
+  /** Rename a folder: it keeps its place, and its tasks' urls follow it. */
+  const renameFolder = async (dir: string) => {
+    const path = folderPath(dir);
+    const current = dir.split("/").pop()!;
+    const name = await app.prompt({
+      title: "Rename folder",
+      hint: "The folder keeps its place; names are slugified like file names.",
+      initial: current,
+      confirmLabel: "Rename",
+    });
+    if (!name || cleanLine(name) === current) return;
+    const open = openPage();
+    const inside = open !== null && open.fileName.startsWith(`${path}/`);
+    if (inside) await open.flush();
+    const res = await fetch(`/api/${tab.folder}-folders/${encodeURIComponent(path)}/rename`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: cleanLine(name) }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
+    if (!res.ok || !data.path) {
+      toast.error(data.error ?? "Could not rename the folder");
+      return;
+    }
+    await store.load();
+    if (data.path === path) return;
+    toast.success(`Renamed folder to ${data.path.split("/").pop()}.`);
+    const still = openPage();
+    if (inside && still?.fileName.startsWith(`${path}/`)) {
+      navigate({ fileName: `${data.path}${still.fileName.slice(path.length)}` });
+    }
+  };
+
+  /** Delete a folder and the tasks in it, named in the confirmation. */
+  const removeFolder = async (dir: string) => {
+    const path = folderPath(dir);
+    const count = pages.filter((p) => p.fileName.startsWith(`${path}/`)).length;
+    const nouns = `${tab.noun}${count === 1 ? "" : "s"}`;
+    const ok = await app.confirm({
+      title: "Delete folder",
+      body:
+        count === 0
+          ? `Delete the empty folder “${dir}”?`
+          : `Delete “${dir}” and the ${count} ${nouns} in it? They are removed from the repository, committed and pushed.`,
+      confirmLabel: count === 0 ? "Delete folder" : `Delete folder and ${count} ${nouns}`,
+    });
+    if (!ok) return;
+    const open = openPage();
+    if (open?.fileName.startsWith(`${path}/`)) {
+      open.seal();
+      app.goHome();
+    }
+    const res = await fetch(`/api/${tab.folder}-folders/${encodeURIComponent(path)}`, {
+      method: "DELETE",
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? "Could not delete the folder");
+      return;
+    }
+    toast.success(`Deleted folder “${dir}”${data.message ? ` — ${data.message}` : ""}.`);
+    await store.load();
+  };
+
   return (
     <div
       className="side-panel page-list"
@@ -962,18 +1148,123 @@ export function PagesSidebar({
         <button onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}>
           + New {tab.noun}
         </button>
+        {ordered && <button onClick={() => void createFolderIn("")}>+ New folder</button>}
       </div>
       <div className="page-rows">
-        {(tab.dated ? entryGroups : pageGroups)(pages).map(({ dir, pages: group }) => (
+        {groups.map(({ dir, pages: group }) => (
           <div key={dir || "."}>
-            {dir && <div className="page-group">{dir}</div>}
-            {group.map((page) => {
+            {dir && !ordered && <div className="page-group">{dir}</div>}
+            {dir && ordered && (
+              <div
+                className={`page-group page-folder${
+                  dropAt && "folder" in dropAt && dropAt.folder === folderPath(dir) ? " drop-target" : ""
+                }`}
+                data-folder={folderPath(dir)}
+                onDragOver={(e) => {
+                  if (dragging === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (!(dropAt && "folder" in dropAt && dropAt.folder === folderPath(dir))) {
+                    setDropAt({ folder: folderPath(dir) });
+                  }
+                }}
+                onDrop={(e) => {
+                  if (dragging === null) return;
+                  e.preventDefault();
+                  dropOn({ folder: folderPath(dir) });
+                }}
+              >
+                <span className="page-folder-name">{dir}</span>
+                <span className="tree-row-menu">
+                  <Tooltip label="More actions">
+                    <button
+                      type="button"
+                      className="tree-menu-btn"
+                      aria-label={`Menu for folder ${dir}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menu === folderMenuKey(dir)}
+                      onClick={() =>
+                        setMenu((m) => (m === folderMenuKey(dir) ? null : folderMenuKey(dir)))
+                      }
+                    >
+                      <Ellipsis size={14} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  <Menu
+                    open={menu === folderMenuKey(dir)}
+                    onClose={() => setMenu(null)}
+                    label={`Menu for folder ${dir}`}
+                    className="tree-menu"
+                    containerSelector=".tree-row-menu"
+                    items={[
+                      {
+                        id: "new-page",
+                        label: `New ${tab.noun} here`,
+                        icon: <ListPlus size={13} />,
+                        onSelect: () =>
+                          void newPageFlow(tab, store, app.promptWithChoice, navigate, dir),
+                      },
+                      {
+                        id: "new-folder",
+                        label: "New folder here",
+                        icon: <NewFolderIcon size={13} />,
+                        onSelect: () => void createFolderIn(dir),
+                      },
+                      {
+                        id: "rename",
+                        label: "Rename",
+                        icon: <Pencil size={13} />,
+                        onSelect: () => void renameFolder(dir),
+                      },
+                      {
+                        id: "delete",
+                        label: "Delete",
+                        icon: <Trash2 size={13} />,
+                        danger: true,
+                        onSelect: () => void removeFolder(dir),
+                      },
+                    ]}
+                  />
+                </span>
+              </div>
+            )}
+            {group.map((page, i) => {
               const replaced = tab.dated ? supersededBy[page.fileName] : undefined;
               const here = page.fileName === active;
+              const edge =
+                dropAt && "row" in dropAt && dropAt.row === page.fileName
+                  ? dropAt.after
+                    ? " drop-after"
+                    : " drop-before"
+                  : "";
               return (
                 <div
                   key={page.fileName}
-                  className={`page-row${dir && !tab.dated ? " nested" : ""}${tab.dated ? " entry-row" : ""}${replaced ? " superseded" : ""}`}
+                  className={`page-row${dir && !tab.dated ? " nested" : ""}${tab.dated ? " entry-row" : ""}${replaced ? " superseded" : ""}${edge}${dragging === page.fileName ? " dragging" : ""}`}
+                  onDragOver={
+                    ordered
+                      ? (e) => {
+                          if (dragging === null) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          const box = e.currentTarget.getBoundingClientRect();
+                          const after = e.clientY > box.top + box.height / 2;
+                          if (!(dropAt && "row" in dropAt && dropAt.row === page.fileName && dropAt.after === after)) {
+                            setDropAt({ row: page.fileName, after });
+                          }
+                        }
+                      : undefined
+                  }
+                  onDrop={
+                    ordered
+                      ? (e) => {
+                          if (dragging === null) return;
+                          e.preventDefault();
+                          const box = e.currentTarget.getBoundingClientRect();
+                          dropOn({ row: page.fileName, after: e.clientY > box.top + box.height / 2 });
+                        }
+                      : undefined
+                  }
                 >
                   <a
                     href={pageLink(page.fileName)}
@@ -984,6 +1275,17 @@ export function PagesSidebar({
                         : pageRowTitle(page)
                     }
                     aria-current={here ? "page" : undefined}
+                    draggable={ordered || undefined}
+                    onDragStart={
+                      ordered
+                        ? (e) => {
+                            e.dataTransfer.setData("text/plain", pageLink(page.fileName));
+                            e.dataTransfer.effectAllowed = "move";
+                            setDragging(page.fileName);
+                          }
+                        : undefined
+                    }
+                    onDragEnd={ordered ? endDrag : undefined}
                     onClick={(e) =>
                       spaClick(e, () => navigate({ fileName: page.fileName }, { push: true }))
                     }
@@ -1019,6 +1321,30 @@ export function PagesSidebar({
                       className="tree-menu"
                       containerSelector=".tree-row-menu"
                       items={[
+                        ...(ordered
+                          ? [
+                              {
+                                id: "move-up",
+                                label: "Move up",
+                                icon: <ArrowUp size={13} />,
+                                disabled: i === 0,
+                                onSelect: () => stepPage(page, -1),
+                              },
+                              {
+                                id: "move-down",
+                                label: "Move down",
+                                icon: <ArrowDown size={13} />,
+                                disabled: i === group.length - 1,
+                                onSelect: () => stepPage(page, 1),
+                              },
+                              {
+                                id: "move",
+                                label: "Move to folder…",
+                                icon: <FolderInput size={13} />,
+                                onSelect: () => void movePagePrompt(page),
+                              },
+                            ]
+                          : []),
                         {
                           id: "rename",
                           label: "Rename",

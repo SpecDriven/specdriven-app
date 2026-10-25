@@ -21,12 +21,17 @@ import {
   NOTEBOOK,
   TASKS,
   createPage,
+  createPageFolder,
   deletePage,
+  deletePageFolder,
   ensurePageFolder,
   importPageDrift,
+  listPageFolders,
   listPages,
+  movePage,
   readPage,
   renamePageFile,
+  renamePageFolder,
   savePage,
   type PageFolder,
 } from "../../../server/pages";
@@ -147,12 +152,45 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
           return json(await setSupersedes(dir, params.file ?? "", { title: b.title.trim(), url }));
         });
       } else {
-        add("GET", base, async (dir) => json({ pages: await listPages(dir, kind) }));
+        // An ordered folder lists its subfolders too, empty ones included,
+        // so a folder just made has a row to drop a task on.
+        add("GET", base, async (dir) =>
+          json({
+            pages: await listPages(dir, kind),
+            ...(kind.ordered ? { folders: await listPageFolders(dir, kind) } : {}),
+          }),
+        );
         add("POST", base, async (dir, req) => {
           const b = await body<{ name?: unknown }>(req);
           if (typeof b?.name !== "string") return json({ error: "name is required" }, 400);
           return json({ fileName: await createPage(dir, kind, b.name) }, 201);
         });
+      }
+
+      // An ordered folder's own order and subfolders (specs/app/tasks
+      // .feature.md "Reorder tasks by dragging", "Task folder menu"): a page
+      // put before another page of a folder — or last, with no `before` —
+      // and the subfolders' ⋯ menu, as the Specs tree's folders have.
+      if (kind.ordered) {
+        add("POST", `${base}/:file/move`, async (dir, req, params) => {
+          const b = await body<{ folder?: unknown; before?: unknown }>(req);
+          if (typeof b?.folder !== "string") return json({ error: "folder is required" }, 400);
+          const before = typeof b.before === "string" ? b.before : null;
+          return json(await movePage(dir, kind, params.file ?? "", b.folder, before));
+        });
+        add("POST", `${base}-folders`, async (dir, req) => {
+          const b = await body<{ path?: unknown }>(req);
+          if (typeof b?.path !== "string") return json({ error: "path is required" }, 400);
+          return json({ path: await createPageFolder(dir, kind, b.path) }, 201);
+        });
+        add("POST", `${base}-folders/:path/rename`, async (dir, req, params) => {
+          const b = await body<{ name?: unknown }>(req);
+          if (typeof b?.name !== "string") return json({ error: "name is required" }, 400);
+          return json(await renamePageFolder(dir, kind, params.path ?? "", b.name));
+        });
+        add("DELETE", `${base}-folders/:path`, async (dir, _req, params) =>
+          json(await deletePageFolder(dir, kind, params.path ?? "")),
+        );
       }
 
       if (kind.folder === TASKS.folder) add("POST", `${base}/:file/estimate`, estimateTask);
