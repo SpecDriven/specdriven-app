@@ -7058,6 +7058,7 @@ export function App() {
     prompt,
     promptWithChoice,
     confirm,
+    pick,
     openSettings,
     openFeature: (fileName) => void openFeature(fileName, { push: true }),
     featureCreated: async (fileName) => {
