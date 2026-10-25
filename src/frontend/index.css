@@ -5484,8 +5484,68 @@ aside header .collapse-btn {
 }
 
 .page-row:hover .tree-menu-btn,
-.page-row:focus-within .tree-menu-btn {
+.page-row:focus-within .tree-menu-btn,
+.page-folder:hover .tree-menu-btn,
+.page-folder:focus-within .tree-menu-btn {
   opacity: 1;
+}
+
+/* A task folder's header (specs/app/tasks.feature.md "Task folder menu"):
+   the group label with the ⋯ a Specs folder carries, and a drop target that
+   puts a dragged task at the folder's top. */
+.page-group.page-folder {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-right: 0;
+  border-radius: var(--radius-sm);
+}
+
+.page-folder-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-folder .tree-menu-btn {
+  margin-right: 0.15rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.page-folder .tree-menu {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  font-size: 0.8125rem;
+}
+
+/* Where a dragged task would land (specs/app/tasks.feature.md "Reorder
+   tasks by dragging"): the same line on a row's edge a scenario drag draws. */
+.page-row.drop-before::before,
+.page-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0.4rem;
+  right: 0.4rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.page-row.drop-before::before {
+  top: -1px;
+}
+
+.page-row.drop-after::after {
+  bottom: -1px;
+}
+
+.page-row.dragging {
+  opacity: 0.5;
 }
 
 /* ---- Skeletons ---- */

@@ -17,6 +17,13 @@ export interface PageFolder {
    * interchange format and a hand-made subfolder must not disappear.
    */
   flat?: boolean;
+  /**
+   * Whether the folder keeps its pages in an order of its own — an
+   * `order.txt` in each folder (src/server/pageOrder.ts) — rather than in
+   * name order: the tasks, which are dragged into the order they are to be
+   * done in (specs/app/tasks.feature.md "Reorder tasks by dragging").
+   */
+  ordered?: boolean;
 }
 
 export const ROADMAP_FOLDER = "roadmap";
@@ -27,7 +34,7 @@ export const NOTEBOOK_FOLDER = "notebook";
 export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page" };
 
 /** The tasks folder: the same pages, called tasks (tasks.feature.md). */
-export const TASKS: PageFolder = { folder: TASKS_FOLDER, label: "task" };
+export const TASKS: PageFolder = { folder: TASKS_FOLDER, label: "task", ordered: true };
 
 /**
  * The notebook folder: the same pages again, called entries and kept flat

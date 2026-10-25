@@ -35,6 +35,7 @@ import {
 } from "../git";
 import { featureTextError, parseFeature, parsePage, type Feature, type MarkdownPage } from "../parser";
 import { isPageFile, isPageFolderPath } from "../pages";
+import { isPageOrderFile, mergeOrder } from "../pageOrder";
 import { CUSTOM_ATTRIBUTES_FILE } from "../customAttributes";
 import { mergeText, threeWayFeature, threeWayPage } from "./merge";
 import { docToPage, projectPage, reconcilePage } from "./page";
@@ -207,6 +208,16 @@ async function autoResolveOne(
   // version; markdown that arrived without operations folds in three-way.
   if (isPageFolderPath(path) && isPageFile(path)) {
     return autoResolvePage(dataDir, path);
+  }
+  // A folder's task order (specs/app/tasks.feature.md "Reorder tasks by
+  // dragging"): two teammates dragged at once. Ours stands, and every task
+  // only theirs names is kept, so the sync never stalls on it.
+  if (isPageFolderPath(path) && isPageOrderFile(path)) {
+    const ours = (await stageVersion(dataDir, path, 2)) ?? "";
+    const theirs = (await stageVersion(dataDir, path, 3)) ?? "";
+    const base = (await stageVersion(dataDir, path, 1)) ?? "";
+    await resolveConflict(dataDir, path, mergeOrder(base, ours, theirs));
+    return null;
   }
   // The custom attribute definitions (specs/app/custom-attributes.feature.md
   // "The definitions file is shared with the team"): plain text two

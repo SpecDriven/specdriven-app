@@ -34,6 +34,13 @@ export interface PageTab {
    * pages by subfolder, in name order.
    */
   dated?: boolean;
+  /**
+   * Whether its pages keep an order of their own, dragged into place, and
+   * its subfolders a ⋯ menu like the Specs tree's folders — the tasks
+   * (specs/app/tasks.feature.md "Reorder tasks by dragging", "Task folder
+   * menu"). The server keeps the order (src/server/pageOrder.ts).
+   */
+  ordered?: boolean;
   icon: LucideIcon;
   /** The `g` chord that opens the tab on its first page. */
   shortcut: string;
@@ -59,6 +66,7 @@ export const TASKS_TAB: PageTab = {
   empty: "No tasks yet",
   done: true,
   calendar: true,
+  ordered: true,
   icon: ListTodo,
   shortcut: "g t",
   order: 20,
@@ -84,11 +92,14 @@ export interface PagesState {
   /** For each superseded notebook entry, the entry that replaced it
       (specs/app/engineering-notebook.feature.md); empty elsewhere. */
   supersededBy: Record<string, PageListing>;
+  /** An ordered tab's subfolders, repo-relative — empty ones included, so a
+      folder just made has a row before a page lands in it. */
+  folders: string[];
   /** Whether `GET /api/<folder>` has answered since the last reset. */
   loaded: boolean;
 }
 
-const EMPTY: PagesState = { pages: [], supersededBy: {}, loaded: false };
+const EMPTY: PagesState = { pages: [], supersededBy: {}, folders: [], loaded: false };
 
 export interface PagesStore {
   subscribe(listener: () => void): () => void;
@@ -128,10 +139,12 @@ export function createPagesStore(folder: string): PagesStore {
       const data = (await res.json().catch(() => ({}))) as {
         pages?: PageListing[];
         supersededBy?: Record<string, PageListing>;
+        folders?: string[];
       };
       set({
         pages: Array.isArray(data.pages) ? data.pages : [],
         supersededBy: data.supersededBy ?? {},
+        folders: Array.isArray(data.folders) ? data.folders : [],
         loaded: true,
       });
     },
@@ -194,9 +207,21 @@ export function pageListingOf(page: PageListing): PageListing {
   };
 }
 
-/** Pages grouped by the subfolder under their own folder, top level first. */
-export function pageGroups(pages: PageListing[]): { dir: string; pages: PageListing[] }[] {
+/**
+ * Pages grouped by the subfolder under their own folder, top level first,
+ * each group in the order the server listed it. `folders` — repo-relative,
+ * as an ordered tab's listing names them — adds a group for each subfolder
+ * that holds no page yet.
+ */
+export function pageGroups(
+  pages: PageListing[],
+  folders: string[] = [],
+): { dir: string; pages: PageListing[] }[] {
   const groups = new Map<string, PageListing[]>();
+  for (const folder of folders) {
+    const dir = folder.split("/").slice(1).join("/");
+    if (dir) groups.set(dir, []);
+  }
   for (const page of pages) {
     const dir = page.fileName.split("/").slice(1, -1).join("/");
     const list = groups.get(dir) ?? [];
@@ -206,6 +231,49 @@ export function pageGroups(pages: PageListing[]): { dir: string; pages: PageList
   return [...groups]
     .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
     .map(([dir, list]) => ({ dir, pages: list }));
+}
+
+/** The repo-relative folder a page is in: `tasks/sub/a.md` -> `tasks/sub`. */
+export function pageFolderOf(fileName: string): string {
+  return fileName.slice(0, fileName.lastIndexOf("/"));
+}
+
+/**
+ * Where a page dropped on a row of a group lands, as `POST
+ * /api/<folder>/:file/move` takes it (specs/app/tasks.feature.md "Reorder
+ * tasks by dragging"): the page it goes before, or null for after the
+ * group's last. Undefined when the drop would leave it where it is.
+ */
+export function dropPlacement(
+  group: PageListing[],
+  dragged: string,
+  target: string,
+  after: boolean,
+): string | null | undefined {
+  if (dragged === target) return undefined;
+  const others = group.map((p) => p.fileName).filter((f) => f !== dragged);
+  const at = others.indexOf(target);
+  if (at === -1) return undefined;
+  const before = others[after ? at + 1 : at] ?? null;
+  const from = group.findIndex((p) => p.fileName === dragged);
+  if (from !== -1 && (group[from + 1]?.fileName ?? null) === before) return undefined;
+  return before;
+}
+
+/**
+ * Move up / Move down from a task's ⋯ menu: the page it then goes before
+ * (null: last), or undefined at the top or the bottom of its group already.
+ */
+export function stepPlacement(
+  group: PageListing[],
+  fileName: string,
+  step: -1 | 1,
+): string | null | undefined {
+  const at = group.findIndex((p) => p.fileName === fileName);
+  if (at === -1) return undefined;
+  if (step === -1) return at === 0 ? undefined : group[at - 1]!.fileName;
+  if (at === group.length - 1) return undefined;
+  return group[at + 2]?.fileName ?? null;
 }
 
 /** A page row's tooltip: its name, and whatever else the row only hints at. */
