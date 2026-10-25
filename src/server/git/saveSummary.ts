@@ -12,7 +12,7 @@ import { STATE_DIR } from "../state";
 import { parseFeature, parsePage, titleFromFileName } from "../parser";
 import type { Feature, Scenario } from "../parser";
 import { PAGE_FOLDERS, isPageFile } from "../pageFolders";
-import { isFeatureFile, isFolderDisplayNameFile } from "../walk";
+import { isFeatureFile, isFolderDisplayNameFile, isFolderOrderFile } from "../walk";
 
 /** One file the working tree holds differently from HEAD. */
 export interface ChangedFile {
@@ -43,7 +43,7 @@ export const FALLBACK_TITLE = "Auto-save scenarios";
 /** The title when only the app's own documents changed — a drifted file absorbed, say. */
 export const DOCUMENTS_TITLE = "Update app documents";
 
-type Verb = "Add" | "Edit" | "Delete" | "Move" | "Rename" | "Describe" | "Save";
+type Verb = "Add" | "Edit" | "Delete" | "Move" | "Rename" | "Describe" | "Reorder" | "Save";
 
 type ScenarioChange = "add" | "edit" | "remove" | "publish";
 
@@ -96,6 +96,12 @@ function entryFor(file: ChangedFile): Entry {
   if (isFolderDisplayNameFile(base)) {
     const folder = path.slice(0, -(base.length + 1)) || ".";
     return { ...blank, verb: after === null ? "Delete" : "Describe", noun: "folder description", name: folder };
+  }
+  if (isFolderOrderFile(base)) {
+    // The subfolder order (specs/ui/folders.feature.md "order folders"),
+    // named by the folder whose subfolders it orders.
+    const folder = path.slice(0, -(base.length + 1)) || ".";
+    return { ...blank, verb: after === null ? "Delete" : "Reorder", noun: "folder order", name: folder };
   }
   const kind = PAGE_FOLDERS.find(({ folder }) => path.startsWith(`${folder}/`));
   if (kind && isPageFile(base)) {
@@ -167,6 +173,7 @@ function mergeMoves(entries: Entry[]): Entry[] {
 function singleTitle(e: Entry): string {
   if (e.noun === "feature" && e.verb === "Edit") return featureTitle(e);
   if (e.verb === "Describe") return `Describe folder: ${e.name}`;
+  if (e.verb === "Reorder") return `Reorder folders in: ${e.name}`;
   if (e.verb === "Save") return `Save ${e.name}`;
   return `${e.verb} ${e.noun}: ${e.name}`;
 }
@@ -234,6 +241,7 @@ function fit(title: string): string {
 function bodyLine(e: Entry): string {
   if (e.verb === "Save") return `- Save ${e.name}`;
   if (e.verb === "Describe") return `- Describe folder: ${e.name}`;
+  if (e.verb === "Reorder") return `- Reorder folders in: ${e.name}`;
   const head = `- ${e.verb} ${e.noun}: ${e.name}`;
   if (e.noun !== "feature" || e.verb !== "Edit") return head;
   const parts = e.scenarios.map((s) => `${s.change} "${s.name}"`);

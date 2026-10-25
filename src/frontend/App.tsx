@@ -205,7 +205,9 @@ import {
   buildTree,
   featuresBeneath,
   findFolder,
+  folderDrop,
   folderLabel,
+  folderNamesMoved,
   folderOptions,
   folderRenamed,
   scenarioDrop,
@@ -955,6 +957,8 @@ interface Listing {
   folders: string[];
   /** Folder path → what its display-name.txt says (specs/ui/folders.feature.md "describe a folder"). */
   folderDescriptions: Record<string, string>;
+  /** Folder path → its subfolders in order, from its folder-order.txt ("order folders"); `specs` for the top level. */
+  folderOrders: Record<string, string[]>;
   members: ProjectMember[];
   codeRepo: string | null;
   /** Whether the repo writes authorship into its feature files
@@ -1039,6 +1043,10 @@ export async function fetchListing(
           folderDescriptions:
             data.folderDescriptions && typeof data.folderDescriptions === "object"
               ? (data.folderDescriptions as Record<string, string>)
+              : {},
+          folderOrders:
+            data.folderOrders && typeof data.folderOrders === "object"
+              ? (data.folderOrders as Record<string, string[]>)
               : {},
           members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
           codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
@@ -1235,6 +1243,13 @@ export function App() {
   const [folders, setFolders] = useState<string[]>([]);
   /** Folder path → description, for the folders that have a display-name.txt. */
   const [folderDescriptions, setFolderDescriptions] = useState<Record<string, string>>({});
+  /**
+   * Folder path → its subfolders in order (specs/ui/folders.feature.md
+   * "order folders"), for the folders that have a folder-order.txt; the top
+   * level's under `specs`. A move writes the new order here first, so the
+   * tree shows it while the save is out.
+   */
+  const [folderOrders, setFolderOrders] = useState<Record<string, string[]>>({});
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /**
@@ -1294,6 +1309,13 @@ export function App() {
     version: number;
     after: boolean;
   } | null>(null);
+  /**
+   * A folder being dragged among its siblings (specs/ui/folders.feature.md
+   * "order folders"), and the sibling row edge it would land on. Apart from
+   * `dragging` too: a folder never drops into a folder, only beside one.
+   */
+  const [folderDrag, setFolderDrag] = useState<{ parent: string; path: string } | null>(null);
+  const [folderDropAt, setFolderDropAt] = useState<{ path: string; after: boolean } | null>(null);
   // Full-text search (specs/search.feature.md) lives in the command palette
   // (⌘K, src/frontend/CommandPalette.tsx): open, with the text it starts on.
   const [palette, setPalette] = useState<{ query: string } | null>(null);
@@ -1743,6 +1765,7 @@ export function App() {
     setFeatures(listing.features);
     setFolders(listing.folders);
     setFolderDescriptions(listing.folderDescriptions);
+    setFolderOrders(listing.folderOrders);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
@@ -3064,7 +3087,7 @@ export function App() {
   // at once, with Undo; one with features asks again, naming how many, and
   // then goes with them — a `git rm -r` on the server, committed and pushed.
   const removeFolder = async (path: string) => {
-    const node = findFolder(buildTree(folders, features, folderDescriptions), path);
+    const node = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), path);
     const count = node ? featuresBeneath(node) : 0;
     const ok = await confirm({
       title: "Delete folder",
@@ -3189,6 +3212,48 @@ export function App() {
         ? `Folder display name set to "${data.description}" — ${data.message}.`
         : `Cleared the folder's display name — ${data.message}.`,
     );
+  };
+
+  /**
+   * Move the subfolder at `from` among `parent`'s subfolders to `to`
+   * (specs/ui/folders.feature.md "order folders") — one place for Move up /
+   * Move down, anywhere for a drop on a sibling's row — and save the order:
+   * the parent's folder-order.txt, committed and pushed. The tree shows the
+   * new order while the save is out, and falls back if it fails.
+   */
+  const moveFolderTo = async (parent: string, from: number, to: number) => {
+    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), parent)?.folders;
+    if (!siblings) return;
+    const names = folderNamesMoved(siblings, from, to);
+    if (!names) return;
+    const before = folderOrders;
+    setFolderOrders({ ...before, [parent]: names });
+    setTreeMenu(null);
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(parent)}/order`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folders: names }),
+      });
+      const data = (await res.json()) as { folders?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Could not move the folder");
+      await loadFeatures();
+    } catch (e) {
+      setFolderOrders(before);
+      toast.error(
+        e instanceof TypeError ? "Could not move the folder — is the server running?" : (e as Error).message,
+      );
+    }
+  };
+
+  /** Move a folder one place up or down among its siblings, from its menu or the palette. */
+  const reorderFolder = (path: string, delta: -1 | 1) => {
+    const parent = path.split("/").slice(0, -1).join("/");
+    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), parent)?.folders;
+    if (!siblings) return;
+    const i = siblings.findIndex((f) => f.path === path);
+    if (i < 0) return;
+    void moveFolderTo(parent, i, i + delta);
   };
 
   /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
@@ -5992,7 +6057,22 @@ export function App() {
    */
   const renderTree = (node: FolderNode, depth: number) => (
     <>
-      {node.folders.map((child) => (
+      {node.folders.map((child, i) => {
+        // Drag to reorder (specs/ui/folders.feature.md "order folders"):
+        // among this folder's siblings only, landing before or after the
+        // row it is over. A folder dragged elsewhere drops nowhere.
+        const siblingDrag = folderDrag !== null && folderDrag.parent === node.path;
+        const folderDropEdge =
+          siblingDrag && folderDropAt?.path === child.path && folderDrag!.path !== child.path
+            ? folderDropAt!.after
+              ? " drop-after"
+              : " drop-before"
+            : "";
+        const endFolderDrag = () => {
+          setFolderDrag(null);
+          setFolderDropAt(null);
+        };
+        return (
         <div
           key={child.path}
           onDragOver={(e) => {
@@ -6013,11 +6093,33 @@ export function App() {
           <div
             className={`folder-row${dragging !== null && dropTarget === child.path ? " drop-target" : ""}${
               child.path === selectedFolder ? " selected" : ""
-            }`}
+            }${folderDropEdge}${siblingDrag && folderDrag!.path === child.path ? " dragging" : ""}`}
             style={{ paddingLeft: `${depth * 0.9}rem` }}
+            onDragOver={(e) => {
+              if (!siblingDrag) return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+              const box = e.currentTarget.getBoundingClientRect();
+              const after = e.clientY > box.top + box.height / 2;
+              if (folderDropAt?.path !== child.path || folderDropAt.after !== after) {
+                setFolderDropAt({ path: child.path, after });
+              }
+            }}
+            onDrop={(e) => {
+              if (!siblingDrag) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const box = e.currentTarget.getBoundingClientRect();
+              const dragged = folderDrag!.path;
+              endFolderDrag();
+              const move = folderDrop(node.folders, dragged, child.path, e.clientY > box.top + box.height / 2);
+              if (move) void moveFolderTo(node.path, move.from, move.to);
+            }}
           >
             {/* Clicking selects the folder (specs/ui/folders.feature.md — "+
-                New folder" then creates inside it) and toggles its subtree. */}
+                New folder" then creates inside it) and toggles its subtree.
+                The button is the drag handle too ("order folders"). */}
             <button
               type="button"
               className="folder-toggle"
@@ -6026,6 +6128,14 @@ export function App() {
               aria-expanded={!collapsed.has(child.path)}
               data-folder={child.path}
               title={child.description ? child.path : undefined}
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation();
+                e.dataTransfer.setData("text/plain", child.path);
+                e.dataTransfer.effectAllowed = "move";
+                setFolderDrag({ parent: node.path, path: child.path });
+              }}
+              onDragEnd={endFolderDrag}
               onClick={() => {
                 setSelectedFolder(child.path);
                 toggleFolder(child.path);
@@ -6106,6 +6216,23 @@ export function App() {
                     icon: <Tag size={13} />,
                     onSelect: () => void editFolderDisplayName(child.path),
                   },
+                  // Move up / Move down (specs/ui/folders.feature.md "order
+                  // folders"): the order among its siblings is the user's,
+                  // kept in the parent's folder-order.txt.
+                  {
+                    id: "move-up",
+                    label: "Move up",
+                    icon: <ArrowUp size={13} />,
+                    disabled: i === 0,
+                    onSelect: () => void moveFolderTo(node.path, i, i - 1),
+                  },
+                  {
+                    id: "move-down",
+                    label: "Move down",
+                    icon: <ArrowDown size={13} />,
+                    disabled: i === node.folders.length - 1,
+                    onSelect: () => void moveFolderTo(node.path, i, i + 1),
+                  },
                   {
                     id: "delete",
                     label: "Delete",
@@ -6119,7 +6246,8 @@ export function App() {
           </div>
           {!collapsed.has(child.path) && <div role="group">{renderTree(child, depth + 1)}</div>}
         </div>
-      ))}
+        );
+      })}
       {node.features.map((f) => featureItem(f, depth))}
     </>
   );
@@ -6302,7 +6430,7 @@ export function App() {
   const scenarioNav =
     selected && editedEntry
       ? scenarioNeighbors(
-          scenarioSequence(buildTree(folders, features, folderDescriptions), selected, feature),
+          scenarioSequence(buildTree(folders, features, folderDescriptions, folderOrders), selected, feature),
           selected,
           editedEntry,
         )
@@ -6634,7 +6762,7 @@ export function App() {
   const moveFeaturePrompt = async (fileName: string | null = selected) => {
     if (!fileName) return;
     const from = fileName.slice(0, fileName.lastIndexOf("/"));
-    const options = folderOptions(buildTree(folders, features, folderDescriptions), from);
+    const options = folderOptions(buildTree(folders, features, folderDescriptions, folderOrders), from);
     const to = await pick({
       title: `Move “${fileStem(fileName)}”`,
       hint: "To another folder — a git mv, committed and pushed.",
@@ -6669,6 +6797,15 @@ export function App() {
             `Edit display name of folder “${selectedFolder.split("/").pop()}”`,
             <Tag size={14} />,
             () => void editFolderDisplayName(selectedFolder),
+          ),
+          action("move-folder-up", `Move folder “${selectedFolder.split("/").pop()}” up`, <ArrowUp size={14} />, () =>
+            reorderFolder(selectedFolder, -1),
+          ),
+          action(
+            "move-folder-down",
+            `Move folder “${selectedFolder.split("/").pop()}” down`,
+            <ArrowDown size={14} />,
+            () => reorderFolder(selectedFolder, 1),
           ),
           action("delete-folder", `Delete folder “${selectedFolder.split("/").pop()}”`, <Trash2 size={14} />, () =>
             void removeFolder(selectedFolder),
@@ -8863,7 +9000,7 @@ export function App() {
               void moveTo(dragging, "");
             }}
           >
-            {renderTree(buildTree(folders, features, folderDescriptions), 0)}
+            {renderTree(buildTree(folders, features, folderDescriptions, folderOrders), 0)}
             {features.length === 0 && folders.length === 0 && (
               <p className="empty">No feature files yet</p>
             )}

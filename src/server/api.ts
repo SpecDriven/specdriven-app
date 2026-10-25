@@ -85,6 +85,7 @@ import {
   listFeatures,
   listFolders,
   listFolderDescriptions,
+  listFolderOrders,
   readFeatureForEditor,
   readFeatureView,
   createFeature,
@@ -92,6 +93,7 @@ import {
   deleteFolder,
   renameFolder,
   setFolderDescription,
+  setFolderOrder,
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
@@ -1825,6 +1827,9 @@ const getFeatures = withDataDir(async (dir) => {
     // What each described folder's display-name.txt says (specs/ui/
     // folders.feature.md "describe a folder") — the sidebar's label for it.
     folderDescriptions: await listFolderDescriptions(dir),
+    // Each folder's subfolder order, from its folder-order.txt (specs/ui/
+    // folders.feature.md "order folders") — how the sidebar sorts them.
+    folderOrders: await listFolderOrders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
     // Authorship in the feature files (specs/app/specs-authorship.feature.md)
@@ -2181,6 +2186,19 @@ const putFolderDescription = withDataDir(async (dir, req, params) => {
   const body = (await req.json()) as { description?: string };
   try {
     return json(await setFolderDescription(dir, params.path!, body.description ?? ""));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/ui/folders.feature.md "order folders": writes the folder's
+// folder-order.txt — its subfolders, one per line, in the order the sidebar
+// shows them — committed and pushed. `specs` orders the top level.
+const putFolderOrder = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { folders?: unknown };
+  if (!Array.isArray(body.folders)) return json({ error: "folders must be a list of folder names" }, 400);
+  try {
+    return json(await setFolderOrder(dir, params.path!, body.folders as string[]));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -3058,6 +3076,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/folders/:path", deleteFolderRoute],
   ["POST", "/api/folders/:path/rename", postRenameFolder],
   ["PUT", "/api/folders/:path/description", putFolderDescription],
+  ["PUT", "/api/folders/:path/order", putFolderOrder],
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
