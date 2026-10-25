@@ -38,7 +38,8 @@ export interface PageTab {
    * Whether its pages keep an order of their own, dragged into place, and
    * its subfolders a ⋯ menu like the Specs tree's folders — the tasks
    * (specs/app/tasks.feature.md "Reorder tasks by dragging", "Task folder
-   * menu"). The server keeps the order (src/server/pageOrder.ts).
+   * menu") and the roadmap's pages (specs/app/roadmap.feature.md "Reorder
+   * roadmap pages"). The server keeps the order (src/server/pageOrder.ts).
    */
   ordered?: boolean;
   icon: LucideIcon;
@@ -54,6 +55,7 @@ export const ROADMAP_TAB: PageTab = {
   noun: "page",
   empty: "No roadmap pages yet",
   done: false,
+  ordered: true,
   icon: MapIcon,
   shortcut: "g r",
   order: 10,

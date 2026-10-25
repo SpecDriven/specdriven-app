@@ -881,7 +881,8 @@ export async function newPageFlow(
  * notebook's entries by the month they were written in instead
  * (specs/app/engineering-notebook.feature.md) — each with a ⋯ menu: Rename,
  * Copy link, Delete. An ordered tab — the tasks (specs/app/tasks.feature.md
- * "Reorder tasks by dragging", "Task folder menu") — also lets a row be
+ * "Reorder tasks by dragging", "Task folder menu") and the roadmap
+ * (specs/app/roadmap.feature.md "Reorder roadmap pages") — also lets a row be
  * dragged into place, adds Move up, Move down and Move to folder… to its
  * menu, and gives each subfolder the ⋯ menu a Specs folder has: New task
  * here, New folder here, Rename, Delete.
