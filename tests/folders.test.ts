@@ -8,13 +8,16 @@ import {
   deleteFolder,
   listFeatures,
   listFolderDescriptions,
+  listFolderOrders,
   listFolders,
   moveFeature,
   readFolderDescription,
+  readFolderOrder,
   readFeature,
   renameFeature,
   renameFolder,
   setFolderDescription,
+  setFolderOrder,
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
@@ -22,7 +25,9 @@ import {
   buildTree,
   featuresBeneath,
   findFolder,
+  folderDrop,
   folderLabel,
+  folderNamesMoved,
   folderOptions,
   folderRenamed,
 } from "../src/frontend/tree";
@@ -387,6 +392,96 @@ test("buildTree carries folder descriptions; folderLabel falls back to the name"
   expect(findFolder(buildTree(["specs/billing"], []), "specs/billing")!.description).toBeUndefined();
 });
 
+// specs/ui/folders.feature.md "order folders": a folder-order.txt names a
+// folder's subfolders in the order the sidebar shows them — one per line,
+// blank and repeated lines dropped. The top level's lives in specs/ itself.
+test("readFolderOrder and listFolderOrders read folder-order.txt", async () => {
+  await mkdir(join(root, "specs/billing/sub"), { recursive: true });
+  await mkdir(join(root, "specs/billing/other"), { recursive: true });
+  await mkdir(join(root, "specs/alpha"), { recursive: true });
+  await Bun.write(join(root, "specs/folder-order.txt"), "billing\n\n alpha \nbilling\n");
+  await Bun.write(join(root, "specs/billing/folder-order.txt"), "sub\r\nother\r\n");
+  expect(await readFolderOrder(root, "specs")).toEqual(["billing", "alpha"]);
+  expect(await readFolderOrder(root, "")).toEqual(["billing", "alpha"]);
+  expect(await readFolderOrder(root, "billing")).toEqual(["sub", "other"]);
+  expect(await readFolderOrder(root, "specs/alpha")).toEqual([]);
+  expect(await listFolderOrders(root)).toEqual({
+    specs: ["billing", "alpha"],
+    "specs/billing": ["sub", "other"],
+  });
+  // the order file is not a feature, and not a folder
+  expect(await listFeatures(root)).toEqual([]);
+  expect(await listFolders(root)).toEqual([
+    "specs/alpha",
+    "specs/billing",
+    "specs/billing/other",
+    "specs/billing/sub",
+  ]);
+});
+
+// setFolderOrder takes the subfolders' own names, every one a direct
+// subfolder of the folder, and writes them one per line; the same order
+// again writes nothing.
+test("setFolderOrder writes folder-order.txt, refusing names that are not subfolders", async () => {
+  await mkdir(join(root, "specs/billing/sub"), { recursive: true });
+  await mkdir(join(root, "specs/billing/other"), { recursive: true });
+  await mkdir(join(root, "specs/alpha"), { recursive: true });
+  expect(await setFolderOrder(root, "specs", ["billing", " alpha "])).toEqual({
+    folders: ["billing", "alpha"],
+    message: "saved locally (not a git repository)",
+  });
+  expect(await Bun.file(join(root, "specs/folder-order.txt")).text()).toBe("billing\nalpha\n");
+  expect(await setFolderOrder(root, "", ["billing", "alpha"])).toEqual({
+    folders: ["billing", "alpha"],
+    message: "folder order unchanged",
+  });
+  expect(await setFolderOrder(root, "billing", ["other", "sub"])).toMatchObject({ folders: ["other", "sub"] });
+  expect(await Bun.file(join(root, "specs/billing/folder-order.txt")).text()).toBe("other\nsub\n");
+  // a partial list is allowed: the rest sort after it by name
+  expect(await setFolderOrder(root, "specs", ["alpha"])).toMatchObject({ folders: ["alpha"] });
+  await expect(setFolderOrder(root, "specs", ["ghost"])).rejects.toThrow("Not a folder in specs: ghost");
+  await expect(setFolderOrder(root, "specs", ["billing/sub"])).rejects.toThrow("Invalid folder name: billing/sub");
+  await expect(setFolderOrder(root, "specs", [])).rejects.toThrow("Folder order is required");
+  await expect(setFolderOrder(root, "specs/ghost", ["x"])).rejects.toThrow("Folder not found: specs/ghost");
+  // a renamed subfolder keeps its place in the parent's order
+  await setFolderOrder(root, "specs", ["billing", "alpha"]);
+  expect(await renameFolder(root, "specs/billing", "Invoices")).toMatchObject({ path: "specs/invoices" });
+  expect(await readFolderOrder(root, "specs")).toEqual(["invoices", "alpha"]);
+});
+
+// The sidebar puts a folder's subfolders in its folder-order.txt order, the
+// ones it leaves out after them by name; a stale name orders nothing.
+test("buildTree orders subfolders by folder order, the rest by name", () => {
+  const tree = buildTree(
+    ["specs/alpha", "specs/billing", "specs/billing/other", "specs/billing/sub", "specs/zeta"],
+    [{ fileName: "specs/billing/quotes.feature.md", name: "Quotes", scenarios: [] }],
+    {},
+    { specs: ["zeta", "ghost", "billing"], "specs/billing": ["sub"] },
+  );
+  expect(tree.folders.map((f) => f.name)).toEqual(["zeta", "billing", "alpha"]);
+  expect(findFolder(tree, "specs/billing")!.folders.map((f) => f.name)).toEqual(["sub", "other"]);
+  // without orders, by name
+  expect(buildTree(["specs/zeta", "specs/alpha"], []).folders.map((f) => f.name)).toEqual(["alpha", "zeta"]);
+});
+
+// Move up / Move down send every sibling in the new order; a drop on a
+// sibling's row lands before or after it, as a scenario drop does.
+test("folderNamesMoved and folderDrop", () => {
+  const siblings = ["a", "b", "c", "d"].map((name) => ({ name, path: `specs/${name}` }));
+  expect(folderNamesMoved(siblings, 1, 0)).toEqual(["b", "a", "c", "d"]);
+  expect(folderNamesMoved(siblings, 1, 2)).toEqual(["a", "c", "b", "d"]);
+  expect(folderNamesMoved(siblings, 0, 3)).toEqual(["b", "c", "d", "a"]);
+  expect(folderNamesMoved(siblings, 2, 2)).toBeNull();
+  expect(folderNamesMoved(siblings, 0, -1)).toBeNull();
+  expect(folderNamesMoved(siblings, 3, 4)).toBeNull();
+  expect(folderDrop(siblings, "specs/d", "specs/b", false)).toEqual({ from: 3, to: 1 });
+  expect(folderDrop(siblings, "specs/a", "specs/c", true)).toEqual({ from: 0, to: 2 });
+  expect(folderDrop(siblings, "specs/a", "specs/c", false)).toEqual({ from: 0, to: 1 });
+  expect(folderDrop(siblings, "specs/b", "specs/b", true)).toBeNull();
+  expect(folderDrop(siblings, "specs/b", "specs/a", true)).toBeNull();
+  expect(folderDrop(siblings, "specs/b", "specs/ghost", true)).toBeNull();
+});
+
 // The move flow runs on all three git engines (git-operations.md).
 for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
@@ -518,6 +613,32 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       await git(b, "pull");
       expect(await listFolderDescriptions(b)).toEqual({});
       expect(await listFolders(b)).toEqual(["specs/billing"]);
+    });
+
+    // specs/ui/folders.feature.md "order folders": the new order lands in
+    // folder-order.txt, committed and pushed, and a rename keeps the
+    // folder's place in it. The other clone sees each on pull.
+    test("setFolderOrder commits and pushes folder-order.txt; renameFolder keeps the place", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/alpha/one.feature.md": "# One\n",
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+      });
+      const set = await setFolderOrder(a, "specs", ["billing", "alpha"]);
+      expect(set).toEqual({ folders: ["billing", "alpha"], message: "committed and pushed" });
+      let log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Reorder folders in: specs");
+      await git(b, "pull");
+      expect(await listFolderOrders(b)).toEqual({ specs: ["billing", "alpha"] });
+
+      await renameFolder(a, "specs/billing", "Invoices");
+      expect(await readFolderOrder(a, "specs")).toEqual(["invoices", "alpha"]);
+      log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Reorder folders in: specs");
+      const status = await git(a, "status", "--porcelain");
+      expect(status.stdout.toString()).toBe("");
+      await git(b, "pull");
+      expect(await listFolderOrders(b)).toEqual({ specs: ["invoices", "alpha"] });
+      expect(await listFolders(b)).toEqual(["specs/alpha", "specs/invoices"]);
     });
 
     // A legacy description.txt moves over to display-name.txt in the same
