@@ -38,11 +38,17 @@ export function folderLabel(node: Pick<FolderNode, "name" | "description">): str
  * `descriptions` is the listing's folder-path → description map; a folder
  * in it carries its description on its node. Order is by folder name still —
  * the description is a label, not the folder's place in the tree.
+ *
+ * `orders` is the listing's folder-path → subfolder-name list, from each
+ * folder's folder-order.txt (specs/ui/folders.feature.md "order folders"):
+ * a folder's subfolders come in that order, the ones it leaves out after
+ * them by name. The root's order is keyed by `specs`.
  */
 export function buildTree(
   folders: string[],
   features: FeatureListing[],
   descriptions: Record<string, string> = {},
+  orders: Record<string, readonly string[]> = {},
 ): FolderNode {
   const root: FolderNode = { name: "", path: SPECS_FOLDER, folders: [], features: [] };
   const nodes = new Map<string, FolderNode>([[SPECS_FOLDER, root]]);
@@ -74,10 +80,62 @@ export function buildTree(
   }
 
   for (const node of nodes.values()) {
-    node.folders.sort((a, b) => a.name.localeCompare(b.name));
+    node.folders = orderedFolders(node.folders, orders[node.path] ?? []);
     node.features.sort((a, b) => a.name.localeCompare(b.name));
   }
   return root;
+}
+
+/**
+ * A folder's subfolders in the order its folder-order.txt gives them: the
+ * named ones first, in that order, then the rest by name. A name with no
+ * folder behind it is skipped.
+ */
+export function orderedFolders<T extends { name: string }>(folders: readonly T[], order: readonly string[]): T[] {
+  const rank = new Map(order.map((name, i) => [name, i] as const));
+  return folders.slice().sort((a, b) => {
+    const ra = rank.get(a.name);
+    const rb = rank.get(b.name);
+    if (ra !== undefined && rb !== undefined) return ra - rb;
+    if (ra !== undefined) return -1;
+    if (rb !== undefined) return 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * The folder names to save once the subfolder at `from` moves to `to`
+ * (specs/ui/folders.feature.md "order folders") — what Move up / Move down
+ * and a drop in the tree send the server: every sibling, in the new order.
+ * Null when the move goes nowhere.
+ */
+export function folderNamesMoved(siblings: readonly { name: string }[], from: number, to: number): string[] | null {
+  if (from < 0 || to < 0 || from >= siblings.length || to >= siblings.length || from === to) return null;
+  const names = siblings.map((f) => f.name);
+  const [moved] = names.splice(from, 1);
+  names.splice(to, 0, moved!);
+  return names;
+}
+
+/**
+ * Where a folder dragged onto a sibling's row lands ("order folders"): the
+ * same halves as a scenario drop — the upper half of `target` puts it just
+ * before, the lower half just after. The answer is the `from` / `to` pair
+ * folderNamesMoved takes, or null when the folder would stay put or either
+ * one is not among `siblings`.
+ */
+export function folderDrop(
+  siblings: readonly { path: string }[],
+  dragged: string,
+  target: string,
+  after: boolean,
+): { from: number; to: number } | null {
+  const from = siblings.findIndex((f) => f.path === dragged);
+  const over = siblings.findIndex((f) => f.path === target);
+  if (from < 0 || over < 0) return null;
+  const slot = over + (after ? 1 : 0);
+  const to = slot > from ? slot - 1 : slot;
+  return to === from ? null : { from, to };
 }
 
 /** One scenario row under a feature in the sidebar tree. */

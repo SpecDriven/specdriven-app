@@ -1128,7 +1128,9 @@ a.page-entry.done {
    (specs/ui/navigation.feature.md "reorder scenarios by dragging them in the
    tree"): a line on the edge of the row it goes before or after. */
 .tree-scenario-row.drop-before::before,
-.tree-scenario-row.drop-after::after {
+.tree-scenario-row.drop-after::after,
+.folder-row.drop-before::before,
+.folder-row.drop-after::after {
   content: "";
   position: absolute;
   left: 0.4rem;
@@ -1139,15 +1141,20 @@ a.page-entry.done {
   pointer-events: none;
 }
 
-.tree-scenario-row.drop-before::before {
+.tree-scenario-row.drop-before::before,
+.folder-row.drop-before::before {
   top: -1px;
 }
 
-.tree-scenario-row.drop-after::after {
+.tree-scenario-row.drop-after::after,
+.folder-row.drop-after::after {
   bottom: -1px;
 }
 
-.tree-scenario-row.dragging {
+/* The row being dragged — a scenario, or a folder among its siblings
+   (specs/ui/folders.feature.md "order folders"). */
+.tree-scenario-row.dragging,
+.folder-row.dragging {
   opacity: 0.5;
 }
 

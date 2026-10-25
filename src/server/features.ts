@@ -1,10 +1,11 @@
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import {
   FOLDER_DISPLAY_NAME_FILE,
+  FOLDER_ORDER_FILE,
   LEGACY_FOLDER_DISPLAY_NAME_FILE,
   SPECS_FOLDER,
   isFeatureFile,
-  isFolderDisplayNameFile,
+  isFolderMetadataFile,
   isSpecsFolderPath,
   walk,
 } from "./walk";
@@ -247,6 +248,107 @@ export async function listFolderDescriptions(dataDir: string): Promise<Record<st
     if (description !== null) out[folder] = description;
   }
   return out;
+}
+
+/**
+ * A folder's subfolder order (specs/ui/folders.feature.md "order folders"):
+ * a `folder-order.txt` in the folder — `specs/` itself for the top level —
+ * naming its subfolders one per line, in the order the sidebar shows them.
+ * The names are the folders' own, not their display names. A subfolder the
+ * file leaves out sorts after the named ones, by name; a name with no
+ * subfolder any more is ignored, not an error.
+ */
+export { FOLDER_ORDER_FILE } from "./walk";
+
+/** The subfolder names a folder's order file lists, in its order; empty without one. */
+export async function readFolderOrder(dataDir: string, folder: string): Promise<string[]> {
+  const text = await readTextFile(`${dataDir}/${safeFolder(folder)}/${FOLDER_ORDER_FILE}`);
+  return text === null ? [] : orderLines(text);
+}
+
+/** The order file's lines, trimmed, blank and repeated ones dropped. */
+function orderLines(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line && !out.includes(line)) out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Every folder order in the spec tree, keyed by the folder whose subfolders
+ * it orders — `specs` for the top level — carried on the listing beside the
+ * folder list, so the tree needs no fetch per folder.
+ */
+export async function listFolderOrders(dataDir: string): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  for (const folder of [SPECS_FOLDER, ...(await listFolders(dataDir))]) {
+    const order = await readFolderOrder(dataDir, folder);
+    if (order.length > 0) out[folder] = order;
+  }
+  return out;
+}
+
+/** A folder's direct subfolders, by name, hidden ones left out. */
+async function subfolderNames(dataDir: string, folder: string): Promise<string[]> {
+  const entries = await readdir(`${dataDir}/${folder}`, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules")
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * specs/ui/folders.feature.md "order folders": put a folder's subfolders in
+ * the given order. `names` are the subfolders' own names, every one a
+ * direct subfolder; the folder's `folder-order.txt` takes them one per line,
+ * committed and pushed. The top level — `specs` — orders its folders the
+ * same way, in `specs/folder-order.txt`.
+ */
+export async function setFolderOrder(
+  dataDir: string,
+  path: string,
+  names: readonly string[],
+): Promise<{ folders: string[]; message: string }> {
+  const folder = safeFolder(path);
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
+  const children = await subfolderNames(dataDir, folder);
+  const order: string[] = [];
+  for (const raw of names) {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    if (!name || name.includes("/")) throw new Error(`Invalid folder name: ${String(raw)}`);
+    if (!children.includes(name)) throw new Error(`Not a folder in ${folder}: ${name}`);
+    if (!order.includes(name)) order.push(name);
+  }
+  if (order.length === 0) throw new Error("Folder order is required");
+  const file = `${folder}/${FOLDER_ORDER_FILE}`;
+  const text = `${order.join("\n")}\n`;
+  const current = await readTextFile(`${dataDir}/${file}`);
+  if (current !== null && orderLines(current).join("\n") === order.join("\n")) {
+    return { folders: order, message: "folder order unchanged" };
+  }
+  await writeTextFile(`${dataDir}/${file}`, text);
+  const sync = await commitAndPush(dataDir, file, `Reorder folders in: ${folder}`);
+  return { folders: order, message: sync.message };
+}
+
+/**
+ * A renamed subfolder keeps its place: the parent's order file, when it
+ * names the old folder, names the new one instead, committed and pushed.
+ * Nothing to do when the parent keeps no order, or never named the folder.
+ */
+async function renameInFolderOrder(dataDir: string, from: string, to: string): Promise<void> {
+  const parent = from.split("/").slice(0, -1).join("/");
+  const file = `${parent}/${FOLDER_ORDER_FILE}`;
+  const text = await readTextFile(`${dataDir}/${file}`);
+  if (text === null) return;
+  const was = from.split("/").pop()!;
+  const now = to.split("/").pop()!;
+  if (!orderLines(text).includes(was)) return;
+  const lines = text.split(/\r?\n/).map((line) => (line.trim() === was ? now : line));
+  await writeTextFile(`${dataDir}/${file}`, lines.join("\n"));
+  await commitAndPush(dataDir, file, `Reorder folders in: ${parent}`);
 }
 
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
@@ -563,7 +665,7 @@ export async function deleteFolder(
   // A folder holding nothing but descriptions ("describe a folder") has no
   // feature to lose, so it needs no second confirmation — but git tracks
   // those files, so it goes the committed way, not off the disk alone.
-  const onlyDescriptions = files.every((entry) => isFolderDisplayNameFile(entry.split("/").pop() ?? ""));
+  const onlyDescriptions = files.every((entry) => isFolderMetadataFile(entry.split("/").pop() ?? ""));
   if (!force && !onlyDescriptions) {
     throw new Error(`Folder is not empty: ${folder} — move its features out first`);
   }
@@ -604,11 +706,15 @@ export async function renameFolder(
   if (await exists(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
   if ((await filesBeneath(`${dataDir}/${from}`)).length === 0) {
     await rename(`${dataDir}/${from}`, `${dataDir}/${to}`);
+    await renameInFolderOrder(dataDir, from, to);
     return { path: to, message: "renamed locally (git does not track an empty folder)" };
   }
   const docFrom = docDirRel(from);
   const docMoves = (await isDirectory(`${dataDir}/${docFrom}`)) ? [{ from: docFrom, to: docDirRel(to) }] : [];
   const sync = await moveAndPush(dataDir, from, to, `Rename folder: ${from} -> ${to}`, docMoves);
+  // The folder keeps its place in the tree ("rename a folder"): the parent's
+  // order, when it names the folder, follows the rename.
+  await renameInFolderOrder(dataDir, from, to);
   return { path: to, message: sync.message };
 }
 
