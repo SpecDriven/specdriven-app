@@ -15,7 +15,7 @@
 // tick off, which is why the two folders share every line below and differ
 // only in their descriptor.
 
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { threeWayPage, threeWayPageStrict } from "./automerge/merge";
 import {
   docToPage,
@@ -44,6 +44,7 @@ import {
   type MarkdownPage,
   type Supersedes,
 } from "./parser";
+import { PAGE_ORDER_FILE, formatOrder, inOrder, parseOrder } from "./pageOrder";
 import { getLogger, withSpan } from "./telemetry";
 import { cleanLine } from "./text";
 
@@ -119,9 +120,14 @@ export async function ensurePageFolder(dataDir: string, kind: PageFolder): Promi
   return true;
 }
 
-/** Every markdown page in the folder, nested ones included. */
+/**
+ * Every markdown page in the folder, nested ones included — an ordered
+ * folder's in each subfolder's own order (src/server/pageOrder.ts), every
+ * other's in name order.
+ */
 export async function listPages(dataDir: string, kind: PageFolder): Promise<PageListing[]> {
-  const files = await pageFiles(dataDir, kind.folder);
+  const sorted = await pageFiles(dataDir, kind.folder);
+  const files = kind.ordered ? await inFolderOrder(dataDir, sorted) : sorted;
   return Promise.all(
     files.map(async (fileName) => {
       const text = await readTextFile(`${dataDir}/${fileName}`);
@@ -278,6 +284,8 @@ export async function renamePageFile(
   const moves = (await hasPageDoc(dataDir, from))
     ? [{ from: pageDocDirRel(from), to: pageDocDirRel(to) }]
     : [];
+  // A renamed task keeps its place: the order names it by its new file.
+  const order = kind.ordered ? await folderOrder(dataDir, folder) : null;
   const sync = await moveAndPush(
     dataDir,
     from,
@@ -285,6 +293,10 @@ export async function renamePageFile(
     `Rename ${kind.label}: ${from} -> ${to}`,
     moves,
   );
+  if (order) {
+    const base = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+    await writeOrder(dataDir, folder, order.map((name) => (name === base(from) ? base(to) : name)));
+  }
   return { fileName: to, name: title, message: sync.message };
 }
 
@@ -319,7 +331,171 @@ export async function deletePage(
   const paths = await pagePaths(dataDir, file);
   const sync = await removeAndPush(dataDir, paths, `Delete ${kind.label}: ${file}`);
   await removePageDoc(dataDir, file);
+  // The order forgets it, or a later task of the same name would take the
+  // deleted one's place.
+  if (kind.ordered) {
+    const folder = parentOf(file);
+    if ((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) !== null) {
+      await writeOrder(dataDir, folder, await folderOrder(dataDir, folder));
+    }
+  }
   return { message: sync.message };
+}
+
+/**
+ * Put a page in a folder, before another page of that folder or after its
+ * last (specs/app/tasks.feature.md "Reorder tasks by dragging"): what a drag
+ * in the sidebar and its Move up, Move down and Move to folder… do. Within
+ * its own folder only the order changes — a local write the sync tick
+ * commits, like a save. Into another folder it is a `git mv` of the page and
+ * its document, committed and pushed like a rename, and both folders'
+ * orders follow. Only an ordered folder's pages move.
+ */
+export async function movePage(
+  dataDir: string,
+  kind: PageFolder,
+  fileName: string,
+  toFolder: string,
+  before: string | null = null,
+): Promise<{ fileName: string; message: string }> {
+  if (!kind.ordered) throw new Error(`${capitalize(kind.label)}s keep their name order`);
+  const from = safe(kind, fileName);
+  const folder = safeFolder(kind, toFolder);
+  if (!(await fileExists(`${dataDir}/${from}`))) {
+    throw new Error(`${capitalize(kind.label)} not found: ${from}`);
+  }
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
+  const base = from.slice(from.lastIndexOf("/") + 1);
+  const to = `${folder}/${base}`;
+  const anchor = before === null ? null : safe(kind, before);
+  if (anchor !== null && parentOf(anchor) !== folder) {
+    throw new Error(`${anchor} is not in ${folder}`);
+  }
+  if (anchor === from) return { fileName: from, message: "already there" };
+
+  let message = "reordered";
+  if (to !== from) {
+    if (await fileExists(`${dataDir}/${to}`)) {
+      throw new Error(`${capitalize(kind.label)} already exists: ${to}`);
+    }
+    const left = parentOf(from);
+    const moves = (await hasPageDoc(dataDir, from))
+      ? [{ from: pageDocDirRel(from), to: pageDocDirRel(to) }]
+      : [];
+    const sync = await moveAndPush(dataDir, from, to, `Move ${kind.label}: ${from} -> ${to}`, moves);
+    message = sync.message;
+    if ((await readTextFile(`${dataDir}/${left}/${PAGE_ORDER_FILE}`)) !== null) {
+      await writeOrder(dataDir, left, await folderOrder(dataDir, left));
+    }
+  }
+  const order = (await folderOrder(dataDir, folder)).filter((name) => name !== base);
+  const at = anchor === null ? -1 : order.indexOf(anchor.slice(anchor.lastIndexOf("/") + 1));
+  order.splice(at === -1 ? order.length : at, 0, base);
+  await writeOrder(dataDir, folder, order);
+  return { fileName: to, message };
+}
+
+/**
+ * The subfolders of a special folder, repo-relative and sorted — empty ones
+ * included, so a folder just made shows in the sidebar before a page lands
+ * in it.
+ */
+export async function listPageFolders(dataDir: string, kind: PageFolder): Promise<string[]> {
+  const found: string[] = [];
+  const walkDirs = async (rel: string) => {
+    const entries = await readdir(`${dataDir}/${rel}`, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const path = `${rel}/${entry.name}`;
+      found.push(path);
+      await walkDirs(path);
+    }
+  };
+  await walkDirs(kind.folder);
+  return found.sort();
+}
+
+/**
+ * A subfolder for pages (the Specs tree's "New folder here", for tasks):
+ * each segment slugified like a page's file name, a leading folder name
+ * accepted rather than doubled. Git keeps no empty folder, so it starts with
+ * an empty order file, which the sync tick commits.
+ */
+export async function createPageFolder(
+  dataDir: string,
+  kind: PageFolder,
+  path: string,
+): Promise<string> {
+  if (kind.flat) throw new Error(`The ${kind.folder} folder has no subfolders`);
+  const segments = path.split("/").map((s) => slugify(cleanLine(s))).filter(Boolean);
+  if (segments[0] === kind.folder) segments.shift();
+  if (segments.length === 0) throw new Error("Folder name is required");
+  const folder = safeFolder(kind, [kind.folder, ...segments].join("/"));
+  if (await isDirectory(`${dataDir}/${folder}`)) throw new Error(`Folder already exists: ${folder}`);
+  await mkdir(`${dataDir}/${folder}`, { recursive: true });
+  await writeTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`, "");
+  return folder;
+}
+
+/**
+ * Rename a subfolder: it keeps its place and takes a new last segment,
+ * slugified. With pages in it, a `git mv` of the folder and of its pages'
+ * documents, committed and pushed like a renamed Specs folder; without,
+ * renamed on disk for the sync tick to commit.
+ */
+export async function renamePageFolder(
+  dataDir: string,
+  kind: PageFolder,
+  path: string,
+  name: string,
+): Promise<{ path: string; message: string }> {
+  const from = safeFolder(kind, path);
+  if (from === kind.folder) throw new Error("Folder name is required");
+  if (!(await isDirectory(`${dataDir}/${from}`))) throw new Error(`Folder not found: ${from}`);
+  const stem = slugify(cleanLine(name).split("/").pop() ?? "");
+  if (!stem) throw new Error("Folder name is required");
+  const to = safeFolder(kind, `${parentOf(from)}/${stem}`);
+  if (to === from) return { path: from, message: "already named that" };
+  if (await isDirectory(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
+  const docFrom = pageDocDirRel(from);
+  const docMoves = (await isDirectory(`${dataDir}/${docFrom}`))
+    ? [{ from: docFrom, to: pageDocDirRel(to) }]
+    : [];
+  if ((await pageFiles(dataDir, from)).length === 0) {
+    for (const m of [{ from, to }, ...docMoves]) {
+      await mkdir(`${dataDir}/${parentOf(m.to)}`, { recursive: true });
+      await rename(`${dataDir}/${m.from}`, `${dataDir}/${m.to}`);
+    }
+    return { path: to, message: "renamed" };
+  }
+  const sync = await moveAndPush(dataDir, from, to, `Rename folder: ${from} -> ${to}`, docMoves);
+  return { path: to, message: sync.message };
+}
+
+/**
+ * Delete a subfolder and the pages in it, with their documents — a `git rm
+ * -r`, committed and pushed; what git never tracked is swept off disk after.
+ * The client confirms first, naming how many pages go.
+ */
+export async function deletePageFolder(
+  dataDir: string,
+  kind: PageFolder,
+  path: string,
+): Promise<{ message: string; pages: number }> {
+  const folder = safeFolder(kind, path);
+  if (folder === kind.folder) throw new Error("Folder name is required");
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
+  const pages = (await pageFiles(dataDir, folder)).length;
+  const docFolder = pageDocDirRel(folder);
+  const paths = [folder, ...((await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : [])];
+  let message = "folder deleted";
+  if (pages > 0) {
+    const label = `${kind.label}${pages === 1 ? "" : "s"}`;
+    const sync = await removeAndPush(dataDir, paths, `Delete folder: ${folder} (${pages} ${label})`);
+    message = sync.message;
+  }
+  for (const p of paths) await rm(`${dataDir}/${p}`, { recursive: true, force: true });
+  return { message, pages };
 }
 
 /**
@@ -489,6 +665,54 @@ export async function pageFiles(dataDir: string, rel: string): Promise<string[]>
     else if (isPageFile(entry.name)) files.push(path);
   }
   return files.sort();
+}
+
+/**
+ * The sorted page paths, each folder's in its order file's order — the
+ * folders themselves where they first appear, so the listing still reads
+ * top level first.
+ */
+async function inFolderOrder(dataDir: string, files: string[]): Promise<string[]> {
+  const byFolder = new Map<string, string[]>();
+  for (const file of files) {
+    const folder = parentOf(file);
+    const names = byFolder.get(folder) ?? [];
+    names.push(file.slice(folder.length + 1));
+    byFolder.set(folder, names);
+  }
+  const out: string[] = [];
+  for (const [folder, names] of byFolder) {
+    const order = parseOrder((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) ?? "");
+    for (const name of inOrder(names, order)) out.push(`${folder}/${name}`);
+  }
+  return out;
+}
+
+/** A folder's pages' file names in its order — its own pages, not its subfolders'. */
+async function folderOrder(dataDir: string, folder: string): Promise<string[]> {
+  const names = (await pageFiles(dataDir, folder))
+    .filter((file) => parentOf(file) === folder)
+    .map((file) => file.slice(folder.length + 1));
+  return inOrder(names, parseOrder((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) ?? ""));
+}
+
+/** Write a folder's order — local, for the sync tick to commit. */
+async function writeOrder(dataDir: string, folder: string, names: string[]): Promise<void> {
+  await writeTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`, formatOrder(names));
+}
+
+/** `tasks/sub/a.md` -> `tasks/sub`. */
+function parentOf(path: string): string {
+  return path.slice(0, path.lastIndexOf("/"));
+}
+
+/** A folder path: the special folder itself or one beneath it, of safe segments. */
+function safeFolder(kind: PageFolder, path: string): string {
+  const segments = path.split("/");
+  if (segments[0] !== kind.folder || segments.some(badSegment)) {
+    throw new Error(`Invalid folder: ${path}`);
+  }
+  return path;
 }
 
 /** Segments that would escape or hide inside the data repo are rejected. */

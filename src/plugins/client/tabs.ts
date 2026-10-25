@@ -10,7 +10,7 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { LucideIcon } from "lucide-react";
 import type { Disposer } from "../kernel";
 import type { Crumb } from "../../frontend/Breadcrumbs";
-import type { ConfirmOptions, PromptOptions, PromptResult } from "../../frontend/ModalPrompts";
+import type { ConfirmOptions, PickOptions, PromptOptions, PromptResult } from "../../frontend/ModalPrompts";
 import type { PaletteGroup, PaletteItem } from "../../frontend/CommandPalette";
 import type { FeatureListing } from "../../server/features";
 import type { ProjectMember } from "../../server/members";
@@ -19,6 +19,8 @@ export type Prompt = (opts: PromptOptions) => Promise<string | null>;
 export type Confirm = (opts: ConfirmOptions) => Promise<boolean>;
 /** A prompt with a radio group: the text together with the picked value. */
 export type PromptWithChoice = (opts: PromptOptions) => Promise<PromptResult | null>;
+/** A choice from a filtered list — the folder a task moves to, say. */
+export type Pick = (opts: PickOptions) => Promise<string | null>;
 
 /** What App hands a tab's components: the shared state and dialogs. */
 export interface TabApp {
@@ -31,6 +33,7 @@ export interface TabApp {
   prompt: Prompt;
   promptWithChoice: PromptWithChoice;
   confirm: Confirm;
+  pick: Pick;
   /** Opens the Settings page — where the GitHub sign-in lives, say. */
   openSettings: () => void;
   /** Open a feature page, pushing its url. */
