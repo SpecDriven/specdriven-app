@@ -21,7 +21,8 @@ export interface PageFolder {
    * Whether the folder keeps its pages in an order of its own — an
    * `order.txt` in each folder (src/server/pageOrder.ts) — rather than in
    * name order: the tasks, which are dragged into the order they are to be
-   * done in (specs/app/tasks.feature.md "Reorder tasks by dragging").
+   * done in (specs/app/tasks.feature.md "Reorder tasks by dragging"), and the
+   * roadmap's pages (specs/app/roadmap.feature.md "Reorder roadmap pages").
    */
   ordered?: boolean;
 }
@@ -31,7 +32,7 @@ export const TASKS_FOLDER = "tasks";
 export const NOTEBOOK_FOLDER = "notebook";
 
 /** The roadmap folder: markdown pages, one sidebar tab (roadmap.feature.md). */
-export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page" };
+export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page", ordered: true };
 
 /** The tasks folder: the same pages, called tasks (tasks.feature.md). */
 export const TASKS: PageFolder = { folder: TASKS_FOLDER, label: "task", ordered: true };
