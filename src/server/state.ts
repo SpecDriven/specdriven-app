@@ -130,30 +130,6 @@ export interface SpecDrivenState {
    */
   codeGenTarget?: CodeGenTarget;
   /**
-   * How long (seconds) a Claude turn in the coding agent pane waits for the
-   * first sign of the API behind a proxy (specs/agents/agent-pane.feature.md
-   * "A Claude turn fails fast when the API proxy does not answer") before
-   * the pane stops it; 0 waits as long as Claude Code retries. Absent means
-   * the 15 second default.
-   */
-  agentFirstResponseSeconds?: number;
-  /**
-   * How the app's Claude signs in (specs/agents/claude.feature.md "Choose
-   * how Claude signs in"): "login" is the claude.ai account the Claude CLI
-   * is signed in to, "proxy" an API proxy at claudeProxyUrl. Absent means
-   * proxy when Claude Code's own settings files or the environment name a
-   * base url (src/server/claudeAuth.ts detectClaudeProxy), else login. The
-   * proxy's token is not here — settings are shareable, a credential never
-   * is (src/server/claudeToken.ts).
-   */
-  claudeAuth?: ClaudeAuthMode;
-  /**
-   * The API proxy's base url (what ANTHROPIC_BASE_URL would be) in proxy
-   * mode; absent means the one Claude Code's settings or the environment
-   * name.
-   */
-  claudeProxyUrl?: string;
-  /**
    * Offer feature assignment — the "Assigned" dropdown of project members
    * (src/server/members.ts); absent means OFF. Off hides the dropdown; an
    * assignment already written into a `.feature.md` is left alone, so
@@ -329,18 +305,6 @@ export function normalizeAutosaveSeconds(value: unknown): number {
   return Math.floor(n);
 }
 
-// The pane's first-response watchdog (src/server/agentChat.ts): a proxy that
-// is down gets one rather than Claude Code's minutes of retries.
-export const DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
-
-/** Effective first-response wait for a stored value: a whole number of
-    seconds, 0 for "no limit"; anything absent or unusable is the default. */
-export function normalizeAgentFirstResponseSeconds(value: unknown): number {
-  const n = typeof value === "number" ? value : Number.NaN;
-  if (!Number.isFinite(n) || n < 0) return DEFAULT_AGENT_FIRST_RESPONSE_SECONDS;
-  return Math.floor(n);
-}
-
 /** Effective "use the GitHub CLI account" setting: ON unless explicitly
     turned off — which signing out does. */
 export function normalizeUseGhAccount(value: unknown): boolean {
@@ -384,32 +348,6 @@ export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string
   if (typeof value !== "string") return null;
   const target = LEGACY_CODE_GEN_TARGETS[value] ?? value;
   return target === "desktop" || agentIds.includes(target) ? target : null;
-}
-
-/** How the app's Claude signs in (specs/agents/claude.feature.md "Choose how
-    Claude signs in"): the claude.ai login, or an API proxy. */
-export type ClaudeAuthMode = "login" | "proxy";
-
-export const CLAUDE_AUTH_MODES: readonly ClaudeAuthMode[] = ["login", "proxy"];
-
-/** Stored sign-in choice, or null when absent or unusable — the server then
-    infers one from Claude Code's own settings (src/server/claudeAuth.ts). */
-export function normalizeClaudeAuth(value: unknown): ClaudeAuthMode | null {
-  return (CLAUDE_AUTH_MODES as readonly unknown[]).includes(value) ? (value as ClaudeAuthMode) : null;
-}
-
-/** Stored proxy base url — an http(s) url, kept as typed (a trailing slash
-    is Claude Code's to interpret) — or null when absent or not a url. */
-export function normalizeClaudeProxyUrl(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const url = value.trim();
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:" ? url : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

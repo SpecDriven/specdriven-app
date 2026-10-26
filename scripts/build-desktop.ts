@@ -257,16 +257,13 @@ async function copyBundleAssets(outdir: string, sources: BakedModuleSources): Pr
   }
 }
 
-/** The Claude Agent SDK's optional per-platform binaries stay out: the app runs the developer's own `claude` (src/server/agentChat.ts). */
-const SDK_BINARIES = "@anthropic-ai/claude-agent-sdk-*";
-
 async function bundle(entry: string, outdir: string, production: boolean, plugins: BunPlugin[]): Promise<void> {
   await Bun.build({
     entrypoints: [entry],
     outdir,
     target: "node",
     format: "esm",
-    external: ["electron", SDK_BINARIES],
+    external: ["electron"],
     sourcemap: "linked",
     define: production ? { "process.env.NODE_ENV": '"production"' } : {},
     plugins,

@@ -6,11 +6,10 @@
 // installed this way is remembered in the profile section, so a plugin the
 // user removed is not installed again; a start that cannot reach the
 // marketplace installs nothing and says so in the log. Not in the hosted
-// app, and not in the demo, whose agent is its own simulation.
-//
-// Dormant until the three agents live in the marketplace: nothing calls
-// ensureCommandPlugins yet. The offers (what the pane shows as installable)
-// read the cached indexes only, so a start never waits on git for them.
+// app, and not in the demo, whose agent is its own simulation. Called from
+// applyStartupState (src/server/api.ts) without being awaited. The offers
+// (what the pane shows as installable) read the cached indexes only, so a
+// start never waits on git for them.
 
 import { which } from "../../server/run";
 import type { AgentOffer } from "../../server/agentTypes";
@@ -56,6 +55,22 @@ export interface AutoInstallDeps {
   /** Read the indexes; default: loadMarketplaces without a refresh. */
   indexes?: (entries: readonly MarketplaceRef[]) => Promise<{ entry: MarketplaceRef; plugins: MarketplacePlugin[]; error?: string }[]>;
   log?: (line: string) => void;
+}
+
+// Injection seam (the folderChooser pattern): what the start's install
+// reaches for — the marketplace, PATH, the plugin folders — swapped by a
+// test for fakes; null restores the defaults.
+let startDeps: AutoInstallDeps | null = null;
+
+export function setAutoInstallDeps(deps: AutoInstallDeps | null): AutoInstallDeps | null {
+  const previous = startDeps;
+  startDeps = deps;
+  return previous;
+}
+
+/** The dependencies the start's install runs with: the seam's, else the defaults. */
+export function autoInstallDeps(): AutoInstallDeps {
+  return startDeps ?? {};
 }
 
 export interface AutoInstallResult {

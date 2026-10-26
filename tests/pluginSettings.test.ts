@@ -20,7 +20,6 @@ import {
   pluginSettingsOf,
 } from "../src/plugins/host/pluginSettings";
 import { hostConfigFor } from "../src/plugins/host/loader";
-import { manifest as agentClaude } from "../src/plugins/builtin/agent-claude/manifest";
 
 let root: string;
 const realRoot = process.env.SPECDRIVEN_ROOT;
@@ -106,7 +105,7 @@ test("the service a host half gets reads, writes and adopts its section of the s
   expect((await settings.read()).acmeMode).toBe("fast");
   expect(((await readState(root)) as Record<string, unknown>).acmeMode).toBe("slow");
   // The loader builds the same service for a built-in, by its manifest.
-  const config = hostConfigFor(agentClaude, "");
+  const config = hostConfigFor({ id: "other", api: "1", displayName: "Other", description: "", defaultEnabled: true }, "");
   expect(config.dir).toBe("");
   expect(await config.settings.read()).toEqual({});
   expect(typeof config.secrets("token").load).toBe("function");

@@ -12,12 +12,6 @@ import { pagesHost } from "./pages/host";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
 import selfFix from "./self-fix/host";
 import { manifest as selfFixManifest } from "./self-fix/manifest";
-import agentClaude from "./agent-claude/host";
-import { manifest as agentClaudeManifest } from "./agent-claude/manifest";
-import agentCodex from "./agent-codex/host";
-import { manifest as agentCodexManifest } from "./agent-codex/manifest";
-import agentPi from "./agent-pi/host";
-import { manifest as agentPiManifest } from "./agent-pi/manifest";
 import tests from "./tests/host";
 import { manifest as testsManifest } from "./tests/manifest";
 import { NOTEBOOK, ROADMAP, TASKS } from "../../server/pages";
@@ -36,9 +30,7 @@ export const builtinHostPlugins: HostPlugin[] = [
   { manifest: issuesManifest, plugin: issues },
   { manifest: testsManifest, plugin: tests },
   { manifest: selfFixManifest, plugin: selfFix },
-  // The coding agents (specs/agents/agent-plugins.feature.md), each a
-  // provider on the agent registry while its plugin is on.
-  { manifest: agentClaudeManifest, plugin: agentClaude },
-  { manifest: agentCodexManifest, plugin: agentCodex },
-  { manifest: agentPiManifest, plugin: agentPi },
+  // The coding agents are marketplace plugins (specs/agents/agent-plugins
+  // .feature.md): the app installs them where it finds their commands
+  // (src/plugins/host/autoInstall.ts).
 ];
