@@ -12,6 +12,7 @@ import {
   listFolderOrders,
   listFolders,
   moveFeature,
+  moveFolder,
   readFeatureOrder,
   readFolderDescription,
   readFolderOrder,
@@ -32,7 +33,9 @@ import {
   featuresBeneath,
   findFolder,
   folderDrop,
+  folderDropsInto,
   folderLabel,
+  folderMoveOptions,
   folderNamesMoved,
   folderOptions,
   folderRenamed,
@@ -217,6 +220,65 @@ test("renameFolder works in a plain directory with features (no git repo)", asyn
   expect(await readFeature(root, "specs/billing/one.feature.md")).toBeNull();
 });
 
+// specs/ui/folders.feature.md "move a folder": the folder keeps its name and
+// takes a new parent, the top level included; never into itself.
+test("moveFolder moves under a new parent, refusing itself and collisions", async () => {
+  await mkdir(join(root, "specs/dashboard/quality/deep"), { recursive: true });
+  await mkdir(join(root, "specs/other/quality"), { recursive: true });
+  expect(await moveFolder(root, "specs/dashboard/quality", "")).toEqual({
+    path: "specs/quality",
+    message: "moved locally (git does not track an empty folder)",
+  });
+  expect(await listFolders(root)).toEqual([
+    "specs/dashboard",
+    "specs/other",
+    "specs/other/quality",
+    "specs/quality",
+    "specs/quality/deep",
+  ]);
+  expect(await moveFolder(root, "specs/quality", "specs")).toEqual({ path: "specs/quality", message: "already there" });
+  expect(moveFolder(root, "specs/quality", "specs/quality")).rejects.toThrow("into itself");
+  expect(moveFolder(root, "specs/quality", "specs/quality/deep")).rejects.toThrow("into itself");
+  expect(moveFolder(root, "specs/quality", "specs/other")).rejects.toThrow("already exists");
+  expect(moveFolder(root, "specs/quality", "specs/ghost")).rejects.toThrow("Folder not found");
+  expect(moveFolder(root, "specs/ghost", "")).rejects.toThrow("Folder not found");
+  expect(moveFolder(root, "", "specs/other")).rejects.toThrow("required");
+  expect(moveFolder(root, "specs/quality", "..")).rejects.toThrow("Invalid folder");
+  // and down into a sibling, keeping its name
+  expect((await moveFolder(root, "specs/quality", "dashboard")).path).toBe("specs/dashboard/quality");
+});
+
+test("moveFolder works in a plain directory with features (no git repo)", async () => {
+  await mkdir(join(root, "specs/dashboard/quality"), { recursive: true });
+  await Bun.write(join(root, "specs/dashboard/quality/one.feature.md"), "# One\n");
+  await Bun.write(join(root, "specs/folder-order.txt"), "dashboard\n");
+  await Bun.write(join(root, "specs/dashboard/folder-order.txt"), "quality\n");
+  const result = await moveFolder(root, "specs/dashboard/quality", "");
+  expect(result.path).toBe("specs/quality");
+  expect(await readFeature(root, "specs/quality/one.feature.md")).toBe("# One\n");
+  expect(await readFeature(root, "specs/dashboard/quality/one.feature.md")).toBeNull();
+  // the old parent's order no longer names it; the new parent's sorts it after the named ones
+  expect(await readFolderOrder(root, "specs/dashboard")).toEqual([]);
+  expect(await readFolderOrder(root, "specs")).toEqual(["dashboard"]);
+});
+
+// specs/ui/folders.feature.md "move a folder": a dragged folder drops into
+// any folder but the one it is in, itself and what is beneath it; the tree
+// background (`specs`) is the top level.
+test("folderDropsInto refuses its own parent, itself and its subfolders", () => {
+  const dragged = { parent: "specs/dashboard", path: "specs/dashboard/quality" };
+  expect(folderDropsInto(dragged, "specs")).toBe(true);
+  expect(folderDropsInto(dragged, "specs/reports")).toBe(true);
+  expect(folderDropsInto(dragged, "specs/dashboard/other")).toBe(true);
+  // a sibling that merely shares the prefix is not beneath it
+  expect(folderDropsInto(dragged, "specs/dashboard/quality-old")).toBe(true);
+  expect(folderDropsInto(dragged, "specs/dashboard")).toBe(false);
+  expect(folderDropsInto(dragged, "specs/dashboard/quality")).toBe(false);
+  expect(folderDropsInto(dragged, "specs/dashboard/quality/deep")).toBe(false);
+  // a top-level folder is already at the top level
+  expect(folderDropsInto({ parent: "specs", path: "specs/reports" }, "specs")).toBe(false);
+});
+
 // The sidebar's folder helpers (src/frontend/tree.ts): what a folder holds,
 // where paths land after a rename, and the list "Move to folder…" offers.
 test("featuresBeneath, folderRenamed and folderOptions", () => {
@@ -254,6 +316,9 @@ test("featuresBeneath, folderRenamed and folderOptions", () => {
     "specs/billing/sub",
     "specs/empty",
   ]);
+  // a folder moves anywhere but its own parent, itself and what is beneath it
+  expect(folderMoveOptions(tree, "specs/billing").map((o) => o.value)).toEqual(["specs/empty"]);
+  expect(folderMoveOptions(tree, "specs/billing/sub").map((o) => o.value)).toEqual(["specs", "specs/empty"]);
   expect(folderOptions(tree, "specs").map((o) => o.value)).toEqual([
     "specs/billing",
     "specs/billing/sub",
@@ -638,6 +703,34 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       await git(b, "pull");
       expect(await listFolders(b)).toEqual(["specs/invoices", "specs/invoices/sub"]);
       expect(await readFeature(b, "specs/invoices/quotes.feature.md")).toBe("# Quotes\n");
+    });
+
+    // specs/ui/folders.feature.md "move a folder": one `git mv` carries the
+    // directory and its documents to the top level; the old parent's order
+    // stops naming it in a commit of its own. The other clone sees it on pull.
+    test("moveFolder git-mvs the directory and its documents to the top level, commits and pushes", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/dashboard/home.feature.md": "# Home\n",
+        "specs/dashboard/folder-order.txt": "quality\n",
+        "specs/dashboard/quality/notify.feature.md": "# Notify\n",
+        ".specdriven/automerge/specs/dashboard/quality/notify.feature.md/snapshot.bin": "doc",
+      });
+      const result = await moveFolder(a, "specs/dashboard/quality", "");
+      expect(result).toEqual({ path: "specs/quality", message: "renamed, committed and pushed" });
+      expect(await listFolders(a)).toEqual(["specs/dashboard", "specs/quality"]);
+      expect(
+        await Bun.file(join(a, ".specdriven/automerge/specs/quality/notify.feature.md/snapshot.bin")).exists(),
+      ).toBe(true);
+      expect(await Bun.file(join(a, ".specdriven/automerge/specs/dashboard/quality")).exists()).toBe(false);
+      const log = await git(a, "log", "-2", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Move folder: specs/dashboard/quality -> specs/quality");
+      expect(log.stdout.toString()).toContain("Reorder folders in: specs/dashboard");
+      const status = await git(a, "status", "--porcelain");
+      expect(status.stdout.toString()).toBe("");
+      await git(b, "pull");
+      expect(await listFolders(b)).toEqual(["specs/dashboard", "specs/quality"]);
+      expect(await readFeature(b, "specs/quality/notify.feature.md")).toBe("# Notify\n");
+      expect(await readFolderOrder(b, "specs/dashboard")).toEqual([]);
     });
 
     // specs/ui/folders.feature.md "delete a folder with features in it": a

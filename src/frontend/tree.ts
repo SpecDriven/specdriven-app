@@ -399,6 +399,27 @@ export function folderOptions(root: FolderNode, except: string | null = null): F
 }
 
 /**
+ * Every folder the folder at `path` can move to (specs/ui/folders.feature.md
+ * "move a folder"): the "Move to folder…" list with the folder's own parent
+ * left out, and the folder itself and everything beneath it too — a folder
+ * never moves into itself.
+ */
+export function folderMoveOptions(root: FolderNode, path: string): FolderOption[] {
+  const parent = path.slice(0, path.lastIndexOf("/"));
+  return folderOptions(root, parent).filter((o) => o.value !== path && !o.value.startsWith(`${path}/`));
+}
+
+/**
+ * Whether a folder dragged out of `dragged.parent` drops into `target`
+ * (specs/ui/folders.feature.md "move a folder"): any folder but the one it
+ * is already in, itself and what is beneath it — `SPECS_FOLDER` being the
+ * tree background, the top level.
+ */
+export function folderDropsInto(dragged: { parent: string; path: string }, target: string): boolean {
+  return target !== dragged.parent && target !== dragged.path && !target.startsWith(`${dragged.path}/`);
+}
+
+/**
  * Where a scenario dragged in the sidebar outline lands
  * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in the
  * tree"): dropped on the upper half of `target` it goes just before it, on

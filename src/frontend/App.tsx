@@ -201,6 +201,7 @@ import {
   resolveScenario,
   scenarioPath,
   splitRepoPath,
+  SPECS_FOLDER,
 } from "./route";
 import type { AppPage } from "./route";
 import {
@@ -225,9 +226,11 @@ import {
   featureDrop,
   featureNamesMoved,
   folderDrop,
+  folderDropsInto,
   folderLabel,
   folderNamesMoved,
   initialCaseDisplayName,
+  folderMoveOptions,
   folderOptions,
   folderRenamed,
   scenarioDrop,
@@ -3155,15 +3158,75 @@ export function App() {
       }
       const to = data.path!;
       if (to === path) return;
-      setSelectedFolder((f) => (f === null ? f : folderRenamed(f, path, to)));
-      setCollapsed((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
-      setOutlined((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
-      await loadFeatures();
-      if (selected !== null && retiring) await openFeature(folderRenamed(selected, path, to));
+      await followFolder(path, to, retiring);
       toast.success(`Renamed folder to ${to.split("/").pop()} — ${data.message}.`);
     } finally {
       if (retiring) unsealFeatureEditors();
     }
+  };
+
+  // After a folder rename or move, everything keyed by a path beneath it —
+  // the selected folder, the collapsed set, the open feature — follows to
+  // the new path.
+  const followFolder = async (path: string, to: string, retiring: boolean) => {
+    setSelectedFolder((f) => (f === null ? f : folderRenamed(f, path, to)));
+    setCollapsed((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
+    setOutlined((prev) => new Set([...prev].map((p) => folderRenamed(p, path, to))));
+    await loadFeatures();
+    if (selected !== null && retiring) await openFeature(folderRenamed(selected, path, to));
+  };
+
+  // Move to folder… from a folder's ⋯ menu or the palette
+  // (specs/ui/folders.feature.md "move a folder"): pick a new parent — the
+  // top level included — and the server git-mvs the directory there, keeping
+  // its name. The open feature follows the way it does on a rename; Undo
+  // moves the folder back to where it came from.
+  const moveFolder = async (path: string, parent: string) => {
+    const from = path.slice(0, path.lastIndexOf("/"));
+    const retiring = selected !== null && selected.startsWith(`${path}/`);
+    if (retiring) {
+      await editorRef.current.flush();
+      editorRef.current.seal();
+    }
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/move`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parent }),
+      });
+      const data = (await res.json()) as { path?: string; message?: string; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Move failed");
+        return;
+      }
+      const to = data.path!;
+      if (to === path) return;
+      await followFolder(path, to, retiring);
+      const where = parent === "" || parent === SPECS_FOLDER ? "the top level" : parent.split("/").pop();
+      toast.success(`Moved folder to ${where} — ${data.message}.`, {
+        action: { label: "Undo", run: () => void moveFolder(to, from) },
+      });
+    } catch (e) {
+      toast.error(e instanceof TypeError ? "Could not move the folder — is the server running?" : (e as Error).message);
+    } finally {
+      if (retiring) unsealFeatureEditors();
+    }
+  };
+  const moveFolderPrompt = async (path: string) => {
+    setTreeMenu(null);
+    const options = folderMoveOptions(
+      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
+      path,
+    );
+    const to = await pick({
+      title: `Move folder “${path.split("/").pop()}”`,
+      hint: "To the top level or another folder — a git mv, committed and pushed.",
+      placeholder: "Find a folder…",
+      options,
+      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
+    });
+    if (to === null) return;
+    await moveFolder(path, to);
   };
 
   // Display name from a folder's ⋯ menu (specs/ui/folders.feature.md "edit a
@@ -6234,11 +6297,28 @@ export function App() {
         const endFolderDrag = () => {
           setFolderDrag(null);
           setFolderDropAt(null);
+          setDropTarget(null);
         };
         return (
         <div
           key={child.path}
           onDragOver={(e) => {
+            // A folder dragged over another folder's subtree ("move a
+            // folder") drops into it — sibling rows took the drag already,
+            // to reorder. The nearest folder decides: over the folder it is
+            // in, or itself, it drops nowhere, never falling through to the
+            // tree background.
+            if (folderDrag !== null) {
+              e.stopPropagation();
+              if (!folderDropsInto(folderDrag, child.path)) {
+                setDropTarget(null);
+                return;
+              }
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDropTarget(child.path);
+              return;
+            }
             if (dragging === null) return;
             e.preventDefault();
             e.stopPropagation();
@@ -6247,6 +6327,15 @@ export function App() {
           }}
           onDragLeave={() => setDropTarget((t) => (t === child.path ? null : t))}
           onDrop={(e) => {
+            if (folderDrag !== null) {
+              e.stopPropagation();
+              if (!folderDropsInto(folderDrag, child.path)) return;
+              e.preventDefault();
+              const dragged = folderDrag.path;
+              endFolderDrag();
+              void moveFolder(dragged, child.path);
+              return;
+            }
             if (dragging === null) return;
             e.preventDefault();
             e.stopPropagation();
@@ -6254,7 +6343,7 @@ export function App() {
           }}
         >
           <div
-            className={`folder-row${dragging !== null && dropTarget === child.path ? " drop-target" : ""}${
+            className={`folder-row${(dragging !== null || folderDrag !== null) && dropTarget === child.path ? " drop-target" : ""}${
               child.path === selectedFolder ? " selected" : ""
             }${folderDropEdge}${siblingDrag && folderDrag!.path === child.path ? " dragging" : ""}`}
             style={{ paddingLeft: `${depth * 0.9}rem` }}
@@ -6263,6 +6352,7 @@ export function App() {
               e.preventDefault();
               e.stopPropagation();
               e.dataTransfer.dropEffect = "move";
+              setDropTarget(null);
               const box = e.currentTarget.getBoundingClientRect();
               const after = e.clientY > box.top + box.height / 2;
               if (folderDropAt?.path !== child.path || folderDropAt.after !== after) {
@@ -6378,6 +6468,12 @@ export function App() {
                     label: "Edit display name",
                     icon: <Tag size={13} />,
                     onSelect: () => void editFolderDisplayName(child.path),
+                  },
+                  {
+                    id: "move",
+                    label: "Move to folder…",
+                    icon: <FolderInput size={13} />,
+                    onSelect: () => void moveFolderPrompt(child.path),
                   },
                   // Move up / Move down (specs/ui/folders.feature.md "order
                   // folders"): the order among its siblings is the user's,
@@ -6976,6 +7072,12 @@ export function App() {
             `Edit display name of folder “${selectedFolder.split("/").pop()}”`,
             <Tag size={14} />,
             () => void editFolderDisplayName(selectedFolder),
+          ),
+          action(
+            "move-folder",
+            `Move folder “${selectedFolder.split("/").pop()}” to folder…`,
+            <FolderInput size={14} />,
+            () => void moveFolderPrompt(selectedFolder),
           ),
           action("move-folder-up", `Move folder “${selectedFolder.split("/").pop()}” up`, <ArrowUp size={14} />, () =>
             reorderFolder(selectedFolder, -1),
@@ -9158,7 +9260,7 @@ export function App() {
             for drag-moving features; the tree background is the top level. */}
         {(
           <div
-            className={`tree${dragging !== null && dropTarget === "" ? " drop-target" : ""}`}
+            className={`tree${(dragging !== null || folderDrag !== null) && dropTarget === "" ? " drop-target" : ""}`}
             role="tree"
             aria-label="Features"
             onKeyDown={onTreeKeyDown}
@@ -9168,6 +9270,15 @@ export function App() {
               if (e.target === e.currentTarget) setSelectedFolder(null);
             }}
             onDragOver={(e) => {
+              // A folder from inside another folder moves to the top level
+              // here ("move a folder"); a top-level one is already there.
+              if (folderDrag !== null) {
+                if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDropTarget("");
+                return;
+              }
               if (dragging === null) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "move";
@@ -9175,6 +9286,16 @@ export function App() {
             }}
             onDragLeave={() => setDropTarget((t) => (t === "" ? null : t))}
             onDrop={(e) => {
+              if (folderDrag !== null) {
+                if (!folderDropsInto(folderDrag, SPECS_FOLDER)) return;
+                e.preventDefault();
+                const dragged = folderDrag.path;
+                setFolderDrag(null);
+                setFolderDropAt(null);
+                setDropTarget(null);
+                void moveFolder(dragged, SPECS_FOLDER);
+                return;
+              }
               if (dragging === null) return;
               e.preventDefault();
               void moveTo(dragging, "");

@@ -76,6 +76,7 @@ import {
   createFolder,
   deleteFolder,
   renameFolder,
+  moveFolder,
   setFolderDescription,
   setFolderOrder,
   setFeatureOrder,
@@ -2097,6 +2098,18 @@ const deleteFolderRoute = withDataDir(async (dir, req, params) => {
   }
 });
 
+// Move a folder under another parent (specs/ui/folders.feature.md "move a
+// folder"): a `git mv` of the directory and its features' documents,
+// committed and pushed. A blank parent is the top level.
+const postMoveFolder = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { parent?: string };
+  try {
+    return json(await moveFolder(dir, params.path!, body.parent ?? ""));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // Rename a folder (specs/ui/folders.feature.md "rename a folder"): a `git
 // mv` of the directory and its features' documents, committed and pushed.
 const postRenameFolder = withDataDir(async (dir, req, params) => {
@@ -3005,6 +3018,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/folders", postFolders],
   ["DELETE", "/api/folders/:path", deleteFolderRoute],
   ["POST", "/api/folders/:path/rename", postRenameFolder],
+  ["POST", "/api/folders/:path/move", postMoveFolder],
   ["PUT", "/api/folders/:path/description", putFolderDescription],
   ["PUT", "/api/folders/:path/order", putFolderOrder],
   ["PUT", "/api/folders/:path/feature-order", putFeatureOrder],
