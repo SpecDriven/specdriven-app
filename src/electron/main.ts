@@ -341,8 +341,9 @@ function installDebugMenu(): void {
     const { response } = win && !win.isDestroyed()
       ? await dialog.showMessageBox(win, opts)
       : await dialog.showMessageBox(opts);
-    if (response === 0) clipboard.writeText(devtoolsUrl(url));
-    if (response === 1) clipboard.writeText(url);
+    // Electron 44's clipboard returns a promise; nothing waits on it.
+    if (response === 0) void clipboard.writeText(devtoolsUrl(url));
+    if (response === 1) void clipboard.writeText(url);
   };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
@@ -393,7 +394,7 @@ if (!app.requestSingleInstanceLock()) {
     // GitHub, Confluence and Claude proxy token storage (specs/app/desktop-app.feature.md): OS-encrypted via
     // safeStorage; without a key store the server's 0600-file backend
     // stays in place. safeStorage needs the ready app, hence here.
-    if (safeStorageAvailable()) {
+    if (await safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
       setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
