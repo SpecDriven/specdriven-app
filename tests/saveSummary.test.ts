@@ -180,6 +180,21 @@ describe("batches", () => {
     expect(body).toContain("- Reorder folders in: specs");
   });
 
+  // specs/ui/folders.feature.md "order features": a feature-order.txt is
+  // named by the folder whose features it orders.
+  test("a feature order reads as a reorder of the folder's features", () => {
+    expect(
+      summarizeSavedChanges([{ path: "specs/ui/feature-order.txt", before: null, after: "folders.feature.md\n" }]).title,
+    ).toBe("Reorder features in: specs/ui");
+    const { title, body } = summarizeSavedChanges([
+      { path: "specs/ui/feature-order.txt", before: null, after: "folders.feature.md\n" },
+      { path: "specs/folder-order.txt", before: "app\nui\n", after: "ui\napp\n" },
+    ]);
+    expect(title).toBe("Reorder 1 feature order, 1 folder order");
+    expect(body).toContain("- Reorder features in: specs/ui");
+    expect(body).toContain("- Reorder folders in: specs");
+  });
+
   test("the same verb everywhere keeps it", () => {
     const { title } = summarizeSavedChanges([
       { path: "notebook/a.md", before: null, after: "# A\n" },

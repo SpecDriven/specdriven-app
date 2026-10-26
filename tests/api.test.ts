@@ -200,6 +200,11 @@ describe("matchApi", () => {
     expect(order).not.toBeNull();
     expect(order!.params).toEqual({ path: "specs" });
     expect(matchApi("POST", "/api/folders/specs/order")).toBeNull();
+    // and its feature order by a third ("order features")
+    const featureOrder = matchApi("PUT", "/api/folders/specs%2Fbilling/feature-order");
+    expect(featureOrder).not.toBeNull();
+    expect(featureOrder!.params).toEqual({ path: "specs/billing" });
+    expect(matchApi("POST", "/api/folders/specs/feature-order")).toBeNull();
   });
 
   test("nested feature routes are distinct", () => {

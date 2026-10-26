@@ -1135,7 +1135,9 @@ a.page-entry.done {
 .tree-scenario-row.drop-before::before,
 .tree-scenario-row.drop-after::after,
 .folder-row.drop-before::before,
-.folder-row.drop-after::after {
+.folder-row.drop-after::after,
+.tree-row.drop-before::before,
+.tree-row.drop-after::after {
   content: "";
   position: absolute;
   left: 0.4rem;
@@ -1147,19 +1149,22 @@ a.page-entry.done {
 }
 
 .tree-scenario-row.drop-before::before,
-.folder-row.drop-before::before {
+.folder-row.drop-before::before,
+.tree-row.drop-before::before {
   top: -1px;
 }
 
 .tree-scenario-row.drop-after::after,
-.folder-row.drop-after::after {
+.folder-row.drop-after::after,
+.tree-row.drop-after::after {
   bottom: -1px;
 }
 
-/* The row being dragged — a scenario, or a folder among its siblings
-   (specs/ui/folders.feature.md "order folders"). */
+/* The row being dragged — a scenario, or a folder or feature among its
+   siblings (specs/ui/folders.feature.md "order folders", "order features"). */
 .tree-scenario-row.dragging,
-.folder-row.dragging {
+.folder-row.dragging,
+.tree-row.dragging {
   opacity: 0.5;
 }
 
