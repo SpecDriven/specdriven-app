@@ -16,7 +16,10 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { PI_BIN } from "./agent";
 import { which } from "./run";
-import type { ChatEventBody, SlashCommandInfo } from "./agentChat";
+import type { AgentOutput, SlashCommandInfo } from "./agentTypes";
+import { jsonlReader } from "./jsonl";
+
+export { jsonlReader };
 
 // --- The subprocess ---------------------------------------------------------
 
@@ -74,25 +77,6 @@ export function setPiSpawn(fn: PiSpawn | null): PiSpawn | null {
   const previous = spawner;
   spawner = fn;
   return previous;
-}
-
-/**
- * A JSONL reader: chunks in, whole records out. Splits on "\n" only and
- * strips one trailing "\r", as the RPC protocol requires.
- */
-export function jsonlReader(onLine: (line: string) => void): (chunk: string) => void {
-  let buffer = "";
-  return (chunk: string) => {
-    buffer += chunk;
-    for (;;) {
-      const nl = buffer.indexOf("\n");
-      if (nl < 0) return;
-      let line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
-      if (line.trim()) onLine(line);
-    }
-  };
 }
 
 // --- The client -------------------------------------------------------------
@@ -284,8 +268,8 @@ export function newPiStream(): PiStreamContext {
 }
 
 /** The assistant message's blocks, in pi's shape (`toolCall`, `thinking`). */
-function assistantBlocks(content: unknown): Extract<ChatEventBody, { kind: "assistant" }>["blocks"] {
-  const blocks: Extract<ChatEventBody, { kind: "assistant" }>["blocks"] = [];
+function assistantBlocks(content: unknown): Extract<AgentOutput, { kind: "assistant" }>["blocks"] {
+  const blocks: Extract<AgentOutput, { kind: "assistant" }>["blocks"] = [];
   if (typeof content === "string") {
     if (content) blocks.push({ type: "text", text: content });
     return blocks;
@@ -319,7 +303,7 @@ export function mapPiEvent(
   event: PiEvent,
   ctx: { turn: number; now?: () => number },
   stream: PiStreamContext,
-): ChatEventBody[] {
+): AgentOutput[] {
   const now = ctx.now ?? Date.now;
   switch (event.type) {
     case "agent_start": {
@@ -355,7 +339,7 @@ export function mapPiEvent(
       const message = record(event.message);
       if (message?.role !== "assistant") return [];
       stream.costUsd += costOf(message.usage);
-      const events: ChatEventBody[] = [];
+      const events: AgentOutput[] = [];
       const blocks = assistantBlocks(message.content);
       if (blocks.length > 0) {
         events.push({

@@ -16,7 +16,7 @@ import {
   normalizeAutosaveSeconds,
   normalizeCodeGen,
   normalizeCodeGenTarget,
-  CODE_GEN_TARGET_LIST,
+  codeGenTargetList,
   DEFAULT_PROJECT_MANAGEMENT_TOOL,
   normalizeDeletePublished,
   normalizeProjectManagement,
@@ -119,9 +119,7 @@ import {
   buildSessionPrompt,
   claudeAvailable,
   claudeDesktopAvailable,
-  codexAvailable,
   launchDesktopSession,
-  piAvailable,
   SESSION_TITLE_MAX,
   sessionsDirectory,
 } from "./agent";
@@ -137,15 +135,17 @@ import {
   interruptChat,
   isFinalStatus,
   listChatSessions,
-  normalizeChatAgent,
   normalizePermissionMode,
-  CHAT_AGENTS,
   PERMISSION_MODES,
+  resolveProvider,
   sendChatMessage,
   setChatPermissionMode,
   subscribeChat,
 } from "./agentChat";
 import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
+// The agents the core still ships, on the registry before any route runs.
+import "./agentProviders";
+import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import {
@@ -524,7 +524,7 @@ async function stateFields(state: SpecDrivenState) {
     codeGen: normalizeCodeGen(state.codeGen),
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
-    codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget),
+    codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget, agentIds()),
     // How long a Claude turn behind a proxy waits for the API's first
     // response in the pane (src/server/agentChat.ts); 0 is no limit.
     agentFirstResponseSeconds: normalizeAgentFirstResponseSeconds(state.agentFirstResponseSeconds),
@@ -537,16 +537,20 @@ async function stateFields(state: SpecDrivenState) {
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: !isHostedMode() && claudeDesktopAvailable(),
-    // Whether the Claude CLI is on PATH, so a session can run in the app's
-    // own coding agent pane (specs/agents/agent-pane.feature.md).
-    canRunAgentPane: !isHostedMode() && claudeAvailable(),
-    // Whether the Pi CLI is on PATH, so a session can run in Pi
-    // (specs/agents/integration-with-pi-dev-agent.feature.md) — gates the
-    // Pi entry of the session dialog's agent choice.
-    canRunPi: !isHostedMode() && piAvailable(),
-    // Whether the Codex CLI is on PATH, so a session can run in Codex
-    // (src/server/codexChat.ts) — gates the Codex entry of the same choice.
-    canRunCodex: !isHostedMode() && codexAvailable(),
+    // The coding agents the plugins supply (specs/agents/agent-plugins
+    // .feature.md), by rank, each saying whether its CLI is on PATH — what
+    // the pane and the session dialog offer. A hosted worker runs none.
+    agents: isHostedMode() ? [] : agents.describe(),
+    // Marketplace plugins that would supply an agent, not installed; the
+    // pane offers them. Filled once the marketplace index carries them.
+    agentOffers: [],
+    // Whether some agent answers one no-tools turn (src/server/estimate.ts).
+    canEstimate: !isHostedMode() && agents.oneShot() !== undefined,
+    // The per-agent flags the client read before the descriptors, derived
+    // from them for one release.
+    canRunAgentPane: agentUsable("claude"),
+    canRunPi: agentUsable("pi"),
+    canRunCodex: agentUsable("codex"),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     featureFlags: normalizeFeatureFlags(state.featureFlags),
@@ -971,9 +975,9 @@ const putState: Handler = async (req) => {
   // Session target (specs/agents/claude.feature.md): the last "Run in"
   // choice of the session dialog, so the next dialog opens on it.
   if (body.codeGenTarget !== undefined) {
-    const target = normalizeCodeGenTarget(body.codeGenTarget);
+    const target = normalizeCodeGenTarget(body.codeGenTarget, agentIds());
     if (target === null) {
-      return json({ error: `codeGenTarget must be ${CODE_GEN_TARGET_LIST}` }, 400);
+      return json({ error: `codeGenTarget must be ${codeGenTargetList(agentIds())}` }, 400);
     }
     state.codeGenTarget = target;
   }
@@ -2448,11 +2452,22 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
   return files;
 }
 
-const CLI_MISSING = "Claude CLI not found — install the `claude` command";
-const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";
-const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";
-/** The agents as the error message lists them: "claude, pi or codex". */
-const CHAT_AGENT_LIST = `${CHAT_AGENTS.slice(0, -1).join(", ")} or ${CHAT_AGENTS.at(-1)}`;
+/** The registered agents' ids, by rank. */
+function agentIds(): string[] {
+  return agents.list().map((p) => p.id);
+}
+
+/** Whether a named agent can run here: registered, its CLI on PATH, not hosted. */
+function agentUsable(id: string): boolean {
+  return !isHostedMode() && (agents.get(id)?.available() ?? false);
+}
+
+/** The agents as an error message lists them: "claude, codex or pi". */
+function chatAgentList(): string {
+  const ids = agentIds();
+  if (ids.length === 0) return "(no agent plugin is installed)";
+  return ids.length === 1 ? ids[0]! : `${ids.slice(0, -1).join(", ")} or ${ids.at(-1)}`;
+}
 
 // Code gen session (specs/agents/claude.feature.md): the client sends the
 // session name, the selected specs — whole files or per-file scenario
@@ -2570,25 +2585,21 @@ const postAgentSession = withDataDir(async (dir, req) => {
   };
   const resolved = await resolveSessionRequest(dir, body);
   if (resolved instanceof Response) return resolved;
-  const target = normalizeCodeGenTarget(body.target);
-  if (target === null) return json({ error: `target must be ${CODE_GEN_TARGET_LIST}` }, 400);
+  const target = normalizeCodeGenTarget(body.target, agentIds());
+  if (target === null) return json({ error: `target must be ${codeGenTargetList(agentIds())}` }, 400);
   const { name, specs, place, sections } = resolved;
   // The pane (specs/agents/agent-pane.feature.md): the prompt opens a
-  // live chat in the app; the client shows it and the conversation goes on.
-  // "pane" is that chat with Claude, "pi" the same chat with Pi
-  // (specs/agents/integration-with-pi-dev-agent.feature.md), "codex" the
-  // same chat with Codex (src/server/codexChat.ts).
-  if (target === "pane" || target === "pi" || target === "codex") {
-    const agent: ChatAgent = target === "pane" ? "claude" : target;
-    const missing = missingAgentCli(agent);
+  // live chat in the app with the named agent; the client shows it and the
+  // conversation goes on.
+  if (target !== "desktop") {
+    const missing = missingAgent(target);
     if (missing) return missing;
     try {
       const meta = await createChatSession({
         place,
         name,
-        agent,
+        agent: target,
         prompt: buildSessionPrompt(name, specs, place, sections),
-        firstResponseSeconds: await agentFirstResponseSeconds(),
         sessionsDir: await sessionsDirectory(getAppRoot()),
       });
       return json({ name, id: meta.id, target });
@@ -2627,24 +2638,26 @@ const postAgentSessionPrompt = withDataDir(async (dir, req) => {
 // by id. Events reach the client over a one-way NDJSON stream, the only kind
 // of push that works over both Bun.serve and Electron's app:// protocol.
 
-/** The refusal for an agent whose CLI is not on PATH, or null when it is. */
-function missingAgentCli(agent: ChatAgent): Response | null {
-  if (agent === "pi" && !piAvailable()) return json({ error: PI_MISSING }, 502);
-  if (agent === "codex" && !codexAvailable()) return json({ error: CODEX_MISSING }, 502);
-  if (agent === "claude" && !claudeAvailable()) return json({ error: CLI_MISSING }, 502);
-  return null;
+/** The refusal for an agent no plugin provides or whose CLI is not on PATH, or null. */
+function missingAgent(agent?: ChatAgent): Response | null {
+  try {
+    resolveProvider(agent);
+    return null;
+  } catch (e) {
+    return chatError(e);
+  }
 }
 
 /** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
 async function agentPanePlace(
   dir: string,
-  agent: ChatAgent,
+  agent: ChatAgent | undefined,
   cwd?: string,
 ): Promise<SessionPlace | Response> {
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
     return json({ error: "Code generation is switched off in Settings" }, 403);
   }
-  const missing = missingAgentCli(agent);
+  const missing = missingAgent(agent);
   if (missing) return missing;
   // A folder the pane picked: it stands in for the code repo, so the data
   // repo still rides along as an extra directory unless it is the folder.
@@ -2663,11 +2676,6 @@ async function agentPanePlace(
   return codeRepo ? { dataRepo: dir, codeRepo } : { dataRepo: dir };
 }
 
-/** The Settings wait for a Claude turn's first API response behind a proxy. */
-async function agentFirstResponseSeconds(): Promise<number> {
-  return normalizeAgentFirstResponseSeconds((await readState(getAppRoot())).agentFirstResponseSeconds);
-}
-
 /** A ChatError carries its status; anything else is a 500 with its words. */
 function chatError(e: unknown): Response {
   if (e instanceof ChatError) return json({ error: e.message }, e.status);
@@ -2682,9 +2690,14 @@ const postAgentChat = withDataDir(async (dir, req) => {
     agent?: unknown;
     cwd?: unknown;
   };
-  // Which agent drives the chat; absent is Claude, as it was before Pi.
-  const agent = body.agent === undefined ? "claude" : normalizeChatAgent(body.agent);
-  if (agent === null) return json({ error: `agent must be ${CHAT_AGENT_LIST}` }, 400);
+  // Which agent drives the chat; absent is the first one whose CLI is there.
+  let agent: ChatAgent | undefined;
+  if (body.agent !== undefined) {
+    if (typeof body.agent !== "string" || !agents.get(body.agent)) {
+      return json({ error: `agent must be ${chatAgentList()}` }, 400);
+    }
+    agent = body.agent;
+  }
   // The folder to work in; absent is the code repo, else the data repo.
   let cwd: string | undefined;
   if (body.cwd !== undefined) {
@@ -2706,10 +2719,9 @@ const postAgentChat = withDataDir(async (dir, req) => {
     const meta = await createChatSession({
       place,
       name,
-      agent,
+      ...(agent ? { agent } : {}),
       ...(prompt ? { prompt } : {}),
       ...(permissionMode ? { permissionMode } : {}),
-      firstResponseSeconds: await agentFirstResponseSeconds(),
       sessionsDir: await sessionsDirectory(getAppRoot()),
     });
     return json(meta);

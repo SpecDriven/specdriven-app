@@ -92,31 +92,47 @@ work from the prompt file. The deep link and its limits (`q` capped at 14336
 chars) were read from the shipped Claude.app bundle, not from public docs, so
 they are version-coupled.
 
-Pane: for developers with the Claude CLI but not Claude Code Desktop, the app
-drives a live Claude Code session itself (src/server/agentChat.ts,
-src/frontend/AgentPane.tsx). One long-lived `query()` from
-`@anthropic-ai/claude-agent-sdk` per chat, in streaming-input mode, spawns the
-developer's own `claude` binary with the project's `code-repo` (else the data
-repo) as its working directory and Claude Code's own system prompt and
-settings. The SDK's messages become an in-memory event log with sequence
-numbers; the browser reads it over a one-way NDJSON stream from the same route
-table (no WebSocket, so it works over Electron's `app://` too) and reopens the
-stream from the last sequence it saw. Permission requests and clarifying
-questions round-trip through cards in the pane; the "/" popup lists whatever
-`supportedCommands()` reports for the session. A `session.json` with
-`agent: "pane"` and Claude's own session id (`agentSessionId`) goes under
-`<settings dir>/sessions/<uuid>/`, so resuming a past pane session is a cheap
-follow-up. When a project names a
+Pane: for developers with a coding agent's CLI but not Claude Code Desktop,
+the app drives a live session itself (src/server/agentChat.ts,
+src/frontend/AgentPane.tsx). Which agent is a provider's business
+(specs/agents/agent-plugins.feature.md): a plugin's host half registers an
+`AgentProvider` on the kernel's `agents` registry (src/plugins/host/agents.ts)
+— its label, rank, CLI, permission modes and capabilities, plus `start()`;
+the engine lends each session an `AgentHost` (emit output, ready/update,
+turn started/ended, request a permission, ended/failed) and gets back an
+`AgentSession` (send, interrupt, set the mode, close). The engine owns what
+every session shares: the in-memory event log with sequence numbers, the
+permission cards and their answers, the turn count, the `session.json`
+record and the routes' API. The browser reads the log over a one-way NDJSON
+stream from the same route table (no WebSocket, so it works over Electron's
+`app://` too) and reopens the stream from the last sequence it saw. The core
+names no agent: `/api/state` lists the providers' descriptors (`agents`), the
+session dialog and the pane read those, a session asked for without an agent
+runs on the first available by rank, and the record's `agent` is the
+provider id (`agentLegacy.ts` maps the pre-plugin values "pane", "pi-pane",
+"codex-pane"). Until the three providers move to marketplace plugins they
+live in src/server/agents/ and are registered by src/server/agentProviders.ts.
+
+Claude (src/server/agents/claude.ts): one long-lived `query()` from
+`@anthropic-ai/claude-agent-sdk` per chat, in streaming-input mode, spawns
+the developer's own `claude` binary with the project's `code-repo` (else the
+data repo) as its working directory and Claude Code's own system prompt and
+settings. Permission requests and clarifying questions round-trip through
+cards in the pane; the "/" popup lists whatever `supportedCommands()` reports
+for the session. The provider also owns the account chip and the
+first-response watchdog for a proxy that does not answer, and answers the
+one-shot turn the task estimate asks for. When a project names a
 `code-repo`, the session runs there and the data repo is an additional
 directory, so Claude can read the specs the prompt points at.
 
-Pi: the same pane, driven by pi.dev's agent instead (src/server/piChat.ts,
+Pi: the same pane, driven by pi.dev's agent instead (src/server/agents/pi.ts
+over src/server/piChat.ts,
 specs/agents/integration-with-pi-dev-agent.feature.md), offered when the `pi`
 binary is on PATH. `pi --mode rpc` speaks JSON lines on stdin/stdout: commands
 out (`prompt`, `abort`, `get_state`, `get_commands`), a `response` per command
 correlated by id, and a stream of events in. Those events are translated into
 the very same event log Claude's messages fill, so the transcript, the browser
-stream and the session record are shared; the record says `agent: "pi-pane"`.
+stream and the session record are shared; the record says `agent: "pi"`.
 Framing is strict JSONL — split on `\n` only, strip a trailing `\r`, never a
 generic line reader, since U+2028 is legal inside JSON strings. Pi's RPC mode
 has no permission protocol: it runs its own tools, so those sessions raise no
@@ -124,7 +140,8 @@ permission cards, offer no permission mode, and say so in the transcript.
 Extension dialogs, which would otherwise block pi forever, are cancelled with
 a note.
 
-Codex: the same pane, driven by OpenAI's Codex CLI (src/server/codexChat.ts),
+Codex: the same pane, driven by OpenAI's Codex CLI (src/server/agents/codex.ts
+over src/server/codexChat.ts),
 offered when the `codex` binary is on PATH. `codex app-server` speaks
 JSON-RPC-shaped lines on stdin/stdout: requests out (`initialize`,
 `thread/start`, `turn/start`, `turn/interrupt`, `turn/steer`), a response per
@@ -142,12 +159,13 @@ the pane's modes map onto those (default → on-request + workspace-write,
 acceptEdits → on-failure, plan → read-only, bypass → never + full access) and
 travel with every `turn/start`; a change applies from the next turn. The
 protocol shapes were read out of `codex app-server generate-ts` for Codex CLI
-0.141, so they are version-coupled. The record says `agent: "codex-pane"` and
+0.141, so they are version-coupled. The record says `agent: "codex"` and
 carries Codex's thread id as `agentSessionId`; the thread is named after the
 session, so `codex resume` lists it by that name.
 
-The feature spec lives in the spec repo as
-`specs/agents/agent-pane.feature.md`; the spec repo is never edited from
+The feature specs live in the spec repo as
+`specs/agents/agent-pane.feature.md` and
+`specs/agents/agent-plugins.feature.md`; the spec repo is never edited from
 this one.
 
 # Decisions

@@ -159,21 +159,27 @@ test("the code gen switch round-trips through the settings file", async () => {
 // Where "Start session" runs (specs/agents/claude.feature.md): the last
 // "Run in" choice; absent or unusable means "not chosen", and the client
 // falls back on whether Claude.app is installed.
-test("the session target is only ever desktop or cli", () => {
-  expect(normalizeCodeGenTarget("desktop")).toBe("desktop");
-  expect(normalizeCodeGenTarget("pane")).toBe("pane");
-  expect(normalizeCodeGenTarget("pi")).toBe("pi");
-  expect(normalizeCodeGenTarget("codex")).toBe("codex");
-  expect(normalizeCodeGenTarget(undefined)).toBeNull();
-  expect(normalizeCodeGenTarget("terminal")).toBeNull();
+test("the session target is only ever desktop or a registered agent", () => {
+  const ids = ["claude", "codex", "pi"];
+  expect(normalizeCodeGenTarget("desktop", ids)).toBe("desktop");
+  expect(normalizeCodeGenTarget("claude", ids)).toBe("claude");
+  expect(normalizeCodeGenTarget("pi", ids)).toBe("pi");
+  expect(normalizeCodeGenTarget("codex", ids)).toBe("codex");
+  // "pane", from before agents were providers, means Claude — while a
+  // Claude is registered.
+  expect(normalizeCodeGenTarget("pane", ids)).toBe("claude");
+  expect(normalizeCodeGenTarget("pane", ["codex"])).toBeNull();
+  expect(normalizeCodeGenTarget("pi", ["claude"])).toBeNull();
+  expect(normalizeCodeGenTarget(undefined, ids)).toBeNull();
+  expect(normalizeCodeGenTarget("terminal", ids)).toBeNull();
   // The headless `claude -p` target is gone; a settings file that still
   // names it reads as "not chosen".
-  expect(normalizeCodeGenTarget("cli")).toBeNull();
+  expect(normalizeCodeGenTarget("cli", ids)).toBeNull();
 });
 
 test("the session target round-trips through the settings file", async () => {
   await writeState({ dataRepo: "data", codeGenTarget: "desktop" }, dir);
-  expect(normalizeCodeGenTarget((await readState(dir)).codeGenTarget)).toBe("desktop");
+  expect(normalizeCodeGenTarget((await readState(dir)).codeGenTarget, [])).toBe("desktop");
 });
 
 // Session records live beside the settings file (src/server/agent.ts), so

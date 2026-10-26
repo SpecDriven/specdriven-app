@@ -12,9 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { version as appVersion } from "../package.json";
-import { setClaudeAvailability } from "../src/server/agent";
-import { InputQueue, endAllChatSessions, setQueryFactory } from "../src/server/agentChat";
-import type { QueryLike, SlashCommandInfo } from "../src/server/agentChat";
+import { setClaudeAvailability, setCodexAvailability, setPiAvailability } from "../src/server/agent";
+import { endAllChatSessions } from "../src/server/agentChat";
+import type { SlashCommandInfo } from "../src/server/agentChat";
+import { InputQueue, setQueryFactory } from "../src/server/agents/claude";
+import type { QueryLike } from "../src/server/agents/claude";
 import { handleApi, reloader } from "../src/server/api";
 import { PATCH_MANIFEST, PATCH_STATE_FILE } from "../src/server/appSource";
 import { setRelauncher } from "../src/server/relaunch";
@@ -100,7 +102,11 @@ beforeEach(async () => {
   process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
   for (const name of ["ANTHROPIC_BASE_URL", "DEMO_MODE", "SPECDRIVEN_HOSTED", "SPECDRIVEN_BOOT"]) delete process.env[name];
   fakes = [];
+  // The fix runs on whichever agent is there by rank: Claude here, and never
+  // a real codex or pi this machine may have on PATH.
   setClaudeAvailability(() => true);
+  setCodexAvailability(() => false);
+  setPiAvailability(() => false);
   setQueryFactory(({ prompt, options }) => {
     const fake = new FakeQuery(prompt, options);
     fakes.push(fake);
@@ -115,6 +121,8 @@ afterEach(async () => {
   await syncPlugins({ plugins: { enabled: [], seen: ["self-fix"] } });
   reloader.stop();
   setClaudeAvailability(null);
+  setCodexAvailability(null);
+  setPiAvailability(null);
   setQueryFactory(null);
   setRelauncher(null);
   await rm(root, { recursive: true, force: true });

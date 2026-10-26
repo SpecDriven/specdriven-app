@@ -9,8 +9,8 @@ import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "../src/server/api";
 import { setClaudeAvailability } from "../src/server/agent";
-import { InputQueue, setQueryFactory } from "../src/server/agentChat";
-import type { QueryLike } from "../src/server/agentChat";
+import { InputQueue, setQueryFactory } from "../src/server/agents/claude";
+import type { QueryLike } from "../src/server/agents/claude";
 import { estimatePrompt, minutesFromResult } from "../src/server/estimate";
 import { writeState } from "../src/server/state";
 import { syncPlugins } from "../src/plugins/host/loader";
@@ -200,10 +200,12 @@ test("a proposal that is not a number is refused", async () => {
   expect(((await res.json()) as { error: string }).error).toContain("number of minutes");
 
   // Without structured output, the first whole number in the words is it.
-  expect(minutesFromResult(success("I'd say 45 minutes.") as never)).toBe(45);
-  expect(minutesFromResult(success("", { minutes: 120 }) as never)).toBe(120);
-  expect(minutesFromResult(success("0") as never)).toBeNull();
-  expect(minutesFromResult(success("99999") as never)).toBeNull();
+  const answered = (text: string, structured?: unknown) => ({ text, structured, isError: false });
+  expect(minutesFromResult(answered("I'd say 45 minutes."))).toBe(45);
+  expect(minutesFromResult(answered("", { minutes: 120 }))).toBe(120);
+  expect(minutesFromResult(answered("0"))).toBeNull();
+  expect(minutesFromResult(answered("99999"))).toBeNull();
+  expect(minutesFromResult({ text: "45", isError: true })).toBeNull();
 });
 
 test("Claude exiting without an answer is 502, and the prompt asks for minutes only", async () => {

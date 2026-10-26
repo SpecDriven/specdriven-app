@@ -14,6 +14,8 @@
 
 import { useSyncExternalStore } from "react";
 import type {
+  AgentDescriptor,
+  AgentOffer,
   AssistantBlock,
   ChatAgent,
   ChatEvent,
@@ -21,10 +23,13 @@ import type {
   ChatStatus,
   PermissionMode,
   SlashCommandInfo,
-} from "../server/agentChat";
+} from "../server/agentTypes";
+import { byRank, fallbackDescriptor } from "../server/agentTypes";
 import { toast } from "./Toasts";
 
 export type {
+  AgentDescriptor,
+  AgentOffer,
   ChatAgent,
   ChatEvent,
   ChatSessionMeta,
@@ -33,8 +38,64 @@ export type {
   SlashCommandInfo,
 };
 
-/** What the pane calls each agent. */
-export const AGENT_LABEL: Record<ChatAgent, string> = { claude: "Claude", pi: "Pi", codex: "Codex" };
+// --- The agents (specs/agents/agent-plugins.feature.md) --------------------
+//
+// What the pane knows of an agent is its descriptor from /api/state: the
+// label, whether its CLI is there, which modes it offers, what it can do.
+// A session whose provider is gone (its plugin switched off, an old record)
+// renders through a fallback: a name, no modes, no Stop.
+
+/** The descriptor for a provider id: the registry's, else a stand-in. */
+export function describeAgent(id: ChatAgent, agents: readonly AgentDescriptor[] = state.agents): AgentDescriptor {
+  return agents.find((a) => a.id === id) ?? fallbackDescriptor(id);
+}
+
+/** What the pane calls an agent. */
+export function agentLabel(id: ChatAgent, agents: readonly AgentDescriptor[] = state.agents): string {
+  return describeAgent(id, agents).label;
+}
+
+/** Whether the pane offers a permission mode for the agent at all. */
+export function hasModes(agent: AgentDescriptor): boolean {
+  return agent.capabilities.permissionModes.length > 0;
+}
+
+/** The agents a session can start on here: those whose CLI is on PATH, by rank. */
+export function usableAgents(agents: readonly AgentDescriptor[] = state.agents): AgentDescriptor[] {
+  return agents.filter((a) => a.available).sort(byRank);
+}
+
+/**
+ * The descriptors off a /api/state answer: the `agents` list, or — from a
+ * server that still reports the per-agent flags only — the three built-in
+ * agents those flags stood for.
+ */
+export function agentsFromState(data: {
+  agents?: unknown;
+  canRunAgentPane?: unknown;
+  canRunPi?: unknown;
+  canRunCodex?: unknown;
+}): AgentDescriptor[] {
+  if (Array.isArray(data.agents)) {
+    return data.agents.filter((a): a is AgentDescriptor => Boolean(a && typeof a === "object" && typeof (a as AgentDescriptor).id === "string"));
+  }
+  const legacy: AgentDescriptor[] = [];
+  const flag = (id: string, label: string, rank: number, on: unknown) => {
+    if (on !== true) return;
+    legacy.push({ ...fallbackDescriptor(id), label, rank, available: true, plugin: "core" });
+  };
+  flag("claude", "Claude", 10, data.canRunAgentPane);
+  flag("codex", "Codex", 20, data.canRunCodex);
+  flag("pi", "Pi", 30, data.canRunPi);
+  return legacy;
+}
+
+/** The offers off a /api/state answer. */
+export function offersFromState(data: { agentOffers?: unknown }): AgentOffer[] {
+  return Array.isArray(data.agentOffers)
+    ? data.agentOffers.filter((o): o is AgentOffer => Boolean(o && typeof o === "object" && typeof (o as AgentOffer).plugin === "string"))
+    : [];
+}
 
 // --- Transcript ------------------------------------------------------------
 
@@ -444,12 +505,10 @@ export interface AgentChatStore {
   sessions: Record<string, SessionState>;
   /** Every session the server knows, newest first. */
   list: ChatSessionMeta[];
-  /** Whether the Claude CLI is there (from /api/state). */
-  available: boolean;
-  /** Whether the Pi CLI is there — a pane session can run on any of them. */
-  piAvailable: boolean;
-  /** Whether the Codex CLI is there. */
-  codexAvailable: boolean;
+  /** The agents the plugins supply (from /api/state), by rank. */
+  agents: AgentDescriptor[];
+  /** Marketplace plugins that would supply an agent, not installed. */
+  agentOffers: AgentOffer[];
 }
 
 let state: AgentChatStore = {
@@ -458,9 +517,8 @@ let state: AgentChatStore = {
   activeId: null,
   sessions: {},
   list: [],
-  available: false,
-  piAvailable: false,
-  codexAvailable: false,
+  agents: [],
+  agentOffers: [],
 };
 const listeners = new Set<() => void>();
 const streams = new Map<string, AbortController>();
@@ -523,8 +581,7 @@ function receive(id: string, ev: ChatEvent): void {
   set({ list: state.list.map((m) => (m.id === id ? meta : m)) });
   // A question nobody is looking at would hang the session in silence.
   if (ev.kind === "permission_request" && (!state.open || state.activeId !== id)) {
-    const who = AGENT_LABEL[s.meta.agent] ?? "The agent";
-    toast.info(`${who} is waiting for your approval in the coding agent pane`);
+    toast.info(`${agentLabel(s.meta.agent)} is waiting for your approval in the coding agent pane`);
   }
 }
 
@@ -610,7 +667,7 @@ function forget(id: string): void {
 
 export interface CreateSessionOptions {
   name: string;
-  /** Which agent drives the chat; absent is Claude. */
+  /** Which agent drives the chat; absent is the first one whose CLI is there. */
   agent?: ChatAgent;
   prompt?: string;
   permissionMode?: PermissionMode;
@@ -619,18 +676,11 @@ export interface CreateSessionOptions {
 }
 
 export const agentChat = {
-  setAvailable(
-    available: boolean,
-    piAvailable = state.piAvailable,
-    codexAvailable = state.codexAvailable,
-  ): void {
-    if (
-      available !== state.available ||
-      piAvailable !== state.piAvailable ||
-      codexAvailable !== state.codexAvailable
-    ) {
-      set({ available, piAvailable, codexAvailable });
-    }
+  /** What /api/state said of the agents; unchanged lists leave the store alone. */
+  setAgents(agents: AgentDescriptor[], agentOffers: AgentOffer[] = state.agentOffers): void {
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    if (same(agents, state.agents) && same(agentOffers, state.agentOffers)) return;
+    set({ agents: [...agents].sort(byRank), agentOffers });
   },
   openPane(): void {
     if (!state.open) set({ open: true });

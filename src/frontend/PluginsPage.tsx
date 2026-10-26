@@ -20,6 +20,8 @@ import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { PluginMarketplace } from "./PluginMarketplace";
 
 export interface PluginsPageProps {
+  /** A marketplace plugin's id to open scrolled to — the agent pane sent the user to install it. */
+  initialWanted?: string | null;
   plugins: PluginStatus[];
   /** Browser halves that failed to load, by plugin id. */
   loadErrors: ReadonlyMap<string, string>;
@@ -55,7 +57,7 @@ function originOf(plugin: PluginStatus): string {
 export function PluginsPage(props: PluginsPageProps) {
   const { plugins, demo } = props;
   // The id a not-installed row asked the marketplaces for.
-  const [wanted, setWanted] = useState<string | null>(null);
+  const [wanted, setWanted] = useState<string | null>(props.initialWanted ?? null);
   const on = plugins.filter((p) => p.enabled);
   const off = plugins.filter((p) => !p.enabled);
 

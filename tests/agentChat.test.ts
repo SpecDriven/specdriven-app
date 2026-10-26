@@ -11,17 +11,17 @@ import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-a
 import { handleApi, reloader } from "../src/server/api";
 import { setClaudeAvailability } from "../src/server/agent";
 import { createClaudeFileBackend, saveClaudeToken, setClaudeTokenBackend } from "../src/server/claudeToken";
+import { createChatSession, endAllChatSessions, getChatEvents } from "../src/server/agentChat";
+import type { ChatEvent, ChatSessionMeta, SlashCommandInfo } from "../src/server/agentChat";
 import {
   InputQueue,
   claudeBaseUrl,
-  createChatSession,
   describeAccount,
-  endAllChatSessions,
-  getChatEvents,
   mapSdkMessage,
+  setClaudeFirstResponseSeconds,
   setQueryFactory,
-} from "../src/server/agentChat";
-import type { AccountInfoLike, ChatEvent, ChatSessionMeta, QueryLike, SlashCommandInfo } from "../src/server/agentChat";
+} from "../src/server/agents/claude";
+import type { AccountInfoLike, QueryLike } from "../src/server/agents/claude";
 import { createFeature, saveFeature } from "../src/server/features";
 import { PROJECT_SETTINGS_FILE } from "../src/server/members";
 import { readState, writeState } from "../src/server/state";
@@ -120,6 +120,7 @@ afterEach(async () => {
   reloader.stop();
   setClaudeAvailability(null);
   setQueryFactory(null);
+  setClaudeFirstResponseSeconds(null);
   setClaudeTokenBackend(createClaudeFileBackend());
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
@@ -319,7 +320,8 @@ test("a session starts Claude on the data repo and is ready once Claude answers"
       JSON.parse(await readFile(join(root, ".specdriven", "sessions", meta.id, "session.json"), "utf8")),
     (r) => r.agentSessionId === "claude-abc",
   );
-  expect(record).toMatchObject({ agent: "pane", cwd: data, dataRepo: data, agentSessionId: "claude-abc" });
+  // The record names the provider, not the pane it ran in (src/server/agentLegacy.ts).
+  expect(record).toMatchObject({ agent: "claude", cwd: data, dataRepo: data, agentSessionId: "claude-abc" });
   expect(ready.meta.agent).toBe("claude");
   expect(stat(join(data, ".specdriven", "sessions"))).rejects.toThrow();
 
@@ -571,7 +573,7 @@ test("the pane is gated by the Settings switch and the CLI on PATH", async () =>
   const state = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
   expect(state.canRunAgentPane).toBe(true);
   setClaudeAvailability(() => false);
-  const noCli = await api("/api/agent/chat", "POST", { name: "chat" });
+  const noCli = await api("/api/agent/chat", "POST", { name: "chat", agent: "claude" });
   expect(noCli.status).toBe(502);
   expect((await noCli.json()).error).toContain("Claude CLI not found");
   const again = (await (await api("/api/state")).json()) as { canRunAgentPane: boolean };
@@ -637,7 +639,8 @@ test("Start session can open the generated prompt in the pane", async () => {
   });
   expect(res.status).toBe(200);
   const body = (await res.json()) as { id: string; name: string; target: string };
-  expect(body).toMatchObject({ name: "implement quotes", target: "pane" });
+  // "pane" is the pre-plugin name for Claude in the pane; the answer names the provider.
+  expect(body).toMatchObject({ name: "implement quotes", target: "claude" });
   const fake = fakes.at(-1)!;
   const first = await fake.input(1);
   expect(first.message.content).toContain("SpecDriven code gen session: implement quotes");
@@ -655,9 +658,12 @@ test("Start session can open the generated prompt in the pane", async () => {
   await until(() => snapshot(body.id), (s) => s.meta.agentSessionId === "claude-1");
   expect((await snapshot(body.id)).meta.status).toBe("running");
 
+  // "pane" is what the app stored before agents were providers; it is
+  // read as Claude and stored as such (src/server/agentLegacy.ts).
   const stored = await api("/api/state", "PUT", { codeGenTarget: "pane" });
   expect(stored.status).toBe(200);
-  expect((await readState(root)).codeGenTarget).toBe("pane");
+  expect((await readState(root)).codeGenTarget).toBe("claude");
+  expect(((await (await api("/api/state")).json()) as { codeGenTarget: string }).codeGenTarget).toBe("claude");
 });
 
 test("ending a session aborts Claude, denies what it asked, and keeps the record", async () => {
@@ -865,10 +871,12 @@ const apiRetry = (attempt: number) =>
 
 /** A Claude chat with a first-response wait of `seconds`, idle and ready. */
 async function watchedSession(seconds: number): Promise<{ id: string; fake: FakeQuery }> {
+  // The Settings value is whole seconds; the provider's seam takes a fraction.
+  setClaudeFirstResponseSeconds(async () => seconds);
   const meta = await createChatSession({
     place: { dataRepo: data },
     name: "chat",
-    firstResponseSeconds: seconds,
+    agent: "claude",
     sessionsDir: join(root, ".specdriven", "sessions"),
   });
   const fake = fakes.at(-1)!;
