@@ -85,3 +85,10 @@ describe("filtering by attribute", () => {
     expect(attributeFilterLabel({ key: "x", names: ["a"] })).toBe("x a");
   });
 });
+
+import { initialCaseDisplayName } from "../src/frontend/tree";
+test("initialCaseDisplayName capitalises a folder name and skips one already in that case", () => {
+  expect(initialCaseDisplayName("billing-rules")).toBe("Billing rules");
+  expect(initialCaseDisplayName("docs")).toBe("Docs");
+  expect(initialCaseDisplayName("Docs")).toBeNull();
+});

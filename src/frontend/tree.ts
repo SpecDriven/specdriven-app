@@ -20,6 +20,17 @@ export interface FolderNode {
   features: FeatureListing[];
 }
 
+/**
+ * The display name a new folder starts with: its own name in initial case —
+ * `-` and `_` read as spaces, the first letter capitalised, the rest kept
+ * (`billing-rules` → `Billing rules`). Null when that is the name itself.
+ */
+export function initialCaseDisplayName(folderName: string): string | null {
+  const spaced = folderName.replace(/[-_]+/g, " ").trim();
+  const name = spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  return name && name !== folderName ? name : null;
+}
+
 /** The sidebar's label for a folder: its description when it has one, else its name. */
 export function folderLabel(node: Pick<FolderNode, "name" | "description">): string {
   return node.description ?? node.name;
