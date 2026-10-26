@@ -46,9 +46,9 @@
  *
  *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
  */
-import { $ } from "bun";
-import { copyFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { $, type BunPlugin } from "bun";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { version } from "../package.json";
 import type { PatchManifest } from "../src/electron/bootPolicy";
 
@@ -151,6 +151,148 @@ export function patchManifest(appVersion: string, fixId: string, now: Date = new
 export const PATCH_MANIFEST_FILE = "patch.json";
 
 /**
+ * Dependencies whose runtime files the main-process bundle reads by path.
+ * Bun's bundler replaces `__dirname` inside a bundled dependency with the
+ * directory it was bundled from — an absolute path into the builder's
+ * node_modules, which a cross-built .deb or a copied .app does not have, so
+ * the app died at launch with ENOENT on automerge_wasm_bg.wasm. The bundle
+ * instead reads these from beside itself (src/electron/bundleAssets.ts),
+ * and the build copies them there:
+ *
+ *   automerge_wasm_bg.wasm   Automerge's engine, read by its nodejs entry (a
+ *                            CommonJS file, automerge_wasm.cjs)
+ *   cbor-extract/            cbor-x's optional native string extractor:
+ *                            package.json and prebuilds/<platform>-<arch>/
+ *                            for every platform package bun installed
+ *                            (normally the host's only — elsewhere cbor-x
+ *                            falls back to its JavaScript path, as it did
+ *                            before). electron-builder unpacks it from the
+ *                            asar ("asarUnpack" in package.json) so the
+ *                            .node file can be dlopen'ed.
+ */
+export const AUTOMERGE_WASM = "automerge_wasm_bg.wasm";
+export const CBOR_EXTRACT_DIR = "cbor-extract";
+
+/** The bundled helper that locates those files; a virtual specifier the plugin resolves. */
+const BUNDLE_ASSETS = "specdriven:bundle-assets";
+const BUNDLE_ASSETS_FILE = resolve(import.meta.dir, "..", "src", "electron", "bundleAssets.ts");
+
+const AUTOMERGE_NODEJS_ENTRY = /[\\/]@automerge[\\/]automerge[\\/]dist[\\/]mjs[\\/]wasm_bindgen_output[\\/]nodejs[\\/]automerge_wasm\.cjs$/;
+const CBOR_EXTRACT_ENTRY = /[\\/]node_modules[\\/]cbor-extract[\\/]index\.js$/;
+
+/**
+ * The source a baked module is bundled from instead: Automerge's nodejs
+ * entry reads the wasm beside the bundle, cbor-extract hands its loader the
+ * cbor-extract/ directory beside the bundle. Null for any other module.
+ */
+export function rewriteBakedModule(path: string, source: string): string | null {
+  if (AUTOMERGE_NODEJS_ENTRY.test(path)) {
+    const needle = "`${__dirname}/automerge_wasm_bg.wasm`";
+    if (!source.includes(needle)) {
+      throw new Error(`${path} no longer reads its wasm from __dirname — update rewriteBakedModule in scripts/build-desktop.ts`);
+    }
+    return source.replace(needle, () => `require(${JSON.stringify(BUNDLE_ASSETS)}).bundleAssetPath(${JSON.stringify(AUTOMERGE_WASM)})`);
+  }
+  if (CBOR_EXTRACT_ENTRY.test(path)) {
+    return `module.exports = require("node-gyp-build-optional-packages")(require(${JSON.stringify(BUNDLE_ASSETS)}).bundleAssetPath(${JSON.stringify(CBOR_EXTRACT_DIR)}));\n`;
+  }
+  return null;
+}
+
+/**
+ * Absolute paths the bundler baked in as a dependency's `__dirname` or
+ * `__filename`. A self-contained bundle has none; the build fails on any,
+ * so a new dependency that reads files by path is caught here rather than
+ * at launch on another machine.
+ */
+export function bakedPaths(bundle: string): string[] {
+  return [...bundle.matchAll(/\b__(?:dirname|filename) = "([^"]+)"/g)].map((m) => m[1]!);
+}
+
+/** Where the rewritten modules came from, for copying their files beside the bundle. */
+interface BakedModuleSources {
+  automergeNodejsDir: string | null;
+  cborExtractDir: string | null;
+}
+
+function selfContainedPlugin(sources: BakedModuleSources): BunPlugin {
+  return {
+    name: "self-contained-native-modules",
+    setup(build) {
+      build.onResolve({ filter: new RegExp(`^${BUNDLE_ASSETS}$`) }, () => ({ path: BUNDLE_ASSETS_FILE }));
+      build.onLoad({ filter: AUTOMERGE_NODEJS_ENTRY }, async ({ path }) => {
+        sources.automergeNodejsDir = dirname(path);
+        return { contents: rewriteBakedModule(path, await Bun.file(path).text())!, loader: "js" };
+      });
+      build.onLoad({ filter: CBOR_EXTRACT_ENTRY }, async ({ path }) => {
+        sources.cborExtractDir = dirname(path);
+        return { contents: rewriteBakedModule(path, await Bun.file(path).text())!, loader: "js" };
+      });
+    },
+  };
+}
+
+/** The wasm and cbor-extract's loadable pieces, copied beside the bundle (see AUTOMERGE_WASM). */
+async function copyBundleAssets(outdir: string, sources: BakedModuleSources): Promise<void> {
+  if (!sources.automergeNodejsDir || !sources.cborExtractDir) {
+    throw new Error("the main-process bundle no longer pulls in Automerge's nodejs entry or cbor-extract — update bundleElectron in scripts/build-desktop.ts");
+  }
+  await copyFile(join(sources.automergeNodejsDir, AUTOMERGE_WASM), join(outdir, AUTOMERGE_WASM));
+
+  const dest = join(outdir, CBOR_EXTRACT_DIR);
+  await mkdir(dest, { recursive: true });
+  await copyFile(join(sources.cborExtractDir, "package.json"), join(dest, "package.json"));
+  // The platform packages: node_modules/@cbor-extract/cbor-extract-<platform>-<arch>,
+  // laid out as the prebuilds/<platform>-<arch>/ directories its loader scans.
+  const scope = join(dirname(sources.cborExtractDir), "@cbor-extract");
+  for (const name of await readdir(scope).catch(() => [] as string[])) {
+    const tuple = /^cbor-extract-(.+)$/.exec(name)?.[1];
+    if (!tuple) continue;
+    const to = join(dest, "prebuilds", tuple);
+    await mkdir(to, { recursive: true });
+    for (const file of await readdir(join(scope, name))) {
+      if (file.endsWith(".node")) await copyFile(join(scope, name, file), join(to, file));
+    }
+  }
+}
+
+/** The Claude Agent SDK's optional per-platform binaries stay out: the app runs the developer's own `claude` (src/server/agentChat.ts). */
+const SDK_BINARIES = "@anthropic-ai/claude-agent-sdk-*";
+
+async function bundle(entry: string, outdir: string, production: boolean, plugins: BunPlugin[]): Promise<void> {
+  await Bun.build({
+    entrypoints: [entry],
+    outdir,
+    target: "node",
+    format: "esm",
+    external: ["electron", SDK_BINARIES],
+    sourcemap: "linked",
+    define: production ? { "process.env.NODE_ENV": '"production"' } : {},
+    plugins,
+  });
+}
+
+/**
+ * The main process and the boot shim, into `outdir` — what the desktop build
+ * and `bun run dev:electron` share. main.js is self-contained: the files it
+ * reads at runtime are copied beside it (AUTOMERGE_WASM above), and a bundle
+ * that still carries a baked absolute path fails the build.
+ */
+export async function bundleElectron(outdir: string, opts: { production: boolean }): Promise<void> {
+  const sources: BakedModuleSources = { automergeNodejsDir: null, cborExtractDir: null };
+  await bundle("src/electron/main.ts", outdir, opts.production, [selfContainedPlugin(sources)]);
+  // The shim is its own file: it imports main.js by a computed path, so the
+  // bundler leaves the two apart (src/electron/boot.ts).
+  await bundle("src/electron/boot.ts", outdir, opts.production, []);
+  await copyBundleAssets(outdir, sources);
+
+  const baked = bakedPaths(await Bun.file(join(outdir, "main.js")).text());
+  if (baked.length > 0) {
+    throw new Error(`dist/electron/main.js bakes in build-machine paths, which only this machine has:\n  ${baked.join("\n  ")}\nRewrite the dependency's loader in rewriteBakedModule (scripts/build-desktop.ts).`);
+  }
+}
+
+/**
  * The bundles — the renderer, the app icon beside it, the main process and
  * the boot shim that picks between this main process and a self-fix's — all a local
  * launch needs (scripts/crash-test-desktop.ts runs them without the
@@ -167,14 +309,7 @@ export async function bundleDesktop(opts: { fixId?: string | null; distDir?: str
 
   console.log("Building main process…");
   await rm(join(dist, "electron"), { recursive: true, force: true });
-  // The Claude Agent SDK's optional per-platform binaries stay out: the app
-  // runs the developer's own `claude` (src/server/agentChat.ts).
-  const sdkBinaries = "@anthropic-ai/claude-agent-sdk-*";
-  const outdir = join(dist, "electron");
-  await $`bun build src/electron/main.ts --target=node --format=esm --external electron --external ${sdkBinaries} --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir ${outdir}`.quiet();
-  // The shim is its own file: it imports main.js by a computed path, so the
-  // bundler leaves the two apart (src/electron/boot.ts).
-  await $`bun build src/electron/boot.ts --target=node --format=esm --external electron --sourcemap --define process.env.NODE_ENV=${'"production"'} --outdir ${outdir}`.quiet();
+  await bundleElectron(join(dist, "electron"), { production: true });
 
   await writePatchManifest(dist, opts.fixId ?? null);
 }
