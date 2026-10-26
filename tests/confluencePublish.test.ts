@@ -475,11 +475,36 @@ describe("publishing a feature", () => {
     expect(res.body.error).toContain("save a new one in Settings");
   });
 
+  test("a folder lists its features, its subfolders' too, with the page each links and its last parent", async () => {
+    await saveToken();
+    await createFeature(data, "billing/Invoices", "# Invoices\n\n## Send an Invoice @v1 [proposed]\n\n- **Given** an order\n");
+    await createFeature(data, "billing/tax/VAT", "# VAT\n\n## Charge VAT @v1 [proposed]\n\n- **Given** a buyer in the EU\n");
+    await createFeature(data, "billing-old/Refunds", "# Refunds\n");
+    const invoices = "specs/billing/invoices.feature.md";
+    const published = await call("POST", `/api/features/${encodeURIComponent(invoices)}/confluence`, {
+      parentUrl: parentUrl(),
+      scope: "all",
+    });
+    expect(published.status).toBe(200);
+    const res = await call("GET", `/api/folders/${encodeURIComponent("specs/billing")}/confluence`);
+    expect(res.status).toBe(200);
+    expect(res.body.features).toEqual([
+      { file: invoices, name: "Invoices", linkedUrl: published.body.url, parentUrl: parentUrl() },
+      { file: "specs/billing/tax/vat.feature.md", name: "VAT" },
+    ]);
+    // A folder with no features lists none; a folder whose name merely
+    // starts the same is another folder.
+    expect((await call("GET", `/api/folders/${encodeURIComponent("specs/nothing")}/confluence`)).body).toEqual({
+      features: [],
+    });
+  });
+
   test("the hosted app refuses Confluence altogether", async () => {
     process.env.SPECDRIVEN_HOSTED = "1";
     expect((await call("GET", "/api/confluence/tokens")).status).toBe(403);
     expect((await saveToken()).status).toBe(403);
     expect((await publish(parentUrl())).status).toBe(403);
+    expect((await call("GET", `/api/folders/${encodeURIComponent("specs")}/confluence`)).status).toBe(403);
     expect(seen).toHaveLength(0);
   });
 
