@@ -211,6 +211,7 @@ import {
   folderDrop,
   folderLabel,
   folderNamesMoved,
+  initialCaseDisplayName,
   folderOptions,
   folderRenamed,
   scenarioDrop,
@@ -3098,6 +3099,16 @@ export function App() {
         return next;
       });
       setSelectedFolder(data.path);
+      // The new folder starts with its name in initial case as its display
+      // name; a failed save leaves it showing its plain name.
+      const display = initialCaseDisplayName(String(data.path).split("/").pop() ?? "");
+      if (display) {
+        await fetch(`/api/folders/${encodeURIComponent(data.path)}/description`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: display }),
+        }).catch(() => undefined);
+      }
       await loadFeatures();
     } else {
       toast.error(data.error ?? "Could not create the folder");
