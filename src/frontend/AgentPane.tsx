@@ -662,9 +662,9 @@ function EmptyState({
                 checked={picked.id === a.id}
                 onChange={() => setAgentId(a.id)}
               />
-              <span>
+              <span className="choice-label">
                 <span>{a.label}</span>
-                <div className="agent-option-desc">{a.description}</div>
+                <span className="agent-option-desc">{a.description}</span>
               </span>
             </label>
           ))}
