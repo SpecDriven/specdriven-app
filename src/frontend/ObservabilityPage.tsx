@@ -54,6 +54,9 @@ export function LevelBadge({ level }: { level: LogLevel }) {
   return <span className={`log-level log-level-${level}`}>{level.toUpperCase()}</span>;
 }
 
+/** Attributes too long for the one-line view (a stack, an HTTP body); the open row shows them. */
+const BULKY_ATTRIBUTES = new Set(["exception.stacktrace", "http.request.body", "http.response.body"]);
+
 /** One entry: a line of time, level, component and message; details below when open. */
 export function LogRow({
   entry,
@@ -86,7 +89,7 @@ export function LogRow({
           <Marked text={entry.message} pattern={pattern} />
           {!open &&
             attrs
-              .filter(([k]) => k !== "exception.stacktrace")
+              .filter(([k]) => !BULKY_ATTRIBUTES.has(k))
               .map(([k, v]) => (
                 <span className="log-attr" key={k}>
                   {" "}

@@ -4,12 +4,18 @@ import type { Feature } from "../server/parser";
 import { parseModuleUrl, sameQtestBase } from "../server/qtestUrl";
 import type { QtestSite } from "./QtestToken";
 import { PromptChoices } from "./ModalPrompts";
+import { FailureLine, type FailureDetails } from "./FailureDetails";
 
 // "Create qTest test cases…" from a feature's ⋯ menu
 // (specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
 // from a feature"): the parent module to create them under, which scenarios
 // go in, and Create. The server makes a module named after the feature under
-// it, one test case per scenario, and links each from the feature.
+// it, one test case per scenario, and links each from the feature. A failure
+// shows as one line; clicking it opens what the server knows of the call
+// that failed — the request, what was sent, qTest's status and its answer —
+// the same exchange the Observability page shows under "qtest". A test case
+// qTest refuses stops the run: what was written is linked back, and the
+// dialog stays open on the failure so Create carries on from it.
 
 export type PublishScope = "all" | "published";
 
@@ -25,6 +31,8 @@ export interface QtestPublishResult {
   parsed: Feature;
   message?: string;
   warning?: string;
+  /** The test case qTest refused, which stopped the run; the dialog stays open on it. */
+  failure?: { scenarioName: string; message: string; details?: FailureDetails };
 }
 
 const SCOPES = [
@@ -55,6 +63,7 @@ export function QtestPublishDialog({
   trapRef,
   onPublished,
   onClose,
+  onOpenLogs,
 }: {
   file: string;
   featureName: string;
@@ -63,29 +72,40 @@ export function QtestPublishDialog({
   initialParentUrl: string;
   sites: QtestSite[];
   trapRef?: Ref<HTMLDivElement>;
+  /** Called after every run that wrote something; the dialog stays open when `result.failure` is set. */
   onPublished: (result: QtestPublishResult) => void;
   onClose: () => void;
+  /** Leave for the Observability page, showing qTest's entries. */
+  onOpenLogs?: () => void;
 }) {
   const [parentUrl, setParentUrl] = useState(initialParentUrl);
   const [scope, setScope] = useState<PublishScope>("all");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** What the server knows of the failed call; shown when the error is clicked. */
+  const [details, setDetails] = useState<FailureDetails | null>(null);
   const problem = parentModuleProblem(parentUrl, sites);
 
   const publish = async () => {
     if (problem || busy) return;
     setBusy(true);
     setError(null);
+    setDetails(null);
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(file)}/qtest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parentUrl: parentUrl.trim(), scope }),
       });
-      const data = (await res.json()) as QtestPublishResult & { error?: string };
+      const data = (await res.json()) as QtestPublishResult & { error?: string; details?: FailureDetails };
       if (!res.ok) {
         setError(data.error ?? `Creating the test cases failed (HTTP ${res.status})`);
+        setDetails(data.details ?? null);
         return;
+      }
+      if (data.failure) {
+        setError(data.failure.message);
+        setDetails(data.failure.details ?? null);
       }
       onPublished(data);
     } catch {
@@ -143,7 +163,7 @@ export function QtestPublishDialog({
             value={scope}
             onChange={(v) => setScope(v === "published" ? "published" : "all")}
           />
-          {error && <p className="error">{error}</p>}
+          {error && <FailureLine service="qTest" error={error} details={details} onOpenLogs={onOpenLogs} />}
           <div className="dialog-actions">
             <button type="button" className="secondary" onClick={onClose}>
               Cancel
