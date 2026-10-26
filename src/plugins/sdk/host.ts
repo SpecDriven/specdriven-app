@@ -26,6 +26,37 @@ export { createFeature } from "../../server/features";
 export { fileExists, readTextFile, writeTextFile } from "../../server/fsx";
 export { commitAndPush, removeAndPush } from "../../server/git";
 export { slugify, titleFromFileName } from "../../server/parser";
+export { which } from "../../server/run";
+export { sessionWorkDir } from "../../server/agent";
+export { jsonlReader } from "../../server/jsonl";
+export { AgentError, agents } from "../host/agents";
+export type {
+  AgentHost,
+  AgentProvider,
+  AgentReadyInfo,
+  AgentRegistry,
+  AgentSession,
+  AgentStartOptions,
+  OneShotRequest,
+  OneShotResult,
+  PermissionDecision,
+  PermissionOutcome,
+  PermissionRequest,
+} from "../host/agents";
+export type {
+  AgentCapabilities,
+  AgentDescriptor,
+  AgentOffer,
+  AssistantBlock,
+  ChatAccount,
+  ChatAgent,
+  ChatEventBody,
+  ChatStatus,
+  NoteCode,
+  PermissionMode,
+  PermissionSuggestion,
+  SlashCommandInfo,
+} from "../../server/agentTypes";
 export { getLogger, withSpan } from "../../server/telemetry";
 export type { Context, Disposer, Plugin } from "../kernel";
 export type {

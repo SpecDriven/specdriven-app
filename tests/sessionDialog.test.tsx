@@ -5,13 +5,10 @@
 // preselected from the remembered choice.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  CODE_GEN_TARGET_LABEL,
-  defaultSessionName,
-  readCodeGenTarget,
-  resolveCodeGenTarget,
-} from "../src/frontend/App";
+import { defaultSessionName } from "../src/frontend/App";
+import { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/codeGenTarget";
 import { PromptChoices, confirmLabelOf, initialChoiceOf } from "../src/frontend/ModalPrompts";
+import { CLAUDE_AGENT, agentsWith } from "./fixtures/agents";
 
 describe("defaultSessionName", () => {
   test("is Session, the local date and time, and the zone's short name", () => {
@@ -32,84 +29,85 @@ describe("defaultSessionName", () => {
 });
 
 describe("resolveCodeGenTarget", () => {
+  // The agents as /api/state reports them, with the named CLIs found.
+  const all = agentsWith("claude", "codex", "pi");
+  const claude = agentsWith("claude");
+  const none = agentsWith();
+
   test("keeps the remembered choice while it is usable", () => {
-    expect(resolveCodeGenTarget("desktop", true)).toBe("desktop");
-    expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
+    expect(resolveCodeGenTarget("desktop", true, none)).toBe("desktop");
+    expect(resolveCodeGenTarget("claude", true, claude)).toBe("claude");
   });
 
   test("falls back on whether Claude.app is installed", () => {
-    expect(resolveCodeGenTarget(null, true)).toBe("desktop");
-    expect(resolveCodeGenTarget("nope", true)).toBe("desktop");
-    expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
+    expect(resolveCodeGenTarget(null, true, none)).toBe("desktop");
+    expect(resolveCodeGenTarget("nope", true, none)).toBe("desktop");
+    expect(resolveCodeGenTarget("desktop", false, claude)).toBe("claude");
     // Nothing installed: desktop stands in, and the server says what is
     // missing — the dialog does not open on it.
-    expect(resolveCodeGenTarget(null, false)).toBe("desktop");
-    expect(resolveCodeGenTarget("pane", false)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, none)).toBe("desktop");
+    expect(resolveCodeGenTarget("claude", false, none)).toBe("desktop");
   });
 
   test("the pane is a target too, and the fallback when only the CLI is there", () => {
-    expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
-    expect(resolveCodeGenTarget("pane", true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, false, true)).toBe("pane");
-    expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
+    expect(resolveCodeGenTarget("claude", true, claude)).toBe("claude");
+    expect(resolveCodeGenTarget("claude", true, none)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, claude)).toBe("claude");
+    expect(resolveCodeGenTarget("desktop", false, claude)).toBe("claude");
   });
 
   // The headless `claude -p` target is gone: only the desktop app and the
-  // coding agent pane (with Claude or Pi) run a session.
+  // coding agent pane, with whichever agent plugin is there, run a session.
+  // "pane", stored before agents were providers, means Claude.
   test("reads only the known targets off the state", () => {
-    expect(readCodeGenTarget("desktop")).toBe("desktop");
-    expect(readCodeGenTarget("pane")).toBe("pane");
-    expect(readCodeGenTarget("pi")).toBe("pi");
-    expect(readCodeGenTarget("codex")).toBe("codex");
-    expect(readCodeGenTarget("cli")).toBeNull();
-    expect(readCodeGenTarget(null)).toBeNull();
-    expect(readCodeGenTarget("x")).toBeNull();
+    expect(readCodeGenTarget("desktop", all)).toBe("desktop");
+    expect(readCodeGenTarget("pane", all)).toBe("claude");
+    expect(readCodeGenTarget("claude", all)).toBe("claude");
+    expect(readCodeGenTarget("pi", all)).toBe("pi");
+    expect(readCodeGenTarget("codex", all)).toBe("codex");
+    // Only agents the plugins supply are targets; Pi's CLI being absent is resolve's business.
+    expect(readCodeGenTarget("pi", claude)).toBe("pi");
+    expect(readCodeGenTarget("pi", [CLAUDE_AGENT])).toBeNull();
+    expect(readCodeGenTarget("cli", all)).toBeNull();
+    expect(readCodeGenTarget(null, all)).toBeNull();
+    expect(readCodeGenTarget("x", all)).toBeNull();
   });
 
-  // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): a choice of
-  // agent, kept when it was the last one picked and pi is still on PATH —
-  // but never what an unchosen dialog falls back to.
-  test("Pi is remembered when its CLI is there, and is never the fallback", () => {
-    expect(CODE_GEN_TARGET_LABEL.pi).toBe("Pi in the coding agent pane");
-    expect(resolveCodeGenTarget("pi", false, false, true)).toBe("pi");
-    expect(resolveCodeGenTarget("pi", true, true, true)).toBe("pi");
-    expect(resolveCodeGenTarget("pi", true, true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, true, true, true)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, false, true, true)).toBe("pane");
-    // Only where there is no Claude at all does an unchosen dialog open on Pi.
-    expect(resolveCodeGenTarget(null, false, false, true)).toBe("pi");
-  });
-
-  // Codex (src/server/codexChat.ts): the same standing as Pi — remembered
-  // while its CLI is there, never the fallback while there is a Claude, and
-  // ahead of Pi where there is none.
-  test("Codex is remembered when its CLI is there, and comes before Pi as a last resort", () => {
-    expect(CODE_GEN_TARGET_LABEL.codex).toBe("Codex in the coding agent pane");
-    expect(resolveCodeGenTarget("codex", false, false, false, true)).toBe("codex");
-    expect(resolveCodeGenTarget("codex", true, true, true, true)).toBe("codex");
-    expect(resolveCodeGenTarget("codex", true, true, true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, true, true, true, true)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, false, true, true, true)).toBe("pane");
-    expect(resolveCodeGenTarget(null, false, false, true, true)).toBe("codex");
-    expect(resolveCodeGenTarget("pi", false, false, true, true)).toBe("pi");
+  // The agents are picked by rank: a remembered one is kept while its CLI
+  // is there, and an unchosen dialog opens on the first usable one — Claude
+  // before Codex before Pi, and never on one whose CLI is gone.
+  test("an unchosen dialog opens on the first usable agent by rank", () => {
+    expect(codeGenTargetLabel("pi", all)).toBe("Pi in the coding agent pane");
+    expect(codeGenTargetLabel("codex", all)).toBe("Codex in the coding agent pane");
+    expect(codeGenTargetLabel("desktop", all)).toBe("Claude Code Desktop");
+    expect(resolveCodeGenTarget("pi", false, agentsWith("pi"))).toBe("pi");
+    expect(resolveCodeGenTarget("pi", true, all)).toBe("pi");
+    expect(resolveCodeGenTarget("pi", true, agentsWith("claude", "codex"))).toBe("desktop");
+    expect(resolveCodeGenTarget(null, true, all)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, all)).toBe("claude");
+    expect(resolveCodeGenTarget(null, false, agentsWith("codex", "pi"))).toBe("codex");
+    expect(resolveCodeGenTarget(null, false, agentsWith("pi"))).toBe("pi");
+    expect(resolveCodeGenTarget("codex", false, agentsWith("codex"))).toBe("codex");
+    expect(resolveCodeGenTarget("codex", true, agentsWith("claude", "pi"))).toBe("desktop");
   });
 });
 
 describe("PromptChoices", () => {
+  const all = agentsWith("claude");
   const choices = [
-    { value: "desktop", label: CODE_GEN_TARGET_LABEL.desktop, hint: "Opens the Claude app" },
-    { value: "pane", label: CODE_GEN_TARGET_LABEL.pane, hint: "Chats with Claude here" },
+    { value: "desktop", label: codeGenTargetLabel("desktop", all), hint: "Opens the Claude app" },
+    { value: "claude", label: codeGenTargetLabel("claude", all), hint: "Chats with Claude here" },
   ];
 
   test("renders one radio per choice with the picked one checked", () => {
     const html = renderToStaticMarkup(
-      <PromptChoices label="Run in" choices={choices} value="pane" onChange={() => {}} />,
+      <PromptChoices label="Run in" choices={choices} value="claude" onChange={() => {}} />,
     );
     expect(html).toContain("<legend>Run in</legend>");
     expect(html.match(/type="radio"/g)).toHaveLength(2);
     expect(html.match(/checked=""/g)).toHaveLength(1);
     expect(html).toMatch(
-      /<input[^>]*checked=""[^>]*value="pane"|<input[^>]*value="pane"[^>]*checked=""/,
+      /<input[^>]*checked=""[^>]*value="claude"|<input[^>]*value="claude"[^>]*checked=""/,
     );
     expect(html).toContain("Claude Code Desktop");
     expect(html).toContain("Opens the Claude app");
@@ -117,7 +115,7 @@ describe("PromptChoices", () => {
   });
 
   test("the dialog starts on the remembered choice, or the first one", () => {
-    expect(initialChoiceOf({ title: "t", choices, initialChoice: "pane" })).toBe("pane");
+    expect(initialChoiceOf({ title: "t", choices, initialChoice: "claude" })).toBe("claude");
     expect(initialChoiceOf({ title: "t", choices, initialChoice: "nope" })).toBe("desktop");
     expect(initialChoiceOf({ title: "t", choices })).toBe("desktop");
     expect(initialChoiceOf({ title: "t" })).toBeNull();
@@ -129,7 +127,7 @@ describe("PromptChoices", () => {
 describe("confirmLabelOf", () => {
   const choices = [
     { value: "clipboard", label: "Copy prompt to clipboard", confirmLabel: "Copy prompt" },
-    { value: "desktop", label: CODE_GEN_TARGET_LABEL.desktop },
+    { value: "desktop", label: codeGenTargetLabel("desktop", []) },
   ];
 
   test("is the picked choice's own label, else the dialog's", () => {

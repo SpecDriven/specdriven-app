@@ -18,7 +18,8 @@ import { homedir, platform } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { version as appVersion } from "../../package.json";
-import { claudeAvailable, sessionsDirectory } from "./agent";
+import { sessionsDirectory } from "./agent";
+import { agents } from "../plugins/host/agents";
 import {
   ChatError,
   createChatSession,
@@ -38,7 +39,7 @@ import { slugify } from "./parser";
 import { getAppRoot } from "./paths";
 import { appRuntime, bootInfo, canRelaunch, relaunch, type BootInfo } from "./relaunch";
 import { run, which, type RunOptions, type RunResult } from "./run";
-import { normalizeAgentFirstResponseSeconds, normalizeCodeGen, readState } from "./state";
+import { normalizeCodeGen, readState } from "./state";
 import { logSource } from "./telemetry";
 import { cleanLine, cleanText } from "./text";
 
@@ -404,7 +405,9 @@ export async function findBun(env: Env = process.env, home: string = homedir()):
 export async function preconditions(): Promise<Preconditions> {
   return {
     codeGen: normalizeCodeGen((await readState(getAppRoot())).codeGen),
-    claude: claudeAvailable(),
+    // Whether some coding agent can run here (any provider by rank, not
+    // Claude by name); the key keeps its name for the pane.
+    claude: agents.default() !== undefined,
     git: which("git") !== null,
     bun: await findBun(),
     source: await discoverSource(),
@@ -415,7 +418,7 @@ export async function preconditions(): Promise<Preconditions> {
 }
 
 export const CODE_GEN_OFF = "Code generation is switched off in Settings";
-export const CLAUDE_MISSING = "Claude CLI not found — install the `claude` command";
+export const CLAUDE_MISSING = "No coding agent is available — install one from Settings → Plugins";
 export const GIT_MISSING = "git is needed to keep the fix reviewable and revertible";
 export const BUN_MISSING = "bun is needed to rebuild the app — install it from https://bun.sh";
 export const NO_SOURCE = "The app's source was not found: run the installer again, or set SPECDRIVEN_APP_SOURCE";
@@ -471,7 +474,7 @@ export async function startFix(id: string, description: string, opts: StartOptio
   const words = cleanText(description);
   if (!words.trim()) throw new FixError("Describe the bug first", 400);
   if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) throw new FixError(CODE_GEN_OFF, 403);
-  if (!claudeAvailable()) throw new FixError(CLAUDE_MISSING, 502);
+  if (agents.default() === undefined) throw new FixError(CLAUDE_MISSING, 502);
   if (which("git") === null) throw new FixError(GIT_MISSING, 409);
   const source = await readySource();
   const runner = opts.runner ?? run;
@@ -492,7 +495,6 @@ export async function startFix(id: string, description: string, opts: StartOptio
     name: `Fix SpecDriven ${appVersion}: ${firstLine}`,
     prompt,
     ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
-    firstResponseSeconds: normalizeAgentFirstResponseSeconds((await readState(getAppRoot())).agentFirstResponseSeconds),
     sessionsDir: await sessionsDirectory(getAppRoot()),
     ...(opts.now ? { now: opts.now } : {}),
   });
