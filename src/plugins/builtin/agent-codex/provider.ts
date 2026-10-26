@@ -8,10 +8,10 @@
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
-import { CODEX_BIN, codexAvailable } from "../agent";
-import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions, PermissionDecision, PermissionOutcome } from "../../plugins/host/agents";
-import { AgentError } from "../../plugins/host/agents";
-import type { PermissionMode, PermissionSuggestion } from "../agentTypes";
+import { CODEX_BIN, codexAvailable } from "../../../server/agent";
+import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions, PermissionDecision, PermissionOutcome } from "../../host/agents";
+import { AgentError } from "../../host/agents";
+import type { PermissionMode, PermissionSuggestion } from "../../../server/agentTypes";
 import {
   CODEX_CLIENT_INFO,
   CODEX_TOOL,
@@ -25,8 +25,8 @@ import {
   fileChangeLine,
   mapCodexNotification,
   newCodexStream,
-} from "../codexChat";
-import type { CodexParams, CodexStreamContext, RpcId } from "../codexChat";
+} from "./codexChat";
+import type { CodexParams, CodexStreamContext, RpcId } from "./codexChat";
 
 /** The refusal when no `codex` is on PATH. */
 export const CODEX_MISSING = "Codex CLI not found — install the `codex` command (npm i -g @openai/codex)";

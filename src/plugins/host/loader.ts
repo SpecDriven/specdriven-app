@@ -18,13 +18,19 @@ import { version as appVersion } from "../../../package.json";
 import { Context, type Disposer, type Plugin, type Scope } from "../kernel";
 import type { PluginManifest } from "../manifest";
 import type { InstallRecord } from "../marketplace";
-import { PROFILE_KEY, readProfile, writeProfile } from "../profile";
+import { PROFILE_KEY, autoEnablePlugins, readProfile, writeProfile } from "../profile";
 import { builtinHostPlugins } from "../builtin/host";
 import { builtinManifests, profileManifests, retiredManifest } from "../builtin/manifests";
 import * as hostSdk from "../sdk/host";
 import { SDK_GLOBAL } from "../shared";
 import { addSearchScope } from "../../server/search";
+import { getAppRoot } from "../../server/paths";
+import { readState, writeState } from "../../server/state";
+import type { SpecDrivenState } from "../../server/state";
+import { secretStore, type SecretStore } from "../../server/secrets";
 import { agents } from "./agents";
+import { createPluginSettings, type PluginSettings } from "./pluginSettings";
+import { safeId as secretSafeId } from "./sources";
 import {
   createRouteRegistry,
   createSessionParts,
@@ -115,11 +121,29 @@ export interface PluginState {
   error?: string;
 }
 
-/** What an external plugin's host half is mounted with. */
+/** What a plugin's host half is mounted with — a built-in's too. */
 export interface HostConfig {
   manifest: PluginManifest;
-  /** The plugin's folder. */
+  /** The plugin's folder; "" for a built-in, which has none. */
   dir: string;
+  /** The plugin's own section of settings.json (src/plugins/host/pluginSettings.ts). */
+  settings: PluginSettings;
+  /** A named secret store of the plugin's, kept on this device apart from the settings. */
+  secrets: (name: string) => SecretStore;
+}
+
+/** The config a plugin is mounted with; `dir` is "" for a built-in. */
+export function hostConfigFor(manifest: PluginManifest, dir: string): HostConfig {
+  const id = manifest.id;
+  return {
+    manifest,
+    dir,
+    settings: createPluginSettings(id, {
+      readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
+      writeState: (state) => writeState(state as SpecDrivenState, getAppRoot()),
+    }),
+    secrets: (name) => secretStore(`${secretSafeId(id)}.${name}`),
+  };
 }
 
 interface Built {
@@ -195,6 +219,14 @@ export function syncPlugins(
     lastOptions = options;
     const section = profileSection(state);
     let { enabled } = readProfile(state, profileManifests);
+    // The plugins that switch themselves on in a folder (manifest.autoEnable):
+    // the coding agents, which have no tab to cost the sidebar.
+    let changed = false;
+    const auto = autoEnablePlugins(state, enabled, profileManifests);
+    if (auto) {
+      enabled = auto;
+      changed = true;
+    }
 
     if (options.sources) {
       const found = await discoverPlugins({
@@ -209,23 +241,24 @@ export function syncPlugins(
       // list, at the end of the tab order, unless its manifest says it
       // starts off; one switched off later stays off — `seen`, kept for the
       // device, remembers the adoption, so other folders list it off.
-      let changed = false;
+      let adoptedNew = false;
       for (const entry of adopted) {
         if (!entry.manifest || entry.error || !entry.trusted) continue;
         if (enabled.includes(entry.id) || seen.includes(entry.id)) continue;
         seen.push(entry.id);
         if (entry.manifest.defaultEnabled) enabled = [...enabled, entry.id];
-        changed = true;
+        adoptedNew = true;
       }
-      if (changed) {
+      if (adoptedNew) {
         writeProfile(state, enabled, profileManifests);
         (state[PROFILE_KEY] as Record<string, unknown>).seen = seen;
-        await options.persist?.(state);
+        changed = true;
       }
       watchFolders(options);
     } else {
       await absorbDiscovered([], []);
     }
+    if (changed) await options.persist?.(state);
     profile = enabled;
 
     for (const [id, { scope }] of [...mounted]) {
@@ -241,7 +274,7 @@ export function syncPlugins(
       const builtin = builtinHostPlugins.find((p) => p.manifest.id === id);
       if (builtin) {
         if (mounted.has(id)) continue;
-        const scope = host.plugin(builtin.plugin);
+        const scope = host.plugin(builtin.plugin, hostConfigFor(builtin.manifest, ""));
         mounted.set(id, { scope });
         await scope.ready;
         continue;
@@ -488,7 +521,7 @@ async function mountExternal(entry: External): Promise<void> {
     // A browser-only plugin still gets a scope, so it reports as active.
     plugin = { name: entry.id, apply() {} };
   }
-  const scope = host.plugin(plugin, { manifest: entry.manifest!, dir: entry.dir });
+  const scope = host.plugin(plugin, hostConfigFor(entry.manifest!, entry.dir));
   mounted.set(entry.id, { scope, rev: built.rev });
   await scope.ready;
   watchSource(entry);

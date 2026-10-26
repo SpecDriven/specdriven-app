@@ -22,8 +22,9 @@ import {
   mapCodexNotification,
   newCodexStream,
   setCodexSpawn,
-} from "../src/server/codexChat";
-import type { CodexSpawnOptions } from "../src/server/codexChat";
+} from "../src/plugins/builtin/agent-codex/codexChat";
+import type { CodexSpawnOptions } from "../src/plugins/builtin/agent-codex/codexChat";
+import { mountAgentPlugins, unmountAgentPlugins } from "./helpers/agentPlugins";
 import { createFeature, saveFeature } from "../src/server/features";
 import { PROJECT_SETTINGS_FILE } from "../src/server/members";
 import { writeState } from "../src/server/state";
@@ -481,12 +482,14 @@ beforeEach(async () => {
     return fake;
   });
   await writeState({ dataRepo: data }, root);
+  await mountAgentPlugins();
   await createFeature(data, "Quote");
   await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
   await endAllChatSessions();
+  await unmountAgentPlugins();
   reloader.stop();
   setCodexAvailability(null);
   setPiAvailability(null);

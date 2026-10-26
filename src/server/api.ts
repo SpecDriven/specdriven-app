@@ -39,19 +39,7 @@ import {
   normalizeClaudeProxyUrl,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import {
-  ClaudeAuthError,
-  cancelLogin,
-  checkProxy,
-  detectClaudeProxy,
-  effectiveClaudeAuth,
-  loginState,
-  loginStatus,
-  logout as claudeLogout,
-  startLogin,
-} from "./claudeAuth";
-import type { EffectiveClaudeAuth, LoginStatus } from "./claudeAuth";
-import { clearClaudeToken, loadClaudeToken, saveClaudeToken } from "./claudeToken";
+import { CLAUDE_PLUGIN_ID, claudeSettingsOf } from "../plugins/builtin/agent-claude/settings";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
@@ -117,7 +105,6 @@ import {
 import type { FeatureView, ScenarioTarget } from "./features";
 import {
   buildSessionPrompt,
-  claudeAvailable,
   claudeDesktopAvailable,
   launchDesktopSession,
   SESSION_TITLE_MAX,
@@ -143,8 +130,6 @@ import {
   subscribeChat,
 } from "./agentChat";
 import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
-// The agents the core still ships, on the registry before any route runs.
-import "./agentProviders";
 import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
@@ -229,6 +214,8 @@ import {
   syncPlugins,
 } from "../plugins/host/loader";
 import { profileManifests } from "../plugins/builtin/manifests";
+import { applyPluginPatch, pluginPatchRefusal, pluginSettingsOf } from "../plugins/host/pluginSettings";
+import { agentOffers } from "../plugins/host/autoInstall";
 import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
@@ -474,7 +461,13 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
     sources: !isHostedMode(),
     paths: !isDemoMode(),
     dataDir: isDemoMode() ? null : await currentDataDir(),
-    persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
+    // Only the profile section goes to disk, onto the file as it is now: a
+    // sync runs beside other writers (a demo reseed, a Settings change),
+    // and the state it was handed may be behind them.
+    persist: async (s) => {
+      const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
+      await writeState({ ...fresh, [PROFILE_KEY]: s[PROFILE_KEY] } as SpecDrivenState, getAppRoot());
+    },
     readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   });
 }
@@ -525,15 +518,14 @@ async function stateFields(state: SpecDrivenState) {
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
     codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget, agentIds()),
-    // How long a Claude turn behind a proxy waits for the API's first
-    // response in the pane (src/server/agentChat.ts); 0 is no limit.
-    agentFirstResponseSeconds: normalizeAgentFirstResponseSeconds(state.agentFirstResponseSeconds),
-    // How the app's Claude signs in (src/server/claudeAuth.ts): the stored
-    // choice, or null when the server infers one; the proxy url stored here,
-    // or null for the one Claude Code's own settings name. The token never
-    // leaves the server — GET /api/claude/auth says whether there is one.
-    claudeAuth: normalizeClaudeAuth(state.claudeAuth),
-    claudeProxyUrl: normalizeClaudeProxyUrl(state.claudeProxyUrl),
+    // The Claude agent plugin's settings (src/plugins/builtin/agent-claude/
+    // settings.ts) under their old top-level names, for one release: the
+    // pane's first-response wait, how Claude signs in, the proxy url. The
+    // token never leaves the server — GET /api/claude/auth says whether
+    // there is one.
+    agentFirstResponseSeconds: claudeSettingsOf(state as Record<string, unknown>).firstResponseSeconds,
+    claudeAuth: claudeSettingsOf(state as Record<string, unknown>).claudeAuth,
+    claudeProxyUrl: claudeSettingsOf(state as Record<string, unknown>).claudeProxyUrl,
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: !isHostedMode() && claudeDesktopAvailable(),
@@ -541,9 +533,10 @@ async function stateFields(state: SpecDrivenState) {
     // .feature.md), by rank, each saying whether its CLI is on PATH — what
     // the pane and the session dialog offer. A hosted worker runs none.
     agents: isHostedMode() ? [] : agents.describe(),
-    // Marketplace plugins that would supply an agent, not installed; the
-    // pane offers them. Filled once the marketplace index carries them.
-    agentOffers: [],
+    // Marketplace plugins that would supply an agent, not installed, from
+    // the cached indexes (src/plugins/host/autoInstall.ts); the pane
+    // offers them. None for a hosted worker or the demo.
+    agentOffers: isHostedMode() || isDemoMode() ? [] : await agentOffers(state as Record<string, unknown>, agentIds()),
     // Whether some agent answers one no-tools turn (src/server/estimate.ts).
     canEstimate: !isHostedMode() && agents.oneShot() !== undefined,
     // The per-agent flags the client read before the descriptors, derived
@@ -560,6 +553,9 @@ async function stateFields(state: SpecDrivenState) {
     // lists — with the per-module switches they replaced (`roadmap`,
     // `testing`, …) still reported for one release.
     plugins: pluginStates(),
+    // The plugins' own settings, by id (src/plugins/host/pluginSettings.ts),
+    // for their Settings sections.
+    pluginSettings: pluginSettingsOf(state as Record<string, unknown>),
     // The profile's explicit plugin folders (specs/app/plugins.feature.md "A
     // plugin loads from a local folder"), which Settings → Plugins lists.
     pluginSources: sourcePaths(profileSection(state)),
@@ -632,11 +628,13 @@ function hostedStateRefusal(body: {
   dataRepo?: unknown;
   gitEngine?: unknown;
   plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
+  pluginSettings?: unknown;
   syncServerUrl?: unknown;
   claudeAuth?: unknown;
   claudeProxyUrl?: unknown;
 }): string | null {
   if (!isHostedMode()) return null;
+  if (body.pluginSettings !== undefined) return "Plugin settings cannot be changed in the hosted app";
   if (
     body.dataRepo !== undefined &&
     (typeof body.dataRepo !== "string" || parseGitHubUrl(body.dataRepo)?.host !== GITHUB_HOST)
@@ -694,6 +692,8 @@ const putState: Handler = async (req) => {
      * folders; a data-repo plugin folder to trust from now on.
      */
     plugins?: { enabled?: unknown; sources?: unknown; trust?: unknown; marketplaces?: unknown };
+    /** A patch per plugin id to its own section (src/plugins/host/pluginSettings.ts). */
+    pluginSettings?: unknown;
     /** The per-module switches the profile replaced — aliases for one release. */
     roadmap?: boolean;
     notebook?: boolean;
@@ -731,6 +731,7 @@ const putState: Handler = async (req) => {
     body.featureFlags === undefined &&
     body.scenarioPolarity === undefined &&
     body.plugins === undefined &&
+    body.pluginSettings === undefined &&
     body.roadmap === undefined &&
     body.notebook === undefined &&
     body.tasks === undefined &&
@@ -743,7 +744,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -992,8 +993,12 @@ const putState: Handler = async (req) => {
     }
     if (Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS) delete state.agentFirstResponseSeconds;
     else state.agentFirstResponseSeconds = Math.floor(n);
+    // The key is the Claude agent plugin's now; its section is kept in step.
+    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, {
+      agentFirstResponseSeconds: state.agentFirstResponseSeconds ?? null,
+    });
   }
-  // How Claude signs in (src/server/claudeAuth.ts): null forgets the choice,
+  // How Claude signs in (src/plugins/builtin/agent-claude/auth.ts): null forgets the choice,
   // so the server infers one again; the url is kept as typed.
   if (body.claudeAuth !== undefined) {
     if (body.claudeAuth === null) delete state.claudeAuth;
@@ -1002,6 +1007,7 @@ const putState: Handler = async (req) => {
       if (!mode) return json({ error: "claudeAuth must be login, proxy or null" }, 400);
       state.claudeAuth = mode;
     }
+    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, { claudeAuth: state.claudeAuth ?? null });
   }
   if (body.claudeProxyUrl !== undefined) {
     if (body.claudeProxyUrl !== null && typeof body.claudeProxyUrl !== "string") {
@@ -1011,6 +1017,7 @@ const putState: Handler = async (req) => {
     if (url && !normalizeClaudeProxyUrl(url)) return json({ error: "claudeProxyUrl must be an http:// or https:// url" }, 400);
     if (url) state.claudeProxyUrl = url;
     else delete state.claudeProxyUrl;
+    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, { claudeProxyUrl: url || null });
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — the default OFF is an absent key.
@@ -1058,6 +1065,20 @@ const putState: Handler = async (req) => {
   // alone rather than a copy (specs/app/plugins.feature.md "Each data folder
   // keeps its own plugins").
   const raw = state as Record<string, unknown>;
+  // A plugin's own settings (src/plugins/host/pluginSettings.ts): a patch
+  // per id, checked for shape only — the plugin's route checks the keys.
+  if (body.pluginSettings !== undefined) {
+    if (!body.pluginSettings || typeof body.pluginSettings !== "object" || Array.isArray(body.pluginSettings)) {
+      return json({ error: "pluginSettings must be an object of patches by plugin id" }, 400);
+    }
+    for (const [id, patch] of Object.entries(body.pluginSettings as Record<string, unknown>)) {
+      const refusal = pluginPatchRefusal(patch);
+      if (refusal) return json({ error: `pluginSettings.${id}: ${refusal}` }, 400);
+    }
+    for (const [id, patch] of Object.entries(body.pluginSettings as Record<string, unknown>)) {
+      applyPluginPatch(raw, id, patch as Record<string, unknown>);
+    }
+  }
   const before = readProfile(raw, profileManifests).enabled;
   let enabled = before;
   if (body.plugins !== undefined) {
@@ -1446,118 +1467,6 @@ const postAhaImport = withDataDir(async (dir, req) => {
   );
 });
 
-// Claude sign-in (specs/agents/claude.feature.md "Choose how Claude signs
-// in", src/server/claudeAuth.ts): how the app's Claude authenticates, what
-// Claude Code's own settings say of a proxy, the login driven from Settings,
-// and a check of the proxy. The proxy token never leaves the server — the
-// page learns only whether there is one.
-
-/** Where Claude Code's project settings would be read from: the open data
-    folder, else the app root. */
-async function claudeCwd(): Promise<string> {
-  try {
-    return (await currentDataDir()) ?? getAppRoot();
-  } catch {
-    return getAppRoot();
-  }
-}
-
-/** A settings file's path with the home folder as ~, for the page. */
-function tilde(path: string | null): string | null {
-  const home = homedir();
-  return path && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
-}
-
-function claudeAuthView(auth: EffectiveClaudeAuth, login: LoginStatus) {
-  return {
-    mode: auth.mode,
-    inferred: auth.inferred,
-    cliAvailable: claudeAvailable(),
-    login,
-    proxy: {
-      /** The url in effect: the stored one, else the detected one. */
-      url: auth.storedUrl ?? auth.detected.url,
-      storedUrl: auth.storedUrl,
-      storedToken: auth.storedToken,
-      hasToken: auth.storedToken || auth.detected.token !== null,
-      detected: {
-        url: auth.detected.url,
-        urlSource: tilde(auth.detected.urlSource),
-        hasToken: auth.detected.token !== null,
-        tokenSource: tilde(auth.detected.tokenSource),
-      },
-    },
-    signIn: loginState(),
-  };
-}
-
-async function claudeAuthAnswer(): Promise<Response> {
-  const auth = await effectiveClaudeAuth(await readState(getAppRoot()), await claudeCwd());
-  return json(claudeAuthView(auth, await loginStatus()));
-}
-
-const claudeFailure = (e: unknown) =>
-  e instanceof ClaudeAuthError ? json({ error: e.message }, e.status) : json({ error: (e as Error).message }, 502);
-
-const getClaudeAuth: Handler = () => claudeAuthAnswer();
-
-const postClaudeToken: Handler = async (req) => {
-  const body = (await req.json().catch(() => ({}))) as { token?: unknown };
-  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
-    return json({ error: "Paste the proxy's token" }, 400);
-  }
-  await saveClaudeToken({ token: body.token.trim() });
-  return claudeAuthAnswer();
-};
-
-const deleteClaudeToken: Handler = async () => {
-  await clearClaudeToken();
-  return claudeAuthAnswer();
-};
-
-// "Use detected": the url and token Claude Code's settings or the
-// environment carry become the app's own, copied server-side so the token
-// never passes through the page.
-const postClaudeProxyDetect: Handler = async () => {
-  const detected = await detectClaudeProxy(await claudeCwd());
-  if (!detected.url) return json({ error: "No proxy found in Claude Code's settings or the environment" }, 404);
-  const state = await readState(getAppRoot());
-  state.claudeProxyUrl = detected.url;
-  await writeState(state, getAppRoot());
-  if (detected.token) await saveClaudeToken({ token: detected.token });
-  return claudeAuthAnswer();
-};
-
-const postClaudeProxyCheck: Handler = async (req) => {
-  const body = (await req.json().catch(() => ({}))) as { url?: unknown };
-  const auth = await effectiveClaudeAuth(await readState(getAppRoot()), await claudeCwd());
-  const url = (typeof body.url === "string" && normalizeClaudeProxyUrl(body.url)) || auth.storedUrl || auth.detected.url;
-  if (!url) return json({ error: "Enter the proxy's url first" }, 400);
-  const token = (await loadClaudeToken())?.token ?? auth.detected.token;
-  return json({ url, ...(await checkProxy(url, token)) });
-};
-
-const postClaudeLogin: Handler = async (req) => {
-  const body = (await req.json().catch(() => ({}))) as { email?: unknown };
-  try {
-    return json({ signIn: await startLogin(typeof body.email === "string" ? body.email : "") });
-  } catch (e) {
-    return claudeFailure(e);
-  }
-};
-
-const getClaudeLogin: Handler = async () => json({ signIn: loginState(), login: await loginStatus() });
-
-const deleteClaudeLogin: Handler = () => json({ signIn: cancelLogin() });
-
-const postClaudeLogout: Handler = async () => {
-  try {
-    await claudeLogout();
-  } catch (e) {
-    return claudeFailure(e);
-  }
-  return claudeAuthAnswer();
-};
 
 // Publish a feature as a Confluence page under a parent page: created the
 // first time, a new version after that. The page is then linked from the
@@ -2964,13 +2873,6 @@ const unlessDemo =
       : handler(req, params);
 
 /** 403 in demo mode — the demo has no Claude to sign in. */
-const unlessDemoClaude =
-  (handler: Handler): Handler =>
-  (req, params) =>
-    isDemoMode()
-      ? json({ error: "Claude sign-in is disabled in demo mode" }, 403)
-      : handler(req, params);
-
 // The test management module's routes live in its plugin
 // (src/plugins/builtin/tests/host.ts) and exist only while it is mounted.
 
@@ -3104,17 +3006,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/aha/tokens", unlessHosted(postAhaToken)],
   ["DELETE", "/api/aha/tokens", unlessHosted(deleteAhaToken)],
   ["POST", "/api/aha/import", unlessHosted(postAhaImport)],
-  // Claude sign-in (src/server/claudeAuth.ts): a local Claude only, so off
-  // in the hosted app and the demo.
-  ["GET", "/api/claude/auth", unlessHosted(unlessDemoClaude(getClaudeAuth))],
-  ["POST", "/api/claude/token", unlessHosted(unlessDemoClaude(postClaudeToken))],
-  ["DELETE", "/api/claude/token", unlessHosted(unlessDemoClaude(deleteClaudeToken))],
-  ["POST", "/api/claude/proxy/detect", unlessHosted(unlessDemoClaude(postClaudeProxyDetect))],
-  ["POST", "/api/claude/proxy/check", unlessHosted(unlessDemoClaude(postClaudeProxyCheck))],
-  ["POST", "/api/claude/login", unlessHosted(unlessDemoClaude(postClaudeLogin))],
-  ["GET", "/api/claude/login", unlessHosted(unlessDemoClaude(getClaudeLogin))],
-  ["DELETE", "/api/claude/login", unlessHosted(unlessDemoClaude(deleteClaudeLogin))],
-  ["POST", "/api/claude/logout", unlessHosted(unlessDemoClaude(postClaudeLogout))],
+  // Claude sign-in: the Claude agent plugin's routes (src/plugins/builtin/
+  // agent-claude/host.ts), there while the plugin is on.
   ["POST", "/api/reload", postReload],
   // Observability (src/server/logs.ts): the app's own log, and its verbosity.
   ["GET", "/api/logs", getLogs],
