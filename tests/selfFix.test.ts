@@ -15,8 +15,8 @@ import { version as appVersion } from "../package.json";
 import { setClaudeAvailability, setCodexAvailability, setPiAvailability } from "../src/server/agent";
 import { endAllChatSessions } from "../src/server/agentChat";
 import type { SlashCommandInfo } from "../src/server/agentChat";
-import { InputQueue, setQueryFactory } from "../src/server/agents/claude";
-import type { QueryLike } from "../src/server/agents/claude";
+import { InputQueue, setQueryFactory } from "../src/plugins/builtin/agent-claude/provider";
+import type { QueryLike } from "../src/plugins/builtin/agent-claude/provider";
 import { handleApi, reloader } from "../src/server/api";
 import { PATCH_MANIFEST, PATCH_STATE_FILE } from "../src/server/appSource";
 import { setRelauncher } from "../src/server/relaunch";
@@ -112,8 +112,8 @@ beforeEach(async () => {
     fakes.push(fake);
     return fake;
   });
-  await writeState({ dataRepo: data, reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix"] } }, root);
-  await syncPlugins({ plugins: { enabled: ["self-fix"] } });
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
+  await syncPlugins({ plugins: { enabled: ["self-fix", "agent-claude"] } });
 });
 
 afterEach(async () => {
@@ -280,8 +280,8 @@ describe("a fix is started from a bug description and screenshots", () => {
   });
 
   test("a fix starts with no data repo open, the source standing in for it", async () => {
-    await writeState({ reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix"] } }, root);
-    await syncPlugins({ plugins: { enabled: ["self-fix"] } });
+    await writeState({ reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
+    await syncPlugins({ plugins: { enabled: ["self-fix", "agent-claude"] } });
     const { fake } = await startedFix();
     expect(fake.options.cwd).toBe(source);
   });
@@ -301,11 +301,11 @@ describe("a fix is started from a bug description and screenshots", () => {
 describe("Fix this app is refused where it cannot work", () => {
   test("code generation off, no claude, no source", async () => {
     const { fix } = (await (await api("/api/self-fix", "POST")).json()) as { fix: FixRecord };
-    await writeState({ dataRepo: data, codeGen: false, plugins: { enabled: ["self-fix"] } }, root);
+    await writeState({ dataRepo: data, codeGen: false, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
     let res = await api(`/api/self-fix/${fix.id}/start`, "POST", { description: "broken" });
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/switched off in Settings/);
-    await writeState({ dataRepo: data, plugins: { enabled: ["self-fix"] } }, root);
+    await writeState({ dataRepo: data, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
     setClaudeAvailability(() => false);
     res = await api(`/api/self-fix/${fix.id}/start`, "POST", { description: "broken" });
     expect(res.status).toBe(502);

@@ -33,6 +33,12 @@ export interface MarketplacePlugin {
   category?: string;
   /** The plugin api the index claims; the manifest's is checked again after the clone. */
   api?: string;
+  /**
+   * The coding agent the plugin supplies (specs/agents/agent-plugins
+   * .feature.md): its provider id and the command it needs on PATH, which
+   * the app installs the plugin for when it finds the command.
+   */
+  agent?: { id: string; command: string };
 }
 
 export interface MarketplaceIndex {
@@ -133,6 +139,11 @@ export function parseMarketplaceIndex(raw: unknown): MarketplaceIndex {
       typeof p[key] === "string" && (p[key] as string).trim() ? (p[key] as string).trim() : undefined;
     const ref = str("ref");
     const api = p.api === undefined ? undefined : String(p.api);
+    const agentRow = p.agent && typeof p.agent === "object" ? (p.agent as Record<string, unknown>) : null;
+    const agent =
+      agentRow && typeof agentRow.id === "string" && agentRow.id.trim() && typeof agentRow.command === "string" && agentRow.command.trim()
+        ? { id: agentRow.id.trim(), command: agentRow.command.trim() }
+        : undefined;
     plugins.push({
       name: pname,
       source,
@@ -141,6 +152,7 @@ export function parseMarketplaceIndex(raw: unknown): MarketplaceIndex {
       ...(str("version") ? { version: str("version") } : {}),
       ...(str("category") ? { category: str("category") } : {}),
       ...(api ? { api } : {}),
+      ...(agent ? { agent } : {}),
     });
   });
   let owner: MarketplaceIndex["owner"];

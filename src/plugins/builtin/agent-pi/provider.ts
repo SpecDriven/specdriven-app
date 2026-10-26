@@ -8,10 +8,10 @@
 //
 // Node APIs only (src/server/run.ts): this module also runs under Electron.
 
-import { PI_BIN, piAvailable } from "../agent";
-import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "../../plugins/host/agents";
-import { PiClient, mapPiEvent, newPiStream, piCommands, piState } from "../piChat";
-import type { PiEvent, PiStreamContext } from "../piChat";
+import { PI_BIN, piAvailable } from "../../../server/agent";
+import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "../../host/agents";
+import { PiClient, mapPiEvent, newPiStream, piCommands, piState } from "./piChat";
+import type { PiEvent, PiStreamContext } from "./piChat";
 
 /** The refusal when no `pi` is on PATH. */
 export const PI_MISSING = "Pi CLI not found — install the `pi` command (https://pi.dev)";

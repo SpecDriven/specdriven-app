@@ -143,6 +143,13 @@ import {
   type PluginView,
   type TabApp,
 } from "../plugins/client/tabs";
+import {
+  sectionsAfter,
+  sectionsBeforeAll,
+  settingsSections,
+  visibleSettingsSections,
+  type SettingsSection,
+} from "../plugins/client/settings";
 import { entityFields } from "./entityFields";
 import {
   AGENT_DEFAULT_WIDTH,
@@ -235,7 +242,6 @@ import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
-import { ClaudeSettings } from "./ClaudeSettings";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
@@ -322,11 +328,6 @@ const DEFAULT_AUTOSYNC_SECONDS = 60;
 // the server's defaults in src/server/state.ts.
 const DEFAULT_AUTOSAVE_SECONDS = 6;
 const MIN_AUTOSAVE_SECONDS = 3;
-
-// The coding agent pane's wait for the API's first response when Claude goes
-// through a proxy (src/server/agentChat.ts); 0 is no limit. Mirrors
-// DEFAULT_AGENT_FIRST_RESPONSE_SECONDS in src/server/state.ts.
-const DEFAULT_AGENT_FIRST_RESPONSE_SECONDS = 15;
 
 // Project management (specs/external-links/project-management-jira-linear-
 // etc.feature.md): the tool tickets live in until Settings names another, and
@@ -1443,9 +1444,6 @@ export function App() {
    * (specs/editor/editor-autosave.feature.md).
    */
   const [autosaveSeconds, setAutosaveSeconds] = useState(DEFAULT_AUTOSAVE_SECONDS);
-  const [agentFirstResponseSeconds, setAgentFirstResponseSeconds] = useState(
-    DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
-  );
   // The data repo's README.md (app-startup.md "App Starts with
   // existing specs folder selected"): the home view is an editor on it, saved
   // on the same interval as the scenario editor. `readme` is what the editor
@@ -1576,6 +1574,11 @@ export function App() {
   // which plugin view has the pane — null when none. App knows only the tab
   // id and an opaque view; the tab parses, renders and titles it.
   const pluginTabs = useRegistry(tabs);
+  // The Settings sections the plugins register (src/plugins/client/
+  // settings.ts), and the state payload they read; each sits where its
+  // order puts it among the core sections.
+  const pluginSettingsSections = visibleSettingsSections(useRegistry(settingsSections), { demo, hosted });
+  const [settingsPayload, setSettingsPayload] = useState<Record<string, unknown>>({});
   const [pluginView, setPluginView] = useState<PluginView | null>(null);
   const pluginViewRef = useRef<PluginView | null>(null);
   pluginViewRef.current = pluginView;
@@ -1609,9 +1612,6 @@ export function App() {
   const [settingsLinesDraft, setSettingsLinesDraft] = useState("8");
   const [settingsAutosaveDraft, setSettingsAutosaveDraft] = useState(
     String(DEFAULT_AUTOSAVE_SECONDS),
-  );
-  const [settingsFirstResponseDraft, setSettingsFirstResponseDraft] = useState(
-    String(DEFAULT_AGENT_FIRST_RESPONSE_SECONDS),
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsOpenInIdeaDraft, setSettingsOpenInIdeaDraft] = useState(false);
@@ -1822,9 +1822,6 @@ export function App() {
         if (typeof state.autosaveIntervalSeconds === "number") {
           setAutosaveSeconds(state.autosaveIntervalSeconds);
         }
-        if (typeof state.agentFirstResponseSeconds === "number") {
-          setAgentFirstResponseSeconds(state.agentFirstResponseSeconds);
-        }
         if (typeof state.showTestLinks === "boolean") {
           setShowTestLinks(state.showTestLinks);
         }
@@ -1906,6 +1903,7 @@ export function App() {
             // (src/server/demo.ts).
             syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
           ]);
+          setSettingsPayload(state);
           // Deep link (specs/ui/navigation.feature.md): the entry url picks the
           // view.
           await openFromLocation();
@@ -2232,6 +2230,7 @@ export function App() {
           loadReadme(),
           syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }),
         ]);
+        setSettingsPayload(state);
         await openFromLocation(entryPath, entryLink);
       } else {
         setRepoError(state.error ?? "Could not use this repo");
@@ -2352,9 +2351,10 @@ export function App() {
         await Promise.all([
           loadFeatures(),
           loadReadme(),
-          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }).then(() =>
-            client.serial("data/changed"),
-          ),
+          syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state }).then(() => {
+            setSettingsPayload(state);
+            return client.serial("data/changed");
+          }),
         ]);
         if (entryPath && entryPath !== "/") {
           history.replaceState(null, "", entryPath);
@@ -2606,6 +2606,7 @@ export function App() {
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
+    setSettingsPayload(data);
     client.emit("settings/changed", data);
   }, []);
   useEffect(() => {
@@ -4136,7 +4137,6 @@ export function App() {
     setSettingsDraft(String(reloadSeconds > 0 ? reloadSeconds : DEFAULT_AUTOSYNC_SECONDS));
     setSettingsLinesDraft(String(previewLines));
     setSettingsAutosaveDraft(String(autosaveSeconds));
-    setSettingsFirstResponseDraft(String(agentFirstResponseSeconds));
     // No stored choice is "auto": whichever engine this machine can run.
     setSettingsEngineDraft(
       gitEngine === "cli" || gitEngine === "gh" || gitEngine === "js" ? gitEngine : "auto",
@@ -4317,9 +4317,6 @@ export function App() {
     setReloadSeconds(data.reloadFrequencySeconds);
     setPreviewLines(data.scenarioPreviewLines);
     setAutosaveSeconds(data.autosaveIntervalSeconds);
-    if (typeof data.agentFirstResponseSeconds === "number") {
-      setAgentFirstResponseSeconds(data.agentFirstResponseSeconds);
-    }
     setShowTestLinks(data.showTestLinks !== false);
     setOpenTestsInIdea(data.openTestsInIdea === true);
     setCanOpenInIdea(Boolean(data.canOpenInIdea));
@@ -4356,6 +4353,7 @@ export function App() {
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
+    setSettingsPayload(data);
     // The mounted ones follow the other switches they read — the tasks'
     // calendar chip follows Google Calendar's, say.
     client.emit("settings/changed", data);
@@ -4400,12 +4398,6 @@ export function App() {
     const n = clampDraft(settingsAutosaveDraft, MIN_AUTOSAVE_SECONDS, DEFAULT_AUTOSAVE_SECONDS);
     setSettingsAutosaveDraft(String(n));
     await patchSettings({ autosaveIntervalSeconds: n });
-  };
-
-  const commitFirstResponseSeconds = async () => {
-    const n = clampDraft(settingsFirstResponseDraft, 0, agentFirstResponseSeconds);
-    setSettingsFirstResponseDraft(String(n));
-    await patchSettings({ agentFirstResponseSeconds: n });
   };
 
   const commitPreviewLines = async () => {
@@ -7563,24 +7555,49 @@ export function App() {
   // label-left, control-right rows. Every control saves itself the moment it
   // changes (macOS style), so there is no Save button; the ✕ or ESC goes
   // back. The plugins have their own page, linked under the sections.
+  // A plugin's Settings sections after a core one (src/plugins/client/
+  // settings.ts): the navigation entries, and the sections themselves,
+  // each given the state payload and the page's patchSettings.
+  const pluginSettingsNav = (after: Parameters<typeof sectionsAfter>[1] | null) =>
+    (after === null ? sectionsBeforeAll(pluginSettingsSections) : sectionsAfter(pluginSettingsSections, after)).map(
+      (s) => ({ id: `settings-${s.id}`, title: s.title }),
+    );
+  const renderPluginSettings = (after: Parameters<typeof sectionsAfter>[1] | null) =>
+    (after === null ? sectionsBeforeAll(pluginSettingsSections) : sectionsAfter(pluginSettingsSections, after)).map(
+      (s: SettingsSection) => (
+        <PageSection key={s.id} id={`settings-${s.id}`} title={s.title} hint={s.hint}>
+          <s.Component settings={settingsPayload} patchSettings={patchSettings} demo={demo} hosted={hosted} />
+        </PageSection>
+      ),
+    );
   const renderSettingsPage = () => (
     <AppPageLayout
       title="Settings"
       sections={[
+        ...pluginSettingsNav(null),
         { id: "settings-general", title: "General" },
+        ...pluginSettingsNav("general"),
         ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
+        ...pluginSettingsNav("sync"),
         { id: "settings-editor", title: "Specs" },
+        ...pluginSettingsNav("specs"),
         ...(customAttributesText !== null ? [{ id: "settings-attributes", title: "Custom attributes" }] : []),
+        ...pluginSettingsNav("attributes"),
         { id: "settings-project", title: "Project management" },
+        ...pluginSettingsNav("project"),
         ...RESOURCE_LINK_KINDS.map((kind) => ({
           id: `settings-links-${kind}`,
           title: RESOURCE_LINK_TOOLS[kind].name,
         })),
+        ...pluginSettingsNav("links"),
         { id: "settings-qtest", title: "qTest" },
+        ...pluginSettingsNav("qtest"),
         ...(demo || hosted ? [] : [{ id: "settings-confluence", title: "Confluence" }]),
+        ...pluginSettingsNav("confluence"),
         { id: "settings-workflow", title: "Workflow" },
-        ...(demo || hosted ? [] : [{ id: "settings-claude", title: "Claude" }]),
+        ...pluginSettingsNav("workflow"),
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
+        ...pluginSettingsNav("git"),
       ]}
       onClose={closeAppPage}
       actions={<span className="app-page-status">Saved to .specdriven/settings.json as you change it</span>}
@@ -7590,6 +7607,7 @@ export function App() {
         </button>
       }
     >
+      {renderPluginSettings(null)}
       <PageSection
         id="settings-general"
         title="General"
@@ -7693,6 +7711,7 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {renderPluginSettings("general")}
       {/* Demo mode has nothing to sync with: the whole autosync/live
           sync group hides — the server refuses the changes anyway. */}
       {!demo && (
@@ -7777,6 +7796,7 @@ export function App() {
         )}
       </PageSection>
       )}
+      {renderPluginSettings("sync")}
       <PageSection
         id="settings-editor"
         title="Specs"
@@ -7938,6 +7958,7 @@ export function App() {
           </span>
         </label>
       </PageSection>
+      {renderPluginSettings("specs")}
       {/* specs/app/custom-attributes.feature.md "Custom attributes are
           defined in Settings": the data repo's definitions, shared with the
           team through git rather than kept on this device. */}
@@ -7961,6 +7982,7 @@ export function App() {
           />
         </PageSection>
       )}
+      {renderPluginSettings("attributes")}
       <PageSection
         id="settings-project"
         title="Project management"
@@ -8060,6 +8082,7 @@ export function App() {
           switch per tool, each in its own section. Off, nothing in the app
           shows or asks for that tool's links; the ones already recorded are
           kept. */}
+      {renderPluginSettings("project")}
       {RESOURCE_LINK_KINDS.map((kind) => {
         const { name, noun } = RESOURCE_LINK_TOOLS[kind];
         return (
@@ -8130,6 +8153,7 @@ export function App() {
           </PageSection>
         );
       })}
+      {renderPluginSettings("links")}
       <PageSection
         id="settings-qtest"
         title="qTest"
@@ -8181,6 +8205,7 @@ export function App() {
           </div>
         )}
       </PageSection>
+      {renderPluginSettings("qtest")}
       {/* specs/external-links/confluence-wiki.feature.md: a personal access
           token per wiki, kept on this device; features publish from their
           ⋯ menu. Not in the hosted app, which keeps no device secrets. */}
@@ -8193,6 +8218,7 @@ export function App() {
           <ConfluenceTokens wikis={confluenceWikis} onChange={setConfluenceWikis} />
         </PageSection>
       )}
+      {renderPluginSettings("confluence")}
       <PageSection
         id="settings-workflow"
         title="Workflow"
@@ -8319,45 +8345,7 @@ export function App() {
           </span>
         </label>
       </PageSection>
-      {/* Claude sign-in (specs/agents/claude.feature.md "Choose how Claude
-          signs in"): the account or proxy every Claude the app starts uses —
-          the coding agent pane, task estimates, self-fix. A local Claude
-          only, so hidden in the demo and the hosted app. */}
-      {!demo && !hosted && (
-      <PageSection
-        id="settings-claude"
-        title="Claude"
-        hint="How the Claude the app starts signs in: your Claude account, or an API proxy with a token kept on this device."
-      >
-        <ClaudeSettings patchSettings={patchSettings}>
-          {/* The pane's first-response wait (specs/agents/agent-pane.feature.md
-              "A Claude turn fails fast when the API proxy does not answer"):
-              only a Claude whose API goes through a proxy is held to it. */}
-          <label className="settings-row">
-            <span className="settings-row-label">
-              Proxy timeout (seconds)
-              <span className="settings-row-hint">
-                A turn in the coding agent pane that gets no response from the API through the
-                proxy in this time is stopped with an error, instead of retrying for minutes
-                while the proxy is down. 0 waits as long as Claude Code retries; the default is{" "}
-                {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the
-                change.
-              </span>
-            </span>
-            <input
-              type="number"
-              min={0}
-              value={settingsFirstResponseDraft}
-              onChange={(e) => setSettingsFirstResponseDraft(e.target.value)}
-              onBlur={() => void commitFirstResponseSeconds()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.currentTarget.blur();
-              }}
-            />
-          </label>
-        </ClaudeSettings>
-      </PageSection>
-      )}
+      {renderPluginSettings("workflow")}
       {/* Git engine (git-operations.md): which one carries
           the operations out and who supplies GitHub credentials.
           Hidden in demo mode along with the sign-in — the demo

@@ -8,6 +8,9 @@ import { manifest as issues } from "./issues/manifest";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
 import { manifest as selfFix } from "./self-fix/manifest";
 import { manifest as tests } from "./tests/manifest";
+import { manifest as agentClaude } from "./agent-claude/manifest";
+import { manifest as agentCodex } from "./agent-codex/manifest";
+import { manifest as agentPi } from "./agent-pi/manifest";
 
 export const builtinManifests: readonly PluginManifest[] = [
   roadmapManifest,
@@ -16,6 +19,9 @@ export const builtinManifests: readonly PluginManifest[] = [
   issues,
   tests,
   selfFix,
+  agentClaude,
+  agentCodex,
+  agentPi,
 ];
 
 /** The manifest of a built-in plugin, by id. */

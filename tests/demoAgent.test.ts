@@ -22,8 +22,8 @@ import {
   interruptChat,
 } from "../src/server/agentChat";
 import type { ChatEvent } from "../src/server/agentChat";
-import { registerCoreAgents } from "../src/server/agentProviders";
-import { InputQueue } from "../src/server/agents/claude";
+import { InputQueue } from "../src/plugins/builtin/agent-claude/provider";
+import { unmountAgentPlugins } from "./helpers/agentPlugins";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setupDemo } from "../src/server/demo";
 import { SIMULATED_MODEL, readBrief, setSimulationPace, simulatedQuery } from "../src/server/demoAgent";
@@ -63,7 +63,7 @@ afterEach(async () => {
   setGitEngine(null);
   setFolderChooser(realChooser);
   setSimulationPace(1);
-  registerCoreAgents();
+  await unmountAgentPlugins();
   setClaudeAvailability(null);
   setPiAvailability(null);
   setDesktopAvailability(null);

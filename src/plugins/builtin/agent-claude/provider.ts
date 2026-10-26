@@ -19,15 +19,16 @@ import type {
   SDKUserMessage,
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
-import { CLAUDE_BIN, claudeAvailable } from "../agent";
-import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions, OneShotRequest, OneShotResult } from "../../plugins/host/agents";
-import { AgentError } from "../../plugins/host/agents";
-import type { AgentOutput, AssistantBlock, ChatAccount, PermissionMode, SlashCommandInfo } from "../agentTypes";
-import { normalizePermissionMode } from "../agentTypes";
-import { claudeLaunch, detectClaudeProxy } from "../claudeAuth";
-import { getAppRoot } from "../paths";
-import { which } from "../run";
-import { normalizeAgentFirstResponseSeconds, readState } from "../state";
+import { CLAUDE_BIN, claudeAvailable } from "../../../server/agent";
+import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions, OneShotRequest, OneShotResult } from "../../host/agents";
+import { AgentError } from "../../host/agents";
+import type { AgentOutput, AssistantBlock, ChatAccount, PermissionMode, SlashCommandInfo } from "../../../server/agentTypes";
+import { normalizePermissionMode } from "../../../server/agentTypes";
+import { claudeLaunch, detectClaudeProxy } from "./auth";
+import { getAppRoot } from "../../../server/paths";
+import { which } from "../../../server/run";
+import { readState } from "../../../server/state";
+import { claudeSettingsOf } from "./settings";
 
 // --- The account chip -------------------------------------------------------
 
@@ -215,7 +216,7 @@ export function setClaudeFirstResponseSeconds(fn: (() => Promise<number>) | null
 
 async function firstResponseSeconds(): Promise<number> {
   if (firstResponseReader) return firstResponseReader();
-  return normalizeAgentFirstResponseSeconds((await readState(getAppRoot())).agentFirstResponseSeconds);
+  return claudeSettingsOf(await readState(getAppRoot())).firstResponseSeconds;
 }
 
 export function userMessage(text: string): SDKUserMessage {

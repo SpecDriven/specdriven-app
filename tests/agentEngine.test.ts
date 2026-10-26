@@ -16,6 +16,7 @@ import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
 import { fakeProvider, type FakeProviderOptions, type FakeSession } from "./helpers/fakeAgent";
+import { mountAgentPlugins, unmountAgentPlugins } from "./helpers/agentPlugins";
 
 let root: string;
 let data: string;
@@ -37,6 +38,7 @@ beforeEach(async () => {
   data = join(root, "data");
   await writeState({ dataRepo: data }, root);
   await Bun.write(join(data, "specs", ".keep"), "");
+  await mountAgentPlugins();
   // The three built-in providers stay registered but none can run: this
   // machine's own CLIs must never be spawned, and the fakes get the default.
   setClaudeAvailability(() => false);
@@ -48,6 +50,7 @@ afterEach(async () => {
   await endAllChatSessions();
   reloader.stop();
   for (const dispose of disposers.splice(0)) await dispose();
+  await unmountAgentPlugins();
   setClaudeAvailability(null);
   setCodexAvailability(null);
   setPiAvailability(null);
