@@ -32,7 +32,14 @@ import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
-import type { CodeGenTarget } from "../server/state";
+import type { AgentDescriptor, AgentOffer } from "../server/agentTypes";
+import {
+  codeGenTargetLabel,
+  readCodeGenTarget,
+  resolveCodeGenTarget,
+  usableAgents,
+  type CodeGenTarget,
+} from "./codeGenTarget";
 import { Logo } from "./Logo";
 import {
   Activity,
@@ -141,6 +148,8 @@ import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
   agentChat,
+  agentsFromState,
+  offersFromState,
   clampAgentWidth,
   defaultSessionName,
   useAgentChat,
@@ -803,50 +812,13 @@ export async function copyText(text: string): Promise<boolean> {
 
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
 // session" runs in — a new session in Claude Code Desktop, or the app's own
-// coding agent pane (specs/agents/agent-pane.feature.md) with Claude,
-// with Pi (specs/agents/integration-with-pi-dev-agent.feature.md) or with
-// Codex (src/server/codexChat.ts).
+// coding agent pane (specs/agents/agent-pane.feature.md) with one of the
+// agents the plugins supply. The helpers live in src/frontend/codeGenTarget.ts.
 export type { CodeGenTarget };
-
-/** The stored target as the server reports it; anything else is "not chosen". */
-export function readCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return value === "desktop" || value === "pane" || value === "pi" || value === "codex"
-    ? value
-    : null;
-}
+export { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget };
 
 /** The session dialog's one non-agent option: copy the prompt, run nothing. */
 export const CLIPBOARD_TARGET = "clipboard";
-
-export const CODE_GEN_TARGET_LABEL: Record<CodeGenTarget, string> = {
-  desktop: "Claude Code Desktop",
-  pane: "Coding agent pane",
-  pi: "Pi in the coding agent pane",
-  codex: "Codex in the coding agent pane",
-};
-
-/** The target a session dialog opens on: the remembered choice when it is
-    still usable, else desktop when Claude.app is installed, else the pane
-    when the Claude CLI is. Codex and Pi are picked, never defaulted to — an
-    unchosen dialog opens on one of them only where there is no Claude at
-    all, Codex first. With nothing installed the answer is desktop, and the
-    server says what is missing. */
-export function resolveCodeGenTarget(
-  stored: string | null | undefined,
-  canOpenDesktop: boolean,
-  canRunPane = false,
-  canRunPi = false,
-  canRunCodex = false,
-): CodeGenTarget {
-  if (stored === "desktop" && canOpenDesktop) return "desktop";
-  if (stored === "pane" && canRunPane) return "pane";
-  if (stored === "pi" && canRunPi) return "pi";
-  if (stored === "codex" && canRunCodex) return "codex";
-  if (canOpenDesktop) return "desktop";
-  if (canRunPane) return "pane";
-  if (canRunCodex) return "codex";
-  return canRunPi ? "pi" : "desktop";
-}
 
 // The default session name lives with the pane's helpers now; re-exported
 // here since the session dialog and its tests know it by this door.
@@ -1540,17 +1512,14 @@ export function App() {
   const [canOpenClaudeDesktop, setCanOpenClaudeDesktop] = useState(false);
   /** The last "Run in" choice, remembered in settings; null means not chosen yet. */
   const [codeGenTarget, setCodeGenTarget] = useState<CodeGenTarget | null>(null);
-  /** Whether the Claude CLI is on PATH, so a session can run in the coding
-      agent pane (specs/agents/agent-pane.feature.md). */
-  const [canRunAgentPane, setCanRunAgentPane] = useState(false);
-  /** Whether the Pi CLI is on PATH, so a pane session can be driven by Pi
-      (specs/agents/integration-with-pi-dev-agent.feature.md). */
-  const [canRunPi, setCanRunPi] = useState(false);
-  /** Whether the Codex CLI is on PATH, so a pane session can be driven by
-      Codex (src/server/codexChat.ts). */
-  const [canRunCodex, setCanRunCodex] = useState(false);
-  /** The pane is offered when any agent's CLI is on PATH. */
-  const canOpenAgentPane = canRunAgentPane || canRunPi || canRunCodex;
+  /** The coding agents the plugins supply (specs/agents/agent-plugins
+      .feature.md), by rank, each saying whether its CLI is on PATH. */
+  const [agents, setAgents] = useState<AgentDescriptor[]>([]);
+  /** Marketplace plugins that would supply an agent, not installed. */
+  const [agentOffers, setAgentOffers] = useState<AgentOffer[]>([]);
+  /** The pane is offered when an agent plugin is there, or one could be
+      installed for a CLI that is. */
+  const canOpenAgentPane = agents.length > 0 || agentOffers.some((o) => o.cliFound);
   // The coding agent pane's own state (src/frontend/agentChat.ts): open,
   // width, sessions. Restored once on boot — the pane, its width and the
   // last session come back the way they were left.
@@ -1869,15 +1838,14 @@ export function App() {
           setCodeGen(state.codeGen);
         }
         setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
-        setCanRunAgentPane(Boolean(state.canRunAgentPane));
-        setCanRunPi(Boolean(state.canRunPi));
-        setCanRunCodex(Boolean(state.canRunCodex));
-        agentChat.setAvailable(
-          Boolean(state.canRunAgentPane),
-          Boolean(state.canRunPi),
-          Boolean(state.canRunCodex),
-        );
-        setCodeGenTarget(readCodeGenTarget(state.codeGenTarget));
+        {
+          const known = agentsFromState(state);
+          const offers = offersFromState(state);
+          setAgents(known);
+          setAgentOffers(offers);
+          agentChat.setAgents(known, offers);
+          setCodeGenTarget(readCodeGenTarget(state.codeGenTarget, known));
+        }
         if (typeof state.deletePublished === "boolean") {
           setDeletePublished(state.deletePublished);
         }
@@ -2585,6 +2553,8 @@ export function App() {
   };
   const openSettings = () => openAppPage("settings");
   const openPlugins = () => openAppPage("plugins");
+  /** A marketplace plugin the Plugins page opens scrolled to, when the agent pane sent the user there. */
+  const [pluginsWanted, setPluginsWanted] = useState<string | null>(null);
   /** The component the Observability page opens narrowed to, when a dialog sent the user there. */
   const [observabilityComponent, setObservabilityComponent] = useState("");
   const openObservability = (component = "") => {
@@ -2863,13 +2833,7 @@ export function App() {
   const sessionCount = specSelection.size + sessionBundle().count;
 
   /** The target the next session dialog opens on. */
-  const sessionTarget = resolveCodeGenTarget(
-    codeGenTarget,
-    canOpenClaudeDesktop,
-    canRunAgentPane,
-    canRunPi,
-    canRunCodex,
-  );
+  const sessionTarget = resolveCodeGenTarget(codeGenTarget, canOpenClaudeDesktop, agents);
 
   // Code gen session (specs/agents/claude.feature.md): with specs or single
   // scenarios selected, "Start session" asks for a name — prefilled with a
@@ -2938,42 +2902,19 @@ export function App() {
         ? [
             {
               value: "desktop",
-              label: CODE_GEN_TARGET_LABEL.desktop,
+              label: codeGenTargetLabel("desktop", agents),
               hint: `Opens a new session in the Claude app, on ${repoWord}`,
             },
           ]
         : []),
-      ...(canRunAgentPane
-        ? [
-            {
-              value: "pane",
-              label: CODE_GEN_TARGET_LABEL.pane,
-              hint: `Chats with Claude in a pane here, on ${repoWord}`,
-            },
-          ]
-        : []),
-      // Codex (src/server/codexChat.ts): the same pane, driven over Codex's
-      // app-server protocol — offered when its CLI is on PATH.
-      ...(canRunCodex
-        ? [
-            {
-              value: "codex",
-              label: CODE_GEN_TARGET_LABEL.codex,
-              hint: `Chats with Codex in a pane here, on ${repoWord} — with permission cards`,
-            },
-          ]
-        : []),
-      // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): the same
-      // pane, driven over pi's RPC mode — offered when its CLI is on PATH.
-      ...(canRunPi
-        ? [
-            {
-              value: "pi",
-              label: CODE_GEN_TARGET_LABEL.pi,
-              hint: `Chats with Pi in a pane here, on ${repoWord} — Pi runs its own tools`,
-            },
-          ]
-        : []),
+      // The agents the plugins supply (specs/agents/agent-plugins
+      // .feature.md): the same pane, driven by each — offered when its CLI
+      // is on PATH, in rank order, each described in its own words.
+      ...usableAgents(agents).map((a) => ({
+        value: a.id,
+        label: codeGenTargetLabel(a.id, agents),
+        hint: `Chats with ${a.label} in a pane here, on ${repoWord} — ${a.description.charAt(0).toLowerCase()}${a.description.slice(1)}`,
+      })),
     ];
     // The clipboard is always on offer, and first: it needs no agent
     // installed, and the prompt it copies is the same text a session would
@@ -2997,7 +2938,7 @@ export function App() {
       hint:
         agentChoices.length === 0
           ? `Builds a prompt over ${describeSelection(files)}${where} to copy — no coding agent found to run it here.`
-          : `Runs ${agentChoices.length > 1 ? "the chosen agent" : only === "pi" ? "Pi" : only === "codex" ? "Codex" : "Claude"} over ${describeSelection(files)}${where}, or copies the prompt.`,
+          : `Runs ${agentChoices.length > 1 ? "the chosen agent" : only === "desktop" ? "Claude" : (agents.find((a) => a.id === only)?.label ?? only)} over ${describeSelection(files)}${where}, or copies the prompt.`,
       initial: defaultSessionName(),
       placeholder: "e.g. implement billing quotes",
       confirmLabel: "Start AI Session",
@@ -3021,7 +2962,7 @@ export function App() {
       await copySessionPrompt(sessionName, files, attachments);
       return;
     }
-    const target = readCodeGenTarget(choice) ?? only;
+    const target = readCodeGenTarget(choice, agents) ?? only;
     // Remembered, so the next dialog opens on the same choice.
     if (target !== codeGenTarget) void patchSettings({ codeGenTarget: target });
     setSessionRunning(true);
@@ -4385,15 +4326,14 @@ export function App() {
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
     setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
-    setCanRunAgentPane(Boolean(data.canRunAgentPane));
-    setCanRunPi(Boolean(data.canRunPi));
-    setCanRunCodex(Boolean(data.canRunCodex));
-    agentChat.setAvailable(
-      Boolean(data.canRunAgentPane),
-      Boolean(data.canRunPi),
-      Boolean(data.canRunCodex),
-    );
-    setCodeGenTarget(readCodeGenTarget(data.codeGenTarget));
+    {
+      const known = agentsFromState(data);
+      const offers = offersFromState(data);
+      setAgents(known);
+      setAgentOffers(offers);
+      agentChat.setAgents(known, offers);
+      setCodeGenTarget(readCodeGenTarget(data.codeGenTarget, known));
+    }
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
     setFeatureFlags(data.featureFlags === true);
@@ -9100,7 +9040,7 @@ export function App() {
                 sessionRunning
                   ? "Session running…"
                   : codeGen && sessionCount > 0
-                    ? `Start an AI session in ${CODE_GEN_TARGET_LABEL[sessionTarget]} with ${selectionLabel}`
+                    ? `Start an AI session in ${codeGenTargetLabel(sessionTarget, agents)} with ${selectionLabel}`
                     : "Start an AI session"
               }
             >
@@ -9426,6 +9366,7 @@ export function App() {
              from the user menu — the plugins on in tab order, the ones off,
              the folders they load from and the marketplaces. */
           <PluginsPage
+            initialWanted={pluginsWanted}
             plugins={plugins}
             loadErrors={pluginLoadErrors}
             hasIssuesRepo={Boolean(issuesRepo)}
@@ -11004,6 +10945,10 @@ export function App() {
           prompt={prompt}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}
+          onOpenPlugins={(wanted) => {
+            setPluginsWanted(wanted ?? null);
+            openPlugins();
+          }}
         />
       )}
       {/* crud-feature.md "Publish feature with merge conflict": a

@@ -21,8 +21,8 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { CODEX_BIN } from "./agent";
-import type { AssistantBlock, ChatEventBody, PermissionMode } from "./agentChat";
-import { jsonlReader } from "./piChat";
+import type { AgentOutput, AssistantBlock, PermissionMode } from "./agentTypes";
+import { jsonlReader } from "./jsonl";
 import { which } from "./run";
 
 // --- The subprocess ---------------------------------------------------------
@@ -391,7 +391,7 @@ function flattenContent(content: unknown): string {
 }
 
 /** The tool_result a completed item is shown as, or null for non-tools. */
-export function codexToolResult(item: CodexParams): Extract<ChatEventBody, { kind: "tool_result" }> | null {
+export function codexToolResult(item: CodexParams): Extract<AgentOutput, { kind: "tool_result" }> | null {
   const id = text(item.id) ?? "";
   const status = text(item.status);
   const failed = status === "failed";
@@ -501,7 +501,7 @@ export function mapCodexNotification(
   params: CodexParams,
   ctx: { turn: number; now?: () => number },
   stream: CodexStreamContext,
-): ChatEventBody[] {
+): AgentOutput[] {
   const now = ctx.now ?? Date.now;
   switch (method) {
     case "turn/started": {
@@ -537,7 +537,7 @@ export function mapCodexNotification(
       const item = record(params.item);
       const id = item ? text(item.id) : null;
       if (!item || !id) return [];
-      const events: ChatEventBody[] = [];
+      const events: AgentOutput[] = [];
       // Every item starts before it completes; if this one did not (a
       // replay, an older Codex), the tool row still needs its call.
       const tool = codexToolUse(item);

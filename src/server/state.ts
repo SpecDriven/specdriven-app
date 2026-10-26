@@ -3,6 +3,7 @@
 // Per specs/ui/app-start.feature.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
+import { LEGACY_CODE_GEN_TARGETS } from "./agentLegacy";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -358,21 +359,25 @@ export function normalizeCodeGen(value: unknown): boolean {
   return value !== false;
 }
 
-/** The agents a code gen session can run in (specs/agents/claude.feature.md,
-    specs/agents/agent-pane.feature.md,
-    specs/agents/integration-with-pi-dev-agent.feature.md; "codex" is the
-    same pane driven by Codex, src/server/codexChat.ts). */
-export type CodeGenTarget = "desktop" | "pane" | "pi" | "codex";
+/** Where a code gen session runs (specs/agents/claude.feature.md): Claude
+    Code Desktop, or the coding agent pane driven by the provider the id
+    names (specs/agents/agent-plugins.feature.md). */
+export type CodeGenTarget = "desktop" | string;
 
-export const CODE_GEN_TARGETS: readonly CodeGenTarget[] = ["desktop", "pane", "pi", "codex"];
-
-/** The targets as the error messages list them, in one place. */
-export const CODE_GEN_TARGET_LIST = "desktop, pane, pi or codex";
+/** The targets as an error message lists them: "desktop, claude, codex or pi". */
+export function codeGenTargetList(agentIds: readonly string[]): string {
+  const all = ["desktop", ...agentIds];
+  return all.length === 1 ? all[0]! : `${all.slice(0, -1).join(", ")} or ${all.at(-1)}`;
+}
 
 /** Stored session target, or null when absent or unusable — the client
-    then picks desktop when Claude.app is installed, else the pane. */
-export function normalizeCodeGenTarget(value: unknown): CodeGenTarget | null {
-  return (CODE_GEN_TARGETS as readonly unknown[]).includes(value) ? (value as CodeGenTarget) : null;
+    then picks desktop when Claude.app is installed, else the first agent.
+    "pane", what the app wrote before agents were providers, means Claude
+    (src/server/agentLegacy.ts). */
+export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string[]): CodeGenTarget | null {
+  if (typeof value !== "string") return null;
+  const target = LEGACY_CODE_GEN_TARGETS[value] ?? value;
+  return target === "desktop" || agentIds.includes(target) ? target : null;
 }
 
 /** How the app's Claude signs in (specs/agents/claude.feature.md "Choose how

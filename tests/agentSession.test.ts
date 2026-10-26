@@ -86,7 +86,7 @@ const FILES = [{ fileName: "specs/quote.feature.md" }];
 test("an unknown target is refused", async () => {
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "nope" });
   expect(res.status).toBe(400);
-  expect((await res.json()).error).toContain("target must be desktop, pane, pi or codex");
+  expect((await res.json()).error).toContain("target must be desktop, claude, codex or pi");
   expect(calls).toHaveLength(0);
 });
 
@@ -222,13 +222,17 @@ test("the state reports whether a session can run in Codex", async () => {
 test("the Run in choice round-trips through the settings file", async () => {
   const before = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await before.json()) as { codeGenTarget: unknown }).codeGenTarget).toBeNull();
-  const res = await api("/api/state", "PUT", { codeGenTarget: "pane" });
+  // A provider id, by rank; "pane" from before agents were providers reads as Claude.
+  const res = await api("/api/state", "PUT", { codeGenTarget: "codex" });
   expect(res.status).toBe(200);
-  expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("pane");
-  expect((await readState(root)).codeGenTarget).toBe("pane");
+  expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("codex");
+  expect((await readState(root)).codeGenTarget).toBe("codex");
+  const legacy = await api("/api/state", "PUT", { codeGenTarget: "pane" });
+  expect(legacy.status).toBe(200);
+  expect(((await legacy.json()) as { codeGenTarget: string }).codeGenTarget).toBe("claude");
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, pane, pi or codex");
+  expect((await bad.json()).error).toContain("codeGenTarget must be desktop, claude, codex or pi");
 });
 
 // "Copy prompt to clipboard", the session dialog's top option: the same

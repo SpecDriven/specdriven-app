@@ -6,9 +6,9 @@
 // browser refresh returns the demo to the default dataset.
 //
 // Code gen sessions run too, simulated (roadmap/demo.md "Demo App"):
-// setupDemo fills the pane's injection seams so the app reports one agent —
-// Claude in a pane — and drives it with the script in src/server/demoAgent.ts
-// instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
+// setupDemo registers a simulated provider under Claude's id, so the app
+// reports one agent — Claude in a pane — and drives it with the script in
+// src/server/demoAgent.ts instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
 // the session dialog offers no choice and nothing can reach a real CLI.
 //
 // Plugins from the marketplace load too (specs/app/plugins.feature.md): at
@@ -19,14 +19,9 @@
 
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import {
-  setClaudeAvailability,
-  setCodexAvailability,
-  setDesktopAvailability,
-  setPiAvailability,
-} from "./agent";
-import { setQueryFactory } from "./agentChat";
-import { simulatedQuery } from "./demoAgent";
+import { setCodexAvailability, setDesktopAvailability, setPiAvailability } from "./agent";
+import { agents } from "../plugins/host/agents";
+import { simulatedProvider } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { resetSearchCache } from "./search";
@@ -76,7 +71,7 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   gitEngine: "js",
   reloadFrequencySeconds: 0,
   codeGen: true,
-  codeGenTarget: "pane",
+  codeGenTarget: "claude",
   // No plugin list: each reseed's fresh data folder shows Specs alone
   // (specs/app/plugins.feature.md "Each data folder keeps its own plugins"),
   // and a visitor switches plugins on in Settings → Plugins. The empty
@@ -150,15 +145,15 @@ export async function setupDemo(): Promise<void> {
   process.env.SPECDRIVEN_HOME = join(getAppRoot(), "home");
   await mkdir(getAppRoot(), { recursive: true });
   setFolderChooser(null);
-  // The coding agent pane, simulated: the app reports the Claude CLI present
-  // (so the pane, its toggle and the session dialog are all live) and the
-  // other agents absent, then answers every session with the script.
-  // Nothing probes PATH and nothing is spawned — see src/server/demoAgent.ts.
-  setClaudeAvailability(() => true);
+  // The coding agent pane, simulated: the script stands in for the Claude
+  // provider (so the pane, its toggle and the session dialog are all live)
+  // and the other agents report absent. Nothing probes PATH and nothing is
+  // spawned — see src/server/demoAgent.ts. The demo never auto-installs
+  // agent plugins either: its agent is this one.
+  agents.register(simulatedProvider);
   setPiAvailability(() => false);
   setCodexAvailability(() => false);
   setDesktopAvailability(() => false);
-  setQueryFactory(simulatedQuery);
   await reseedDemo();
 }
 
