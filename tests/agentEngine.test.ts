@@ -9,14 +9,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import { setClaudeAvailability, setCodexAvailability, setPiAvailability } from "../src/server/agent";
 import { endAllChatSessions, getChatEvents, getChatSession } from "../src/server/agentChat";
 import type { ChatEvent, ChatSessionMeta } from "../src/server/agentChat";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
 import { fakeProvider, type FakeProviderOptions, type FakeSession } from "./helpers/fakeAgent";
-import { mountAgentPlugins, unmountAgentPlugins } from "./helpers/agentPlugins";
 
 let root: string;
 let data: string;
@@ -38,22 +36,12 @@ beforeEach(async () => {
   data = join(root, "data");
   await writeState({ dataRepo: data }, root);
   await Bun.write(join(data, "specs", ".keep"), "");
-  await mountAgentPlugins();
-  // The three built-in providers stay registered but none can run: this
-  // machine's own CLIs must never be spawned, and the fakes get the default.
-  setClaudeAvailability(() => false);
-  setCodexAvailability(() => false);
-  setPiAvailability(() => false);
 });
 
 afterEach(async () => {
   await endAllChatSessions();
   reloader.stop();
   for (const dispose of disposers.splice(0)) await dispose();
-  await unmountAgentPlugins();
-  setClaudeAvailability(null);
-  setCodexAvailability(null);
-  setPiAvailability(null);
   await rm(root, { recursive: true, force: true });
   for (const [name, value] of [
     ["SPECDRIVEN_ROOT", realRoot],
@@ -99,7 +87,7 @@ async function ready(fake: ReturnType<typeof register>, body: Record<string, unk
 test("a plugin's provider drives a session from start to end", async () => {
   const fake = register({ id: "gemini", label: "Gemini", rank: 15, defaultPermissionMode: "plan" });
   const state = (await (await api("/api/state")).json()) as { agents: { id: string; available: boolean }[]; canEstimate: boolean };
-  expect(state.agents.map((a) => a.id)).toEqual(["claude", "gemini", "codex", "pi"]);
+  expect(state.agents.map((a) => a.id)).toEqual(["gemini"]);
   expect(state.agents.find((a) => a.id === "gemini")).toMatchObject({ available: true, plugin: "core" });
   expect(state.canEstimate).toBe(false);
 
@@ -264,7 +252,7 @@ test("no plugin, the wrong plugin, or a missing CLI is a clear refusal, and the 
   expect((await none.json()).error).toContain("No coding agent is installed");
   const unknown = await api("/api/agent/chat", "POST", { name: "chat", agent: "gemini" });
   expect(unknown.status).toBe(400);
-  expect((await unknown.json()).error).toContain("agent must be claude, codex or pi");
+  expect((await unknown.json()).error).toContain("agent must be (no agent plugin is installed)");
 
   const slow = register({ id: "zed", rank: 40 });
   const fast = register({ id: "gemini", rank: 15, available: () => false, missingMessage: "Gemini CLI not found — install the `gemini` command" });

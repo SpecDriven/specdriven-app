@@ -9,21 +9,20 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
-import {
-  desktopOpener,
-  setCodexAvailability,
-  setDesktopAvailability,
-  setDesktopRunner,
-  setPiAvailability,
-} from "../src/server/agent";
+import { desktopOpener, setDesktopAvailability, setDesktopRunner } from "../src/server/agent";
 import type { Runner } from "../src/server/agent";
-import { mountAgentPlugins, unmountAgentPlugins } from "./helpers/agentPlugins";
+import { agents } from "../src/plugins/host/agents";
+import type { Disposer } from "../src/plugins/kernel";
+import { fakeProvider } from "./helpers/fakeAgent";
 import { createFeature, saveFeature } from "../src/server/features";
 import type { RunOptions } from "../src/server/run";
 import { PROJECT_SETTINGS_FILE } from "../src/server/members";
 import { readState, writeState } from "../src/server/state";
 
 let root: string;
+let piFound: boolean;
+let codexFound: boolean;
+const disposers: Disposer[] = [];
 let home: string;
 let data: string;
 let calls: { cmd: string; args: string[]; options?: RunOptions }[];
@@ -45,24 +44,26 @@ beforeEach(async () => {
   calls = [];
   setDesktopAvailability(() => true);
   setDesktopRunner(recordingRunner);
-  // Pi is not on the developer's or CI's PATH; the pi session itself is
-  // driven by a fake in tests/piChat.test.ts.
-  setPiAvailability(() => true);
-  // Likewise Codex: its session is driven by a fake in tests/codexChat.test.ts.
-  setCodexAvailability(() => true);
+  // The agent plugins' providers, faked (tests/helpers/fakeAgent.ts): the
+  // route only picks one by id and asks whether its CLI is there; the
+  // sessions themselves are each plugin's business.
+  piFound = true;
+  codexFound = true;
+  disposers.push(
+    agents.register(fakeProvider({ id: "claude", rank: 10, available: () => true }).provider),
+    agents.register(fakeProvider({ id: "codex", rank: 20, available: () => codexFound, missingMessage: "Codex CLI not found — install the `codex` command" }).provider),
+    agents.register(fakeProvider({ id: "pi", rank: 30, available: () => piFound, missingMessage: "Pi CLI not found — install the `pi` command" }).provider),
+  );
   await writeState({ dataRepo: data }, root);
-  await mountAgentPlugins();
   await createFeature(data, "Quote");
   await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
-  await unmountAgentPlugins();
+  for (const dispose of disposers.splice(0)) await dispose();
   reloader.stop();
   setDesktopAvailability(null);
   setDesktopRunner(null);
-  setPiAvailability(null);
-  setCodexAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -185,10 +186,10 @@ test("the state reports whether Claude Code Desktop can be opened", async () => 
 });
 
 // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): Pi is a choice
-// of agent at the route; the session it opens is the pane one, driven over
-// pi's RPC mode (tests/piChat.test.ts).
+// of agent at the route; the session it opens is the pane one, driven by
+// the Pi agent plugin (plugins/agent-pi in SpecDriven/plugins).
 test("without the pi CLI the pi target is refused before anything runs", async () => {
-  setPiAvailability(() => false);
+  piFound = false;
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "pi" });
   expect(res.status).toBe(502);
   expect((await res.json()).error).toContain("Pi CLI not found");
@@ -198,16 +199,15 @@ test("without the pi CLI the pi target is refused before anything runs", async (
 test("the state reports whether a session can run in Pi", async () => {
   const res = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await res.json()) as { canRunPi: boolean }).canRunPi).toBe(true);
-  setPiAvailability(() => false);
+  piFound = false;
   const again = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await again.json()) as { canRunPi: boolean }).canRunPi).toBe(false);
 });
 
-// Codex (src/server/codexChat.ts): the same choice at the route; the session
-// it opens is the pane one, driven over Codex's app-server protocol
-// (tests/codexChat.test.ts).
+// Codex: the same choice at the route; the session it opens is the pane
+// one, driven by the Codex agent plugin (plugins/agent-codex).
 test("without the codex CLI the codex target is refused before anything runs", async () => {
-  setCodexAvailability(() => false);
+  codexFound = false;
   const res = await api("/api/agent/session", "POST", { name: "s", files: FILES, target: "codex" });
   expect(res.status).toBe(502);
   expect((await res.json()).error).toContain("Codex CLI not found");
@@ -217,7 +217,7 @@ test("without the codex CLI the codex target is refused before anything runs", a
 test("the state reports whether a session can run in Codex", async () => {
   const res = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await res.json()) as { canRunCodex: boolean }).canRunCodex).toBe(true);
-  setCodexAvailability(() => false);
+  codexFound = false;
   const again = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await again.json()) as { canRunCodex: boolean }).canRunCodex).toBe(false);
 });

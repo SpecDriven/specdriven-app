@@ -1,77 +1,39 @@
 // Add a task to Google Calendar (specs/app/tasks.feature.md): the estimate
-// route asks the developer's `claude` CLI once, through the coding agent
-// pane's query seam, so a fake answers here and nothing spawns.
+// route asks a coding agent once, through a provider's one-shot turn
+// (src/plugins/host/agents.ts), so a fake provider answers here and nothing
+// spawns.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { handleApi, reloader } from "../src/server/api";
-import { setClaudeAvailability } from "../src/server/agent";
-import { InputQueue, setQueryFactory } from "../src/plugins/builtin/agent-claude/provider";
-import type { QueryLike } from "../src/plugins/builtin/agent-claude/provider";
+import { agents } from "../src/plugins/host/agents";
+import type { OneShotRequest, OneShotResult } from "../src/plugins/host/agents";
+import type { Disposer } from "../src/plugins/kernel";
 import { estimatePrompt, minutesFromResult } from "../src/server/estimate";
 import { writeState } from "../src/server/state";
 import { syncPlugins } from "../src/plugins/host/loader";
-
-/** A stand-in for the SDK's Query that answers with one scripted message. */
-class FakeQuery implements QueryLike {
-  readonly out = new InputQueue<SDKMessage>();
-  readonly inputs: SDKUserMessage[] = [];
-  aborted = false;
-
-  constructor(
-    prompt: AsyncIterable<SDKUserMessage>,
-    readonly options: Options,
-    answer: SDKMessage | null,
-  ) {
-    void (async () => {
-      for await (const m of prompt) this.inputs.push(m);
-      if (answer) this.out.push(answer);
-      // A one-turn query ends with its result; the fake ends too.
-      this.out.close();
-    })();
-    options.abortController?.signal.addEventListener("abort", () => {
-      this.aborted = true;
-      this.out.close();
-    });
-  }
-
-  [Symbol.asyncIterator]() {
-    return this.out[Symbol.asyncIterator]();
-  }
-  async interrupt() {}
-  async setPermissionMode() {}
-  async supportedCommands() {
-    return [];
-  }
-}
-
-const success = (result: string, structured?: unknown): SDKMessage =>
-  ({
-    type: "result",
-    subtype: "success",
-    is_error: false,
-    result,
-    ...(structured === undefined ? {} : { structured_output: structured }),
-    duration_ms: 1,
-    duration_api_ms: 1,
-    num_turns: 1,
-    total_cost_usd: 0,
-    usage: {},
-    session_id: "s",
-    uuid: "u",
-  }) as unknown as SDKMessage;
+import { fakeProvider } from "./helpers/fakeAgent";
 
 let root: string;
 let home: string;
 let data: string;
-let fakes: FakeQuery[];
-let answer: SDKMessage | null;
+/** The one-shot requests the fake agent took. */
+let asked: OneShotRequest[];
+/** What the fake answers, or the error it throws. */
+let answer: OneShotResult | Error;
+let available: boolean;
+let dispose: Disposer;
 const realRoot = process.env.SPECDRIVEN_ROOT;
 const realHome = process.env.SPECDRIVEN_HOME;
 const TASK = "tasks/ship-v2.md";
+
+const success = (text: string, structured?: unknown): OneShotResult => ({
+  text,
+  ...(structured === undefined ? {} : { structured }),
+  isError: false,
+});
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "specdriven-estimate-"));
@@ -79,14 +41,24 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_ROOT = root;
   process.env.SPECDRIVEN_HOME = home;
   data = join(root, "data");
-  fakes = [];
+  asked = [];
   answer = success("90", { minutes: 90 });
-  setClaudeAvailability(() => true);
-  setQueryFactory(({ prompt, options }) => {
-    const fake = new FakeQuery(prompt, options, answer);
-    fakes.push(fake);
-    return fake;
+  available = true;
+  // An agent plugin's provider that answers one-shot turns, under Claude's
+  // id since the estimate prefers it; nothing spawns.
+  const { provider } = fakeProvider({
+    id: "claude",
+    rank: 10,
+    available: () => available,
+    missingMessage: "Claude CLI not found",
+    capabilities: { oneShot: true },
+    oneShot: async (req) => {
+      asked.push(req);
+      if (answer instanceof Error) throw answer;
+      return answer;
+    },
   });
+  dispose = agents.register(provider);
   await writeState({ dataRepo: data, tasks: true, googleCalendar: true }, root);
   // The route is the tasks plugin's (src/plugins/builtin/pages/host.ts): it
   // exists while the Tasks switch has the plugin mounted.
@@ -101,8 +73,7 @@ beforeEach(async () => {
 afterEach(async () => {
   reloader.stop();
   await syncPlugins({ tasks: false });
-  setClaudeAvailability(null);
-  setQueryFactory(null);
+  await dispose();
   await rm(root, { recursive: true, force: true });
   await rm(home, { recursive: true, force: true });
   for (const [name, value] of [
@@ -122,30 +93,23 @@ function estimate(file = TASK): Promise<Response> {
   ) as Promise<Response>;
 }
 
-test("the estimate route asks Claude once, with no tools, and answers in minutes", async () => {
+test("the estimate route asks the agent once, with no tools, and answers in minutes", async () => {
   const res = await estimate();
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ minutes: 90 });
 
-  expect(fakes).toHaveLength(1);
-  const fake = fakes[0]!;
-  const { options } = fake;
-  expect(options.maxTurns).toBe(1);
-  expect(options.tools).toEqual([]);
-  expect(options.settingSources).toEqual([]);
-  expect(options.persistSession).toBe(false);
-  expect(typeof options.systemPrompt).toBe("string");
-  expect(options.cwd).toBe(data);
-  expect(options.env?.CLAUDECODE).toBeUndefined();
-  expect(options.outputFormat?.type).toBe("json_schema");
-
-  expect(fake.inputs).toHaveLength(1);
-  const text = fake.inputs[0]!.message.content;
-  expect(text).toContain("Task: Ship v2");
-  expect(text).toContain("Cut the build and tell everyone.");
-  expect(text).not.toContain("**Assigned:**");
-  // The turn is over: nothing lingers.
-  expect(fake.aborted).toBe(true);
+  // One one-shot turn (src/plugins/host/agents.ts OneShotRequest): the
+  // system prompt, a schema that holds the answer to a number, in the data
+  // repo, with a deadline.
+  expect(asked).toHaveLength(1);
+  const req = asked[0]!;
+  expect(typeof req.systemPrompt).toBe("string");
+  expect(req.cwd).toBe(data);
+  expect(req.schema).toMatchObject({ type: "object" });
+  expect(req.timeoutMs).toBeGreaterThan(0);
+  expect(req.prompt).toContain("Task: Ship v2");
+  expect(req.prompt).toContain("Cut the build and tell everyone.");
+  expect(req.prompt).not.toContain("**Assigned:**");
 });
 
 test("the estimate route is 404 while Google Calendar is switched off", async () => {
@@ -153,41 +117,31 @@ test("the estimate route is 404 while Google Calendar is switched off", async ()
   const res = await estimate();
   expect(res.status).toBe(404);
   expect(((await res.json()) as { error: string }).error).toContain("Google Calendar");
-  expect(fakes).toHaveLength(0);
+  expect(asked).toHaveLength(0);
 });
 
-test("the estimate route is 503 without a Claude CLI, 404 for a task that is not there, and 502 when Claude fails", async () => {
-  setClaudeAvailability(() => false);
+test("the estimate route is 503 without an agent's CLI, 404 for a task that is not there, and 502 when the agent fails", async () => {
+  available = false;
   expect((await estimate()).status).toBe(503);
-  expect(fakes).toHaveLength(0);
+  expect(asked).toHaveLength(0);
 
-  setClaudeAvailability(() => true);
+  available = true;
   expect((await estimate("tasks/nope.md")).status).toBe(404);
-  expect(fakes).toHaveLength(0);
+  expect(asked).toHaveLength(0);
 
-  answer = {
-    type: "result",
-    subtype: "error_max_turns",
-    is_error: true,
-    errors: ["ran out of turns"],
-  } as unknown as SDKMessage;
+  answer = { text: "ran out of turns", isError: true };
   const failed = await estimate();
   expect(failed.status).toBe(502);
   expect(((await failed.json()) as { error: string }).error).toContain("ran out of turns");
 
-  setQueryFactory(() => {
-    throw new Error("spawn failed");
-  });
+  answer = new Error("spawn failed");
   const thrown = await estimate();
   expect(thrown.status).toBe(502);
   expect(((await thrown.json()) as { error: string }).error).toContain("spawn failed");
 });
 
 test("a turn the API refused carries its own words", async () => {
-  answer = {
-    ...(success("Failed to authenticate. API Error: 401 Invalid bearer token") as object),
-    is_error: true,
-  } as SDKMessage;
+  answer = { text: "Failed to authenticate. API Error: 401 Invalid bearer token", isError: true };
   const res = await estimate();
   expect(res.status).toBe(502);
   expect(((await res.json()) as { error: string }).error).toContain("401 Invalid bearer token");
@@ -208,36 +162,11 @@ test("a proposal that is not a number is refused", async () => {
   expect(minutesFromResult({ text: "45", isError: true })).toBeNull();
 });
 
-test("Claude exiting without an answer is 502, and the prompt asks for minutes only", async () => {
-  answer = null;
+test("an agent exiting without an answer is 502, and the prompt asks for minutes only", async () => {
+  answer = new Error("Claude exited without an answer");
   const res = await estimate();
   expect(res.status).toBe(502);
   expect(((await res.json()) as { error: string }).error).toContain("without an answer");
   expect(estimatePrompt({ name: "Ship v2", body: "" })).toContain("(no further description)");
   expect(estimatePrompt({ name: "", body: "x" })).toContain("Task: (untitled)");
-});
-
-test("the estimate's Claude gets the sign-in Settings chose, like the pane (src/server/claudeAuth.ts)", async () => {
-  // This test's Claude config, not the machine's, and no proxy token from
-  // the shell — either would be picked up as the proxy's.
-  const saved = Object.fromEntries(
-    ["CLAUDE_CONFIG_DIR", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"].map((n) => [n, process.env[n]]),
-  );
-  process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
-  delete process.env.ANTHROPIC_AUTH_TOKEN;
-  delete process.env.ANTHROPIC_BASE_URL;
-  try {
-    await writeState(
-      { dataRepo: data, tasks: true, googleCalendar: true, claudeAuth: "proxy", claudeProxyUrl: "http://proxy.test:9/" },
-      root,
-    );
-    const res = await estimate();
-    expect(res.status).toBe(200);
-    expect(JSON.parse(fakes[0]!.options.extraArgs!.settings!)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://proxy.test:9/" } });
-  } finally {
-    for (const [name, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
 });

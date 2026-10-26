@@ -19,7 +19,6 @@ import {
   type SecretBackend,
   type SecretRecord,
 } from "../src/server/secrets";
-import { claudeTokenPath, loadClaudeToken, saveClaudeToken } from "../src/server/claudeToken";
 
 const realHome = process.env.SPECDRIVEN_HOME;
 let home: string;
@@ -69,12 +68,13 @@ test("a corrupt or empty file reads as no secret", async () => {
 });
 
 test("the Claude token keeps its old file, through the store the Claude plugin owns", async () => {
-  expect(claudeTokenPath()).toBe(join(home, "claude-token.json"));
-  expect(secretPath("agent-claude.token")).toBe(claudeTokenPath());
-  await saveClaudeToken({ token: "proxy-secret" });
-  expect(JSON.parse(await readFile(claudeTokenPath(), "utf8"))).toEqual({ token: "proxy-secret" });
+  // The store the Claude agent plugin asks for (HostConfig.secrets("token"))
+  // reads and writes the file the token had while Claude was built in.
+  const file = join(home, "claude-token.json");
+  expect(secretPath("agent-claude.token")).toBe(file);
+  await secretStore("agent-claude.token").save({ token: "proxy-secret" });
+  expect(JSON.parse(await readFile(file, "utf8"))).toEqual({ token: "proxy-secret" });
   expect(await secretStore("agent-claude.token").load()).toEqual({ token: "proxy-secret" });
-  expect(await loadClaudeToken()).toEqual({ token: "proxy-secret" });
 });
 
 test("the backend factory swaps every store, the ones handed out before included", async () => {
