@@ -16,6 +16,7 @@ import { createFeature, readFeature, readFeatureView, saveFeature } from "../src
 import { readState, writeState } from "../src/server/state";
 import { setProjectionOptions, projectionOptions } from "../src/server/automerge/project";
 import { createQtestFileBackend, qtestToken, setQtestTokenBackend } from "../src/server/qtestTokens";
+import { queryLogs } from "../src/server/logs";
 
 const GOOD = "tok-good";
 const EMPTY = "tok-no-projects";
@@ -413,9 +414,20 @@ describe("creating a feature's test cases", () => {
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ created: 2, updated: 0 });
-    expect(res.body.warning).toBe(
+    expect(res.body.warning).toBeUndefined();
+    const failure = res.body.failure as { scenarioName: string; message: string; details: Record<string, unknown> };
+    expect(failure.scenarioName).toBe("REFUSED Quote");
+    expect(failure.message).toBe(
       "2 of the test cases were written; “REFUSED Quote” was not: qTest answered HTTP 400: Test case name is not allowed",
     );
+    // What qTest was sent and what it answered, for the dialog's detail box.
+    expect(failure.details).toMatchObject({
+      method: "POST",
+      url: `${site}/api/v3/projects/12/test-cases`,
+      status: 400,
+    });
+    expect(failure.details.requestBody).toContain('"name": "S3: REFUSED Quote"');
+    expect(failure.details.body).toContain("Test case name is not allowed");
     const file = (await readFeature(data, FILE))!;
     expect(file).toContain("[qTest:TC-1001]");
     expect(file).toContain("[qTest:TC-1002]");
@@ -463,5 +475,68 @@ describe("creating a feature's test cases", () => {
     expect((await saveToken()).status).toBe(403);
     expect((await publish(moduleUrl(1))).status).toBe(403);
     expect(seen).toHaveLength(0);
+  });
+});
+
+// specs/external-links/qtest-test-cases.feature.md "Every call to qTest is
+// logged, and a failure shows what qTest answered".
+describe("observability", () => {
+  test("every call to qTest is logged under qtest, with both bodies and never the token", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    const { entries } = await queryLogs({ components: ["qtest"], q: site, limit: 500 });
+    const lines = entries.map((e) => e.message);
+    expect(lines).toContain(`GET ${site}/api/v3/projects → 200`);
+    expect(lines).toContain(`GET ${site}/api/v3/projects/12/settings/test-cases/fields → 200`);
+    const created = entries.filter((e) => e.message === `POST ${site}/api/v3/projects/12/test-cases → 200`);
+    expect(created.length).toBeGreaterThanOrEqual(2);
+    expect(created[0]!.level).toBe("info");
+    expect(created[0]!.attributes).toMatchObject({
+      "http.request.method": "POST",
+      "url.full": `${site}/api/v3/projects/12/test-cases`,
+      "http.response.status_code": "200",
+    });
+    expect(created[0]!.attributes["http.request.body"]).toContain("Quote");
+    expect(created[0]!.attributes["http.response.body"]).toContain("TC-");
+    expect(Number(created[0]!.attributes["duration_ms"])).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(entries)).not.toContain(GOOD);
+  });
+
+  test("a failure answers the request and qTest's answer as details, and is logged as a warning", async () => {
+    await saveToken();
+    const gone = await publish(moduleUrl(999));
+    expect(gone.status).toBe(404);
+    expect(gone.body.details).toMatchObject({
+      method: "GET",
+      url: `${site}/api/v3/projects/12/modules/999`,
+      status: 404,
+      contentType: expect.stringContaining("json"),
+    });
+    expect((gone.body.details as { body: string }).body).toContain("Module not found");
+    expect(JSON.stringify(gone.body)).not.toContain(GOOD);
+    const { entries } = await queryLogs({ components: ["qtest"], q: `${site}/api/v3/projects/12/modules/999` });
+    expect(entries[0]).toMatchObject({ level: "warn", message: "qTest reports no such project, module or test case, or the token cannot see it." });
+  });
+
+  test("a token qTest refuses comes back with what qTest answered", async () => {
+    const bad = await saveToken("tok-bad");
+    expect(bad.status).toBe(400);
+    expect(bad.body.details).toMatchObject({ method: "GET", url: `${site}/api/v3/projects`, status: 401 });
+    expect(JSON.stringify(bad.body)).not.toContain("tok-bad");
+  });
+
+  test("an unreachable site is logged as an error with the network error, and no status", async () => {
+    await saveToken();
+    server.stop(true);
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain(`Could not reach qTest at ${site}`);
+    const details = res.body.details as Record<string, unknown>;
+    expect(details.status).toBeUndefined();
+    expect(details.cause).toBeTruthy();
+    const { entries } = await queryLogs({ components: ["qtest"], q: "Could not reach qTest" });
+    expect(entries[0]?.level).toBe("error");
+    // Restart something for afterEach to stop.
+    site = stubQtest();
   });
 });

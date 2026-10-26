@@ -4,6 +4,7 @@ import type { Feature } from "../server/parser";
 import { parseParentPageUrl, sameBase } from "../server/confluenceUrl";
 import type { ConfluenceWiki } from "./ConfluenceToken";
 import { PromptChoices } from "./ModalPrompts";
+import { FailureLine, whenText, type FailureDetails } from "./FailureDetails";
 
 // "Publish to Confluence…" from a feature's ⋯ menu
 // (specs/external-links/confluence-wiki.feature.md): the parent page to
@@ -44,24 +45,7 @@ export interface ConfluenceConflict {
 }
 
 /** The call that failed, as the route reports it (src/server/confluence.ts). */
-export interface ConfluenceFailureDetails {
-  method: string;
-  url: string;
-  status?: number;
-  statusText?: string;
-  contentType?: string;
-  location?: string;
-  body?: string;
-  cause?: string;
-  time: string;
-}
-
-/** A Confluence timestamp as the dialog shows it, in the reader's locale; the raw text when it is no date. */
-function whenText(when: string): string {
-  const date = new Date(when);
-  if (Number.isNaN(date.getTime())) return when;
-  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
+export type ConfluenceFailureDetails = FailureDetails;
 
 /**
  * The notice a conflict shows in the dialog: who changed the page in
@@ -86,74 +70,6 @@ export function ConfluenceConflictNotice({ conflict }: { conflict: ConfluenceCon
         </a>{" "}
         to see them first.
       </p>
-    </div>
-  );
-}
-
-/**
- * The detail box under a failure: the request, Confluence's status and
- * content type, and its answer, with a way to the Observability page.
- */
-export function ConfluenceFailureBox({
-  details,
-  onOpenLogs,
-}: {
-  details: ConfluenceFailureDetails;
-  onOpenLogs?: () => void;
-}) {
-  const status =
-    details.status !== undefined ? `${details.status}${details.statusText ? ` ${details.statusText}` : ""}` : null;
-  return (
-    <div className="confluence-failure" role="region" aria-label="Error details">
-      <dl>
-        <dt>Request</dt>
-        <dd>
-          <code>
-            {details.method} {details.url}
-          </code>
-        </dd>
-        <dt>Status</dt>
-        <dd>{status ?? "No answer"}</dd>
-        {details.cause && (
-          <>
-            <dt>Cause</dt>
-            <dd>{details.cause}</dd>
-          </>
-        )}
-        {details.location && (
-          <>
-            <dt>Redirected to</dt>
-            <dd>
-              <code>{details.location}</code>
-            </dd>
-          </>
-        )}
-        {details.contentType && (
-          <>
-            <dt>Content type</dt>
-            <dd>{details.contentType}</dd>
-          </>
-        )}
-        <dt>Time</dt>
-        <dd>
-          <time dateTime={details.time}>{whenText(details.time)}</time>
-        </dd>
-      </dl>
-      {details.status !== undefined && (
-        <>
-          <p className="confluence-failure-label">Confluence answered</p>
-          {details.body ? (
-            <pre className="confluence-failure-body">{details.body}</pre>
-          ) : (
-            <p className="hint">An empty body.</p>
-          )}
-        </>
-      )}
-      {onOpenLogs && (
-        <button type="button" className="link" onClick={onOpenLogs}>
-          Open in Observability
-        </button>
-      )}
     </div>
   );
 }
@@ -206,7 +122,6 @@ export function ConfluencePublishDialog({
   const [error, setError] = useState<string | null>(null);
   /** What the server knows of the failed call; shown when the error is clicked. */
   const [details, setDetails] = useState<ConfluenceFailureDetails | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   /** The page changed in Confluence since the last publish; Publish anyway replaces it. */
   const [conflict, setConflict] = useState<ConfluenceConflict | null>(null);
   const problem = parentUrlProblem(parentUrl, wikis);
@@ -216,7 +131,6 @@ export function ConfluencePublishDialog({
     setBusy(true);
     setError(null);
     setDetails(null);
-    setDetailsOpen(false);
     try {
       const res = await fetch(`/api/features/${encodeURIComponent(file)}/confluence`, {
         method: "POST",
@@ -300,23 +214,7 @@ export function ConfluencePublishDialog({
             }}
           />
           {conflict && <ConfluenceConflictNotice conflict={conflict} />}
-          {error &&
-            (details ? (
-              <>
-                <button
-                  type="button"
-                  className="error error-link"
-                  aria-expanded={detailsOpen}
-                  title={detailsOpen ? "Hide the details" : "Show the details"}
-                  onClick={() => setDetailsOpen((open) => !open)}
-                >
-                  {error}
-                </button>
-                {detailsOpen && <ConfluenceFailureBox details={details} onOpenLogs={onOpenLogs} />}
-              </>
-            ) : (
-              <p className="error">{error}</p>
-            ))}
+          {error && <FailureLine service="Confluence" error={error} details={details} onOpenLogs={onOpenLogs} />}
           <div className="dialog-actions">
             <button type="button" className="secondary" onClick={onClose}>
               Cancel

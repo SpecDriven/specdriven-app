@@ -8,30 +8,14 @@
 // else by its title, which Confluence keeps unique within a space.
 
 import type { ParentPageRef } from "./confluenceUrl";
+import { BODY_EXCERPT_CHARS, bodyExcerpt, failureAttributes, type FailureDetails } from "./httpFailure";
 import { getLogger } from "./telemetry";
 
 const log = getLogger("confluence");
 
-/**
- * What went wrong on the wire, for the dialog's detail box and the log: the
- * request (never its token), and Confluence's answer when there was one.
- */
-export interface ConfluenceFailureDetails {
-  method: string;
-  url: string;
-  /** The HTTP status Confluence answered; absent when it could not be reached. */
-  status?: number;
-  statusText?: string;
-  contentType?: string;
-  /** Where a redirect pointed. */
-  location?: string;
-  /** Confluence's response body, as text and cut to a readable length. */
-  body?: string;
-  /** Why the request never got an answer (a network error). */
-  cause?: string;
-  /** When the call failed, ISO 8601. */
-  time: string;
-}
+/** What went wrong on the wire, for the dialog's detail box and the log. */
+export type ConfluenceFailureDetails = FailureDetails;
+export { BODY_EXCERPT_CHARS, bodyExcerpt };
 
 /** A failed Confluence call, with the HTTP status so the route can pass it on. */
 export class ConfluenceError extends Error {
@@ -44,34 +28,6 @@ export class ConfluenceError extends Error {
   }
 }
 
-/** Response bodies are kept to this many characters in details and the log. */
-export const BODY_EXCERPT_CHARS = 4000;
-
-/**
- * A response body as text a person can read: an HTML error page loses its
- * markup, whitespace collapses, and the rest is cut to BODY_EXCERPT_CHARS.
- */
-export function bodyExcerpt(text: string, contentType = ""): string {
-  let out = text;
-  if (/html/i.test(contentType) || /^\s*<(!doctype|html)/i.test(text)) {
-    out = text
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, "&")
-      .replace(/[ \t]+/g, " ")
-      .replace(/\s*\n\s*/g, "\n")
-      .trim();
-  } else {
-    out = text.trim();
-  }
-  return out.length > BODY_EXCERPT_CHARS ? `${out.slice(0, BODY_EXCERPT_CHARS)}… (${out.length - BODY_EXCERPT_CHARS} more characters)` : out;
-}
-
 /**
  * Record a failed call in the app's log (the Observability page) with
  * everything the dialog's detail box shows: server errors and unreachable
@@ -79,17 +35,7 @@ export function bodyExcerpt(text: string, contentType = ""): string {
  */
 function logFailure(error: ConfluenceError): ConfluenceError {
   const d = error.details;
-  const attributes = d
-    ? {
-        "http.request.method": d.method,
-        "url.full": d.url,
-        ...(d.status !== undefined ? { "http.response.status_code": d.status } : {}),
-        ...(d.contentType ? { "http.response.content_type": d.contentType } : {}),
-        ...(d.location ? { "http.response.location": d.location } : {}),
-        ...(d.body ? { "http.response.body": d.body } : {}),
-        ...(d.cause ? { "error.cause": d.cause } : {}),
-      }
-    : undefined;
+  const attributes = d ? failureAttributes(d) : undefined;
   const serious = d?.status === undefined || d.status >= 500;
   log[serious ? "error" : "warn"](error.message, attributes);
   return error;

@@ -10929,12 +10929,17 @@ export function App() {
           sites={qtestSites}
           trapRef={qtestTrapRef}
           onClose={() => setQtestPublishOpen(false)}
+          onOpenLogs={() => {
+            setQtestPublishOpen(false);
+            openObservability("qtest");
+          }}
           onPublished={(data) => {
             setFeature(featureFromResponse(data, selected));
             setDirty(false);
             markSaved();
             setQtestParentUrl(data.parentUrl);
-            setQtestPublishOpen(false);
+            // A test case qTest refused keeps the dialog open on it, with its details.
+            if (!data.failure) setQtestPublishOpen(false);
             const open = { label: "Open module", run: () => window.open(data.module.url, "_blank", "noreferrer") };
             const what = [
               data.created > 0 ? `created ${data.created}` : "",
@@ -10942,7 +10947,8 @@ export function App() {
             ]
               .filter(Boolean)
               .join(", ");
-            toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
+            // A run refused at its first test case wrote nothing to report.
+            if (what || !data.failure) toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
             if (data.warning) toast.error(data.warning);
           }}
         />

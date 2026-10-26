@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { normalizeQtestBase } from "../server/qtestUrl";
+import { FailureLine, type FailureDetails } from "./FailureDetails";
 
 // Settings → qTest (specs/external-links/qtest-test-cases.feature.md "A qTest
 // token is kept per site on this device"): the qTest sites this device holds
 // an API token for, and a form to add one. The server checks a token against
 // the site before keeping it and never sends one back — the list shows the
-// site and what the token reaches.
+// site and what the token reaches. A token qTest refuses shows as one line;
+// clicking it opens what qTest answered.
 
 /** A qTest site with a token on this device. */
 export interface QtestSite {
@@ -24,15 +26,20 @@ export async function fetchQtestTokens(): Promise<QtestSite[]> {
   }
 }
 
-export async function postQtestToken(base: string, token: string): Promise<{ site: QtestSite } | { error: string }> {
+export async function postQtestToken(
+  base: string,
+  token: string,
+): Promise<{ site: QtestSite } | { error: string; details?: FailureDetails }> {
   try {
     const res = await fetch("/api/qtest/tokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ base, token }),
     });
-    const data = (await res.json()) as { base?: string; user?: string; error?: string };
-    if (!res.ok || !data.base) return { error: data.error ?? "qTest did not accept this token" };
+    const data = (await res.json()) as { base?: string; user?: string; error?: string; details?: FailureDetails };
+    if (!res.ok || !data.base) {
+      return { error: data.error ?? "qTest did not accept this token", ...(data.details ? { details: data.details } : {}) };
+    }
     return { site: { base: data.base, user: data.user ?? "" } };
   } catch {
     return { error: "Could not save the token — is the server running?" };
@@ -58,6 +65,7 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
   const [base, setBase] = useState("");
   const [token, setToken] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const [details, setDetails] = useState<FailureDetails | null>(null);
   const [busy, setBusy] = useState(false);
   const cleanBase = normalizeQtestBase(base);
 
@@ -65,10 +73,12 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
     if (!token.trim() || !cleanBase) return;
     setBusy(true);
     setStatus(null);
+    setDetails(null);
     const result = await postQtestToken(cleanBase, token.trim());
     setBusy(false);
     if ("error" in result) {
       setStatus(result.error);
+      setDetails(result.details ?? null);
       return;
     }
     setToken("");
@@ -78,7 +88,10 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
 
   const remove = async (site: QtestSite) => {
     const next = await deleteQtestToken(site.base);
-    if (next === null) setStatus(`Could not remove the token for ${site.base}`);
+    if (next === null) {
+      setStatus(`Could not remove the token for ${site.base}`);
+      setDetails(null);
+    }
     else onChange(next);
   };
 
@@ -129,7 +142,7 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
         Copy the bearer token from qTest under your name → API &amp; SDK, as a user who can add test cases to the
         project. It is checked against the site and kept on this device only.
       </span>
-      {status && <p className="error">{status}</p>}
+      {status && <FailureLine service="qTest" error={status} details={details} />}
     </div>
   );
 }
