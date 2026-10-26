@@ -12,7 +12,7 @@
  */
 import { $ } from "bun";
 import { copyFile, mkdir } from "node:fs/promises";
-import { APP_ICON } from "./build-desktop";
+import { APP_ICON, bundleElectron } from "./build-desktop";
 
 const port = process.env.PORT || "3000";
 const devUrl = `http://localhost:${port}`;
@@ -26,8 +26,8 @@ try {
 
 await mkdir("dist", { recursive: true });
 await copyFile(APP_ICON, "dist/icon.png");
-await $`bun build src/electron/main.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
-// The entry is the boot shim (src/electron/boot.ts), built apart from main.js.
-await $`bun build src/electron/boot.ts --target=node --format=esm --external electron --sourcemap --outdir dist/electron`.quiet();
+// main.js, the boot shim (the entry, src/electron/boot.ts) and the files
+// main.js reads beside itself, as the desktop build makes them.
+await bundleElectron("dist/electron", { production: false });
 
 await $`bunx electron .`.env({ ...process.env, ELECTRON_DEV: "1" });
