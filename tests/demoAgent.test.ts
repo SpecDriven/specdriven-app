@@ -16,7 +16,7 @@ import {
   getChatSession,
   interruptChat,
 } from "../src/server/agentChat";
-import type { ChatEvent } from "../src/server/agentChat";
+import type { ChatEvent } from "../src/server/agentTypes";
 import type { AgentHost, AgentStartOptions, PermissionOutcome } from "../src/plugins/host/agents";
 import type { ChatEventBody } from "../src/server/agentTypes";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
@@ -103,7 +103,7 @@ async function snapshot(dir: string): Promise<Map<string, string>> {
 async function startSession(name = "implement autopay grace"): Promise<string> {
   const res = await api("/api/agent/session", "POST", {
     name,
-    target: "pane",
+    target: "claude",
     files: [{ fileName: SPEC }],
   });
   expect(res.status).toBe(200);

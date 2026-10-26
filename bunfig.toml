@@ -2,3 +2,6 @@
 # A deterministic PATH for every test file: git, but never the machine's own
 # gh (specs/git-operations.spec.md — gh presence picks the default engine).
 preload = ["./tests/helpers/preload.ts"]
+# Only the app's own tests: a desktop crash test (bun run test:desktop) leaves
+# the plugins it auto-installs, their .ts tests included, under dist/.
+root = "tests"

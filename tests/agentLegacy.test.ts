@@ -4,7 +4,7 @@
 // else as written.
 
 import { expect, test } from "bun:test";
-import { LEGACY_CODE_GEN_TARGETS, LEGACY_RECORD_AGENTS, normalizeRecordAgent } from "../src/server/agentLegacy";
+import { LEGACY_RECORD_AGENTS, normalizeRecordAgent } from "../src/server/agentLegacy";
 import { fallbackDescriptor } from "../src/server/agentTypes";
 
 test("a session record's agent from before agent plugins reads as the provider id", () => {
@@ -18,7 +18,6 @@ test("a session record's agent from before agent plugins reads as the provider i
   expect(normalizeRecordAgent(undefined)).toBeNull();
   expect(normalizeRecordAgent(3)).toBeNull();
   expect(LEGACY_RECORD_AGENTS).toEqual({ pane: "claude", "pi-pane": "pi", "codex-pane": "codex" });
-  expect(LEGACY_CODE_GEN_TARGETS).toEqual({ pane: "claude" });
 });
 
 test("a record whose plugin is gone renders through a fallback with no modes and no Stop", () => {

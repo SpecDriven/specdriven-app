@@ -209,11 +209,8 @@ describe("Start session targets with the pane", () => {
   test("the pane is a target, and the fallback when only the CLI is there", () => {
     const claude = agentsWith("claude");
     const none = agentsWith();
-    // "pane" is what the app stored before agents were providers: Claude.
-    expect(readCodeGenTarget("pane", claude)).toBe("claude");
     expect(codeGenTargetLabel("claude", claude)).toBe("Claude in the coding agent pane");
     expect(resolveCodeGenTarget("claude", true, claude)).toBe("claude");
-    expect(resolveCodeGenTarget("pane", true, claude)).toBe("claude");
     expect(resolveCodeGenTarget("claude", true, none)).toBe("desktop");
     expect(resolveCodeGenTarget(null, false, claude)).toBe("claude");
     expect(resolveCodeGenTarget(null, true, claude)).toBe("desktop");

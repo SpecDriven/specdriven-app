@@ -25,11 +25,8 @@ import {
   createChatSession,
   endChatSession,
   getChatSession,
-  normalizePermissionMode,
-  PERMISSION_MODES,
-  type ChatSessionMeta,
-  type PermissionMode,
 } from "./agentChat";
+import { normalizePermissionMode, PERMISSION_MODES, type ChatSessionMeta, type PermissionMode } from "./agentTypes";
 import { appSourceDir, PATCH_MANIFEST, PATCH_STATE_FILE, selfFixHome } from "./appSource";
 import { directoryExists, fileExists, readTextFile, writeTextFile } from "./fsx";
 import type { Handler } from "./http";

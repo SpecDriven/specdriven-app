@@ -82,7 +82,8 @@ test("the agent pane lists no sessions rather than refusing", async () => {
 test("the state says hosted and offers no local agents, folder chooser or IntelliJ", async () => {
   const state = (await (await api("GET", "/api/state")).json()) as Record<string, unknown>;
   expect(state.hosted).toBe(true);
-  for (const flag of ["canRunAgentPane", "canRunPi", "canRunCodex", "canOpenClaudeDesktop", "canChooseFolder", "canOpenInIdea"]) {
+  expect(state.agents).toEqual([]);
+  for (const flag of ["canOpenClaudeDesktop", "canChooseFolder", "canOpenInIdea"]) {
     expect(state[flag]).toBe(false);
   }
 });
