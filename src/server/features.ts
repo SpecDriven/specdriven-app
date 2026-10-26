@@ -346,6 +346,23 @@ async function renameInFolderOrder(dataDir: string, from: string, to: string): P
 }
 
 /**
+ * A folder moved out of its parent leaves the parent's order file, when it
+ * named the folder, committed and pushed. Nothing to do when the parent
+ * keeps no order, or never named the folder.
+ */
+async function dropFromFolderOrder(dataDir: string, from: string): Promise<void> {
+  const parent = from.split("/").slice(0, -1).join("/");
+  const file = `${parent}/${FOLDER_ORDER_FILE}`;
+  const text = await readTextFile(`${dataDir}/${file}`);
+  if (text === null) return;
+  const name = from.split("/").pop()!;
+  if (!orderLines(text).includes(name)) return;
+  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== name);
+  await writeTextFile(`${dataDir}/${file}`, lines.join("\n"));
+  await commitAndPush(dataDir, file, `Reorder folders in: ${parent}`);
+}
+
+/**
  * An order file naming `from`'s last segment names `to`'s instead, committed
  * and pushed — how a renamed folder or feature keeps its place. Nothing to
  * do when there is no order file, or it never named the old one.
@@ -787,6 +804,44 @@ export async function renameFolder(
   // The folder keeps its place in the tree ("rename a folder"): the parent's
   // order, when it names the folder, follows the rename.
   await renameInFolderOrder(dataDir, from, to);
+  return { path: to, message: sync.message };
+}
+
+/**
+ * specs/ui/folders.feature.md "move a folder": the folder keeps its name and
+ * takes a new parent — the top level (`specs`) when `toParent` is blank. With
+ * files beneath it the move is a `git mv` of the whole directory, its
+ * features' documents moving in the same commit, committed and pushed; an
+ * empty folder is moved on disk alone. A folder never moves into itself or
+ * one of its own subfolders, and a name already taken at the target is
+ * refused. The old parent's order stops naming it; the new parent's sorts it
+ * after the folders it names, like any folder it leaves out.
+ */
+export async function moveFolder(
+  dataDir: string,
+  path: string,
+  toParent: string,
+): Promise<{ path: string; message: string }> {
+  const from = safeFolder(path);
+  if (from === SPECS_FOLDER) throw new Error("Folder name is required");
+  if (!(await isDirectory(`${dataDir}/${from}`))) throw new Error(`Folder not found: ${from}`);
+  const parent = safeFolder(toParent);
+  if (parent === from || parent.startsWith(`${from}/`)) {
+    throw new Error(`Cannot move a folder into itself: ${from}`);
+  }
+  if (!(await isDirectory(`${dataDir}/${parent}`))) throw new Error(`Folder not found: ${parent}`);
+  const to = `${parent}/${from.split("/").pop()!}`;
+  if (to === from) return { path: from, message: "already there" };
+  if (await exists(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
+  if ((await filesBeneath(`${dataDir}/${from}`)).length === 0) {
+    await rename(`${dataDir}/${from}`, `${dataDir}/${to}`);
+    await dropFromFolderOrder(dataDir, from);
+    return { path: to, message: "moved locally (git does not track an empty folder)" };
+  }
+  const docFrom = docDirRel(from);
+  const docMoves = (await isDirectory(`${dataDir}/${docFrom}`)) ? [{ from: docFrom, to: docDirRel(to) }] : [];
+  const sync = await moveAndPush(dataDir, from, to, `Move folder: ${from} -> ${to}`, docMoves);
+  await dropFromFolderOrder(dataDir, from);
   return { path: to, message: sync.message };
 }
 
