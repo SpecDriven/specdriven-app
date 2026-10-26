@@ -289,6 +289,14 @@ machine can cut a full release; macOS artifacts need macOS, and Windows ones
 need Windows (off it, electron-builder needs Wine to stamp the executable), so
 `--all` means macOS and Linux.
 
+The main-process bundle is self-contained: it carries Automerge's wasm
+(`dist/electron/automerge_wasm_bg.wasm`) and cbor-extract's prebuilt native
+extractor for every platform package bun installed (`dist/electron/cbor-extract/`,
+unpacked from the asar), and reads both from beside itself. Bun would
+otherwise bake each dependency's build-time `__dirname` into the bundle, so
+a cross-built .deb or a copied .app died at launch looking for the wasm in
+the builder's node_modules; the build now fails on any such path.
+
 The bundle registers the `specdriven://` url scheme with the OS — through
 `Info.plist` on macOS, through the desktop entry's `MimeType` on Linux — so
 spec links launch or focus the installed app. Builds are unsigned for now:
