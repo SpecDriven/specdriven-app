@@ -134,6 +134,7 @@ export function parsePackageManifest(raw: unknown, appVersion: string): PluginMa
     description: typeof s.description === "string" ? s.description : "",
     // A plugin someone put in a folder is meant to run: on unless it says not.
     defaultEnabled: s.defaultEnabled !== false,
+    ...(s.autoEnable === true ? { autoEnable: true } : {}),
     ...(paths?.length ? { paths } : {}),
     ...(typeof pkg.version === "string" ? { version: pkg.version } : {}),
     ...(minAppVersion ? { minAppVersion } : {}),
