@@ -51,7 +51,9 @@ test("--local packages only the installer this machine starts, for its own archi
   // No .deb: its fpm needs libcrypt.so.1, which Arch and friends lack.
   expect(electronBuilderArgs(["linux"], true, "arm64")).toEqual(["--linux", "AppImage", "--arm64"]);
   expect(electronBuilderArgs(["linux"], true, "x64")).toEqual(["--linux", "AppImage", "--x64"]);
-  expect(electronBuilderArgs(["linux"], true, "arm")).toEqual(["--linux", "AppImage", "--armv7l"]);
+  // Electron 44 stopped publishing 32-bit ARM binaries: say so instead of
+  // letting electron-builder fail on a download it cannot make.
+  expect(() => electronBuilderArgs(["linux"], true, "arm")).toThrow(/32-bit ARM/);
   expect(electronBuilderArgs(["mac"], true, "arm64")).toEqual(["--mac", "dmg", "--arm64"]);
   // Windows gets the app itself, unpacked, which install.ps1 starts in place.
   expect(electronBuilderArgs(["win"], true, "x64")).toEqual(["--win", "dir", "--x64"]);
