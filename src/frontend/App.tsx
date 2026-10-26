@@ -237,6 +237,7 @@ import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./G
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { ClaudeSettings } from "./ClaudeSettings";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
+import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
 import { QtestPublishDialog } from "./QtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
@@ -1489,6 +1490,14 @@ export function App() {
       and whether the publish dialog is open. */
   const [confluenceWikis, setConfluenceWikis] = useState<ConfluenceWiki[]>([]);
   const [confluencePublishOpen, setConfluencePublishOpen] = useState(false);
+  /** "Publish to Confluence…" on a folder ("Publish a folder's features to
+      Confluence"): the folder, as the sidebar names it, and its features —
+      null until the server says which pages they link. */
+  const [confluenceFolder, setConfluenceFolder] = useState<{
+    path: string;
+    label: string;
+    features: FolderFeature[] | null;
+  } | null>(null);
   /** qTest (specs/external-links/qtest-test-cases.feature.md "Create qTest
       test cases from a feature"): the sites this device holds a token for,
       the last parent module created under, and whether the dialog is open. */
@@ -2093,6 +2102,7 @@ export function App() {
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
   const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
+  const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
   const qtestTrapRef = useFocusTrap(qtestPublishOpen);
   const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
@@ -4083,10 +4093,11 @@ export function App() {
   // the state the boot just loaded. A layout effect, so the fields never
   // paint with their defaults first.
   const settingsShown = appPage === "settings";
+  const confluenceFolderOpen = confluenceFolder !== null;
   // The Confluence wikis this device holds a token for: read when Settings
-  // or the publish dialog opens, so a token added in one shows in the other.
+  // or a publish dialog opens, so a token added in one shows in the other.
   useEffect(() => {
-    if (hosted || (!settingsShown && !confluencePublishOpen)) return;
+    if (hosted || (!settingsShown && !confluencePublishOpen && !confluenceFolderOpen)) return;
     let live = true;
     void fetchConfluenceTokens().then((wikis) => {
       if (live) setConfluenceWikis(wikis);
@@ -4094,7 +4105,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [hosted, settingsShown, confluencePublishOpen]);
+  }, [hosted, settingsShown, confluencePublishOpen, confluenceFolderOpen]);
   // The qTest sites this device holds a token for, read the same way.
   useEffect(() => {
     if (hosted || (!settingsShown && !qtestPublishOpen)) return;
@@ -6187,6 +6198,34 @@ export function App() {
    * A folder's whole subtree is its drop zone — dropping on a feature drops
    * into the folder that holds it; nested folders win via stopPropagation.
    */
+  // "Publish to Confluence…" on a folder: the dialog opens on the folder's
+  // features in the sidebar's order, its subfolders' after its own, then
+  // learns from the server which pages they link and where they were last
+  // published under.
+  const openConfluenceFolder = async (node: FolderNode) => {
+    const inOrder: FeatureListing[] = [];
+    const walk = (n: FolderNode) => {
+      inOrder.push(...n.features);
+      n.folders.forEach(walk);
+    };
+    walk(node);
+    const path = node.path;
+    setConfluenceFolder({ path, label: folderLabel(node), features: null });
+    let known = new Map<string, FolderFeature>();
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(path)}/confluence`);
+      if (res.ok) {
+        const data = (await res.json()) as { features: FolderFeature[] };
+        known = new Map(data.features.map((f) => [f.file, f]));
+      }
+    } catch {
+      // Without the server's answer every feature reads as a new page; the
+      // publish itself still finds the pages they link.
+    }
+    const features = inOrder.map((f) => known.get(f.fileName) ?? { file: f.fileName, name: f.name });
+    setConfluenceFolder((open) => (open?.path === path ? { ...open, features } : open));
+  };
+
   const renderTree = (node: FolderNode, depth: number) => (
     <>
       {node.folders.map((child, i) => {
@@ -6365,6 +6404,21 @@ export function App() {
                     disabled: i === node.folders.length - 1,
                     onSelect: () => void moveFolderTo(node.path, i, i + 1),
                   },
+                  // Publish to Confluence (specs/external-links/confluence
+                  // -wiki.feature.md "Publish a folder's features to
+                  // Confluence"): each feature under the folder its own page
+                  // under one parent. Never in the demo or the hosted app,
+                  // which keep no token.
+                  ...(demo || hosted
+                    ? []
+                    : [
+                        {
+                          id: "confluence",
+                          label: "Publish to Confluence…",
+                          icon: <BookOpen size={13} />,
+                          onSelect: () => void openConfluenceFolder(child),
+                        },
+                      ]),
                   {
                     id: "delete",
                     label: "Delete",
@@ -6524,6 +6578,7 @@ export function App() {
     if (userInfoOpen) return setUserInfoOpen(false);
     if (tokenSignInOpen) return setTokenSignInOpen(false);
     if (confluencePublishOpen) return setConfluencePublishOpen(false);
+    if (confluenceFolder) return setConfluenceFolder(null);
     if (qtestPublishOpen) return setQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
@@ -11064,6 +11119,39 @@ export function App() {
             const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
             toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
             if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {confluenceFolder && (
+        <ConfluenceFolderPublishDialog
+          key={`${confluenceFolder.path}:${confluenceFolder.features === null ? "loading" : "ready"}`}
+          folderLabel={confluenceFolder.label}
+          features={confluenceFolder.features}
+          wikis={confluenceWikis}
+          trapRef={confluenceFolderTrapRef}
+          onClose={() => setConfluenceFolder(null)}
+          onOpenLogs={() => {
+            setConfluenceFolder(null);
+            openObservability("confluence");
+          }}
+          onPublished={(file, data) => {
+            // The open feature now links its page: show it as saved.
+            if (file !== selected) return;
+            setFeature(featureFromResponse(data, selected));
+            setDirty(false);
+            markSaved();
+          }}
+          onFinished={(results) => {
+            setConfluenceFolder(null);
+            const created = results.filter((r) => r.created).length;
+            const parts = [
+              ...(created > 0 ? [`published ${created}`] : []),
+              ...(results.length - created > 0 ? [`updated ${results.length - created}`] : []),
+            ];
+            const said = parts.join(", ");
+            toast.success(`${said.charAt(0).toUpperCase()}${said.slice(1)} in Confluence`);
+            const warnings = results.flatMap((r) => (r.warning ? [`${r.title}: ${r.warning}`] : []));
+            if (warnings.length > 0) toast.error(warnings.join(" "));
           }}
         />
       )}
