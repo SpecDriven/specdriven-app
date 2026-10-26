@@ -1,6 +1,6 @@
 // Agent descriptors as /api/state reports them (src/server/agentTypes.ts),
-// for the client tests: the three built-in agents, and a builder for one
-// a plugin might bring.
+// for the client tests: the three agents the marketplace plugins bring, and
+// a builder for one another plugin might.
 
 import type { AgentDescriptor, PermissionMode } from "../../src/server/agentTypes";
 

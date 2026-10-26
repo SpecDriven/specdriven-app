@@ -11,9 +11,13 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentOffers, autoInstalled, ensureCommandPlugins, rememberAutoInstalled } from "../src/plugins/host/autoInstall";
-import { marketplacesHome } from "../src/plugins/host/sources";
+import { agentOffers, autoInstalled, ensureCommandPlugins, rememberAutoInstalled, setAutoInstallDeps } from "../src/plugins/host/autoInstall";
+import { agents } from "../src/plugins/host/agents";
+import { pluginStates, stopWatching, syncPlugins } from "../src/plugins/host/loader";
+import { marketplacesHome, pluginsHome } from "../src/plugins/host/sources";
 import { parseMarketplaceIndex, type MarketplacePlugin, type MarketplaceRef } from "../src/plugins/marketplace";
+import { applyStartupState, autoInstalledOnStart, reloader, syncedOnStart } from "../src/server/api";
+import { readState, writeState } from "../src/server/state";
 
 const realHome = process.env.SPECDRIVEN_HOME;
 let home: string;
@@ -118,4 +122,71 @@ test("the offers come from the cached indexes on disk, for agents no plugin regi
     { plugin: "agent-pi", marketplace: "specdriven", label: "Pi", description: "Pi", cli: "pi", cliFound: false },
   ]);
   expect(await agentOffers({}, ["claude", "codex", "pi"], { marketplaces: [market] })).toEqual([]);
+});
+
+// The start itself (src/server/api.ts applyStartupState): the install runs
+// after the plugins are synced, without being awaited, and what it put in
+// place is mounted — the pane has its agent on the next /api/state.
+test("a start installs the agent plugin for a command it finds, mounts it, and records it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "specdriven-auto-install-root-"));
+  const realRoot = process.env.SPECDRIVEN_ROOT;
+  const noInstall = process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+  process.env.SPECDRIVEN_ROOT = root;
+  delete process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+  const data = join(root, "data");
+  await mkdir(data, { recursive: true });
+  // A dist-only plugin, as a marketplace install leaves it, whose host half
+  // registers a provider.
+  const install = async (_entry: MarketplaceRef, name: string) => {
+    const dir = join(pluginsHome(), name);
+    await mkdir(join(dir, "dist"), { recursive: true });
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name,
+        version: "1.0.0",
+        specdriven: { id: name, api: "1", displayName: "Gem agent", description: "Gem in the pane", host: "./dist/host.js", autoEnable: true },
+      }),
+    );
+    await writeFile(
+      join(dir, "dist", "host.js"),
+      `export default { name: ${JSON.stringify(name)}, inject: ["agents"], apply(ctx) {
+        ctx.effect(() => ctx.need("agents").register({
+          id: "gem", label: "Gem", description: "Gem", available: () => true, missingMessage: "no gem",
+          capabilities: { permissionModes: ["default"], canInterrupt: false, canChangeModeMidSession: false, hasAccount: false, rememberPermissions: "none", oneShot: false },
+          defaultPermissionMode: "default", async start() { throw new Error("not in this test"); },
+        }));
+      } };`,
+    );
+  };
+  setAutoInstallDeps({
+    marketplaces: [market],
+    commandFound: (c) => c === "gem",
+    install,
+    indexes: async () => [{ entry: market, plugins: [{ name: "agent-gem", source: "./plugins/agent-gem", description: "Gem", agent: { id: "gem", command: "gem" } }, ...rows] }],
+    log: () => {},
+  });
+  try {
+    await writeState({ dataRepo: data, reloadFrequencySeconds: 0 }, root);
+    await applyStartupState();
+    await autoInstalledOnStart();
+    // Installed, remembered, found and mounted: the provider is on the registry.
+    expect(((await readState(root)) as { plugins: { autoInstalled: string[] } }).plugins.autoInstalled).toEqual(["agent-gem"]);
+    expect(pluginStates().find((p) => p.id === "agent-gem")).toMatchObject({ installed: true, enabled: true, active: true });
+    expect(agents.get("gem")?.label).toBe("Gem");
+    // Claude, Codex and Pi: their commands were not found, so nothing else arrived.
+    expect(pluginStates().map((p) => p.id)).not.toContain("agent-claude");
+  } finally {
+    setAutoInstallDeps(null);
+    await syncedOnStart();
+    reloader.stop();
+    stopWatching();
+    await syncPlugins({ plugins: { enabled: [] } }, { sources: true, dataDir: null });
+    await syncPlugins({});
+    await rm(root, { recursive: true, force: true });
+    if (realRoot === undefined) delete process.env.SPECDRIVEN_ROOT;
+    else process.env.SPECDRIVEN_ROOT = realRoot;
+    if (noInstall === undefined) delete process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+    else process.env.SPECDRIVEN_NO_AUTO_INSTALL = noInstall;
+  }
 });

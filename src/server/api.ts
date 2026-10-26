@@ -6,7 +6,6 @@ import {
   readState,
   writeState,
   needsDataRepo,
-  normalizeAgentFirstResponseSeconds,
   normalizeAssignments,
   normalizeFeatureFlags,
   normalizeScenarioPolarity,
@@ -33,13 +32,9 @@ import {
   recentDataRepos,
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
-  DEFAULT_AGENT_FIRST_RESPONSE_SECONDS,
   normalizeQtestParentUrl,
-  normalizeClaudeAuth,
-  normalizeClaudeProxyUrl,
 } from "./state";
 import type { SpecDrivenState } from "./state";
-import { CLAUDE_PLUGIN_ID, claudeSettingsOf } from "../plugins/builtin/agent-claude/settings";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
@@ -208,6 +203,7 @@ import { bodyOf, json, type Handler, type Params } from "./http";
 import {
   pluginStates,
   provideDataAccess,
+  rescanPlugins,
   routes as routeRegistry,
   sessionParts,
   sourcePaths,
@@ -215,7 +211,7 @@ import {
 } from "../plugins/host/loader";
 import { profileManifests } from "../plugins/builtin/manifests";
 import { applyPluginPatch, pluginPatchRefusal, pluginSettingsOf } from "../plugins/host/pluginSettings";
-import { agentOffers } from "../plugins/host/autoInstall";
+import { AUTO_INSTALLED_KEY, agentOffers, autoInstallDeps, autoInstalled, ensureCommandPlugins } from "../plugins/host/autoInstall";
 import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
@@ -351,6 +347,43 @@ export async function applyStartupState(): Promise<void> {
   // Not awaited: resolving the data repo may clone it, and startup must not
   // wait on the network for an optional accelerator.
   void applyNetSync(state);
+  // The agent plugins for the commands this machine has (specs/agents/
+  // agent-plugins.feature.md "Agent plugins are installed for the commands
+  // found on this machine"): not awaited either — the marketplace may be
+  // offline, and the pane learns of a new plugin through /api/plugins/events.
+  startupInstall = installAgentPlugins(state);
+}
+
+let startupInstall: Promise<void> = Promise.resolve();
+
+/** Settled once the start's agent plugin install is over — for the tests. */
+export function autoInstalledOnStart(): Promise<void> {
+  return startupInstall;
+}
+
+/**
+ * Install the agent plugins whose commands are on PATH, from the cached
+ * marketplace indexes, then mount what arrived. Not in the hosted app (no
+ * plugin folders) and not in the demo (its agent is the simulation);
+ * SPECDRIVEN_NO_AUTO_INSTALL=1 keeps a test or a kiosk from reaching out.
+ */
+async function installAgentPlugins(state: SpecDrivenState): Promise<void> {
+  if (isHostedMode() || isDemoMode() || process.env.SPECDRIVEN_NO_AUTO_INSTALL === "1") return;
+  try {
+    const result = await ensureCommandPlugins(state as Record<string, unknown>, async (s) => {
+      // Only the record of what was installed goes to disk, onto the file as
+      // it is now — the sync above and a Settings change write beside this.
+      const fresh = (await readState(getAppRoot())) as Record<string, unknown>;
+      const section = fresh[PROFILE_KEY] && typeof fresh[PROFILE_KEY] === "object" ? (fresh[PROFILE_KEY] as Record<string, unknown>) : {};
+      await writeState(
+        { ...fresh, [PROFILE_KEY]: { ...section, [AUTO_INSTALLED_KEY]: autoInstalled(s) } } as SpecDrivenState,
+        getAppRoot(),
+      );
+    }, autoInstallDeps());
+    if (result.installed.length > 0) await rescanPlugins();
+  } catch (e) {
+    console.error(`[plugins] installing agent plugins: ${(e as Error).message}`);
+  }
 }
 
 
@@ -518,14 +551,6 @@ async function stateFields(state: SpecDrivenState) {
     // Where "Start session" runs (specs/agents/claude.feature.md): the
     // remembered choice, or null for "desktop when it is there, else cli".
     codeGenTarget: normalizeCodeGenTarget(state.codeGenTarget, agentIds()),
-    // The Claude agent plugin's settings (src/plugins/builtin/agent-claude/
-    // settings.ts) under their old top-level names, for one release: the
-    // pane's first-response wait, how Claude signs in, the proxy url. The
-    // token never leaves the server — GET /api/claude/auth says whether
-    // there is one.
-    agentFirstResponseSeconds: claudeSettingsOf(state as Record<string, unknown>).firstResponseSeconds,
-    claudeAuth: claudeSettingsOf(state as Record<string, unknown>).claudeAuth,
-    claudeProxyUrl: claudeSettingsOf(state as Record<string, unknown>).claudeProxyUrl,
     // Whether Claude.app is installed here, so a session can open in Claude
     // Code Desktop — gates the "Run in" choice of the session dialog.
     canOpenClaudeDesktop: !isHostedMode() && claudeDesktopAvailable(),
@@ -630,8 +655,6 @@ function hostedStateRefusal(body: {
   plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
   pluginSettings?: unknown;
   syncServerUrl?: unknown;
-  claudeAuth?: unknown;
-  claudeProxyUrl?: unknown;
 }): string | null {
   if (!isHostedMode()) return null;
   if (body.pluginSettings !== undefined) return "Plugin settings cannot be changed in the hosted app";
@@ -652,9 +675,6 @@ function hostedStateRefusal(body: {
     return "Plugin folders and marketplaces cannot be changed in the hosted app";
   }
   if (body.syncServerUrl !== undefined) return "The sync server cannot be changed in the hosted app";
-  if (body.claudeAuth !== undefined || body.claudeProxyUrl !== undefined) {
-    return "The hosted app runs no local Claude, so its sign-in cannot be changed";
-  }
   return null;
 }
 
@@ -680,9 +700,6 @@ const putState: Handler = async (req) => {
     qtestLinks?: boolean;
     codeGen?: boolean;
     codeGenTarget?: string;
-    agentFirstResponseSeconds?: number;
-    claudeAuth?: string | null;
-    claudeProxyUrl?: string | null;
     deletePublished?: boolean;
     assignments?: boolean;
     featureFlags?: boolean;
@@ -723,9 +740,6 @@ const putState: Handler = async (req) => {
     body.qtestLinks === undefined &&
     body.codeGen === undefined &&
     body.codeGenTarget === undefined &&
-    body.agentFirstResponseSeconds === undefined &&
-    body.claudeAuth === undefined &&
-    body.claudeProxyUrl === undefined &&
     body.deletePublished === undefined &&
     body.assignments === undefined &&
     body.featureFlags === undefined &&
@@ -744,7 +758,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, agentFirstResponseSeconds, claudeAuth, claudeProxyUrl, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -775,10 +789,6 @@ const putState: Handler = async (req) => {
     return json({ error: "plugin folders and marketplaces cannot be changed in demo mode" }, 403);
   }
   const hostedRefusal = hostedStateRefusal(body);
-  // The demo has no Claude to sign in (codeGen is pinned off there).
-  if (isDemoMode() && (body.claudeAuth !== undefined || body.claudeProxyUrl !== undefined)) {
-    return json({ error: "Claude sign-in cannot be changed in demo mode" }, 403);
-  }
   if (hostedRefusal) return json({ error: hostedRefusal }, 403);
   const state = await readState(getAppRoot());
   // Git engine (git-operations.md): "gh" (GitHub CLI), "cli"
@@ -981,43 +991,6 @@ const putState: Handler = async (req) => {
       return json({ error: `codeGenTarget must be ${codeGenTargetList(agentIds())}` }, 400);
     }
     state.codeGenTarget = target;
-  }
-  // The pane's first-response wait for Claude behind a proxy
-  // (specs/agents/agent-pane.feature.md "A Claude turn fails fast when the
-  // API proxy does not answer"): whole seconds, 0 for no limit; the default
-  // is stored as an absent key.
-  if (body.agentFirstResponseSeconds !== undefined) {
-    const n = body.agentFirstResponseSeconds;
-    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) {
-      return json({ error: "agentFirstResponseSeconds must be a number >= 0" }, 400);
-    }
-    if (Math.floor(n) === DEFAULT_AGENT_FIRST_RESPONSE_SECONDS) delete state.agentFirstResponseSeconds;
-    else state.agentFirstResponseSeconds = Math.floor(n);
-    // The key is the Claude agent plugin's now; its section is kept in step.
-    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, {
-      agentFirstResponseSeconds: state.agentFirstResponseSeconds ?? null,
-    });
-  }
-  // How Claude signs in (src/plugins/builtin/agent-claude/auth.ts): null forgets the choice,
-  // so the server infers one again; the url is kept as typed.
-  if (body.claudeAuth !== undefined) {
-    if (body.claudeAuth === null) delete state.claudeAuth;
-    else {
-      const mode = normalizeClaudeAuth(body.claudeAuth);
-      if (!mode) return json({ error: "claudeAuth must be login, proxy or null" }, 400);
-      state.claudeAuth = mode;
-    }
-    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, { claudeAuth: state.claudeAuth ?? null });
-  }
-  if (body.claudeProxyUrl !== undefined) {
-    if (body.claudeProxyUrl !== null && typeof body.claudeProxyUrl !== "string") {
-      return json({ error: "claudeProxyUrl must be a string or null" }, 400);
-    }
-    const url = (body.claudeProxyUrl ?? "").trim();
-    if (url && !normalizeClaudeProxyUrl(url)) return json({ error: "claudeProxyUrl must be an http:// or https:// url" }, 400);
-    if (url) state.claudeProxyUrl = url;
-    else delete state.claudeProxyUrl;
-    applyPluginPatch(state as Record<string, unknown>, CLAUDE_PLUGIN_ID, { claudeProxyUrl: url || null });
   }
   // Published-scenario deletion (specs/editor/spec-editor.feature.md "Delete
   // Published Spec"): opt-in — the default OFF is an absent key.
@@ -3006,8 +2979,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/aha/tokens", unlessHosted(postAhaToken)],
   ["DELETE", "/api/aha/tokens", unlessHosted(deleteAhaToken)],
   ["POST", "/api/aha/import", unlessHosted(postAhaImport)],
-  // Claude sign-in: the Claude agent plugin's routes (src/plugins/builtin/
-  // agent-claude/host.ts), there while the plugin is on.
+  // Claude sign-in: the Claude agent plugin's routes (/api/claude/*),
+  // there while the plugin is installed and on.
   ["POST", "/api/reload", postReload],
   // Observability (src/server/logs.ts): the app's own log, and its verbosity.
   ["GET", "/api/logs", getLogs],

@@ -1,22 +1,19 @@
 // Automates specs/app/self-healing.feature.md over the routes: the app asks
 // a coding agent to fix a bug in its own installed source, shows the change
-// as a diff, rebuilds, restarts or reverts. The Claude Agent SDK is swapped
-// for a fake query (as in tests/agentChat.test.ts), the installed source is
-// a throwaway package tree, git is real, and the rebuild and the relaunch
-// are stand-ins that record what they were asked.
+// as a diff, rebuilds, restarts or reverts. The coding agent is a fake
+// provider on the registry (tests/helpers/fakeAgent.ts), the installed
+// source is a throwaway package tree, git is real, and the rebuild and the
+// relaunch are stand-ins that record what they were asked.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { version as appVersion } from "../package.json";
-import { setClaudeAvailability, setCodexAvailability, setPiAvailability } from "../src/server/agent";
 import { endAllChatSessions } from "../src/server/agentChat";
-import type { SlashCommandInfo } from "../src/server/agentChat";
-import { InputQueue, setQueryFactory } from "../src/plugins/builtin/agent-claude/provider";
-import type { QueryLike } from "../src/plugins/builtin/agent-claude/provider";
+import { agents } from "../src/plugins/host/agents";
+import type { Disposer } from "../src/plugins/kernel";
 import { handleApi, reloader } from "../src/server/api";
 import { PATCH_MANIFEST, PATCH_STATE_FILE } from "../src/server/appSource";
 import { setRelauncher } from "../src/server/relaunch";
@@ -34,46 +31,16 @@ import {
 } from "../src/server/selfFix";
 import { writeState } from "../src/server/state";
 import { syncPlugins } from "../src/plugins/host/loader";
-
-class FakeQuery implements QueryLike {
-  readonly out = new InputQueue<SDKMessage>();
-  readonly inputs: SDKUserMessage[] = [];
-  commands: SlashCommandInfo[] = [];
-  private waiters: (() => void)[] = [];
-  constructor(
-    prompt: AsyncIterable<SDKUserMessage>,
-    readonly options: Options,
-  ) {
-    void (async () => {
-      for await (const m of prompt) {
-        this.inputs.push(m);
-        for (const w of this.waiters.splice(0)) w();
-      }
-    })();
-    options.abortController?.signal.addEventListener("abort", () => this.out.close());
-  }
-  async input(n = 1): Promise<SDKUserMessage> {
-    while (this.inputs.length < n) await new Promise<void>((r) => this.waiters.push(r));
-    return this.inputs[n - 1]!;
-  }
-  [Symbol.asyncIterator]() {
-    return this.out[Symbol.asyncIterator]();
-  }
-  async interrupt() {}
-  async setPermissionMode() {}
-  async supportedCommands() {
-    return this.commands;
-  }
-  async accountInfo() {
-    return undefined;
-  }
-}
+import { fakeProvider, type FakeSession } from "./helpers/fakeAgent";
 
 let root: string;
 let home: string;
 let data: string;
 let source: string;
-let fakes: FakeQuery[];
+/** The sessions the fake agent started, in order. */
+let fakes: FakeSession[];
+let available: boolean;
+let dispose: Disposer;
 const saved: Record<string, string | undefined> = {};
 const ENV = ["SPECDRIVEN_ROOT", "SPECDRIVEN_HOME", "SPECDRIVEN_APP_SOURCE", "CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL", "DEMO_MODE", "SPECDRIVEN_HOSTED", "SPECDRIVEN_BOOT"];
 
@@ -101,29 +68,21 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_APP_SOURCE = source;
   process.env.CLAUDE_CONFIG_DIR = join(home, "claude");
   for (const name of ["ANTHROPIC_BASE_URL", "DEMO_MODE", "SPECDRIVEN_HOSTED", "SPECDRIVEN_BOOT"]) delete process.env[name];
-  fakes = [];
-  // The fix runs on whichever agent is there by rank: Claude here, and never
-  // a real codex or pi this machine may have on PATH.
-  setClaudeAvailability(() => true);
-  setCodexAvailability(() => false);
-  setPiAvailability(() => false);
-  setQueryFactory(({ prompt, options }) => {
-    const fake = new FakeQuery(prompt, options);
-    fakes.push(fake);
-    return fake;
-  });
-  await writeState({ dataRepo: data, reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
-  await syncPlugins({ plugins: { enabled: ["self-fix", "agent-claude"] } });
+  available = true;
+  // The fix runs on whichever agent is there by rank: a fake under Claude's
+  // id here, so nothing this machine has on PATH is spawned.
+  const fake = fakeProvider({ id: "claude", rank: 10, available: () => available, missingMessage: "Claude CLI not found" });
+  fakes = fake.sessions;
+  dispose = agents.register(fake.provider);
+  await writeState({ dataRepo: data, reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix"] } }, root);
+  await syncPlugins({ plugins: { enabled: ["self-fix"] } });
 });
 
 afterEach(async () => {
   await endAllChatSessions();
   await syncPlugins({ plugins: { enabled: [], seen: ["self-fix"] } });
   reloader.stop();
-  setClaudeAvailability(null);
-  setCodexAvailability(null);
-  setPiAvailability(null);
-  setQueryFactory(null);
+  await dispose();
   setRelauncher(null);
   await rm(root, { recursive: true, force: true });
   for (const name of ENV) {
@@ -151,7 +110,7 @@ async function upload(id: string, name: string, bytes: Uint8Array): Promise<Resp
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
 
 /** A fix started on "the greeting is misspelled", with one screenshot. */
-async function startedFix(description = "The greeting on the home page reads Helo.\nIt should read Hello."): Promise<{ fix: FixRecord; fake: FakeQuery }> {
+async function startedFix(description = "The greeting on the home page reads Helo.\nIt should read Hello."): Promise<{ fix: FixRecord; fake: FakeSession }> {
   const created = await api("/api/self-fix", "POST");
   expect(created.status).toBe(201);
   const { fix: draft } = (await created.json()) as { fix: FixRecord };
@@ -267,10 +226,11 @@ describe("a fix is started from a bug description and screenshots", () => {
     expect(existsSync(shot)).toBe(true);
     expect(existsSync(join(data, ".images"))).toBe(false);
     // The session works in the source, with the data repo beside it.
-    expect(fake.options.cwd).toBe(source);
-    const first = await fake.input(1);
-    expect(first.message.content).toContain("The greeting on the home page reads Helo.");
-    expect(first.message.content).toContain(`- ${shot}`);
+    expect(fake.opts.cwd).toBe(source);
+    expect(fake.opts.dataRepo).toBe(data);
+    const first = fake.opts.prompt!;
+    expect(first).toContain("The greeting on the home page reads Helo.");
+    expect(first).toContain(`- ${shot}`);
     // The same screenshot again is stored once.
     const again = await api("/api/self-fix", "POST");
     const { fix: other } = (await again.json()) as { fix: FixRecord };
@@ -280,10 +240,10 @@ describe("a fix is started from a bug description and screenshots", () => {
   });
 
   test("a fix starts with no data repo open, the source standing in for it", async () => {
-    await writeState({ reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
-    await syncPlugins({ plugins: { enabled: ["self-fix", "agent-claude"] } });
+    await writeState({ reloadFrequencySeconds: 0, plugins: { enabled: ["self-fix"] } }, root);
+    await syncPlugins({ plugins: { enabled: ["self-fix"] } });
     const { fake } = await startedFix();
-    expect(fake.options.cwd).toBe(source);
+    expect(fake.opts.cwd).toBe(source);
   });
 
   test("an empty description, a wrong mode, or an unknown fix are refused in words", async () => {
@@ -301,15 +261,15 @@ describe("a fix is started from a bug description and screenshots", () => {
 describe("Fix this app is refused where it cannot work", () => {
   test("code generation off, no claude, no source", async () => {
     const { fix } = (await (await api("/api/self-fix", "POST")).json()) as { fix: FixRecord };
-    await writeState({ dataRepo: data, codeGen: false, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
+    await writeState({ dataRepo: data, codeGen: false, plugins: { enabled: ["self-fix"] } }, root);
     let res = await api(`/api/self-fix/${fix.id}/start`, "POST", { description: "broken" });
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toMatch(/switched off in Settings/);
-    await writeState({ dataRepo: data, plugins: { enabled: ["self-fix", "agent-claude"] } }, root);
-    setClaudeAvailability(() => false);
+    await writeState({ dataRepo: data, plugins: { enabled: ["self-fix"] } }, root);
+    available = false;
     res = await api(`/api/self-fix/${fix.id}/start`, "POST", { description: "broken" });
     expect(res.status).toBe(502);
-    setClaudeAvailability(() => true);
+    available = true;
     process.env.SPECDRIVEN_APP_SOURCE = join(root, "nowhere");
     res = await api(`/api/self-fix/${fix.id}/start`, "POST", { description: "broken" });
     expect(res.status).toBe(409);

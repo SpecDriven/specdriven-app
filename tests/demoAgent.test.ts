@@ -5,15 +5,10 @@
 // spawning nothing and leaving the dataset byte-for-byte as it was.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { Options, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  setClaudeAvailability,
-  setDesktopAvailability,
-  setPiAvailability,
-} from "../src/server/agent";
+import { setDesktopAvailability } from "../src/server/agent";
 import {
   answerPermission,
   endAllChatSessions,
@@ -22,11 +17,11 @@ import {
   interruptChat,
 } from "../src/server/agentChat";
 import type { ChatEvent } from "../src/server/agentChat";
-import { InputQueue } from "../src/plugins/builtin/agent-claude/provider";
-import { unmountAgentPlugins } from "./helpers/agentPlugins";
+import type { AgentHost, AgentStartOptions, PermissionOutcome } from "../src/plugins/host/agents";
+import type { ChatEventBody } from "../src/server/agentTypes";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
-import { setupDemo } from "../src/server/demo";
-import { SIMULATED_MODEL, readBrief, setSimulationPace, simulatedQuery } from "../src/server/demoAgent";
+import { setupDemo, teardownDemoAgent } from "../src/server/demo";
+import { SIMULATED_MODEL, readBrief, setSimulationPace, simulatedProvider } from "../src/server/demoAgent";
 import { setFolderChooser } from "../src/server/folderChooser";
 import { setGitEngine } from "../src/server/git";
 import { readState } from "../src/server/state";
@@ -63,9 +58,7 @@ afterEach(async () => {
   setGitEngine(null);
   setFolderChooser(realChooser);
   setSimulationPace(1);
-  await unmountAgentPlugins();
-  setClaudeAvailability(null);
-  setPiAvailability(null);
+  await teardownDemoAgent();
   setDesktopAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(source, { recursive: true, force: true });
@@ -158,33 +151,48 @@ test("readBrief pulls the name and the specs out of the generated prompt", () =>
 });
 
 // The pane's typewriter runs on partial messages; the script has to produce
-// them, and in the order Claude Code does — message_start, deltas, then the
-// settled assistant message that replaces them.
+// them, and in the order an agent does — the deltas, then the settled
+// assistant message that replaces them. Pinned at the provider, with a host
+// of the test's own that records what the script emits.
 test("the script streams its text before settling it", async () => {
-  const input = new InputQueue<SDKUserMessage>();
-  input.push({
-    type: "user",
-    message: { role: "user", content: "SpecDriven code gen session: x\n\n## Spec: a/b.feature.md\n" },
-    parent_tool_use_id: null,
-  } as SDKUserMessage);
-  const query = await simulatedQuery({
-    prompt: input,
-    options: {
-      cwd: "/work",
-      abortController: new AbortController(),
-      canUseTool: async () => ({ behavior: "deny", message: "no" }),
-    } as unknown as Options,
-  });
   const seen: string[] = [];
-  for await (const msg of query) {
-    seen.push(msg.type === "stream_event" ? `stream:${msg.event.type}` : msg.type);
-    if (msg.type === "result") break;
-  }
-  expect(seen[0]).toBe("system");
-  expect(seen[1]).toBe("stream:message_start");
-  expect(seen[2]).toBe("stream:content_block_delta");
-  expect(seen.filter((s) => s === "stream:content_block_delta").length).toBeGreaterThan(3);
-  expect(seen.indexOf("assistant")).toBeGreaterThan(seen.indexOf("stream:content_block_delta"));
+  let done!: () => void;
+  const finished = new Promise<void>((r) => (done = r));
+  const host: AgentHost = {
+    emit(body: ChatEventBody) {
+      seen.push(body.kind);
+      if (body.kind === "result") done();
+    },
+    note: (_level, code) => seen.push(`note:${code}`),
+    ready: () => seen.push("ready"),
+    update: () => {},
+    turnStarted: () => {},
+    turnEnded: () => {},
+    requestPermission: async (): Promise<PermissionOutcome> => ({ decision: { behavior: "deny", message: "no" }, via: "user" }),
+    ended: () => {},
+    failed: () => {},
+    status: () => "running",
+    busy: () => true,
+    turn: () => 1,
+    permissionMode: () => "default",
+  };
+  const opts: AgentStartOptions = {
+    sessionId: "s",
+    name: "x",
+    cwd: "/work",
+    dataRepo: "/work",
+    permissionMode: "default",
+    prompt: "SpecDriven code gen session: x\n\n## Spec: a/b.feature.md\n",
+    signal: new AbortController().signal,
+    host,
+  };
+  await simulatedProvider.start(opts);
+  await finished;
+  expect(seen[0]).toBe("note:init");
+  expect(seen[1]).toBe("ready");
+  expect(seen[2]).toBe("text_delta");
+  expect(seen.filter((s) => s === "text_delta").length).toBeGreaterThan(3);
+  expect(seen.indexOf("assistant")).toBeGreaterThan(seen.indexOf("text_delta"));
   expect(seen.at(-1)).toBe("result");
 });
 

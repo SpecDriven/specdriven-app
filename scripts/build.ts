@@ -44,10 +44,6 @@ async function compile(target: Target | null): Promise<string> {
     "--compile",
     "--production",
     "--sourcemap",
-    // The Claude Agent SDK's optional per-platform binaries are never used —
-    // the app runs the developer's own `claude` (src/server/agentChat.ts).
-    "--external",
-    "@anthropic-ai/claude-agent-sdk-*",
     ENTRY,
     "--outfile",
     outfile,
