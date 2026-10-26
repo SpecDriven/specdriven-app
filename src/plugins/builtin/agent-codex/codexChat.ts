@@ -20,10 +20,10 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { CODEX_BIN } from "./agent";
-import type { AgentOutput, AssistantBlock, PermissionMode } from "./agentTypes";
-import { jsonlReader } from "./jsonl";
-import { which } from "./run";
+import { CODEX_BIN } from "../../../server/agent";
+import type { AgentOutput, AssistantBlock, PermissionMode } from "../../../server/agentTypes";
+import { jsonlReader } from "../../../server/jsonl";
+import { which } from "../../../server/run";
 
 // --- The subprocess ---------------------------------------------------------
 

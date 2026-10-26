@@ -14,10 +14,10 @@
 
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { PI_BIN } from "./agent";
-import { which } from "./run";
-import type { AgentOutput, SlashCommandInfo } from "./agentTypes";
-import { jsonlReader } from "./jsonl";
+import { PI_BIN } from "../../../server/agent";
+import { which } from "../../../server/run";
+import type { AgentOutput, SlashCommandInfo } from "../../../server/agentTypes";
+import { jsonlReader } from "../../../server/jsonl";
 
 export { jsonlReader };
 

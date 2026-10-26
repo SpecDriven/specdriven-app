@@ -182,7 +182,45 @@ export function writeProfile(
     state[PROFILE_KEY] = { ...section(state), enabled: list };
     return;
   }
-  state[PROFILE_KEY] = { ...section(state), repos: { ...repoLists(state), [repo]: { enabled: list } } };
+  const lists = repoLists(state);
+  const entry = lists[repo] && typeof lists[repo] === "object" ? (lists[repo] as object) : {};
+  state[PROFILE_KEY] = { ...section(state), repos: { ...lists, [repo]: { ...entry, enabled: list } } };
+}
+
+/** The ids a folder has switched on by itself before (`repos[<folder>].autoEnabled`). */
+function autoEnabledIn(state: State, repo: string): string[] {
+  const entry = repoLists(state)[repo];
+  return (entry && typeof entry === "object" ? idList((entry as { autoEnabled?: unknown }).autoEnabled) : null) ?? [];
+}
+
+/**
+ * Switch on, in the open folder, the plugins whose manifests say they
+ * switch themselves on (`autoEnable`) and that the folder has not switched
+ * on before — so a folder from before such a plugin, or a fresh one, gets
+ * it without a visit to Settings → Plugins, and one switched off there
+ * stays off. Records the folder's list and what it switched on; returns
+ * the new list, or null when nothing changed (no folder open included).
+ */
+export function autoEnablePlugins(
+  state: State,
+  enabled: readonly string[],
+  manifests: readonly PluginManifest[],
+): string[] | null {
+  const repo = profileRepo(state);
+  if (!repo) return null;
+  const done = autoEnabledIn(state, repo);
+  const add = manifests
+    .filter((m) => m.autoEnable && !enabled.includes(m.id) && !done.includes(m.id))
+    .map((m) => m.id);
+  if (add.length === 0) return null;
+  const next = [...enabled, ...add];
+  writeProfile(state, next, manifests);
+  const lists = repoLists(state);
+  state[PROFILE_KEY] = {
+    ...section(state),
+    repos: { ...lists, [repo]: { ...(lists[repo] as object), autoEnabled: dedupe([...done, ...add]) } },
+  };
+  return next;
 }
 
 /**

@@ -6,9 +6,9 @@
 // browser refresh returns the demo to the default dataset.
 //
 // Code gen sessions run too, simulated (roadmap/demo.md "Demo App"):
-// setupDemo registers a simulated provider under Claude's id, so the app
-// reports one agent — Claude in a pane — and drives it with the script in
-// src/server/demoAgent.ts instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
+// the Claude agent plugin registers a simulated provider under Claude's id,
+// so the app reports one agent — Claude in a pane — and drives it with the
+// script in src/server/demoAgent.ts instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
 // the session dialog offers no choice and nothing can reach a real CLI.
 //
 // Plugins from the marketplace load too (specs/app/plugins.feature.md): at
@@ -20,8 +20,6 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { setCodexAvailability, setDesktopAvailability, setPiAvailability } from "./agent";
-import { agents } from "../plugins/host/agents";
-import { simulatedProvider } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { resetSearchCache } from "./search";
@@ -145,12 +143,12 @@ export async function setupDemo(): Promise<void> {
   process.env.SPECDRIVEN_HOME = join(getAppRoot(), "home");
   await mkdir(getAppRoot(), { recursive: true });
   setFolderChooser(null);
-  // The coding agent pane, simulated: the script stands in for the Claude
-  // provider (so the pane, its toggle and the session dialog are all live)
-  // and the other agents report absent. Nothing probes PATH and nothing is
-  // spawned — see src/server/demoAgent.ts. The demo never auto-installs
-  // agent plugins either: its agent is this one.
-  agents.register(simulatedProvider);
+  // The coding agent pane, simulated: the Claude agent plugin registers the
+  // script in place of the SDK while DEMO_MODE is on (src/plugins/builtin/
+  // agent-claude/host.ts), so the pane, its toggle and the session dialog
+  // are all live, and the other agents report absent. Nothing probes PATH
+  // and nothing is spawned — see src/server/demoAgent.ts. The demo never
+  // auto-installs agent plugins either: its agent is this one.
   setPiAvailability(() => false);
   setCodexAvailability(() => false);
   setDesktopAvailability(() => false);

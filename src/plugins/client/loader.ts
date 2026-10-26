@@ -11,12 +11,14 @@
 import { Context, type Plugin, type Scope } from "../kernel";
 import { builtinClientPlugins } from "../builtin/client";
 import { Registry, type PluginView, type TabPlugin } from "./tabs";
+import { settingsSections } from "./settings";
 
 export const client = new Context();
 /** Each plugin's position in the profile, which is its tab's position. */
 const rank = new Map<string, number>();
 export const tabs = new Registry<TabPlugin>((tab) => rank.get(tab.id));
 client.provide("tabs", tabs);
+client.provide("settings", settingsSections);
 
 const mounted = new Map<string, { scope: Scope; rev?: string }>();
 let turn: Promise<void> = Promise.resolve();

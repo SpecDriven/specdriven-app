@@ -83,6 +83,25 @@ async function cacheMarketplace(entry: MarketplaceRef, dir: string, refresh: boo
   }
 }
 
+/**
+ * The indexes already on disk, without touching git: what a start that
+ * cannot reach the marketplaces still knows. A marketplace with no cache
+ * or a bad index is left out.
+ */
+export async function cachedMarketplaceIndexes(
+  entries: readonly MarketplaceRef[],
+): Promise<{ entry: MarketplaceRef; index: MarketplaceIndex }[]> {
+  const out: { entry: MarketplaceRef; index: MarketplaceIndex }[] = [];
+  for (const entry of entries) {
+    try {
+      out.push({ entry, index: await readIndex(join(marketplacesHome(), entry.name)) });
+    } catch {
+      // Nothing cached yet, or an index the app cannot read.
+    }
+  }
+  return out;
+}
+
 async function readIndex(dir: string): Promise<MarketplaceIndex> {
   let text: string;
   try {

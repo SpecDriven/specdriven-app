@@ -19,6 +19,15 @@ export interface PluginManifest {
    */
   defaultEnabled: boolean;
   /**
+   * Whether the plugin switches itself on in every data folder the first
+   * time this device opens the folder with it installed — the way a plugin
+   * found in a folder goes on — rather than waiting for a profile that
+   * never named it. For a plugin with no tab, which costs the sidebar
+   * nothing: the coding agents (specs/agents/agent-plugins.feature.md). A
+   * later switch-off is kept per folder.
+   */
+  autoEnable?: boolean;
+  /**
    * The Settings key the module's switch lived under before the profile
    * (`testing`, `issues`, …). A settings file that still has it is read as
    * the matching profile once, and `PUT /api/state` keeps taking the key as

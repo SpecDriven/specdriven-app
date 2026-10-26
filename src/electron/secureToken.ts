@@ -7,7 +7,7 @@
 import { safeStorage } from "electron";
 import { readFile, rm } from "node:fs/promises";
 import { writeTextFile } from "../server/fsx";
-import { parseClaudeRecord, type ClaudeTokenBackend } from "../server/claudeToken";
+import { parseSecretRecord, type SecretBackend } from "../server/secrets";
 import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
 import { parseQtestRecords, type QtestTokenBackend } from "../server/qtestTokens";
 import { parseAhaRecords, type AhaTokenBackend } from "../server/ahaTokens";
@@ -70,7 +70,7 @@ export function createAhaSafeStorageBackend(file: string): AhaTokenBackend {
   return encryptedFile(file, parseAhaRecords, []);
 }
 
-/** The Claude API proxy's token on safeStorage (src/server/claudeToken.ts). */
-export function createClaudeSafeStorageBackend(file: string): ClaudeTokenBackend {
-  return encryptedFile(file, parseClaudeRecord, null);
+/** A plugin's secret store on safeStorage (src/server/secrets.ts). */
+export function createSecretSafeStorageBackend(file: string): SecretBackend {
+  return encryptedFile(file, parseSecretRecord, null);
 }

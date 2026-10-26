@@ -20,12 +20,13 @@ import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { CLAUDE_BIN, claudeAvailable } from "./agent";
-import { loadClaudeToken } from "./claudeToken";
-import { run } from "./run";
-import type { RunResult } from "./run";
-import { normalizeClaudeAuth, normalizeClaudeProxyUrl } from "./state";
-import type { ClaudeAuthMode, SpecDrivenState } from "./state";
+import { CLAUDE_BIN, claudeAvailable } from "../../../server/agent";
+import { loadClaudeToken } from "../../../server/claudeToken";
+import { run } from "../../../server/run";
+import type { RunResult } from "../../../server/run";
+import { normalizeClaudeAuth, normalizeClaudeProxyUrl } from "../../../server/state";
+import type { ClaudeAuthMode, SpecDrivenState } from "../../../server/state";
+import { claudeSettingsOf } from "./settings";
 
 type Env = Record<string, string | undefined>;
 
@@ -127,9 +128,10 @@ export async function effectiveClaudeAuth(
 ): Promise<EffectiveClaudeAuth> {
   const detected = await detectClaudeProxy(cwd, env);
   const stored = await loadClaudeToken();
-  const chosen = normalizeClaudeAuth(state.claudeAuth);
+  const own = claudeSettingsOf(state);
+  const chosen = normalizeClaudeAuth(own.claudeAuth);
   const mode = chosen ?? (detected.url ? "proxy" : "login");
-  const storedUrl = normalizeClaudeProxyUrl(state.claudeProxyUrl);
+  const storedUrl = normalizeClaudeProxyUrl(own.claudeProxyUrl);
   const url = storedUrl ?? detected.url;
   const token = stored?.token ?? detected.token;
   return {

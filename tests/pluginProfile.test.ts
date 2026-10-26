@@ -65,7 +65,8 @@ test("a settings file with the old switches is rewritten as the profile on start
   await applyStartupState();
 
   const file = await settingsFile();
-  expect(file.plugins).toEqual({ enabled: ["roadmap", "tests", "self-fix"] });
+  // The agents, on by default (specs/agents/agent-plugins.feature.md), come with the defaults.
+  expect(file.plugins).toEqual({ enabled: ["roadmap", "tests", "self-fix", "agent-claude", "agent-codex", "agent-pi"] });
   for (const key of ["testing", "roadmap", "notebook", "tasks", "models", "issues"]) {
     expect(key in file).toBe(false);
   }
@@ -78,6 +79,9 @@ test("a settings file with the old switches is rewritten as the profile on start
     ["roadmap", true],
     ["tests", true],
     ["self-fix", true],
+    ["agent-claude", true],
+    ["agent-codex", true],
+    ["agent-pi", true],
     ["tasks", false],
     ["notebook", false],
     ["issues", false],
@@ -95,6 +99,9 @@ test("a fresh install shows Specs alone without a settings write", async () => {
     ["issues", false],
     ["tests", false],
     ["self-fix", false],
+    ["agent-claude", false],
+    ["agent-codex", false],
+    ["agent-pi", false],
   ]);
 });
 
@@ -117,11 +124,18 @@ test("each data folder keeps its own plugins, and a new one shows Specs alone", 
   ]);
   expect(matchApi("GET", "/api/tests")).not.toBeNull();
 
-  // A new folder: Specs alone, and nothing written for it until it changes.
+  // A new folder: Specs alone — only the tab-less agents switch themselves
+  // on (manifest.autoEnable, specs/agents/agent-plugins.feature.md), and
+  // that is all that is written for it until it changes.
   res = await put({ dataRepo: b });
-  expect(((await res.json()) as StateBody).plugins.filter((p) => p.enabled)).toEqual([]);
+  expect(((await res.json()) as StateBody).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual(["agent-claude", "agent-codex", "agent-pi"]);
   expect(matchApi("GET", "/api/tests")).toBeNull();
-  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["tests", "issues"] } } });
+  expect((await settingsFile()).plugins).toEqual({
+    repos: {
+      [a]: { enabled: ["tests", "issues"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] },
+      [b]: { enabled: ["agent-claude", "agent-codex", "agent-pi"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] },
+    },
+  });
   await put({ testing: true });
 
   // Back to the first folder: its list, its routes.
@@ -132,7 +146,10 @@ test("each data folder keeps its own plugins, and a new one shows Specs alone", 
   ]);
   expect(matchApi("GET", "/api/tests")).not.toBeNull();
   expect((await settingsFile()).plugins).toEqual({
-    repos: { [a]: { enabled: ["tests", "issues"] }, [b]: { enabled: ["tests"] } },
+    repos: {
+      [a]: { enabled: ["tests", "issues"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] },
+      [b]: { enabled: ["agent-claude", "agent-codex", "agent-pi", "tests"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] },
+    },
   });
 });
 
@@ -141,10 +158,10 @@ test("an older device-wide list carries over to the folder that is open", async 
   await mkdir(a);
   await writeState({ reloadFrequencySeconds: 0, dataRepo: a, plugins: { enabled: ["roadmap"] } }, root);
   await applyStartupState();
-  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["roadmap"] } } });
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["roadmap", "agent-claude", "agent-codex", "agent-pi"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] } } });
   expect(
     (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
-  ).toEqual(["roadmap"]);
+  ).toEqual(["roadmap", "agent-claude", "agent-codex", "agent-pi"]);
 });
 
 // An app from before per-folder lists showed the manifests' defaults — the
@@ -155,10 +172,10 @@ test("an older file with a folder but no plugin list keeps the Notebook on in th
   await mkdir(a);
   await writeState({ reloadFrequencySeconds: 0, dataRepo: a }, root);
   await applyStartupState();
-  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["notebook", "self-fix"] } } });
+  expect((await settingsFile()).plugins).toEqual({ repos: { [a]: { enabled: ["notebook", "self-fix", "agent-claude", "agent-codex", "agent-pi"] } } });
   expect(
     (await state()).plugins.filter((p) => p.enabled).map((p) => p.id),
-  ).toEqual(["notebook", "self-fix"]);
+  ).toEqual(["notebook", "self-fix", "agent-claude", "agent-codex", "agent-pi"]);
 });
 
 // The file this app writes when it records a folder says it keeps
@@ -169,10 +186,12 @@ test("a folder picked in this app still shows Specs alone after a restart", asyn
   await writeState({ reloadFrequencySeconds: 0 }, root);
   await syncPlugins({});
   expect((await put({ dataRepo: a })).status).toBe(200);
-  expect((await settingsFile()).plugins).toEqual({ repos: {} });
+  // The agents switched themselves on for the folder; the tabs stay off.
+  const agentsOn = { repos: { [a]: { enabled: ["agent-claude", "agent-codex", "agent-pi"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] } } };
+  expect((await settingsFile()).plugins).toEqual(agentsOn);
   await applyStartupState();
-  expect((await state()).plugins.filter((p) => p.enabled)).toEqual([]);
-  expect((await settingsFile()).plugins).toEqual({ repos: {} });
+  expect((await state()).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual(["agent-claude", "agent-codex", "agent-pi"]);
+  expect((await settingsFile()).plugins).toEqual(agentsOn);
 });
 
 test("PUT /api/state takes the profile whole, or a legacy switch as an alias", async () => {
@@ -212,4 +231,28 @@ test("PUT /api/state takes the profile whole, or a legacy switch as an alias", a
   expect(rows[0]).toMatchObject({ id: "acme-jira", enabled: true, active: false, installed: false });
   expect(rows[0]!.error).toMatch(/No installed plugin/);
   expect(rows[1]).toMatchObject({ id: "notebook", enabled: true, active: true });
+});
+
+// The plugins that switch themselves on (manifest.autoEnable, specs/agents/
+// agent-plugins.feature.md): the coding agents, which have no tab. A folder
+// gets them the first time this device opens it with them installed — one
+// from before them included — and one switched off there stays off.
+test("a tab-less plugin that switches itself on does so once per folder, and a switch-off sticks", async () => {
+  const a = join(root, "repo-a");
+  await mkdir(a);
+  // A folder from before the agent plugins: a list of its own without them.
+  await writeState({ reloadFrequencySeconds: 0, dataRepo: a, plugins: { repos: { [a]: { enabled: ["tests"] } } } }, root);
+  await applyStartupState();
+  expect((await state()).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual(["tests", "agent-claude", "agent-codex", "agent-pi"]);
+  expect((await settingsFile()).plugins).toEqual({
+    repos: { [a]: { enabled: ["tests", "agent-claude", "agent-codex", "agent-pi"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] } },
+  });
+  // Switched off in Settings → Plugins: the next start leaves it off.
+  const res = await put({ plugins: { enabled: ["tests", "agent-claude", "agent-pi"] } });
+  expect(res.status).toBe(200);
+  await applyStartupState();
+  expect((await state()).plugins.filter((p) => p.enabled).map((p) => p.id)).toEqual(["tests", "agent-claude", "agent-pi"]);
+  expect((await settingsFile()).plugins).toEqual({
+    repos: { [a]: { enabled: ["tests", "agent-claude", "agent-pi"], autoEnabled: ["agent-claude", "agent-codex", "agent-pi"] } },
+  });
 });

@@ -30,7 +30,7 @@ import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setAhaTokenBackend } from "../server/ahaTokens";
-import { setClaudeTokenBackend } from "../server/claudeToken";
+import { LEGACY_SECRET_FILES, setSecretBackendFactory } from "../server/secrets";
 import { DESKTOP_SCHEME } from "../frontend/route";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
@@ -41,7 +41,7 @@ import {
   type LinkWindow,
 } from "./linkRouting";
 import {
-  createClaudeSafeStorageBackend,
+  createSecretSafeStorageBackend,
   createConfluenceSafeStorageBackend,
   createQtestSafeStorageBackend,
   createAhaSafeStorageBackend,
@@ -399,7 +399,13 @@ if (!app.requestSingleInstanceLock()) {
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
       setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
       setAhaTokenBackend(createAhaSafeStorageBackend(join(userData, "aha-tokens.enc")));
-      setClaudeTokenBackend(createClaudeSafeStorageBackend(join(userData, "claude-token.enc")));
+      // The plugins' secret stores (src/server/secrets.ts), one encrypted
+      // file each; a store from before them keeps its old file name.
+      setSecretBackendFactory((name) => {
+        const legacy = LEGACY_SECRET_FILES[name];
+        const file = legacy ? join(userData, legacy.replace(/\.json$/, ".enc")) : join(userData, "secrets", `${name}.enc`);
+        return createSecretSafeStorageBackend(file);
+      });
     }
     // Data-directory picker (specs/ui/app-start.feature.md): replace the
     // server's osascript fallback with the native dialog, parented to the

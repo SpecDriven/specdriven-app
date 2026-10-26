@@ -1,9 +1,9 @@
 // Simulated coding agent for demo mode (roadmap/demo.md, "Demo App":
 // "Launch Coding Session is a partial no-op … It may create pretend session
 // output and results"). A public demo has no `claude` on PATH and must never
-// spawn one, but the session is the point of the product — so demo mode
-// registers a provider under Claude's id (src/plugins/host/agents.ts) whose
-// SDK query is this scripted stand-in.
+// spawn one, but the session is the point of the product — so in demo mode
+// the Claude agent plugin (src/plugins/builtin/agent-claude/host.ts)
+// registers this scripted stand-in under Claude's id instead of the SDK.
 //
 // Everything downstream of this file is the production path: the messages
 // below go through mapSdkMessage into the same event log, out over the same
@@ -19,8 +19,8 @@ import { randomUUID } from "node:crypto";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentProvider } from "../plugins/host/agents";
 import { fromPlugin } from "../plugins/host/agents";
-import { createClaudeProvider } from "./agents/claude";
-import type { QueryFactory, QueryLike } from "./agents/claude";
+import { createClaudeProvider } from "../plugins/builtin/agent-claude/provider";
+import type { QueryFactory, QueryLike } from "../plugins/builtin/agent-claude/provider";
 import type { PermissionMode, SlashCommandInfo } from "./agentTypes";
 
 /** The model the header shows: obviously not a real one. */
@@ -413,7 +413,7 @@ export const simulatedQuery: QueryFactory = ({ prompt, options }) =>
   new SimulatedQuery(prompt, options);
 
 /**
- * The provider demo mode registers (src/server/demo.ts): Claude's own, down
+ * The provider the Claude agent plugin registers in demo mode: Claude's own, down
  * to the modes and the account chip, with the script in place of the SDK
  * and its CLI always "found". Everything downstream — the SDK message
  * mapping, the event log, the permission cards — is the production path.

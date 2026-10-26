@@ -1,12 +1,14 @@
-import { useEffect, useState, type ReactNode } from "react";
-import type { ClaudeAuthMode } from "../server/state";
+import { useEffect, useState } from "react";
+import { DEFAULT_AGENT_FIRST_RESPONSE_SECONDS, type ClaudeAuthMode } from "../../../../server/state";
 
 // Settings → Claude (specs/agents/claude.feature.md "Choose how Claude signs
 // in", "API proxy settings are filled in from Claude Code's settings", "Sign
 // in to Claude with an email"): how every Claude the app starts signs in —
 // the Claude account the CLI is signed in to, or an API proxy with a token
-// kept on this device. The server (src/server/claudeAuth.ts) never sends a
-// token back; the page learns only whether there is one.
+// kept on this device. The server (src/plugins/builtin/agent-claude/auth.ts)
+// never sends a token back; the page learns only whether there is one. What
+// the section changes goes through the plugin's own route
+// (PUT /api/claude/settings), into its section of the settings file.
 
 export interface ClaudeSignIn {
   inProgress: boolean;
@@ -29,7 +31,19 @@ export interface ClaudeAuthInfo {
     hasToken: boolean;
     detected: { url: string | null; urlSource: string | null; hasToken: boolean; tokenSource: string | null };
   };
+  /** The pane's first-response wait behind the proxy; 0 is no limit. */
+  firstResponseSeconds: number;
   signIn: ClaudeSignIn | null;
+}
+
+/** The plugin's own settings, patched through its route. */
+async function patchClaudeSettings(patch: {
+  claudeAuth?: ClaudeAuthMode | null;
+  claudeProxyUrl?: string | null;
+  firstResponseSeconds?: number;
+}): Promise<string | null> {
+  const result = await call("PUT", "/api/claude/settings", patch);
+  return result.ok ? null : result.error;
 }
 
 export async function fetchClaudeAuth(): Promise<ClaudeAuthInfo | null> {
@@ -64,17 +78,11 @@ const MODE_HINT: Record<ClaudeAuthMode, string> = {
     "Sessions send their API calls to the proxy below, with its token. That overrides whatever Claude Code's own settings say.",
 };
 
-/** The section's body: the mode, then the account or the proxy; `children`
-    (the proxy timeout) show in proxy mode only. */
-export function ClaudeSettings({
-  patchSettings,
-  children,
-}: {
-  patchSettings: (patch: Record<string, unknown>) => Promise<boolean>;
-  children?: ReactNode;
-}) {
+/** The section's body: the mode, then the account or the proxy with its timeout. */
+export function ClaudeSettings() {
   const [info, setInfo] = useState<ClaudeAuthInfo | null>(null);
   const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
     const next = await fetchClaudeAuth();
@@ -90,8 +98,8 @@ export function ClaudeSettings({
 
   const pickMode = async (mode: ClaudeAuthMode) => {
     setInfo({ ...info, mode, inferred: false });
-    if (await patchSettings({ claudeAuth: mode })) await refresh();
-    else await refresh();
+    setError(await patchClaudeSettings({ claudeAuth: mode }));
+    await refresh();
   };
 
   return (
@@ -112,10 +120,61 @@ export function ClaudeSettings({
       {info.mode === "login" ? (
         <ClaudeAccount info={info} onChange={setInfo} refresh={refresh} />
       ) : (
-        <ClaudeProxy info={info} patchSettings={patchSettings} refresh={refresh} />
+        <ClaudeProxy info={info} refresh={refresh} onError={setError} />
       )}
-      {info.mode === "proxy" && children}
+      {info.mode === "proxy" && <ProxyTimeout info={info} refresh={refresh} onError={setError} />}
+      {error && <p className="error">{error}</p>}
     </div>
+  );
+}
+
+/**
+ * The pane's first-response wait (specs/agents/agent-pane.feature.md "A
+ * Claude turn fails fast when the API proxy does not answer"): only a
+ * Claude whose API goes through a proxy is held to it.
+ */
+function ProxyTimeout({
+  info,
+  refresh,
+  onError,
+}: {
+  info: ClaudeAuthInfo;
+  refresh: () => Promise<void>;
+  onError: (error: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(String(info.firstResponseSeconds));
+  useEffect(() => setDraft(String(info.firstResponseSeconds)), [info.firstResponseSeconds]);
+  const commit = async () => {
+    const n = Number(draft);
+    const seconds = Number.isFinite(n) && n >= 0 ? Math.floor(n) : info.firstResponseSeconds;
+    setDraft(String(seconds));
+    if (seconds === info.firstResponseSeconds) return;
+    onError(await patchClaudeSettings({ firstResponseSeconds: seconds }));
+    await refresh();
+  };
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">
+        Proxy timeout (seconds)
+        <span className="settings-row-hint">
+          A turn in the coding agent pane that gets no response from the API through the proxy
+          in this time is stopped with an error, instead of retrying for minutes while the proxy
+          is down. 0 waits as long as Claude Code retries; the default is{" "}
+          {DEFAULT_AGENT_FIRST_RESPONSE_SECONDS}. Applies to sessions started after the change.
+        </span>
+      </span>
+      <input
+        type="number"
+        min={0}
+        aria-label="Proxy timeout in seconds"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+        }}
+      />
+    </label>
   );
 }
 
@@ -256,12 +315,12 @@ function ClaudeAccount({
 /** The API proxy: its url and token, what Claude Code's settings carry, a check. */
 function ClaudeProxy({
   info,
-  patchSettings,
   refresh,
+  onError,
 }: {
   info: ClaudeAuthInfo;
-  patchSettings: (patch: Record<string, unknown>) => Promise<boolean>;
   refresh: () => Promise<void>;
+  onError: (error: string | null) => void;
 }) {
   const { proxy } = info;
   const [urlDraft, setUrlDraft] = useState(proxy.storedUrl ?? "");
@@ -275,7 +334,8 @@ function ClaudeProxy({
     const url = urlDraft.trim();
     if (url === (proxy.storedUrl ?? "")) return;
     setStatus(null);
-    if (await patchSettings({ claudeProxyUrl: url || null })) await refresh();
+    onError(await patchClaudeSettings({ claudeProxyUrl: url || null }));
+    await refresh();
   };
   const saveToken = async () => {
     if (!token.trim()) return;
