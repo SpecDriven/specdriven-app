@@ -43,12 +43,17 @@ export function folderLabel(node: Pick<FolderNode, "name" | "description">): str
  * folder's folder-order.txt (specs/ui/folders.feature.md "order folders"):
  * a folder's subfolders come in that order, the ones it leaves out after
  * them by name. The root's order is keyed by `specs`.
+ *
+ * `featureOrders` is the same for features, from each folder's
+ * feature-order.txt ("order features"): file names in that order first, the
+ * rest after them by feature name.
  */
 export function buildTree(
   folders: string[],
   features: FeatureListing[],
   descriptions: Record<string, string> = {},
   orders: Record<string, readonly string[]> = {},
+  featureOrders: Record<string, readonly string[]> = {},
 ): FolderNode {
   const root: FolderNode = { name: "", path: SPECS_FOLDER, folders: [], features: [] };
   const nodes = new Map<string, FolderNode>([[SPECS_FOLDER, root]]);
@@ -81,9 +86,48 @@ export function buildTree(
 
   for (const node of nodes.values()) {
     node.folders = orderedFolders(node.folders, orders[node.path] ?? []);
-    node.features.sort((a, b) => a.name.localeCompare(b.name));
+    node.features = orderedFeatures(node.features, featureOrders[node.path] ?? []);
   }
   return root;
+}
+
+/** A feature's file name without its folder — what a feature-order.txt names. */
+export function featureBaseName(fileName: string): string {
+  return fileName.slice(fileName.lastIndexOf("/") + 1);
+}
+
+/**
+ * Items in the order `order` ranks their keys: the ranked ones first, in
+ * that order, then the rest as `rest` sorts them. A key the order names
+ * with no item behind it is skipped.
+ */
+function ordered<T>(
+  items: readonly T[],
+  order: readonly string[],
+  key: (item: T) => string,
+  rest: (a: T, b: T) => number,
+): T[] {
+  const rank = new Map(order.map((name, i) => [name, i] as const));
+  return items.slice().sort((a, b) => {
+    const ra = rank.get(key(a));
+    const rb = rank.get(key(b));
+    if (ra !== undefined && rb !== undefined) return ra - rb;
+    if (ra !== undefined) return -1;
+    if (rb !== undefined) return 1;
+    return rest(a, b);
+  });
+}
+
+/**
+ * A folder's features in the order its feature-order.txt gives them
+ * (specs/ui/folders.feature.md "order features"): the named files first, in
+ * that order, then the rest by feature name.
+ */
+export function orderedFeatures<T extends { fileName: string; name: string }>(
+  features: readonly T[],
+  order: readonly string[],
+): T[] {
+  return ordered(features, order, (f) => featureBaseName(f.fileName), (a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -92,15 +136,7 @@ export function buildTree(
  * folder behind it is skipped.
  */
 export function orderedFolders<T extends { name: string }>(folders: readonly T[], order: readonly string[]): T[] {
-  const rank = new Map(order.map((name, i) => [name, i] as const));
-  return folders.slice().sort((a, b) => {
-    const ra = rank.get(a.name);
-    const rb = rank.get(b.name);
-    if (ra !== undefined && rb !== undefined) return ra - rb;
-    if (ra !== undefined) return -1;
-    if (rb !== undefined) return 1;
-    return a.name.localeCompare(b.name);
-  });
+  return ordered(folders, order, (f) => f.name, (a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -110,10 +146,23 @@ export function orderedFolders<T extends { name: string }>(folders: readonly T[]
  * Null when the move goes nowhere.
  */
 export function folderNamesMoved(siblings: readonly { name: string }[], from: number, to: number): string[] | null {
-  if (from < 0 || to < 0 || from >= siblings.length || to >= siblings.length || from === to) return null;
-  const names = siblings.map((f) => f.name);
-  const [moved] = names.splice(from, 1);
-  names.splice(to, 0, moved!);
+  return moved(siblings.map((f) => f.name), from, to);
+}
+
+/**
+ * The feature file names to save once the feature at `from` moves to `to`
+ * (specs/ui/folders.feature.md "order features") — every sibling's file name,
+ * without its folder, in the new order. Null when the move goes nowhere.
+ */
+export function featureNamesMoved(siblings: readonly { fileName: string }[], from: number, to: number): string[] | null {
+  return moved(siblings.map((f) => featureBaseName(f.fileName)), from, to);
+}
+
+/** `names` with the one at `from` moved to `to`; null when that goes nowhere. */
+function moved(names: string[], from: number, to: number): string[] | null {
+  if (from < 0 || to < 0 || from >= names.length || to >= names.length || from === to) return null;
+  const [item] = names.splice(from, 1);
+  names.splice(to, 0, item!);
   return names;
 }
 
@@ -130,8 +179,33 @@ export function folderDrop(
   target: string,
   after: boolean,
 ): { from: number; to: number } | null {
-  const from = siblings.findIndex((f) => f.path === dragged);
-  const over = siblings.findIndex((f) => f.path === target);
+  return dropMove(siblings.map((f) => f.path), dragged, target, after);
+}
+
+/**
+ * Where a feature dragged onto a sibling feature's row lands ("order
+ * features"): just before `target` on its upper half, just after on its
+ * lower half — folderDrop's rule, by file name. Null when it would stay put
+ * or either one is not among `siblings`.
+ */
+export function featureDrop(
+  siblings: readonly { fileName: string }[],
+  dragged: string,
+  target: string,
+  after: boolean,
+): { from: number; to: number } | null {
+  return dropMove(siblings.map((f) => f.fileName), dragged, target, after);
+}
+
+/** The `from` / `to` pair for dropping `dragged` before or after `target` among `ids`. */
+function dropMove(
+  ids: readonly string[],
+  dragged: string,
+  target: string,
+  after: boolean,
+): { from: number; to: number } | null {
+  const from = ids.indexOf(dragged);
+  const over = ids.indexOf(target);
   if (from < 0 || over < 0) return null;
   const slot = over + (after ? 1 : 0);
   const to = slot > from ? slot - 1 : slot;
