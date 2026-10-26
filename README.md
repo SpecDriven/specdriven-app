@@ -383,6 +383,7 @@ curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/m
 ```
 
 [install.sh](install.sh) (POSIX sh; curl or wget; unzip, bsdtar or python3)
+needs macOS 13 or later on a Mac — Electron 44 dropped macOS 12 — and
 follows the redirect from the releases page's `latest` to find the newest
 `v<version>`, downloads `specdriven-<version>-src.zip` and `SHASUMS256.txt`
 from that release, verifies the checksum, unpacks the zip to
