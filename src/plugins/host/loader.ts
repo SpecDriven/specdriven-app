@@ -24,6 +24,7 @@ import { builtinManifests, profileManifests, retiredManifest } from "../builtin/
 import * as hostSdk from "../sdk/host";
 import { SDK_GLOBAL } from "../shared";
 import { addSearchScope } from "../../server/search";
+import { agents } from "./agents";
 import {
   createRouteRegistry,
   createSessionParts,
@@ -53,6 +54,7 @@ host.provide("shell", shell);
 host.provide("sync", sync);
 host.provide("search", { add: addSearchScope });
 host.provide("sessions", sessionParts);
+host.provide("agents", agents);
 
 // `@specdriven/host` for the plugins' host halves: their builds point the
 // specifier at a shim over this global (src/plugins/host/build.ts), so a

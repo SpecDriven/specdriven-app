@@ -200,7 +200,7 @@ export interface Hint {
 export function preconditionHints(index: Preconditions): Hint[] {
   const hints: Hint[] = [];
   if (!index.codeGen) hints.push({ text: "Code generation is switched off in Settings.", settings: true, blocking: true });
-  if (!index.claude) hints.push({ text: "The `claude` command is not on PATH; install Claude Code first.", blocking: true });
+  if (!index.claude) hints.push({ text: "No coding agent can run here; install an agent plugin from Settings → Plugins, and its command.", blocking: true });
   if (!index.git) hints.push({ text: "git is not on PATH; it keeps the fix reviewable and revertible.", blocking: true });
   if (!index.source) {
     hints.push({ text: "The app's source was not found. Run the installer again, or set SPECDRIVEN_APP_SOURCE.", blocking: true });

@@ -13,7 +13,7 @@ import {
   setDesktopAvailability,
   setPiAvailability,
 } from "../src/server/agent";
-import { setQueryFactory } from "../src/server/agentChat";
+import { registerCoreAgents } from "../src/server/agentProviders";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setupDemo } from "../src/server/demo";
 import { setFolderChooser } from "../src/server/folderChooser";
@@ -56,9 +56,10 @@ afterEach(async () => {
   reloader.stop();
   setGitEngine(null);
   setFolderChooser(realChooser);
-  // setupDemo fills these four (src/server/demo.ts); left in place they would
-  // hand a fake Claude to every later test file in the run.
-  setQueryFactory(null);
+  // setupDemo registers the simulated Claude and fakes the other probes
+  // (src/server/demo.ts); left in place they would hand a fake Claude to
+  // every later test file in the run.
+  registerCoreAgents();
   setClaudeAvailability(null);
   setPiAvailability(null);
   setDesktopAvailability(null);
@@ -122,7 +123,7 @@ test("boot state names the demo — ephemeral folder, no chooser, js git, no cro
 test("the coding agent pane is on and is the only target on offer", async () => {
   const state = await bootState();
   expect(state.codeGen).toBe(true);
-  expect(state.codeGenTarget).toBe("pane");
+  expect(state.codeGenTarget).toBe("claude");
   expect(state.canRunAgentPane).toBe(true);
   expect(state.canOpenClaudeDesktop).toBe(false);
   expect(state.canRunPi).toBe(false);

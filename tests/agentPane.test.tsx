@@ -26,7 +26,8 @@ import {
   toolSummary,
 } from "../src/frontend/agentChat";
 import type { ChatEvent, TranscriptItem } from "../src/frontend/agentChat";
-import { CODE_GEN_TARGET_LABEL, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/App";
+import { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/codeGenTarget";
+import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agentsWith } from "./fixtures/agents";
 
 let seq = 0;
 // Omit over the event union would keep only the shared keys; the bodies
@@ -206,19 +207,26 @@ describe("geometry", () => {
 
 describe("Start session targets with the pane", () => {
   test("the pane is a target, and the fallback when only the CLI is there", () => {
-    expect(readCodeGenTarget("pane")).toBe("pane");
-    expect(CODE_GEN_TARGET_LABEL.pane).toBe("Coding agent pane");
-    expect(resolveCodeGenTarget("pane", true, true)).toBe("pane");
-    expect(resolveCodeGenTarget("pane", true, false)).toBe("desktop");
-    expect(resolveCodeGenTarget(null, false, true)).toBe("pane");
-    expect(resolveCodeGenTarget(null, true, true)).toBe("desktop");
-    expect(resolveCodeGenTarget("desktop", false, true)).toBe("pane");
+    const claude = agentsWith("claude");
+    const none = agentsWith();
+    // "pane" is what the app stored before agents were providers: Claude.
+    expect(readCodeGenTarget("pane", claude)).toBe("claude");
+    expect(codeGenTargetLabel("claude", claude)).toBe("Claude in the coding agent pane");
+    expect(resolveCodeGenTarget("claude", true, claude)).toBe("claude");
+    expect(resolveCodeGenTarget("pane", true, claude)).toBe("claude");
+    expect(resolveCodeGenTarget("claude", true, none)).toBe("desktop");
+    expect(resolveCodeGenTarget(null, false, claude)).toBe("claude");
+    expect(resolveCodeGenTarget(null, true, claude)).toBe("desktop");
+    expect(resolveCodeGenTarget("desktop", false, claude)).toBe("claude");
   });
 });
 
 describe("TranscriptRow", () => {
   const at = "2026-09-04T10:00:00.000Z";
-  const row = (item: TranscriptItem) => renderToStaticMarkup(<TranscriptRow item={item} />);
+  // Rows render for an agent; the fixture is Claude's descriptor, as the
+  // pane reads it off /api/state (specs/agents/agent-plugins.feature.md).
+  const row = (item: TranscriptItem, agent = CLAUDE_AGENT) =>
+    renderToStaticMarkup(<TranscriptRow item={item} agent={agent} />);
 
   test("a tool call shows its name, its subject, and how it went", () => {
     const html = row({
@@ -359,7 +367,7 @@ describe("TranscriptRow", () => {
 
   test("the mode menu numbers every mode and badges the agent's default", () => {
     const picked: string[] = [];
-    const claude = modeItems("claude", "plan", (m) => picked.push(m));
+    const claude = modeItems(CLAUDE_AGENT, "plan", (m) => picked.push(m));
     expect(claude.map((i) => i.id)).toEqual(["auto", "default", "acceptEdits", "plan", "bypassPermissions"]);
     expect(claude.map((i) => i.keys)).toEqual(["1", "2", "3", "4", "5"]);
     expect(claude.filter((i) => i.checked).map((i) => i.id)).toEqual(["plan"]);
@@ -368,11 +376,15 @@ describe("TranscriptRow", () => {
       renderToStaticMarkup(<>{items.find((i) => i.id === id)!.label}</>);
     expect(label(claude, "auto")).toContain("Default");
     expect(label(claude, "default")).toBe("Manual");
-    const codex = modeItems("codex", "default", () => {});
+    const codex = modeItems(CODEX_AGENT, "default", () => {});
     expect(label(codex, "auto")).toBe("Auto");
     expect(label(codex, "default")).toContain("Default");
+    // The "auto" line names the agent whose call it is.
+    expect(codex.find((i) => i.id === "auto")!.description).toBe("Codex handles permission decisions");
     claude[0]!.onSelect!();
     expect(picked).toEqual(["auto"]);
+    // An agent that declares no modes gets no menu at all.
+    expect(modeItems(PI_AGENT, "bypassPermissions", () => {})).toEqual([]);
   });
 });
 

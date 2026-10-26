@@ -402,7 +402,7 @@ test("a pi session spawns `pi --mode rpc` on the work dir and is ready once it a
     },
     (r) => r?.agentSessionId === "pi-session-1",
   );
-  expect(record).toMatchObject({ agent: "pi-pane", cwd: data, dataRepo: data });
+  expect(record).toMatchObject({ agent: "pi", cwd: data, dataRepo: data });
 });
 
 test("a turn goes to pi as a prompt command and its reply streams into the log", async () => {
@@ -537,7 +537,7 @@ test("Start session can open the generated prompt in a pi pane session", async (
 test("an unknown agent is refused, and Pi needs its CLI", async () => {
   const bad = await api("/api/agent/chat", "POST", { name: "x", agent: "nope" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("agent must be claude, pi or codex");
+  expect((await bad.json()).error).toContain("agent must be claude, codex or pi");
 
   setPiAvailability(() => false);
   const gone = await api("/api/agent/chat", "POST", { name: "x", agent: "pi" });

@@ -1,0 +1,85 @@
+// The pane's view of the agents (src/frontend/agentChat.ts, src/frontend/
+// AgentPane.tsx; specs/agents/agent-plugins.feature.md): what /api/state
+// says of each plugin's agent is all the client knows, a session whose
+// plugin is gone renders through a fallback, and the empty state points at
+// Settings → Plugins when nothing can start.
+
+import { describe, expect, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AgentEmptyGuide, modeDescription, statusLabel } from "../src/frontend/AgentPane";
+import { agentLabel, agentsFromState, describeAgent, hasModes, offersFromState, usableAgents } from "../src/frontend/agentChat";
+import { byRank, fallbackDescriptor } from "../src/server/agentTypes";
+import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agent, agentsWith } from "./fixtures/agents";
+
+describe("agent descriptors on the client", () => {
+  test("a session's agent is read off the descriptors, or a fallback when its plugin is gone", () => {
+    const all = agentsWith("claude", "codex", "pi");
+    expect(describeAgent("codex", all)).toBe(all[1]!);
+    expect(agentLabel("pi", all)).toBe("Pi");
+    const gone = describeAgent("gemini", all);
+    expect(gone).toEqual(fallbackDescriptor("gemini"));
+    expect(agentLabel("gemini", all)).toBe("Gemini");
+    expect(hasModes(CLAUDE_AGENT)).toBe(true);
+    expect(hasModes(PI_AGENT)).toBe(false);
+    expect(hasModes(gone)).toBe(false);
+    expect(statusLabel("starting", gone)).toBe("Starting Gemini…");
+    expect(statusLabel("idle", gone)).toBe("Ready");
+    expect(modeDescription("auto", CODEX_AGENT)).toBe("Codex handles permission decisions");
+    expect(modeDescription("plan", CODEX_AGENT)).toBe("Create a plan before making changes");
+  });
+
+  test("only agents whose CLI is there are usable, in rank order", () => {
+    const shuffled = [PI_AGENT, { ...CODEX_AGENT, available: false }, CLAUDE_AGENT, agent({ id: "zed", rank: 5 })];
+    expect(usableAgents(shuffled).map((a) => a.id)).toEqual(["zed", "claude", "pi"]);
+    expect([...shuffled].sort(byRank).map((a) => a.id)).toEqual(["zed", "claude", "codex", "pi"]);
+    expect(usableAgents([]).length).toBe(0);
+  });
+
+  test("the state's agents list is what the pane reads, and the old per-agent flags stand in for a server without one", () => {
+    const fromList = agentsFromState({ agents: [PI_AGENT, { nope: true }, CLAUDE_AGENT], canRunPi: false });
+    expect(fromList.map((a) => a.id)).toEqual(["pi", "claude"]);
+    const legacy = agentsFromState({ canRunAgentPane: true, canRunCodex: true, canRunPi: false });
+    expect(legacy.map((a) => a.id)).toEqual(["claude", "codex"]);
+    expect(legacy[0]).toMatchObject({ label: "Claude", available: true, rank: 10, plugin: "core" });
+    expect(agentsFromState({})).toEqual([]);
+    expect(offersFromState({ agentOffers: [{ plugin: "agent-gemini", marketplace: "specdriven", label: "Gemini", description: "", cli: "gemini", cliFound: true }, 3] })).toHaveLength(1);
+    expect(offersFromState({})).toEqual([]);
+  });
+});
+
+describe("AgentEmptyGuide", () => {
+  const offer = (cliFound: boolean) => ({
+    plugin: "agent-gemini",
+    marketplace: "specdriven",
+    label: "Gemini",
+    description: "Google's Gemini CLI",
+    cli: "gemini",
+    cliFound,
+  });
+
+  test("with no agent plugin and nothing to install, it says agents come as plugins", () => {
+    const html = renderToStaticMarkup(<AgentEmptyGuide agents={[]} offers={[]} onOpenPlugins={() => {}} />);
+    expect(html).toContain("Coding agents come as plugins");
+    expect(html).toContain("Open Plugins");
+    expect(html).toContain('data-guide="none"');
+    // Without a way to the Plugins page there is no button to it.
+    expect(renderToStaticMarkup(<AgentEmptyGuide agents={[]} offers={[]} />)).not.toContain("Open Plugins");
+  });
+
+  test("an installed plugin whose CLI is missing says so in the provider's words", () => {
+    const html = renderToStaticMarkup(<AgentEmptyGuide agents={agentsWith()} offers={[]} onOpenPlugins={() => {}} />);
+    expect(html).toContain("Claude CLI not found");
+    expect(html).toContain("Codex CLI not found");
+    expect(html).toContain("Pi CLI not found");
+    expect(html).toContain('data-guide="offers"');
+  });
+
+  test("a marketplace offer is installable when its CLI is there, and names the CLI first when not", () => {
+    const found = renderToStaticMarkup(<AgentEmptyGuide agents={[]} offers={[offer(true)]} onOpenPlugins={() => {}} />);
+    expect(found).toContain("Install the Gemini agent plugin");
+    const absent = renderToStaticMarkup(<AgentEmptyGuide agents={[]} offers={[offer(false)]} onOpenPlugins={() => {}} />);
+    expect(absent).toContain("<code>gemini</code>");
+    expect(absent).toContain("install that first");
+    expect(absent).not.toContain("Install the Gemini agent plugin");
+  });
+});

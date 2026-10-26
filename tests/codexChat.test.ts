@@ -594,7 +594,7 @@ test("a codex session spawns `codex app-server` on the work dir and is ready onc
     },
     (r) => r?.agentSessionId === "thread-1",
   );
-  expect(record).toMatchObject({ agent: "codex-pane", cwd: data, dataRepo: data });
+  expect(record).toMatchObject({ agent: "codex", cwd: data, dataRepo: data });
 });
 
 test("a turn goes to Codex as turn/start and its items stream into the log", async () => {
@@ -930,7 +930,7 @@ test("Start session can open the generated prompt in a codex pane session", asyn
 test("an unknown agent is refused, and Codex needs its CLI", async () => {
   const bad = await api("/api/agent/chat", "POST", { name: "x", agent: "nope" });
   expect(bad.status).toBe(400);
-  expect((await bad.json()).error).toContain("agent must be claude, pi or codex");
+  expect((await bad.json()).error).toContain("agent must be claude, codex or pi");
 
   setCodexAvailability(() => false);
   const gone = await api("/api/agent/chat", "POST", { name: "x", agent: "codex" });

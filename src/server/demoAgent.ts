@@ -1,9 +1,9 @@
 // Simulated coding agent for demo mode (roadmap/demo.md, "Demo App":
 // "Launch Coding Session is a partial no-op … It may create pretend session
 // output and results"). A public demo has no `claude` on PATH and must never
-// spawn one, but the session is the point of the product — so demo mode fills
-// the pane's own injection seam (setQueryFactory in src/server/agentChat.ts)
-// with a scripted stand-in.
+// spawn one, but the session is the point of the product — so demo mode
+// registers a provider under Claude's id (src/plugins/host/agents.ts) whose
+// SDK query is this scripted stand-in.
 //
 // Everything downstream of this file is the production path: the messages
 // below go through mapSdkMessage into the same event log, out over the same
@@ -17,7 +17,11 @@
 
 import { randomUUID } from "node:crypto";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { PermissionMode, QueryFactory, QueryLike, SlashCommandInfo } from "./agentChat";
+import type { AgentProvider } from "../plugins/host/agents";
+import { fromPlugin } from "../plugins/host/agents";
+import { createClaudeProvider } from "./agents/claude";
+import type { QueryFactory, QueryLike } from "./agents/claude";
+import type { PermissionMode, SlashCommandInfo } from "./agentTypes";
 
 /** The model the header shows: obviously not a real one. */
 export const SIMULATED_MODEL = "claude-simulated";
@@ -404,6 +408,17 @@ class SimulatedQuery implements QueryLike {
   }
 }
 
-/** The factory demo mode hands to setQueryFactory (src/server/demo.ts). */
+/** The factory behind the simulated provider; on its own for the tests. */
 export const simulatedQuery: QueryFactory = ({ prompt, options }) =>
   new SimulatedQuery(prompt, options);
+
+/**
+ * The provider demo mode registers (src/server/demo.ts): Claude's own, down
+ * to the modes and the account chip, with the script in place of the SDK
+ * and its CLI always "found". Everything downstream — the SDK message
+ * mapping, the event log, the permission cards — is the production path.
+ */
+export const simulatedProvider: AgentProvider = fromPlugin(
+  createClaudeProvider({ available: () => true, query: simulatedQuery }),
+  "demo",
+);

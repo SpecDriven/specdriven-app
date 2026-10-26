@@ -17,6 +17,7 @@ import {
   Globe,
   PanelRightClose,
   Plus,
+  Puzzle,
   Search,
   ShieldAlert,
   Square,
@@ -29,20 +30,22 @@ import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { toast } from "./Toasts";
 import { cleanLine, cleanText } from "../server/text";
-import { PERMISSION_MODES, defaultPermissionMode } from "../server/permissionModes";
 import {
-  AGENT_LABEL,
   agentChat,
   applyCommand,
   defaultSessionName,
+  describeAgent,
   filterCommands,
   formatCost,
   formatDuration,
+  hasModes,
   isFinalStatus,
   shouldFollow,
+  usableAgents,
   useAgentChat,
   type AgentChatStore,
-  type ChatAgent,
+  type AgentDescriptor,
+  type AgentOffer,
   type ChatSessionMeta,
   type ChatStatus,
   type PermissionMode,
@@ -54,13 +57,14 @@ import {
 /**
  * The coding agent pane (specs/agents/agent-pane.feature.md): a live
  * coding agent chat inside SpecDriven for developers who have a CLI but not
- * Claude Code Desktop — Claude Code, or Pi over its RPC mode
- * (specs/agents/integration-with-pi-dev-agent.feature.md). Header (session,
- * work dir, status, permission mode, Stop, close), a scrolling transcript
- * that follows new output until the reader scrolls up, and a composer with a
- * "/" popup listing the commands the session supports. State lives in
- * src/frontend/agentChat.ts; this file only renders it and forwards what the
- * user does.
+ * Claude Code Desktop. Which agents there are is the plugins' business
+ * (specs/agents/agent-plugins.feature.md): every branch in here reads the
+ * agent's descriptor — its label, its modes, what it can do — and names
+ * none. Header (session, work dir, status, permission mode, Stop, close), a
+ * scrolling transcript that follows new output until the reader scrolls
+ * up, and a composer with a "/" popup listing the commands the session
+ * supports. State lives in src/frontend/agentChat.ts; this file only
+ * renders it and forwards what the user does.
  */
 
 export const STATUS_LABEL: Record<ChatStatus, string> = {
@@ -73,8 +77,8 @@ export const STATUS_LABEL: Record<ChatStatus, string> = {
 };
 
 /** The status as the pane says it: only "starting" names the agent. */
-export function statusLabel(status: ChatStatus, agent: ChatAgent = "claude"): string {
-  return status === "starting" ? `Starting ${AGENT_LABEL[agent]}…` : STATUS_LABEL[status];
+export function statusLabel(status: ChatStatus, agent: Pick<AgentDescriptor, "label">): string {
+  return status === "starting" ? `Starting ${agent.label}…` : STATUS_LABEL[status];
 }
 
 // "default" is the SDK's name for asking every time; the pane calls it
@@ -87,12 +91,17 @@ export const MODE_LABEL: Record<PermissionMode, string> = {
   bypassPermissions: "Bypass permissions",
 };
 export const MODE_DESCRIPTION: Record<PermissionMode, string> = {
-  auto: "Claude handles permission decisions",
+  auto: "The agent handles permission decisions",
   default: "Always ask before making changes",
   acceptEdits: "Automatically accept all file edits",
   plan: "Create a plan before making changes",
   bypassPermissions: "Accepts all permissions",
 };
+
+/** A mode's one-line description, naming the agent where the mode is its call. */
+export function modeDescription(mode: PermissionMode, agent: Pick<AgentDescriptor, "label">): string {
+  return mode === "auto" ? `${agent.label} handles permission decisions` : MODE_DESCRIPTION[mode];
+}
 
 export interface Answer {
   requestId: string;
@@ -123,6 +132,7 @@ export function AgentPane({
   prompt,
   browseFolder,
   onClose,
+  onOpenPlugins,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -134,9 +144,12 @@ export function AgentPane({
   /** The native folder chooser, offered as Browse… in that prompt. */
   browseFolder?: () => Promise<string | null>;
   onClose: () => void;
+  /** Open Settings → Plugins, scrolled to a marketplace plugin when named. */
+  onOpenPlugins?: (wanted?: string) => void;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
+  const agent = session ? describeAgent(session.meta.agent, store.agents) : null;
   // Asks for any folder; null when canceled or there is no prompt.
   const askFolder = prompt
     ? async (initial: string): Promise<string | null> =>
@@ -160,10 +173,10 @@ export function AgentPane({
         askFolder={askFolder}
         onClose={onClose}
       />
-      {session ? (
+      {session && agent ? (
         <>
-          <Transcript session={session} />
-          <Composer session={session} />
+          <Transcript session={session} agent={agent} />
+          <Composer session={session} agent={agent} />
         </>
       ) : (
         <EmptyState
@@ -172,6 +185,7 @@ export function AgentPane({
           codeRepo={codeRepo}
           dataRepo={dataRepo}
           askFolder={askFolder}
+          onOpenPlugins={onOpenPlugins}
         />
       )}
       {demo && <SimulationWatermark />}
@@ -231,15 +245,19 @@ function AgentHeader({
   const [modeOpen, setModeOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
   const meta = session?.meta ?? null;
+  const agent = meta ? describeAgent(meta.agent, store.agents) : null;
   const fail = (e: Error) => toast.error(e.message);
   const items: MenuItem[] = [
-    ...store.list.map((m) => ({
-      id: m.id,
-      label: m.name,
-      checked: m.id === store.activeId,
-      title: `${AGENT_LABEL[m.agent]} · ${statusLabel(m.status, m.agent)} · ${m.cwd}`,
-      onSelect: () => agentChat.setActive(m.id),
-    })),
+    ...store.list.map((m) => {
+      const a = describeAgent(m.agent, store.agents);
+      return {
+        id: m.id,
+        label: m.name,
+        checked: m.id === store.activeId,
+        title: `${a.label} · ${statusLabel(m.status, a)} · ${m.cwd}`,
+        onSelect: () => agentChat.setActive(m.id),
+      };
+    }),
     {
       id: "new",
       label: "New session",
@@ -281,9 +299,9 @@ function AgentHeader({
           className="agent-session-menu"
         />
       </div>
-      {meta && (
+      {meta && agent && (
         <div className="agent-cwd-picker">
-          <Tooltip label={`${AGENT_LABEL[meta.agent]} · ${meta.cwd}`}>
+          <Tooltip label={`${agent.label} · ${meta.cwd}`}>
             <button
               type="button"
               className="chip muted agent-cwd"
@@ -310,7 +328,7 @@ function AgentHeader({
                   name: defaultSessionName(),
                   agent: meta.agent,
                   cwd,
-                  ...(meta.agent === "pi" ? {} : { permissionMode: meta.permissionMode }),
+                  ...(hasModes(agent) ? { permissionMode: meta.permissionMode } : {}),
                 })
                 .catch(fail);
             })}
@@ -319,13 +337,13 @@ function AgentHeader({
           />
         </div>
       )}
-      {meta && (
+      {meta && agent && (
         <span
           className="agent-dot"
           data-status={meta.status}
           role="img"
-          aria-label={statusLabel(meta.status, meta.agent)}
-          title={statusLabel(meta.status, meta.agent)}
+          aria-label={statusLabel(meta.status, agent)}
+          title={statusLabel(meta.status, agent)}
         />
       )}
       <span className="spacer" />
@@ -339,9 +357,9 @@ function AgentHeader({
           </span>
         </Tooltip>
       )}
-      {/* Claude only: whether this session spends a Claude plan or is billed
-          per token, from Claude Code's own account answer. */}
-      {meta?.account && (
+      {/* An agent with an account: whether this session spends a plan or is
+          billed per token, from the agent's own account answer. */}
+      {meta?.account && agent?.capabilities.hasAccount && (
         <Tooltip label={meta.account.detail}>
           <span
             className="chip muted agent-account"
@@ -353,16 +371,16 @@ function AgentHeader({
           </span>
         </Tooltip>
       )}
-      {/* Pi's RPC mode has no permission protocol — it runs its own tools,
-          so there is no mode to offer and the pane says as much. */}
-      {meta && meta.agent === "pi" && (
-        <Tooltip label="Pi runs its own tools — SpecDriven cannot gate them">
+      {/* An agent with no permission protocol (Pi runs its own tools): there
+          is no mode to offer, and the pane says as much. */}
+      {meta && agent && !hasModes(agent) && (
+        <Tooltip label={agent.capabilities.noPermissionsNote ?? `${agent.label} has no permission modes`}>
           <span className="chip muted" tabIndex={0}>
             No permission gate
           </span>
         </Tooltip>
       )}
-      {meta && meta.agent !== "pi" && (
+      {meta && agent && hasModes(agent) && (
         <div className="agent-mode-picker">
           <button
             type="button"
@@ -382,7 +400,7 @@ function AgentHeader({
             onClose={() => setModeOpen(false)}
             label="Permission mode"
             heading="Mode"
-            items={modeItems(meta.agent, meta.permissionMode, (m) =>
+            items={modeItems(agent, meta.permissionMode, (m) =>
               void agentChat.setMode(meta.id, m).catch(fail),
             )}
             className="agent-mode-menu"
@@ -390,7 +408,7 @@ function AgentHeader({
           />
         </div>
       )}
-      {meta && busy && (
+      {meta && busy && agent?.capabilities.canInterrupt && (
         <Tooltip label="Stop this turn">
           <button
             type="button"
@@ -450,14 +468,15 @@ export function folderItems(
   ];
 }
 
-/** The mode menu: one item per mode, numbered 1–5, the agent's default badged. */
+/** The mode menu: one item per mode the agent declares, numbered from 1,
+    the agent's default badged. */
 export function modeItems(
-  agent: ChatAgent,
+  agent: AgentDescriptor,
   current: PermissionMode,
   onSelect: (mode: PermissionMode) => void,
 ): MenuItem[] {
-  const start = defaultPermissionMode(agent);
-  return PERMISSION_MODES.map((m, i) => ({
+  const start = agent.defaultPermissionMode;
+  return agent.capabilities.permissionModes.map((m, i) => ({
     id: m,
     label:
       m === start ? (
@@ -467,11 +486,75 @@ export function modeItems(
       ) : (
         MODE_LABEL[m]
       ),
-    description: MODE_DESCRIPTION[m],
+    description: modeDescription(m, agent),
     keys: String(i + 1),
     checked: m === current,
     onSelect: () => onSelect(m),
   }));
+}
+
+/**
+ * What the pane shows when no agent can start (specs/agents/agent-plugins
+ * .feature.md "The pane offers to install an agent plugin"): agents come as
+ * plugins, so the way out is Settings → Plugins — named plainly when there
+ * is nothing, per offer when the marketplace has one, and with the
+ * provider's own words when a plugin is there but its CLI is not. Nothing
+ * installs from here; the Plugins page has the consent flow.
+ */
+export function AgentEmptyGuide({
+  agents,
+  offers,
+  onOpenPlugins,
+}: {
+  agents: readonly AgentDescriptor[];
+  offers: readonly AgentOffer[];
+  onOpenPlugins?: (wanted?: string) => void;
+}) {
+  const open = (wanted?: string) =>
+    onOpenPlugins ? (
+      <button type="button" className="primary-action" onClick={() => onOpenPlugins(wanted)}>
+        <Puzzle size={14} aria-hidden="true" /> Open Plugins
+      </button>
+    ) : null;
+  if (agents.length === 0 && offers.length === 0) {
+    return (
+      <div className="agent-empty" data-guide="none">
+        <h3>Coding agent</h3>
+        <p>Coding agents come as plugins. Install one from Settings → Plugins, and the pane will offer it here.</p>
+        {open()}
+      </div>
+    );
+  }
+  return (
+    <div className="agent-empty" data-guide="offers">
+      <h3>Coding agent</h3>
+      {agents.map((a) => (
+        <p key={a.id} className="agent-guide-row">
+          {a.missingMessage}
+        </p>
+      ))}
+      {offers.map((o) => (
+        <p key={o.plugin} className="agent-guide-row">
+          {o.cliFound ? (
+            <>
+              Install the {o.label} agent plugin to chat with {o.label} here.{" "}
+              {onOpenPlugins && (
+                <button type="button" className="agent-folder-change" onClick={() => onOpenPlugins(o.plugin)}>
+                  Install the {o.label} agent plugin
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              The {o.label} agent plugin needs the <code>{o.cli}</code> command — install that first, then the
+              plugin from Settings → Plugins.
+            </>
+          )}
+        </p>
+      ))}
+      {open()}
+    </div>
+  );
 }
 
 function EmptyState({
@@ -480,48 +563,36 @@ function EmptyState({
   codeRepo,
   dataRepo,
   askFolder,
+  onOpenPlugins,
 }: {
   store: AgentChatStore;
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
   askFolder?: (initial: string) => Promise<string | null>;
+  onOpenPlugins?: (wanted?: string) => void;
 }) {
   const [name, setName] = useState(() => defaultSessionName());
   /** A folder picked here; null keeps the default (code repo, else data repo). */
   const [folder, setFolder] = useState<string | null>(null);
-  const [agent, setAgent] = useState<ChatAgent>(() =>
-    store.available ? "claude" : store.codexAvailable ? "codex" : "pi",
-  );
+  // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
+  const agents = usableAgents(store.agents);
+  const [agentId, setAgentId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const defaultDir = codeRepo ?? dataRepo;
   const workDir = folder ?? defaultDir;
-  if (!store.available && !store.piAvailable && !store.codexAvailable) {
-    return (
-      <div className="agent-empty">
-        <h3>Coding agent</h3>
-        <p>
-          No coding agent CLI found — install the <code>claude</code> command
-          (or <code>codex</code>, from OpenAI, or <code>pi</code>, from pi.dev) and reload.
-        </p>
-      </div>
-    );
+  if (agents.length === 0) {
+    return <AgentEmptyGuide agents={store.agents} offers={store.agentOffers} onOpenPlugins={onOpenPlugins} />;
   }
-  // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
-  const agents: ChatAgent[] = [
-    ...(store.available ? (["claude"] as ChatAgent[]) : []),
-    ...(store.codexAvailable ? (["codex"] as ChatAgent[]) : []),
-    ...(store.piAvailable ? (["pi"] as ChatAgent[]) : []),
-  ];
-  const picked = agents.includes(agent) ? agent : agents[0]!;
+  const picked = agents.find((a) => a.id === agentId) ?? agents[0]!;
   const start = async () => {
     setBusy(true);
     setError(null);
     try {
       await agentChat.createSession({
         name: cleanLine(name) || defaultSessionName(),
-        agent: picked,
+        agent: picked.id,
         ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
       });
     } catch (e) {
@@ -549,8 +620,7 @@ function EmptyState({
         </p>
       ) : (
         <p>
-          A live {picked === "pi" ? "Pi" : picked === "codex" ? "Codex" : "Claude Code"} session,
-          run by SpecDriven.
+          A live {picked.label} session, run by SpecDriven.
           {workDir && (
             <>
               {" "}
@@ -584,23 +654,17 @@ function EmptyState({
         <fieldset className="choice-group" role="radiogroup" aria-label="Agent">
           <legend>Agent</legend>
           {agents.map((a) => (
-            <label key={a} className="choice">
+            <label key={a.id} className="choice">
               <input
                 type="radio"
                 name="agent-empty-agent"
-                value={a}
-                checked={picked === a}
-                onChange={() => setAgent(a)}
+                value={a.id}
+                checked={picked.id === a.id}
+                onChange={() => setAgentId(a.id)}
               />
               <span>
-                <span>{AGENT_LABEL[a]}</span>
-                <div className="agent-option-desc">
-                  {a === "pi"
-                    ? "Minimal, and runs its own tools — nothing asks for permission"
-                    : a === "codex"
-                      ? "OpenAI's Codex CLI, with permission cards for commands and file changes"
-                      : "Claude Code, with permission cards and its own commands"}
-                </div>
+                <span>{a.label}</span>
+                <div className="agent-option-desc">{a.description}</div>
               </span>
             </label>
           ))}
@@ -618,7 +682,7 @@ function EmptyState({
   );
 }
 
-function Transcript({ session }: { session: SessionState }) {
+function Transcript({ session, agent }: { session: SessionState; agent: AgentDescriptor }) {
   const ref = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [unseen, setUnseen] = useState(false);
@@ -661,10 +725,10 @@ function Transcript({ session }: { session: SessionState }) {
       aria-label="Session transcript"
     >
       {items.length === 0 && (
-        <p className="agent-note">{statusLabel(session.meta.status, session.meta.agent)}</p>
+        <p className="agent-note">{statusLabel(session.meta.status, agent)}</p>
       )}
       {items.map((item) => (
-        <TranscriptRow key={item.id} item={item} agent={session.meta.agent} onAnswer={answer} />
+        <TranscriptRow key={item.id} item={item} agent={agent} onAnswer={answer} />
       ))}
       {session.connection === "reconnecting" && (
         <p className="agent-note" data-level="error">
@@ -683,11 +747,11 @@ function Transcript({ session }: { session: SessionState }) {
 /** One transcript entry. Exported so tests can render a row on its own. */
 export function TranscriptRow({
   item,
-  agent = "claude",
+  agent = describeAgent("claude"),
   onAnswer,
 }: {
   item: TranscriptItem;
-  agent?: ChatAgent;
+  agent?: AgentDescriptor;
   onAnswer?: (answer: Answer) => void;
 }) {
   switch (item.kind) {
@@ -705,7 +769,7 @@ export function TranscriptRow({
     case "permission":
       return <PermissionCard item={item} agent={agent} onAnswer={onAnswer} />;
     case "question":
-      return <QuestionCard item={item} onAnswer={onAnswer} />;
+      return <QuestionCard item={item} agent={agent} onAnswer={onAnswer} />;
     case "result": {
       const loginHint =
         item.isError && /not logged in|no api key|unauthorized/i.test(item.text ?? "");
@@ -721,22 +785,13 @@ export function TranscriptRow({
           {item.costUsd !== null && <span>{formatCost(item.costUsd)}</span>}
           <span>{formatDuration(item.durationMs)}</span>
           {item.isError && item.text && <span className="agent-err-text">{item.text}</span>}
-          {loginHint && (
+          {loginHint && agent.loginHint && (
             <span className="agent-err-text">
-              {agent === "pi" ? (
+              {agent.loginHint.text}
+              {agent.loginHint.command && (
                 <>
-                  Pi has no credentials for this model here: run <code>pi</code> in a terminal and{" "}
-                  <code>/login</code>, then start a new session.
-                </>
-              ) : agent === "codex" ? (
-                <>
-                  The Codex CLI is not signed in on this machine: run <code>codex login</code> in a
-                  terminal, then start a new session.
-                </>
-              ) : (
-                <>
-                  The Claude CLI is not signed in on this machine: run{" "}
-                  <code>claude auth login</code> in a terminal, then start a new session.
+                  {" "}
+                  <code>{agent.loginHint.command}</code>
                 </>
               )}
             </span>
@@ -801,17 +856,18 @@ function ToolRow({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) 
 
 function PermissionCard({
   item,
-  agent = "claude",
+  agent,
   onAnswer,
 }: {
   item: Extract<TranscriptItem, { kind: "permission" }>;
-  agent?: ChatAgent;
+  agent: AgentDescriptor;
   onAnswer?: (answer: Answer) => void;
 }) {
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState("");
   const done = item.resolved;
-  const who = AGENT_LABEL[agent];
+  const who = agent.label;
+  const remember = agent.capabilities.rememberPermissions;
   const send = (a: Omit<Answer, "requestId">) => onAnswer?.({ requestId: item.requestId, ...a });
   const deny = () => send({ behavior: "deny", ...(cleanLine(reason) ? { message: cleanLine(reason) } : {}) });
   return (
@@ -860,12 +916,12 @@ function PermissionCard({
           <button type="button" className="primary" onClick={() => send({ behavior: "allow" })}>
             Allow once
           </button>
-          {item.suggestions.length > 0 && (
+          {item.suggestions.length > 0 && remember !== "none" && (
             <button
               type="button"
               title={
-                agent === "codex"
-                  ? "Also allow this for the rest of the session, so Codex stops asking for it"
+                remember === "session"
+                  ? `Also allow this for the rest of the session, so ${who} stops asking for it`
                   : `Also keep the rule ${who} suggests, so it stops asking for this`
               }
               onClick={() => send({ behavior: "allow", remember: true })}
@@ -884,9 +940,11 @@ function PermissionCard({
 
 function QuestionCard({
   item,
+  agent,
   onAnswer,
 }: {
   item: Extract<TranscriptItem, { kind: "question" }>;
+  agent: AgentDescriptor;
   onAnswer?: (answer: Answer) => void;
 }) {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
@@ -925,10 +983,10 @@ function QuestionCard({
       message: "The user dismissed the question without answering",
     });
   return (
-    <div className="agent-card" role="group" aria-label="Claude has a question">
+    <div className="agent-card" role="group" aria-label={`${agent.label} has a question`}>
       <div className="agent-card-title">
         <CircleHelp size={14} aria-hidden="true" />
-        Claude has a question
+        {agent.label} has a question
       </div>
       {item.questions.map((q) => (
         <fieldset className="agent-question" key={q.question} disabled={done !== undefined}>
@@ -973,10 +1031,10 @@ function QuestionCard({
   );
 }
 
-function Composer({ session }: { session: SessionState }) {
+function Composer({ session, agent }: { session: SessionState; agent: AgentDescriptor }) {
   const id = session.meta.id;
   const status = session.meta.status;
-  const who = AGENT_LABEL[session.meta.agent];
+  const who = agent.label;
   const [draft, setDraft] = useState("");
   const [caret, setCaret] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
