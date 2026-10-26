@@ -3,7 +3,6 @@
 // Per specs/ui/app-start.feature.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
-import { LEGACY_CODE_GEN_TARGETS } from "./agentLegacy";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -119,14 +118,12 @@ export interface SpecDrivenState {
   codeGen?: boolean;
   /**
    * Where "Start session" runs (specs/agents/claude.feature.md): "desktop"
-   * opens a new session in Claude Code Desktop, "pane" opens one in the
-   * app's own coding agent pane (specs/agents/agent-pane.feature.md),
-   * "pi" the same pane driven by Pi
-   * (specs/agents/integration-with-pi-dev-agent.feature.md), "codex" the
-   * same pane driven by Codex (src/server/codexChat.ts). Absent means
-   * desktop when Claude.app is installed, else pane when the Claude CLI is —
-   * the client resolves that from canOpenClaudeDesktop, canRunAgentPane,
-   * canRunCodex and canRunPi.
+   * opens a new session in Claude Code Desktop; a provider id ("claude",
+   * "codex", "pi", …) opens one in the app's own coding agent pane
+   * (specs/agents/agent-pane.feature.md) driven by that agent plugin
+   * (specs/agents/agent-plugins.feature.md). Absent means desktop when
+   * Claude.app is installed, else the first usable agent by rank — the
+   * client resolves that from canOpenClaudeDesktop and `agents`.
    */
   codeGenTarget?: CodeGenTarget;
   /**
@@ -341,13 +338,10 @@ export function codeGenTargetList(agentIds: readonly string[]): string {
 }
 
 /** Stored session target, or null when absent or unusable — the client
-    then picks desktop when Claude.app is installed, else the first agent.
-    "pane", what the app wrote before agents were providers, means Claude
-    (src/server/agentLegacy.ts). */
+    then picks desktop when Claude.app is installed, else the first agent. */
 export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string[]): CodeGenTarget | null {
   if (typeof value !== "string") return null;
-  const target = LEGACY_CODE_GEN_TARGETS[value] ?? value;
-  return target === "desktop" || agentIds.includes(target) ? target : null;
+  return value === "desktop" || agentIds.includes(value) ? value : null;
 }
 
 /**

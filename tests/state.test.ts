@@ -165,10 +165,9 @@ test("the session target is only ever desktop or a registered agent", () => {
   expect(normalizeCodeGenTarget("claude", ids)).toBe("claude");
   expect(normalizeCodeGenTarget("pi", ids)).toBe("pi");
   expect(normalizeCodeGenTarget("codex", ids)).toBe("codex");
-  // "pane", from before agents were providers, means Claude — while a
-  // Claude is registered.
-  expect(normalizeCodeGenTarget("pane", ids)).toBe("claude");
-  expect(normalizeCodeGenTarget("pane", ["codex"])).toBeNull();
+  // "pane", what the app wrote before agents were providers, read as Claude
+  // for one release; it is "not chosen" now.
+  expect(normalizeCodeGenTarget("pane", ids)).toBeNull();
   expect(normalizeCodeGenTarget("pi", ["claude"])).toBeNull();
   expect(normalizeCodeGenTarget(undefined, ids)).toBeNull();
   expect(normalizeCodeGenTarget("terminal", ids)).toBeNull();

@@ -41,26 +41,6 @@ import type {
 import { isFinalStatus, normalizePermissionMode, PERMISSION_MODES } from "./agentTypes";
 import { writeTextFile } from "./fsx";
 
-// The types the routes, the client and the tests share live in
-// src/server/agentTypes.ts; re-exported here for one release.
-export type {
-  AgentCapabilities,
-  AgentDescriptor,
-  AgentOffer,
-  AssistantBlock,
-  ChatAccount,
-  ChatAgent,
-  ChatEvent,
-  ChatEventBody,
-  ChatSessionMeta,
-  ChatStatus,
-  PermissionAnswer,
-  PermissionMode,
-  PermissionSuggestion,
-  SlashCommandInfo,
-} from "./agentTypes";
-export { isFinalStatus, normalizePermissionMode, PERMISSION_MODES };
-
 /** An HTTP-shaped failure: the route turns `status` into the response code. */
 export class ChatError extends Error {
   constructor(

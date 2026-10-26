@@ -89,7 +89,7 @@ test("two users get two workers with separate settings, folders and environments
 
   const stateA = (await (await api(socketA, "GET", "/api/state")).json()) as Record<string, unknown>;
   expect(stateA.hosted).toBe(true);
-  expect(stateA.canRunAgentPane).toBe(false);
+  expect(stateA.agents).toEqual([]);
 
   expect((await api(socketA, "PUT", "/api/state", { reloadFrequencySeconds: 300 })).status).toBe(200);
   const stateB = (await (await api(socketB, "GET", "/api/state")).json()) as Record<string, unknown>;

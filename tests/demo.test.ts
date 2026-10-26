@@ -111,15 +111,15 @@ test("boot state names the demo — ephemeral folder, no chooser, js git, no cro
 });
 
 // Code gen sessions are the demo's point (roadmap/demo.md "Demo App"),
-// but only the simulated pane: the other two targets report unavailable, so
-// the session dialog offers no choice and nothing can reach a real CLI.
+// but only the simulated pane: the simulated agent is the only one listed and
+// Claude.app reports absent, so the session dialog offers no choice and
+// nothing can reach a real CLI.
 test("the coding agent pane is on and is the only target on offer", async () => {
   const state = await bootState();
   expect(state.codeGen).toBe(true);
   expect(state.codeGenTarget).toBe("claude");
-  expect(state.canRunAgentPane).toBe(true);
+  expect(state.agents.map((a: { id: string; available: boolean }) => [a.id, a.available])).toEqual([["claude", true]]);
   expect(state.canOpenClaudeDesktop).toBe(false);
-  expect(state.canRunPi).toBe(false);
 });
 
 // The demo starts with Specs alone (src/server/demo.ts DEMO_SETTINGS,

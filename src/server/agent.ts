@@ -111,13 +111,6 @@ export function buildSessionPrompt(
 export const CLAUDE_DESKTOP_PROMPT_MAX = 14336;
 /** The agent recorded in a desktop session's session.json. */
 export const DESKTOP_AGENT = "claude-code-desktop";
-/** The agent recorded for a session run in the app's own coding agent pane
-    (specs/agents/agent-pane.feature.md, src/server/agentChat.ts). */
-export const PANE_AGENT = "pane";
-/** The same pane, driven by Pi, as recorded before agent plugins. */
-export const PI_PANE_AGENT = "pi-pane";
-/** The same pane, driven by Codex, as recorded before agent plugins. */
-export const CODEX_PANE_AGENT = "codex-pane";
 /** Session records live in <settings dir>/sessions/<id>/ — beside the
     settings file, never inside the data repo, which is pushed to git. */
 export const SESSIONS_SUBDIR = "sessions";
@@ -239,7 +232,10 @@ export interface SessionRecord {
   name: string;
   /** ISO 8601 start time. */
   startedAt: string;
-  agent: typeof DESKTOP_AGENT | typeof PANE_AGENT | typeof PI_PANE_AGENT | typeof CODEX_PANE_AGENT;
+  /** DESKTOP_AGENT for a Claude Code Desktop launch, else the id of the
+      provider that drove the coding agent pane (src/server/agentChat.ts; the
+      pre-plugin pane names read through src/server/agentLegacy.ts). */
+  agent: string;
   dataRepo: string;
   /** The code repo the session was opened on; absent when it ran in the
       data repo (src/server/members.ts `code-repo`). */

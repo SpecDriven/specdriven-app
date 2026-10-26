@@ -433,7 +433,7 @@ test("a special folder's tab opens its first page, and is a list to pick from", 
         { id: "tasks", enabled: true },
         { id: "notebook", enabled: true },
       ],
-      { demo: false, settings: { googleCalendar: true, canRunAgentPane: false } },
+      { demo: false, settings: { googleCalendar: true, canEstimate: false } },
     );
     expect(tabs.list().map((t) => [t.id, t.shortcut])).toEqual([
       ["tasks", "g t"],
