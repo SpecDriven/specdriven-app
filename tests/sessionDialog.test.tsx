@@ -58,10 +58,8 @@ describe("resolveCodeGenTarget", () => {
 
   // The headless `claude -p` target is gone: only the desktop app and the
   // coding agent pane, with whichever agent plugin is there, run a session.
-  // "pane", stored before agents were providers, means Claude.
   test("reads only the known targets off the state", () => {
     expect(readCodeGenTarget("desktop", all)).toBe("desktop");
-    expect(readCodeGenTarget("pane", all)).toBe("claude");
     expect(readCodeGenTarget("claude", all)).toBe("claude");
     expect(readCodeGenTarget("pi", all)).toBe("pi");
     expect(readCodeGenTarget("codex", all)).toBe("codex");

@@ -2,20 +2,17 @@
 // session in Claude Code Desktop, or the app's own coding agent pane
 // driven by one of the agents the plugins supply
 // (specs/agents/agent-plugins.feature.md). The target is "desktop" or a
-// provider id; "pane", what the app stored before agents were providers,
-// means Claude.
+// provider id.
 
 import type { AgentDescriptor } from "../server/agentTypes";
 import type { CodeGenTarget } from "../server/state";
-import { LEGACY_CODE_GEN_TARGETS } from "../server/agentLegacy";
 
 export type { CodeGenTarget };
 
 /** The stored target as the server reports it; anything else is "not chosen". */
 export function readCodeGenTarget(value: unknown, agents: readonly AgentDescriptor[]): CodeGenTarget | null {
   if (typeof value !== "string") return null;
-  const target = LEGACY_CODE_GEN_TARGETS[value] ?? value;
-  return target === "desktop" || agents.some((a) => a.id === target) ? target : null;
+  return value === "desktop" || agents.some((a) => a.id === value) ? value : null;
 }
 
 /** What the session dialog and its notices call a target. */

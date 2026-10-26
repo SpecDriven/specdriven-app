@@ -109,8 +109,8 @@ stream from the same route table (no WebSocket, so it works over Electron's
 names no agent: `/api/state` lists the providers' descriptors (`agents`), the
 session dialog and the pane read those, a session asked for without an agent
 runs on the first available by rank, and the record's `agent` is the
-provider id (`agentLegacy.ts` maps the pre-plugin values "pane", "pi-pane",
-"codex-pane"). The three providers are marketplace plugins
+provider id (`agentLegacy.ts` reads the pre-plugin record values "pane",
+"pi-pane" and "codex-pane" as ids). The three providers are marketplace plugins
 (`plugins/agent-claude`, `agent-codex` and `agent-pi` in the
 SpecDriven/plugins repository), not part of this tree: at start the app
 reads the cached marketplace indexes and, for each row carrying `agent:

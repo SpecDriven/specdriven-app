@@ -35,12 +35,12 @@ describe("agent descriptors on the client", () => {
     expect(usableAgents([]).length).toBe(0);
   });
 
-  test("the state's agents list is what the pane reads, and the old per-agent flags stand in for a server without one", () => {
-    const fromList = agentsFromState({ agents: [PI_AGENT, { nope: true }, CLAUDE_AGENT], canRunPi: false });
+  test("the state's agents list is what the pane reads, and nothing stands in for it", () => {
+    const fromList = agentsFromState({ agents: [PI_AGENT, { nope: true }, CLAUDE_AGENT] });
     expect(fromList.map((a) => a.id)).toEqual(["pi", "claude"]);
-    const legacy = agentsFromState({ canRunAgentPane: true, canRunCodex: true, canRunPi: false });
-    expect(legacy.map((a) => a.id)).toEqual(["claude", "codex"]);
-    expect(legacy[0]).toMatchObject({ label: "Claude", available: true, rank: 10, plugin: "core" });
+    // The per-agent flags of the releases before the list are not read any more.
+    const flagsOnly: Record<string, unknown> = { canRunAgentPane: true, canRunCodex: true };
+    expect(agentsFromState(flagsOnly)).toEqual([]);
     expect(agentsFromState({})).toEqual([]);
     expect(offersFromState({ agentOffers: [{ plugin: "agent-gemini", marketplace: "specdriven", label: "Gemini", description: "", cli: "gemini", cliFound: true }, 3] })).toHaveLength(1);
     expect(offersFromState({})).toEqual([]);

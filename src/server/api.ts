@@ -115,16 +115,14 @@ import {
   getChatEvents,
   getChatSession,
   interruptChat,
-  isFinalStatus,
   listChatSessions,
-  normalizePermissionMode,
-  PERMISSION_MODES,
   resolveProvider,
   sendChatMessage,
   setChatPermissionMode,
   subscribeChat,
 } from "./agentChat";
-import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentChat";
+import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentTypes";
+import { isFinalStatus, normalizePermissionMode, PERMISSION_MODES } from "./agentTypes";
 import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
@@ -564,11 +562,6 @@ async function stateFields(state: SpecDrivenState) {
     agentOffers: isHostedMode() || isDemoMode() ? [] : await agentOffers(state as Record<string, unknown>, agentIds()),
     // Whether some agent answers one no-tools turn (src/server/estimate.ts).
     canEstimate: !isHostedMode() && agents.oneShot() !== undefined,
-    // The per-agent flags the client read before the descriptors, derived
-    // from them for one release.
-    canRunAgentPane: agentUsable("claude"),
-    canRunPi: agentUsable("pi"),
-    canRunCodex: agentUsable("codex"),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     featureFlags: normalizeFeatureFlags(state.featureFlags),
@@ -2360,11 +2353,6 @@ function parseSessionFiles(value: unknown): SessionFile[] | null {
 /** The registered agents' ids, by rank. */
 function agentIds(): string[] {
   return agents.list().map((p) => p.id);
-}
-
-/** Whether a named agent can run here: registered, its CLI on PATH, not hosted. */
-function agentUsable(id: string): boolean {
-  return !isHostedMode() && (agents.get(id)?.available() ?? false);
 }
 
 /** The agents as an error message lists them: "claude, codex or pi". */
