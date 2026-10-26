@@ -219,14 +219,7 @@ export function syncPlugins(
     lastOptions = options;
     const section = profileSection(state);
     let { enabled } = readProfile(state, profileManifests);
-    // The plugins that switch themselves on in a folder (manifest.autoEnable):
-    // the coding agents, which have no tab to cost the sidebar.
     let changed = false;
-    const auto = autoEnablePlugins(state, enabled, profileManifests);
-    if (auto) {
-      enabled = auto;
-      changed = true;
-    }
 
     if (options.sources) {
       const found = await discoverPlugins({
@@ -257,6 +250,17 @@ export function syncPlugins(
       watchFolders(options);
     } else {
       await absorbDiscovered([], []);
+    }
+    // The plugins that switch themselves on in a folder (manifest.autoEnable):
+    // the coding agents, built in or installed, which have no tab to cost
+    // the sidebar.
+    const installed = [...external.values()]
+      .filter((e) => e.manifest && e.trusted && !e.error)
+      .map((e) => e.manifest!);
+    const auto = autoEnablePlugins(state, enabled, [...profileManifests, ...installed]);
+    if (auto) {
+      enabled = auto;
+      changed = true;
     }
     if (changed) await options.persist?.(state);
     profile = enabled;
