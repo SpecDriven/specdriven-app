@@ -1308,7 +1308,9 @@ const postQtestToken: Handler = async (req) => {
     await saveQtestToken({ base, token: body.token.trim(), user });
     return json({ base, user });
   } catch (e) {
-    return json({ error: (e as Error).message }, 400);
+    // What qTest answered goes along, for the error's detail box.
+    const details = e instanceof QtestError ? e.details : undefined;
+    return json({ error: (e as Error).message, ...(details ? { details } : {}) }, 400);
   }
 };
 
@@ -1709,7 +1711,7 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
       existingModuleId,
     });
   } catch (e) {
-    if (e instanceof QtestError) return json({ error: e.message }, e.status);
+    if (e instanceof QtestError) return json({ error: e.message, ...(e.details ? { details: e.details } : {}) }, e.status);
     return json({ error: (e as Error).message }, 502);
   }
   const state = await readState(getAppRoot());
@@ -1718,11 +1720,6 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     await writeState(state, getAppRoot());
   }
   const warnings: string[] = [];
-  if (result.failed) {
-    warnings.push(
-      `${result.cases.length} of the test cases were written; “${result.failed.scenarioName}” was not: ${result.failed.error}`,
-    );
-  }
   const summary = {
     module: { id: result.module.id, pid: result.module.pid, url: result.module.url, created: result.module.created },
     cases: result.cases.map(({ scenarioName, id, pid, url, created }) => ({ scenarioName, id, pid, url, created })),
@@ -1730,6 +1727,16 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     updated: result.cases.filter((c) => !c.created).length,
     title,
     parentUrl,
+    // The test case qTest refused: the dialog stays open on it, with its details.
+    ...(result.failed
+      ? {
+          failure: {
+            scenarioName: result.failed.scenarioName,
+            message: `${result.cases.length} of the test cases were written; “${result.failed.scenarioName}” was not: ${result.failed.error}`,
+            ...(result.failed.details ? { details: result.failed.details } : {}),
+          },
+        }
+      : {}),
   };
   const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
   // The links back: the module on the feature, each test case on its scenario.

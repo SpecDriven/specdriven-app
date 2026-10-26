@@ -319,6 +319,11 @@ button.error-link {
   justify-self: start;
   align-self: flex-start;
   text-align: left;
+  /* A long failure wraps like the plain error line, rather than widening the dialog. */
+  white-space: normal;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
@@ -328,7 +333,7 @@ button.error-link:hover {
   text-decoration-style: solid;
 }
 
-.confluence-failure {
+.failure-details {
   display: grid;
   gap: 0.5rem;
   min-width: 0;
@@ -340,33 +345,33 @@ button.error-link:hover {
   line-height: 1.45;
 }
 
-.confluence-failure dl {
+.failure-details dl {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 0.2rem 0.875rem;
   margin: 0;
 }
 
-.confluence-failure dt {
+.failure-details dt {
   color: var(--text-3);
 }
 
-.confluence-failure dd {
+.failure-details dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-.confluence-failure code {
+.failure-details code {
   font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
-.confluence-failure-label {
+.failure-details-label {
   margin: 0;
   color: var(--text-3);
 }
 
-.confluence-failure-body {
+.failure-details-body {
   margin: 0;
   max-height: 14rem;
   overflow: auto;
@@ -379,7 +384,7 @@ button.error-link:hover {
   overflow-wrap: anywhere;
 }
 
-.confluence-failure button.link {
+.failure-details button.link {
   justify-self: start;
 }
 

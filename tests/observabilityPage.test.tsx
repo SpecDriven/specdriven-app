@@ -126,6 +126,32 @@ describe("markup", () => {
     expect(html).toContain('aria-expanded="false"');
   });
 
+  test("a closed row leaves out HTTP bodies and stacks; the open row shows them", () => {
+    const http = entry({
+      component: "qtest",
+      level: "info",
+      message: "POST https://acme.qtestnet.com/api/v3/projects/12/test-cases → 200",
+      attributes: {
+        "http.response.status_code": "200",
+        "http.request.body": '{\n  "name": "S1: Basic Quote"\n}',
+        "http.response.body": '{\n  "id": 1001\n}',
+        "exception.stacktrace": "at somewhere",
+      },
+    });
+    const row = (open: boolean) =>
+      renderToStaticMarkup(
+        <LogRow entry={http} pattern={null} open={open} onToggle={() => {}} onCopy={() => {}} copied={false} />,
+      );
+    const closed = row(false);
+    expect(closed).toContain("http.response.status_code=200");
+    expect(closed).not.toContain("http.request.body");
+    expect(closed).not.toContain("http.response.body");
+    expect(closed).not.toContain("exception.stacktrace");
+    const opened = row(true);
+    expect(opened).toContain("<dt>http.request.body</dt>");
+    expect(opened).toContain("<dt>http.response.body</dt>");
+  });
+
   test("an open row lists its attributes and offers to copy", () => {
     const html = renderToStaticMarkup(
       <LogRow entry={entry({ traceId: "a".repeat(32), spanId: "b".repeat(16) })} pattern={null} open onToggle={() => {}} onCopy={() => {}} copied={false} />,

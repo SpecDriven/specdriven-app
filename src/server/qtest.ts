@@ -11,12 +11,20 @@ import type { Feature, Scenario } from "./parser";
 import { scenarioNumbers } from "./parser";
 import { scenarioToTestCase, type TestCaseDraft } from "./qtestSteps";
 import { moduleWebUrl, onQtestBase, testCaseIdFromUrl, testCaseWebUrl } from "./qtestUrl";
+import { bodyExcerpt, failureAttributes, type FailureDetails } from "./httpFailure";
+import { getLogger } from "./telemetry";
+
+const log = getLogger("qtest");
+
+/** What went wrong on the wire, for the dialog's detail box and the log. */
+export type QtestFailureDetails = FailureDetails;
 
 /** A failed qTest call, with the HTTP status so the route can pass it on. */
 export class QtestError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly details?: QtestFailureDetails,
   ) {
     super(message);
   }
@@ -27,58 +35,128 @@ interface Init {
   json?: unknown;
 }
 
-/** One request to a qTest site's REST API, with the token and headers it wants. */
-export async function qtestRequest(base: string, path: string, token: string, init: Init = {}): Promise<Response> {
+/** A body as the log and the detail box show it: JSON indented, the rest as bodyExcerpt reads it. */
+function readable(text: string, contentType = ""): string {
+  if (/json/i.test(contentType) || /^\s*[[{]/.test(text)) {
+    try {
+      return bodyExcerpt(JSON.stringify(JSON.parse(text), null, 2), "application/json");
+    } catch {
+      // not JSON after all
+    }
+  }
+  return bodyExcerpt(text, contentType);
+}
+
+/**
+ * Every exchange with qTest goes into the app's log under the "qtest"
+ * component (the Observability page): the request and qTest's answer, both
+ * bodies included, never the token. An answered call is info; a failure is
+ * logged with the error the dialog shows — server errors and an unreachable
+ * site as errors, refusals qTest explains (401, 403, 404, 400…) as warnings.
+ */
+function logExchange(details: QtestFailureDetails, started: number, error?: QtestError): void {
+  const attributes = { ...failureAttributes(details), duration_ms: Math.round(performance.now() - started) };
+  if (!error) {
+    log.info(`${details.method} ${details.url} → ${details.status}`, attributes);
+    return;
+  }
+  const serious = details.status === undefined || details.status >= 500;
+  log[serious ? "error" : "warn"](error.message, attributes);
+}
+
+/**
+ * One request to a qTest site's REST API, with the token and headers it
+ * wants: qTest's answer as text with the details of the exchange, or a
+ * QtestError carrying them.
+ */
+export async function qtestRequest(
+  base: string,
+  path: string,
+  token: string,
+  init: Init = {},
+): Promise<{ text: string; details: QtestFailureDetails }> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "User-Agent": "SpecDriven",
     Authorization: `bearer ${token}`,
   };
   if (init.json !== undefined) headers["Content-Type"] = "application/json";
+  const method = init.method ?? "GET";
+  const url = `${base}${path}`;
+  const sent = init.json !== undefined ? JSON.stringify(init.json) : undefined;
+  const request = { method, url, ...(sent ? { requestBody: readable(sent, "application/json") } : {}) };
+  const started = performance.now();
+  const fail = (error: QtestError): QtestError => {
+    logExchange(error.details!, started, error);
+    return error;
+  };
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, {
-      method: init.method ?? "GET",
-      headers,
-      body: init.json !== undefined ? JSON.stringify(init.json) : undefined,
-      redirect: "manual",
-    });
+    res = await fetch(url, { method, headers, body: sent, redirect: "manual" });
   } catch (e) {
-    throw new QtestError(`Could not reach qTest at ${base}: ${(e as Error).message}`, 502);
+    const cause = (e as Error).message;
+    throw fail(
+      new QtestError(`Could not reach qTest at ${base}: ${cause}`, 502, {
+        ...request,
+        cause,
+        time: new Date().toISOString(),
+      }),
+    );
   }
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text().catch(() => "");
+  const details: QtestFailureDetails = {
+    ...request,
+    status: res.status,
+    ...(res.statusText ? { statusText: res.statusText } : {}),
+    ...(contentType ? { contentType } : {}),
+    ...(text ? { body: readable(text, contentType) } : {}),
+    time: new Date().toISOString(),
+  };
   if (res.status >= 300 && res.status < 400) {
     // A redirect from the REST API is a sign-in page or SSO, never data.
-    throw new QtestError("qTest redirected the request — check the site url, and that the token is an API token", 401);
+    throw fail(
+      new QtestError("qTest redirected the request — check the site url, and that the token is an API token", 401, {
+        ...details,
+        location: res.headers.get("location") ?? undefined,
+      }),
+    );
   }
-  if (!res.ok) throw await describeFailure(res);
-  return res;
+  if (!res.ok) throw fail(describeFailure(res.status, text, details));
+  logExchange(details, started);
+  return { text, details };
 }
 
 async function qtest<T>(base: string, path: string, token: string, init: Init = {}): Promise<T> {
-  const res = await qtestRequest(base, path, token, init);
+  const { text, details } = await qtestRequest(base, path, token, init);
   try {
-    return (await res.json()) as T;
+    return JSON.parse(text) as T;
   } catch {
-    throw new QtestError("qTest answered with something that is not JSON — check the site url", 502);
+    const error = new QtestError("qTest answered with something that is not JSON — check the site url", 502, details);
+    log.error(error.message, failureAttributes(details));
+    throw error;
   }
 }
 
-/** A qTest failure as one sentence the dialog can show, with the status kept. */
-async function describeFailure(res: Response): Promise<QtestError> {
-  const detail = ((await res.json().catch(() => null)) as { message?: string } | null)?.message;
-  if (res.status === 401) {
-    return new QtestError("qTest rejected the token; save a new one in Settings → qTest.", 401);
+/** A qTest failure as one sentence the dialog can show, with the status and details kept. */
+function describeFailure(status: number, text: string, details: QtestFailureDetails): QtestError {
+  const err = (message: string, code: number) => new QtestError(message, code, details);
+  let detail: string | undefined;
+  try {
+    detail = (JSON.parse(text) as { message?: string } | null)?.message;
+  } catch {
+    // Not JSON (an HTML error page, say): the detail box shows the body.
   }
-  if (res.status === 403) {
-    return new QtestError(
-      `qTest refused the request — the token cannot write to this project${detail ? `: ${detail}` : ""}`,
-      403,
-    );
+  if (status === 401) {
+    return err("qTest rejected the token; save a new one in Settings → qTest.", 401);
   }
-  if (res.status === 404) {
-    return new QtestError("qTest reports no such project or module, or the token cannot see it.", 404);
+  if (status === 403) {
+    return err(`qTest refused the request — the token cannot write to this project${detail ? `: ${detail}` : ""}`, 403);
   }
-  return new QtestError(`qTest answered HTTP ${res.status}${detail ? `: ${detail}` : ""}`, 502);
+  if (status === 404) {
+    return err("qTest reports no such project, module or test case, or the token cannot see it.", 404);
+  }
+  return err(`qTest answered HTTP ${status}${detail ? `: ${detail}` : ""}`, 502);
 }
 
 // --- Shapes ------------------------------------------------------------------------
@@ -161,14 +239,15 @@ const project = (projectId: string) => `/api/v3/projects/${encodeURIComponent(pr
  * published with it.
  */
 export async function validateToken(base: string, token: string): Promise<{ user: string }> {
-  const refused = new QtestError("qTest did not accept this token — check it and its expiry", 401);
+  const refused = (details?: QtestFailureDetails) =>
+    new QtestError("qTest did not accept this token — check it and its expiry", 401, details);
   let projects: RawProject[];
   try {
     projects = await qtest<RawProject[]>(base, "/api/v3/projects", token);
   } catch (e) {
-    throw e instanceof QtestError && e.status === 401 ? refused : e;
+    throw e instanceof QtestError && e.status === 401 ? refused(e.details) : e;
   }
-  if (!Array.isArray(projects)) throw refused;
+  if (!Array.isArray(projects)) throw refused();
   if (projects.length === 0) throw new QtestError("The token sees no qTest project, so nothing could be published with it", 403);
   return { user: `${projects.length} project${projects.length === 1 ? "" : "s"}` };
 }
@@ -309,7 +388,7 @@ export interface PublishResult {
   module: ModuleInfo & { created: boolean };
   cases: PublishedCase[];
   /** The scenario whose test case could not be written, when one could not. */
-  failed?: { index: number; scenarioName: string; error: string };
+  failed?: { index: number; scenarioName: string; error: string; details?: QtestFailureDetails };
 }
 
 /**
@@ -366,11 +445,20 @@ export async function publishFeatureTestCases(p: {
   scope: "all" | "published";
   existingModuleId?: string;
 }): Promise<PublishResult> {
-  const parent = await getModule(p.base, p.token, p.projectId, p.parentModuleId);
-  if (!parent) {
+  let parent: ModuleInfo;
+  try {
+    const raw = await qtest<RawModule>(
+      p.base,
+      `${project(p.projectId)}/modules/${encodeURIComponent(p.parentModuleId)}`,
+      p.token,
+    );
+    parent = moduleInfo(p.base, p.projectId, raw);
+  } catch (e) {
+    if (!(e instanceof QtestError && e.status === 404)) throw e;
     throw new QtestError(
       `qTest has no module ${p.parentModuleId} in project ${p.projectId}, or the token cannot see it.`,
       404,
+      e.details,
     );
   }
   const module = await featureModule({
@@ -397,7 +485,8 @@ export async function publishFeatureTestCases(p: {
       cases.push({ index, scenarioName: scenario.name, ...written, created: !existing });
     } catch (e) {
       const error = e instanceof QtestError ? e.message : (e as Error).message;
-      return { module, cases, failed: { index, scenarioName: scenario.name, error } };
+      const details = e instanceof QtestError ? e.details : undefined;
+      return { module, cases, failed: { index, scenarioName: scenario.name, error, ...(details ? { details } : {}) } };
     }
   }
   return { module, cases };

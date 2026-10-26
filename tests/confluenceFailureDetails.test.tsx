@@ -98,10 +98,10 @@ describe("a failed publish", () => {
     const line = host.querySelector("button.error-link") as HTMLButtonElement;
     expect(line.textContent).toBe("Confluence answered HTTP 500");
     expect(line.getAttribute("aria-expanded")).toBe("false");
-    expect(host.querySelector(".confluence-failure")).toBeNull();
+    expect(host.querySelector(".failure-details")).toBeNull();
 
     await act(async () => line.click());
-    const box = host.querySelector(".confluence-failure")!;
+    const box = host.querySelector(".failure-details")!;
     expect(line.getAttribute("aria-expanded")).toBe("true");
     expect(box.textContent).toContain("POST https://wiki.acme.com/rest/api/content");
     expect(box.textContent).toContain("500 Internal Server Error");
@@ -113,7 +113,7 @@ describe("a failed publish", () => {
     expect(opened).toBe(1);
 
     await act(async () => line.click());
-    expect(host.querySelector(".confluence-failure")).toBeNull();
+    expect(host.querySelector(".failure-details")).toBeNull();
     unmount();
   });
 
@@ -123,7 +123,7 @@ describe("a failed publish", () => {
       details: { method: "GET", url: DETAILS.url, cause: "Unable to connect", time: DETAILS.time },
     });
     await act(async () => (host.querySelector("button.error-link") as HTMLButtonElement).click());
-    const box = host.querySelector(".confluence-failure")!;
+    const box = host.querySelector(".failure-details")!;
     expect(box.textContent).toContain("No answer");
     expect(box.textContent).toContain("Unable to connect");
     expect(box.querySelector("pre")).toBeNull();
