@@ -6,6 +6,16 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ConfluenceConflictNotice, ConfluencePublishDialog, parentUrlProblem } from "../src/frontend/ConfluencePublishDialog";
 import { ConfluenceTokens } from "../src/frontend/ConfluenceToken";
+import {
+  commonParentUrl,
+  ConfluenceFolderPublishDialog,
+  failsEveryFeature,
+  pendingFiles,
+  publishEach,
+  type FolderFeature,
+  type RowState,
+} from "../src/frontend/ConfluenceFolderPublishDialog";
+import type { ConfluencePublishResult, PublishOutcome } from "../src/frontend/ConfluencePublishDialog";
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
 const noop = () => {};
@@ -89,6 +99,117 @@ describe("ConfluencePublishDialog", () => {
     );
     expect(markup).toContain("No token for https://wiki.acme.com");
     expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Publish<\/button>/);
+  });
+});
+
+describe("ConfluenceFolderPublishDialog", () => {
+  const FEATURES: FolderFeature[] = [
+    { file: "specs/billing/invoices.feature.md", name: "Invoices", linkedUrl: "https://wiki.acme.com/spaces/ABC/pages/5/Invoices", parentUrl: PARENT },
+    { file: "specs/billing/tax/vat.feature.md", name: "VAT" },
+  ];
+  const folderDialog = (features: FolderFeature[] | null, wikis = [WIKI]) =>
+    html(
+      <ConfluenceFolderPublishDialog
+        folderLabel="Billing"
+        features={features}
+        wikis={wikis}
+        onPublished={noop}
+        onFinished={noop}
+        onClose={noop}
+      />,
+    );
+
+  test("a modal dialog with the parent url, the two scopes and each feature checked", () => {
+    const markup = folderDialog(FEATURES);
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-label="Publish folder to Confluence"');
+    expect(markup).toContain("Each feature in <strong>Billing</strong> becomes its own page under the parent page");
+    expect(markup).toContain(`value="${PARENT}"`);
+    expect(markup).toContain('aria-label="All scenarios"');
+    expect(markup).toContain('aria-label="Published scenarios only"');
+    expect(markup).toMatch(/type="checkbox" aria-label="Invoices" checked=""/);
+    expect(markup).toMatch(/type="checkbox" aria-label="VAT" checked=""/);
+    // A feature published before says it updates its page; the rest are new.
+    expect(markup).toContain('Updates <a href="https://wiki.acme.com/spaces/ABC/pages/5/Invoices"');
+    expect(markup).toContain("New page");
+    expect(markup).toMatch(/<button type="submit" class="primary">Publish 2 features<\/button>/);
+  });
+
+  test("waits for the folder's features, and says when there are none", () => {
+    expect(folderDialog(null)).toContain("Loading the folder&#x27;s features");
+    expect(folderDialog(null)).toMatch(/disabled="">Publish<\/button>/);
+    expect(folderDialog([])).toContain("This folder has no features to publish.");
+  });
+
+  test("Publish waits for a page url on a wiki with a token", () => {
+    const markup = folderDialog(FEATURES, []);
+    expect(markup).toContain("No token for https://wiki.acme.com");
+    expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Publish 2 features<\/button>/);
+  });
+
+  test("offers the parent most of the folder's features were last published under", () => {
+    const other = "https://wiki.acme.com/spaces/ABC/pages/2/Archive";
+    const f = (file: string, parentUrl?: string): FolderFeature => ({ file, name: file, ...(parentUrl ? { parentUrl } : {}) });
+    expect(commonParentUrl([])).toBe("");
+    expect(commonParentUrl([f("a"), f("b")])).toBe("");
+    expect(commonParentUrl([f("a", other), f("b", PARENT), f("c", PARENT)])).toBe(PARENT);
+    // A tie goes to the first in the folder's order.
+    expect(commonParentUrl([f("a", other), f("b", PARENT)])).toBe(other);
+  });
+
+  const done = (file: string): PublishOutcome => ({
+    kind: "done",
+    result: { id: file, url: `https://wiki.acme.com/pages/${file}`, created: true, title: file } as ConfluencePublishResult,
+  });
+
+  test("publishes each feature in turn, forcing only the conflicts the user chose to replace", async () => {
+    const calls: [string, boolean][] = [];
+    const states: [string, RowState["kind"]][] = [];
+    await publishEach(
+      ["a", "b", "c"],
+      async (file, force) => {
+        calls.push([file, force]);
+        return file === "b" ? { kind: "failed", error: "Confluence answered HTTP 500", status: 502, details: { method: "PUT", url: "u", status: 500, time: "t" } } : done(file);
+      },
+      (file, state) => states.push([file, state.kind]),
+      new Set(["c"]),
+    );
+    // A failure of one feature's own does not stop the rest.
+    expect(calls).toEqual([["a", false], ["b", false], ["c", true]]);
+    expect(states).toEqual([
+      ["a", "publishing"],
+      ["a", "done"],
+      ["b", "publishing"],
+      ["b", "failed"],
+      ["c", "publishing"],
+      ["c", "done"],
+    ]);
+  });
+
+  test("stops at a failure every feature would meet, a refused token or a wiki with no answer", async () => {
+    const refused: PublishOutcome = { kind: "failed", error: "Confluence rejected the token", status: 401 };
+    const unreachable: PublishOutcome = {
+      kind: "failed",
+      error: "Could not reach Confluence",
+      status: 502,
+      details: { method: "GET", url: "u", cause: "ECONNREFUSED", time: "t" },
+    };
+    for (const failure of [refused, unreachable]) {
+      expect(failsEveryFeature(failure)).toBe(true);
+      const calls: string[] = [];
+      await publishEach(["a", "b", "c"], async (file) => (calls.push(file), file === "b" ? failure : done(file)), noop);
+      expect(calls).toEqual(["a", "b"]);
+    }
+    expect(failsEveryFeature({ kind: "failed", error: "no such page", status: 404 })).toBe(false);
+    expect(failsEveryFeature({ kind: "conflict", conflict: { pageId: "5", url: "u", version: 7, lastVersion: 6 } })).toBe(false);
+  });
+
+  test("Publish sends the checked features not yet published in this run", () => {
+    const files = FEATURES.map((f) => f.file);
+    expect(pendingFiles(FEATURES, new Set(files), new Map())).toEqual(files);
+    expect(pendingFiles(FEATURES, new Set([files[1]!]), new Map())).toEqual([files[1]!]);
+    expect(pendingFiles(FEATURES, new Set(files), new Map([[files[0]!, done(files[0]!) as RowState]]))).toEqual([files[1]!]);
   });
 });
 
