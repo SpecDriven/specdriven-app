@@ -6,8 +6,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  AUTOMERGE_WASM,
+  CBOR_EXTRACT_DIR,
   PATCH_MANIFEST_FILE,
+  bakedPaths,
   bundleOptions,
+  rewriteBakedModule,
   electronBuilderArgs,
   patchManifest,
   selectPlatforms,
@@ -86,4 +90,46 @@ test("the manifest names the app version and the fix; a build without a fix remo
   } finally {
     await rm(dist, { recursive: true, force: true });
   }
+});
+
+// The bundle is self-contained: a cross-built .deb or a copied .app starts on
+// a machine that has no node_modules at the builder's path. Bun bakes a
+// bundled dependency's `__dirname` in as an absolute string; the two that
+// read files by it are rewritten to look beside the bundle instead.
+test("Automerge's nodejs entry reads its wasm from beside the bundle, not the builder's node_modules", () => {
+  const path = "/builder/node_modules/@automerge/automerge/dist/mjs/wasm_bindgen_output/nodejs/automerge_wasm.cjs";
+  const source = "const wasmPath = `${__dirname}/automerge_wasm_bg.wasm`;\nconst wasmBytes = require('fs').readFileSync(wasmPath);\n";
+  const rewritten = rewriteBakedModule(path, source)!;
+  expect(rewritten).not.toContain("__dirname");
+  expect(rewritten).toContain(`bundleAssetPath(${JSON.stringify(AUTOMERGE_WASM)})`);
+  expect(rewritten).toContain("readFileSync(wasmPath)");
+  // The Windows path spelling matches too.
+  expect(rewriteBakedModule(path.replaceAll("/", "\\"), source)).not.toBeNull();
+  // An Automerge release that loads its wasm some other way fails the build rather than ship a surprise.
+  expect(() => rewriteBakedModule(path, "const wasmBytes = fetch('x');")).toThrow(/no longer reads its wasm from __dirname/);
+});
+
+test("cbor-extract hands its loader the cbor-extract/ directory beside the bundle", () => {
+  const rewritten = rewriteBakedModule("/builder/node_modules/cbor-extract/index.js", "module.exports = require('node-gyp-build-optional-packages')(__dirname)\n")!;
+  expect(rewritten).not.toContain("__dirname");
+  expect(rewritten).toContain(`bundleAssetPath(${JSON.stringify(CBOR_EXTRACT_DIR)})`);
+  expect(rewritten).toContain("node-gyp-build-optional-packages");
+  // Its platform packages, and everything else, bundle as they are.
+  expect(rewriteBakedModule("/builder/node_modules/@cbor-extract/cbor-extract-darwin-arm64/index.js", "")).toBeNull();
+  expect(rewriteBakedModule("/builder/node_modules/@automerge/automerge/dist/mjs/wasm_bindgen_output/web/automerge_wasm.js", "")).toBeNull();
+});
+
+test("a bundle that still bakes a build-machine path in is caught", () => {
+  const bundle = [
+    'var __dirname = "/Users/builder/app/node_modules/@automerge/automerge/dist/mjs/wasm_bindgen_output/nodejs", $Automerge;',
+    '  var __dirname = "/Users/builder/app/node_modules/cbor-extract";',
+    '  var __filename = "C:\\\\builder\\\\app\\\\node_modules\\\\x\\\\index.js";',
+    'const wasmPath = bundleAssetPath("automerge_wasm_bg.wasm");',
+  ].join("\n");
+  expect(bakedPaths(bundle)).toEqual([
+    "/Users/builder/app/node_modules/@automerge/automerge/dist/mjs/wasm_bindgen_output/nodejs",
+    "/Users/builder/app/node_modules/cbor-extract",
+    "C:\\\\builder\\\\app\\\\node_modules\\\\x\\\\index.js",
+  ]);
+  expect(bakedPaths('const wasmPath = bundleAssetPath("automerge_wasm_bg.wasm");')).toEqual([]);
 });
