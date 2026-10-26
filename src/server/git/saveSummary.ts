@@ -12,7 +12,7 @@ import { STATE_DIR } from "../state";
 import { parseFeature, parsePage, titleFromFileName } from "../parser";
 import type { Feature, Scenario } from "../parser";
 import { PAGE_FOLDERS, isPageFile } from "../pageFolders";
-import { isFeatureFile, isFolderDisplayNameFile, isFolderOrderFile } from "../walk";
+import { isFeatureFile, isFeatureOrderFile, isFolderDisplayNameFile, isFolderOrderFile } from "../walk";
 
 /** One file the working tree holds differently from HEAD. */
 export interface ChangedFile {
@@ -103,6 +103,12 @@ function entryFor(file: ChangedFile): Entry {
     const folder = path.slice(0, -(base.length + 1)) || ".";
     return { ...blank, verb: after === null ? "Delete" : "Reorder", noun: "folder order", name: folder };
   }
+  if (isFeatureOrderFile(base)) {
+    // The feature order (specs/ui/folders.feature.md "order features"),
+    // named by the folder whose features it orders.
+    const folder = path.slice(0, -(base.length + 1)) || ".";
+    return { ...blank, verb: after === null ? "Delete" : "Reorder", noun: "feature order", name: folder };
+  }
   const kind = PAGE_FOLDERS.find(({ folder }) => path.startsWith(`${folder}/`));
   if (kind && isPageFile(base)) {
     try {
@@ -170,10 +176,15 @@ function mergeMoves(entries: Entry[]): Entry[] {
   return out;
 }
 
+/** What a reorder is of: a folder's subfolders, or its features. */
+function reorderLine(e: Entry): string {
+  return e.noun === "feature order" ? "Reorder features in" : "Reorder folders in";
+}
+
 function singleTitle(e: Entry): string {
   if (e.noun === "feature" && e.verb === "Edit") return featureTitle(e);
   if (e.verb === "Describe") return `Describe folder: ${e.name}`;
-  if (e.verb === "Reorder") return `Reorder folders in: ${e.name}`;
+  if (e.verb === "Reorder") return `${reorderLine(e)}: ${e.name}`;
   if (e.verb === "Save") return `Save ${e.name}`;
   return `${e.verb} ${e.noun}: ${e.name}`;
 }
@@ -241,7 +252,7 @@ function fit(title: string): string {
 function bodyLine(e: Entry): string {
   if (e.verb === "Save") return `- Save ${e.name}`;
   if (e.verb === "Describe") return `- Describe folder: ${e.name}`;
-  if (e.verb === "Reorder") return `- Reorder folders in: ${e.name}`;
+  if (e.verb === "Reorder") return `- ${reorderLine(e)}: ${e.name}`;
   const head = `- ${e.verb} ${e.noun}: ${e.name}`;
   if (e.noun !== "feature" || e.verb !== "Edit") return head;
   const parts = e.scenarios.map((s) => `${s.change} "${s.name}"`);

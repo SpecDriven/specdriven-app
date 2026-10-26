@@ -86,6 +86,7 @@ import {
   listFolders,
   listFolderDescriptions,
   listFolderOrders,
+  listFeatureOrders,
   readFeatureForEditor,
   readFeatureView,
   createFeature,
@@ -94,6 +95,7 @@ import {
   renameFolder,
   setFolderDescription,
   setFolderOrder,
+  setFeatureOrder,
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
@@ -1830,6 +1832,9 @@ const getFeatures = withDataDir(async (dir) => {
     // Each folder's subfolder order, from its folder-order.txt (specs/ui/
     // folders.feature.md "order folders") — how the sidebar sorts them.
     folderOrders: await listFolderOrders(dir),
+    // Each folder's feature order, from its feature-order.txt (specs/ui/
+    // folders.feature.md "order features") — how the sidebar sorts them.
+    featureOrders: await listFeatureOrders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
     // Authorship in the feature files (specs/app/specs-authorship.feature.md)
@@ -2199,6 +2204,19 @@ const putFolderOrder = withDataDir(async (dir, req, params) => {
   if (!Array.isArray(body.folders)) return json({ error: "folders must be a list of folder names" }, 400);
   try {
     return json(await setFolderOrder(dir, params.path!, body.folders as string[]));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
+// specs/ui/folders.feature.md "order features": writes the folder's
+// feature-order.txt — its features' file names, one per line, in the order
+// the sidebar shows them — committed and pushed. `specs` orders the top level.
+const putFeatureOrder = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { features?: unknown };
+  if (!Array.isArray(body.features)) return json({ error: "features must be a list of feature file names" }, 400);
+  try {
+    return json(await setFeatureOrder(dir, params.path!, body.features as string[]));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -3077,6 +3095,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/folders/:path/rename", postRenameFolder],
   ["PUT", "/api/folders/:path/description", putFolderDescription],
   ["PUT", "/api/folders/:path/order", putFolderOrder],
+  ["PUT", "/api/folders/:path/feature-order", putFeatureOrder],
   ["POST", "/api/features/:file/move", postMove],
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],

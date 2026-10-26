@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
 import {
   FOLDER_DISPLAY_NAME_FILE,
+  FEATURE_ORDER_FILE,
   FOLDER_ORDER_FILE,
   LEGACY_FOLDER_DISPLAY_NAME_FILE,
   SPECS_FOLDER,
@@ -340,7 +341,15 @@ export async function setFolderOrder(
  */
 async function renameInFolderOrder(dataDir: string, from: string, to: string): Promise<void> {
   const parent = from.split("/").slice(0, -1).join("/");
-  const file = `${parent}/${FOLDER_ORDER_FILE}`;
+  await renameInOrder(dataDir, `${parent}/${FOLDER_ORDER_FILE}`, from, to, `Reorder folders in: ${parent}`);
+}
+
+/**
+ * An order file naming `from`'s last segment names `to`'s instead, committed
+ * and pushed — how a renamed folder or feature keeps its place. Nothing to
+ * do when there is no order file, or it never named the old one.
+ */
+async function renameInOrder(dataDir: string, file: string, from: string, to: string, message: string): Promise<void> {
   const text = await readTextFile(`${dataDir}/${file}`);
   if (text === null) return;
   const was = from.split("/").pop()!;
@@ -348,7 +357,69 @@ async function renameInFolderOrder(dataDir: string, from: string, to: string): P
   if (!orderLines(text).includes(was)) return;
   const lines = text.split(/\r?\n/).map((line) => (line.trim() === was ? now : line));
   await writeTextFile(`${dataDir}/${file}`, lines.join("\n"));
-  await commitAndPush(dataDir, file, `Reorder folders in: ${parent}`);
+  await commitAndPush(dataDir, file, message);
+}
+
+/**
+ * A folder's feature order (specs/ui/folders.feature.md "order features"):
+ * a `feature-order.txt` beside the features — `specs/` itself for the top
+ * level — naming their files one per line, in the order the sidebar shows
+ * them. A feature the file leaves out sorts after the named ones, by feature
+ * name; a name with no feature file any more is ignored, not an error.
+ */
+export { FEATURE_ORDER_FILE } from "./walk";
+
+/** The feature file names a folder's feature order lists, in its order; empty without one. */
+export async function readFeatureOrder(dataDir: string, folder: string): Promise<string[]> {
+  const text = await readTextFile(`${dataDir}/${safeFolder(folder)}/${FEATURE_ORDER_FILE}`);
+  return text === null ? [] : orderLines(text);
+}
+
+/**
+ * Every feature order in the spec tree, keyed by the folder whose features
+ * it orders — `specs` for the top level — carried on the listing beside the
+ * folder orders.
+ */
+export async function listFeatureOrders(dataDir: string): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  for (const folder of [SPECS_FOLDER, ...(await listFolders(dataDir))]) {
+    const order = await readFeatureOrder(dataDir, folder);
+    if (order.length > 0) out[folder] = order;
+  }
+  return out;
+}
+
+/**
+ * specs/ui/folders.feature.md "order features": put a folder's features in
+ * the given order. `names` are the features' file names, every one a feature
+ * directly in the folder; the folder's `feature-order.txt` takes them one per
+ * line, committed and pushed.
+ */
+export async function setFeatureOrder(
+  dataDir: string,
+  path: string,
+  names: readonly string[],
+): Promise<{ features: string[]; message: string }> {
+  const folder = safeFolder(path);
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
+  const entries = await readdir(`${dataDir}/${folder}`, { withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile() && isFeatureFile(entry.name)).map((entry) => entry.name);
+  const order: string[] = [];
+  for (const raw of names) {
+    const name = typeof raw === "string" ? raw.trim() : "";
+    if (!name || name.includes("/")) throw new Error(`Invalid feature file name: ${String(raw)}`);
+    if (!files.includes(name)) throw new Error(`Not a feature in ${folder}: ${name}`);
+    if (!order.includes(name)) order.push(name);
+  }
+  if (order.length === 0) throw new Error("Feature order is required");
+  const file = `${folder}/${FEATURE_ORDER_FILE}`;
+  const current = await readTextFile(`${dataDir}/${file}`);
+  if (current !== null && orderLines(current).join("\n") === order.join("\n")) {
+    return { features: order, message: "feature order unchanged" };
+  }
+  await writeTextFile(`${dataDir}/${file}`, `${order.join("\n")}\n`);
+  const sync = await commitAndPush(dataDir, file, `Reorder features in: ${folder}`);
+  return { features: order, message: sync.message };
 }
 
 export async function readFeature(dataDir: string, fileName: string): Promise<string | null> {
@@ -798,6 +869,9 @@ export async function renameFeatureFile(
     throw new Error(`Feature file already exists: ${to}`);
   }
   const sync = await moveAndPush(dataDir, from, to, `Rename file: ${from} -> ${to}`, await docMoves(dataDir, from, to));
+  // The feature keeps its place in the tree ("order features"): the
+  // folder's feature order, when it names the file, follows the rename.
+  await renameInOrder(dataDir, `${folder}/${FEATURE_ORDER_FILE}`, from, to, `Reorder features in: ${folder}`);
   return { fileName: to, message: sync.message };
 }
 

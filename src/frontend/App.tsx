@@ -205,6 +205,8 @@ import {
   buildTree,
   featuresBeneath,
   findFolder,
+  featureDrop,
+  featureNamesMoved,
   folderDrop,
   folderLabel,
   folderNamesMoved,
@@ -959,6 +961,8 @@ interface Listing {
   folderDescriptions: Record<string, string>;
   /** Folder path → its subfolders in order, from its folder-order.txt ("order folders"); `specs` for the top level. */
   folderOrders: Record<string, string[]>;
+  /** Folder path → its features' file names in order, from its feature-order.txt ("order features"). */
+  featureOrders: Record<string, string[]>;
   members: ProjectMember[];
   codeRepo: string | null;
   /** Whether the repo writes authorship into its feature files
@@ -1047,6 +1051,10 @@ export async function fetchListing(
           folderOrders:
             data.folderOrders && typeof data.folderOrders === "object"
               ? (data.folderOrders as Record<string, string[]>)
+              : {},
+          featureOrders:
+            data.featureOrders && typeof data.featureOrders === "object"
+              ? (data.featureOrders as Record<string, string[]>)
               : {},
           members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
           codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
@@ -1250,6 +1258,12 @@ export function App() {
    * tree shows it while the save is out.
    */
   const [folderOrders, setFolderOrders] = useState<Record<string, string[]>>({});
+  /**
+   * Folder path → its features' file names in order (specs/ui/
+   * folders.feature.md "order features"), for the folders that have a
+   * feature-order.txt. Written first on a move, like `folderOrders`.
+   */
+  const [featureOrders, setFeatureOrders] = useState<Record<string, string[]>>({});
   /** Folder paths whose subtree is collapsed in the sidebar. */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   /**
@@ -1295,6 +1309,12 @@ export function App() {
   /** True while the File submenu of the open tree menu is expanded. */
   /** Folder path the drag is hovering over ("" = top level). */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /**
+   * The sibling feature row a dragged feature would land beside (specs/ui/
+   * folders.feature.md "order features"), and on which edge. A feature
+   * dragged over a row in another folder drops into that folder instead.
+   */
+  const [featureDropAt, setFeatureDropAt] = useState<{ fileName: string; after: boolean } | null>(null);
   /**
    * A scenario being dragged in the sidebar outline
    * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
@@ -1766,6 +1786,7 @@ export function App() {
     setFolders(listing.folders);
     setFolderDescriptions(listing.folderDescriptions);
     setFolderOrders(listing.folderOrders);
+    setFeatureOrders(listing.featureOrders);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
@@ -3087,7 +3108,7 @@ export function App() {
   // at once, with Undo; one with features asks again, naming how many, and
   // then goes with them — a `git rm -r` on the server, committed and pushed.
   const removeFolder = async (path: string) => {
-    const node = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), path);
+    const node = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), path);
     const count = node ? featuresBeneath(node) : 0;
     const ok = await confirm({
       title: "Delete folder",
@@ -3222,7 +3243,7 @@ export function App() {
    * new order while the save is out, and falls back if it fails.
    */
   const moveFolderTo = async (parent: string, from: number, to: number) => {
-    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), parent)?.folders;
+    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), parent)?.folders;
     if (!siblings) return;
     const names = folderNamesMoved(siblings, from, to);
     if (!names) return;
@@ -3249,11 +3270,59 @@ export function App() {
   /** Move a folder one place up or down among its siblings, from its menu or the palette. */
   const reorderFolder = (path: string, delta: -1 | 1) => {
     const parent = path.split("/").slice(0, -1).join("/");
-    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders), parent)?.folders;
+    const siblings = findFolder(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), parent)?.folders;
     if (!siblings) return;
     const i = siblings.findIndex((f) => f.path === path);
     if (i < 0) return;
     void moveFolderTo(parent, i, i + delta);
+  };
+
+  /**
+   * Move the feature at `from` among `parent`'s features to `to` (specs/ui/
+   * folders.feature.md "order features") — one place for Move up / Move
+   * down, anywhere for a drop on a sibling's row — and save the order: the
+   * folder's feature-order.txt, committed and pushed. The tree shows the new
+   * order while the save is out, and falls back if it fails.
+   */
+  const moveFeatureTo = async (parent: string, from: number, to: number) => {
+    const siblings = findFolder(
+      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
+      parent,
+    )?.features;
+    if (!siblings) return;
+    const names = featureNamesMoved(siblings, from, to);
+    if (!names) return;
+    const before = featureOrders;
+    setFeatureOrders({ ...before, [parent]: names });
+    setTreeMenu(null);
+    try {
+      const res = await fetch(`/api/folders/${encodeURIComponent(parent)}/feature-order`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ features: names }),
+      });
+      const data = (await res.json()) as { features?: string[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Could not move the feature");
+      await loadFeatures();
+    } catch (e) {
+      setFeatureOrders(before);
+      toast.error(
+        e instanceof TypeError ? "Could not move the feature — is the server running?" : (e as Error).message,
+      );
+    }
+  };
+
+  /** Move a feature one place up or down among its siblings, from the palette. */
+  const reorderFeature = (fileName: string, delta: -1 | 1) => {
+    const parent = fileName.slice(0, fileName.lastIndexOf("/"));
+    const siblings = findFolder(
+      buildTree(folders, features, folderDescriptions, folderOrders, featureOrders),
+      parent,
+    )?.features;
+    if (!siblings) return;
+    const i = siblings.findIndex((f) => f.fileName === fileName);
+    if (i < 0) return;
+    void moveFeatureTo(parent, i, i + delta);
   };
 
   /** Undo of a folder delete: only empty folders go, so re-creating restores it. */
@@ -5755,8 +5824,24 @@ export function App() {
     await loadFeatures();
   };
 
-  /** One sidebar entry per feature; the entry is the drag source. */
-  const featureItem = (f: FeatureListing, depth: number) => {
+  /**
+   * One sidebar entry per feature; the entry is the drag source. `parent` is
+   * the folder it sits in, whose features it moves up and down among
+   * (specs/ui/folders.feature.md "order features").
+   */
+  const featureItem = (f: FeatureListing, depth: number, parent: FolderNode) => {
+    const index = parent.features.findIndex((x) => x.fileName === f.fileName);
+    // Drag to reorder ("order features"): a feature dragged over a sibling's
+    // row lands before or after it; over a row in another folder it still
+    // drops into that folder, the folder's own drag-move.
+    const siblingDrag =
+      dragging !== null && dragging !== f.fileName && parent.features.some((x) => x.fileName === dragging);
+    const featureDropEdge =
+      siblingDrag && featureDropAt?.fileName === f.fileName
+        ? featureDropAt.after
+          ? " drop-after"
+          : " drop-before"
+        : "";
     const entry = specSelection.get(f.fileName);
     // The feature's scenarios, listed under it when the outline is expanded
     // (specs/ui/navigation.feature.md "Scenario navigation"). The open feature
@@ -5766,7 +5851,35 @@ export function App() {
     const expanded = rows.length > 0 && outlined.has(f.fileName);
     return (
       <div key={f.fileName}>
-        <div className={`tree-row${matchesFilter(f) ? "" : " dim"}`}>
+        <div
+          className={`tree-row${matchesFilter(f) ? "" : " dim"}${featureDropEdge}${
+            dragging === f.fileName ? " dragging" : ""
+          }`}
+          onDragOver={(e) => {
+            if (!siblingDrag) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "move";
+            setDropTarget(null);
+            const box = e.currentTarget.getBoundingClientRect();
+            const after = e.clientY > box.top + box.height / 2;
+            if (featureDropAt?.fileName !== f.fileName || featureDropAt.after !== after) {
+              setFeatureDropAt({ fileName: f.fileName, after });
+            }
+          }}
+          onDrop={(e) => {
+            if (!siblingDrag) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const box = e.currentTarget.getBoundingClientRect();
+            const dragged = dragging!;
+            setDragging(null);
+            setDropTarget(null);
+            setFeatureDropAt(null);
+            const move = featureDrop(parent.features, dragged, f.fileName, e.clientY > box.top + box.height / 2);
+            if (move) void moveFeatureTo(parent.path, move.from, move.to);
+          }}
+        >
           {/* Code gen selection (specs/agents/claude.feature.md): checking a
               spec here takes the whole thing; a dash means some of its
               scenarios are picked, which is done on the scenario cards.
@@ -5838,6 +5951,7 @@ export function App() {
         onDragEnd={() => {
           setDragging(null);
           setDropTarget(null);
+          setFeatureDropAt(null);
         }}
         onClick={(e) =>
           spaClick(e, () => {
@@ -5891,6 +6005,23 @@ export function App() {
                   onSelect: () => void renameFile(f.fileName),
                 },
               ],
+            },
+            // Move up / Move down (specs/ui/folders.feature.md "order
+            // features"): the order among its siblings is the user's, kept
+            // in the folder's feature-order.txt.
+            {
+              id: "move-up",
+              label: "Move up",
+              icon: <ArrowUp size={13} />,
+              disabled: index <= 0,
+              onSelect: () => void moveFeatureTo(parent.path, index, index - 1),
+            },
+            {
+              id: "move-down",
+              label: "Move down",
+              icon: <ArrowDown size={13} />,
+              disabled: index < 0 || index === parent.features.length - 1,
+              onSelect: () => void moveFeatureTo(parent.path, index, index + 1),
             },
             {
               id: "move",
@@ -6248,7 +6379,7 @@ export function App() {
         </div>
         );
       })}
-      {node.features.map((f) => featureItem(f, depth))}
+      {node.features.map((f) => featureItem(f, depth, node))}
     </>
   );
 
@@ -6430,7 +6561,7 @@ export function App() {
   const scenarioNav =
     selected && editedEntry
       ? scenarioNeighbors(
-          scenarioSequence(buildTree(folders, features, folderDescriptions, folderOrders), selected, feature),
+          scenarioSequence(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), selected, feature),
           selected,
           editedEntry,
         )
@@ -6762,7 +6893,7 @@ export function App() {
   const moveFeaturePrompt = async (fileName: string | null = selected) => {
     if (!fileName) return;
     const from = fileName.slice(0, fileName.lastIndexOf("/"));
-    const options = folderOptions(buildTree(folders, features, folderDescriptions, folderOrders), from);
+    const options = folderOptions(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), from);
     const to = await pick({
       title: `Move “${fileStem(fileName)}”`,
       hint: "To another folder — a git mv, committed and pushed.",
@@ -6821,6 +6952,10 @@ export function App() {
           ),
           action("move", "Move feature to folder…", <FolderInput size={14} />, () =>
             void moveFeaturePrompt(),
+          ),
+          action("move-feature-up", "Move feature up", <ArrowUp size={14} />, () => reorderFeature(selected, -1)),
+          action("move-feature-down", "Move feature down", <ArrowDown size={14} />, () =>
+            reorderFeature(selected, 1),
           ),
           ...(listing
             ? [
@@ -9001,7 +9136,7 @@ export function App() {
               void moveTo(dragging, "");
             }}
           >
-            {renderTree(buildTree(folders, features, folderDescriptions, folderOrders), 0)}
+            {renderTree(buildTree(folders, features, folderDescriptions, folderOrders, featureOrders), 0)}
             {features.length === 0 && folders.length === 0 && (
               <p className="empty">No feature files yet</p>
             )}
