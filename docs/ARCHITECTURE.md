@@ -110,25 +110,35 @@ names no agent: `/api/state` lists the providers' descriptors (`agents`), the
 session dialog and the pane read those, a session asked for without an agent
 runs on the first available by rank, and the record's `agent` is the
 provider id (`agentLegacy.ts` maps the pre-plugin values "pane", "pi-pane",
-"codex-pane"). The three providers are built-in plugins
-(src/plugins/builtin/agent-claude, agent-codex, agent-pi): each registers
-its provider while it is on, and their manifests `autoEnable` — they go on
-in every data folder the first time it is opened, since they have no tab,
-and a switch-off in Settings → Plugins is kept per folder
-(`plugins.repos[<folder>].autoEnabled`). A built-in is mounted with the
-same `HostConfig` an external plugin gets: `settings`, the plugin's own
-section of settings.json (`pluginSettings[<id>]`, src/plugins/host/
-pluginSettings.ts, patched through the service or `PUT /api/state`), and
-`secrets(name)`, a named store kept apart from the settings file
-(src/server/secrets.ts: a 0600 file under the home, or Electron
-safeStorage on the desktop). The Claude plugin keeps how Claude signs in
-under its section — adopted once from the old top-level keys, which stay
-for one release — and changes it through its own `PUT /api/claude/settings`;
-its Settings section comes from the client's `settings` registry
-(src/plugins/client/settings.ts), the page's extension point, which puts a
-plugin's section where its `order` says among the core ones.
+"codex-pane"). The three providers are marketplace plugins
+(`plugins/agent-claude`, `agent-codex` and `agent-pi` in the
+SpecDriven/plugins repository), not part of this tree: at start the app
+reads the cached marketplace indexes and, for each row carrying `agent:
+{ id, command }` whose command is on PATH, installs the plugin the way
+Settings → Plugins would — once, remembered in `plugins.autoInstalled` so a
+plugin the user removed stays removed (src/plugins/host/autoInstall.ts,
+called from `applyStartupState` without being awaited; the pane learns of
+the new plugin through `/api/plugins/events`). The pane's empty state offers
+the rest from the same indexes. Their manifests `autoEnable`: they go on in
+every data folder the first time it is opened with them installed, since
+they have no tab, and a switch-off in Settings → Plugins is kept per folder
+(`plugins.repos[<folder>].autoEnabled`). Each is mounted with a `HostConfig`:
+`settings`, the plugin's own section of settings.json
+(`pluginSettings[<id>]`, src/plugins/host/pluginSettings.ts, patched through
+the service or `PUT /api/state`), and `secrets(name)`, a named store kept
+apart from the settings file (src/server/secrets.ts: a 0600 file under the
+home, or Electron safeStorage on the desktop; the Claude plugin's token
+store keeps the `claude-token.json` file it had while Claude was built in).
+The Claude plugin keeps how Claude signs in under its section — adopted
+once from the old top-level keys — and changes it through its own `PUT
+/api/claude/settings`; its Settings section comes from the client's
+`settings` registry (src/plugins/client/settings.ts), the page's extension
+point, which puts a plugin's section where its `order` says among the core
+ones. The demo registers a scripted provider of its own under Claude's id
+(src/server/demoAgent.ts) and installs no agent plugin. The hosted app runs
+no plugin folders, so it has no agent.
 
-Claude (src/plugins/builtin/agent-claude/provider.ts): one long-lived `query()` from
+Claude (`plugins/agent-claude/src/provider.ts`): one long-lived `query()` from
 `@anthropic-ai/claude-agent-sdk` per chat, in streaming-input mode, spawns
 the developer's own `claude` binary with the project's `code-repo` (else the
 data repo) as its working directory and Claude Code's own system prompt and
@@ -140,7 +150,7 @@ one-shot turn the task estimate asks for. When a project names a
 `code-repo`, the session runs there and the data repo is an additional
 directory, so Claude can read the specs the prompt points at.
 
-Pi: the same pane, driven by pi.dev's agent instead (src/plugins/builtin/agent-pi/provider.ts
+Pi: the same pane, driven by pi.dev's agent instead (`plugins/agent-pi/src/provider.ts`
 over its piChat.ts,
 specs/agents/integration-with-pi-dev-agent.feature.md), offered when the `pi`
 binary is on PATH. `pi --mode rpc` speaks JSON lines on stdin/stdout: commands
@@ -155,7 +165,7 @@ permission cards, offer no permission mode, and say so in the transcript.
 Extension dialogs, which would otherwise block pi forever, are cancelled with
 a note.
 
-Codex: the same pane, driven by OpenAI's Codex CLI (src/plugins/builtin/agent-codex/provider.ts
+Codex: the same pane, driven by OpenAI's Codex CLI (`plugins/agent-codex/src/provider.ts`
 over its codexChat.ts),
 offered when the `codex` binary is on PATH. `codex app-server` speaks
 JSON-RPC-shaped lines on stdin/stdout: requests out (`initialize`,

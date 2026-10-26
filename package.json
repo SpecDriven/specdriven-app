@@ -160,7 +160,6 @@
     }
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.261",
     "@automerge/automerge": "^3.5.0",
     "@automerge/automerge-repo": "^2.6.0-alpha.3",
     "@automerge/automerge-repo-network-websocket": "^2.6.0-alpha.3",

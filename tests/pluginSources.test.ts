@@ -23,7 +23,6 @@ import { setBuildDisabled } from "../src/plugins/host/build";
 import { pluginsHome, repoPluginsDir } from "../src/plugins/host/sources";
 import { compareVersions, parsePackageManifest } from "../src/plugins/manifest";
 import { clientLoadErrors, syncClientPlugins, tabs } from "../src/plugins/client/loader";
-import { AGENT_PLUGIN_IDS } from "./helpers/agentPlugins";
 import { pathToFileURL } from "node:url";
 
 let home: string;
@@ -243,18 +242,16 @@ test("an installed plugin whose manifest says autoEnable switches itself on in t
 
   await fixture(join(pluginsHome(), "pal"), "pal", { manifest: { autoEnable: true, defaultEnabled: false } });
   const opts = { sources: true, dataDir: null };
-  // Found for the first time in a folder that has its own list (the
-  // built-in agents switched on there before): off by its manifest, yet on
-  // in that folder by autoEnable, and recorded as such.
-  const done = [...AGENT_PLUGIN_IDS];
-  const state: Record<string, unknown> = { dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: done } } } };
+  // Found for the first time in a folder that has its own list: off by its
+  // manifest, yet on in that folder by autoEnable, and recorded as such.
+  const state: Record<string, unknown> = { dataRepo: repo, plugins: { repos: { [repo]: { enabled: [] } } } };
   await syncPlugins(state, opts);
-  expect(state.plugins).toEqual({ repos: { [repo]: { enabled: ["pal"], autoEnabled: [...done, "pal"] } }, seen: ["pal"] });
+  expect(state.plugins).toEqual({ repos: { [repo]: { enabled: ["pal"], autoEnabled: ["pal"] } }, seen: ["pal"] });
   expect(matchApi("GET", "/api/pal")).not.toBeNull();
   expect(row("pal")).toMatchObject({ enabled: true, active: true });
 
   // Switched off in that folder afterwards: the record says it was done once.
-  await syncPlugins({ dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: [...done, "pal"] } }, seen: ["pal"] } }, opts);
+  await syncPlugins({ dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: ["pal"] } }, seen: ["pal"] } }, opts);
   expect(matchApi("GET", "/api/pal")).toBeNull();
   expect(row("pal")).toMatchObject({ enabled: false, active: false });
 });

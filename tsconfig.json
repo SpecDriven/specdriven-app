@@ -27,5 +27,8 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  // The build's output, and the desktop crash test's profile under dist/,
+  // where the agent plugins it installs bring their own .ts tests.
+  "exclude": ["node_modules", "dist", "release"]
 }

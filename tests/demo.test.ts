@@ -8,14 +8,9 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import {
-  setClaudeAvailability,
-  setDesktopAvailability,
-  setPiAvailability,
-} from "../src/server/agent";
-import { unmountAgentPlugins } from "./helpers/agentPlugins";
+import { setDesktopAvailability } from "../src/server/agent";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
-import { setupDemo } from "../src/server/demo";
+import { setupDemo, teardownDemoAgent } from "../src/server/demo";
 import { setFolderChooser } from "../src/server/folderChooser";
 import { setGitEngine } from "../src/server/git";
 import { readState } from "../src/server/state";
@@ -56,12 +51,10 @@ afterEach(async () => {
   reloader.stop();
   setGitEngine(null);
   setFolderChooser(realChooser);
-  // The demo's plugins register the simulated Claude, and setupDemo fakes
-  // the other probes (src/server/demo.ts); left in place they would hand a
-  // fake Claude to every later test file in the run.
-  await unmountAgentPlugins();
-  setClaudeAvailability(null);
-  setPiAvailability(null);
+  // setupDemo registers the simulated Claude and fakes the desktop probe
+  // (src/server/demo.ts); left in place they would hand a fake Claude to
+  // every later test file in the run.
+  await teardownDemoAgent();
   setDesktopAvailability(null);
   await rm(root, { recursive: true, force: true });
   await rm(source, { recursive: true, force: true });
@@ -170,15 +163,11 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
   expect(state.openTestsInIdea).toBe(false);
   // The profile behind the module switches (specs/app/plugins.feature.md
   // "Each data folder keeps its own plugins"): every built-in listed, none
-  // of the tabs on — the visitor's Settings → Plugins offers them. The
-  // tab-less agents switch themselves on (specs/agents/agent-plugins
-  // .feature.md); the Claude one is the simulation.
+  // on — the visitor's Settings → Plugins offers them. The agent is the
+  // simulation, no plugin (src/server/demoAgent.ts).
   expect(
     (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
   ).toEqual([
-    ["agent-claude", true, true],
-    ["agent-codex", true, true],
-    ["agent-pi", true, true],
     ["roadmap", false, false],
     ["tasks", false, false],
     ["notebook", false, false],

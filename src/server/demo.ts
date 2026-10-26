@@ -5,11 +5,12 @@
 // nothing ever talks to GitHub. Each page load reseeds a fresh copy, so a
 // browser refresh returns the demo to the default dataset.
 //
-// Code gen sessions run too, simulated (roadmap/demo.md "Demo App"):
-// the Claude agent plugin registers a simulated provider under Claude's id,
-// so the app reports one agent — Claude in a pane — and drives it with the
-// script in src/server/demoAgent.ts instead of a subprocess. Claude Code Desktop, Pi and Codex report unavailable, so
-// the session dialog offers no choice and nothing can reach a real CLI.
+// Code gen sessions run too, simulated (roadmap/demo.md "Demo App"): the
+// demo registers a scripted provider under Claude's id, so the app reports
+// one agent — Claude in a pane — and drives it with the script in
+// src/server/demoAgent.ts instead of a subprocess. No agent plugin is
+// installed and Claude Code Desktop reports unavailable, so the session
+// dialog offers no choice and nothing can reach a real CLI.
 //
 // Plugins from the marketplace load too (specs/app/plugins.feature.md): at
 // start the demo installs the ones DEMO_MARKETPLACE_PLUGINS names — the
@@ -19,7 +20,10 @@
 
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { setCodexAvailability, setDesktopAvailability, setPiAvailability } from "./agent";
+import { setDesktopAvailability } from "./agent";
+import { agents } from "../plugins/host/agents";
+import type { Disposer } from "../plugins/kernel";
+import { simulatedProvider } from "./demoAgent";
 import { setFolderChooser } from "./folderChooser";
 import { getAppRoot } from "./paths";
 import { resetSearchCache } from "./search";
@@ -138,19 +142,27 @@ export function reseedDemo(): Promise<void> {
  * files — under the demo root, away from the user's real ~/.specdriven, and
  * removes the native folder chooser (Browse… hides, /api/choose-folder 501s).
  */
+/** The simulated provider's registration, while the demo is set up. */
+let simulation: Disposer | null = null;
+
+/** Take the simulated agent off the registry — for the tests, which share a process. */
+export async function teardownDemoAgent(): Promise<void> {
+  const dispose = simulation;
+  simulation = null;
+  if (dispose) await dispose();
+}
+
 export async function setupDemo(): Promise<void> {
   process.env.SPECDRIVEN_ROOT ||= "/tmp/specdriven-demo";
   process.env.SPECDRIVEN_HOME = join(getAppRoot(), "home");
   await mkdir(getAppRoot(), { recursive: true });
   setFolderChooser(null);
-  // The coding agent pane, simulated: the Claude agent plugin registers the
-  // script in place of the SDK while DEMO_MODE is on (src/plugins/builtin/
-  // agent-claude/host.ts), so the pane, its toggle and the session dialog
-  // are all live, and the other agents report absent. Nothing probes PATH
-  // and nothing is spawned — see src/server/demoAgent.ts. The demo never
-  // auto-installs agent plugins either: its agent is this one.
-  setPiAvailability(() => false);
-  setCodexAvailability(() => false);
+  // The coding agent pane, simulated: the demo registers its own scripted
+  // provider under Claude's id (src/server/demoAgent.ts), so the pane, its
+  // toggle and the session dialog are all live. Nothing probes PATH and
+  // nothing is spawned; the demo never installs agent plugins either, its
+  // agent is this one, and Claude Code Desktop reports absent.
+  simulation ??= agents.register(simulatedProvider);
   setDesktopAvailability(() => false);
   await reseedDemo();
 }

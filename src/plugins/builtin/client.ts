@@ -9,8 +9,6 @@ import { pagesClient } from "./pages/client";
 import { notebookManifest, roadmapManifest, tasksManifest } from "./pages/manifest";
 import selfFix from "./self-fix/client";
 import { manifest as selfFixManifest } from "./self-fix/manifest";
-import agentClaude from "./agent-claude/client";
-import { manifest as agentClaudeManifest } from "./agent-claude/manifest";
 import tests from "./tests/client";
 import { manifest as testsManifest } from "./tests/manifest";
 import { NOTEBOOK_TAB, ROADMAP_TAB, TASKS_TAB } from "../../frontend/pages/pages";
@@ -28,6 +26,4 @@ export const builtinClientPlugins: ClientPlugin[] = [
   { manifest: issuesManifest, plugin: issues },
   { manifest: testsManifest, plugin: tests },
   { manifest: selfFixManifest, plugin: selfFix },
-  // The Claude agent's Settings section; Codex and Pi have host halves only.
-  { manifest: agentClaudeManifest, plugin: agentClaude },
 ];
