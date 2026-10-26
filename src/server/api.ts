@@ -100,6 +100,7 @@ import {
   deleteFeature,
   deletePublishedScenario,
   moveScenario,
+  duplicateScenario,
   moveFeature,
   renameFeature,
   renameFeatureFile,
@@ -2146,6 +2147,20 @@ const postMoveScenario = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/ui/navigation.feature.md "duplicate a scenario": the scenario menus'
+// Duplicate — a draft copy right after the scenario, saved locally like any
+// edit. Answers the feature's editor view and the copy's name and version.
+const postDuplicateScenario = withDataDir(async (dir, req, params) => {
+  const body = (await req.json()) as { scenario?: ScenarioBody };
+  const target = scenarioTarget(body.scenario);
+  if (!target) return json({ error: "scenario needs a name and a version" }, 400);
+  try {
+    return json(await duplicateScenario(dir, params.file!, target));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/ui/ui.feature.md "Feature entry menu": Delete removes the feature
 // file — a `git rm`, committed and pushed. The client confirms first.
 const deleteFeatureRoute = withDataDir(async (dir, _req, params) => {
@@ -3113,6 +3128,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/features/:file/scenario-files", putScenarioFiles],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
+  ["POST", "/api/features/:file/duplicate-scenario", postDuplicateScenario],
   ["POST", "/api/agent/session", unlessHosted(postAgentSession)],
   ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],
   ["POST", "/api/agent/chat", unlessHosted(postAgentChat)],
