@@ -91,10 +91,24 @@ export function isFolderOrderFile(base: string): boolean {
 }
 
 /**
- * Whether a file is one of a folder's own metadata files — a display name
- * or a subfolder order — rather than content: a folder holding nothing else
- * loses no feature when it goes.
+ * Whether a file is one of a folder's own metadata files — a display name,
+ * a subfolder order or a feature order — rather than content: a folder
+ * holding nothing else loses no feature when it goes.
  */
 export function isFolderMetadataFile(base: string): boolean {
-  return isFolderDisplayNameFile(base) || isFolderOrderFile(base);
+  return isFolderDisplayNameFile(base) || isFolderOrderFile(base) || isFeatureOrderFile(base);
+}
+
+/**
+ * The file a folder's feature order lives in (specs/ui/folders.feature.md
+ * "order features"): one feature file name per line — `billing.feature.md` —
+ * in the order the sidebar shows them. A feature it does not name sorts
+ * after the named ones, by feature name. It sits beside the features it
+ * orders — `specs/` itself for the top level.
+ */
+export const FEATURE_ORDER_FILE = "feature-order.txt";
+
+/** Whether a file's base name is a folder's feature order file. */
+export function isFeatureOrderFile(base: string): boolean {
+  return base === FEATURE_ORDER_FILE;
 }

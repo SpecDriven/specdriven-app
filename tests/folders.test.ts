@@ -7,22 +7,28 @@ import {
   createFolder,
   deleteFolder,
   listFeatures,
+  listFeatureOrders,
   listFolderDescriptions,
   listFolderOrders,
   listFolders,
   moveFeature,
+  readFeatureOrder,
   readFolderDescription,
   readFolderOrder,
   readFeature,
   renameFeature,
+  renameFeatureFile,
   renameFolder,
   setFolderDescription,
+  setFeatureOrder,
   setFolderOrder,
 } from "../src/server/features";
 import { setGitEngine } from "../src/server/git";
 import type { GitEngine } from "../src/server/git";
 import {
   buildTree,
+  featureDrop,
+  featureNamesMoved,
   featuresBeneath,
   findFolder,
   folderDrop,
@@ -482,6 +488,101 @@ test("folderNamesMoved and folderDrop", () => {
   expect(folderDrop(siblings, "specs/b", "specs/ghost", true)).toBeNull();
 });
 
+// specs/ui/folders.feature.md "order features": a feature-order.txt beside
+// a folder's features names their files in the order the sidebar shows them;
+// setFeatureOrder takes only features directly in that folder, and a renamed
+// file keeps its place.
+test("setFeatureOrder writes feature-order.txt, refusing names that are not features there", async () => {
+  await mkdir(join(root, "specs/billing"), { recursive: true });
+  await Bun.write(join(root, "specs/top.feature.md"), "# Top\n");
+  await Bun.write(join(root, "specs/billing/quotes.feature.md"), "# Quotes\n");
+  await Bun.write(join(root, "specs/billing/invoices.feature.md"), "# Invoices\n");
+  expect(await setFeatureOrder(root, "billing", ["quotes.feature.md", " invoices.feature.md "])).toEqual({
+    features: ["quotes.feature.md", "invoices.feature.md"],
+    message: "saved locally (not a git repository)",
+  });
+  expect(await Bun.file(join(root, "specs/billing/feature-order.txt")).text()).toBe(
+    "quotes.feature.md\ninvoices.feature.md\n",
+  );
+  expect(await setFeatureOrder(root, "specs/billing", ["quotes.feature.md", "invoices.feature.md"])).toEqual({
+    features: ["quotes.feature.md", "invoices.feature.md"],
+    message: "feature order unchanged",
+  });
+  expect(await setFeatureOrder(root, "", ["top.feature.md"])).toMatchObject({ features: ["top.feature.md"] });
+  expect(await readFeatureOrder(root, "specs")).toEqual(["top.feature.md"]);
+  expect(await listFeatureOrders(root)).toEqual({
+    specs: ["top.feature.md"],
+    "specs/billing": ["quotes.feature.md", "invoices.feature.md"],
+  });
+  // the order file is not a feature
+  expect((await listFeatures(root)).map((f) => f.fileName)).toEqual([
+    "specs/billing/invoices.feature.md",
+    "specs/billing/quotes.feature.md",
+    "specs/top.feature.md",
+  ]);
+  await expect(setFeatureOrder(root, "specs", ["quotes.feature.md"])).rejects.toThrow(
+    "Not a feature in specs: quotes.feature.md",
+  );
+  await expect(setFeatureOrder(root, "specs", ["billing/quotes.feature.md"])).rejects.toThrow(
+    "Invalid feature file name: billing/quotes.feature.md",
+  );
+  await expect(setFeatureOrder(root, "specs", [])).rejects.toThrow("Feature order is required");
+  await expect(setFeatureOrder(root, "specs/ghost", ["x.feature.md"])).rejects.toThrow("Folder not found: specs/ghost");
+  // a renamed file keeps its place in the folder's order
+  expect(await renameFeatureFile(root, "specs/billing/quotes.feature.md", "Offers")).toMatchObject({
+    fileName: "specs/billing/offers.feature.md",
+  });
+  expect(await readFeatureOrder(root, "billing")).toEqual(["offers.feature.md", "invoices.feature.md"]);
+  // a folder holding only order files is deleted without a second ask
+  await mkdir(join(root, "specs/empty"), { recursive: true });
+  await Bun.write(join(root, "specs/empty/feature-order.txt"), "gone.feature.md\n");
+  await deleteFolder(root, "specs/empty");
+  expect(await listFolders(root)).toEqual(["specs/billing"]);
+});
+
+// The sidebar puts a folder's features in its feature-order.txt order, the
+// ones it leaves out after them by feature name; a stale name orders nothing.
+test("buildTree orders features by feature order, the rest by name", () => {
+  const listing = (fileName: string, name: string) => ({ fileName, name, scenarios: [] });
+  const tree = buildTree(
+    ["specs/billing"],
+    [
+      listing("specs/a.feature.md", "Zebra"),
+      listing("specs/b.feature.md", "Apple"),
+      listing("specs/c.feature.md", "Mango"),
+      listing("specs/billing/x.feature.md", "X"),
+      listing("specs/billing/y.feature.md", "Y"),
+    ],
+    {},
+    {},
+    { specs: ["c.feature.md", "ghost.feature.md"], "specs/billing": ["y.feature.md", "x.feature.md"] },
+  );
+  expect(tree.features.map((f) => f.name)).toEqual(["Mango", "Apple", "Zebra"]);
+  expect(findFolder(tree, "specs/billing")!.features.map((f) => f.name)).toEqual(["Y", "X"]);
+  // without orders, by feature name
+  expect(buildTree([], [listing("specs/a.feature.md", "Zebra"), listing("specs/b.feature.md", "Apple")]).features.map((f) => f.name)).toEqual(["Apple", "Zebra"]);
+});
+
+// Move up / Move down send every sibling's file name in the new order; a
+// drop on a sibling's row lands before or after it, as a folder drop does.
+test("featureNamesMoved and featureDrop", () => {
+  const siblings = ["a", "b", "c"].map((n) => ({ fileName: `specs/billing/${n}.feature.md` }));
+  expect(featureNamesMoved(siblings, 1, 0)).toEqual(["b.feature.md", "a.feature.md", "c.feature.md"]);
+  expect(featureNamesMoved(siblings, 1, 2)).toEqual(["a.feature.md", "c.feature.md", "b.feature.md"]);
+  expect(featureNamesMoved(siblings, 0, -1)).toBeNull();
+  expect(featureNamesMoved(siblings, 2, 3)).toBeNull();
+  expect(featureDrop(siblings, "specs/billing/c.feature.md", "specs/billing/a.feature.md", false)).toEqual({
+    from: 2,
+    to: 0,
+  });
+  expect(featureDrop(siblings, "specs/billing/a.feature.md", "specs/billing/c.feature.md", true)).toEqual({
+    from: 0,
+    to: 2,
+  });
+  expect(featureDrop(siblings, "specs/billing/b.feature.md", "specs/billing/a.feature.md", true)).toBeNull();
+  expect(featureDrop(siblings, "specs/billing/b.feature.md", "specs/other/a.feature.md", true)).toBeNull();
+});
+
 // The move flow runs on all three git engines (git-operations.md).
 for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
   describe(`git engine: ${engine}`, () => {
@@ -639,6 +740,31 @@ for (const engine of ["cli", "gh", "js"] as GitEngine[]) {
       await git(b, "pull");
       expect(await listFolderOrders(b)).toEqual({ specs: ["invoices", "alpha"] });
       expect(await listFolders(b)).toEqual(["specs/alpha", "specs/invoices"]);
+    });
+
+    // specs/ui/folders.feature.md "order features": the new order lands in
+    // feature-order.txt, committed and pushed, and a file rename keeps the
+    // feature's place in it. The other clone sees each on pull.
+    test("setFeatureOrder commits and pushes feature-order.txt; renameFeatureFile keeps the place", async () => {
+      const { a, b } = await twoClones(root, {
+        "specs/billing/invoices.feature.md": "# Invoices\n",
+        "specs/billing/quotes.feature.md": "# Quotes\n",
+      });
+      const set = await setFeatureOrder(a, "specs/billing", ["quotes.feature.md", "invoices.feature.md"]);
+      expect(set).toEqual({ features: ["quotes.feature.md", "invoices.feature.md"], message: "committed and pushed" });
+      let log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Reorder features in: specs/billing");
+      await git(b, "pull");
+      expect(await listFeatureOrders(b)).toEqual({ "specs/billing": ["quotes.feature.md", "invoices.feature.md"] });
+
+      await renameFeatureFile(a, "specs/billing/quotes.feature.md", "offers");
+      expect(await readFeatureOrder(a, "specs/billing")).toEqual(["offers.feature.md", "invoices.feature.md"]);
+      log = await git(a, "log", "-1", "--pretty=%s");
+      expect(log.stdout.toString()).toContain("Reorder features in: specs/billing");
+      const status = await git(a, "status", "--porcelain");
+      expect(status.stdout.toString()).toBe("");
+      await git(b, "pull");
+      expect(await listFeatureOrders(b)).toEqual({ "specs/billing": ["offers.feature.md", "invoices.feature.md"] });
     });
 
     // A legacy description.txt moves over to display-name.txt in the same
