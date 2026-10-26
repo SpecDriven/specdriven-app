@@ -26,9 +26,16 @@ export { createFeature } from "../../server/features";
 export { fileExists, readTextFile, writeTextFile } from "../../server/fsx";
 export { commitAndPush, removeAndPush } from "../../server/git";
 export { slugify, titleFromFileName } from "../../server/parser";
-export { which } from "../../server/run";
+export { run, which } from "../../server/run";
+export type { RunOptions, RunResult } from "../../server/run";
 export { sessionWorkDir } from "../../server/agent";
 export { jsonlReader } from "../../server/jsonl";
+export { isDemoMode } from "../../server/demoMode";
+export { HOSTED_REFUSAL, isHostedMode } from "../../server/hostedMode";
+export type { SecretRecord, SecretStore } from "../../server/secrets";
+export type { PluginSettings } from "../host/pluginSettings";
+export type { HostConfig } from "../host/loader";
+export type { PluginManifest } from "../manifest";
 export { AgentError, agents } from "../host/agents";
 export type {
   AgentHost,
@@ -47,6 +54,7 @@ export type {
   AgentCapabilities,
   AgentDescriptor,
   AgentOffer,
+  AgentOutput,
   AssistantBlock,
   ChatAccount,
   ChatAgent,
@@ -57,6 +65,7 @@ export type {
   PermissionSuggestion,
   SlashCommandInfo,
 } from "../../server/agentTypes";
+export { normalizePermissionMode } from "../../server/agentTypes";
 export { getLogger, withSpan } from "../../server/telemetry";
 export type { Context, Disposer, Plugin } from "../kernel";
 export type {

@@ -23,6 +23,7 @@ import { setBuildDisabled } from "../src/plugins/host/build";
 import { pluginsHome, repoPluginsDir } from "../src/plugins/host/sources";
 import { compareVersions, parsePackageManifest } from "../src/plugins/manifest";
 import { clientLoadErrors, syncClientPlugins, tabs } from "../src/plugins/client/loader";
+import { AGENT_PLUGIN_IDS } from "./helpers/agentPlugins";
 import { pathToFileURL } from "node:url";
 
 let home: string;
@@ -229,6 +230,33 @@ test("switching a folder plugin off unwinds its routes, and on mounts it again",
   await syncPlugins({ plugins: { enabled: ["hello"], seen: ["hello"] } }, opts);
   expect(matchApi("GET", "/api/hello")).not.toBeNull();
   expect(row("hello")).toMatchObject({ enabled: true, active: true });
+});
+
+// An installed plugin that switches itself on (manifest.autoEnable, specs/
+// agents/agent-plugins.feature.md): a coding agent from the marketplace is
+// on in the open folder from the first sync that finds it, as a built-in
+// one is, and one switched off there stays off.
+test("an installed plugin whose manifest says autoEnable switches itself on in the open folder", async () => {
+  const pkg = { name: "pal", version: "0.1.0", specdriven: { id: "pal", api: "1", displayName: "Pal", description: "an agent", host: "./dist/host.js", autoEnable: true } };
+  expect(parsePackageManifest(pkg, "0.1.0").autoEnable).toBe(true);
+  expect(parsePackageManifest({ ...pkg, specdriven: { ...pkg.specdriven, autoEnable: "yes" } }, "0.1.0").autoEnable).toBeUndefined();
+
+  await fixture(join(pluginsHome(), "pal"), "pal", { manifest: { autoEnable: true, defaultEnabled: false } });
+  const opts = { sources: true, dataDir: null };
+  // Found for the first time in a folder that has its own list (the
+  // built-in agents switched on there before): off by its manifest, yet on
+  // in that folder by autoEnable, and recorded as such.
+  const done = [...AGENT_PLUGIN_IDS];
+  const state: Record<string, unknown> = { dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: done } } } };
+  await syncPlugins(state, opts);
+  expect(state.plugins).toEqual({ repos: { [repo]: { enabled: ["pal"], autoEnabled: [...done, "pal"] } }, seen: ["pal"] });
+  expect(matchApi("GET", "/api/pal")).not.toBeNull();
+  expect(row("pal")).toMatchObject({ enabled: true, active: true });
+
+  // Switched off in that folder afterwards: the record says it was done once.
+  await syncPlugins({ dataRepo: repo, plugins: { repos: { [repo]: { enabled: [], autoEnabled: [...done, "pal"] } }, seen: ["pal"] } }, opts);
+  expect(matchApi("GET", "/api/pal")).toBeNull();
+  expect(row("pal")).toMatchObject({ enabled: false, active: false });
 });
 
 test("a plugin whose folder goes away is unwound and reported", async () => {
