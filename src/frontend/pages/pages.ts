@@ -292,9 +292,10 @@ export function pageRowTitle(page: PageListing): string {
 
 /**
  * The app settings a page's header reads beside its own folder's switch:
- * the Google Calendar switch behind a task's calendar chip, and whether the
- * `claude` CLI is there to propose an estimate (specs/app/tasks.feature.md
- * "Add task to Google Calendar"). Fed from `GET /api/state` at mount and on
+ * the Google Calendar switch behind a task's calendar chip, and whether an
+ * agent is there to propose an estimate — one that answers a single no-tools
+ * turn, src/server/estimate.ts (specs/app/tasks.feature.md "Add task to
+ * Google Calendar"). Fed from `GET /api/state` at mount and on
  * every settings change.
  */
 export interface PageSettings {
@@ -317,7 +318,7 @@ export const pageSettings = {
   apply(state: Record<string, unknown>): void {
     const next = {
       googleCalendar: state.googleCalendar === true,
-      canEstimate: state.canRunAgentPane === true,
+      canEstimate: state.canEstimate === true,
     };
     if (next.googleCalendar === settings.googleCalendar && next.canEstimate === settings.canEstimate) {
       return;

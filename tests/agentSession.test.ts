@@ -196,12 +196,17 @@ test("without the pi CLI the pi target is refused before anything runs", async (
   expect(calls).toHaveLength(0);
 });
 
-test("the state reports whether a session can run in Pi", async () => {
+/** Whether the state's `agents` descriptor for an id says its CLI is there. */
+async function availableIn(id: string): Promise<boolean | undefined> {
   const res = (await handleApi(new Request("http://localhost/api/state")))!;
-  expect(((await res.json()) as { canRunPi: boolean }).canRunPi).toBe(true);
+  const { agents } = (await res.json()) as { agents: { id: string; available: boolean }[] };
+  return agents.find((a) => a.id === id)?.available;
+}
+
+test("the state reports whether a session can run in Pi", async () => {
+  expect(await availableIn("pi")).toBe(true);
   piFound = false;
-  const again = (await handleApi(new Request("http://localhost/api/state")))!;
-  expect(((await again.json()) as { canRunPi: boolean }).canRunPi).toBe(false);
+  expect(await availableIn("pi")).toBe(false);
 });
 
 // Codex: the same choice at the route; the session it opens is the pane
@@ -215,24 +220,22 @@ test("without the codex CLI the codex target is refused before anything runs", a
 });
 
 test("the state reports whether a session can run in Codex", async () => {
-  const res = (await handleApi(new Request("http://localhost/api/state")))!;
-  expect(((await res.json()) as { canRunCodex: boolean }).canRunCodex).toBe(true);
+  expect(await availableIn("codex")).toBe(true);
   codexFound = false;
-  const again = (await handleApi(new Request("http://localhost/api/state")))!;
-  expect(((await again.json()) as { canRunCodex: boolean }).canRunCodex).toBe(false);
+  expect(await availableIn("codex")).toBe(false);
 });
 
 test("the Run in choice round-trips through the settings file", async () => {
   const before = (await handleApi(new Request("http://localhost/api/state")))!;
   expect(((await before.json()) as { codeGenTarget: unknown }).codeGenTarget).toBeNull();
-  // A provider id, by rank; "pane" from before agents were providers reads as Claude.
+  // A provider id, by rank.
   const res = await api("/api/state", "PUT", { codeGenTarget: "codex" });
   expect(res.status).toBe(200);
   expect(((await res.json()) as { codeGenTarget: string }).codeGenTarget).toBe("codex");
   expect((await readState(root)).codeGenTarget).toBe("codex");
+  // "pane", what the app wrote before agents were providers, is no longer read.
   const legacy = await api("/api/state", "PUT", { codeGenTarget: "pane" });
-  expect(legacy.status).toBe(200);
-  expect(((await legacy.json()) as { codeGenTarget: string }).codeGenTarget).toBe("claude");
+  expect(legacy.status).toBe(400);
   const bad = await api("/api/state", "PUT", { codeGenTarget: "x" });
   expect(bad.status).toBe(400);
   expect((await bad.json()).error).toContain("codeGenTarget must be desktop, claude, codex or pi");

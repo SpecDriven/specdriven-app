@@ -65,29 +65,10 @@ export function usableAgents(agents: readonly AgentDescriptor[] = state.agents):
   return agents.filter((a) => a.available).sort(byRank);
 }
 
-/**
- * The descriptors off a /api/state answer: the `agents` list, or — from a
- * server that still reports the per-agent flags only — the three built-in
- * agents those flags stood for.
- */
-export function agentsFromState(data: {
-  agents?: unknown;
-  canRunAgentPane?: unknown;
-  canRunPi?: unknown;
-  canRunCodex?: unknown;
-}): AgentDescriptor[] {
-  if (Array.isArray(data.agents)) {
-    return data.agents.filter((a): a is AgentDescriptor => Boolean(a && typeof a === "object" && typeof (a as AgentDescriptor).id === "string"));
-  }
-  const legacy: AgentDescriptor[] = [];
-  const flag = (id: string, label: string, rank: number, on: unknown) => {
-    if (on !== true) return;
-    legacy.push({ ...fallbackDescriptor(id), label, rank, available: true, plugin: "core" });
-  };
-  flag("claude", "Claude", 10, data.canRunAgentPane);
-  flag("codex", "Codex", 20, data.canRunCodex);
-  flag("pi", "Pi", 30, data.canRunPi);
-  return legacy;
+/** The descriptors off a /api/state answer: the rows of its `agents` list that are one. */
+export function agentsFromState(data: { agents?: unknown }): AgentDescriptor[] {
+  if (!Array.isArray(data.agents)) return [];
+  return data.agents.filter((a): a is AgentDescriptor => Boolean(a && typeof a === "object" && typeof (a as AgentDescriptor).id === "string"));
 }
 
 /** The offers off a /api/state answer. */

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import { endAllChatSessions, getChatEvents, getChatSession } from "../src/server/agentChat";
-import type { ChatEvent, ChatSessionMeta } from "../src/server/agentChat";
+import type { ChatEvent, ChatSessionMeta } from "../src/server/agentTypes";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
