@@ -74,7 +74,7 @@ export function ConfluenceConflictNotice({ conflict }: { conflict: ConfluenceCon
   );
 }
 
-const SCOPES = [
+export const SCOPES = [
   { value: "all", label: "All scenarios", hint: "Published, proposed and draft, each with its status" },
   { value: "published", label: "Published scenarios only" },
 ];
@@ -91,6 +91,48 @@ export function parentUrlProblem(parentUrl: string, wikis: ConfluenceWiki[]): st
     return `No token for ${ref.base} — add one in Settings → Confluence.`;
   }
   return null;
+}
+
+/** How one feature's publish ended, as the dialogs show it. */
+export type PublishOutcome =
+  | { kind: "done"; result: ConfluencePublishResult }
+  | { kind: "conflict"; conflict: ConfluenceConflict }
+  | { kind: "failed"; error: string; status?: number; details?: ConfluenceFailureDetails };
+
+/**
+ * Publish one feature through its route: the page, a conflict to ask about
+ * (the page changed in Confluence since), or the failure as one sentence
+ * with what the server knows of the call. `force` is the user's answer to a
+ * conflict shown before.
+ */
+export async function postConfluencePublish(
+  file: string,
+  p: { parentUrl: string; scope: PublishScope; force?: boolean },
+): Promise<PublishOutcome> {
+  try {
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}/confluence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentUrl: p.parentUrl.trim(), scope: p.scope, ...(p.force ? { force: true } : {}) }),
+    });
+    const data = (await res.json()) as ConfluencePublishResult & {
+      error?: string;
+      conflict?: ConfluenceConflict;
+      details?: ConfluenceFailureDetails;
+    };
+    if (res.status === 409 && data.conflict) return { kind: "conflict", conflict: data.conflict };
+    if (!res.ok) {
+      return {
+        kind: "failed",
+        error: data.error ?? `Confluence publish failed (HTTP ${res.status})`,
+        status: res.status,
+        ...(data.details ? { details: data.details } : {}),
+      };
+    }
+    return { kind: "done", result: data };
+  } catch {
+    return { kind: "failed", error: "Could not publish — is the server running?" };
+  }
 }
 
 export function ConfluencePublishDialog({
@@ -131,33 +173,14 @@ export function ConfluencePublishDialog({
     setBusy(true);
     setError(null);
     setDetails(null);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/confluence`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // A second Publish, with the conflict shown, is the user's answer.
-        body: JSON.stringify({ parentUrl: parentUrl.trim(), scope, ...(conflict ? { force: true } : {}) }),
-      });
-      const data = (await res.json()) as ConfluencePublishResult & {
-        error?: string;
-        conflict?: ConfluenceConflict;
-        details?: ConfluenceFailureDetails;
-      };
-      if (res.status === 409 && data.conflict) {
-        setConflict(data.conflict);
-        return;
-      }
-      if (!res.ok) {
-        setError(data.error ?? `Confluence publish failed (HTTP ${res.status})`);
-        setDetails(data.details ?? null);
-        return;
-      }
-      onPublished(data);
-    } catch {
-      setError("Could not publish — is the server running?");
-    } finally {
-      setBusy(false);
-    }
+    // A second Publish, with the conflict shown, is the user's answer.
+    const outcome = await postConfluencePublish(file, { parentUrl, scope, force: conflict !== null });
+    setBusy(false);
+    if (outcome.kind === "conflict") setConflict(outcome.conflict);
+    else if (outcome.kind === "failed") {
+      setError(outcome.error);
+      setDetails(outcome.details ?? null);
+    } else onPublished(outcome.result);
   };
 
   return (

@@ -1673,6 +1673,29 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
   }
 });
 
+// What "Publish to Confluence…" on a folder needs to know of its features
+// (specs/external-links/confluence-wiki.feature.md "Publish a folder's
+// features to Confluence"): each feature under the folder, its subfolders'
+// included, with the page it links and the parent it was last published
+// under. The dialog then publishes them one by one through the feature's
+// own route.
+const getFolderConfluence = withDataDir(async (dir, _req, params) => {
+  const prefix = `${params.path!.replace(/\/+$/, "")}/`;
+  const listed = (await listFeatures(dir)).filter((f) => f.fileName.startsWith(prefix));
+  const features = await Promise.all(
+    listed.map(async (f) => {
+      const parsed = (await readFeatureView(dir, f.fileName))?.parsed;
+      return {
+        file: f.fileName,
+        name: f.name,
+        ...(parsed?.confluence ? { linkedUrl: parsed.confluence.url } : {}),
+        ...(parsed?.confluencePage?.parentUrl ? { parentUrl: parsed.confluencePage.parentUrl } : {}),
+      };
+    }),
+  );
+  return json({ features });
+});
+
 // Create a feature's scenarios as qTest test cases
 // (specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
 // from a feature"): one module named after the feature under the parent
@@ -3122,6 +3145,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["POST", "/api/features/:file/confluence", unlessHosted(postPublishConfluence)],
+  ["GET", "/api/folders/:path/confluence", unlessHosted(getFolderConfluence)],
   ["POST", "/api/features/:file/qtest", unlessHosted(postPublishQtest)],
   ["DELETE", "/api/features/:file", deleteFeatureRoute],
   ["POST", "/api/folders", postFolders],
