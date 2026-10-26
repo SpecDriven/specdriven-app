@@ -59,6 +59,7 @@ import type {
   Feature,
   PullRequestLink,
   ResourceLink,
+  Scenario,
   ScenarioFile,
   ScenarioPick,
   ScenarioStatus,
@@ -1321,6 +1322,66 @@ export async function moveScenario(
     message = sync.message;
   }
   return { status: "saved", content: view.content, parsed: view.parsed, movedTo: to, message };
+}
+
+/** What duplicateScenario answers: the feature's editor view, plus the copy. */
+export interface DuplicateScenarioResult extends SaveResult {
+  duplicate: { name: string; version: number };
+}
+
+/**
+ * The name a copy of `name` takes (specs/ui/navigation.feature.md
+ * "duplicate a scenario"): `<name> (copy)`, then `(copy 2)`, `(copy 3)`… —
+ * the first no scenario of the feature already has, at any version.
+ */
+export function duplicateName(name: string, taken: Iterable<string>): string {
+  const used = new Set(taken);
+  const base = `${name} (copy)`;
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const next = `${name} (copy ${n})`;
+    if (!used.has(next)) return next;
+  }
+}
+
+/**
+ * Duplicate a scenario within its feature (specs/ui/navigation.feature.md
+ * "duplicate a scenario"): a new draft right after it, named by
+ * duplicateName at v1, carrying its body, feature flags, custom attributes
+ * and polarity. What ties a scenario to the world outside the spec — its
+ * tests, ticket, qTest case, pull requests, Aha! and Figma links, stored
+ * files and document id — stays with the original: the copy is a new
+ * scenario, and none of that is true of it yet. Any scenario can be
+ * duplicated, published ones too; the original is not touched.
+ */
+export async function duplicateScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<DuplicateScenarioResult> {
+  const name = safe(fileName);
+  const view = await readFeatureView(dataDir, name);
+  if (view === null) throw new Error(`Feature file not found: ${name}`);
+  const scenarios = view.parsed.scenarios;
+  const at = scenarios.findIndex((s) => s.name === target.name && s.version === target.version);
+  if (at === -1) throw new Error(`Scenario "${target.name}" @v${target.version} not found`);
+  const src = scenarios[at]!;
+  const copy: Scenario = {
+    name: duplicateName(src.name, scenarios.map((s) => s.name)),
+    version: 1,
+    status: "draft",
+    body: src.body,
+    tests: [],
+    ...(src.flags && src.flags.length > 0 ? { flags: src.flags.map((f) => ({ ...f })) } : {}),
+    ...(src.attributes && src.attributes.length > 0
+      ? { attributes: src.attributes.map((a) => ({ ...a })) }
+      : {}),
+    ...(src.negative ? { negative: true as const } : {}),
+  };
+  const next = [...scenarios];
+  next.splice(at + 1, 0, copy);
+  const saved = await saveFeature(dataDir, name, serializeFeature({ ...view.parsed, scenarios: next }));
+  return { ...saved, duplicate: { name: copy.name, version: copy.version } };
 }
 
 /**

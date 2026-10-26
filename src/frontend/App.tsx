@@ -72,6 +72,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowRightLeft,
+  CopyPlus,
   Bot,
   KeyRound,
   Lightbulb,
@@ -5753,6 +5754,47 @@ export function App() {
   };
 
   /**
+   * Duplicate from a scenario's menu — its card's on the feature page or its
+   * row's in the sidebar tree (specs/ui/navigation.feature.md "duplicate a
+   * scenario"): the server puts a draft copy right after it, and the copy
+   * opens in the editor pane, ready to be renamed and changed. An editor
+   * pane open on the feature is left first, autosaving like any navigation
+   * away, so its save goes out before the copy is made rather than after.
+   */
+  const duplicateTreeScenario = async (file: string, s: ScenarioRow) => {
+    if (file === selected && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    await scenarioSaveQueue.current.idle();
+    let res: Response;
+    try {
+      res = await fetch(`/api/features/${encodeURIComponent(file)}/duplicate-scenario`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
+      });
+    } catch {
+      toast.error("Duplicate failed — is the server running?");
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      toast.error(data.error ?? "Duplicate failed");
+      return;
+    }
+    const copy = data.duplicate as { name: string; version: number };
+    await openFeature(file, {
+      push: true,
+      scenario: { slug: slugify(copy.name), version: copy.version },
+      pane: true,
+    });
+    await loadFeatures();
+    toast.success(`Duplicated "${s.name}" v${s.version} as "${copy.name}".`);
+  };
+
+  /**
    * A scenario dropped on another row of its feature's outline
    * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
    * the tree"): it lands before or after that row and the feature is saved
@@ -6055,9 +6097,9 @@ export function App() {
                 paneScenario.name === s.name &&
                 paneScenario.version === s.version;
               // Its menu (specs/ui/navigation.feature.md "Scenario
-              // navigation"): Move to… and Delete, offered on the same terms
-              // as the editor pane's Delete — a published scenario only while
-              // Settings allows it.
+              // navigation"): Duplicate always; Move to… and Delete on the
+              // same terms as the editor pane's Delete — a published scenario
+              // only while Settings allows it.
               const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
               const deletable = s.status !== "published" || deletePublished;
               // Drag to reorder (specs/ui/navigation.feature.md "reorder
@@ -6134,44 +6176,52 @@ export function App() {
                     <span className="tree-scenario-name">{s.name}</span>
                     <span className="version">v{s.version}</span>
                   </a>
-                  {deletable && (
-                    <span className="tree-row-menu">
-                      <Tooltip label="More actions">
-                        <button
-                          type="button"
-                          className="tree-menu-btn"
-                          aria-label={`Menu for ${s.name} v${s.version}`}
-                          aria-haspopup="menu"
-                          aria-expanded={treeMenu === menuKey}
-                          onClick={() => setTreeMenu((m) => (m === menuKey ? null : menuKey))}
-                        >
-                          <Ellipsis size={14} aria-hidden="true" />
-                        </button>
-                      </Tooltip>
-                      <Menu
-                        open={treeMenu === menuKey}
-                        onClose={() => setTreeMenu(null)}
-                        label={`Menu for ${s.name} v${s.version}`}
-                        className="tree-menu"
-                        containerSelector=".tree-row-menu"
-                        items={[
-                          {
-                            id: "move",
-                            label: "Move to…",
-                            icon: <ArrowRightLeft size={13} />,
-                            onSelect: () => void moveTreeScenario(f.fileName, s),
-                          },
-                          {
-                            id: "delete",
-                            label: "Delete",
-                            icon: <Trash2 size={13} />,
-                            danger: true,
-                            onSelect: () => void deleteTreeScenario(f.fileName, s),
-                          },
-                        ]}
-                      />
-                    </span>
-                  )}
+                  <span className="tree-row-menu">
+                    <Tooltip label="More actions">
+                      <button
+                        type="button"
+                        className="tree-menu-btn"
+                        aria-label={`Menu for ${s.name} v${s.version}`}
+                        aria-haspopup="menu"
+                        aria-expanded={treeMenu === menuKey}
+                        onClick={() => setTreeMenu((m) => (m === menuKey ? null : menuKey))}
+                      >
+                        <Ellipsis size={14} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                    <Menu
+                      open={treeMenu === menuKey}
+                      onClose={() => setTreeMenu(null)}
+                      label={`Menu for ${s.name} v${s.version}`}
+                      className="tree-menu"
+                      containerSelector=".tree-row-menu"
+                      items={[
+                        {
+                          id: "duplicate",
+                          label: "Duplicate",
+                          icon: <CopyPlus size={13} />,
+                          onSelect: () => void duplicateTreeScenario(f.fileName, s),
+                        },
+                        ...(deletable
+                          ? [
+                              {
+                                id: "move",
+                                label: "Move to…",
+                                icon: <ArrowRightLeft size={13} />,
+                                onSelect: () => void moveTreeScenario(f.fileName, s),
+                              },
+                              {
+                                id: "delete",
+                                label: "Delete",
+                                icon: <Trash2 size={13} />,
+                                danger: true,
+                                onSelect: () => void deleteTreeScenario(f.fileName, s),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
+                  </span>
                 </div>
               );
             })}
@@ -10747,6 +10797,12 @@ export function App() {
                                 icon: <Plus size={13} />,
                                 onSelect: () => newVersion(i),
                               },
+                          {
+                            id: "duplicate",
+                            label: "Duplicate",
+                            icon: <CopyPlus size={13} />,
+                            onSelect: () => void duplicateTreeScenario(selected, s),
+                          },
                           {
                             id: "copy",
                             label: copied === scenarioPath(selected, s) ? "Copied" : "Copy link",
