@@ -1693,7 +1693,8 @@ button.link:disabled {
 
 /* A prompt's radio group (specs/agents/claude.feature.md "Run in"): a few
    ways to act on the text, each with a one-line hint. */
-.modal-form .choice-group {
+.modal-form .choice-group,
+.agent-empty .choice-group {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -1703,7 +1704,8 @@ button.link:disabled {
   min-width: 0;
 }
 
-.modal-form .choice-group legend {
+.modal-form .choice-group legend,
+.agent-empty .choice-group legend {
   padding: 0;
   margin-bottom: 0.3rem;
   font-size: 0.86rem;
@@ -1712,7 +1714,8 @@ button.link:disabled {
 }
 
 /* Row, not the column `.dialog label` stacks a field under its caption. */
-.modal-form .choice {
+.modal-form .choice,
+.agent-empty .choice {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
@@ -1720,13 +1723,15 @@ button.link:disabled {
   cursor: pointer;
 }
 
-.modal-form .choice input[type="radio"] {
+.modal-form .choice input[type="radio"],
+.agent-empty .choice input[type="radio"] {
   margin: 0.15rem 0 0;
   accent-color: var(--accent);
   flex-shrink: 0;
 }
 
-.modal-form .choice-label {
+.modal-form .choice-label,
+.agent-empty .choice-label {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -6756,7 +6761,7 @@ aside header .collapse-btn {
   font-size: 0.75rem;
 }
 
-.agent-empty input {
+.agent-empty input:not([type="radio"]) {
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -6766,7 +6771,7 @@ aside header .collapse-btn {
   font-size: 0.8125rem;
 }
 
-.agent-empty input:focus {
+.agent-empty input:not([type="radio"]):focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--ring);
