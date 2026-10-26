@@ -191,6 +191,11 @@ describe("matchApi", () => {
     expect(rename).not.toBeNull();
     expect(rename!.params).toEqual({ path: "specs/billing" });
     expect(matchApi("DELETE", "/api/folders/specs%2Fbilling/rename")).toBeNull();
+    // moved under another parent by a POST too ("move a folder")
+    const move = matchApi("POST", "/api/folders/specs%2Fbilling/move");
+    expect(move).not.toBeNull();
+    expect(move!.params).toEqual({ path: "specs/billing" });
+    expect(matchApi("GET", "/api/folders/specs%2Fbilling/move")).toBeNull();
     const displayName = matchApi("PUT", "/api/folders/specs%2Fbilling/description");
     expect(displayName).not.toBeNull();
     expect(displayName!.params).toEqual({ path: "specs/billing" });
