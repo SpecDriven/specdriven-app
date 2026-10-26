@@ -7,12 +7,18 @@ import { LEGACY_CODE_GEN_TARGETS } from "./agentLegacy";
 import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { writeTextFile } from "./fsx";
+import { replaceTextFile } from "./fsx";
 import type { GitEngine } from "./git";
 import { CONFLUENCE_PROGRAM, QTEST_PROGRAM } from "./parser";
 
 export interface SpecDrivenState {
   dataRepo?: string;
+  /**
+   * The plugins' own settings, by plugin id (src/plugins/host/
+   * pluginSettings.ts): each an object the plugin alone reads and writes,
+   * through its HostConfig.settings or its own route.
+   */
+  pluginSettings?: Record<string, Record<string, unknown>>;
   /**
    * Data folders used before, most recent first (specs/ui/ui.feature.md
    * "Recent folder list"): what the ▾ beside the folder name offers. Holds
@@ -541,13 +547,14 @@ export async function writeState(
     // migration leaves the old settings recoverable instead of gone.
     const aside = `${legacy}.migrating`;
     await rename(legacy, aside);
-    await writeTextFile(local, serialize(state));
+    await replaceTextFile(local, serialize(state));
     await rm(aside, { force: true });
     return;
   }
   const home = homeStatePath();
   const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
-  await writeTextFile(target, serialize(state));
+  // In one step: requests read the file while others write it.
+  await replaceTextFile(target, serialize(state));
 }
 
 export function needsDataRepo(state: SpecDrivenState): boolean {

@@ -2,7 +2,7 @@
 // session takes the selected specs and builds one prompt from them. The
 // targets: the app's own coding agent pane, driven by Claude, by Pi
 // (specs/agents/integration-with-pi-dev-agent.feature.md) or by Codex
-// (src/server/codexChat.ts); or Claude Code
+// (src/plugins/builtin/agent-codex); or Claude Code
 // Desktop, opened on the data repo through its
 // `claude://code/new` deep link with a short bootstrap prompt that titles the
 // session and points it at the full prompt saved on disk. Node APIs only —
@@ -118,7 +118,7 @@ export function buildSessionPrompt(
 // Pi (specs/agents/integration-with-pi-dev-agent.feature.md): pi.dev's
 // terminal coding agent, more minimal and less opinionated than Claude. It
 // runs in the app's own coding agent pane, driven over its RPC mode
-// (src/server/piChat.ts).
+// (src/plugins/builtin/agent-pi).
 
 /** The Pi CLI binary a pane session spawns. */
 export const PI_BIN = "pi";
@@ -139,7 +139,7 @@ export function piAvailable(): boolean {
 
 // ---------------------------------------------------------------------------
 // Codex: OpenAI's Codex CLI. It runs in the app's own coding agent pane too,
-// driven over its app-server protocol (src/server/codexChat.ts).
+// driven over its app-server protocol (src/plugins/builtin/agent-codex).
 
 /** The Codex CLI binary a pane session spawns. */
 export const CODEX_BIN = "codex";

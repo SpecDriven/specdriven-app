@@ -13,7 +13,7 @@ import {
   setDesktopAvailability,
   setPiAvailability,
 } from "../src/server/agent";
-import { registerCoreAgents } from "../src/server/agentProviders";
+import { unmountAgentPlugins } from "./helpers/agentPlugins";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setupDemo } from "../src/server/demo";
 import { setFolderChooser } from "../src/server/folderChooser";
@@ -56,10 +56,10 @@ afterEach(async () => {
   reloader.stop();
   setGitEngine(null);
   setFolderChooser(realChooser);
-  // setupDemo registers the simulated Claude and fakes the other probes
-  // (src/server/demo.ts); left in place they would hand a fake Claude to
-  // every later test file in the run.
-  registerCoreAgents();
+  // The demo's plugins register the simulated Claude, and setupDemo fakes
+  // the other probes (src/server/demo.ts); left in place they would hand a
+  // fake Claude to every later test file in the run.
+  await unmountAgentPlugins();
   setClaudeAvailability(null);
   setPiAvailability(null);
   setDesktopAvailability(null);
@@ -170,10 +170,15 @@ test("Specs alone, and every other optional setting on except IntelliJ IDEA", as
   expect(state.openTestsInIdea).toBe(false);
   // The profile behind the module switches (specs/app/plugins.feature.md
   // "Each data folder keeps its own plugins"): every built-in listed, none
-  // on — the visitor's Settings → Plugins offers them.
+  // of the tabs on — the visitor's Settings → Plugins offers them. The
+  // tab-less agents switch themselves on (specs/agents/agent-plugins
+  // .feature.md); the Claude one is the simulation.
   expect(
     (state.plugins as { id: string; enabled: boolean; active: boolean }[]).map((p) => [p.id, p.enabled, p.active]),
   ).toEqual([
+    ["agent-claude", true, true],
+    ["agent-codex", true, true],
+    ["agent-pi", true, true],
     ["roadmap", false, false],
     ["tasks", false, false],
     ["notebook", false, false],

@@ -17,6 +17,7 @@ import {
   setPiAvailability,
 } from "../src/server/agent";
 import type { Runner } from "../src/server/agent";
+import { mountAgentPlugins, unmountAgentPlugins } from "./helpers/agentPlugins";
 import { createFeature, saveFeature } from "../src/server/features";
 import type { RunOptions } from "../src/server/run";
 import { PROJECT_SETTINGS_FILE } from "../src/server/members";
@@ -50,11 +51,13 @@ beforeEach(async () => {
   // Likewise Codex: its session is driven by a fake in tests/codexChat.test.ts.
   setCodexAvailability(() => true);
   await writeState({ dataRepo: data }, root);
+  await mountAgentPlugins();
   await createFeature(data, "Quote");
   await saveFeature(data, "specs/quote.feature.md", "# Quote\n\n## Basic @v1\n\nbody\n");
 });
 
 afterEach(async () => {
+  await unmountAgentPlugins();
   reloader.stop();
   setDesktopAvailability(null);
   setDesktopRunner(null);
