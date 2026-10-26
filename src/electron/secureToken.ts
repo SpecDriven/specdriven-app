@@ -13,8 +13,11 @@ import { parseQtestRecords, type QtestTokenBackend } from "../server/qtestTokens
 import { parseAhaRecords, type AhaTokenBackend } from "../server/ahaTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
-export function safeStorageAvailable(): boolean {
-  return safeStorage.isEncryptionAvailable();
+// The async safeStorage API throughout: the synchronous one is deprecated
+// in Electron 45 and gone in 46, and both read the same per-platform key
+// store, so files written by the old encryptString still decrypt.
+export function safeStorageAvailable(): Promise<boolean> {
+  return safeStorage.isAsyncEncryptionAvailable();
 }
 
 /**
@@ -23,19 +26,24 @@ export function safeStorageAvailable(): boolean {
  * startup crash.
  */
 function encryptedFile<T>(file: string, parse: (raw: string) => T | null, empty: T) {
+  async function write(value: T): Promise<void> {
+    const encrypted = await safeStorage.encryptStringAsync(JSON.stringify(value));
+    await writeTextFile(file, encrypted.toString("base64"));
+  }
   return {
     async load(): Promise<T> {
       try {
         const encrypted = Buffer.from(await readFile(file, "utf8"), "base64");
-        return parse(safeStorage.decryptString(encrypted)) ?? empty;
+        const { result, shouldReEncrypt } = await safeStorage.decryptStringAsync(encrypted);
+        const value = parse(result) ?? empty;
+        // The OS rotated its key: rewrite before the old one stops decrypting.
+        if (shouldReEncrypt && value !== empty) await write(value).catch(() => {});
+        return value;
       } catch {
         return empty;
       }
     },
-    async save(value: T): Promise<void> {
-      const encrypted = safeStorage.encryptString(JSON.stringify(value));
-      await writeTextFile(file, encrypted.toString("base64"));
-    },
+    save: write,
     async clear(): Promise<void> {
       await rm(file, { force: true });
     },

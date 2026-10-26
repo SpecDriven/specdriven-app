@@ -106,7 +106,8 @@ const LOCAL_TARGET: Record<Platform, string> = { linux: "AppImage", mac: "dmg", 
 /** electron-builder's architecture flag for a `process.arch`. */
 export function archFlag(osArch: string): string {
   if (osArch === "x64" || osArch === "arm64") return `--${osArch}`;
-  if (osArch === "arm") return "--armv7l";
+  // Electron 44 stopped publishing 32-bit ARM (armv7l) binaries.
+  if (osArch === "arm") throw new Error("no desktop build for 32-bit ARM: Electron ships no armv7l binary");
   throw new Error(`no desktop build for the ${osArch} architecture`);
 }
 
