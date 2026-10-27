@@ -1,7 +1,8 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
-import { PencilRuler } from "lucide-react";
+import { PencilRuler, SquarePen } from "lucide-react";
 import { isDiagram } from "./excalidraw/diagram";
+import { canMarkUp } from "./excalidraw/markup";
 
 // Image sizing (specs/images.feature.md). A pasted screenshot lands at its
 // pixel size — on a HiDPI display twice as big as it looked on screen — so in
@@ -24,6 +25,12 @@ export interface ImageSizing {
    * off, so no diagram shows the control; only diagrams ever show it.
    */
   editDiagram?(index: number): void;
+  /**
+   * Open the nth image in the markup pane (specs/image-editor-markup.feature
+   * .md). Absent when Excalidraw support is off; only images stored in the
+   * data repo, and never diagrams, show the control.
+   */
+  markUp?(index: number): void;
 }
 
 /** Put around an editable preview by the editor; absent, images are plain. */
@@ -166,6 +173,9 @@ function ResizableImage({
   // reopens it in the pane (specs/editor/excalidraw-support.feature.md "Edit
   // Excalidraw diagram"), shown alongside the width badge on the same hover.
   const editDiagram = sizing.editDiagram && isDiagram(alt, src) ? sizing.editDiagram : null;
+  // Any other stored image carries one, in the same corner, that opens it
+  // for markup (specs/image-editor-markup.feature.md).
+  const markUp = sizing.markUp && canMarkUp(alt, src) ? sizing.markUp : null;
   return (
     <span className={`md-img${drag !== null ? " resizing" : ""}`} onPointerEnter={measure}>
       <img
@@ -202,6 +212,17 @@ function ResizableImage({
           onClick={() => editDiagram(index)}
         >
           <PencilRuler size={13} aria-hidden="true" />
+        </button>
+      )}
+      {markUp && (
+        <button
+          type="button"
+          className="md-img-edit"
+          aria-label={alt ? `Mark up image "${alt}"` : "Mark up image"}
+          title="Mark up this image"
+          onClick={() => markUp(index)}
+        >
+          <SquarePen size={13} aria-hidden="true" />
         </button>
       )}
       {shown !== undefined && (
