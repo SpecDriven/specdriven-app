@@ -164,6 +164,54 @@ describe("a diagram already in the text", () => {
   });
 });
 
+// specs/image-editor-markup.feature.md: behind the same switch, every other
+// image stored in the data repo carries a button that opens it for markup —
+// in the editable Preview, and in the toolbar with the caret in its link.
+describe("an image to mark up", () => {
+  const SHOT = "![shot](/api/images/shot-1a2b3c4d.png)";
+  const DIAGRAM = "![flow.excalidraw](/api/images/flow-excalidraw-1a2b3c4d.svg)";
+  const MARK_UP = 'aria-label="Mark up image &quot;shot&quot;"';
+  const preview = (value: string) =>
+    html(<MarkdownEditor value={value} onChange={() => {}} initialTab="preview" />);
+  const write = (value: string) => html(<MarkdownEditor value={value} onChange={() => {}} />);
+
+  test("carries a markup button in the editable preview once the switch is on", () => {
+    applyExcalidrawPref(true);
+    const markup = preview(SHOT);
+    expect(markup).toContain(MARK_UP);
+    expect(markup).toContain('class="md-img-edit"');
+  });
+
+  test("carries none while the switch is off", () => {
+    expect(preview(SHOT)).not.toContain("Mark up image");
+  });
+
+  test("carries none on a published (read-only) body", () => {
+    applyExcalidrawPref(true);
+    expect(html(<MarkdownEditor value={SHOT} onChange={() => {}} readOnly />)).not.toContain(
+      "Mark up image",
+    );
+  });
+
+  test("is never a diagram, nor an image from elsewhere", () => {
+    applyExcalidrawPref(true);
+    const markup = preview(`${DIAGRAM}\n\n![web](https://example.com/web.png)`);
+    expect(markup).toContain('aria-label="Edit diagram &quot;flow.excalidraw&quot;"');
+    expect(markup).not.toContain("Mark up image");
+  });
+
+  test("is offered by the toolbar with the caret in its link", () => {
+    applyExcalidrawPref(true);
+    expect(write(`${SHOT}\n`)).toContain(MARK_UP);
+    expect(write(`Given a policy\n\n${SHOT}\n`)).not.toContain("Mark up image");
+    expect(write(`${DIAGRAM}\n`)).not.toContain("Mark up image");
+  });
+
+  test("is not offered by the toolbar while the switch is off", () => {
+    expect(write(`${SHOT}\n`)).not.toContain("Mark up image");
+  });
+});
+
 // The toolbar's one diagram button does whichever the caret asks for. The
 // caret moving is a DOM interaction; what the button becomes is decided by
 // imageAt + isDiagram, covered in tests/excalidrawDiagram.test.ts. Here: the
