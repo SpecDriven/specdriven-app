@@ -14,6 +14,7 @@ import {
   ListOrdered,
   PencilRuler,
   Quote,
+  SquarePen,
   Table,
 } from "lucide-react";
 import { Tooltip } from "./Tooltip";
@@ -32,6 +33,8 @@ import {
 import type { Edit } from "./markdown";
 import { diagramName, isDiagram, isExcalidrawFile } from "./excalidraw/diagram";
 import type { ExcalidrawEdit } from "./excalidraw/ExcalidrawPane";
+import { canMarkUp } from "./excalidraw/markup";
+import type { MarkupResult } from "./excalidraw/MarkupPane";
 import { markNodes, markText } from "./highlight";
 import { TableEditContext } from "./MarkdownTable";
 import { TableDialog } from "./TableDialog";
@@ -56,6 +59,10 @@ const VimEditor = lazy(() => import("./VimEditor").then((m) => ({ default: m.Vim
 // pane, and the library with it, load the first time a diagram is drawn.
 const ExcalidrawPane = lazy(() =>
   import("./excalidraw/ExcalidrawPane").then((m) => ({ default: m.ExcalidrawPane })),
+);
+// And the markup pane (specs/image-editor-markup.feature.md), which shares it.
+const MarkupPane = lazy(() =>
+  import("./excalidraw/MarkupPane").then((m) => ({ default: m.MarkupPane })),
 );
 
 /** POST the image to the data repo; resolves to the url for `![...](url)`. */
@@ -146,6 +153,11 @@ export function MarkdownEditor({
     | { mode: "edit"; index: number; edit: ExcalidrawEdit }
     | null
   >(null);
+  // Image markup (specs/image-editor-markup.feature.md), behind the same
+  // switch: any other stored image opens in the markup pane — from its
+  // button in the Preview tab, or from the toolbar with the caret in its
+  // link — and the marked-up copy replaces it.
+  const [markup, setMarkup] = useState<{ index: number; src: string; alt: string } | null>(null);
   // Where the caret is in the source, so the toolbar's diagram button knows
   // whether it is over a diagram's link. Only followed while the switch is
   // on: nothing else in the toolbar cares where the caret is.
@@ -339,19 +351,20 @@ export function MarkdownEditor({
   // The edited diagram, uploaded like any other image but landing over the
   // one it was opened from rather than at the caret — so the diagram shown
   // in the text is the edited one (specs/editor/excalidraw-support.feature.md
-  // "Edit Excalidraw diagram"). The image is found again by index at save
-  // time, against the text as it stands then.
-  const saveDiagram = async (index: number, file: File) => {
+  // "Edit Excalidraw diagram"). A marked-up image the same way, keeping its
+  // alt — or, with its markup all gone, pointed back at its original, with
+  // nothing to upload (specs/image-editor-markup.feature.md). The image is
+  // found again by index at save time, against the text as it stands then.
+  const replaceImage = async (index: number, image: File | string, alt: string) => {
     setUploadError(null);
     setUploading((n) => n + 1);
     try {
-      const url = await uploadImage(file);
-      const alt = file.name.replace(/\.[^.]*$/, "") || "image";
+      const url = typeof image === "string" ? image : await uploadImage(image);
       const { value: text, onChange: change } = latest.current;
       const next = setImageSrc(text, index, url, alt);
       if (next !== text) change(next);
       // The link is a different length now; keep the caret inside it, so the
-      // toolbar still offers to edit the diagram the user just saved.
+      // toolbar still offers to edit the diagram (or image) just saved.
       const saved = imageRefs(next.replaceAll("\r\n", "\n"))[index];
       if (saved) setCaret(saved.start);
     } catch (e) {
@@ -370,6 +383,13 @@ export function MarkdownEditor({
     if (!ref) return;
     setDiagram({ mode: "edit", index, edit: { url: ref.src, name: diagramName(ref.alt, ref.src) } });
   };
+  // Opening an image for markup, the same way.
+  const openMarkup = useRef<(index: number) => void>(() => {});
+  openMarkup.current = (index) => {
+    const ref = imageRefs(latest.current.value.replaceAll("\r\n", "\n"))[index];
+    if (!ref) return;
+    setMarkup({ index, src: ref.src, alt: ref.alt });
+  };
 
   // The diagram the caret is in, if it is in one — what the toolbar's
   // diagram button acts on while editing the source (specs/editor/
@@ -379,17 +399,25 @@ export function MarkdownEditor({
   // the caret moves on every keystroke.
   // A body with no diagram in it never reaches the parser: the word is in
   // every diagram link, in the alt an insert leaves or the file name, so a
-  // substring test rules out the common case for the cost of a scan.
+  // substring test rules out the common case for the cost of a scan. The
+  // same goes for an image to mark up, which is always a stored one.
   const mayHaveDiagram =
-    excalidrawOn && editing && !readOnly && value.includes("excalidraw");
+    excalidrawOn &&
+    editing &&
+    !readOnly &&
+    (value.includes("excalidraw") || value.includes("/api/images/"));
   const refs = useMemo(
     () => (mayHaveDiagram ? imageRefs(value.replaceAll("\r\n", "\n")) : []),
     [mayHaveDiagram, value],
   );
-  const caretDiagram = useMemo(() => {
-    const hit = refs.length === 0 ? null : imageAtOffset(refs, caret);
-    return hit && isDiagram(hit.ref.alt, hit.ref.src) ? hit : null;
-  }, [refs, caret]);
+  const caretImage = useMemo(
+    () => (refs.length === 0 ? null : imageAtOffset(refs, caret)),
+    [refs, caret],
+  );
+  const caretDiagram =
+    caretImage && isDiagram(caretImage.ref.alt, caretImage.ref.src) ? caretImage : null;
+  const caretMarkup =
+    caretImage && canMarkUp(caretImage.ref.alt, caretImage.ref.src) ? caretImage : null;
   const sizing = useMemo<ImageSizing>(
     () => ({
       resize: (index, width) => {
@@ -397,8 +425,13 @@ export function MarkdownEditor({
         const next = setImageWidth(text, index, width);
         if (next !== text) change(next);
       },
-      // Off with the Settings switch, so no diagram offers the control.
-      ...(excalidrawOn ? { editDiagram: (index: number) => openDiagram.current(index) } : {}),
+      // Off with the Settings switch, so no diagram (or image) offers the control.
+      ...(excalidrawOn
+        ? {
+            editDiagram: (index: number) => openDiagram.current(index),
+            markUp: (index: number) => openMarkup.current(index),
+          }
+        : {}),
     }),
     [excalidrawOn],
   );
@@ -628,6 +661,18 @@ export function MarkdownEditor({
           },
         ]
       : []),
+    // Only while the caret is in the link of an image that can be marked up.
+    ...(caretMarkup
+      ? [
+          {
+            icon: <SquarePen size={size} />,
+            title: caretMarkup.ref.alt
+              ? `Mark up image "${caretMarkup.ref.alt}"`
+              : "Mark up image",
+            run: () => openMarkup.current(caretMarkup.index),
+          },
+        ]
+      : []),
     // Only while the caret is in a web link: there is nothing to open otherwise.
     ...(caretLink
       ? [
@@ -645,14 +690,17 @@ export function MarkdownEditor({
   // pane down, so nothing of it (its own focus trap, the discard dialog's)
   // moves focus after this; on Insert, apply() then lands the caret after
   // the embedded link once the upload finishes. A diagram opened from the
-  // Preview tab has no text pane to go back to, and leaves focus alone.
+  // Preview tab has no text pane to go back to, and leaves focus alone. The
+  // markup pane closes the same way.
   const closeDiagram = () => setDiagram(null);
-  const diagramWasOpen = useRef(false);
+  const closeMarkup = () => setMarkup(null);
+  const paneOpen = diagram !== null || markup !== null;
+  const paneWasOpen = useRef(false);
   useEffect(() => {
-    if (diagramWasOpen.current && !diagram && editing) surface()?.focus();
-    diagramWasOpen.current = diagram !== null;
+    if (paneWasOpen.current && !paneOpen && editing) surface()?.focus();
+    paneWasOpen.current = paneOpen;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diagram]);
+  }, [paneOpen]);
 
   const preview = tab === "preview" ? renderMarkdown(value) : null;
 
@@ -745,7 +793,27 @@ export function MarkdownEditor({
               // A new diagram lands at the caret; an edited one over the
               // image it came from.
               if (target === null) void addImages([file]);
-              else void saveDiagram(target, file);
+              else void replaceImage(target, file, file.name.replace(/\.[^.]*$/, "") || "image");
+            }}
+          />
+        </Suspense>
+      )}
+      {markup && !readOnly && (
+        <Suspense
+          fallback={
+            <div className="dialog-backdrop">
+              <div className="dialog">Loading Excalidraw…</div>
+            </div>
+          }
+        >
+          <MarkupPane
+            src={markup.src}
+            alt={markup.alt}
+            onCancel={closeMarkup}
+            onSave={(result: MarkupResult) => {
+              const { index, alt } = markup;
+              closeMarkup();
+              void replaceImage(index, "file" in result ? result.file : result.url, alt);
             }}
           />
         </Suspense>

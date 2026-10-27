@@ -3488,6 +3488,18 @@ button.table-add:hover {
   flex: none;
 }
 
+/* The markup pane (specs/image-editor-markup.feature.md) names the image it
+   opened where the diagram pane has its name field, taking the same room. */
+.markup-alt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+
 .excalidraw-body {
   flex: 1;
   min-height: 0;

@@ -29,9 +29,11 @@ import { importedName, isExcalidrawFile, svgFile } from "./diagram";
 // the canvas — under the file's own name — for Insert to export like any
 // other drawing.
 //
-// This module is the only one importing the library, and the editor loads it
-// lazily: the ~2 MB of Excalidraw stays out of the main bundle until a
-// diagram is actually drawn.
+// This module and the markup pane (src/frontend/excalidraw/MarkupPane.tsx,
+// which imports this one for the stylesheet and the asset path below) are
+// the only ones importing the library, and the editor loads both lazily: the
+// ~2 MB of Excalidraw stays out of the main bundle until a diagram is
+// actually drawn or an image marked up.
 
 // Excalidraw fetches its fonts at runtime (for the canvas, and again to inline
 // them into an export). Bun bundles nothing it cannot see from an import, so
@@ -58,7 +60,7 @@ function readDark(): boolean {
   );
 }
 
-function useDarkTheme(): boolean {
+export function useDarkTheme(): boolean {
   const [dark, setDark] = useState(readDark);
   useEffect(() => {
     const update = () => setDark(readDark());
