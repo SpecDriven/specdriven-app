@@ -1480,6 +1480,9 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   /** "all", a scenario key (`name@vN`), or null while no publish is running. */
   const [publishing, setPublishing] = useState<string | null>(null);
+  // The editor pane's Back to proposed is away (specs/editor/spec-editor.
+  // feature.md "Unpublish a Spec"): its route commits and pushes first.
+  const [unpublishing, setUnpublishing] = useState(false);
   const [reloadSeconds, setReloadSeconds] = useState(60);
   const [previewLines, setPreviewLines] = useState(8);
   /**
@@ -5357,6 +5360,57 @@ export function App() {
     }
     setEditing(null);
     await removeScenario(idx, saved, `Deleted scenario "${name}" v${version}.`);
+  };
+
+  /**
+   * Back to proposed (specs/editor/spec-editor.feature.md "Unpublish a Spec"):
+   * the published status chip's one action, offered only while Settings allows
+   * deleting or moving published specs — the route checks the same switch,
+   * and commits and pushes the demotion. The pane stays on the scenario, now
+   * [proposed] and editable again; Publish takes it back.
+   */
+  const unpublishScenario = async () => {
+    if (!editing || editing.index === null || !feature || !selected) return;
+    const saved = feature.scenarios[editing.index];
+    if (!saved || saved.status !== "published") return;
+    const { name, version } = saved;
+    const file = selected;
+    const session = editorSession.current;
+    setUnpublishing(true);
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(file)}/unpublish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name, version } }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Unpublish failed");
+        return;
+      }
+      // Like a delete's answer: the feature's editor view, which goes to the
+      // listing instead when another feature was opened meanwhile.
+      const left = featureFromResponse(data, file);
+      if (selectedRef.current === file) {
+        setFeature(left);
+        setDirty(false);
+      } else {
+        setFeatures((prev) => withOpenScenarios(prev, file, left));
+      }
+      if (session === editorSession.current) {
+        setEditing((e) =>
+          e && e.scenario.name === name && e.scenario.version === version
+            ? { ...e, scenario: { ...e.scenario, status: "proposed" } }
+            : e,
+        );
+      }
+      toast.success(`Moved "${name}" v${version} back to proposed.`);
+      markSaved();
+    } catch {
+      toast.error("Unpublish failed");
+    } finally {
+      setUnpublishing(false);
+    }
   };
 
   /**
@@ -9894,11 +9948,45 @@ export function App() {
                   forward — Propose moves it into the .feature.md as
                   [proposed]; Publish takes it straight to [published],
                   committed and pushed — a proposed scenario's only Publish,
-                  and a published one is a plain badge. Closing without either
-                  keeps the autosaved draft. mod+enter picks the first. */}
+                  and a published one is a plain badge, unless Settings allows
+                  deleting published specs: then its menu offers Back to
+                  proposed ("Unpublish a Spec"). Closing without either keeps
+                  the autosaved draft. mod+enter picks the first. */}
               <div className="version-field">
                 Version <span className="version">v{draftVersion}</span>
-                {editingPublished ? (
+                {editingPublished && deletePublished && savedEntry?.status === "published" ? (
+                  <span className="chip-anchor status-anchor">
+                    <button
+                      type="button"
+                      className="chip status-chip"
+                      aria-haspopup="menu"
+                      aria-expanded={statusMenuOpen}
+                      aria-label="Status: published"
+                      disabled={unpublishing}
+                      onClick={() => setStatusMenuOpen((o) => !o)}
+                    >
+                      <StatusIcon status="published" size={14} />
+                      published
+                      <ChevronDown size={12} aria-hidden="true" />
+                    </button>
+                    <Menu
+                      open={statusMenuOpen}
+                      onClose={() => setStatusMenuOpen(false)}
+                      label="Scenario status"
+                      className="chip-menu"
+                      containerSelector=".status-anchor"
+                      items={[
+                        {
+                          id: "unpublish",
+                          label: unpublishing ? "Moving back…" : "Back to proposed",
+                          icon: <StatusIcon status="proposed" size={13} />,
+                          disabled: unpublishing,
+                          onSelect: () => void unpublishScenario(),
+                        },
+                      ]}
+                    />
+                  </span>
+                ) : editingPublished ? (
                   <span className="chip static status-chip">
                     <StatusIcon status="published" size={14} />
                     published
