@@ -1485,6 +1485,39 @@ button {
   border-left-color: var(--status-published);
 }
 
+/* A card dragged to another place or feature (specs/ui/navigation.feature.md
+   "drag a scenario to another feature"): faded while it moves, and a line in
+   the gap above or below the card it would land beside. */
+.scenario-card[draggable="true"] {
+  position: relative;
+}
+
+.scenario-card.dragging {
+  opacity: 0.5;
+}
+
+.scenario-card.drop-before::before,
+.scenario-card.drop-after::after {
+  content: "";
+  position: absolute;
+  /* Out over the borders — the status edge is 3px — to the card's own width. */
+  left: -3px;
+  right: -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* Half the list's 0.7rem gap, less half the line. */
+.scenario-card.drop-before::before {
+  top: calc(-0.35rem - 2px);
+}
+
+.scenario-card.drop-after::after {
+  bottom: calc(-0.35rem - 2px);
+}
+
 /* Scenario selected with the up/down keys (specs/ui.spec.md); an outline so it
    stays visible on top of the published shading. */
 .scenario-card.selected {

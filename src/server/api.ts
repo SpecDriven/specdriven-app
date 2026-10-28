@@ -2044,14 +2044,22 @@ const postUnpublish = withDataDir(async (dir, req, params) => {
 });
 
 // specs/ui/navigation.feature.md "move a scenario to another feature": the
-// scenario menu's Move to… — offered on the same terms as its Delete, so a
+// scenario menu's Move to…, and a drag onto another feature ("drag a scenario
+// to another feature") — offered on the same terms as its Delete, so a
 // published scenario moves only while Settings allows deleting published
 // ones, enforced here as delete-published enforces it.
 const postMoveScenario = withDataDir(async (dir, req, params) => {
-  const body = (await req.json()) as { scenario?: ScenarioBody; to?: unknown };
+  const body = (await req.json()) as { scenario?: ScenarioBody; to?: unknown; at?: unknown };
   const target = scenarioTarget(body.scenario);
   if (!target) return json({ error: "scenario needs a name and a version" }, 400);
   if (typeof body.to !== "string") return json({ error: "to is required" }, 400);
+  // Where a drag dropped it in the target (optional): next to a scenario there.
+  const place = scenarioTargetOf(body.at);
+  const at = place && {
+    name: place.name,
+    version: place.version,
+    after: (body.at as { after?: unknown }).after === true,
+  };
   try {
     const source = await readFeatureView(dir, params.file!);
     const moving = source?.parsed.scenarios.find(
@@ -2063,7 +2071,7 @@ const postMoveScenario = withDataDir(async (dir, req, params) => {
     ) {
       return json({ error: "Moving published scenarios is switched off in Settings" }, 403);
     }
-    return json(await moveScenario(dir, params.file!, target, body.to));
+    return json(await moveScenario(dir, params.file!, target, body.to, at ?? undefined));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
