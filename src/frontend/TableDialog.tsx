@@ -373,14 +373,14 @@ export function TableDialog({ initial, mode, locked = [], onApply, onCancel }: T
         </p>
         <div className="dialog-actions">
           {mode === "edit" && (
-            <button type="button" className="danger" onClick={() => void remove()}>
+            <button type="button" className="btn btn-danger" onClick={() => void remove()}>
               Delete table
             </button>
           )}
-          <button type="button" className="secondary" onClick={() => void cancel()}>
+          <button type="button" className="btn btn-secondary" onClick={() => void cancel()}>
             Cancel
           </button>
-          <button type="button" onClick={apply} disabled={mode === "edit" && !changed}>
+          <button type="button" className="btn btn-primary" onClick={apply} disabled={mode === "edit" && !changed}>
             {mode === "edit" ? "Save" : "Insert"}
           </button>
         </div>

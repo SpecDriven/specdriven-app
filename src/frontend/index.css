@@ -1181,24 +1181,88 @@ button {
   white-space: nowrap;
 }
 
-/* Primary action: filled terracotta. */
-.editor-bar button,
-.conflict-actions button,
-.repo-prompt button {
-  padding: 0.46rem 0.95rem;
+/* The one button (specs/ui/ui.feature.md "Design system"): 28px tall, the
+   bar's and the dialogs' text size, a variant for each role. A bare <button>
+   carries no look of its own — a loud control is a choice, never a default.
+   Icon buttons are `.ibtn`, the same height. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 1.75rem;
+  padding: 0 0.7rem;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: transparent;
+  color: var(--text-1);
   font-size: 0.8125rem;
   font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.editor-bar button:hover:not(:disabled),
-.conflict-actions button:hover:not(:disabled),
-.repo-prompt button:hover:not(:disabled) {
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+/* The one filled button on a screen. */
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+/* Cancel, Close, the other way. */
+.btn-secondary {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--text-3);
+}
+
+.btn-ghost {
+  color: var(--text-2);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+/* Destructive, beside a primary: the soft red; the destructive primary of a
+   delete confirmation (specs/ui.spec.md "Dialogs"): solid red, unmistakable. */
+.btn-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+  border-color: var(--danger-fg);
+}
+
+.btn-danger-solid {
+  background: var(--danger-solid);
+  color: var(--on-accent);
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  background: var(--danger-solid-hover);
 }
 
 /* Sidebar actions stay quiet — the loud button on a screen is Publish. */
@@ -1273,22 +1337,6 @@ button {
 .editor-actions {
   display: flex;
   gap: 0.5rem;
-}
-
-.editor-bar button.secondary {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-  color: var(--text-1);
-}
-
-.editor-bar button.secondary:hover:not(:disabled) {
-  background: var(--surface-2);
-  border-color: var(--text-3);
-}
-
-.editor-bar button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Free markdown between the feature heading and the first scenario: its own
@@ -1623,61 +1671,10 @@ button.link:disabled {
   gap: 0.5rem;
 }
 
-.dialog-actions button {
-  padding: 0.46rem 0.95rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.dialog-actions button:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.dialog-actions button.secondary {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-  color: var(--text-1);
-}
-
-.dialog-actions button.secondary:hover:not(:disabled) {
-  background: var(--hover);
-  border-color: var(--text-3);
-}
-
-.dialog-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Delete in the scenario dialog (specs/ui.spec.md "Scenario editor"):
-   destructive styling, pushed to the far left away from Cancel/Save. */
-.dialog-actions button.danger {
+/* Delete in a dialog (specs/ui.spec.md "Scenario editor"): pushed to the
+   far left, away from Cancel/Save. */
+.dialog-actions .btn-danger {
   margin-right: auto;
-  border-color: var(--danger-border);
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-}
-
-.dialog-actions button.danger:hover:not(:disabled) {
-  background: var(--danger-bg);
-  border-color: var(--danger-fg);
-}
-
-/* The destructive primary of a delete confirmation (specs/ui.spec.md
-   "Dialogs"): solid red, unmistakable. */
-.dialog-actions button.danger-solid {
-  background: var(--danger-solid);
-  border-color: transparent;
-  color: var(--on-accent);
-}
-
-.dialog-actions button.danger-solid:hover:not(:disabled) {
-  background: var(--danger-solid-hover);
 }
 
 /* Prompt/confirm dialogs: compact, one field or one question. */
@@ -1805,61 +1802,11 @@ button.link:disabled {
   gap: 0.6rem;
 }
 
-/* The way back: a quiet icon button like the ▾ beside the data folder name,
-   not the bar's filled primary (which `.editor-bar button` would make it). */
-.editor-bar button.back-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
-/* The scenario editor's previous / next scenario: the same quiet icon
-   buttons, side by side. */
+/* The scenario editor's previous / next scenario: two icon buttons side by
+   side. */
 .scenario-nav {
   display: inline-flex;
   gap: 0.15rem;
-}
-
-.editor-bar button.scenario-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
-.editor-bar button.scenario-nav-btn:hover:not(:disabled) {
-  color: var(--text-1);
-  background: var(--hover);
-}
-
-.editor-bar button.scenario-nav-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.editor-bar button.back-button:hover:not(:disabled) {
-  color: var(--text-1);
-  background: var(--hover);
-}
-
-.editor-bar button.back-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--ring);
 }
 
 /* The scenario's name, above the editor's top left corner
@@ -1922,19 +1869,6 @@ button.link:disabled {
   white-space: nowrap;
 }
 
-/* Delete, set apart from Propose/Publish: the dialogs' destructive look. */
-.editor-bar button.danger {
-  border-color: var(--danger-border);
-  background: var(--danger-bg);
-  color: var(--danger-fg);
-  margin-right: 0.75rem;
-}
-
-.editor-bar button.danger:hover:not(:disabled) {
-  background: var(--danger-bg);
-  border-color: var(--danger-fg);
-}
-
 /* The column: the body first and growing, then the scenario table, the ticket
    link and the tests. Same 3px trick as .scenarios, so focus rings aren't
    clipped by the scroll box. */
@@ -1963,7 +1897,7 @@ button.link:disabled {
   color: var(--text-2);
   font-size: 0.75rem;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -3024,15 +2958,9 @@ aside > .user-corner {
   flex-wrap: wrap;
 }
 
-/* Cancel sits away from the three resolutions, like the scenario dialog's
-   Delete. */
-.conflict-actions button.secondary {
+/* Cancel sits away from the three resolutions, like a dialog's Delete. */
+.conflict-actions .btn-secondary {
   margin-right: auto;
-}
-
-.conflict-actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Too narrow for two columns (a small window, or the sides dragged in) —
@@ -3215,24 +3143,6 @@ button.table-add {
 button.table-add:hover {
   color: var(--accent-strong);
   border-color: var(--accent);
-}
-
-/* "+ Add Scenario": a quiet dashed row, not a loud button. */
-.add-spec {
-  padding: 0.55rem 0.9rem;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-2);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-
-.add-spec:hover {
-  color: var(--accent-strong);
-  border-color: var(--accent);
-  background: var(--accent-soft);
 }
 
 /* Test links (specs/traceability.spec.md): a table of GitHub links to the
@@ -4288,15 +4198,12 @@ button.table-add:hover {
   margin-right: 0.45rem;
 }
 
-/* The editor pane's status, glyph plus word, beside the version. */
-.status-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin-left: 0.6rem;
-  color: var(--text-2);
-  font-size: 0.75rem;
+/* The editor pane's status chip beside the version (specs/editor/
+   spec-editor.feature.md "Spec editor pane"): glyph plus word, a menu of the
+   ways forward until published. */
+.status-chip {
   text-transform: capitalize;
+  margin-left: 0.35rem;
 }
 
 /* A feature's rollup in the tree: the share of its scenarios published. */
@@ -4418,36 +4325,6 @@ kbd {
 
 .menu-item.danger:hover,
 .menu-item.danger:focus-visible {
-  background: var(--danger-bg);
-}
-
-/* A menu that opens from an editor bar (the Event Model header's ⋯): the
-   bar's filled-button rule (`.editor-bar button`) outranks `.menu-item`, so
-   restore the menu look at a higher specificity. */
-.editor-bar .menu-item {
-  padding: 0.25rem 0.5rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-1);
-  font-weight: 400;
-}
-
-.editor-bar .menu-item:hover:not(:disabled),
-.editor-bar .menu-item:focus-visible {
-  background: var(--hover);
-}
-
-.editor-bar .menu-item:disabled {
-  color: var(--text-3);
-}
-
-.editor-bar .menu-item.danger {
-  color: var(--danger-fg);
-}
-
-.editor-bar .menu-item.danger:hover:not(:disabled),
-.editor-bar .menu-item.danger:focus-visible {
   background: var(--danger-bg);
 }
 
@@ -4778,8 +4655,7 @@ a.crumb:hover,
   font-size: 0.6875rem;
 }
 
-.ibtn,
-.editor-bar button.ibtn {
+.ibtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4794,17 +4670,19 @@ a.crumb:hover,
 }
 
 .ibtn:hover:not(:disabled),
-.ibtn.active,
-.editor-bar button.ibtn:hover:not(:disabled),
-.editor-bar button.ibtn.active {
+.ibtn.active {
   background: var(--hover);
   color: var(--text-1);
 }
 
-.ibtn:focus-visible,
-.editor-bar button.ibtn:focus-visible {
+.ibtn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--ring);
+}
+
+.ibtn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .page-more {
@@ -4817,14 +4695,8 @@ a.crumb:hover,
   right: 0;
 }
 
-.editor-bar button.primary-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-left: 0.5rem;
-}
-
-.primary-action .dot {
+/* The unpublished dot on the publish rollup chip. */
+.chip .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -5900,10 +5772,6 @@ aside header .collapse-btn {
     min-width: 0;
   }
 
-  .editor-bar button.danger {
-    margin-right: 0.25rem;
-  }
-
   .scenario-card {
     padding: 0.7rem 0.8rem;
   }
@@ -6011,7 +5879,6 @@ aside header .collapse-btn {
   }
 
   .ibtn,
-  .editor-bar button.ibtn,
   .tree-menu-btn,
   .roadmap-add,
   .repo-edit,
@@ -8663,7 +8530,8 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .dialog-actions a.button-link {
   display: inline-flex;
   align-items: center;
-  padding: 0.46rem 0.95rem;
+  height: 1.75rem;
+  padding: 0 0.7rem;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: var(--accent);

@@ -34,7 +34,7 @@ describe("QtestPublishDialog", () => {
     expect(markup).toContain(`value="${PARENT.replace(/&/g, "&amp;")}"`);
     expect(markup).toContain('aria-label="All scenarios"');
     expect(markup).toContain('aria-label="Published scenarios only"');
-    expect(markup).toMatch(/<button type="submit" class="primary">Create test cases<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary">Create test cases<\/button>/);
   });
 
   test("a feature whose test cases were created before says creating them again updates its module", () => {
@@ -66,7 +66,7 @@ describe("QtestPublishDialog", () => {
       <QtestPublishDialog file="f" featureName="F" initialParentUrl={PARENT} sites={[]} onPublished={noop} onClose={noop} />,
     );
     expect(markup).toContain("No token for https://acme.qtestnet.com");
-    expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Create test cases<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Create test cases<\/button>/);
   });
 });
 
