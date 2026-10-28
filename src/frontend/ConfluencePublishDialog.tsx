@@ -239,10 +239,10 @@ export function ConfluencePublishDialog({
           {conflict && <ConfluenceConflictNotice conflict={conflict} />}
           {error && <FailureLine service="Confluence" error={error} details={details} onOpenLogs={onOpenLogs} />}
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={onClose}>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className={conflict ? "danger" : "primary"} disabled={busy || problem !== null}>
+            <button type="submit" className={`btn ${conflict ? "btn-danger" : "btn-primary"}`} disabled={busy || problem !== null}>
               {busy ? "Publishing…" : conflict ? "Publish anyway" : "Publish"}
             </button>
           </div>

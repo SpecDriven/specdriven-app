@@ -87,6 +87,9 @@ import {
   PenTool,
   ShieldCheck,
   BookOpen,
+  History,
+  SendHorizontal,
+  CloudUpload,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -721,6 +724,37 @@ export function landedScenario(
 }
 
 /**
+ * The editor state for a scenario about to be written: a draft under `name`
+ * (cleaned, as a save writes it), version 1 until the first save derives the
+ * real one, going into the feature at `insertAt` — appended without
+ * (specs/ui/ui.feature.md "Add A Scenario Button").
+ */
+export function newScenarioDraft(name: string, insertAt?: number): EditState {
+  return {
+    index: null,
+    isNew: true,
+    ...(insertAt === undefined ? {} : { insertAt }),
+    scenario: { name: cleanLine(name), version: 1, status: "draft", body: "", tests: [] },
+  };
+}
+
+/**
+ * Where the scenario added from an open pane goes (specs/editor/
+ * spec-editor.feature.md "Spec editor pane"): right after the pane's
+ * scenario, found where its save landed it — by identity, else by document
+ * id — and at `fallback` when the feature no longer has it.
+ */
+export function insertAfterScenario(
+  scenarios: readonly Scenario[],
+  current: { name: string; version: number },
+  id: string | undefined,
+  fallback: number,
+): number {
+  const at = landedScenario(scenarios, current, id);
+  return at === null ? fallback : at + 1;
+}
+
+/**
  * The scenario whose page is open (specs/ui/navigation.feature.md "URL scheme")
  * — what the address bar and the window title name. Read through the pane's
  * index into the feature, so a rename follows the scenario the moment its save
@@ -1322,6 +1356,12 @@ export function App() {
   const [recent, setRecent] = useState<RecentEntry[]>(readRecent);
   /** The header's ⋯ menu, a card's ⋯ menu (by index), the assignee chips. */
   const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
+  // The scenario pane's ⋯ menu, its status chip's menu, and the feature
+  // page's publish-rollup menu (specs/editor/spec-editor.feature.md "Spec
+  // editor pane"): actions as menus, not a row of filled buttons.
+  const [editorMenuOpen, setEditorMenuOpen] = useState(false);
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [publishMenuOpen, setPublishMenuOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<number | null>(null);
   const [assigneeMenuOpen, setAssigneeMenuOpen] = useState(false);
   /** Sidebar collapsed to a rail ("["), remembered on this device. */
@@ -1411,7 +1451,7 @@ export function App() {
       itself after it. `flush` / `seal` land and then refuse writes when the
       file is about to be renamed, moved or deleted. */
   const editorRef = useRef<{
-    close: () => Promise<boolean> | null;
+    close: () => Promise<{ ok: boolean; placed: Placement }> | null;
     back: () => void;
     flush: () => Promise<void>;
     seal: () => void;
@@ -5391,8 +5431,8 @@ export function App() {
    * under this editor session; while a tick is still in flight the parting
    * save follows it, placed where it lands. Returns the save when one went out.
    */
-  const closeEditor = (): Promise<boolean> | null => {
-    let saving: Promise<boolean> | null = null;
+  const closeEditor = (): Promise<{ ok: boolean; placed: Placement }> | null => {
+    let saving: Promise<{ ok: boolean; placed: Placement }> | null = null;
     if (
       !featureEditorsSealed.current &&
       editing &&
@@ -5412,11 +5452,52 @@ export function App() {
         { url: testDraft, name: testNameDraft },
       ).tests;
       if (scenarioSignature({ ...editing.scenario, tests }, draftVersion) !== autosaved.current) {
-        saving = commitScenario(tests, false);
+        saving = saveScenario(tests, false);
       }
     }
     setEditing(null);
     return saving;
+  };
+
+  /**
+   * Whether the open pane can be followed by a new scenario: its scenario
+   * has a place in the feature, or at least a name to be saved under. A
+   * brand-new unnamed scenario has neither, so nothing could come after it.
+   */
+  const canAddAfter =
+    editing !== null && (editing.index !== null || editing.scenario.name.trim() !== "");
+
+  /**
+   * New scenario after the open one (specs/editor/spec-editor.feature.md
+   * "Spec editor pane"): the pane's `+` and `c`. The pane saves on the way
+   * out, as ESC and the arrows do, and the new draft opens right after where
+   * that save landed the scenario — so S3's successor is S4, whatever a
+   * rename re-sorted meanwhile.
+   */
+  const newScenarioAfterCurrent = async () => {
+    if (!editing || !feature || !selected || !canAddAfter || publishing !== null) return;
+    const file = selected;
+    const current = { name: editing.scenario.name, version: draftVersion };
+    const id = editing.scenario.id;
+    const fallback =
+      editing.index !== null ? editing.index + 1 : (editing.insertAt ?? feature.scenarios.length);
+    const name = await prompt({
+      title: "New scenario",
+      placeholder: "Scenario name",
+      confirmLabel: "Create",
+    });
+    if (!name || !cleanLine(name)) return;
+    // The prompt was modal, but autosave may have ticked meanwhile: close
+    // the pane as it stands now, and wait for every save ahead of the new
+    // scenario to land before placing it.
+    const ahead = autosaveInFlight.current;
+    const saving = editorRef.current.close();
+    const placed = saving === null ? null : ((await saving)?.placed ?? null);
+    await ahead;
+    await scenarioSaveQueue.current.idle();
+    if (selectedRef.current !== file || featureEditorsSealed.current) return;
+    const scenarios = placed?.feature.scenarios ?? feature.scenarios;
+    setEditing(newScenarioDraft(name, insertAfterScenario(scenarios, current, id, fallback)));
   };
 
   /**
@@ -5435,7 +5516,9 @@ export function App() {
     const s = { ...editing.scenario, version: draftVersion };
     const at = editing.index;
     const saved = closeEditor() !== null;
-    const landed = saved ? withScenario(feature, at, s) : feature;
+    // A new scenario lands where the pane was told to put it (a new
+    // version, "New scenario below", the pane's `+`), not at the end.
+    const landed = saved ? withScenario(feature, at, s, editing.insertAt) : feature;
     setSelectedScenario(cardOfScenario(landed.scenarios, s));
   };
 
@@ -6553,6 +6636,9 @@ export function App() {
     recentMenuOpen ||
     userMenuOpen ||
     featureMenuOpen ||
+    editorMenuOpen ||
+    statusMenuOpen ||
+    publishMenuOpen ||
     cardMenu !== null ||
     assigneeMenuOpen ||
     filterMenuOpen;
@@ -6599,18 +6685,15 @@ export function App() {
   // (specs/editor/editor-autosave.feature.md) writes the editor out every few
   // seconds, and a draft stays in the document. Proposing it — into the
   // .feature.md — takes the editor's Propose button, an explicit act.
-  const newScenario = async () => {
+  const newScenario = async (insertAt?: number) => {
     const name = await prompt({
       title: "New scenario",
       placeholder: "Scenario name",
       confirmLabel: "Create",
     });
     if (!name || !cleanLine(name)) return;
-    setEditing({
-      index: null,
-      isNew: true,
-      scenario: { name: cleanLine(name), version: 1, status: "draft", body: "", tests: [] },
-    });
+    // At `insertAt` — "New scenario below" on a card — or at the end.
+    setEditing(newScenarioDraft(name, insertAt));
   };
   // specs/ui/ui.feature.md "Select scenarios via up and down keys": the
   // highlight walks the cards; Enter opens the highlighted one in the editor
@@ -6853,12 +6936,20 @@ export function App() {
     {
       id: "create",
       keys: "c",
-      label: onFeaturePage ? "New scenario" : "New feature",
+      // Inside the scenario pane the new scenario follows the open one
+      // (specs/editor/spec-editor.feature.md "Spec editor pane"); single
+      // letters never fire while typing, so `c` in the body is just a c.
+      label: editing
+        ? "New scenario after this one"
+        : onFeaturePage
+          ? "New scenario"
+          : "New feature",
       group: "Create",
-      when: () => !quiet && editing === null,
-      palette: () => !quietBehindPalette && editing === null,
+      when: () => !quiet && (editing === null || canAddAfter),
+      palette: () => !quietBehindPalette && (editing === null || canAddAfter),
       run: () => {
-        if (onFeaturePage) void newScenario();
+        if (editing) void newScenarioAfterCurrent();
+        else if (onFeaturePage) void newScenario();
         else void createFeature();
       },
     },
@@ -7057,7 +7148,10 @@ export function App() {
   ): PaletteItem => ({ id: `action:${id}`, group: "Actions", label, text: label, icon, run, ...extra });
   const listing = selected ? features.find((f) => f.fileName === selected) : undefined;
   const paletteActions: PaletteItem[] = [
-    shortcutAction("create", onFeaturePage ? <Plus size={14} /> : <NewFeatureIcon size={14} />),
+    shortcutAction(
+      "create",
+      editing || onFeaturePage ? <Plus size={14} /> : <NewFeatureIcon size={14} />,
+    ),
     action("new-folder", "New folder", <NewFolderIcon size={14} />, () => void createFolder()),
     // Only while Import from Aha! is switched on in Settings
     // (specs/external-links/aha-import.feature.md).
@@ -7506,7 +7600,7 @@ export function App() {
           ) : (
             <p className="error">{bootError.message}</p>
           )}
-          <button type="button" onClick={() => void boot()}>
+          <button type="button" className="btn btn-primary" onClick={() => void boot()}>
             Retry now
           </button>
           {hostedAccount && <HostedStartNav account={hostedAccount} onSignOut={signOutHosted} />}
@@ -7569,7 +7663,7 @@ export function App() {
             </button>
           )}
         </div>
-        <button type="submit" disabled={settingRepo}>
+        <button type="submit" className="btn btn-primary" disabled={settingRepo}>
           {settingRepo ? "Checking access…" : hosted ? "Open this repository" : "Use this directory"}
         </button>
         {repoError && <p className="error">{repoError}</p>}
@@ -9599,7 +9693,7 @@ export function App() {
                   >
                     <button
                       type="button"
-                      className="scenario-nav-btn"
+                      className="ibtn"
                       aria-label="Previous scenario"
                       disabled={scenarioNav.prev === null}
                       onClick={() => stepScenario(-1)}
@@ -9617,7 +9711,7 @@ export function App() {
                   >
                     <button
                       type="button"
-                      className="scenario-nav-btn"
+                      className="ibtn"
                       aria-label="Next scenario"
                       disabled={scenarioNav.next === null}
                       onClick={() => stepScenario(1)}
@@ -9636,7 +9730,7 @@ export function App() {
                 >
                   <button
                     type="button"
-                    className="scenario-nav-btn"
+                    className="ibtn"
                     aria-label="Copy link"
                     disabled={!editing.scenario.name.trim()}
                     onClick={() => void copyLink(scenarioPath(selected, editing.scenario))}
@@ -9648,47 +9742,100 @@ export function App() {
                     )}
                   </button>
                 </Tooltip>
-                <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
-                {/* Proposed scenarios and drafts can be deleted
-                    (specs/editor/spec-editor.feature.md) — published ones too
-                    while Settings allows it ("Delete Published Spec") —
-                    confirmed first, then saved out of the feature or removed
-                    from the document. Kept apart from Propose/Publish, at the
-                    head of the actions. */}
-                {editingDeletable && (
-                  <button className="danger" onClick={() => void deleteScenario()}>
-                    Delete
+                {/* The next scenario, from here (specs/editor/
+                    spec-editor.feature.md "Spec editor pane"): the pane saves
+                    on the way out and the new draft opens right after it. */}
+                <Tooltip label="New scenario after this one" keys="c">
+                  <button
+                    type="button"
+                    className="ibtn"
+                    aria-label="New scenario after this one"
+                    disabled={!canAddAfter || publishing !== null}
+                    onClick={() => void newScenarioAfterCurrent()}
+                  >
+                    <Plus size={16} aria-hidden="true" />
                   </button>
-                )}
-                {/* The two ways forward (specs/editor/spec-editor.feature.md):
-                    Propose moves the draft into the .feature.md as [proposed];
-                    Publish takes it straight to [published], committed and
-                    pushed. Closing without either keeps the autosaved draft.
-                    Propose is only offered on a draft — an already proposed
-                    scenario has nowhere left to go but Publish. */}
-                {!editingPublished && (
-                  <>
-                    {editing.scenario.status === "draft" && (
-                      <button
-                        className="secondary"
-                        onClick={() => void proposeScenario()}
-                        disabled={!editing.scenario.name.trim()}
-                      >
-                        Propose
-                      </button>
-                    )}
+                </Tooltip>
+                <SaveIndicator saving={saving} savedAt={savedAt} dirty={dirty} />
+                {/* The rest of the pane's actions as a menu, like a card's ⋯.
+                    Delete sits last, apart and red: proposed scenarios and
+                    drafts can be deleted (specs/editor/spec-editor.feature.md)
+                    — published ones too while Settings allows it ("Delete
+                    Published Spec") — confirmed first, then saved out of the
+                    feature or removed from the document. Propose and Publish
+                    are not here: they are the status chip's, under the bar. A
+                    published scenario is read-only apart from its links, which
+                    save themselves, so its bar carries no save action. */}
+                <span className="page-more editor-more">
+                  <Tooltip label="More actions">
                     <button
-                      onClick={() => void publishScenario()}
-                      disabled={!editing.scenario.name.trim() || publishing !== null}
+                      type="button"
+                      className="ibtn"
+                      aria-label="Scenario actions"
+                      aria-haspopup="menu"
+                      aria-expanded={editorMenuOpen}
+                      onClick={() => setEditorMenuOpen((o) => !o)}
                     >
-                      Publish
+                      <Ellipsis size={15} aria-hidden="true" />
                     </button>
-                  </>
-                )}
-                {/* A published scenario is read-only apart from its links —
-                    test links and its ticket — and those save themselves:
-                    autosave writes them locally like any other edit, and Sync
-                    pushes them. So its bar carries no save action at all. */}
+                  </Tooltip>
+                  <Menu
+                    open={editorMenuOpen}
+                    onClose={() => setEditorMenuOpen(false)}
+                    label="Scenario actions"
+                    className="page-menu"
+                    containerSelector=".editor-more"
+                    items={[
+                      {
+                        id: "new-below",
+                        label: "New scenario below",
+                        icon: <Plus size={13} />,
+                        keys: "c",
+                        disabled: !canAddAfter || publishing !== null,
+                        onSelect: () => void newScenarioAfterCurrent(),
+                      },
+                      {
+                        id: "duplicate",
+                        label: "Duplicate",
+                        icon: <CopyPlus size={13} />,
+                        disabled: savedEntry === null,
+                        onSelect: () => {
+                          if (savedEntry) void duplicateTreeScenario(selected, savedEntry);
+                        },
+                      },
+                      ...(editingPublished && editing.index !== null
+                        ? [
+                            {
+                              id: "new-version",
+                              label: "New version",
+                              icon: <History size={13} />,
+                              onSelect: () => newVersion(editing.index!),
+                            },
+                          ]
+                        : []),
+                      {
+                        id: "copy",
+                        label:
+                          copied === scenarioPath(selected, editing.scenario) ? "Copied" : "Copy link",
+                        icon: <Link size={13} />,
+                        keys: "mod+shift+c",
+                        disabled: !editing.scenario.name.trim(),
+                        onSelect: () => void copyLink(scenarioPath(selected, editing.scenario)),
+                      },
+                      ...(editingDeletable
+                        ? [
+                            {
+                              id: "delete",
+                              label: "Delete",
+                              icon: <Trash2 size={13} />,
+                              danger: true,
+                              onSelect: () => void deleteScenario(),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
+                </span>
               </div>
             </div>
             {/* The scenario's name sits above the editor's top left corner
@@ -9742,13 +9889,67 @@ export function App() {
                   }
                 />
               )}
-              <p className="version-field">
+              {/* The status as a chip (specs/editor/spec-editor.feature.md
+                  "Spec editor pane"): a draft's menu offers the two ways
+                  forward — Propose moves it into the .feature.md as
+                  [proposed]; Publish takes it straight to [published],
+                  committed and pushed — a proposed scenario's only Publish,
+                  and a published one is a plain badge. Closing without either
+                  keeps the autosaved draft. mod+enter picks the first. */}
+              <div className="version-field">
                 Version <span className="version">v{draftVersion}</span>
-                <span className="status-field">
-                  <StatusIcon status={editing.scenario.status} size={14} />
-                  {editing.scenario.status}
-                </span>
-              </p>
+                {editingPublished ? (
+                  <span className="chip static status-chip">
+                    <StatusIcon status="published" size={14} />
+                    published
+                  </span>
+                ) : (
+                  <span className="chip-anchor status-anchor">
+                    <button
+                      type="button"
+                      className="chip status-chip"
+                      aria-haspopup="menu"
+                      aria-expanded={statusMenuOpen}
+                      aria-label={`Status: ${editing.scenario.status}`}
+                      disabled={publishing !== null}
+                      onClick={() => setStatusMenuOpen((o) => !o)}
+                    >
+                      <StatusIcon status={editing.scenario.status} size={14} />
+                      {editing.scenario.status}
+                      <ChevronDown size={12} aria-hidden="true" />
+                    </button>
+                    <Menu
+                      open={statusMenuOpen}
+                      onClose={() => setStatusMenuOpen(false)}
+                      label="Scenario status"
+                      className="chip-menu"
+                      containerSelector=".status-anchor"
+                      items={[
+                        ...(editing.scenario.status === "draft"
+                          ? [
+                              {
+                                id: "propose",
+                                label: "Propose",
+                                icon: <SendHorizontal size={13} />,
+                                keys: "mod+enter",
+                                disabled: !editing.scenario.name.trim() || publishing !== null,
+                                onSelect: () => void proposeScenario(),
+                              },
+                            ]
+                          : []),
+                        {
+                          id: "publish",
+                          label: publishing !== null ? "Publishing…" : "Publish",
+                          icon: <StatusIcon status="published" size={13} />,
+                          ...(editing.scenario.status === "proposed" ? { keys: "mod+enter" } : {}),
+                          disabled: !editing.scenario.name.trim() || publishing !== null,
+                          onSelect: () => void publishScenario(),
+                        },
+                      ]}
+                    />
+                  </span>
+                )}
+              </div>
             </div>
             <div className="scenario-pane-body">
               <div
@@ -10119,6 +10320,20 @@ export function App() {
                   savedAt={savedAt}
                   dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
                 />
+                {/* New scenario (specs/ui/ui.feature.md "Add A Scenario
+                    Button"): from the header, pinned above the list, so it is
+                    always in view — at the end of the feature; a card's ⋯
+                    adds one below that card. */}
+                <Tooltip label="New scenario" keys="c">
+                  <button
+                    type="button"
+                    className="ibtn"
+                    aria-label="New scenario"
+                    onClick={() => void newScenario()}
+                  >
+                    <Plus size={16} aria-hidden="true" />
+                  </button>
+                </Tooltip>
                 {/* The description editor (specs/editor/feature-editor
                     .feature.md): switches the description pane below between
                     rendered and editable. */}
@@ -10202,6 +10417,18 @@ export function App() {
                         keys: "mod+shift+c",
                         onSelect: () => void copyLink(featurePath(selected)),
                       },
+                      // Publish All (crud-feature.md "publish each scenario
+                      // individually"): marks every scenario published —
+                      // here and on the publish rollup chip; individual
+                      // scenarios publish from their cards.
+                      {
+                        id: "publish-all",
+                        label: publishing === "all" ? "Publishing…" : "Publish all",
+                        icon: <CloudUpload size={13} />,
+                        keys: "mod+enter",
+                        disabled: publishing !== null,
+                        onSelect: () => void publish(),
+                      },
                       ...(demo || hosted
                         ? []
                         : [
@@ -10235,21 +10462,6 @@ export function App() {
                     ]}
                   />
                 </span>
-                {/* Publish All (crud-feature.md "publish each
-                    scenario individually"): marks every scenario published;
-                    individual scenarios publish from their cards. The dot
-                    means there is something unpublished. Sync lives in the
-                    sidebar header, beside the data folder. */}
-                <button
-                  className="primary-action"
-                  onClick={() => void publish()}
-                  disabled={publishing !== null}
-                >
-                  {publishing === "all" ? "Publishing…" : "Publish all"}
-                  {publishing === null && (dirty || hasProposed) && (
-                    <span className="dot" role="img" aria-label="unpublished changes" />
-                  )}
-                </button>
               </div>
             </header>
             {/* Properties as chips (specs/ui/ui.feature.md "Design system"):
@@ -10259,10 +10471,45 @@ export function App() {
                 (specs/external-links/project-management-jira-linear-etc
                 .feature.md "Add link to feature"), edited in a popover. */}
             <div className="props">
-              <span className="chip static">
-                <StatusIcon status="published" size={14} />
-                {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
-                {feature.scenarios.length} published
+              {/* The publish rollup, and the way to Publish All (crud-feature
+                  .md "publish each scenario individually"): its menu marks
+                  every scenario published; the dot means there is something
+                  unpublished. Sync lives in the sidebar header, beside the
+                  data folder. */}
+              <span className="chip-anchor publish-anchor">
+                <button
+                  type="button"
+                  className="chip"
+                  aria-haspopup="menu"
+                  aria-expanded={publishMenuOpen}
+                  aria-label={`${feature.scenarios.filter((s) => s.status === "published").length} of ${feature.scenarios.length} published${publishing === null && (dirty || hasProposed) ? ", unpublished changes" : ""}`}
+                  onClick={() => setPublishMenuOpen((o) => !o)}
+                >
+                  <StatusIcon status="published" size={14} />
+                  {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
+                  {feature.scenarios.length} published
+                  {publishing === null && (dirty || hasProposed) && (
+                    <span className="dot" role="img" aria-label="unpublished changes" />
+                  )}
+                  <ChevronDown size={12} aria-hidden="true" />
+                </button>
+                <Menu
+                  open={publishMenuOpen}
+                  onClose={() => setPublishMenuOpen(false)}
+                  label="Publish"
+                  className="chip-menu"
+                  containerSelector=".publish-anchor"
+                  items={[
+                    {
+                      id: "all",
+                      label: publishing === "all" ? "Publishing…" : "Publish all",
+                      icon: <CloudUpload size={13} />,
+                      keys: "mod+enter",
+                      disabled: publishing !== null,
+                      onSelect: () => void publish(),
+                    },
+                  ]}
+                />
               </span>
               {/* Who created the feature and last changed it
                   (specs/app/specs-authorship.feature.md). */}
@@ -10384,12 +10631,12 @@ export function App() {
                         <div className="dialog-actions">
                           <button
                             type="button"
-                            className="secondary"
+                            className="btn btn-secondary"
                             onClick={() => setFeatureLinkDraft(null)}
                           >
                             Cancel
                           </button>
-                          <button type="submit" disabled={featureLinkSaving}>
+                          <button type="submit" className="btn btn-primary" disabled={featureLinkSaving}>
                             {featureLinkSaving
                               ? "Saving…"
                               : feature.link && isBlankLinkDraft(featureLinkDraft)
@@ -10467,12 +10714,12 @@ export function App() {
                         <div className="dialog-actions">
                           <button
                             type="button"
-                            className="secondary"
+                            className="btn btn-secondary"
                             onClick={() => setFeatureQtestDraft(null)}
                           >
                             Cancel
                           </button>
-                          <button type="submit" disabled={featureQtestSaving}>
+                          <button type="submit" className="btn btn-primary" disabled={featureQtestSaving}>
                             {featureQtestSaving
                               ? "Saving…"
                               : feature.qtest && isBlankLinkDraft(featureQtestDraft)
@@ -10533,7 +10780,7 @@ export function App() {
                     onChange={(prs) => savePullRequests(null, prs)}
                   />
                   <div className="dialog-actions">
-                    <button type="button" className="secondary" onClick={() => setFeaturePrsOpen(false)}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setFeaturePrsOpen(false)}>
                       Close
                     </button>
                   </div>
@@ -10573,7 +10820,7 @@ export function App() {
                       onChange={(flags) => saveFeatureFlags(flags)}
                     />
                     <div className="dialog-actions">
-                      <button type="button" className="secondary" onClick={() => setFeatureFlagsOpen(false)}>
+                      <button type="button" className="btn btn-secondary" onClick={() => setFeatureFlagsOpen(false)}>
                         Close
                       </button>
                     </div>
@@ -10617,7 +10864,7 @@ export function App() {
                       onChange={(attributes) => saveFeatureAttributes(attributes)}
                     />
                     <div className="dialog-actions">
-                      <button type="button" className="secondary" onClick={() => setFeatureAttributesOpen(false)}>
+                      <button type="button" className="btn btn-secondary" onClick={() => setFeatureAttributesOpen(false)}>
                         Close
                       </button>
                     </div>
@@ -10669,7 +10916,7 @@ export function App() {
                       <div className="dialog-actions">
                         <button
                           type="button"
-                          className="secondary"
+                          className="btn btn-secondary"
                           onClick={() => setFeatureResourceOpen(null)}
                         >
                           Close
@@ -10899,6 +11146,15 @@ export function App() {
                             keys: "e",
                             onSelect: () => setEditing({ index: i, scenario: { ...s } }),
                           },
+                          // A new scenario right after this one (specs/ui/
+                          // ui.feature.md "Add A Scenario Button").
+                          {
+                            id: "new-below",
+                            label: "New scenario below",
+                            icon: <Plus size={13} />,
+                            disabled: editing !== null,
+                            onSelect: () => void newScenario(i + 1),
+                          },
                           s.status !== "published"
                             ? {
                                 id: "publish",
@@ -10910,7 +11166,7 @@ export function App() {
                             : {
                                 id: "new-version",
                                 label: "New version",
-                                icon: <Plus size={13} />,
+                                icon: <History size={13} />,
                                 onSelect: () => newVersion(i),
                               },
                           {
@@ -11008,12 +11264,9 @@ export function App() {
                     — the sidebar filter hides the rest.
                   </p>
                 )}
-              {feature.scenarios.length === 0 && <p className="empty">No scenarios yet.</p>}
-            </div>
-            <div>
-              <button className="add-spec" onClick={() => void newScenario()}>
-                + Add Scenario
-              </button>
+              {feature.scenarios.length === 0 && (
+                <p className="empty">No scenarios yet. Press c, or the + above, to add one.</p>
+              )}
             </div>
           </>
         ) : selected && !feature && featureLoading ? (
@@ -11179,25 +11432,28 @@ export function App() {
             </section>
             <div className="dialog-actions conflict-actions">
               <button
-                className="secondary"
+                className="btn btn-secondary"
                 onClick={dismissConflict}
                 disabled={resolving !== null}
               >
                 Cancel
               </button>
               <button
+                className="btn btn-primary"
                 onClick={() => void resolveWith("ours", conflict.ours)}
                 disabled={resolving !== null}
               >
                 {resolving === "ours" ? "Publishing…" : "Accept yours"}
               </button>
               <button
+                className="btn btn-primary"
                 onClick={() => void resolveWith("theirs", conflict.theirs)}
                 disabled={resolving !== null}
               >
                 {resolving === "theirs" ? "Publishing…" : "Accept theirs"}
               </button>
               <button
+                className="btn btn-primary"
                 onClick={() => void resolveWith("draft", conflictDraft)}
                 disabled={resolving !== null}
               >
@@ -11364,7 +11620,7 @@ export function App() {
               GitHub account, or the system git identity when signed out.
             </p>
             <div className="dialog-actions">
-              <button autoFocus onClick={() => setUserInfoOpen(false)}>
+              <button autoFocus className="btn btn-primary" onClick={() => setUserInfoOpen(false)}>
                 Close
               </button>
             </div>
@@ -11408,7 +11664,7 @@ export function App() {
             <h3>Code gen session failed</h3>
             <p className="error session-error">{sessionError}</p>
             <div className="dialog-actions">
-              <button onClick={() => setSessionError(null)}>Close</button>
+              <button className="btn btn-primary" onClick={() => setSessionError(null)}>Close</button>
             </div>
           </div>
         </div>

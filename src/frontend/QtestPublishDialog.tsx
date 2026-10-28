@@ -165,10 +165,10 @@ export function QtestPublishDialog({
           />
           {error && <FailureLine service="qTest" error={error} details={details} onOpenLogs={onOpenLogs} />}
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={onClose}>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="primary" disabled={busy || problem !== null}>
+            <button type="submit" className="btn btn-primary" disabled={busy || problem !== null}>
               {busy ? "Creating…" : "Create test cases"}
             </button>
           </div>

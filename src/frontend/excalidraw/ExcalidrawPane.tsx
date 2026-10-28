@@ -330,18 +330,19 @@ export function ExcalidrawPane({ onInsert, onCancel, edit, importFile }: Excalid
             />
             <button
               type="button"
-              className="secondary"
+              className="btn btn-secondary"
               title="Load a .excalidraw file onto the canvas"
               disabled={!api || exporting || loading !== null}
               onClick={() => importRef.current?.click()}
             >
               Import…
             </button>
-            <button type="button" className="secondary" onClick={() => void cancel()}>
+            <button type="button" className="btn btn-secondary" onClick={() => void cancel()}>
               Cancel
             </button>
             <button
               type="button"
+              className="btn btn-primary"
               disabled={!api || !hasElements || exporting || loading !== null}
               onClick={() => void insert()}
             >

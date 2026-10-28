@@ -117,3 +117,24 @@ test("real keys still dispatch — a field keeps single letters, takes shortcuts
   press({ key: "c" });
   expect(fired).toEqual(["search", "create"]);
 });
+
+// The pane's `c` (specs/editor/spec-editor.feature.md "Spec editor pane"):
+// a new scenario after the open one — but a `c` typed into the body
+// (CodeMirror's contenteditable) is just a c, and a shortcut whose `when`
+// says no stays quiet.
+test("single letters stand down in a contenteditable body and behind a false `when`", () => {
+  root = createRoot(host!);
+  let allowed = false;
+  const create: Shortcut = { ...shortcut("create", "c"), when: () => allowed };
+  act(() => root!.render(<Keys shortcuts={[create]} />));
+  const body = document.createElement("div");
+  body.setAttribute("contenteditable", "true");
+  host!.appendChild(body);
+  press({ key: "c" });
+  expect(fired).toEqual([]);
+  allowed = true;
+  press({ key: "c" }, body);
+  expect(fired).toEqual([]);
+  press({ key: "c" });
+  expect(fired).toEqual(["create"]);
+});

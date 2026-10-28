@@ -156,7 +156,7 @@ export function CloneFromGitHub({
         onChange={(e) => setToken(e.target.value)}
       />
       <TokenHint host={host ?? GITHUB_HOST} />
-      <button type="button" disabled={busy || checking} onClick={() => void submit()}>
+      <button type="button" className="btn btn-primary" disabled={busy || checking} onClick={() => void submit()}>
         {checking ? "Checking the token…" : busy ? "Cloning…" : "Clone and open"}
       </button>
       {(problem ?? error) && <p className="error">{problem ?? cloneError(error!)}</p>}
@@ -232,7 +232,7 @@ export function PasteToken({
           }}
           placeholder="Personal access token"
         />
-        <button className="secondary" disabled={busy || !token.trim()} onClick={() => void save()}>
+        <button className="btn btn-secondary" disabled={busy || !token.trim()} onClick={() => void save()}>
           {busy ? "Checking…" : "Save token"}
         </button>
       </div>
@@ -279,7 +279,7 @@ export function TokenSignInDialog({
         )}
         <PasteToken replacing={signedIn} autoFocus onSignedIn={onSignedIn} />
         <div className="dialog-actions">
-          <button className="secondary" onClick={onClose}>
+          <button className="btn btn-secondary" onClick={onClose}>
             Close
           </button>
         </div>
