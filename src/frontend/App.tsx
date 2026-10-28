@@ -22,6 +22,7 @@ import type {
   Scenario,
   ScenarioFile,
   ScenarioPick,
+  ScenarioStatus,
   ScenarioTarget,
   SpecAttribute,
 } from "../server/parser";
@@ -237,7 +238,9 @@ import {
   folderOptions,
   folderRenamed,
   scenarioDrop,
+  scenarioMovesInto,
   scenarioNeighbors,
+  scenarioPlace,
   scenarioRows,
   scenarioSequence,
   withOpenScenarios,
@@ -1329,19 +1332,27 @@ export function App() {
    */
   const [featureDropAt, setFeatureDropAt] = useState<{ fileName: string; after: boolean } | null>(null);
   /**
-   * A scenario being dragged in the sidebar outline
-   * (specs/ui/navigation.feature.md "reorder scenarios by dragging them in
-   * the tree"), and the row edge it would land on. Apart from `dragging`, so
-   * the folders' drop zones never take it for a feature.
+   * A scenario being dragged — a row of the sidebar outline or a card of the
+   * feature page (specs/ui/navigation.feature.md "reorder scenarios by
+   * dragging them in the tree", "drag a scenario to another feature") — and
+   * the row or card edge it would land on, in its own feature or another.
+   * Apart from `dragging`, so the folders' drop zones never take it for a
+   * feature.
    */
-  const [scenarioDrag, setScenarioDrag] = useState<{ file: string; name: string; version: number } | null>(
-    null,
-  );
+  const [scenarioDrag, setScenarioDrag] = useState<{
+    file: string;
+    name: string;
+    version: number;
+    status: ScenarioStatus;
+  } | null>(null);
   const [scenarioDropAt, setScenarioDropAt] = useState<{
+    file: string;
     name: string;
     version: number;
     after: boolean;
   } | null>(null);
+  /** The feature row a scenario dragged out of another feature is over. */
+  const [scenarioDropInto, setScenarioDropInto] = useState<string | null>(null);
   /**
    * A folder being dragged among its siblings (specs/ui/folders.feature.md
    * "order folders"), and the sibling row edge it would land on. Apart from
@@ -5869,21 +5880,50 @@ export function App() {
       empty: options.length === 0 ? "There is no other feature to move it to." : "No feature matches.",
     });
     if (to === null) return;
+    await moveScenarioToFeature(file, s, to);
+  };
+
+  /**
+   * Move a scenario out of `file` into the feature `to` — from Move to…, or
+   * dropped there (specs/ui/navigation.feature.md "drag a scenario to another
+   * feature"): last in it, or next to the scenario `at` names. The toast's
+   * Undo moves it back to where it was.
+   */
+  const moveScenarioToFeature = async (
+    file: string,
+    s: { name: string; version: number },
+    to: string,
+    at?: { name: string; version: number; after: boolean },
+  ) => {
     const following =
       file === selected &&
       paneScenario !== null &&
       paneScenario.name === s.name &&
       paneScenario.version === s.version;
+    // Its place before the move, for Undo: the open feature knows its drafts
+    // too, the listing only what the file holds.
+    const listed = features.find((f) => f.fileName === file);
+    const back = scenarioPlace(
+      file === selected && feature ? feature.scenarios : (listed?.scenarios ?? []),
+      s,
+    );
     if ((file === selected || to === selected) && editing) {
       const ahead = autosaveInFlight.current;
       await closeEditor();
       await ahead;
     }
-    const res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to }),
-    });
+    await scenarioSaveQueue.current.idle();
+    let res: Response;
+    try {
+      res = await fetch(`/api/features/${encodeURIComponent(file)}/move-scenario`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: { name: s.name, version: s.version }, to, at }),
+      });
+    } catch {
+      toast.error("Move failed — is the server running?");
+      return;
+    }
     const data = await res.json();
     if (!res.ok) {
       toast.error(data.error ?? "Move failed");
@@ -5903,9 +5943,15 @@ export function App() {
       await openFeature(to);
     }
     await loadFeatures();
-    const target = options.find((o) => o.value === to)?.label ?? to;
-    toast.success(`Moved "${s.name}" v${s.version} to ${target}.`);
+    const target = features.find((f) => f.fileName === to);
+    // Undo runs whenever it is clicked, so through the latest render's move:
+    // this one's selection and editor pane may be long gone by then.
+    toast.success(`Moved "${s.name}" v${s.version} to ${target?.name || titleFromFileName(to)}.`, {
+      action: { label: "Undo", run: () => void latestMoveScenario.current(to, s, file, back ?? undefined) },
+    });
   };
+  const latestMoveScenario = useRef(moveScenarioToFeature);
+  latestMoveScenario.current = moveScenarioToFeature;
 
   /**
    * Duplicate from a scenario's menu — its card's on the feature page or its
@@ -6020,6 +6066,13 @@ export function App() {
     await loadFeatures();
   };
 
+  /** A scenario drag is over: dropped, or let go anywhere else. */
+  const endScenarioDrag = () => {
+    setScenarioDrag(null);
+    setScenarioDropAt(null);
+    setScenarioDropInto(null);
+  };
+
   /**
    * One sidebar entry per feature; the entry is the drag source. `parent` is
    * the folder it sits in, whose features it moves up and down among
@@ -6038,6 +6091,11 @@ export function App() {
           ? " drop-after"
           : " drop-before"
         : "";
+    // A scenario dragged out of another feature — a row of its outline or a
+    // card of its page — drops in here, last (specs/ui/navigation.feature.md
+    // "drag a scenario to another feature").
+    const scenarioInto =
+      scenarioDrag !== null && scenarioMovesInto(scenarioDrag, f.fileName, deletePublished);
     const entry = specSelection.get(f.fileName);
     // The feature's scenarios, listed under it when the outline is expanded
     // (specs/ui/navigation.feature.md "Scenario navigation"). The open feature
@@ -6050,8 +6108,16 @@ export function App() {
         <div
           className={`tree-row${matchesFilter(f) ? "" : " dim"}${featureDropEdge}${
             dragging === f.fileName ? " dragging" : ""
-          }`}
+          }${scenarioInto && scenarioDropInto === f.fileName ? " drop-target" : ""}`}
           onDragOver={(e) => {
+            if (scenarioInto) {
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+              setScenarioDropAt(null);
+              if (scenarioDropInto !== f.fileName) setScenarioDropInto(f.fileName);
+              return;
+            }
             if (!siblingDrag) return;
             e.preventDefault();
             e.stopPropagation();
@@ -6063,7 +6129,20 @@ export function App() {
               setFeatureDropAt({ fileName: f.fileName, after });
             }
           }}
+          onDragLeave={(e) => {
+            if (scenarioDropInto === f.fileName && !e.currentTarget.contains(e.relatedTarget as Node | null)) {
+              setScenarioDropInto(null);
+            }
+          }}
           onDrop={(e) => {
+            if (scenarioInto) {
+              e.preventDefault();
+              e.stopPropagation();
+              const dragged = scenarioDrag!;
+              endScenarioDrag();
+              void moveScenarioToFeature(dragged.file, dragged, f.fileName);
+              return;
+            }
             if (!siblingDrag) return;
             e.preventDefault();
             e.stopPropagation();
@@ -6257,49 +6336,56 @@ export function App() {
               const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
               const deletable = s.status !== "published" || deletePublished;
               // Drag to reorder (specs/ui/navigation.feature.md "reorder
-              // scenarios by dragging them in the tree"): within this
-              // feature only, landing before or after the row it is over.
+              // scenarios by dragging them in the tree"): landing before or
+              // after the row it is over — in this feature, or moved here
+              // out of another one ("drag a scenario to another feature").
               const same = (x: { name: string; version: number } | null) =>
                 x !== null && x.name === s.name && x.version === s.version;
               const draggingHere = scenarioDrag !== null && scenarioDrag.file === f.fileName;
+              const droppable = draggingHere || scenarioInto;
               const dropEdge =
-                draggingHere && same(scenarioDropAt) && !same(scenarioDrag)
-                  ? scenarioDropAt!.after
+                droppable &&
+                scenarioDropAt?.file === f.fileName &&
+                same(scenarioDropAt) &&
+                !(draggingHere && same(scenarioDrag))
+                  ? scenarioDropAt.after
                     ? " drop-after"
                     : " drop-before"
                   : "";
-              const endScenarioDrag = () => {
-                setScenarioDrag(null);
-                setScenarioDropAt(null);
-              };
               return (
                 <div
                   key={`${s.name}-v${s.version}`}
                   className={`tree-scenario-row${dropEdge}${draggingHere && same(scenarioDrag) ? " dragging" : ""}`}
                   onDragOver={(e) => {
-                    if (!draggingHere) return;
+                    if (!droppable) return;
                     e.preventDefault();
                     e.stopPropagation();
                     e.dataTransfer.dropEffect = "move";
+                    setScenarioDropInto(null);
                     const box = e.currentTarget.getBoundingClientRect();
                     const after = e.clientY > box.top + box.height / 2;
-                    if (!same(scenarioDropAt) || scenarioDropAt!.after !== after) {
-                      setScenarioDropAt({ name: s.name, version: s.version, after });
+                    if (
+                      scenarioDropAt?.file !== f.fileName ||
+                      !same(scenarioDropAt) ||
+                      scenarioDropAt.after !== after
+                    ) {
+                      setScenarioDropAt({ file: f.fileName, name: s.name, version: s.version, after });
                     }
                   }}
                   onDrop={(e) => {
-                    if (!draggingHere) return;
+                    if (!droppable) return;
                     e.preventDefault();
                     e.stopPropagation();
                     const box = e.currentTarget.getBoundingClientRect();
                     const dragged = scenarioDrag!;
+                    const at = {
+                      name: s.name,
+                      version: s.version,
+                      after: e.clientY > box.top + box.height / 2,
+                    };
                     endScenarioDrag();
-                    void dropTreeScenario(
-                      f.fileName,
-                      dragged,
-                      { name: s.name, version: s.version },
-                      e.clientY > box.top + box.height / 2,
-                    );
+                    if (draggingHere) void dropTreeScenario(f.fileName, dragged, at, at.after);
+                    else void moveScenarioToFeature(dragged.file, dragged, f.fileName, at);
                   }}
                 >
                   <a
@@ -6318,7 +6404,7 @@ export function App() {
                       e.stopPropagation();
                       e.dataTransfer.setData("text/plain", scenarioPath(f.fileName, s));
                       e.dataTransfer.effectAllowed = "move";
-                      setScenarioDrag({ file: f.fileName, name: s.name, version: s.version });
+                      setScenarioDrag({ file: f.fileName, name: s.name, version: s.version, status: s.status });
                     }}
                     onDragEnd={endScenarioDrag}
                     onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
@@ -11081,14 +11167,62 @@ export function App() {
               className="scenarios"
               style={{ "--preview-lines": previewLines } as CSSProperties}
             >
-              {feature.scenarios.map((s, i) =>
-                !scenarioMatches(s, feature, filter) ? null : (
+              {feature.scenarios.map((s, i) => {
+                if (!scenarioMatches(s, feature, filter)) return null;
+                // A card is a drag source (specs/ui/navigation.feature.md
+                // "drag a scenario to another feature"): onto another
+                // feature in the sidebar it moves there; onto another card
+                // here it lands before or after it, as a drag in the
+                // sidebar outline does — or, dragged out of another
+                // feature's outline, moves in at that spot.
+                const isCard = (x: { file?: string; name: string; version: number } | null) =>
+                  x !== null && x.file === selected && x.name === s.name && x.version === s.version;
+                const droppable =
+                  scenarioDrag !== null &&
+                  !isCard(scenarioDrag) &&
+                  (scenarioDrag.file === selected || scenarioMovesInto(scenarioDrag, selected, deletePublished));
+                const dropEdge =
+                  droppable && isCard(scenarioDropAt)
+                    ? scenarioDropAt!.after
+                      ? " drop-after"
+                      : " drop-before"
+                    : "";
+                return (
                 <article
                   key={i}
                   ref={(el) => {
                     scenarioRefs.current[i] = el;
                   }}
-                  className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}`}
+                  className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}${dropEdge}${
+                    isCard(scenarioDrag) ? " dragging" : ""
+                  }`}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", scenarioPath(selected, s));
+                    e.dataTransfer.effectAllowed = "move";
+                    setScenarioDrag({ file: selected, name: s.name, version: s.version, status: s.status });
+                  }}
+                  onDragEnd={endScenarioDrag}
+                  onDragOver={(e) => {
+                    if (!droppable) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const after = e.clientY > box.top + box.height / 2;
+                    if (!isCard(scenarioDropAt) || scenarioDropAt!.after !== after) {
+                      setScenarioDropAt({ file: selected, name: s.name, version: s.version, after });
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (!droppable) return;
+                    e.preventDefault();
+                    const box = e.currentTarget.getBoundingClientRect();
+                    const dragged = scenarioDrag!;
+                    const at = { name: s.name, version: s.version, after: e.clientY > box.top + box.height / 2 };
+                    endScenarioDrag();
+                    if (dragged.file === selected) void dropTreeScenario(selected, dragged, at, at.after);
+                    else void moveScenarioToFeature(dragged.file, dragged, selected, at);
+                  }}
                   // A click anywhere on the card highlights it (the title link
                   // does so itself); a double-click opens it in the editor
                   // pane, like Enter. The card's controls keep their own
@@ -11341,8 +11475,8 @@ export function App() {
                       scenario and who last changed it. */}
                   {authorshipLine(s) && <p className="scenario-authors">{authorshipLine(s)}</p>}
                 </article>
-                ),
-              )}
+                );
+              })}
               {feature.scenarios.length > 0 &&
                 !feature.scenarios.some((s) => scenarioMatches(s, feature, filter)) && (
                   <p className="empty">

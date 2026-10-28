@@ -1337,12 +1337,23 @@ export interface MoveScenarioResult extends SaveResult {
   movedTo: string;
 }
 
+/** Where a moved scenario lands in its new feature: just before or just
+    after one of the scenarios already there, found by name and version. */
+export interface ScenarioPlace {
+  name: string;
+  version: number;
+  after: boolean;
+}
+
 /**
  * Move a scenario to another feature (specs/ui/navigation.feature.md "move a
  * scenario to another feature"): it keeps its name, version, status, body,
  * tests, ticket and pull request links, and leaves the source the way a
  * Delete of it would. Added to the target before it is taken out of the
  * source, so a failure part way leaves it in both rather than in neither.
+ * It lands last in the target, or next to the scenario `at` names — a drop
+ * on a row of the target's outline (specs/ui/navigation.feature.md "drag a
+ * scenario to another feature"); one `at` no longer finds lands last.
  *
  * Drafts and [proposed] scenarios are local writes, committed and pushed by
  * the reload cron like any save. A [published] one is published content
@@ -1355,6 +1366,7 @@ export async function moveScenario(
   fileName: string,
   target: ScenarioTarget,
   toFileName: string,
+  at?: ScenarioPlace,
 ): Promise<MoveScenarioResult> {
   const from = safe(fileName);
   const to = safe(toFileName);
@@ -1372,15 +1384,15 @@ export async function moveScenario(
     throw new Error(`"${destName}" already has "${target.name}" v${target.version}`);
   }
 
-  // Into the target, last in its order: a fresh document entry there (no id
-  // — ids belong to the source's document), then its pull request, Aha! and
-  // Figma links and stored files, which only the document holds.
+  // Into the target, last in its order or at `at`: a fresh document entry
+  // there (no id — ids belong to the source's document), then its pull
+  // request, Aha! and Figma links and stored files, which only the document
+  // holds.
   const { id: _id, prs, aha, figma, files, ...carried } = moving;
-  await saveFeature(
-    dataDir,
-    to,
-    serializeFeature({ ...dest.parsed, scenarios: [...dest.parsed.scenarios, carried] }),
-  );
+  const scenarios = [...dest.parsed.scenarios];
+  const anchor = at ? scenarios.findIndex((s) => s.name === at.name && s.version === at.version) : -1;
+  scenarios.splice(anchor < 0 ? scenarios.length : anchor + (at!.after ? 1 : 0), 0, carried);
+  await saveFeature(dataDir, to, serializeFeature({ ...dest.parsed, scenarios }));
   if (prs && prs.length > 0) {
     await savePullRequests(dataDir, to, { name: moving.name, version: moving.version }, prs);
   }
