@@ -299,10 +299,10 @@ function ModalDialog({
                 />
               )}
               <div className="dialog-actions">
-                <button type="button" className="secondary" onClick={cancel}>
+                <button type="button" className="btn btn-secondary" onClick={cancel}>
                   Cancel
                 </button>
-                <button type="submit" disabled={!draft.trim() && !request.opts.allowEmpty}>
+                <button type="submit" className="btn btn-primary" disabled={!draft.trim() && !request.opts.allowEmpty}>
                   {confirmLabelOf(request.opts, choice)}
                 </button>
               </div>
@@ -312,10 +312,10 @@ function ModalDialog({
           <>
             {request.opts.body && <p className="modal-body">{request.opts.body}</p>}
             <div className="dialog-actions">
-              <button className="secondary" onClick={cancel}>
+              <button className="btn btn-secondary" onClick={cancel}>
                 Cancel
               </button>
-              <button className={request.opts.danger === false ? undefined : "danger-solid"} onClick={confirm}>
+              <button className={request.opts.danger === false ? "btn btn-primary" : "btn btn-danger-solid"} onClick={confirm}>
                 {request.opts.confirmLabel ?? "Delete"}
               </button>
             </div>
@@ -428,7 +428,7 @@ function PickDialog({
             </ul>
           )}
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={cancel}>
+            <button type="button" className="btn btn-secondary" onClick={cancel}>
               Cancel
             </button>
           </div>

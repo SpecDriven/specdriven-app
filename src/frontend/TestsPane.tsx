@@ -1175,7 +1175,7 @@ export function CasePicker({ cases, onAdd, onNew }: { cases: TestCase[]; onAdd: 
         ))}
       </ul>
       <div className="dialog-actions">
-        <button type="button" className="secondary" onClick={onNew}>
+        <button type="button" className="btn btn-secondary" onClick={onNew}>
           + New case in this plan
         </button>
       </div>

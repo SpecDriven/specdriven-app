@@ -300,12 +300,12 @@ export function ConfluenceFolderPublishDialog({
             </p>
           )}
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={onClose} disabled={busy}>
+            <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
               {states.size > 0 ? "Close" : "Cancel"}
             </button>
             <button
               type="submit"
-              className={conflicts.length > 0 ? "danger" : "primary"}
+              className={`btn ${conflicts.length > 0 ? "btn-danger" : "btn-primary"}`}
               disabled={busy || problem !== null || pending.length === 0}
             >
               {label}

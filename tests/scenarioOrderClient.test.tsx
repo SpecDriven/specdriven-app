@@ -1,7 +1,13 @@
 // specs/ui/ui.feature.md "Number scenarios and move them up or down": the
 // editor's pure helpers behind the numbers and Move up / Move down.
 import { expect, test } from "bun:test";
-import { scenarioNumbers, withScenario, withScenarioMoved } from "../src/frontend/App";
+import {
+  insertAfterScenario,
+  newScenarioDraft,
+  scenarioNumbers,
+  withScenario,
+  withScenarioMoved,
+} from "../src/frontend/App";
 import type { Feature, Scenario } from "../src/server/parser";
 
 const sc = (name: string, status: Scenario["status"] = "proposed"): Scenario => ({
@@ -40,4 +46,25 @@ test("scenarioNumbers counts the scenarios the file holds and skips drafts", () 
     null,
   ]);
   expect(scenarioNumbers([])).toEqual([]);
+});
+
+// specs/ui/ui.feature.md "Add A Scenario Button": the draft a new scenario
+// opens as, and where "New scenario below" / the pane's `+` put it.
+test("newScenarioDraft is a new draft under the cleaned name, at insertAt when given", () => {
+  const d = newScenarioDraft("  Pay   the  bill ", 2);
+  expect(d.index).toBeNull();
+  expect(d.isNew).toBe(true);
+  expect(d.insertAt).toBe(2);
+  expect(d.scenario).toEqual({ name: "Pay the bill", version: 1, status: "draft", body: "", tests: [] });
+  expect("insertAt" in newScenarioDraft("Tail")).toBe(false);
+});
+
+test("insertAfterScenario lands right after the pane's scenario, wherever its save left it", () => {
+  const f = feature(sc("A"), sc("B"), { ...sc("C"), id: "c-doc" });
+  // Found by identity: after it.
+  expect(insertAfterScenario(f.scenarios, { name: "B", version: 1 }, undefined, 9)).toBe(2);
+  // A rename re-sorted the entry; the document id still finds it.
+  expect(insertAfterScenario(f.scenarios, { name: "Old C", version: 1 }, "c-doc", 9)).toBe(3);
+  // Gone from the feature: the caller's fallback.
+  expect(insertAfterScenario(f.scenarios, { name: "Zed", version: 1 }, "no-such", 1)).toBe(1);
 });

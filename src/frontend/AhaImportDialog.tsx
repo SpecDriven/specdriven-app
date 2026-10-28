@@ -168,10 +168,10 @@ export function AhaImportDialog({
           />
           {error && <p className="error">{error}</p>}
           <div className="dialog-actions">
-            <button type="button" className="secondary" onClick={onClose}>
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
               Cancel
             </button>
-            <button type="submit" className="primary" disabled={busy || problem !== null}>
+            <button type="submit" className="btn btn-primary" disabled={busy || problem !== null}>
               {busy ? "Importing…" : "Import"}
             </button>
           </div>

@@ -76,10 +76,10 @@ export function AiSessionFields({ dialog, state, onConfirm, onCancel }: AiTabPro
           <PromptChoices label={dialog.choicesLabel} choices={choices} value={choice} onChange={setChoice} />
         )}
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={onCancel}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button type="submit" disabled={!state.enabled || !draft.trim()}>
+          <button type="submit" className="btn btn-primary" disabled={!state.enabled || !draft.trim()}>
             {confirmLabelOf(dialog, choice)}
           </button>
         </div>
