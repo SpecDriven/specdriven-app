@@ -1265,10 +1265,55 @@ export async function deletePublishedScenario(
  * the removal with `force` — and return the projection now on disk. The
  * caller commits and pushes.
  */
-async function removePublished(
+function removePublished(dataDir: string, name: string, target: ScenarioTarget): Promise<string> {
+  return rewritePublished(dataDir, name, target, (scenarios, at) =>
+    scenarios.filter((_, i) => i !== at),
+  );
+}
+
+/**
+ * Move a published scenario back to [proposed]
+ * (specs/editor/spec-editor.feature.md "Unpublish a Spec"): the other
+ * change to published content a plain save must never perform, allowed on
+ * the same terms as Delete Published Spec — its route checks the same
+ * user-settings switch. The scenario keeps its name, version, body, tests
+ * and links; only the status changes, so it is editable again and Publish
+ * takes it back. The doc absorbs the demotion with `force`, which also
+ * clears its recorded published body, and the change is committed and
+ * pushed right away.
+ */
+export async function unpublishScenario(
+  dataDir: string,
+  fileName: string,
+  target: ScenarioTarget,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const projection = await rewritePublished(dataDir, name, target, (scenarios, at) =>
+    scenarios.map((s, i) => (i === at ? { ...s, status: "proposed" as const } : s)),
+  );
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, name),
+    `Unpublish scenario: ${target.name} v${target.version} (${name})`,
+  );
+  return {
+    status: "saved",
+    ...(await featureView(dataDir, name, projection)),
+    message: sync.message,
+  };
+}
+
+/**
+ * Change a published scenario the immutability gates would refuse, locally —
+ * `edit` gets the feature's scenarios and the target's index — with the doc
+ * absorbing the result with `force`. Returns the projection now on disk; the
+ * caller commits and pushes.
+ */
+async function rewritePublished(
   dataDir: string,
   name: string,
   target: ScenarioTarget,
+  edit: (scenarios: Scenario[], at: number) => Scenario[],
 ): Promise<string> {
   const current = await readFeature(dataDir, name);
   if (current === null) throw new Error(`Feature file not found: ${name}`);
@@ -1279,10 +1324,7 @@ async function removePublished(
   if (at === -1) {
     throw new Error(`Published scenario "${target.name}" @v${target.version} not found`);
   }
-  const next = serializeFeature({
-    ...feature,
-    scenarios: feature.scenarios.filter((_, i) => i !== at),
-  });
+  const next = serializeFeature({ ...feature, scenarios: edit(feature.scenarios, at) });
   assertFeatureText(name, next);
   const projection = await absorbIntoDoc(dataDir, name, next, { force: true });
   await writeTextFile(`${dataDir}/${name}`, projection);
