@@ -42,7 +42,7 @@ describe("ConfluencePublishDialog", () => {
     expect(markup).toContain(`value="${PARENT}"`);
     expect(markup).toContain('aria-label="All scenarios"');
     expect(markup).toContain('aria-label="Published scenarios only"');
-    expect(markup).toMatch(/<button type="submit" class="primary">Publish<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary">Publish<\/button>/);
   });
 
   test("a feature published before says publishing again updates its page", () => {
@@ -98,7 +98,7 @@ describe("ConfluencePublishDialog", () => {
       <ConfluencePublishDialog file="f" featureName="F" initialParentUrl={PARENT} wikis={[]} onPublished={noop} onClose={noop} />,
     );
     expect(markup).toContain("No token for https://wiki.acme.com");
-    expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Publish<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Publish<\/button>/);
   });
 });
 
@@ -133,7 +133,7 @@ describe("ConfluenceFolderPublishDialog", () => {
     // A feature published before says it updates its page; the rest are new.
     expect(markup).toContain('Updates <a href="https://wiki.acme.com/spaces/ABC/pages/5/Invoices"');
     expect(markup).toContain("New page");
-    expect(markup).toMatch(/<button type="submit" class="primary">Publish 2 features<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary">Publish 2 features<\/button>/);
   });
 
   test("waits for the folder's features, and says when there are none", () => {
@@ -145,7 +145,7 @@ describe("ConfluenceFolderPublishDialog", () => {
   test("Publish waits for a page url on a wiki with a token", () => {
     const markup = folderDialog(FEATURES, []);
     expect(markup).toContain("No token for https://wiki.acme.com");
-    expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Publish 2 features<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Publish 2 features<\/button>/);
   });
 
   test("offers the parent most of the folder's features were last published under", () => {

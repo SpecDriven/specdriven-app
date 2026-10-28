@@ -158,10 +158,10 @@ export function PomodoroSettingsForm({
           </span>
         </label>
         <div className="dialog-actions">
-          <button type="button" className="secondary" onClick={onCancel}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>
             Cancel
           </button>
-          <button type="submit">Save</button>
+          <button type="submit" className="btn btn-primary">Save</button>
         </div>
       </form>
     </>

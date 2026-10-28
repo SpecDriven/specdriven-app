@@ -25,7 +25,7 @@ describe("AhaImportDialog", () => {
     expect(markup).toContain('placeholder="https://acme.aha.io/features/APP-123"');
     expect(markup).toContain('aria-label="Requirements as scenarios"');
     expect(markup).toContain('aria-label="Description only"');
-    expect(markup).toMatch(/<button type="submit" class="primary" disabled="">Import<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Import<\/button>/);
     expect(html(<AhaImportDialog folder={null} sites={[SITE]} onImported={noop} onClose={noop} />)).toContain(
       "at the top level",
     );

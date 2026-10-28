@@ -206,10 +206,10 @@ export function SpecFoldersDialog({
           </ul>
         )}
         <div className="dialog-actions">
-          <button type="button" className="secondary" disabled={busy} onClick={onAdd}>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAdd}>
             Open another folder…
           </button>
-          <button type="button" autoFocus onClick={onClose}>
+          <button type="button" className="btn btn-primary" autoFocus onClick={onClose}>
             Close
           </button>
         </div>

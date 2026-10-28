@@ -274,11 +274,12 @@ export function MarkupPane({ src, alt, onSave, onCancel }: MarkupPaneProps) {
           {note && <span className="excalidraw-status">{note}</span>}
           {error && <span className="excalidraw-error">{error}</span>}
           <div className="dialog-actions excalidraw-actions">
-            <button type="button" className="secondary" onClick={() => void cancel()}>
+            <button type="button" className="btn btn-secondary" onClick={() => void cancel()}>
               Cancel
             </button>
             <button
               type="button"
+              className="btn btn-primary"
               disabled={!api || loading !== null || !changed || saving}
               onClick={() => void save()}
             >
