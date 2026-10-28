@@ -446,3 +446,35 @@ export function scenarioDrop(
   const to = slot > from ? slot - 1 : slot;
   return to === from ? null : { from, to };
 }
+
+/**
+ * Whether a scenario dragged out of `dragged.file` drops into the feature
+ * `target` (specs/ui/navigation.feature.md "drag a scenario to another
+ * feature"): any feature but its own, on the terms of its Move to… — a
+ * published scenario only while Settings allows deleting published ones.
+ */
+export function scenarioMovesInto(
+  dragged: { file: string; status: string },
+  target: string,
+  deletePublished: boolean,
+): boolean {
+  return target !== dragged.file && (dragged.status !== "published" || deletePublished);
+}
+
+/**
+ * The place `s` holds among `scenarios`, as the move route's `at` names one:
+ * just before the scenario after it, or just after the one before it when it
+ * is last. A moved scenario's Undo puts it back there. Null when it is not
+ * in `scenarios` or is the only one — back last is then back in place.
+ */
+export function scenarioPlace(
+  scenarios: readonly { name: string; version: number }[],
+  s: { name: string; version: number },
+): { name: string; version: number; after: boolean } | null {
+  const i = scenarios.findIndex((x) => x.name === s.name && x.version === s.version);
+  if (i < 0) return null;
+  const next = scenarios[i + 1];
+  if (next) return { name: next.name, version: next.version, after: false };
+  const prev = scenarios[i - 1];
+  return prev ? { name: prev.name, version: prev.version, after: true } : null;
+}
