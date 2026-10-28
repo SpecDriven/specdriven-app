@@ -83,6 +83,7 @@ import {
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
+  unpublishScenario,
   moveScenario,
   duplicateScenario,
   moveFeature,
@@ -2024,6 +2025,24 @@ const postDeletePublished = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/editor/spec-editor.feature.md "Unpublish a Spec": moving a published
+// scenario back to [proposed] is allowed on the same terms as deleting one —
+// only while the Settings switch is on, enforced here as delete-published
+// enforces it. The demotion is committed and pushed right away.
+const postUnpublish = withDataDir(async (dir, req, params) => {
+  if (!normalizeDeletePublished((await readState(getAppRoot())).deletePublished)) {
+    return json({ error: "Changing published scenarios is switched off in Settings" }, 403);
+  }
+  const body = (await req.json()) as { scenario?: ScenarioBody };
+  const target = scenarioTarget(body.scenario);
+  if (!target) return json({ error: "scenario needs a name and a version" }, 400);
+  try {
+    return json(await unpublishScenario(dir, params.file!, target));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/ui/navigation.feature.md "move a scenario to another feature": the
 // scenario menu's Move to… — offered on the same terms as its Delete, so a
 // published scenario moves only while Settings allows deleting published
@@ -3031,6 +3050,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/scenario-files", postScenarioFile],
   ["PUT", "/api/features/:file/scenario-files", putScenarioFiles],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
+  ["POST", "/api/features/:file/unpublish", postUnpublish],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
   ["POST", "/api/features/:file/duplicate-scenario", postDuplicateScenario],
   ["POST", "/api/agent/session", unlessHosted(postAgentSession)],
