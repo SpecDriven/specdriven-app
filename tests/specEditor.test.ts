@@ -60,7 +60,7 @@ test("Delete removes the draft spec", async () => {
 
 // "Propose" — the explicit action that moves the draft into the .feature.md
 // as [proposed].
-test("Propose lands the draft in the feature file as [proposed]", async () => {
+test("Propose lands the draft in the feature file as proposed", async () => {
   await createFeature(root, "Quote");
   await saveFeature(root, "specs/quote.feature.md", "# Quote\n\n## Idea @v1 [draft]\n\nwip\n");
   // The dialog's Propose saves the same scenario with the proposed status.
@@ -74,7 +74,7 @@ test("Propose lands the draft in the feature file as [proposed]", async () => {
 
 // "Publish" — straight from the dialog: the targeted scenario goes into the
 // file marked [published], without a stop at [proposed].
-test("Publish promotes a draft scenario straight to [published]", async () => {
+test("Publish promotes a draft scenario straight to published", async () => {
   await createFeature(root, "Quote");
   await saveFeature(
     root,

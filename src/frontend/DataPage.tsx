@@ -21,6 +21,7 @@ import {
   changeTime,
   docUrl,
   formatBytes,
+  formatCount,
   historyUrl,
   patchLine,
   rowValue,
@@ -325,7 +326,7 @@ export function DataPage({ onClose, fetcher, initialTable }: DataPageProps) {
   };
 
   const shownTables = (tables?.tables ?? []).filter((t) => t.label.toLowerCase().includes(tableFilter.trim().toLowerCase()));
-  const sections = shownTables.map((t) => ({ id: t.name, title: `${t.label} · ${t.rows}` }));
+  const sections = shownTables.map((t) => ({ id: t.name, title: `${t.label} · ${formatCount(t.rows)}` }));
   const label = tables?.tables.find((t) => t.name === table)?.label ?? table;
   const rows = page?.rows ?? [];
   const filtered = query.q.trim() !== "";
@@ -396,7 +397,7 @@ export function DataPage({ onClose, fetcher, initialTable }: DataPageProps) {
               <span className="log-error">{tablesError}</span>
             ) : tables ? (
               <>
-                {tables.documents} {tables.documents === 1 ? "document" : "documents"} in the store
+                {formatCount(tables.documents)} {tables.documents === 1 ? "document" : "documents"} in the store
               </>
             ) : (
               "Scanning the store…"
@@ -446,7 +447,7 @@ export function DataPage({ onClose, fetcher, initialTable }: DataPageProps) {
                     ? filtered
                       ? "No rows match."
                       : "No rows."
-                    : `${from}–${to} of ${page.filtered}${filtered && page.filtered !== page.total ? ` (of ${page.total})` : ""}`}
+                    : `${formatCount(from)}–${formatCount(to)} of ${formatCount(page.filtered)}${filtered && page.filtered !== page.total ? ` (of ${formatCount(page.total)})` : ""}`}
               </p>
               <button
                 type="button"
@@ -599,7 +600,7 @@ export function DataPage({ onClose, fetcher, initialTable }: DataPageProps) {
               {history ? (
                 <>
                   <p className="data-status">
-                    {history.total} {history.total === 1 ? "change" : "changes"}
+                    {formatCount(history.total)} {history.total === 1 ? "change" : "changes"}
                   </p>
                   <ol className="data-changes" aria-label="Changes">
                     {history.changes.map((c) => (

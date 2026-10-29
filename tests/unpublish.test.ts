@@ -17,6 +17,7 @@ import {
 } from "../src/server/features";
 import { loadFeatureDoc } from "../src/server/automerge/store";
 import { writeState } from "../src/server/state";
+import { git, twoClones } from "./helpers/fixtures";
 
 let root: string;
 let home: string;
@@ -108,4 +109,28 @@ test("only a published scenario can be unpublished", async () => {
   await expect(unpublishScenario(data, FILE, { name: "Basic", version: 1 })).rejects.toThrow(
     'Published scenario "Basic" @v1 not found',
   );
+});
+
+test("an unpublished spec keeps its tests and links, and the change is committed and pushed", async () => {
+  const { a, originDir } = await twoClones(join(root, "clones"));
+  await createFeature(a, "Quote");
+  await saveFeature(
+    a,
+    FILE,
+    "# Quote\n\n## Basic @v1\n\n[Jira:Q-1](https://acme.atlassian.net/browse/Q-1)\n\nbody\n\n" +
+      "[test: basic works : https://github.com/a/b/blob/main/t.test.ts#L3 ]\n",
+  );
+  await publishFeature(a, FILE, (await readFeature(a, FILE))!, { name: "Basic", version: 1 });
+  await unpublishScenario(a, FILE, { name: "Basic", version: 1 });
+
+  const text = (await readFeature(a, FILE))!;
+  expect(text).toContain("## S1: Basic @v1 [proposed]");
+  expect(text).toContain("[Jira:Q-1](https://acme.atlassian.net/browse/Q-1)");
+  expect(text).toContain("[test: basic works : https://github.com/a/b/blob/main/t.test.ts#L3 ]");
+  // Right away, as a Delete Published Spec is: origin has the change, nothing is left to commit.
+  expect((await git(originDir, "log", "-1", "--format=%s")).stdout.toString().trim()).toBe(
+    `Unpublish scenario: Basic v1 (${FILE})`,
+  );
+  expect((await git(originDir, "show", `main:${FILE}`)).stdout.toString()).toBe(text);
+  expect((await git(a, "status", "--porcelain", "--", FILE)).stdout.toString()).toBe("");
 });
