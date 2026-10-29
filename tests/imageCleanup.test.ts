@@ -14,6 +14,7 @@ import { handleApi } from "../src/server/api";
 import { deleteImages, imageReferences, listImages, StillReferenced } from "../src/server/imageCleanup";
 import { IMAGES_DIR, isStoredImageName, referencedImageNames, storeImage } from "../src/server/images";
 import { writeState } from "../src/server/state";
+import { git, twoClones } from "./helpers/fixtures";
 
 let root: string;
 let data: string;
@@ -161,6 +162,28 @@ describe("deleteImages", () => {
     const result = await deleteImages(data, [e, e]);
     expect(result.deleted).toEqual([e]);
     expect((await readdir(join(data, IMAGES_DIR))).sort()).toEqual([a, b, c, d].sort());
+  });
+
+  test("removes the images in one commit, pushed", async () => {
+    const { a: repo, originDir } = await twoClones(join(root, "clones"));
+    const kept = await storeImage(repo, "kept.png", png(1));
+    const x = await storeImage(repo, "x.png", png(2));
+    const y = await storeImage(repo, "y.png", png(3));
+    await writeFile(join(repo, "notes.md"), `![kept](/api/images/${kept})\n`);
+    await git(repo, "add", "-A");
+    await git(repo, "commit", "-m", "images");
+    await git(repo, "push");
+    const before = (await git(originDir, "rev-parse", "main")).stdout.toString().trim();
+
+    await deleteImages(repo, [x, y]);
+
+    expect((await git(originDir, "rev-list", "--count", `${before}..main`)).stdout.toString().trim()).toBe("1");
+    expect((await git(originDir, "log", "-1", "--format=%s")).stdout.toString().trim()).toBe(
+      `Delete unused images: ${x}, ${y}`,
+    );
+    const tree = (await git(originDir, "ls-tree", "--name-only", "main", `${IMAGES_DIR}/`)).stdout.toString();
+    expect(tree.trim().split("\n")).toEqual([`${IMAGES_DIR}/${kept}`]);
+    expect((await git(repo, "status", "--porcelain")).stdout.toString()).toBe("");
   });
 
   test("refuses an image a file still references, and deletes nothing", async () => {

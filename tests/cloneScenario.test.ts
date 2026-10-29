@@ -38,7 +38,7 @@ beforeEach(async () => {
     data,
     QUOTE,
     "# Quote\n\n## Basic @v1\n\nbody\n\n" +
-      "## Extra @v1\n\n[negative]\n\n[ff:beta:on]\n\n" +
+      "## Extra @v1\n\n[negative]\n\n[ff:beta:on]\n\n[team:payments]\n\n" +
       "[Jira:Q-1](https://acme.atlassian.net/browse/Q-1)\n\n- Given: more\n\n" +
       "[test: extra works : https://github.com/a/b/blob/main/t.test.ts#L3 ]\n\n" +
       "## Last @v1\n\nend\n",
@@ -80,7 +80,7 @@ test("the copy is a draft named '<name> (clone)' at v1, right after the original
   expect(result.parsed.scenarios.map((s) => s.name)).toContain("Basic (clone)");
 });
 
-test("the copy carries the spec text, flags and polarity, not the tests, ticket or pull requests", async () => {
+test("the copy carries the spec text, flags, attributes and polarity, not the tests, ticket or pull requests", async () => {
   await savePullRequests(data, QUOTE, { name: "Extra", version: 1 }, [
     { url: "https://github.com/a/b/pull/7", title: "Extra" },
   ]);
@@ -88,6 +88,8 @@ test("the copy carries the spec text, flags and polarity, not the tests, ticket 
   const copy = await scenario("Extra (clone)");
   expect(copy.body).toContain("- Given: more");
   expect(copy.flags).toEqual([{ name: "beta", on: true }]);
+  expect(copy.attributes).toEqual((await scenario("Extra")).attributes);
+  expect(copy.attributes?.length).toBe(1);
   expect(copy.negative).toBe(true);
   expect(copy.tests).toEqual([]);
   expect(copy.link).toBeUndefined();
