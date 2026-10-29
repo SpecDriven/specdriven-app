@@ -91,6 +91,7 @@ import {
   History,
   SendHorizontal,
   CloudUpload,
+  Database,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -122,6 +123,7 @@ import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
+import { DataPage } from "./DataPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -2210,7 +2212,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : "Observability"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -2628,6 +2630,8 @@ export function App() {
     setObservabilityComponent(component);
     openAppPage("observability");
   };
+  /** Data (src/frontend/DataPage.tsx): the Automerge store, browsed read-only. */
+  const openData = () => openAppPage("data");
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -7037,6 +7041,17 @@ export function App() {
       run: () => openObservability(),
     },
     {
+      // Data (src/frontend/DataPage.tsx): the Automerge store as tables,
+      // documents and history. Read-only, so the demo may show it too.
+      id: "data",
+      keys: "g d",
+      label: "Data",
+      group: "Navigate",
+      when: () => !quiet,
+      palette: () => !quietBehindPalette,
+      run: () => openData(),
+    },
+    {
       id: "theme",
       keys: "mod+shift+l",
       label: "Cycle the theme",
@@ -7397,6 +7412,7 @@ export function App() {
     shortcutAction("settings", <Settings size={14} />),
     shortcutAction("plugins", <Puzzle size={14} />),
     shortcutAction("observability", <Activity size={14} />),
+    shortcutAction("data", <Database size={14} />),
     shortcutAction(
       "sidebar",
       compact ? (
@@ -9623,6 +9639,17 @@ export function App() {
                       },
                     },
                   ]),
+              // The Automerge store, browsed read-only (src/frontend/DataPage.tsx).
+              {
+                id: "data",
+                label: "Data",
+                icon: <Database size={13} />,
+                keys: "g d",
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openData();
+                },
+              },
               // The desktop and local app's own GitHub sign-in
               // (specs/user-info-settings.feature.md): paste a token, switch
               // to another account's, or sign out.
@@ -9791,6 +9818,9 @@ export function App() {
             copyText={copyText}
             initialComponent={observabilityComponent}
           />
+        ) : appPage === "data" ? (
+          /* Data: the Automerge store as tables, documents and history. */
+          <DataPage onClose={closeAppPage} />
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
