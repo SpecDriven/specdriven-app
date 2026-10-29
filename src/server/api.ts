@@ -128,6 +128,7 @@ import { isFinalStatus, normalizePermissionMode, PERMISSION_MODES } from "./agen
 import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
+import { StillReferenced, deleteImages, listImages } from "./imageCleanup";
 import {
   FILES_DIR,
   MAX_FILE_BYTES,
@@ -2263,6 +2264,25 @@ const getImage = withDataDir(async (dir, _req, params) => {
   });
 });
 
+// Unused images (specs/app/unused-images.feature.md): every stored image
+// with the files that reference it, and a delete of the ones the user picked
+// — refused, 409, for any a file references by the time the request lands.
+const getImages = withDataDir(async (dir) => json({ images: await listImages(dir) }));
+
+const deleteImagesRoute = withDataDir(async (dir, req) => {
+  try {
+    const body = await bodyOf(req);
+    const names = body.names;
+    if (!Array.isArray(names) || names.length === 0 || !names.every((n) => typeof n === "string")) {
+      throw new Error("A non-empty 'names' list is required");
+    }
+    return json(await deleteImages(dir, names as string[]));
+  } catch (e) {
+    if (e instanceof StillReferenced) return json({ error: e.message, referenced: e.referenced }, 409);
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 /** The `scenario` a files route names, the way a save names it; null when malformed. */
 function scenarioTargetOf(value: unknown): ScenarioTarget | null {
   const { name, version, id } = (value ?? {}) as { name?: unknown; version?: unknown; id?: unknown };
@@ -3031,7 +3051,9 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["DELETE", "/api/auth/github", unlessHosted(unlessDemo(deleteAuth))],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
+  ["GET", "/api/images", getImages],
   ["POST", "/api/images", postImage],
+  ["DELETE", "/api/images", deleteImagesRoute],
   ["GET", "/api/images/:name", getImage],
   ["GET", "/api/scenario-files/:name", getScenarioFile],
   ["GET", "/api/search", getSearch],
