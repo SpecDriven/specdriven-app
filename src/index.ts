@@ -77,6 +77,8 @@ const shellRoutes = () => ({
   "/plugins": index,
   // Observability (src/frontend/ObservabilityPage.tsx): the app's own logs.
   "/observability": index,
+  // Data (src/frontend/DataPage.tsx): the Automerge store, browsed read-only.
+  "/data": index,
   // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
   // app shell") — the special folders' pages among them: each module
   // behind the kernel names its prefix in its manifest, on or off, so a

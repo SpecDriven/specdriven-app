@@ -4069,6 +4069,492 @@ button.table-add:hover {
   }
 }
 
+/* Data viewer (src/frontend/DataPage.tsx): the store browsed as tables.
+   The grid wants the whole pane — dense monospace cells under a sticky
+   header, a row's tree in a drawer beside it — and the document and history
+   views read as monospace trees and lists. */
+
+.app-page.data-page .app-page-columns {
+  grid-template-columns: 13rem minmax(0, 1fr);
+}
+
+.settings-group.data-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.data-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
+.data-table-search {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.data-table-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-1);
+}
+
+.data-aside-note {
+  margin: 0;
+}
+
+.data-views {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-view {
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.35rem 0.6rem;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+}
+
+.data-view:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.data-view.active {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
+
+.data-view:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.data-views-doc {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+}
+
+.data-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.data-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 12rem;
+}
+
+.data-rows.with-drawer {
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 24rem);
+}
+
+.data-grid {
+  overflow: auto;
+  max-height: calc(100dvh - 17rem);
+}
+
+.data-grid table {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.data-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.data-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 550;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.data-sort:hover {
+  color: var(--text-1);
+  background: var(--hover);
+}
+
+.data-row {
+  cursor: pointer;
+}
+
+.data-row:hover td {
+  background: var(--hover);
+}
+
+.data-row[aria-selected="true"] td {
+  background: var(--accent-soft);
+}
+
+.data-row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.data-cell {
+  max-width: 28rem;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-1);
+  vertical-align: top;
+}
+
+.data-cell[data-type="number"],
+.data-cell[data-type="boolean"] {
+  color: var(--accent-strong);
+}
+
+.data-cell-json {
+  color: var(--text-3);
+}
+
+.data-cell-null {
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+.data-drawer {
+  border-left: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  overflow: auto;
+  max-height: calc(100dvh - 17rem);
+  font-size: 0.76rem;
+}
+
+.data-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.data-drawer-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
+.data-open-doc {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-top: 0.6rem;
+}
+
+.data-document,
+.data-history {
+  padding: 0.6rem 0.75rem;
+  font-size: 0.76rem;
+}
+
+.data-document {
+  overflow: auto;
+  max-height: calc(100dvh - 14rem);
+}
+
+.data-meta {
+  display: grid;
+  gap: 0.25rem 0.75rem;
+  margin: 0 0 0.6rem;
+}
+
+.data-meta-row {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.data-meta dt {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.data-meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+
+.data-meta dd code {
+  font-size: 0.72rem;
+}
+
+.data-hash {
+  display: inline-block;
+  margin-right: 0.4rem;
+  color: var(--text-2);
+}
+
+.data-chunks td {
+  padding: 0.1rem 0.6rem 0.1rem 0;
+  color: var(--text-2);
+}
+
+.data-chunks tr.skipped td {
+  color: var(--danger-fg);
+}
+
+.data-muted {
+  color: var(--text-3);
+}
+
+.data-loading {
+  padding: 0.5rem 0;
+}
+
+.data-tree-tools {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0.4rem 0;
+}
+
+.data-history {
+  display: grid;
+  grid-template-columns: minmax(18rem, 30rem) minmax(0, 1fr);
+  gap: 1rem;
+  max-height: calc(100dvh - 14rem);
+}
+
+.data-history-list,
+.data-history-detail {
+  min-width: 0;
+  overflow: auto;
+}
+
+.data-changes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.data-change-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 0.2rem 0.6rem;
+  align-items: baseline;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.74rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+}
+
+.data-change-line:hover {
+  background: var(--hover);
+}
+
+.data-change.selected .data-change-line {
+  background: var(--accent-soft);
+}
+
+.data-change-time {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.data-change-actor {
+  grid-column: 1 / 3;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.data-change-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-change-ops {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.data-at-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 550;
+}
+
+.data-patches {
+  margin: 0 0 0.5rem;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
+.data-patches li {
+  overflow-wrap: anywhere;
+}
+
+/* The JSON tree (src/frontend/JsonTree.tsx). */
+.json-tree {
+  list-style: none;
+  margin: 0;
+  padding-left: 1rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.json-tree.json-root {
+  padding-left: 0;
+}
+
+.json-leaf,
+.json-branch {
+  overflow-wrap: anywhere;
+}
+
+.json-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 0 0.2rem 0 0;
+  margin-left: -0.9rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.json-toggle:hover {
+  background: var(--hover);
+}
+
+.json-caret {
+  align-self: center;
+  color: var(--text-3);
+  transition: transform 0.12s;
+}
+
+.json-branch.open > .json-toggle .json-caret {
+  transform: rotate(90deg);
+}
+
+.json-key {
+  color: var(--text-2);
+}
+
+.json-colon,
+.json-bracket {
+  color: var(--text-3);
+}
+
+.json-summary {
+  color: var(--text-3);
+  padding: 0 0.3rem;
+  font-style: italic;
+}
+
+.json-close {
+  display: block;
+}
+
+.json-string {
+  color: var(--status-published);
+}
+
+.json-number,
+.json-boolean {
+  color: var(--accent-strong);
+}
+
+.json-null,
+.json-undefined {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+@container (max-width: 44rem) {
+  .app-page.data-page .app-page-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .data-rows.with-drawer,
+  .data-history {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .data-drawer {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    max-height: none;
+  }
+}
+
 /* Plugins on, in tab order: the place each holds after Specs. */
 .plugin-row-rank {
   flex: none;
