@@ -342,6 +342,11 @@ describe("app pages", () => {
     expect(matchAppPage("/data")).toBe("data");
   });
 
+  test("Images has its own url", () => {
+    expect(appPagePath("images")).toBe("/images");
+    expect(matchAppPage("/images")).toBe("images");
+  });
+
   test("anything else is not an app page", () => {
     expect(matchAppPage("/")).toBeNull();
     expect(matchAppPage("/settings/extra")).toBeNull();

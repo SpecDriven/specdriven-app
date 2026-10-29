@@ -41,10 +41,13 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/auth/github")).toBeNull();
   });
 
-  // Image upload + serving (specs/images.feature.md).
+  // Image upload + serving (specs/images.feature.md); the listing and the
+  // delete of unreferenced ones (specs/app/unused-images.feature.md).
   test("image routes match by method", () => {
     expect(matchApi("POST", "/api/images")).not.toBeNull();
-    expect(matchApi("GET", "/api/images")).toBeNull();
+    expect(matchApi("GET", "/api/images")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/images")).not.toBeNull();
+    expect(matchApi("PUT", "/api/images")).toBeNull();
     const get = matchApi("GET", "/api/images/shot-1a2b3c4d.png");
     expect(get).not.toBeNull();
     expect(get!.params).toEqual({ name: "shot-1a2b3c4d.png" });
