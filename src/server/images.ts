@@ -40,6 +40,11 @@ function safeImageName(name: string): string | null {
   return SAFE_NAME.test(name) ? name : null;
 }
 
+/** Whether a name is one storeImage generates — what `.images/` may hold and a url may name. */
+export function isStoredImageName(name: string): boolean {
+  return SAFE_NAME.test(name);
+}
+
 /** The route the app serves stored images on; a body references one as `![alt](/api/images/<name>)`. */
 export const IMAGES_ROUTE = "/api/images/";
 
@@ -57,6 +62,25 @@ export function storedImageName(url: string): string | null {
     return null;
   }
   return safeImageName(name);
+}
+
+/** A stored-image url wherever it sits in text: its name runs to the first character a url cannot carry. */
+const IMAGE_URL = /\/api\/images\/([^\s)"'<>`\]]+)/g;
+
+/**
+ * The stored images a text references (specs/app/unused-images.feature.md):
+ * every `/api/images/<name>` in it — in a markdown image, an `<img>` tag or
+ * plain prose alike — whose name is one storeImage generates. A textual
+ * scan on purpose: a reference the renderer would not show still counts,
+ * which is the safe side for a tool that deletes what is unreferenced.
+ */
+export function referencedImageNames(text: string): Set<string> {
+  const names = new Set<string>();
+  for (const m of text.matchAll(IMAGE_URL)) {
+    const name = storedImageName(`${IMAGES_ROUTE}${m[1]!}`);
+    if (name) names.add(name);
+  }
+  return names;
 }
 
 /** The part of a stored name that says which bytes it holds. */
