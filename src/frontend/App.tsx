@@ -92,6 +92,7 @@ import {
   SendHorizontal,
   CloudUpload,
   Database,
+  Images,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -124,6 +125,7 @@ import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
 import { DataPage } from "./DataPage";
+import { ImagesPage } from "./ImagesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -2212,7 +2214,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : "Observability"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -2632,6 +2634,8 @@ export function App() {
   };
   /** Data (src/frontend/DataPage.tsx): the Automerge store, browsed read-only. */
   const openData = () => openAppPage("data");
+  /** Images (src/frontend/ImagesPage.tsx): the stored images, the unreferenced ones to delete. */
+  const openImages = () => openAppPage("images");
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -7052,6 +7056,17 @@ export function App() {
       run: () => openData(),
     },
     {
+      // Images (src/frontend/ImagesPage.tsx): every stored image with where
+      // it is used, and the unreferenced ones to delete.
+      id: "images",
+      keys: "g i",
+      label: "Images",
+      group: "Navigate",
+      when: () => !quiet,
+      palette: () => !quietBehindPalette,
+      run: () => openImages(),
+    },
+    {
       id: "theme",
       keys: "mod+shift+l",
       label: "Cycle the theme",
@@ -9650,6 +9665,17 @@ export function App() {
                   openData();
                 },
               },
+              // The stored images, the unreferenced ones first (src/frontend/ImagesPage.tsx).
+              {
+                id: "images",
+                label: "Images",
+                icon: <Images size={13} />,
+                keys: "g i",
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openImages();
+                },
+              },
               // The desktop and local app's own GitHub sign-in
               // (specs/user-info-settings.feature.md): paste a token, switch
               // to another account's, or sign out.
@@ -9821,6 +9847,9 @@ export function App() {
         ) : appPage === "data" ? (
           /* Data: the Automerge store as tables, documents and history. */
           <DataPage onClose={closeAppPage} />
+        ) : appPage === "images" ? (
+          /* Images: every stored image with where it is used; delete the unreferenced. */
+          <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
