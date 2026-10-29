@@ -85,7 +85,7 @@ import {
   deletePublishedScenario,
   unpublishScenario,
   moveScenario,
-  duplicateScenario,
+  cloneScenario,
   moveFeature,
   renameFeature,
   renameFeatureFile,
@@ -2078,15 +2078,15 @@ const postMoveScenario = withDataDir(async (dir, req, params) => {
   }
 });
 
-// specs/ui/navigation.feature.md "duplicate a scenario": the scenario menus'
-// Duplicate — a draft copy right after the scenario, saved locally like any
+// specs/ui/navigation.feature.md "clone a scenario": the scenario menus'
+// Clone — a draft copy right after the scenario, saved locally like any
 // edit. Answers the feature's editor view and the copy's name and version.
-const postDuplicateScenario = withDataDir(async (dir, req, params) => {
+const postCloneScenario = withDataDir(async (dir, req, params) => {
   const body = (await req.json()) as { scenario?: ScenarioBody };
   const target = scenarioTarget(body.scenario);
   if (!target) return json({ error: "scenario needs a name and a version" }, 400);
   try {
-    return json(await duplicateScenario(dir, params.file!, target));
+    return json(await cloneScenario(dir, params.file!, target));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
@@ -3068,7 +3068,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
   ["POST", "/api/features/:file/unpublish", postUnpublish],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
-  ["POST", "/api/features/:file/duplicate-scenario", postDuplicateScenario],
+  ["POST", "/api/features/:file/clone-scenario", postCloneScenario],
   ["POST", "/api/agent/session", unlessHosted(postAgentSession)],
   ["POST", "/api/agent/session/prompt", postAgentSessionPrompt],
   ["POST", "/api/agent/chat", unlessHosted(postAgentChat)],

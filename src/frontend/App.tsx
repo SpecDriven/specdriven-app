@@ -5958,14 +5958,14 @@ export function App() {
   latestMoveScenario.current = moveScenarioToFeature;
 
   /**
-   * Duplicate from a scenario's menu — its card's on the feature page or its
-   * row's in the sidebar tree (specs/ui/navigation.feature.md "duplicate a
+   * Clone from a scenario's menu — its card's on the feature page or its
+   * row's in the sidebar tree (specs/ui/navigation.feature.md "clone a
    * scenario"): the server puts a draft copy right after it, and the copy
    * opens in the editor pane, ready to be renamed and changed. An editor
    * pane open on the feature is left first, autosaving like any navigation
    * away, so its save goes out before the copy is made rather than after.
    */
-  const duplicateTreeScenario = async (file: string, s: ScenarioRow) => {
+  const cloneTreeScenario = async (file: string, s: ScenarioRow) => {
     if (file === selected && editing) {
       const ahead = autosaveInFlight.current;
       await closeEditor();
@@ -5974,28 +5974,28 @@ export function App() {
     await scenarioSaveQueue.current.idle();
     let res: Response;
     try {
-      res = await fetch(`/api/features/${encodeURIComponent(file)}/duplicate-scenario`, {
+      res = await fetch(`/api/features/${encodeURIComponent(file)}/clone-scenario`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scenario: { name: s.name, version: s.version } }),
       });
     } catch {
-      toast.error("Duplicate failed — is the server running?");
+      toast.error("Clone failed — is the server running?");
       return;
     }
     const data = await res.json();
     if (!res.ok) {
-      toast.error(data.error ?? "Duplicate failed");
+      toast.error(data.error ?? "Clone failed");
       return;
     }
-    const copy = data.duplicate as { name: string; version: number };
+    const copy = data.clone as { name: string; version: number };
     await openFeature(file, {
       push: true,
       scenario: { slug: slugify(copy.name), version: copy.version },
       pane: true,
     });
     await loadFeatures();
-    toast.success(`Duplicated "${s.name}" v${s.version} as "${copy.name}".`);
+    toast.success(`Cloned "${s.name}" v${s.version} as "${copy.name}".`);
   };
 
   /**
@@ -6334,7 +6334,7 @@ export function App() {
                 paneScenario.name === s.name &&
                 paneScenario.version === s.version;
               // Its menu (specs/ui/navigation.feature.md "Scenario
-              // navigation"): Duplicate always; Move to… and Delete on the
+              // navigation"): Clone always; Move to… and Delete on the
               // same terms as the editor pane's Delete — a published scenario
               // only while Settings allows it.
               const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
@@ -6441,10 +6441,10 @@ export function App() {
                       containerSelector=".tree-row-menu"
                       items={[
                         {
-                          id: "duplicate",
-                          label: "Duplicate",
+                          id: "clone",
+                          label: "Clone",
                           icon: <CopyPlus size={13} />,
-                          onSelect: () => void duplicateTreeScenario(f.fileName, s),
+                          onSelect: () => void cloneTreeScenario(f.fileName, s),
                         },
                         ...(deletable
                           ? [
@@ -9965,12 +9965,12 @@ export function App() {
                         onSelect: () => void newScenarioAfterCurrent(),
                       },
                       {
-                        id: "duplicate",
-                        label: "Duplicate",
+                        id: "clone",
+                        label: "Clone",
                         icon: <CopyPlus size={13} />,
                         disabled: savedEntry === null,
                         onSelect: () => {
-                          if (savedEntry) void duplicateTreeScenario(selected, savedEntry);
+                          if (savedEntry) void cloneTreeScenario(selected, savedEntry);
                         },
                       },
                       ...(editingPublished && editing.index !== null
@@ -11422,10 +11422,10 @@ export function App() {
                                 onSelect: () => newVersion(i),
                               },
                           {
-                            id: "duplicate",
-                            label: "Duplicate",
+                            id: "clone",
+                            label: "Clone",
                             icon: <CopyPlus size={13} />,
-                            onSelect: () => void duplicateTreeScenario(selected, s),
+                            onSelect: () => void cloneTreeScenario(selected, s),
                           },
                           {
                             id: "copy",
