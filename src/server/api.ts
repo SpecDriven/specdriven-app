@@ -189,6 +189,7 @@ import { setProjectionOptions } from "./automerge/project";
 import type { NetSync } from "./automerge/netsync";
 import { errorAttributes, getLogger, setLogVerbosity } from "./telemetry";
 import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs";
+import { getDataDoc, getDataDocAt, getDataDocHistory, getDataTable, getDataTables } from "./dataViewer";
 import { version as appVersion } from "../../package.json";
 import { sourceUrl } from "./sourceUrl";
 import {
@@ -3014,6 +3015,13 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/logs", getLogs],
   ["GET", "/api/logs/settings", getLogSettings],
   ["PUT", "/api/logs/settings", putLogSettings],
+  // Data viewer (src/server/dataViewer.ts): the Automerge store browsed
+  // read-only as tables, documents and their history.
+  ["GET", "/api/data/tables", withDataDir(getDataTables)],
+  ["GET", "/api/data/tables/:table", withDataDir(getDataTable)],
+  ["GET", "/api/data/doc", withDataDir(getDataDoc)],
+  ["GET", "/api/data/doc/history", withDataDir(getDataDocHistory)],
+  ["GET", "/api/data/doc/at", withDataDir(getDataDocAt)],
   ["POST", "/api/auth/github/start", unlessHosted(unlessDemo(postAuthStart))],
   ["POST", "/api/auth/github/poll", unlessHosted(unlessDemo(postAuthPoll))],
   ["POST", "/api/auth/github/web/start", unlessHosted(unlessDemo(postAuthWebStart))],
@@ -3088,9 +3096,10 @@ export function matchApi(method: string, pathname: string) {
 /**
  * Requests that still work while the open folder holds data a newer app
  * wrote: switching folders, re-checking, signing in, and the app's own log —
- * none of them writes to the data repo.
+ * none of them writes to the data repo. The data viewer reads the store's
+ * bytes as they are, migrating nothing, so it is exactly what helps then.
  */
-const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|logs|auth)(\/|$)/;
+const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|logs|auth|data)(\/|$)/;
 
 /** Serve an API request, or null when the path is not an API route. */
 export async function handleApi(req: Request): Promise<Response | null> {
