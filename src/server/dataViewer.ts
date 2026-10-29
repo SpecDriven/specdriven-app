@@ -237,6 +237,8 @@ export async function scanStore(dataDir: string, opts: { refresh?: boolean } = {
 // Pure helpers
 
 const TESTING_DIR = "test-management/project";
+/** Where the store keeps event models (store.ts maps `models/` there). */
+const EVENT_MODELS_FOLDER = "event-models";
 const PAGE_FOLDERS = new Set(["roadmap", "tasks", "notebook"]);
 
 /** What schema a store directory's document follows, from where it sits. */
@@ -457,7 +459,9 @@ export function buildTable(name: TableName, docs: RawLoadedDoc[]): { columns: Co
     }
     case "event_models": {
       preferred = ["path"];
-      for (const d of byKind("file")) {
+      // Only the Event Models folder: a plugin's own folder (storms/…) is a
+      // "file" document too, listed under documents but not as a model.
+      for (const d of byKind("file").filter((d) => d.dirRel.startsWith(`${EVENT_MODELS_FOLDER}/`))) {
         const value = asRecord(plain(d.doc));
         rows.push({ key: d.dirRel, doc: d.dirRel, cells: cellsOf(value, [], { path: sourceFileOf(d.dirRel) }) });
       }

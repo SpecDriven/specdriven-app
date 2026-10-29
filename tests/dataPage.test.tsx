@@ -56,6 +56,7 @@ import {
   cellText,
   changeTime,
   docUrl,
+  formatCount,
   historyUrl,
   patchLine,
   tableUrl,
@@ -319,6 +320,42 @@ describe("the page", () => {
     expect(calls.at(-1)).toBe(`/api/data/doc/at?path=${encodeURIComponent(FEATURE)}&heads=${HASH_B}`);
     expect(container.querySelector(".data-patches")!.textContent).toBe('splice /specs/0/body "paid"');
     expect(container.querySelector(".data-history-detail .json-tree")!.textContent).toContain("Collect Premium");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("counts carry thousands separators in the table list, the store and the toolbar", async () => {
+    const big: TablesResponse = {
+      ...tables,
+      tables: tables.tables.map((t) => (t.name === "documents" ? { ...t, rows: 1431 } : t)),
+      documents: 1431,
+    };
+    const first = specsPage(null, null, null);
+    const page: TablePage = {
+      ...first,
+      table: "documents",
+      rows: Array.from({ length: 100 }, (_, i) => ({ ...first.rows[0]!, key: `row-${i}` })),
+      total: 1431,
+      filtered: 1431,
+    };
+    const fetcher = async (url: string) => {
+      const u = new URL(url, "http://x");
+      if (u.pathname === "/api/data/tables") return Response.json(big);
+      if (u.pathname === "/api/data/tables/documents") return Response.json(page);
+      return Response.json({ error: `unexpected ${url}` }, { status: 500 });
+    };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<DataPage onClose={() => {}} fetcher={fetcher} />));
+    await flush();
+
+    expect(container.querySelector("#documents-tab")!.textContent).toBe("Documents · 1,431");
+    expect(container.textContent).toContain("1,431 documents in the store");
+    expect(container.querySelector(".data-status")!.textContent).toBe("1–100 of 1,431");
+    expect(formatCount(999)).toBe("999");
+    expect(formatCount(1234567)).toBe("1,234,567");
 
     await act(async () => root.unmount());
     container.remove();

@@ -50,7 +50,7 @@ afterEach(async () => {
 
 const names = async (file: string) => (await readFeatureView(data, file))!.parsed.scenarios.map((s) => s.name);
 
-test("a scenario dropped on the upper half of another feature's row lands just before it", async () => {
+test("a scenario dropped on the upper half of a row in another feature's outline lands just before it", async () => {
   await moveScenario(data, QUOTE, { name: "Extra", version: 1 }, ORDER, { name: "Refund", version: 1, after: false });
   expect(await names(ORDER)).toEqual(["Checkout", "Extra", "Refund"]);
   // Numbered by its new place (parser.ts `S<n>:`).
@@ -58,7 +58,7 @@ test("a scenario dropped on the upper half of another feature's row lands just b
   expect(await names(QUOTE)).toEqual(["Basic", "Idea"]);
 });
 
-test("a scenario dropped on the lower half of another feature's row lands just after it", async () => {
+test("a scenario dropped on the lower half of a row in another feature's outline lands just after it", async () => {
   await moveScenario(data, QUOTE, { name: "Basic", version: 1 }, ORDER, { name: "Checkout", version: 1, after: true });
   expect(await names(ORDER)).toEqual(["Checkout", "Basic", "Refund"]);
 });
