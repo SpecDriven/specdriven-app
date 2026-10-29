@@ -160,6 +160,11 @@ export function patchLine(patch: Patch): string {
   }
 }
 
+/** A count with thousands separators — "1,431" — as the toolbar and the table list show it. */
+export function formatCount(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

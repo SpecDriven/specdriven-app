@@ -181,6 +181,15 @@ describe("tables", () => {
     expect(models.rows[0]!.cells.slices).toEqual({ json: [{ id: "a" }, { id: "b" }] });
   });
 
+  test("a plugin's own folder is a document, not an event model", async () => {
+    await seed();
+    await createFileDoc(data, "storms/movies.storm.json", A.from({ id: "s-1", stickies: [] }));
+    const { docs } = await scanStore(data);
+    const documents = buildTable("documents", docs).rows.map((r) => r.cells.dirRel);
+    expect(documents).toContain("storms/movies.storm.json");
+    expect(buildTable("event_models", docs).rows.map((r) => r.key)).toEqual(["event-models/claims/water.model.json"]);
+  });
+
   test("queryRows filters over scalar and nested cells, sorts, and pages", () => {
     const row = (key: string, cells: TableRow["cells"]): TableRow => ({ key, doc: "d", cells });
     const rows = [
