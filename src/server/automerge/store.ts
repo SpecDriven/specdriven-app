@@ -30,8 +30,8 @@
 
 import * as A from "@automerge/automerge";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { readTextFile } from "../fsx";
 import { documentTooNew } from "../dataFormat";
 import { getLogger, withSpan } from "../telemetry";
@@ -345,6 +345,130 @@ async function loadDoc<T>(
   // Heads are captured before the schema migration on purpose — see migrated.
   const heads = A.getHeads(doc);
   return { doc: migrate(doc), heads, docId, skippedChunks };
+}
+
+/** One chunk file of a document directory, as the data viewer lists it. */
+export interface DocChunk {
+  file: string;
+  kind: "snapshot" | "changes";
+  bytes: number;
+  /** False when the chunk was unreadable or from a foreign lineage. */
+  applied: boolean;
+}
+
+/** A document as its directory holds it — no schema check, no migration. */
+export interface RawLoadedDoc extends LoadedDoc<unknown> {
+  /** The document's directory, relative to AUTOMERGE_ROOT. */
+  dirRel: string;
+  chunks: DocChunk[];
+}
+
+function isChunkName(name: string): boolean {
+  return (name.startsWith("snapshot-") || name.startsWith("changes-")) && name.endsWith(".bin");
+}
+
+/**
+ * Every document directory under the store, relative to AUTOMERGE_ROOT —
+ * `specs/a/b.feature.md`, `tasks/x.md`, `event-models/p.model.json`,
+ * `test-management/project`. A directory is a document when it holds a
+ * `docid` or a chunk; the walk never descends into one. Loader-agnostic on
+ * purpose: a plugin's folder the server never heard of is listed too. The
+ * data viewer (src/server/dataViewer.ts) is built on it.
+ */
+export async function listDocDirs(dataDir: string): Promise<string[]> {
+  const rootDir = join(dataDir, AUTOMERGE_ROOT);
+  const found: string[] = [];
+  const visit = async (rel: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(join(rootDir, rel), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (rel && entries.some((e) => e.isFile() && (e.name === "docid" || isChunkName(e.name)))) {
+      found.push(rel);
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      await visit(rel ? `${rel}/${entry.name}` : entry.name);
+    }
+  };
+  await visit("");
+  return found.sort();
+}
+
+/**
+ * A store-relative document directory that stays inside the store: no empty
+ * or dot-led segment, no `..`, no backslash, not absolute (the rule of
+ * features.ts badSegment).
+ */
+export function isSafeDocDir(dirRel: string): boolean {
+  if (!dirRel || isAbsolute(dirRel) || dirRel.includes("\\")) return false;
+  return dirRel.split("/").every((segment) => segment !== "" && !segment.startsWith("."));
+}
+
+/**
+ * Load a document by merging its chunks exactly as they are on disk: no
+ * schema version check and no migration, so a too-new or a pre-v3 document
+ * reads as written — what the data viewer shows. Null when the directory
+ * holds no readable chunk; throws on a directory path that leaves the store.
+ */
+export async function loadRawDoc(dataDir: string, dirRel: string): Promise<RawLoadedDoc | null> {
+  if (!isSafeDocDir(dirRel)) throw new Error("invalid document path");
+  const rootDir = resolve(dataDir, AUTOMERGE_ROOT);
+  const dir = resolve(rootDir, dirRel);
+  if (!dir.startsWith(rootDir + sep)) throw new Error("invalid document path");
+  const { snapshots, changes } = await chunkFiles(dir);
+  if (snapshots.length === 0 && changes.length === 0) return null;
+
+  let doc: A.Doc<unknown> | null = null;
+  const skippedChunks: string[] = [];
+  const chunks: DocChunk[] = [];
+  for (const file of [...snapshots, ...changes]) {
+    const kind = file.startsWith("snapshot-") ? "snapshot" : "changes";
+    let bytes: Uint8Array;
+    try {
+      bytes = await readFile(join(dir, file));
+    } catch {
+      skippedChunks.push(file);
+      chunks.push({ file, kind, bytes: 0, applied: false });
+      continue;
+    }
+    let applied = true;
+    try {
+      doc = doc === null ? A.load<unknown>(bytes) : A.loadIncremental(doc, bytes);
+    } catch {
+      skippedChunks.push(file);
+      applied = false;
+    }
+    chunks.push({ file, kind, bytes: bytes.byteLength, applied });
+  }
+  if (doc === null) return null;
+  const docId = (await readTextFile(join(dir, "docid")))?.trim() ?? (doc as { id?: string }).id ?? "";
+  return { doc, heads: A.getHeads(doc), docId, skippedChunks, dirRel, chunks };
+}
+
+/** When the directory itself was last changed — a chunk added or removed. */
+export async function docDirMtime(dataDir: string, dirRel: string): Promise<number> {
+  try {
+    return (await stat(join(dataDir, AUTOMERGE_ROOT, dirRel))).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The data repo file a store directory mirrors — the inverse of DOC_FOLDERS
+ * (`event-models/p.model.json` → `models/p.model.json`); null for the test
+ * management document, which has no file.
+ */
+export function sourceFileOf(dirRel: string): string | null {
+  if (dirRel === `${TESTING_FOLDER}/${TESTING_DOC_NAME}`) return null;
+  const { folder, rest } = splitFolder(dirRel);
+  if (!folder) return null;
+  const source = Object.entries(DOC_FOLDERS).find(([, store]) => store === folder)?.[0] ?? folder;
+  return `${source}/${rest}`;
 }
 
 /**

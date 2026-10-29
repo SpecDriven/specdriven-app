@@ -337,6 +337,11 @@ describe("app pages", () => {
     expect(matchAppPage("/observability")).toBe("observability");
   });
 
+  test("Data has its own url", () => {
+    expect(appPagePath("data")).toBe("/data");
+    expect(matchAppPage("/data")).toBe("data");
+  });
+
   test("anything else is not an app page", () => {
     expect(matchAppPage("/")).toBeNull();
     expect(matchAppPage("/settings/extra")).toBeNull();

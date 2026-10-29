@@ -233,9 +233,9 @@ export function resolveScenario(scenarios: Scenario[], ref: ScenarioRef): number
  * reopens them. They are checked before the plugins' urls, so no plugin can
  * claim them.
  */
-export type AppPage = "settings" | "plugins" | "observability";
+export type AppPage = "settings" | "plugins" | "observability" | "data";
 
-export const APP_PAGES: readonly AppPage[] = ["settings", "plugins", "observability"];
+export const APP_PAGES: readonly AppPage[] = ["settings", "plugins", "observability", "data"];
 
 export function appPagePath(page: AppPage): string {
   return `/${page}`;

@@ -286,3 +286,64 @@ test("a v2 document's scenarios become typed specs on load", async () => {
   expect(reloaded.doc.specs[0]!.body).toBe("a quote");
   expect(reloaded.heads).toEqual(A.getHeads(reloaded.doc));
 });
+
+// The data viewer's raw side (src/server/dataViewer.ts): every document
+// directory found whatever its loader, and a document read as its chunks
+// are — no migration — with its chunk files listed and a bad one skipped.
+import { isSafeDocDir, listDocDirs, loadRawDoc, sourceFileOf, createPageDoc, newPageDoc } from "../../src/server/automerge/store";
+import { mkdir } from "node:fs/promises";
+
+test("listDocDirs finds every document directory and nothing else", async () => {
+  await createFeatureDoc(root, FILE, sampleDoc());
+  await createPageDoc(root, "tasks/ship.md", newPageDoc({ name: "Ship", body: "- do it" }));
+  // An empty folder in the store is not a document.
+  await mkdir(join(root, ".specdriven/automerge/specs/empty"), { recursive: true });
+  expect(await listDocDirs(root)).toEqual(["specs/policy/quote-policy.feature.md", "tasks/ship.md"]);
+  expect(await listDocDirs(join(root, "nowhere"))).toEqual([]);
+});
+
+test("loadRawDoc reads a pre-v3 document as written, lists its chunks and skips a corrupt one", async () => {
+  const v1 = A.from({
+    schemaVersion: 1,
+    id: "old-id",
+    name: "Old",
+    description: "",
+    scenarios: [{ id: "leg-1", name: "Legacy", version: 1, published: true, body: "- **Then** old", tests: [] }],
+  }) as unknown as A.Doc<FeatureDoc>;
+  await createFeatureDoc(root, FILE, v1);
+  // Automerge quietly ignores bytes it cannot decode, so the unreadable
+  // chunk here is one the file system refuses: a directory with a chunk's name.
+  await mkdir(join(docDir(root, FILE), "changes-deadbeef.bin"));
+
+  const raw = await loadRawDoc(root, "specs/policy/quote-policy.feature.md");
+  expect(raw).not.toBeNull();
+  const value = A.toJS(raw!.doc) as { schemaVersion: number; scenarios: unknown[]; specs?: unknown };
+  expect(value.schemaVersion).toBe(1);
+  expect(value.scenarios.length).toBe(1);
+  expect(value.specs).toBeUndefined();
+  expect(raw!.docId).toBe("old-id");
+  expect(raw!.skippedChunks).toEqual(["changes-deadbeef.bin"]);
+  expect(raw!.chunks.map((c) => [c.kind, c.applied, c.bytes > 0])).toEqual([
+    ["snapshot", true, true],
+    ["changes", false, false],
+  ]);
+  // The ordinary loader migrates the same bytes.
+  const migrated = await loadFeatureDoc(root, FILE);
+  expect(migrated!.doc.specs[0]!.status).toBe("published");
+});
+
+test("loadRawDoc stays inside the store", async () => {
+  await createFeatureDoc(root, FILE, sampleDoc());
+  for (const bad of ["", "..", "../..", "specs/../../x", "/etc/passwd", ".git", "specs/.hidden", "specs\\x"]) {
+    expect(isSafeDocDir(bad)).toBe(false);
+    await expect(loadRawDoc(root, bad)).rejects.toThrow("invalid document path");
+  }
+  expect(await loadRawDoc(root, "specs/missing.feature.md")).toBeNull();
+});
+
+test("sourceFileOf maps a store directory back to its data repo file", () => {
+  expect(sourceFileOf("specs/a/b.feature.md")).toBe("specs/a/b.feature.md");
+  expect(sourceFileOf("event-models/claims/x.model.json")).toBe("models/claims/x.model.json");
+  expect(sourceFileOf("tasks/ship.md")).toBe("tasks/ship.md");
+  expect(sourceFileOf("test-management/project")).toBeNull();
+});
