@@ -159,7 +159,7 @@ import {
 } from "./confluenceTokens";
 import { publishFeatureTestCases, QtestError, validateToken as validateQtestToken } from "./qtest";
 import { moduleIdFromUrl, normalizeQtestBase, onQtestBase, parseModuleUrl } from "./qtestUrl";
-import { clearQtestToken, listQtestTokens, qtestToken, saveQtestToken } from "./qtestTokens";
+import { bareQtestToken, clearQtestToken, listQtestTokens, qtestToken, saveQtestToken } from "./qtestTokens";
 import { AhaError, getAhaFeature, validateAhaKey } from "./aha";
 import { normalizeAhaBase, parseAhaRecordUrl, parseAhaRef } from "./ahaUrl";
 import { ahaToken, clearAhaToken, listAhaTokens, saveAhaToken } from "./ahaTokens";
@@ -1296,7 +1296,8 @@ const getQtestTokens: Handler = async () => json({ tokens: await listQtestTokens
 
 const postQtestToken: Handler = async (req) => {
   const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
-  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+  const token = typeof body.token === "string" ? bareQtestToken(body.token) : "";
+  if (!token || token.length > 1024) {
     return json({ error: "Paste a qTest Bearer token" }, 400);
   }
   const base = typeof body.base === "string" ? normalizeQtestBase(body.base) : null;
@@ -1304,8 +1305,8 @@ const postQtestToken: Handler = async (req) => {
     return json({ error: "Enter the qTest site's url, like https://acme.qtestnet.com" }, 400);
   }
   try {
-    const { user } = await validateQtestToken(base, body.token.trim());
-    await saveQtestToken({ base, token: body.token.trim(), user });
+    const { user } = await validateQtestToken(base, token);
+    await saveQtestToken({ base, token, user });
     return json({ base, user });
   } catch (e) {
     // What qTest answered goes along, for the error's detail box.
