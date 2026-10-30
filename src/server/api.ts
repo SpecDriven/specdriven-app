@@ -1592,7 +1592,7 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     return json(
       {
         error:
-          "Paste the parent module's url from qTest, like https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901",
+          "Paste the parent module's url from qTest, like https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901",
       },
       400,
     );

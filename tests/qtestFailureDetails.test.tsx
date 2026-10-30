@@ -55,7 +55,7 @@ import { QtestPublishDialog, type QtestPublishResult } from "../src/frontend/Qte
 import { QtestTokens } from "../src/frontend/QtestToken";
 
 const SITE = { base: "https://acme.qtestnet.com", user: "3 projects" };
-const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901";
+const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901";
 const DETAILS = {
   method: "POST",
   url: "https://acme.qtestnet.com/api/v3/projects/12/test-cases",

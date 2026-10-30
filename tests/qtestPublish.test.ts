@@ -250,7 +250,7 @@ const call = async (method: string, path: string, body?: unknown) => {
 const saveToken = (token = GOOD, base = site) => call("POST", "/api/qtest/tokens", { base, token });
 const publish = (parentUrl: string, scope: string = "all") =>
   call("POST", `/api/features/${encodeURIComponent(FILE)}/qtest`, { parentUrl, scope });
-const moduleUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=2&id=${id}`;
+const moduleUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=0&id=${id}`;
 const caseUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=1&id=${id}`;
 const posts = (path: string) => seen.filter((r) => r.method === "POST" && r.path.startsWith(path));
 

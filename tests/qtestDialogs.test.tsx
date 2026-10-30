@@ -12,7 +12,7 @@ import { QtestTokens } from "../src/frontend/QtestToken";
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
 const noop = () => {};
 const SITE = { base: "https://acme.qtestnet.com", user: "3 projects" };
-const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901";
+const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901";
 
 describe("QtestPublishDialog", () => {
   test("a modal dialog with the parent module url, the two scopes and Create test cases", () => {
@@ -42,7 +42,7 @@ describe("QtestPublishDialog", () => {
       <QtestPublishDialog
         file="f"
         featureName="F"
-        linkedUrl="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=66"
+        linkedUrl="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=66"
         initialParentUrl={PARENT}
         sites={[SITE]}
         onPublished={noop}
@@ -50,7 +50,7 @@ describe("QtestPublishDialog", () => {
       />,
     );
     expect(markup).toContain("creating them again updates");
-    expect(markup).toContain('href="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&amp;object=2&amp;id=66"');
+    expect(markup).toContain('href="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&amp;object=0&amp;id=66"');
   });
 
   test("Create waits for a module url on a site with a token, and says what is missing", () => {
@@ -59,7 +59,7 @@ describe("QtestPublishDialog", () => {
     expect(parentModuleProblem("https://acme.qtestnet.com/p/12/portal/project#object=1&id=5", [SITE])).toContain(
       "Not a qTest module url",
     );
-    expect(parentModuleProblem("https://other.qtestnet.com/p/1/portal/project#object=2&id=1", [SITE])).toBe(
+    expect(parentModuleProblem("https://other.qtestnet.com/p/1/portal/project#object=0&id=1", [SITE])).toBe(
       "No token for https://other.qtestnet.com — add one in Settings → qTest.",
     );
     const markup = html(

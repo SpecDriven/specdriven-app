@@ -6,8 +6,12 @@
 //
 // qTest spells an object's url as the project's portal page plus a fragment:
 //
-//   https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901   (a module)
+//   https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901   (a module)
 //   https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=1&id=6517980   (a test case)
+//
+// with the fragment's keys in any order (qTest's own address bar puts `id`
+// first). `object=` counts per tab — on Test Execution `object=2` is a test
+// cycle — so a url on another tab names neither.
 //
 // and an on-premise install may sit under a context path. The site's base
 // url is everything before `/p/<project>/`, so the context path stays part
@@ -23,7 +27,7 @@ export interface ModuleRef {
 
 /** The Test Design tree's object kinds, as the `object=` fragment names them. */
 const TEST_CASE_OBJECT = "1";
-const MODULE_OBJECT = "2";
+const MODULE_OBJECT = "0";
 
 function httpUrl(raw: string): URL | null {
   try {
@@ -46,25 +50,29 @@ function fragment(url: URL): URLSearchParams {
   return new URLSearchParams(url.hash.replace(/^#/, ""));
 }
 
+/** The numeric id of the Test Design object of this kind the fragment names, or null. */
+function testDesignId(f: URLSearchParams, object: string): string | null {
+  const tab = f.get("tab");
+  if (tab !== null && tab !== "testdesign") return null;
+  const id = f.get("id");
+  return f.get("object") === object && id && /^\d+$/.test(id) ? id : null;
+}
+
 /** The module a qTest url names, or null when it names none. */
 export function parseModuleUrl(raw: string): ModuleRef | null {
   const url = httpUrl(raw);
   if (!url) return null;
   const p = portal(url);
   if (!p) return null;
-  const f = fragment(url);
-  const id = f.get("id");
-  if (f.get("object") !== MODULE_OBJECT || !id || !/^\d+$/.test(id)) return null;
-  return { ...p, moduleId: id };
+  const id = testDesignId(fragment(url), MODULE_OBJECT);
+  return id ? { ...p, moduleId: id } : null;
 }
 
 /** The numeric id of the test case a qTest url names, or null. */
 export function testCaseIdFromUrl(raw: string): string | null {
   const url = httpUrl(raw);
   if (!url || !portal(url)) return null;
-  const f = fragment(url);
-  const id = f.get("id");
-  return f.get("object") === TEST_CASE_OBJECT && id && /^\d+$/.test(id) ? id : null;
+  return testDesignId(fragment(url), TEST_CASE_OBJECT);
 }
 
 /** The numeric id of the module a qTest url names, or null. */
