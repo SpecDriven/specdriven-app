@@ -35,6 +35,14 @@ export function qtestTokenPath(): string {
   return join(process.env.SPECDRIVEN_HOME || join(homedir(), STATE_DIR), QTEST_TOKEN_FILE);
 }
 
+/**
+ * The token alone, from what was pasted: qTest's API & SDK page shows it as
+ * "Bearer <token>", so a leading "Bearer " (any case) comes off.
+ */
+export function bareQtestToken(pasted: string): string {
+  return pasted.trim().replace(/^bearer\s+/i, "").trim();
+}
+
 /** The stored records, dropping any that are not one; a corrupt file is none. */
 export function parseQtestRecords(raw: string): QtestTokenRecord[] | null {
   try {
