@@ -106,3 +106,17 @@ export function onBase(url: string, base: string): boolean {
   const path = u.pathname.toLowerCase();
   return prefix === "" || path === prefix || path.startsWith(`${prefix}/`);
 }
+
+/**
+ * The deep link to scenario S<n> on its feature's page — the `S<n>` anchor
+ * the page writes on its heading (src/server/confluenceStorage.ts). Server
+ * and Data Center name an anchor's fragment after the page: its title with
+ * the spaces and hyphens dropped, other punctuation kept, then `-` and the
+ * anchor (`SCM - Dashboard (Global Filters)` → `SCMDashboard(GlobalFilters)-S3`).
+ * A draft, which has no number and so no anchor, links the page itself.
+ */
+export function scenarioAnchorUrl(pageUrl: string, pageTitle: string, number: number | null): string {
+  const page = pageUrl.replace(/#.*$/, "");
+  if (number === null) return page;
+  return `${page}#${encodeURIComponent(`${pageTitle.replace(/[\s-]+/g, "")}-S${number}`)}`;
+}

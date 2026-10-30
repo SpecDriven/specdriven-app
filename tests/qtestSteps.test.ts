@@ -89,6 +89,16 @@ describe("the test case a scenario makes", () => {
     ]);
   });
 
+  test("with a Confluence page, the description links the scenario's anchor there; a draft links the page", () => {
+    const page = { url: "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy", title: "Quote Policy" };
+    expect(scenarioToTestCase(scenario(""), 3, { ...source, confluencePage: page }).description).toBe(
+      "Scenario of the SpecDriven feature “Quote Policy” (https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy#QuotePolicy-S3).",
+    );
+    expect(scenarioToTestCase(scenario(""), null, { ...source, confluencePage: page }).description).toBe(
+      "Scenario of the SpecDriven feature “Quote Policy” (https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy).",
+    );
+  });
+
   test("a scenario with no steps gets one step so qTest accepts it", () => {
     expect(scenarioToTestCase(scenario(""), 3, source).test_steps).toEqual([
       { description: "Basic Quote", expected: "" },

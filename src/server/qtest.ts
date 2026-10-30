@@ -480,10 +480,14 @@ export async function publishFeatureTestCases(p: {
     existingModuleId: p.existingModuleId,
   });
   const numbers = scenarioNumbers(p.feature.scenarios);
+  // The feature's Confluence page is titled the way this module is named
+  // (the publish route's rule), which its anchors' fragments are built from.
+  const page = p.feature.confluence;
+  const source = { featureName: p.title, file: p.file, ...(page ? { confluencePage: { url: page.url, title: p.title } } : {}) };
   const cases: PublishedCase[] = [];
   for (const [index, scenario] of p.feature.scenarios.entries()) {
     if (p.scope === "published" && scenario.status !== "published") continue;
-    const draft = scenarioToTestCase(scenario, numbers[index] ?? null, { featureName: p.title, file: p.file });
+    const draft = scenarioToTestCase(scenario, numbers[index] ?? null, source);
     const fields: TestCaseFields = { ...draft, parent_id: module.id, properties };
     try {
       const linkedId = linkedTestCaseId(scenario, p.base);

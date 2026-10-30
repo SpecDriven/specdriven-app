@@ -4,6 +4,7 @@
 // that follow a When are that step's expected result. Pure — the REST calls
 // are in ./qtest.ts.
 
+import { scenarioAnchorUrl } from "./confluenceUrl";
 import type { Scenario } from "./parser";
 
 /** A test step as qTest's API takes it. */
@@ -85,6 +86,12 @@ export interface StepSource {
   featureName: string;
   /** The feature's file in the data repo, so a qTest reader can find the spec. */
   file: string;
+  /**
+   * The feature's Confluence page, when it has one: the description then
+   * links the scenario on it rather than naming the file, which a qTest
+   * reader cannot open.
+   */
+  confluencePage?: { url: string; title: string };
 }
 
 /**
@@ -122,7 +129,11 @@ export function scenarioToTestCase(scenario: Scenario, number: number | null, so
   const label = number === null ? scenario.name : `S${number}: ${scenario.name}`;
   return {
     name: label.slice(0, NAME_LIMIT),
-    description: `Scenario of the SpecDriven feature “${source.featureName}” (${source.file}).`,
+    description: `Scenario of the SpecDriven feature “${source.featureName}” (${
+      source.confluencePage
+        ? scenarioAnchorUrl(source.confluencePage.url, source.confluencePage.title, number)
+        : source.file
+    }).`,
     precondition: precondition.join("\n"),
     test_steps: steps,
   };

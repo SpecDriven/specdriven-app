@@ -409,6 +409,16 @@ describe("creating a feature's test cases", () => {
     expect(view.scenarios[1]!.qtest).toMatchObject({ ticket: "TC-1001" });
   });
 
+  test("a feature on a Confluence page links each test case to its scenario there, not to the file", async () => {
+    await saveToken();
+    const page = "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy";
+    await saveFeature(data, FILE, SAMPLE.replace("# Quote Policy\n", `# Quote Policy\n\n[Confluence:99](${page})\n`));
+    expect((await publish(moduleUrl(1))).status).toBe(200);
+    const [first, second] = posts("/api/v3/projects/12/test-cases");
+    expect((first!.body as { description: string }).description).toBe(`Scenario of the SpecDriven feature “Quote Policy” (${page}#QuotePolicy-S1).`);
+    expect((second!.body as { description: string }).description).toBe(`Scenario of the SpecDriven feature “Quote Policy” (${page}#QuotePolicy-S2).`);
+  });
+
   test("a test case qTest refuses stops the run, and what was written is still linked back", async () => {
     await saveToken();
     await saveFeature(data, FILE, `${SAMPLE}
