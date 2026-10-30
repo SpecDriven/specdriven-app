@@ -131,6 +131,8 @@ export interface OneShotRequest {
   prompt: string;
   /** A JSON schema the answer must fit, when the provider can hold it to one. */
   schema?: Record<string, unknown>;
+  /** The model to answer with, as the agent's CLI names it; absent, the agent's own default. */
+  model?: string;
   timeoutMs: number;
   signal?: AbortSignal;
 }

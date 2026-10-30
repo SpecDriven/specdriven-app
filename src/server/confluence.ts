@@ -283,6 +283,30 @@ export async function getPage(base: string, token: string, id: string): Promise<
   }
 }
 
+/** A page's text as the import reads it: its title and body, rendered as HTML. */
+export interface PageBody {
+  id: string;
+  title: string;
+  url: string;
+  /** The body as Confluence renders it for export — macros expanded, HTML. */
+  html: string;
+}
+
+/**
+ * A page with its body rendered as HTML (specs/external-links/jira-wiki
+ * -import.feature.md): the export view, which expands macros the way a PDF
+ * export does, falling back to the plain view when an install has none.
+ */
+export async function getPageBody(base: string, token: string, id: string): Promise<PageBody> {
+  const raw = await confluence<RawPage & { body?: { export_view?: { value?: string }; view?: { value?: string } } }>(
+    base,
+    `/rest/api/content/${encodeURIComponent(id)}?expand=body.export_view,body.view,space,version`,
+    token,
+  );
+  const html = raw.body?.export_view?.value ?? raw.body?.view?.value ?? "";
+  return { id: String(raw.id), title: raw.title, url: pageUrl(base, raw), html };
+}
+
 /** The current page titled `title` in a space, or null. */
 export async function findPageByTitle(
   base: string,
