@@ -181,7 +181,7 @@ describe("the assigned line", () => {
     for (const text of [canonical, other]) {
       const feature = parseFeature(text);
       expect(feature.assigned).toBe(DANA);
-      expect(feature.link?.ticket).toBe("ABC-123");
+      expect(feature.links?.[0]?.ticket).toBe("ABC-123");
       expect(feature.description).toBe("The description.");
     }
     // Both forms normalize to the link-first one the projection writes.

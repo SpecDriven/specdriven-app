@@ -5,7 +5,14 @@
 // yet) and for guessing the tool and ticket from a pasted url. Pure and
 // DOM-free so the rules can be tested on their own.
 
-import { isConfluenceLink, isExternalLink, isQtestLink, QTEST_PROGRAM } from "../server/parser";
+import {
+  isConfluenceLink,
+  isExternalLink,
+  isQtestLink,
+  MAX_FEATURE_TICKETS,
+  QTEST_PROGRAM,
+  sameTicket,
+} from "../server/parser";
 import { cleanLine } from "../server/text";
 import type { ExternalLink } from "../server/parser";
 
@@ -258,4 +265,28 @@ export function resolveQtestDraft(draft: LinkDraft): ResolvedLink {
     };
   }
   return resolved;
+}
+
+/**
+ * What the feature header's ticket chip reads
+ * (specs/external-links/project-management-jira-linear-etc.feature.md
+ * "Several tickets on a feature"): the one ticket's own label, a count of
+ * several, or the invitation to link one.
+ */
+export function ticketChipLabel(links: ExternalLink[] | undefined): string {
+  const n = links?.length ?? 0;
+  if (n === 0) return "Link ticket";
+  if (n === 1) return externalLinkLabel(links![0]!);
+  return `${n} tickets`;
+}
+
+/**
+ * Why a ticket cannot join a feature's list — the list is full, or already
+ * holds it — or null when it can.
+ */
+export function ticketAddProblem(links: ExternalLink[], candidate: ExternalLink): string | null {
+  if (links.length >= MAX_FEATURE_TICKETS) return `A feature can link up to ${MAX_FEATURE_TICKETS} tickets.`;
+  const repeat = links.find((l) => sameTicket(l, candidate));
+  if (repeat) return `${externalLinkLabel(repeat)} is already linked.`;
+  return null;
 }

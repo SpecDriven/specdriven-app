@@ -15,6 +15,8 @@ import { htmlToMarkdown } from "./html";
 import { getJiraIssue, JiraError } from "./jira";
 import { jiraToken } from "./jiraTokens";
 import { MAX_SCENARIOS, sourcesProblem, type SourceRef } from "./importSources";
+import { parseJiraIssueUrl } from "./jiraUrl";
+import { dedupeTicketLinks, formatExternalLink, MAX_FEATURE_TICKETS, type ExternalLink } from "./parser";
 
 /** Why an import could not go on, with the HTTP status the route answers. */
 export class ImportError extends Error {
@@ -312,11 +314,31 @@ function sourcesLine(sources: SourceLink[]): string {
 }
 
 /**
- * The feature file the review step creates: the title, where it came from,
- * and each scenario as a proposed one — `## S<n>: <name> @v1 [proposed]`,
- * numbered in the order the agent gave them — with
- * its body, its sources named on a last line. Names are cleaned of what the
- * heading syntax would misread and repeats are told apart.
+ * The Jira issues a feature was read from, as its tickets (specs/external-
+ * links/project-management-jira-linear-etc.feature.md "Several tickets on a
+ * feature"): one `[Jira:<key>](url)` line each, the key from the source's
+ * title (the issue key) or, failing that, from its url; repeats dropped and
+ * at most MAX_FEATURE_TICKETS of them — the import's own cap on Jira issues
+ * is the same number.
+ */
+function ticketLines(sources: SourceLink[]): string[] {
+  const links: ExternalLink[] = [];
+  for (const s of sources) {
+    if (s.kind !== "jira") continue;
+    const key = /^[A-Z][A-Z0-9_]*-\d+$/i.test(s.title.trim())
+      ? s.title.trim().toUpperCase()
+      : parseJiraIssueUrl(s.url)?.key;
+    if (key) links.push({ program: "Jira", ticket: key, url: s.url });
+  }
+  return dedupeTicketLinks(links).slice(0, MAX_FEATURE_TICKETS).map(formatExternalLink);
+}
+
+/**
+ * The feature file the review step creates: the title, the Jira issues as
+ * its tickets, where it came from, and each scenario as a proposed one —
+ * `## S<n>: <name> @v1 [proposed]`, numbered in the order the agent gave
+ * them — with its body, its sources named on a last line. Names are cleaned
+ * of what the heading syntax would misread and repeats are told apart.
  */
 export function planImportedFeature(
   title: string,
@@ -345,6 +367,9 @@ export function planImportedFeature(
     return lines.join("\n");
   });
   const intro = sourcesLine(sources);
-  const text = [`# ${name}`, "", ...(intro ? [intro, ""] : []), ...blocks].join("\n").replace(/\n+$/, "\n");
+  const tickets = ticketLines(sources);
+  const text = [`# ${name}`, "", ...(tickets.length ? [...tickets, ""] : []), ...(intro ? [intro, ""] : []), ...blocks]
+    .join("\n")
+    .replace(/\n+$/, "\n");
   return { name, text };
 }

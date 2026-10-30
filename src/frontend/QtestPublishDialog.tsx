@@ -25,8 +25,8 @@ export interface QtestPublishResult {
   cases: { scenarioName: string; id: string; pid: string; url: string; created: boolean }[];
   created: number;
   updated: number;
-  /** The requirement of the feature's Jira issue the test cases were linked to, when one was found. */
-  requirement?: { id: string; pid: string; name: string; url: string; linked: number; alreadyLinked: number };
+  /** The requirements of the feature's Jira issues the test cases were linked to, one per key found. */
+  requirements?: { key: string; id: string; pid: string; name: string; url: string; linked: number; alreadyLinked: number }[];
   title: string;
   parentUrl: string;
   content: string;

@@ -285,8 +285,13 @@ export interface Feature {
   /** Free markdown between the feature heading and the first scenario. */
   description: string;
   scenarios: Scenario[];
-  /** The ticket tracking the feature as a whole, if it has one. */
-  link?: ExternalLink;
+  /**
+   * The tickets tracking the feature as a whole, in written order — up to
+   * `MAX_FEATURE_TICKETS` of them from the editor, one `[Jira:ABC-123](url)`
+   * line each (specs/external-links/project-management-jira-linear-etc.
+   * feature.md). Absent when there are none.
+   */
+  links?: ExternalLink[];
   /** The qTest test case covering the feature as a whole, if it has one. */
   qtest?: ExternalLink;
   /**
@@ -565,6 +570,42 @@ export function isExternalLink(link: ExternalLink): boolean {
     back.ticket === link.ticket &&
     back.url === link.url
   );
+}
+
+/**
+ * How many tickets a feature can carry (specs/external-links/project-
+ * management-jira-linear-etc.feature.md "Several tickets on a feature"). The
+ * editor and the tickets route hold the line; a hand-edited file with more is
+ * still read whole, so nothing is dropped behind the user's back.
+ */
+export const MAX_FEATURE_TICKETS = 5;
+
+/** Identity of a link for change detection; none is the empty string. */
+export function linkKey(link: ExternalLink | undefined): string {
+  return link ? `${link.program}\n${link.ticket}\n${link.url}` : "";
+}
+
+/** Identity of a list of links, in order; none is the empty string. */
+export function linksKey(links: ExternalLink[] | undefined): string {
+  return (links ?? []).map(linkKey).join("\n\n");
+}
+
+/**
+ * Whether two tickets are the same one: the same url, or the same ticket id
+ * in the same tool, case aside — a repeat the editor refuses and the parser
+ * drops.
+ */
+export function sameTicket(a: ExternalLink, b: ExternalLink): boolean {
+  const url = (l: ExternalLink) => l.url.trim().replace(/\/+$/, "").toLowerCase();
+  const id = (l: ExternalLink) => `${l.program.trim().toLowerCase()}:${l.ticket.trim().toLowerCase()}`;
+  return url(a) === url(b) || id(a) === id(b);
+}
+
+/** The tickets with repeats dropped — the first of each kept, order preserved. */
+export function dedupeTicketLinks(links: ExternalLink[]): ExternalLink[] {
+  const kept: ExternalLink[] = [];
+  for (const link of links) if (!kept.some((k) => sameTicket(k, link))) kept.push(link);
+  return kept;
 }
 
 /**
@@ -1018,12 +1059,14 @@ export function splitPageMeta(text: string): {
  * test case (specs/external-links/qtest-test-cases.feature.md), a
  * `Confluence` link the published page
  * (specs/external-links/confluence-wiki.feature.md), any other the ticket.
- * Each is taken once — a second line of a kind already lifted is not
- * metadata, so it ends the metadata like any other content line.
+ * The qTest and Confluence links are taken once — a second line of a kind
+ * already lifted is not metadata, so it ends the metadata like any other
+ * content line. A ticket is taken while `takeTicket` says so: once for a
+ * scenario, any number of times for a feature, which carries a list.
  */
 function metaLinks(
   line: string,
-  link: ExternalLink | undefined,
+  takeTicket: boolean,
   qtest: ExternalLink | undefined,
   confluence: ExternalLink | undefined,
 ): { nextLink: ExternalLink | null; nextQtest: ExternalLink | null; nextConfluence: ExternalLink | null } {
@@ -1032,7 +1075,7 @@ function metaLinks(
   if (!parsed) return none;
   if (isQtestLink(parsed)) return { ...none, nextQtest: qtest === undefined ? parsed : null };
   if (isConfluenceLink(parsed)) return { ...none, nextConfluence: confluence === undefined ? parsed : null };
-  return { ...none, nextLink: link === undefined ? parsed : null };
+  return { ...none, nextLink: takeTicket ? parsed : null };
 }
 
 /**
@@ -1062,7 +1105,7 @@ export function formatNegative(): string {
  */
 export function splitFeatureMeta(text: string): {
   text: string;
-  link?: ExternalLink;
+  links?: ExternalLink[];
   qtest?: ExternalLink;
   confluence?: ExternalLink;
   assigned?: string;
@@ -1072,7 +1115,9 @@ export function splitFeatureMeta(text: string): {
   attributes?: SpecAttribute[];
 } {
   let rest = text;
-  let link: ExternalLink | undefined;
+  // The tickets, in written order: a feature takes any number of ticket
+  // lines (the editor stops at MAX_FEATURE_TICKETS), repeats dropped below.
+  const links: ExternalLink[] = [];
   let qtest: ExternalLink | undefined;
   let confluence: ExternalLink | undefined;
   let assigned: string | undefined;
@@ -1088,14 +1133,14 @@ export function splitFeatureMeta(text: string): {
     if (at === -1) break;
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
-    const { nextLink, nextQtest, nextConfluence } = metaLinks(line, link, qtest, confluence);
+    const { nextLink, nextQtest, nextConfluence } = metaLinks(line, true, qtest, confluence);
     const nextAssigned = assigned === undefined ? parseAssignedLine(line) : null;
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
     if (nextTokens) {
       addFlags(flags, nextTokens.flags);
       addAttributes(attributes, nextTokens.attributes);
-    } else if (nextLink) link = nextLink;
+    } else if (nextLink) links.push(nextLink);
     else if (nextQtest) qtest = nextQtest;
     else if (nextConfluence) confluence = nextConfluence;
     else if (nextAssigned) assigned = nextAssigned;
@@ -1106,7 +1151,7 @@ export function splitFeatureMeta(text: string): {
   }
   return {
     text: rest,
-    ...(link ? { link } : {}),
+    ...(links.length ? { links: dedupeTicketLinks(links) } : {}),
     ...(qtest ? { qtest } : {}),
     ...(confluence ? { confluence } : {}),
     ...(assigned ? { assigned } : {}),
@@ -1148,7 +1193,7 @@ export function splitScenarioMeta(text: string): {
     const line = lines[at]!;
     const nextTokens = parseMetadataTokens(line);
     // A Confluence line belongs to the feature: under a scenario it is content.
-    const { nextLink, nextQtest } = metaLinks(line, link, qtest, undefined);
+    const { nextLink, nextQtest } = metaLinks(line, link === undefined, qtest, undefined);
     const nextCreated = createdBy === undefined ? parseCreatedByLine(line) : null;
     const nextUpdated = updatedBy === undefined ? parseUpdatedByLine(line) : null;
     // Taken once, like the links: a second marker is content.
@@ -1353,7 +1398,7 @@ export function parseFeature(text: string): Feature {
   }
   flush();
 
-  const { text: description, link, qtest, confluence, assigned, createdBy, updatedBy, flags, attributes } =
+  const { text: description, links, qtest, confluence, assigned, createdBy, updatedBy, flags, attributes } =
     splitFeatureMeta(trimBlankLines(preamble.join("\n")));
   const feature: Feature = {
     name,
@@ -1362,7 +1407,7 @@ export function parseFeature(text: string): Feature {
   };
   if (flags) feature.flags = flags;
   if (attributes) feature.attributes = attributes;
-  if (link) feature.link = link;
+  if (links) feature.links = links;
   if (qtest) feature.qtest = qtest;
   if (confluence) feature.confluence = confluence;
   if (assigned) feature.assigned = assigned;
@@ -1419,7 +1464,9 @@ export function serializeFeature(
   if (feature.flags?.length) parts.push(formatFeatureFlags(feature.flags));
   const featureAttributes = formatAttributeLines(feature.attributes ?? []);
   if (featureAttributes) parts.push(featureAttributes);
-  if (links && feature.link) parts.push(formatExternalLink(feature.link));
+  // One line per ticket, as one block: the parser takes them in any order,
+  // the canonical form keeps them together.
+  if (links && feature.links?.length) parts.push(feature.links.map(formatExternalLink).join("\n"));
   if (links && feature.qtest) parts.push(formatExternalLink(feature.qtest));
   if (links && feature.confluence) parts.push(formatExternalLink(feature.confluence));
   if (feature.assigned) parts.push(formatAssigned(feature.assigned));

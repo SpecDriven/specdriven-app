@@ -70,7 +70,7 @@ describe("the Confluence line", () => {
   test("is lifted into confluence, beside the ticket and the test case", () => {
     const feature = parseFeature(SAMPLE);
     expect(feature.confluence).toEqual(PAGE);
-    expect(feature.link).toEqual(JIRA);
+    expect(feature.links).toEqual([JIRA]);
     expect(feature.qtest?.ticket).toBe("TC-42");
     expect(feature.description).toBe("Quotes for potential customers.");
   });
@@ -87,7 +87,7 @@ describe("the Confluence line", () => {
     expect(isConfluenceLink(JIRA)).toBe(false);
     const only = parseFeature(`# F\n\n[confluence:7](${PAGE_URL})\n`);
     expect(only.confluence?.ticket).toBe("7");
-    expect(only.link).toBeUndefined();
+    expect(only.links).toBeUndefined();
   });
 
   test("under a scenario heading it is content, not the scenario's ticket", () => {
@@ -133,11 +133,11 @@ describe("the document", () => {
     moved.confluence = { ...PAGE, ticket: "9" };
     doc = reconcile(doc, moved);
     expect(docToFeature(doc).confluence!.ticket).toBe("9");
-    expect(docToFeature(doc).link).toEqual(JIRA);
+    expect(docToFeature(doc).links).toEqual([JIRA]);
 
     doc = reconcile(doc, plain);
     expect(docToFeature(doc).confluence).toBeUndefined();
-    expect(docToFeature(doc).link).toEqual(JIRA);
+    expect(docToFeature(doc).links).toEqual([JIRA]);
   });
 
   test("a three-way merge keeps the side that changed it, ours when both did", () => {
