@@ -14,7 +14,7 @@ import {
 } from "../src/server/qtestUrl";
 
 const SITE = "https://acme.qtestnet.com";
-const MODULE = `${SITE}/p/12/portal/project#tab=testdesign&object=2&id=901`;
+const MODULE = `${SITE}/p/12/portal/project#tab=testdesign&object=0&id=901`;
 const CASE = `${SITE}/p/12/portal/project#tab=testdesign&object=1&id=6517980`;
 
 describe("a module url", () => {
@@ -23,17 +23,24 @@ describe("a module url", () => {
     expect(moduleIdFromUrl(MODULE)).toBe("901");
   });
 
+  test("reads the fragment in qTest's own order, id first", () => {
+    const url = "https://acme.qtestnet.com/p/12345/portal/project#id=67890&object=0&tab=testdesign";
+    expect(parseModuleUrl(url)).toEqual({ base: "https://acme.qtestnet.com", projectId: "12345", moduleId: "67890" });
+  });
+
   test("keeps an on-premise context path in the site", () => {
-    const url = "https://qa.acme.com/qtest/p/3/portal/project/#tab=testdesign&object=2&id=7";
+    const url = "https://qa.acme.com/qtest/p/3/portal/project/#tab=testdesign&object=0&id=7";
     expect(parseModuleUrl(url)).toEqual({ base: "https://qa.acme.com/qtest", projectId: "3", moduleId: "7" });
   });
 
   test("is not a test case url, a project url or a non-url", () => {
     expect(parseModuleUrl(CASE)).toBeNull();
+    expect(parseModuleUrl(`${SITE}/p/12/portal/project#tab=testdesign&object=2&id=901`)).toBeNull();
+    expect(parseModuleUrl(`${SITE}/p/12/portal/project#id=901&object=0&tab=testexecution`)).toBeNull();
     expect(parseModuleUrl(`${SITE}/p/12/portal/project#tab=testdesign`)).toBeNull();
-    expect(parseModuleUrl(`${SITE}/p/12/portal/project#tab=testdesign&object=2&id=MD-9`)).toBeNull();
+    expect(parseModuleUrl(`${SITE}/p/12/portal/project#tab=testdesign&object=0&id=MD-9`)).toBeNull();
     expect(parseModuleUrl(SITE)).toBeNull();
-    expect(parseModuleUrl("ftp://acme.qtestnet.com/p/1/portal/project#object=2&id=1")).toBeNull();
+    expect(parseModuleUrl("ftp://acme.qtestnet.com/p/1/portal/project#object=0&id=1")).toBeNull();
     expect(parseModuleUrl("not a url")).toBeNull();
   });
 });
@@ -43,6 +50,7 @@ describe("a test case url", () => {
     expect(testCaseIdFromUrl(CASE)).toBe("6517980");
     expect(testCaseIdFromUrl(MODULE)).toBeNull();
     expect(testCaseIdFromUrl("https://elsewhere.example/x#object=1&id=5")).toBeNull();
+    expect(testCaseIdFromUrl(`${SITE}/p/12/portal/project#id=5&object=1&tab=testexecution`)).toBeNull();
   });
 
   test("is built the way qTest shows it", () => {

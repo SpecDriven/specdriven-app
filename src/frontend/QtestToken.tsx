@@ -4,7 +4,7 @@ import { FailureLine, type FailureDetails } from "./FailureDetails";
 
 // Settings → qTest (specs/external-links/qtest-test-cases.feature.md "A qTest
 // token is kept per site on this device"): the qTest sites this device holds
-// an API token for, and a form to add one. The server checks a token against
+// a Bearer token for, and a form to add one. The server checks a token against
 // the site before keeping it and never sends one back — the list shows the
 // site and what the token reaches. A token qTest refuses shows as one line;
 // clicking it opens what qTest answered.
@@ -113,7 +113,7 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
         </ul>
       )}
       <span className="settings-row-hint">
-        {sites.length > 0 ? "Add another qTest site" : "Add a qTest site"} — its url and an API token:
+        {sites.length > 0 ? "Add another qTest site" : "Add a qTest site"} — its url and a Bearer token:
       </span>
       <div className="auth-row">
         <input
@@ -124,7 +124,7 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
           placeholder="https://acme.qtestnet.com"
         />
         <input
-          aria-label="qTest API token"
+          aria-label="qTest Bearer token"
           type="password"
           autoComplete="off"
           value={token}
@@ -132,14 +132,14 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
           onKeyDown={(e) => {
             if (e.key === "Enter") void save();
           }}
-          placeholder="API token"
+          placeholder="Bearer token"
         />
         <button className="secondary" disabled={busy || !token.trim() || !cleanBase} onClick={() => void save()}>
           {busy ? "Checking…" : "Save token"}
         </button>
       </div>
       <span className="hint">
-        Copy the bearer token from qTest under your name → API &amp; SDK, as a user who can add test cases to the
+        Copy the Bearer token from qTest under your name → API &amp; SDK, as a user who can add test cases to the
         project. It is checked against the site and kept on this device only.
       </span>
       {status && <FailureLine service="qTest" error={status} details={details} />}

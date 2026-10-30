@@ -153,7 +153,7 @@ export function QtestPublishDialog({
               autoFocus
               value={parentUrl}
               onChange={(e) => setParentUrl(e.target.value)}
-              placeholder="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901"
+              placeholder="https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901"
             />
           </label>
           {parentUrl.trim() && problem && <p className="hint">{problem}</p>}
