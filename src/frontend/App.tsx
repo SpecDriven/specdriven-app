@@ -255,6 +255,8 @@ import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
+import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
+import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
@@ -1573,6 +1575,12 @@ export function App() {
       no API key. */
   const [ahaImportOn, setAhaImportOn] = useState(false);
   const ahaImport = ahaImportOn && !demo && !hosted;
+  /** Import from Jira/Wiki (specs/external-links/jira-wiki-import
+      .feature.md): the Jira sites this device holds a token for, and the
+      folder an open import lands in (null for the top level) — or null
+      while the dialog is closed. Never in the demo or the hosted app. */
+  const [jiraSites, setJiraSites] = useState<JiraSite[]>([]);
+  const [importOpen, setImportOpen] = useState<{ folder: string | null } | null>(null);
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -2164,6 +2172,7 @@ export function App() {
   const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
   const qtestTrapRef = useFocusTrap(qtestPublishOpen);
   const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
+  const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
   const conflictTrapRef = useFocusTrap(conflict !== null);
@@ -4240,7 +4249,7 @@ export function App() {
   // The Confluence wikis this device holds a token for: read when Settings
   // or a publish dialog opens, so a token added in one shows in the other.
   useEffect(() => {
-    if (hosted || (!settingsShown && !confluencePublishOpen && !confluenceFolderOpen)) return;
+    if (hosted || (!settingsShown && !confluencePublishOpen && !confluenceFolderOpen && importOpen === null)) return;
     let live = true;
     void fetchConfluenceTokens().then((wikis) => {
       if (live) setConfluenceWikis(wikis);
@@ -4248,7 +4257,18 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [hosted, settingsShown, confluencePublishOpen, confluenceFolderOpen]);
+  }, [hosted, settingsShown, confluencePublishOpen, confluenceFolderOpen, importOpen]);
+  // The Jira sites this device holds a token for, read the same way.
+  useEffect(() => {
+    if (hosted || (!settingsShown && importOpen === null)) return;
+    let live = true;
+    void fetchJiraTokens().then((sites) => {
+      if (live) setJiraSites(sites);
+    });
+    return () => {
+      live = false;
+    };
+  }, [hosted, settingsShown, importOpen]);
   // The qTest sites this device holds a token for, read the same way.
   useEffect(() => {
     if (hosted || (!settingsShown && !qtestPublishOpen)) return;
@@ -6699,6 +6719,20 @@ export function App() {
                           onSelect: () => setAhaImportOpen({ folder: child.path }),
                         },
                       ]),
+                  // Import from Jira/Wiki (specs/external-links/jira-wiki
+                  // -import.feature.md): issues and pages read into a new
+                  // feature in this folder. Never in the demo or the hosted
+                  // app, which keep no token and no agent.
+                  ...(demo || hosted
+                    ? []
+                    : [
+                        {
+                          id: "import-jira-wiki",
+                          label: "Import from Jira/Wiki here…",
+                          icon: <Import size={13} />,
+                          onSelect: () => setImportOpen({ folder: child.path }),
+                        },
+                      ]),
                   {
                     id: "new-folder",
                     label: "New folder here",
@@ -6781,6 +6815,7 @@ export function App() {
   // while typing in a field; ESC works everywhere.
   const dialogOpen =
     userInfoOpen ||
+    importOpen !== null ||
     tokenSignInOpen ||
     foldersOpen ||
     switching !== null ||
@@ -6917,6 +6952,7 @@ export function App() {
     if (confluenceFolder) return setConfluenceFolder(null);
     if (qtestPublishOpen) return setQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
+    if (importOpen !== null) return setImportOpen(null);
     if (featureLinkOpen) return setFeatureLinkDraft(null);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
@@ -7976,6 +8012,7 @@ export function App() {
         ...pluginSettingsNav("links"),
         { id: "settings-qtest", title: "qTest" },
         ...pluginSettingsNav("qtest"),
+        ...(demo || hosted ? [] : [{ id: "settings-jira", title: "Jira" }]),
         ...(demo || hosted ? [] : [{ id: "settings-confluence", title: "Confluence" }]),
         ...pluginSettingsNav("confluence"),
         { id: "settings-workflow", title: "Workflow" },
@@ -8590,6 +8627,19 @@ export function App() {
         )}
       </PageSection>
       {renderPluginSettings("qtest")}
+      {/* Jira (specs/external-links/jira-wiki-import.feature.md): the sites
+          this device holds a personal access token for, read by "Import
+          from Jira/Wiki" in a folder's ⋯ menu. Not in the hosted app, which
+          keeps no device secrets. */}
+      {!demo && !hosted && (
+        <PageSection
+          id="settings-jira"
+          title="Jira"
+          hint="Read Jira issues into a new feature, with Confluence pages, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
+        >
+          <JiraTokens sites={jiraSites} onChange={setJiraSites} />
+        </PageSection>
+      )}
       {/* specs/external-links/confluence-wiki.feature.md: a personal access
           token per wiki, kept on this device; features publish from their
           ⋯ menu. Not in the hosted app, which keeps no device secrets. */}
@@ -11878,6 +11928,33 @@ export function App() {
             const what = data.scenarios > 0 ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : "";
             toast.success(`Imported “${data.title}” from Aha!${what}`, { action: open });
             if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {importOpen !== null && (
+        <ImportFromJiraWikiDialog
+          folder={importOpen.folder}
+          jiraSites={jiraSites}
+          wikis={confluenceWikis}
+          agents={agents}
+          trapRef={importTrapRef}
+          onClose={() => setImportOpen(null)}
+          onCreated={(data) => {
+            const { folder } = importOpen;
+            setImportOpen(null);
+            // Reveal the new feature: a selected folder may be collapsed.
+            if (folder) {
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                next.delete(folder);
+                return next;
+              });
+            }
+            void (async () => {
+              await loadFeatures();
+              await openFeature(data.fileName, { push: true });
+            })();
+            toast.success(`Imported “${data.title}” with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}`);
           }}
         />
       )}

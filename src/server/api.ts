@@ -164,6 +164,20 @@ import { AhaError, getAhaFeature, validateAhaKey } from "./aha";
 import { normalizeAhaBase, parseAhaRecordUrl, parseAhaRef } from "./ahaUrl";
 import { ahaToken, clearAhaToken, listAhaTokens, saveAhaToken } from "./ahaTokens";
 import { isAhaImportScope, planAhaImport } from "./ahaImport";
+import { JiraError, validateJiraToken } from "./jira";
+import { normalizeJiraBase } from "./jiraUrl";
+import { clearJiraToken, listJiraTokens, saveJiraToken } from "./jiraTokens";
+import {
+  classifySource,
+  ImportError,
+  MAX_JIRA_SOURCES,
+  MAX_WIKI_SOURCES,
+  planImportedFeature,
+  proposeFeature,
+  readSources,
+  type SourceLink,
+  type SourceRef,
+} from "./jiraWikiImport";
 import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
@@ -1435,6 +1449,126 @@ const postAhaImport = withDataDir(async (dir, req) => {
     },
     201,
   );
+});
+
+
+// Jira (specs/external-links/jira-wiki-import.feature.md "A Jira token is
+// kept per site on this device"): one personal access token per Jira site,
+// kept on this device (src/server/jiraTokens.ts), checked against the site
+// before it is kept. The list never carries a token.
+const getJiraTokens: Handler = async () => json({ tokens: await listJiraTokens() });
+
+const postJiraToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
+  if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
+    return json({ error: "Paste a Jira personal access token" }, 400);
+  }
+  const base = typeof body.base === "string" ? normalizeJiraBase(body.base) : null;
+  if (!base) {
+    return json({ error: "Enter the Jira site's url, like https://jira.acme.com or https://acme.com/jira" }, 400);
+  }
+  try {
+    const { user } = await validateJiraToken(base, body.token.trim());
+    await saveJiraToken({ base, token: body.token.trim(), user });
+    return json({ base, user });
+  } catch (e) {
+    const details = e instanceof JiraError ? e.details : undefined;
+    return json({ error: (e as Error).message, ...(details ? { details } : {}) }, 400);
+  }
+};
+
+const deleteJiraToken: Handler = async (req) => {
+  const body = (await req.json().catch(() => ({}))) as { base?: unknown };
+  if (typeof body.base !== "string" || !body.base.trim()) return json({ error: "base is required" }, 400);
+  await clearJiraToken(body.base);
+  return json({ tokens: await listJiraTokens() });
+};
+
+// Import from Jira/Wiki (specs/external-links/jira-wiki-import.feature.md
+// "A proposed title and scenarios, reviewed before the feature is written"):
+// the urls the dialog collected — up to five Jira issues and five
+// Confluence pages — are read with this device's tokens and handed to an
+// agent plugin's one-shot turn, which proposes a title and up to fifteen
+// scenarios; `exclude` names the ones already shown when the dialog asks
+// for the rest. Nothing is written here: the review step creates the file.
+// Not in the demo (no tokens, no agent) nor the hosted app.
+const postImportPropose = withDataDir(async (dir, req) => {
+  if (isDemoMode()) return json({ error: "Importing from Jira or Confluence is off in demo mode" }, 403);
+  const body = (await req.json().catch(() => ({}))) as { sources?: unknown; agent?: unknown; exclude?: unknown };
+  const urls = Array.isArray(body.sources) ? body.sources.filter((u): u is string => typeof u === "string") : [];
+  if (urls.length === 0) return json({ error: "Add at least one Jira issue or Confluence page url" }, 400);
+  if (urls.length > MAX_JIRA_SOURCES + MAX_WIKI_SOURCES) {
+    return json({ error: `At most ${MAX_JIRA_SOURCES} Jira issues and ${MAX_WIKI_SOURCES} Confluence pages` }, 400);
+  }
+  const refs: SourceRef[] = [];
+  for (const url of urls) {
+    const ref = classifySource(url);
+    if (!ref) return json({ error: `Not a Jira issue or Confluence page url: ${url}` }, 400);
+    refs.push(ref);
+  }
+  const exclude = Array.isArray(body.exclude) ? body.exclude.filter((n): n is string => typeof n === "string") : [];
+  const agent = typeof body.agent === "string" && body.agent ? body.agent : undefined;
+  try {
+    const sources = await readSources(refs);
+    const proposal = await proposeFeature(sources, dir, { agent, exclude });
+    const links: SourceLink[] = sources.map((s) => ({ kind: s.kind, url: s.url, title: s.title }));
+    return json({ ...proposal, sources: links });
+  } catch (e) {
+    if (e instanceof ImportError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 502);
+  }
+});
+
+// The review step's "Create feature": the title and the scenarios the user
+// kept become a new feature file in the chosen folder, each scenario
+// proposed, the sources named under the title; committed and opened.
+const postImportCreate = withDataDir(async (dir, req) => {
+  if (isDemoMode()) return json({ error: "Importing from Jira or Confluence is off in demo mode" }, 403);
+  const body = (await req.json().catch(() => ({}))) as {
+    folder?: unknown;
+    title?: unknown;
+    scenarios?: unknown;
+    sources?: unknown;
+  };
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  if (!title) return json({ error: "Give the feature a title" }, 400);
+  const scenarios = Array.isArray(body.scenarios)
+    ? (body.scenarios as { name?: unknown; body?: unknown; sources?: unknown }[]).flatMap((s) =>
+        s && typeof s.name === "string" && s.name.trim()
+          ? [
+              {
+                name: s.name,
+                body: typeof s.body === "string" ? s.body : "",
+                sources: Array.isArray(s.sources) ? s.sources.filter((x): x is string => typeof x === "string") : [],
+              },
+            ]
+          : [],
+      )
+    : [];
+  if (scenarios.length === 0) return json({ error: "Keep at least one scenario" }, 400);
+  const sources: SourceLink[] = Array.isArray(body.sources)
+    ? (body.sources as Partial<SourceLink>[]).flatMap((s) =>
+        s && (s.kind === "jira" || s.kind === "wiki") && typeof s.url === "string" && typeof s.title === "string"
+          ? [{ kind: s.kind, url: s.url, title: s.title }]
+          : [],
+      )
+    : [];
+  const folder = typeof body.folder === "string" ? body.folder.trim().replace(/^\/+|\/+$/g, "") : "";
+  const plan = planImportedFeature(title, scenarios, sources);
+  try {
+    const fileName = await createFeature(
+      dir,
+      folder ? `${folder}/${plan.name}` : plan.name,
+      plan.text,
+      (n) => `Import feature from Jira/Wiki: ${n}`,
+    );
+    return json({ fileName, title: plan.name, scenarios: scenarios.length }, 201);
+  } catch (e) {
+    const message = (e as Error).message;
+    const exists = message.match(/^Feature file already exists: (.+)$/);
+    if (exists) return json({ error: `Already there as ${exists[1]} — open it instead.`, fileName: exists[1] }, 409);
+    return json({ error: message }, 400);
+  }
 });
 
 
@@ -3028,6 +3162,11 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/aha/tokens", unlessHosted(postAhaToken)],
   ["DELETE", "/api/aha/tokens", unlessHosted(deleteAhaToken)],
   ["POST", "/api/aha/import", unlessHosted(postAhaImport)],
+  ["GET", "/api/jira/tokens", unlessHosted(getJiraTokens)],
+  ["POST", "/api/jira/tokens", unlessHosted(postJiraToken)],
+  ["DELETE", "/api/jira/tokens", unlessHosted(deleteJiraToken)],
+  ["POST", "/api/import/propose", unlessHosted(postImportPropose)],
+  ["POST", "/api/import/create", unlessHosted(postImportCreate)],
   // Claude sign-in: the Claude agent plugin's routes (/api/claude/*),
   // there while the plugin is installed and on.
   ["POST", "/api/reload", postReload],
