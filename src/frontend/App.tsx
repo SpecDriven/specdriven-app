@@ -3549,6 +3549,23 @@ export function App() {
     }
   };
 
+  // "Create qTest test cases…" (specs/external-links/qtest-test-cases.feature.md
+  // "A feature with no Confluence page asks first"): each test case links its
+  // scenario on the feature's Confluence page, so without one it would only
+  // name the spec file — asked before the dialog opens.
+  const openQtestPublish = async (f: Feature) => {
+    if (!f.confluence) {
+      const ok = await confirm({
+        title: "No Confluence page",
+        body: `“${f.name}” has not been published to Confluence, so its test cases cannot link their scenarios there — they will name the spec file instead. Create the qTest test cases anyway?`,
+        confirmLabel: "Create anyway",
+        danger: false,
+      });
+      if (!ok) return;
+    }
+    setQtestPublishOpen(true);
+  };
+
   // Delete (specs/ui/ui.feature.md "Feature entry menu"): removes the feature
   // file after a confirmation — a `git rm`, committed and pushed on the server.
   const removeFeature = async (f: FeatureListing) => {
@@ -10679,7 +10696,7 @@ export function App() {
                               id: "qtest",
                               label: "Create qTest test cases…",
                               icon: <ClipboardCheck size={13} />,
-                              onSelect: () => setQtestPublishOpen(true),
+                              onSelect: () => void openQtestPublish(feature),
                             },
                           ]),
                       {

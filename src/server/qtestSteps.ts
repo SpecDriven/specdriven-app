@@ -4,6 +4,8 @@
 // that follow a When are that step's expected result. Pure — the REST calls
 // are in ./qtest.ts.
 
+import { escapeXml } from "./confluenceStorage";
+import { scenarioAnchorUrl } from "./confluenceUrl";
 import type { Scenario } from "./parser";
 
 /** A test step as qTest's API takes it. */
@@ -85,6 +87,29 @@ export interface StepSource {
   featureName: string;
   /** The feature's file in the data repo, so a qTest reader can find the spec. */
   file: string;
+  /**
+   * The feature's Confluence page, when it has one: the description then
+   * links the scenario on it rather than naming the file, which a qTest
+   * reader cannot open.
+   */
+  confluencePage?: { url: string; title: string };
+}
+
+/**
+ * A test case's description, as the HTML qTest's rich-text field holds: the
+ * feature, then its scenario on the Confluence page as a link — the url its
+ * own text, so it reads the same wherever qTest shows the description as
+ * plain text — or else the spec file's path.
+ */
+function descriptionOf(source: StepSource, number: number | null): string {
+  const page = source.confluencePage;
+  const where = page
+    ? (() => {
+        const url = escapeXml(scenarioAnchorUrl(page.url, page.title, number));
+        return `<a href="${url}">${url}</a>`;
+      })()
+    : escapeXml(source.file);
+  return `Scenario of the SpecDriven feature “${escapeXml(source.featureName)}” (${where}).`;
 }
 
 /**
@@ -122,7 +147,7 @@ export function scenarioToTestCase(scenario: Scenario, number: number | null, so
   const label = number === null ? scenario.name : `S${number}: ${scenario.name}`;
   return {
     name: label.slice(0, NAME_LIMIT),
-    description: `Scenario of the SpecDriven feature “${source.featureName}” (${source.file}).`,
+    description: descriptionOf(source, number),
     precondition: precondition.join("\n"),
     test_steps: steps,
   };
