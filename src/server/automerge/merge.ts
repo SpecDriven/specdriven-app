@@ -10,6 +10,8 @@ import * as A from "@automerge/automerge";
 import {
   attributesKey,
   featureFlagsKey,
+  linkKey,
+  linksKey,
   plainAttributes,
   plainFeatureFlags,
   type EntryKind,
@@ -113,10 +115,6 @@ export function threeWayPageStrict(
 /** draft → proposed → published: the lifecycle only moves forward. */
 const STATUS_RANK = { draft: 0, proposed: 1, published: 2 } as const;
 
-function linkKey(link: ExternalLink | undefined): string {
-  return link ? `${link.program}\n${link.ticket}\n${link.url}` : "";
-}
-
 /**
  * An external link is one value, not text: the side that changed it wins,
  * ours when both did (specs/external-links/project-management-jira-linear-
@@ -130,6 +128,19 @@ function mergeLink(
   const winner =
     linkKey(theirs) !== linkKey(base) && linkKey(ours) === linkKey(base) ? theirs : ours;
   return winner ? { ...winner } : undefined;
+}
+
+/**
+ * A feature's tickets are one list, set whole like the flags: the side that
+ * changed it wins, ours when both did.
+ */
+function mergeLinks(
+  base: ExternalLink[] | undefined,
+  ours: ExternalLink[] | undefined,
+  theirs: ExternalLink[] | undefined,
+): ExternalLink[] | undefined {
+  const winner = linksKey(theirs) !== linksKey(base) && linksKey(ours) === linksKey(base) ? theirs : ours;
+  return winner?.length ? winner.map((l) => ({ ...l })) : undefined;
 }
 
 /**
@@ -298,7 +309,7 @@ export function threeWayFeature(
   const scenarios = mergeOrder([...b.keys()], [...o.keys()], [...t.keys()], merged).map(
     (k) => merged.get(k)!,
   );
-  const link = mergeLink(base.link, ours.link, theirs.link);
+  const links = mergeLinks(base.links, ours.links, theirs.links);
   const qtest = mergeLink(base.qtest, ours.qtest, theirs.qtest);
   const confluence = mergeLink(base.confluence, ours.confluence, theirs.confluence);
   const flags = mergeFlags(base.flags, ours.flags, theirs.flags);
@@ -317,7 +328,7 @@ export function threeWayFeature(
       scenarios,
       ...(flags ? { flags } : {}),
       ...(attributes ? { attributes } : {}),
-      ...(link ? { link } : {}),
+      ...(links ? { links } : {}),
       ...(qtest ? { qtest } : {}),
       ...(confluence ? { confluence } : {}),
       ...(assigned ? { assigned } : {}),
