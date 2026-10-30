@@ -10,6 +10,7 @@
 import type { ImmutableString } from "@automerge/automerge";
 import type {
   ConfluencePage,
+  QtestModule,
   EntryKind,
   ExternalLink,
   FeatureFlag,
@@ -218,6 +219,14 @@ export type FeatureDoc = {
    * migration — a feature without it publishes unchecked and starts keeping it.
    */
   confluencePage?: ConfluencePage;
+  /**
+   * The qTest module the test cases were last published into, with the
+   * parent module url it went under (specs/external-links/
+   * qtest-test-cases.feature.md), so the dialog offers each feature its own
+   * parent. Document-only and set whole, like `confluencePage`; optional,
+   * so documents from before it need no migration.
+   */
+  qtestModule?: QtestModule;
   /** The pull requests implementing the feature as a whole (see SpecEntry.prs). */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs (see SpecEntry.aha). */

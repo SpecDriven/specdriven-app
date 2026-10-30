@@ -15,6 +15,7 @@ import {
   plainFeatureFlags,
   splitScenarioMeta,
   type ConfluencePage,
+  type QtestModule,
   type ExternalLink,
   type Feature,
   type FeatureFlag,
@@ -538,6 +539,21 @@ export function setConfluencePage(doc: A.Doc<FeatureDoc>, page: ConfluencePage):
       version: page.version,
       ...(page.parentUrl !== undefined ? { parentUrl: page.parentUrl } : {}),
     };
+  });
+}
+
+/**
+ * Record the qTest module the feature's test cases were just published into
+ * and the parent module it went under (specs/external-links/
+ * qtest-test-cases.feature.md "Create qTest test cases from a feature"), so
+ * the dialog offers that parent next time. A direct document operation like
+ * setConfluencePage, set whole.
+ */
+export function setQtestModule(doc: A.Doc<FeatureDoc>, module: QtestModule): A.Doc<FeatureDoc> {
+  const current = doc.qtestModule;
+  if (current?.id === module.id && current.parentUrl === module.parentUrl) return doc;
+  return A.change(doc, (d) => {
+    d.qtestModule = { id: module.id, parentUrl: module.parentUrl };
   });
 }
 

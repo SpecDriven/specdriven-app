@@ -210,6 +210,9 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
     const { id, version, parentUrl } = doc.confluencePage;
     feature.confluencePage = { id, version, ...(typeof parentUrl === "string" ? { parentUrl } : {}) };
   }
+  if (doc.qtestModule && typeof doc.qtestModule.parentUrl === "string") {
+    feature.qtestModule = { id: String(doc.qtestModule.id), parentUrl: doc.qtestModule.parentUrl };
+  }
   const prs = plainPrs(doc.prs);
   if (prs) feature.prs = prs;
   const aha = plainResources(doc.aha);

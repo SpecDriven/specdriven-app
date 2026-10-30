@@ -90,6 +90,11 @@ export function testCaseWebUrl(base: string, projectId: string, testCaseId: stri
   return `${base}/p/${projectId}/portal/project#tab=testdesign&object=${TEST_CASE_OBJECT}&id=${testCaseId}`;
 }
 
+/** A requirement's url as qTest shows it: the Requirements tab, object 5. */
+export function requirementWebUrl(base: string, projectId: string, requirementId: string): string {
+  return `${base}/p/${projectId}/portal/project#tab=requirements&object=5&id=${requirementId}`;
+}
+
 /**
  * A qTest site's base url as typed in Settings — `https://acme.qtestnet.com`,
  * `https://qa.acme.com/qtest/`, or any portal url of it — or null when it is

@@ -160,6 +160,20 @@ export interface ConfluencePage {
   parentUrl?: string;
 }
 
+/**
+ * The qTest module a feature's test cases were last published into
+ * (specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
+ * from a feature"): `id` is the module's, the same as the link's, so a
+ * record left by an earlier module never stands for the one linked now;
+ * `parentUrl` is the parent module url the feature was last published
+ * under, as the user pasted it, offered again by the publish dialog — each
+ * feature its own, as features may live under different parents.
+ */
+export interface QtestModule {
+  id: string;
+  parentUrl: string;
+}
+
 /** Whether a link is a feature's Confluence page rather than a ticket. */
 export function isConfluenceLink(link: ExternalLink): boolean {
   return link.program.trim().toLowerCase() === CONFLUENCE_PROGRAM.toLowerCase();
@@ -292,6 +306,11 @@ export interface Feature {
    * never writes it.
    */
   confluencePage?: ConfluencePage;
+  /**
+   * The qTest module the feature's test cases were last published into and
+   * the parent it went under; document-only, like the page above.
+   */
+  qtestModule?: QtestModule;
   /** The pull requests implementing the feature as a whole; document-only. */
   prs?: PullRequestLink[];
   /** The feature's Aha! records and Figma designs; document-only. */
