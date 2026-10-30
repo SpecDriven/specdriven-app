@@ -11878,10 +11878,11 @@ export function App() {
             const what = [
               data.created > 0 ? `created ${data.created}` : "",
               data.updated > 0 ? `updated ${data.updated}` : "",
-              // The requirement of the feature's Jira issue they cover, when one was found.
-              data.requirement && data.requirement.linked + data.requirement.alreadyLinked > 0
-                ? `linked to ${data.requirement.pid}`
-                : "",
+              // The requirements of the feature's Jira issues they cover, those found and linked.
+              (() => {
+                const pids = (data.requirements ?? []).filter((r) => r.linked + r.alreadyLinked > 0).map((r) => r.pid);
+                return pids.length > 0 ? `linked to ${pids.join(", ")}` : "";
+              })(),
             ]
               .filter(Boolean)
               .join(", ");

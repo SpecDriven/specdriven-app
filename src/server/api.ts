@@ -1784,8 +1784,8 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     cases: result.cases.map(({ scenarioName, id, pid, url, created }) => ({ scenarioName, id, pid, url, created })),
     created: result.cases.filter((c) => c.created).length,
     updated: result.cases.filter((c) => !c.created).length,
-    // The requirement of the feature's Jira issue the test cases cover, when one was found.
-    ...(result.requirement ? { requirement: result.requirement } : {}),
+    // The requirements of the feature's Jira issues the test cases cover, those that were found.
+    ...(result.requirements.length > 0 ? { requirements: result.requirements } : {}),
     title,
     parentUrl,
     // The test case qTest refused: the dialog stays open on it, with its details.

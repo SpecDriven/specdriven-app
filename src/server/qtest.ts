@@ -516,16 +516,24 @@ export async function linkTestCases(
 }
 
 /**
- * The Jira issue key a feature's link names, upper-cased — from the ticket
- * of a Jira link, else from the url of any link that is a Jira issue url —
- * or null when the feature links no Jira issue.
+ * The Jira issue keys a feature's tickets name, upper-cased and in the
+ * tickets' order, each once — from the ticket of a Jira link, else from the
+ * url of any link that is a Jira issue url. Empty when the feature links no
+ * Jira issue. Every ticket counts (specs/external-links/project-management-
+ * jira-linear-etc.feature.md "Several tickets on a feature"): a feature
+ * under an epic and two stories covers all three requirements.
  */
-export function featureJiraKey(feature: Feature): string | null {
-  const link = feature.link;
-  if (!link) return null;
-  const ticket = link.ticket.trim();
-  if (link.program.trim().toLowerCase() === "jira" && isJiraIssueKey(ticket)) return ticket.toUpperCase();
-  return parseJiraIssueUrl(link.url)?.key ?? null;
+export function featureJiraKeys(feature: Feature): string[] {
+  const keys: string[] = [];
+  for (const link of feature.links ?? []) {
+    const ticket = link.ticket.trim();
+    const key =
+      link.program.trim().toLowerCase() === "jira" && isJiraIssueKey(ticket)
+        ? ticket.toUpperCase()
+        : (parseJiraIssueUrl(link.url)?.key ?? null);
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
 }
 
 // --- Publishing a feature ------------------------------------------------------------
@@ -545,97 +553,132 @@ export interface PublishResult {
   module: ModuleInfo & { created: boolean };
   cases: PublishedCase[];
   /**
-   * The requirement of the feature's Jira issue, when one was found: how
-   * many test cases this run linked to it, and how many already were.
+   * The requirements of the feature's Jira issues that were found, one per
+   * key in the tickets' order: how many test cases this run linked to each,
+   * and how many already were. Empty when none was found.
    */
-  requirement?: RequirementInfo & { linked: number; alreadyLinked: number };
+  requirements: LinkedRequirement[];
   /**
    * What kept the test cases from being tied to a requirement — no Jira
-   * link, no such requirement, a refused search or link. Reported as
-   * warnings, never as a failure: the test cases are written either way.
+   * link, no such requirement for a key, a refused search or link. Reported
+   * as warnings, never as a failure: the test cases are written either way.
    */
   notices: string[];
   /** The scenario whose test case could not be written, when one could not. */
   failed?: { index: number; scenarioName: string; error: string; details?: QtestFailureDetails };
 }
 
+/** A requirement found for one of the feature's Jira keys. */
+export interface KeyedRequirement extends RequirementInfo {
+  /** The Jira issue key whose requirement this is. */
+  key: string;
+}
+
+/** A requirement after the publish: how many test cases were linked to it, and how many already were. */
+export type LinkedRequirement = KeyedRequirement & { linked: number; alreadyLinked: number };
+
 /**
- * The requirement the feature's Jira issue names, looked up before anything
- * is written. Not finding one, or a search qTest refuses (an older site
- * without the search API, a token that may not read requirements), is a
- * notice: the test cases go without. A rejected token still stops the run,
- * since nothing after it would be accepted either.
+ * The requirements the feature's Jira issues name — one search per key, in
+ * the tickets' order — looked up before anything is written. A key with no
+ * requirement is a notice and the others still count; a search qTest refuses
+ * (an older site without the search API, a token that may not read
+ * requirements) ends the looking, as the next search would be refused the
+ * same way, and is a notice naming the keys left. A rejected token still
+ * stops the run, since nothing after it would be accepted either.
  */
-async function requirementFor(p: {
+async function requirementsFor(p: {
   base: string;
   token: string;
   projectId: string;
   feature: Feature;
   notices: string[];
-}): Promise<RequirementInfo | null> {
-  const key = featureJiraKey(p.feature);
-  const notice = (text: string) => {
+}): Promise<KeyedRequirement[]> {
+  const keys = featureJiraKeys(p.feature);
+  const notice = (text: string, key?: string) => {
     p.notices.push(text);
     log.warn(text, { project_id: p.projectId, ...(key ? { jira_key: key } : {}) });
   };
-  if (!key) {
+  if (keys.length === 0) {
     notice("The feature has no Jira link, so its test cases were not tied to a qTest requirement.");
-    return null;
+    return [];
   }
-  let found: RequirementMatch;
-  try {
-    found = await findRequirement(p.base, p.token, p.projectId, key);
-  } catch (e) {
-    if (!(e instanceof QtestError) || e.status === 401) throw e;
-    notice(`The qTest requirement for ${key} could not be looked up (${e.message}); the test cases were written without one.`);
-    return null;
+  const found: KeyedRequirement[] = [];
+  const missing: string[] = [];
+  for (const [i, key] of keys.entries()) {
+    let match: RequirementMatch;
+    try {
+      match = await findRequirement(p.base, p.token, p.projectId, key);
+    } catch (e) {
+      if (!(e instanceof QtestError) || e.status === 401) throw e;
+      const left = keys.slice(i);
+      const which = left.length === 1 ? `requirement for ${left[0]}` : `requirements for ${left.join(", ")}`;
+      const without = found.length === 0 ? "without one" : "without them";
+      notice(`The qTest ${which} could not be looked up (${e.message}); the test cases were written ${without}.`, key);
+      break;
+    }
+    if (!match.match) {
+      missing.push(key);
+      continue;
+    }
+    if (match.candidates.length > 1) {
+      notice(
+        `${match.candidates.length} qTest requirements start with "${key}"; the test cases were linked to ${match.match.pid} “${match.match.name}”.`,
+        key,
+      );
+    }
+    found.push({ ...match.match, key });
   }
-  if (!found.match) {
-    notice(`No qTest requirement in project ${p.projectId} starts with "${key}"; the test cases were written without one.`);
-    return null;
+  // Worded once the search is over: a key without a requirement is "without
+  // one" only when no other key supplied one.
+  for (const key of missing) {
+    const tail = found.length === 0 ? "; the test cases were written without one" : "";
+    notice(`No qTest requirement in project ${p.projectId} starts with "${key}"${tail}.`, key);
   }
-  if (found.candidates.length > 1) {
-    notice(
-      `${found.candidates.length} qTest requirements start with "${key}"; the test cases were linked to ${found.match.pid} “${found.match.name}”.`,
-    );
-  }
-  return found.match;
+  return found;
 }
 
 /**
- * Link the test cases written to the requirement, leaving alone those linked
- * before — on a second publish, the ones a first run linked. A site that
- * cannot list the links (older than qTest 7.5) has them all sent, which qTest
- * takes as a no-op for the ones that stand. A refused link is a notice.
+ * Link the test cases written to each requirement, leaving alone those
+ * linked before — on a second publish, the ones a first run linked. A site
+ * that cannot list the links (older than qTest 7.5) has them all sent, which
+ * qTest takes as a no-op for the ones that stand. A refused link is a
+ * notice, and the next requirement is still tried.
  */
-async function linkToRequirement(p: {
+async function linkToRequirements(p: {
   base: string;
   token: string;
   projectId: string;
-  requirement: RequirementInfo;
+  requirements: KeyedRequirement[];
   cases: PublishedCase[];
   notices: string[];
-}): Promise<NonNullable<PublishResult["requirement"]>> {
-  // The test cases are in qTest by now, so nothing here may fail the run:
-  // the route must still link them back to their scenarios.
-  let already = new Set<string>();
-  try {
-    already = await linkedTestCaseIds(p.base, p.token, p.projectId, p.requirement.id);
-  } catch {
-    // Listed as none linked: the link call below is sent for all of them.
+}): Promise<LinkedRequirement[]> {
+  const out: LinkedRequirement[] = [];
+  for (const requirement of p.requirements) {
+    // The test cases are in qTest by now, so nothing here may fail the run:
+    // the route must still link them back to their scenarios.
+    let already = new Set<string>();
+    try {
+      already = await linkedTestCaseIds(p.base, p.token, p.projectId, requirement.id);
+    } catch {
+      // Listed as none linked: the link call below is sent for all of them.
+    }
+    const missing = p.cases.map((c) => c.id).filter((id) => !already.has(id));
+    const alreadyLinked = p.cases.length - missing.length;
+    if (missing.length === 0) {
+      out.push({ ...requirement, linked: 0, alreadyLinked });
+      continue;
+    }
+    try {
+      await linkTestCases(p.base, p.token, p.projectId, requirement.id, missing);
+      out.push({ ...requirement, linked: missing.length, alreadyLinked });
+    } catch (e) {
+      const text = `The test cases were written but could not be linked to requirement ${requirement.pid}: ${(e as Error).message}`;
+      p.notices.push(text);
+      log.warn(text, { project_id: p.projectId, requirement_id: requirement.id, jira_key: requirement.key });
+      out.push({ ...requirement, linked: 0, alreadyLinked });
+    }
   }
-  const missing = p.cases.map((c) => c.id).filter((id) => !already.has(id));
-  const alreadyLinked = p.cases.length - missing.length;
-  if (missing.length === 0) return { ...p.requirement, linked: 0, alreadyLinked };
-  try {
-    await linkTestCases(p.base, p.token, p.projectId, p.requirement.id, missing);
-  } catch (e) {
-    const text = `The test cases were written but could not be linked to requirement ${p.requirement.pid}: ${(e as Error).message}`;
-    p.notices.push(text);
-    log.warn(text, { project_id: p.projectId, requirement_id: p.requirement.id });
-    return { ...p.requirement, linked: 0, alreadyLinked };
-  }
-  return { ...p.requirement, linked: missing.length, alreadyLinked };
+  return out;
 }
 
 /**
@@ -711,7 +754,7 @@ export async function publishFeatureTestCases(p: {
   // Read before anything is written, so a failure here leaves no empty module behind.
   const properties = await requiredProperties(p.base, p.token, p.projectId);
   const notices: string[] = [];
-  const requirement = await requirementFor({ base: p.base, token: p.token, projectId: p.projectId, feature: p.feature, notices });
+  const requirements = await requirementsFor({ base: p.base, token: p.token, projectId: p.projectId, feature: p.feature, notices });
   const module = await featureModule({
     base: p.base,
     token: p.token,
@@ -748,13 +791,11 @@ export async function publishFeatureTestCases(p: {
       break;
     }
   }
-  // The test cases written are linked to the requirement even when the run
-  // stopped short: the next run carries on from the refused one.
+  // The test cases written are linked to every requirement found even when
+  // the run stopped short: the next run carries on from the refused one.
   const linked =
-    requirement && cases.length > 0
-      ? await linkToRequirement({ base: p.base, token: p.token, projectId: p.projectId, requirement, cases, notices })
-      : requirement
-        ? { ...requirement, linked: 0, alreadyLinked: 0 }
-        : undefined;
-  return { module, cases, ...(linked ? { requirement: linked } : {}), notices, ...(failed ? { failed } : {}) };
+    cases.length > 0
+      ? await linkToRequirements({ base: p.base, token: p.token, projectId: p.projectId, requirements, cases, notices })
+      : requirements.map((r) => ({ ...r, linked: 0, alreadyLinked: 0 }));
+  return { module, cases, requirements: linked, notices, ...(failed ? { failed } : {}) };
 }
