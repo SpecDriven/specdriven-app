@@ -3126,7 +3126,7 @@ aside > .user-corner {
   cursor: pointer;
   padding: 0.15rem 0.3rem;
   font-size: 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
 }
@@ -3277,7 +3277,7 @@ button.table-add:hover {
 /* Why no name was found, or that one is being read, under the add field. */
 .test-name-hint {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--text-2);
   font-size: 0.75rem;
 }
 
@@ -8805,7 +8805,7 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .scenario-authors {
   margin: 0.5rem 0 0;
   font-size: 0.78rem;
-  color: var(--text-muted);
+  color: var(--text-2);
 }
 
 /* Pull request links (specs/external-links/related-pull-requests.feature.md):
@@ -8878,7 +8878,7 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 /* The state read from GitHub, or why nothing was read, under the add field. */
 .pr-hint {
   margin: 0;
-  color: var(--text-muted);
+  color: var(--text-2);
   font-size: 0.75rem;
 }
 
@@ -9320,7 +9320,7 @@ aside.rail .rail-btn.pomodoro-chip.flash {
    the pull request list and add-row layout, with each file's size and its
    rename / replace / remove actions after the name. */
 .file-list .file-size {
-  color: var(--text-muted);
+  color: var(--text-2);
   font-size: 0.75rem;
   white-space: nowrap;
 }
@@ -9562,4 +9562,99 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 
 .confluence-row-conflict {
   color: var(--status-proposed);
+}
+
+/* Import from Jira/Wiki (specs/external-links/jira-wiki-import.feature.md):
+   the sources collected, then the proposed scenarios under review. */
+.import-dialog .import-sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.import-dialog .import-sources li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  min-width: 0;
+}
+
+.import-dialog .import-source-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-dialog .import-kind {
+  flex: none;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.import-dialog .import-add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.import-dialog .import-add input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.import-dialog .import-scenarios {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: min(40vh, 22rem);
+  overflow-y: auto;
+}
+
+.import-dialog .import-scenarios li.dropped .import-scenario-name {
+  color: var(--text-2);
+  text-decoration: line-through;
+}
+
+.import-dialog .import-scenario-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.import-dialog .import-scenario-row input[type="checkbox"] {
+  flex: none;
+  margin: 0;
+}
+
+.import-dialog .import-scenario-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.import-dialog .import-scenario-body {
+  margin: 0.25rem 0 0.5rem 1.75rem;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+}
+
+.import-dialog .import-more {
+  font-size: 0.8125rem;
+  color: var(--text-2);
 }
