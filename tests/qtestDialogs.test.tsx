@@ -83,7 +83,8 @@ describe("QtestTokens", () => {
     const markup = html(<QtestTokens sites={[]} onChange={noop} />);
     expect(markup).toContain("Add a qTest site");
     expect(markup).toContain('aria-label="qTest url"');
-    expect(markup).toMatch(/aria-label="qTest API token" type="password"/);
+    expect(markup).toMatch(/aria-label="qTest Bearer token" type="password"/);
+    expect(markup).toContain("its url and a Bearer token");
     expect(markup).toContain("kept on this device only");
   });
 });

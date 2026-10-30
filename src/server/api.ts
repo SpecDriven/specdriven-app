@@ -1297,7 +1297,7 @@ const getQtestTokens: Handler = async () => json({ tokens: await listQtestTokens
 const postQtestToken: Handler = async (req) => {
   const body = (await req.json().catch(() => ({}))) as { base?: unknown; token?: unknown };
   if (typeof body.token !== "string" || !body.token.trim() || body.token.length > 1024) {
-    return json({ error: "Paste a qTest API token" }, 400);
+    return json({ error: "Paste a qTest Bearer token" }, 400);
   }
   const base = typeof body.base === "string" ? normalizeQtestBase(body.base) : null;
   if (!base) {
