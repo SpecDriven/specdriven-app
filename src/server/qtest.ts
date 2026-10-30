@@ -349,8 +349,12 @@ export async function getTestCase(
   }
 }
 
-interface TestCaseFields extends TestCaseDraft {
+/** What an update sends: only what the spec owns, and the module it sits in. */
+interface TestCaseUpdate extends TestCaseDraft {
   parent_id: string;
+}
+
+interface TestCaseFields extends TestCaseUpdate {
   properties: Property[];
 }
 
@@ -370,7 +374,7 @@ export async function updateTestCase(
   token: string,
   projectId: string,
   id: string,
-  fields: TestCaseFields,
+  fields: TestCaseUpdate,
 ): Promise<TestCaseInfo> {
   const raw = await qtest<RawTestCase>(base, `${project(projectId)}/test-cases/${encodeURIComponent(id)}`, token, {
     method: "PUT",
@@ -488,13 +492,16 @@ export async function publishFeatureTestCases(p: {
   for (const [index, scenario] of p.feature.scenarios.entries()) {
     if (p.scope === "published" && scenario.status !== "published") continue;
     const draft = scenarioToTestCase(scenario, numbers[index] ?? null, source);
-    const fields: TestCaseFields = { ...draft, parent_id: module.id, properties };
+    const fields: TestCaseUpdate = { ...draft, parent_id: module.id };
     try {
       const linkedId = linkedTestCaseId(scenario, p.base);
       const existing = linkedId ? await getTestCase(p.base, p.token, p.projectId, linkedId) : null;
+      // An update leaves the properties alone: the required ones go in at
+      // their defaults only when the test case is made, so a Status a tester
+      // has moved on is not reset by publishing again.
       const written = existing
         ? await updateTestCase(p.base, p.token, p.projectId, existing.id, fields)
-        : await createTestCase(p.base, p.token, p.projectId, fields);
+        : await createTestCase(p.base, p.token, p.projectId, { ...fields, properties });
       cases.push({ index, scenarioName: scenario.name, ...written, created: !existing });
     } catch (e) {
       const error = e instanceof QtestError ? e.message : (e as Error).message;

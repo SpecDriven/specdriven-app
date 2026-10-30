@@ -184,6 +184,8 @@ function stubQtest(): string {
             parent_id: b.parent_id ? Number(b.parent_id) : c.parent_id,
             test_steps: b.test_steps ?? c.test_steps,
             precondition: b.precondition ?? c.precondition,
+            // Like qTest, properties sent replace those stored; none sent keeps them.
+            properties: b.properties ?? c.properties,
             version: c.version + 1,
           });
           return Response.json(rawCase(c));
@@ -366,6 +368,21 @@ describe("creating a feature's test cases", () => {
     expect(cases.size).toBe(2);
     expect(cases.get(1001)!.version).toBe(2);
     expect(again.body.message).toBe("test case links unchanged");
+  });
+
+  test("creating them again leaves the test cases' properties alone, so a Status set in qTest stays", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    // A tester moves the first test case's Status on from its default.
+    const moved = [
+      { field_id: 7310, field_value: 711 },
+      { field_id: 501, field_value: 701 },
+    ];
+    cases.get(1001)!.properties = moved;
+    seen = [];
+    expect((await publish(moduleUrl(1))).body).toMatchObject({ created: 0, updated: 2 });
+    for (const put of seen.filter((r) => r.method === "PUT")) expect(put.body).not.toHaveProperty("properties");
+    expect(cases.get(1001)!.properties).toEqual(moved);
   });
 
   test("the linked module moves under a new parent; a deleted one is found by name, or made anew", async () => {
