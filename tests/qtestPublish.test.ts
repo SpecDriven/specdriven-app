@@ -415,8 +415,12 @@ describe("creating a feature's test cases", () => {
     await saveFeature(data, FILE, SAMPLE.replace("# Quote Policy\n", `# Quote Policy\n\n[Confluence:99](${page})\n`));
     expect((await publish(moduleUrl(1))).status).toBe(200);
     const [first, second] = posts("/api/v3/projects/12/test-cases");
-    expect((first!.body as { description: string }).description).toBe(`Scenario of the SpecDriven feature “Quote Policy” (${page}#QuotePolicy-S1).`);
-    expect((second!.body as { description: string }).description).toBe(`Scenario of the SpecDriven feature “Quote Policy” (${page}#QuotePolicy-S2).`);
+    expect((first!.body as { description: string }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${page}#QuotePolicy-S1">${page}#QuotePolicy-S1</a>).`,
+    );
+    expect((second!.body as { description: string }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${page}#QuotePolicy-S2">${page}#QuotePolicy-S2</a>).`,
+    );
   });
 
   test("a test case qTest refuses stops the run, and what was written is still linked back", async () => {
