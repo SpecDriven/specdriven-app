@@ -11873,7 +11873,7 @@ export function App() {
           file={selected}
           featureName={feature.name}
           linkedUrl={feature.qtest?.url}
-          initialParentUrl={qtestParentUrl}
+          initialParentUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
           sites={qtestSites}
           trapRef={qtestTrapRef}
           onClose={() => setQtestPublishOpen(false)}

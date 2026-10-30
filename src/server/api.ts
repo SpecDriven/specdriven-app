@@ -91,6 +91,7 @@ import {
   renameFeatureFile,
   reprojectFeatures,
   saveConfluencePage,
+  saveQtestModule,
   saveFeature,
   savePullRequests,
   saveResourceLinks,
@@ -1805,11 +1806,16 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     return written ? { ...s, qtest: { program: QTEST_PROGRAM, ticket: written.pid, url: written.url } } : s;
   });
   const next: Feature = { ...feature, qtest: moduleLink, scenarios };
+  // The module and the parent it went under, kept in the document so the
+  // dialog offers this feature that parent next time; the link lines are
+  // saved first, as before, when they changed.
+  const recorded = () => saveQtestModule(dir, params.file!, { id: result.module.id, parentUrl });
   if (serializeFeature(next) === serializeFeature(feature)) {
-    return json({ ...view, ...summary, ...warned(), message: "test case links unchanged" });
+    return json({ ...(await recorded()), ...summary, ...warned(), message: "test case links unchanged" });
   }
   try {
-    return json({ ...(await saveFeature(dir, params.file!, serializeFeature(next))), ...summary, ...warned() });
+    await saveFeature(dir, params.file!, serializeFeature(next));
+    return json({ ...(await recorded()), ...summary, ...warned() });
   } catch (e) {
     // The test cases are in qTest; only the links back could not be written.
     warnings.push(`The test case links were not saved: ${(e as Error).message}`);

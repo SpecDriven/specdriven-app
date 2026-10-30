@@ -412,11 +412,28 @@ describe("creating a feature's test cases", () => {
     expect(file).toContain(`# Quote Policy\n\n[qTest:MD-1000](${moduleUrl(1000)})\n\nQuotes for potential customers.`);
     expect(file).toContain(`## S1: Basic Quote @v1 [proposed]\n\n[qTest:TC-1001](${caseUrl(1001)})\n`);
     expect(file).toContain(`## S2: Declined Quote @v2 [published]\n\n[qTest:TC-1002](${caseUrl(1002)})\n`);
-    const parsed = res.body.parsed as { qtest: unknown; scenarios: { qtest: unknown }[] };
+    const parsed = res.body.parsed as { qtest: unknown; qtestModule: unknown; scenarios: { qtest: unknown }[] };
     expect(parsed.qtest).toEqual({ program: "qTest", ticket: "MD-1000", url: moduleUrl(1000) });
     expect(parsed.scenarios[1]!.qtest).toEqual({ program: "qTest", ticket: "TC-1002", url: caseUrl(1002) });
     expect((await readState(root)).qtestParentUrl).toBe(moduleUrl(1));
     expect((await call("GET", "/api/state")).body.qtestParentUrl).toBe(moduleUrl(1));
+    // The module and its parent, kept with the feature for the next dialog.
+    expect(parsed.qtestModule).toEqual({ id: "1000", parentUrl: moduleUrl(1) });
+  });
+
+  test("a feature published before offers the parent module it was published under, kept with the feature", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    const recorded = async () => (await readFeatureView(data, FILE))!.parsed.qtestModule;
+    expect(await recorded()).toEqual({ id: "1000", parentUrl: moduleUrl(1) });
+    // Publishing again under another parent remembers that one, even with no link line to change.
+    const again = await publish(moduleUrl(2));
+    expect(again.body.message).toBe("test case links unchanged");
+    expect((again.body.parsed as { qtestModule: unknown }).qtestModule).toEqual({ id: "1000", parentUrl: moduleUrl(2) });
+    expect(await recorded()).toEqual({ id: "1000", parentUrl: moduleUrl(2) });
+    // A module link changed by hand leaves the earlier module's parent unoffered.
+    await saveFeature(data, FILE, (await readFeature(data, FILE))!.replace(`[qTest:MD-1000](${moduleUrl(1000)})`, `[qTest:MD-77](${moduleUrl(77)})`));
+    expect(await recorded()).toBeUndefined();
   });
 
   test("creating them again updates the test cases the scenarios link, in the module the feature links", async () => {
