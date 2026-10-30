@@ -140,7 +140,7 @@ export function QtestTokens({ sites, onChange }: { sites: QtestSite[]; onChange:
       </div>
       <span className="hint">
         Copy the Bearer token from qTest under your name → API &amp; SDK, as a user who can add test cases to the
-        project. It is checked against the site and kept on this device only.
+        project — with or without the leading "Bearer". It is checked against the site and kept on this device only.
       </span>
       {status && <FailureLine service="qTest" error={status} details={details} />}
     </div>
