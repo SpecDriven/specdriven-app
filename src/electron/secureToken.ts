@@ -11,6 +11,7 @@ import { parseSecretRecord, type SecretBackend } from "../server/secrets";
 import { parseConfluenceRecords, type ConfluenceTokenBackend } from "../server/confluenceTokens";
 import { parseQtestRecords, type QtestTokenBackend } from "../server/qtestTokens";
 import { parseAhaRecords, type AhaTokenBackend } from "../server/ahaTokens";
+import { parseJiraRecords, type JiraTokenBackend } from "../server/jiraTokens";
 import { parseRecord, type TokenBackend } from "../server/tokenStore";
 
 // The async safeStorage API throughout: the synchronous one is deprecated
@@ -63,6 +64,11 @@ export function createConfluenceSafeStorageBackend(file: string): ConfluenceToke
 /** The qTest tokens on safeStorage. */
 export function createQtestSafeStorageBackend(file: string): QtestTokenBackend {
   return encryptedFile(file, parseQtestRecords, []);
+}
+
+/** The Jira tokens on safeStorage. */
+export function createJiraSafeStorageBackend(file: string): JiraTokenBackend {
+  return encryptedFile(file, parseJiraRecords, []);
 }
 
 /** The Aha! API keys on safeStorage. */

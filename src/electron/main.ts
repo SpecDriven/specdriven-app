@@ -28,6 +28,7 @@ import { setRelauncher } from "../server/relaunch";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
+import { setJiraTokenBackend } from "../server/jiraTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setAhaTokenBackend } from "../server/ahaTokens";
 import { LEGACY_SECRET_FILES, setSecretBackendFactory } from "../server/secrets";
@@ -43,6 +44,7 @@ import {
 import {
   createSecretSafeStorageBackend,
   createConfluenceSafeStorageBackend,
+  createJiraSafeStorageBackend,
   createQtestSafeStorageBackend,
   createAhaSafeStorageBackend,
   createSafeStorageBackend,
@@ -397,6 +399,7 @@ if (!app.requestSingleInstanceLock()) {
     if (await safeStorageAvailable()) {
       setTokenBackend(createSafeStorageBackend(join(userData, "github-token.enc")));
       setConfluenceTokenBackend(createConfluenceSafeStorageBackend(join(userData, "confluence-tokens.enc")));
+      setJiraTokenBackend(createJiraSafeStorageBackend(join(userData, "jira-tokens.enc")));
       setQtestTokenBackend(createQtestSafeStorageBackend(join(userData, "qtest-tokens.enc")));
       setAhaTokenBackend(createAhaSafeStorageBackend(join(userData, "aha-tokens.enc")));
       // The plugins' secret stores (src/server/secrets.ts), one encrypted
