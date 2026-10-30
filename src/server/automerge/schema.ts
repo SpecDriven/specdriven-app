@@ -167,6 +167,16 @@ export function effectiveBody(e: {
   return snap === undefined ? e.body : snap;
 }
 
+/**
+ * The feature's tickets as plain copies (Automerge hands out proxies): the
+ * `links` list, or the one `link` of a document from before it, or none.
+ */
+export function ticketLinksOf(doc: { links?: ExternalLink[]; link?: ExternalLink }): ExternalLink[] {
+  const plain = (l: ExternalLink): ExternalLink => ({ program: l.program, ticket: l.ticket, url: l.url });
+  if (doc.links) return doc.links.map(plain);
+  return doc.link ? [plain(doc.link)] : [];
+}
+
 export type FeatureDoc = {
   schemaVersion: number;
   /** Stable identity of the feature, independent of its file path. */
@@ -175,7 +185,22 @@ export type FeatureDoc = {
   /** Free markdown between the feature heading and the first spec. */
   description: string;
   specs: SpecEntry[];
-  /** The ticket tracking the feature as a whole, if any (see SpecEntry.link). */
+  /**
+   * The tickets tracking the feature as a whole, in written order — up to
+   * MAX_FEATURE_TICKETS from the editor (specs/external-links/project-
+   * management-jira-linear-etc.feature.md "Several tickets on a feature").
+   * Set whole, like `flags`: the list is also in the markdown, so every
+   * write arrives as a whole list and the side that changed it wins.
+   * Supersedes `link`, which is read until the first write that changes
+   * the list replaces it (reconcile.ts assignLinks). Optional key, no
+   * migration.
+   */
+  links?: ExternalLink[];
+  /**
+   * @deprecated The single ticket of documents from before `links`; read as
+   * a one-element list (ticketLinksOf) and removed by the first write that
+   * changes the tickets. Never written any more.
+   */
   link?: ExternalLink;
   /** The qTest test case covering the feature as a whole (see SpecEntry.qtest). */
   qtest?: ExternalLink;

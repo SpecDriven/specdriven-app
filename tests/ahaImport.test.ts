@@ -254,7 +254,7 @@ describe("importing a feature from Aha!", () => {
     expect(view.parsed.scenarios[0]!.body).toContain("Given a potential customer has an account");
     expect(view.parsed.scenarios[0]!.body).toContain("Then a quote is provided");
     // The file is the parser's input: no ticket line, nothing lifted out of the description.
-    expect(view.parsed.link).toBeUndefined();
+    expect(view.parsed.links).toBeUndefined();
     expect(view.parsed.description).toContain("\\[Mock: see this](https://acme.aha.io/attachments/1)");
   });
 

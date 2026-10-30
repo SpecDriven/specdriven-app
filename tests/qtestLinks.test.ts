@@ -100,7 +100,7 @@ afterEach(async () => {
 describe("the qTest line", () => {
   test("is lifted into qtest, beside the ticket, under the heading it belongs to", () => {
     const feature = parseFeature(SAMPLE);
-    expect(feature.link).toEqual(JIRA);
+    expect(feature.links).toEqual([JIRA]);
     expect(feature.qtest).toEqual(QTEST);
     expect(feature.description).toBe("Quotes for potential customers.");
     const [basic, declined] = feature.scenarios;
@@ -121,7 +121,7 @@ describe("the qTest line", () => {
   test("may come before the ticket line, and is written back after it", () => {
     const swapped = SAMPLE.replace(`${JIRA_LINE}\n\n${QTEST_LINE}`, `${QTEST_LINE}\n\n${JIRA_LINE}`);
     const feature = parseFeature(swapped);
-    expect(feature.link).toEqual(JIRA);
+    expect(feature.links).toEqual([JIRA]);
     expect(feature.qtest).toEqual(QTEST);
     expect(serializeFeature(feature)).toBe(WRITTEN);
   });
@@ -132,7 +132,7 @@ describe("the qTest line", () => {
     expect(isQtestLink(JIRA)).toBe(false);
     const lower = parseFeature(`# F\n\n[qtest:TC-1](${QURL})\n`);
     expect(lower.qtest?.ticket).toBe("TC-1");
-    expect(lower.link).toBeUndefined();
+    expect(lower.links).toBeUndefined();
   });
 
   test("a second qTest line is content, not a second link", () => {
@@ -182,7 +182,7 @@ describe("the document", () => {
     doc = reconcile(doc, moved);
     expect(docToFeature(doc).qtest!.ticket).toBe("TC-99");
     // The ticket is a separate key: replacing the test case left it alone.
-    expect(docToFeature(doc).link).toEqual(JIRA);
+    expect(docToFeature(doc).links).toEqual([JIRA]);
 
     const noQtest = parseFeature(SAMPLE);
     delete noQtest.qtest;
@@ -190,7 +190,7 @@ describe("the document", () => {
     doc = reconcile(doc, noQtest);
     expect(docToFeature(doc).qtest).toBeUndefined();
     expect(docToFeature(doc).scenarios[0]!.qtest).toBeUndefined();
-    expect(docToFeature(doc).link).toEqual(JIRA);
+    expect(docToFeature(doc).links).toEqual([JIRA]);
   });
 
   test("a published scenario's test case stays editable", () => {

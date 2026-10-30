@@ -45,18 +45,24 @@ import {
   resolveConflict as gitResolve,
 } from "./git";
 import {
-  parseFeature,
+  dedupeTicketLinks,
   featureTextError,
+  isConfluenceLink,
+  isExternalLink,
+  isQtestLink,
   markPublished,
   markProposed,
   markScenarioPublished,
-  serializeFeature,
+  MAX_FEATURE_TICKETS,
+  parseFeature,
   renameFeatureName,
+  serializeFeature,
   slugify,
   titleFromFileName,
 } from "./parser";
 import type {
   ConfluencePage,
+  ExternalLink,
   Feature,
   PullRequestLink,
   QtestModule,
@@ -585,8 +591,8 @@ async function featureView(
       ...docAuthors.get(key(s)),
     };
   });
-  const link = feature.link ?? inDoc.link;
-  if (link && !feature.link) linked++;
+  const links = feature.links?.length ? feature.links : inDoc.links;
+  if (links?.length && !feature.links?.length) linked++;
   const qtest = feature.qtest ?? inDoc.qtest;
   if (qtest && !feature.qtest) linked++;
   const confluence = feature.confluence ?? inDoc.confluence;
@@ -596,7 +602,7 @@ async function featureView(
   const { createdBy: _c, updatedBy: _u, ...featureRest } = feature;
   const parsed: Feature = {
     ...featureRest,
-    ...(link ? { link } : {}),
+    ...(links?.length ? { links } : {}),
     ...(qtest ? { qtest } : {}),
     ...(confluence ? { confluence } : {}),
     ...(inDoc.confluencePage ? { confluencePage: inDoc.confluencePage } : {}),
@@ -1087,6 +1093,41 @@ export async function deleteDraftScenario(
     ...(await featureView(dataDir, name, content)),
     message: "draft deleted locally",
   };
+}
+
+/**
+ * Set the tickets of a feature (specs/external-links/project-management-
+ * jira-linear-etc.feature.md "Several tickets on a feature"): at most
+ * MAX_FEATURE_TICKETS well-formed tickets, no repeats, none a qTest or
+ * Confluence link (those have doors of their own). Unlike the pull requests
+ * a ticket is in the markdown, so this is a whole-feature save from the
+ * server's fresh view of the file and its document — the way the Confluence
+ * publish writes its link line — not a document-only write, which the next
+ * drift pass would read as a stale file and undo. Throws on a refused list.
+ */
+export async function saveFeatureTickets(
+  dataDir: string,
+  fileName: string,
+  links: ExternalLink[],
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  for (const link of links) {
+    if (!isExternalLink(link)) throw new Error(`Not a ticket link: ${link.program}:${link.ticket}`);
+    if (isQtestLink(link) || isConfluenceLink(link)) {
+      throw new Error(`${link.program} links are not tickets`);
+    }
+  }
+  const tickets = dedupeTicketLinks(links);
+  if (tickets.length < links.length) throw new Error("A ticket is listed twice");
+  if (tickets.length > MAX_FEATURE_TICKETS) {
+    throw new Error(`A feature can link up to ${MAX_FEATURE_TICKETS} tickets`);
+  }
+  const view = await readFeatureView(dataDir, name);
+  if (view === null) throw new Error(`Feature file not found: ${name}`);
+  const { links: _before, ...rest } = view.parsed;
+  const next: Feature = tickets.length ? { ...rest, links: tickets } : rest;
+  const saved = await saveFeature(dataDir, name, serializeFeature(next));
+  return { ...saved, message: "tickets saved locally" };
 }
 
 /**

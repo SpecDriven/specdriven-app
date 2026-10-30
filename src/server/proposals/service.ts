@@ -159,7 +159,7 @@ export function newFeatureText(name: unknown, description: unknown, scenario: Sc
     back.name !== featureName ||
     back.description !== desc ||
     back.assigned ||
-    back.link ||
+    back.links ||
     back.qtest ||
     back.flags ||
     back.attributes ||

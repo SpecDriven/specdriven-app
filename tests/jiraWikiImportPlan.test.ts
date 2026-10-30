@@ -128,7 +128,7 @@ describe("the feature file", () => {
     { kind: "wiki" as const, url: "https://wiki.acme.com/pages/5", title: "Quote [Policy]" },
   ];
 
-  test("names the sources under the title, each scenario proposed and numbered in the agent's order, with its body and where it came from", () => {
+  test("the Jira issues as tickets, the sources under the title, each scenario proposed and numbered in the agent's order, with its body and where it came from", () => {
     const { name, text } = planImportedFeature(
       "Quote Policy",
       [
@@ -141,6 +141,9 @@ describe("the feature file", () => {
     expect(text).toBe(
       [
         "# Quote Policy",
+        "",
+        "[Jira:ABC-1](https://jira.acme.com/browse/ABC-1)",
+        "[Jira:ABC-2](https://jira.acme.com/browse/ABC-2)",
         "",
         "_Imported from Jira [ABC-1](https://jira.acme.com/browse/ABC-1), [ABC-2](https://jira.acme.com/browse/ABC-2) and Confluence [Quote Policy](https://wiki.acme.com/pages/5)._",
         "",
@@ -159,7 +162,14 @@ describe("the feature file", () => {
     );
     const feature = parseFeature(text);
     expect(feature.name).toBe("Quote Policy");
-    expect(feature.link).toBeUndefined();
+    // The Jira issues it was read from are its tickets (specs/external-links/
+    // project-management-jira-linear-etc.feature.md "Several tickets on a
+    // feature"); the prose line stays, and is description, not metadata.
+    expect(feature.links).toEqual([
+      { program: "Jira", ticket: "ABC-1", url: "https://jira.acme.com/browse/ABC-1" },
+      { program: "Jira", ticket: "ABC-2", url: "https://jira.acme.com/browse/ABC-2" },
+    ]);
+    expect(feature.description).toContain("_Imported from Jira");
     // Numbered, so the agent's order survives the parser's name sort.
     expect(feature.scenarios.map((s) => [s.name, s.status])).toEqual([
       ["Declined quote", "proposed"],
@@ -185,5 +195,34 @@ describe("the feature file", () => {
     expect(feature.scenarios).toHaveLength(3);
     expect(feature.scenarios[0]!.tests).toEqual([]);
     expect(feature.scenarios[0]!.link).toBeUndefined();
+  });
+});
+
+describe("the tickets of an imported feature", () => {
+  test("a key read from the url when the title is not one; repeats dropped; no more than five", () => {
+    const sources = [
+      { kind: "jira" as const, url: "https://jira.acme.com/browse/ABC-1", title: "Quote engine" },
+      { kind: "jira" as const, url: "https://jira.acme.com/browse/abc-1", title: "ABC-1" },
+      ...[2, 3, 4, 5, 6].map((n) => ({
+        kind: "jira" as const,
+        url: `https://jira.acme.com/browse/ABC-${n}`,
+        title: `ABC-${n}`,
+      })),
+      { kind: "wiki" as const, url: "https://wiki.acme.com/pages/5", title: "Quote Policy" },
+    ];
+    const { text } = planImportedFeature("Quotes", [{ name: "Basic", body: "" }], sources);
+    const feature = parseFeature(text);
+    expect(feature.links!.map((l) => l.ticket)).toEqual(["ABC-1", "ABC-2", "ABC-3", "ABC-4", "ABC-5"]);
+    expect(feature.links![0]!.url).toBe("https://jira.acme.com/browse/ABC-1");
+  });
+
+  test("a wiki-only import links no ticket", () => {
+    const { text } = planImportedFeature(
+      "Quotes",
+      [{ name: "Basic", body: "" }],
+      [{ kind: "wiki", url: "https://wiki.acme.com/pages/5", title: "Quote Policy" }],
+    );
+    expect(parseFeature(text).links).toBeUndefined();
+    expect(text.startsWith("# Quotes\n\n_Imported from Confluence")).toBe(true);
   });
 });

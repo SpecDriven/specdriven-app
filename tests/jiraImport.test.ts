@@ -359,7 +359,7 @@ describe("creating the feature", () => {
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ fileName: "specs/billing/quote-policy.feature.md", title: "Quote Policy", scenarios: 2 });
     const text = await readFile(join(data, "specs/billing/quote-policy.feature.md"), "utf8");
-    expect(text).toContain("# Quote Policy\n\n_Imported from Jira [ABC-1](https://jira.acme.com/browse/ABC-1) and Confluence [Quote Policy](https://wiki.acme.com/pages/55)._");
+    expect(text).toContain("# Quote Policy\n\n[Jira:ABC-1](https://jira.acme.com/browse/ABC-1)\n\n_Imported from Jira [ABC-1](https://jira.acme.com/browse/ABC-1) and Confluence [Quote Policy](https://wiki.acme.com/pages/55)._");
     expect(text).toContain("## S1: Basic quote @v1 [proposed]\n\n- Given: an account\n- Then: a quote\n\n_From ABC-1._");
     expect(text).toContain("## S2: Declined quote @v1 [proposed]");
   });

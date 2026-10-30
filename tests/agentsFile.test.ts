@@ -88,11 +88,11 @@ test("the template's example is a canonical feature file", () => {
   const example = m![1]!;
   const feature = parseFeature(example);
   expect(feature.name).toBe("Collect premium");
-  expect(feature.link).toEqual({
+  expect(feature.links).toEqual([{
     program: "Jira",
     ticket: "BIL-42",
     url: "https://acme.atlassian.net/browse/BIL-42",
-  });
+  }]);
   expect(feature.scenarios.map((s) => [s.name, s.version, s.status, s.negative ?? false])).toEqual([
     ["Failed autopay starts the grace period", 1, "proposed", false],
     ["A policy without autopay is not charged", 1, "proposed", true],

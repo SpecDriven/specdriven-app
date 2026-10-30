@@ -618,7 +618,7 @@ describe("creating a feature's test cases", () => {
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ created: 2, warning: NO_JIRA });
-    expect(res.body.requirement).toBeUndefined();
+    expect(res.body.requirements).toBeUndefined();
     expect(seen.some((r) => r.path.includes("/search") || r.path.includes("/link"))).toBe(false);
   });
 
@@ -648,7 +648,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     expect(res.body.warning).toBeUndefined();
     expect(res.body).toMatchObject({
       created: 2,
-      requirement: { id: "300", pid: "RQ-300", name: "ACME-571 Create new UI", url: requirementUrl(300), linked: 2, alreadyLinked: 0 },
+      requirements: [{ key: "ACME-571", id: "300", pid: "RQ-300", name: "ACME-571 Create new UI", url: requirementUrl(300), linked: 2, alreadyLinked: 0 }],
     });
     // Found with qTest's own query, before the module is made; "contains" is narrowed to "starts with" here.
     expect(search()).toHaveLength(1);
@@ -672,13 +672,13 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     reqLinks.get(300)!.delete(1002);
     seen = [];
     const again = await publish(moduleUrl(1));
-    expect(again.body).toMatchObject({ updated: 2, requirement: { pid: "RQ-300", linked: 1, alreadyLinked: 1 } });
+    expect(again.body).toMatchObject({ updated: 2, requirements: [{ pid: "RQ-300", linked: 1, alreadyLinked: 1 }] });
     expect(seen.map((r) => r.path)).toContain("/api/v3/projects/12/linked-artifacts?type=requirements&ids=300");
     expect(links()).toHaveLength(1);
     expect(links()[0]!.body).toEqual([1002]);
     seen = [];
     const third = await publish(moduleUrl(1));
-    expect(third.body).toMatchObject({ requirement: { linked: 0, alreadyLinked: 2 } });
+    expect(third.body).toMatchObject({ requirements: [{ linked: 0, alreadyLinked: 2 }] });
     expect(links()).toHaveLength(0);
   });
 
@@ -686,7 +686,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     await saveToken();
     await saveFeature(data, FILE, withJira(SAMPLE, "[Other:tracker](https://acme.atlassian.net/browse/acme-571)"));
     const res = await publish(moduleUrl(1));
-    expect(res.body).toMatchObject({ requirement: { pid: "RQ-300", linked: 2 } });
+    expect(res.body).toMatchObject({ requirements: [{ pid: "RQ-300", linked: 2 }] });
     expect(search()[0]!.body).toMatchObject({ query: "'Name' ~ 'ACME-571'" });
   });
 
@@ -696,7 +696,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ created: 2 });
-    expect(res.body.requirement).toBeUndefined();
+    expect(res.body.requirements).toBeUndefined();
     expect(res.body.warning).toBe('No qTest requirement in project 12 starts with "ACME-9"; the test cases were written without one.');
     expect(links()).toHaveLength(0);
     expect((await readFeature(data, FILE))!).toContain("[qTest:TC-1002]");
@@ -711,7 +711,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     requirements.set(299, { id: 299, name: "ACME-571: Create new UI (copy)" });
     await saveFeature(data, FILE, withJira(SAMPLE));
     const res = await publish(moduleUrl(1));
-    expect(res.body).toMatchObject({ requirement: { pid: "RQ-299", linked: 2 } });
+    expect(res.body).toMatchObject({ requirements: [{ pid: "RQ-299", linked: 2 }] });
     expect(res.body.warning).toBe(
       '2 qTest requirements start with "ACME-571"; the test cases were linked to RQ-299 “ACME-571: Create new UI (copy)”.',
     );
@@ -738,7 +738,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
 `);
     seen = [];
     const partial = await publish(moduleUrl(1));
-    expect(partial.body).toMatchObject({ created: 0, updated: 2, requirement: { pid: "RQ-300", linked: 2 } });
+    expect(partial.body).toMatchObject({ created: 0, updated: 2, requirements: [{ pid: "RQ-300", linked: 2 }] });
     expect((partial.body.failure as { scenarioName: string }).scenarioName).toBe("REFUSED Quote");
     expect(partial.body.warning).toBeUndefined();
     expect(links()[0]!.body).toEqual([1001, 1002]);
@@ -750,7 +750,7 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     await saveFeature(data, FILE, withJira(SAMPLE));
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ created: 2, requirement: { pid: "RQ-300", linked: 0, alreadyLinked: 0 } });
+    expect(res.body).toMatchObject({ created: 2, requirements: [{ pid: "RQ-300", linked: 0, alreadyLinked: 0 }] });
     expect(res.body.warning).toBe(
       "The test cases were written but could not be linked to requirement RQ-300: qTest refused the request — the token cannot write to this project: Not allowed",
     );
@@ -759,8 +759,71 @@ describe("linking the test cases to the Jira issue's requirement", () => {
     // Linked the next time, once the token may.
     linkStatus = null;
     seen = [];
-    expect((await publish(moduleUrl(1))).body).toMatchObject({ requirement: { linked: 2, alreadyLinked: 0 } });
+    expect((await publish(moduleUrl(1))).body).toMatchObject({ requirements: [{ linked: 2, alreadyLinked: 0 }] });
     expect(links()[0]!.body).toEqual([1001, 1002]);
+  });
+
+  // specs/external-links/project-management-jira-linear-etc.feature.md
+  // "Several tickets on a feature": every ticket's requirement counts.
+  const TWO = `${JIRA_LINE}\n[Jira:ACME-600](https://acme.atlassian.net/browse/ACME-600)`;
+
+  test("with several tickets, each key's requirement is found and every test case is linked to each of them", async () => {
+    await saveToken();
+    requirements.set(310, { id: 310, name: "ACME-600 Checkout" });
+    await saveFeature(data, FILE, withJira(SAMPLE, TWO));
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toBeUndefined();
+    expect(res.body).toMatchObject({
+      created: 2,
+      requirements: [
+        { key: "ACME-571", pid: "RQ-300", linked: 2, alreadyLinked: 0 },
+        { key: "ACME-600", pid: "RQ-310", linked: 2, alreadyLinked: 0 },
+      ],
+    });
+    // One search per key, in the tickets' order, all before the module is made.
+    expect(search().map((r) => (r.body as { query: string }).query)).toEqual(["'Name' ~ 'ACME-571'", "'Name' ~ 'ACME-600'"]);
+    const moduleAt = seen.findIndex((r) => r.method === "POST" && r.path.startsWith("/api/v3/projects/12/modules"));
+    expect(seen.filter((r) => r.path.includes("/search")).every(() => true)).toBe(true);
+    expect(seen.map((r, i) => (r.path.includes("/search") ? i : -1)).filter((i) => i >= 0).every((i) => i < moduleAt)).toBe(true);
+    expect(links().map((r) => r.path)).toEqual([
+      "/api/v3/projects/12/requirements/300/link?type=test-cases",
+      "/api/v3/projects/12/requirements/310/link?type=test-cases",
+    ]);
+    expect([...reqLinks.get(300)!]).toEqual([1001, 1002]);
+    expect([...reqLinks.get(310)!]).toEqual([1001, 1002]);
+    // Publishing again links nothing new to either.
+    seen = [];
+    const again = await publish(moduleUrl(1));
+    expect(again.body).toMatchObject({
+      requirements: [
+        { pid: "RQ-300", linked: 0, alreadyLinked: 2 },
+        { pid: "RQ-310", linked: 0, alreadyLinked: 2 },
+      ],
+    });
+    expect(links()).toHaveLength(0);
+  });
+
+  test("a key with no requirement is a warning while the other ticket's requirement still links; a refused search names the keys left", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, withJira(SAMPLE, `${JIRA_LINE}\n[Jira:ACME-9](https://acme.atlassian.net/browse/ACME-9)`));
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 2, requirements: [{ key: "ACME-571", pid: "RQ-300", linked: 2 }] });
+    expect(res.body.requirements).toHaveLength(1);
+    expect(res.body.warning).toBe('No qTest requirement in project 12 starts with "ACME-9".');
+    expect([...reqLinks.get(300)!]).toEqual([1001, 1002]);
+
+    searchStatus = 403;
+    seen = [];
+    await saveFeature(data, FILE, withJira(SAMPLE, TWO));
+    const refused = await publish(moduleUrl(1));
+    expect(refused.status).toBe(200);
+    expect(refused.body.requirements).toBeUndefined();
+    expect(refused.body.warning).toBe(
+      "The qTest requirements for ACME-571, ACME-600 could not be looked up (qTest refused the request — the token cannot write to this project: No permission); the test cases were written without one.",
+    );
+    expect(search()).toHaveLength(1);
   });
 });
 
