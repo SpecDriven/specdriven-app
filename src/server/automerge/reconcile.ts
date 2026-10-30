@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import {
   attributesKey,
   featureFlagsKey,
+  linkKey,
+  linksKey,
   plainAttributes,
   plainFeatureFlags,
   splitScenarioMeta,
@@ -26,7 +28,7 @@ import {
 } from "../parser";
 import type { ResourceLinkKind } from "../resourceLinks";
 import { compareSpecs, interleaveDrafts } from "./project";
-import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry } from "./schema";
+import { effectiveBody, type FeatureDoc, snapshotOf, type SpecEntry, ticketLinksOf } from "./schema";
 import { newFeatureDoc } from "./store";
 
 /**
@@ -46,7 +48,7 @@ export function importFeatureDoc(feature: Feature, author?: string): A.Doc<Featu
     specs: feature.scenarios.map((s, i) => newEntry(s, author, i + 1)),
     ...(feature.flags?.length ? { flags: plainFeatureFlags(feature.flags)! } : {}),
     ...(feature.attributes?.length ? { attributes: plainAttributes(feature.attributes)! } : {}),
-    ...(feature.link ? { link: { ...feature.link } } : {}),
+    ...(feature.links?.length ? { links: feature.links.map((l) => ({ ...l })) } : {}),
     ...(feature.qtest ? { qtest: { ...feature.qtest } } : {}),
     ...(feature.confluence ? { confluence: { ...feature.confluence } } : {}),
     ...(feature.assigned ? { assigned: feature.assigned } : {}),
@@ -113,11 +115,6 @@ function assignAuthors(
   if (updatedBy && holder.updatedBy !== updatedBy) holder.updatedBy = updatedBy;
 }
 
-/** Identity of a link for change detection; none is the empty string. */
-function linkKey(link: ExternalLink | undefined): string {
-  return link ? `${link.program}\n${link.ticket}\n${link.url}` : "";
-}
-
 /**
  * Set or clear a `link` key — or the `qtest` one
  * (specs/external-links/qtest-test-cases.feature.md), or a feature's
@@ -135,6 +132,25 @@ function assignLink(
   if (linkKey(before) === linkKey(after)) return;
   if (after) target[key] = { program: after.program, ticket: after.ticket, url: after.url };
   else delete target[key];
+}
+
+/**
+ * Set or clear a feature's tickets (specs/external-links/project-management-
+ * jira-linear-etc.feature.md "Several tickets on a feature"): one list,
+ * replaced whole like the flags — it is in the markdown too, so every write
+ * arrives as a whole list. A changed list also retires the single `link` of
+ * a document from before the list; an unchanged one touches nothing, so a
+ * no-op reconcile stays a no-op on an old document.
+ */
+function assignLinks(
+  target: { links?: ExternalLink[]; link?: ExternalLink },
+  before: ExternalLink[],
+  after: ExternalLink[] | undefined,
+): void {
+  if (linksKey(before) === linksKey(after)) return;
+  if (after?.length) target.links = after.map((l) => ({ program: l.program, ticket: l.ticket, url: l.url }));
+  else delete target.links;
+  if ("link" in target) delete target.link;
 }
 
 /** A plain copy of a link held in the doc; undefined when none. */
@@ -274,7 +290,7 @@ export function reconcile(
   }));
   // Read before any key is assigned below — schema.ts keeps them optional.
   const authorsAt = doc.specs.map((e) => ({ createdBy: e.createdBy, updatedBy: e.updatedBy }));
-  const docLink = plainLink(doc.link);
+  const docLinks = ticketLinksOf(doc);
   const docQtest = plainLink(doc.qtest);
   const docConfluence = plainLink(doc.confluence);
   const docAssigned = doc.assigned;
@@ -361,7 +377,7 @@ export function reconcile(
   const featureChanged =
     doc.name !== target.name ||
     doc.description !== target.description ||
-    linkKey(docLink) !== linkKey(target.link) ||
+    linksKey(docLinks) !== linksKey(target.links) ||
     linkKey(docQtest) !== linkKey(target.qtest) ||
     linkKey(docConfluence) !== linkKey(target.confluence) ||
     featureFlagsKey(docFlags) !== featureFlagsKey(target.flags) ||
@@ -377,7 +393,7 @@ export function reconcile(
     if (d.description !== target.description) {
       A.updateText(d, ["description"], target.description);
     }
-    assignLink(d, docLink, target.link);
+    assignLinks(d, docLinks, target.links);
     assignLink(d, docQtest, target.qtest, "qtest");
     assignLink(d, docConfluence, target.confluence, "confluence");
     assignFlags(d, docFlags, target.flags);

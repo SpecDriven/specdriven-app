@@ -99,7 +99,7 @@ order, a feature or a scenario may carry:
 
 | Line | Where | Meaning |
 | --- | --- | --- |
-| `[Jira:ABC-123](https://…)` | feature, scenario | The ticket tracking it. The program name is anything without `:`; `GitHub`, `Jira` and `Linear` are known to the app. |
+| `[Jira:ABC-123](https://…)` | feature, scenario | The ticket tracking it. The program name is anything without `:`; `GitHub`, `Jira` and `Linear` are known to the app. A feature may carry up to five such lines, one ticket each; a scenario one. |
 | `[Confluence:99999](https://…)` | feature | The Confluence page the feature was published to. The app writes it; do not invent one. |
 | `[negative]` | scenario | The scenario guards a failure or an edge case. Absent means positive. |
 | `**Assigned:** Ada Lovelace` | feature | A member named in `project-settings.json`. |
@@ -107,7 +107,8 @@ order, a feature or a scenario may carry:
 | `[br:young-driver-surcharge:on]` | feature, scenario | Custom attributes, `[<key>:<name>:<value>]`, keys defined in `custom-attributes.txt`. |
 
 Metadata ends at the first line that is none of these. A ticket link lower
-in the description is just a link.
+in the description is just a link; a repeated ticket among the metadata
+lines is dropped.
 
 ## The body
 
@@ -131,8 +132,9 @@ markdown. Conventions that keep specs uniform and testable:
 The app rewrites every file it saves into one form. Writing it the same way
 means the app's first save of your file is a zero diff:
 
-1. `# <name>`, then the feature's metadata lines, then the description, then
-   the scenarios in file order, each numbered by position.
+1. `# <name>`, then the feature's metadata lines — the ticket links together,
+   in order — then the description, then the scenarios in file order, each
+   numbered by position.
 2. Under a scenario heading: `[negative]` first, then flags, attributes, the
    ticket link, the body, the `[test: … ]` lines.
 3. Exactly one blank line between blocks, none at the start, one `\n` at

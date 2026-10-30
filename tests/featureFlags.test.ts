@@ -53,7 +53,7 @@ const WRITTEN = FLAGGED.replace("## Pay by card", "## S1: Pay by card");
 test("flag lines under the headings are lifted into flags and written back as they were", () => {
   const feature = parseFeature(FLAGGED);
   expect(feature.flags).toEqual([{ name: "new-checkout", on: true }]);
-  expect(feature.link?.ticket).toBe("ABC-1");
+  expect(feature.links?.[0]?.ticket).toBe("ABC-1");
   expect(feature.description).toBe("Pay for what is in the cart.");
   expect(feature.scenarios[0]!.flags).toEqual([
     { name: "new-checkout", on: true },

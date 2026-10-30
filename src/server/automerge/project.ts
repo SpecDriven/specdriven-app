@@ -41,7 +41,7 @@ import {
   type ScenarioFile,
 } from "../parser";
 import { readProjectSettings } from "../members";
-import { effectiveBody, type FeatureDoc } from "./schema";
+import { effectiveBody, ticketLinksOf, type FeatureDoc } from "./schema";
 
 export interface ProjectionOptions {
   /** Write external links into the `.feature.md` (Settings, default ON). */
@@ -199,8 +199,9 @@ export function docToFeature(doc: A.Doc<FeatureDoc>): Feature {
   if (flags) feature.flags = flags;
   const attributes = plainAttributes(doc.attributes);
   if (attributes) feature.attributes = attributes;
-  const link = plainLink(doc.link);
-  if (link) feature.link = link;
+  // The tickets: the list, or the single link of a document from before it.
+  const links = ticketLinksOf(doc);
+  if (links.length) feature.links = links;
   const qtest = plainLink(doc.qtest);
   if (qtest) feature.qtest = qtest;
   const confluence = plainLink(doc.confluence);

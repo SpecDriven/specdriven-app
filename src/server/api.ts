@@ -92,6 +92,7 @@ import {
   reprojectFeatures,
   saveConfluencePage,
   saveFeature,
+  saveFeatureTickets,
   savePullRequests,
   saveResourceLinks,
   readScenarioFiles,
@@ -139,7 +140,7 @@ import {
 import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
 import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
-import type { Feature } from "./parser";
+import type { ExternalLink, Feature } from "./parser";
 import {
   attachFiles,
   ConfluenceConflict,
@@ -2088,6 +2089,39 @@ const postDeleteDraft = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/external-links/project-management-jira-linear-etc.feature.md
+// "Several tickets on a feature": the whole list of a feature's tickets.
+// The rows are checked for shape here; the cap, repeats and the kinds that
+// are not tickets are saveFeatureTickets' to refuse.
+const putTickets = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { links?: unknown };
+  const rows = body.links;
+  const wellFormed =
+    Array.isArray(rows) &&
+    rows.every(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        typeof (r as ExternalLink).program === "string" &&
+        typeof (r as ExternalLink).ticket === "string" &&
+        typeof (r as ExternalLink).url === "string" &&
+        /^https?:\/\//.test((r as ExternalLink).url.trim()),
+    );
+  if (!wellFormed) {
+    return json({ error: "links must be a list of { program, ticket, url } tickets with http(s) urls" }, 400);
+  }
+  const links = (rows as ExternalLink[]).map((r) => ({
+    program: r.program.trim(),
+    ticket: r.ticket.trim(),
+    url: r.url.trim(),
+  }));
+  try {
+    return json(await saveFeatureTickets(dir, params.file!, links));
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 // specs/external-links/related-pull-requests.feature.md: the pull requests
 // linked to a feature (no `scenario` in the body) or to one of its scenarios.
 // A document-only write, like delete-draft: the links never reach the
@@ -3232,6 +3266,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/rename-file", postRenameFile],
   ["POST", "/api/features/:file/rename", postRename],
   ["POST", "/api/features/:file/delete-draft", postDeleteDraft],
+  ["PUT", "/api/features/:file/tickets", putTickets],
   ["PUT", "/api/features/:file/pull-requests", putPullRequests],
   ["PUT", "/api/features/:file/links/:kind", putResourceLinks],
   ["POST", "/api/features/:file/scenario-files", postScenarioFile],

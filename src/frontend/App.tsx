@@ -15,6 +15,7 @@ import {
   unclosedFence,
 } from "../server/parser";
 import type {
+  ExternalLink as TicketLink,
   Feature,
   FeatureFlag,
   PullRequestLink,
@@ -172,6 +173,7 @@ import {
 import { ExternalLinkField } from "./ExternalLinkField";
 import { QtestLinkField } from "./QtestLinkField";
 import { PullRequestField, PullRequestList } from "./PullRequestField";
+import { TicketLinkField } from "./TicketLinkField";
 import { FeatureFlagChips, FeatureFlagsField } from "./FeatureFlagsField";
 import { PolarityPill } from "./PolarityPill";
 import { AttributeChips, AttributesField } from "./AttributesField";
@@ -196,6 +198,7 @@ import {
   linkDraftOf,
   resolveLinkDraft,
   resolveQtestDraft,
+  ticketChipLabel,
 } from "./externallinks";
 import type { LinkDraft } from "./externallinks";
 import {
@@ -1721,10 +1724,12 @@ export function App() {
   const [linkDraft, setLinkDraft] = useState<LinkDraft>(EMPTY_LINK_DRAFT);
   /** Why the last Save was blocked by the ticket-link fields, if it was. */
   const [linkError, setLinkError] = useState<string | null>(null);
-  /** The feature's ticket-link dialog: its fields while open, else null. */
-  const [featureLinkDraft, setFeatureLinkDraft] = useState<LinkDraft | null>(null);
-  const [featureLinkError, setFeatureLinkError] = useState<string | null>(null);
-  const [featureLinkSaving, setFeatureLinkSaving] = useState(false);
+  /** The feature's tickets popover (specs/external-links/project-management-
+      jira-linear-etc.feature.md "Several tickets on a feature"): open or not,
+      why the server refused the last list, and whether one is on its way. */
+  const [featureTicketsOpen, setFeatureTicketsOpen] = useState(false);
+  const [featureTicketsError, setFeatureTicketsError] = useState<string | null>(null);
+  const [featureTicketsSaving, setFeatureTicketsSaving] = useState(false);
   /** The edit dialog's "qTest test case" fields as typed
       (specs/external-links/qtest-test-cases.feature.md), and why the last
       Save was blocked by them; then the feature's own qTest dialog. */
@@ -2156,7 +2161,7 @@ export function App() {
     setQtestError(null);
   }, [editingOpen, qtestDraft]);
 
-  const featureLinkOpen = featureLinkDraft !== null;
+  const featureLinkOpen = featureTicketsOpen;
   const featureQtestOpen = featureQtestDraft !== null;
   // ESC (specs/ui/ui.feature.md "Dialogs", specs/editor/spec-editor.feature.md
   // "Spec editor pane", specs/ui/folders.feature.md): one key, closing whatever
@@ -4921,40 +4926,45 @@ export function App() {
     }
   };
 
-  const saveFeatureLink = async () => {
-    if (!feature || !selected || featureLinkDraft === null) return;
-    const resolved = resolveLinkDraft(featureLinkDraft);
-    if (resolved.error) {
-      setFeatureLinkError(resolved.error);
-      return;
-    }
-    const { link: _previous, ...rest } = feature;
-    const next: Feature = resolved.link ? { ...rest, link: resolved.link } : rest;
-    setFeatureLinkSaving(true);
+  /**
+   * Set the feature's tickets (specs/external-links/project-management-jira-
+   * linear-etc.feature.md "Several tickets on a feature"): the whole list to
+   * the tickets route, which saves it from the server's own view of the
+   * feature — the markdown changes with it when links are published, so it
+   * is a save, not a document-only write like the pull requests'.
+   */
+  const saveFeatureTickets = async (links: TicketLink[]) => {
+    if (!feature || !selected) return;
+    const before = feature.links ?? [];
+    const added = links.find((l) => !before.includes(l));
+    const removed = before.find((l) => !links.includes(l));
+    setFeatureTicketsSaving(true);
+    setFeatureTicketsError(null);
     try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}`, {
+      const res = await fetch(`/api/features/${encodeURIComponent(selected)}/tickets`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeFeature(next), save: true }),
+        body: JSON.stringify({ links }),
       });
       const data = await res.json();
       if (res.ok) {
         setFeature(featureFromResponse(data, selected));
         setDirty(false);
-        setFeatureLinkDraft(null);
         toast.success(
-          resolved.link
-            ? `Linked ${externalLinkLabel(resolved.link)} — ${data.message}.`
-            : `Ticket link removed — ${data.message}.`,
+          added
+            ? `Linked ${externalLinkLabel(added)} — ${data.message}.`
+            : removed
+              ? `Removed ${externalLinkLabel(removed)} — ${data.message}.`
+              : `Tickets saved — ${data.message}.`,
         );
         markSaved();
       } else {
-        setFeatureLinkError(data.error ?? "Could not save the ticket link");
+        setFeatureTicketsError(data.error ?? "Could not save the tickets");
       }
     } catch {
-      setFeatureLinkError("Could not save the ticket link — is the server running?");
+      setFeatureTicketsError("Could not save the tickets — is the server running?");
     } finally {
-      setFeatureLinkSaving(false);
+      setFeatureTicketsSaving(false);
     }
   };
 
@@ -6952,7 +6962,7 @@ export function App() {
     if (qtestPublishOpen) return setQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
     if (importOpen !== null) return setImportOpen(null);
-    if (featureLinkOpen) return setFeatureLinkDraft(null);
+    if (featureLinkOpen) return setFeatureTicketsOpen(false);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
     if (featurePrsOpen) return setFeaturePrsOpen(false);
     if (featureFlagsOpen) return setFeatureFlagsOpen(false);
@@ -10869,83 +10879,59 @@ export function App() {
               )}
               {projectManagement && (
                 <span className="chip-anchor ticket-anchor">
+                  {/* "Several tickets on a feature": the chip reads the one
+                      ticket, or counts them; the popover lists them and
+                      takes another, up to five. */}
                   <button
                     type="button"
-                    className={`chip${feature.link ? "" : " muted"}`}
+                    className={`chip${feature.links?.length ? "" : " muted"}`}
                     aria-haspopup="dialog"
                     aria-expanded={featureLinkOpen}
                     onClick={() => {
-                      if (featureLinkOpen) {
-                        setFeatureLinkDraft(null);
-                      } else {
-                        setFeatureLinkError(null);
-                        setFeatureLinkDraft(linkDraftOf(feature.link));
-                      }
+                      setFeatureTicketsError(null);
+                      setFeatureTicketsOpen((open) => !open);
                     }}
                   >
                     <Ticket size={14} aria-hidden="true" />
-                    {feature.link ? externalLinkLabel(feature.link) : "Link ticket"}
+                    {ticketChipLabel(feature.links)}
                   </button>
-                  {feature.link && (
+                  {feature.links?.length === 1 && (
                     <a
                       className="chip-ext"
-                      href={feature.link.url}
+                      href={feature.links[0]!.url}
                       target="_blank"
                       rel="noreferrer"
-                      title={feature.link.url}
-                      aria-label={`Open ${externalLinkLabel(feature.link)}`}
+                      title={feature.links[0]!.url}
+                      aria-label={`Open ${externalLinkLabel(feature.links[0]!)}`}
                     >
                       <ExternalLink size={12} aria-hidden="true" />
                     </a>
                   )}
                   <Popover
                     open={featureLinkOpen}
-                    onClose={() => setFeatureLinkDraft(null)}
-                    label="Ticket for this feature"
-                    className="chip-popover"
+                    onClose={() => setFeatureTicketsOpen(false)}
+                    label="Tickets for this feature"
+                    className="chip-popover ticket-popover"
                     containerSelector=".ticket-anchor"
                   >
-                    {featureLinkDraft !== null && (
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void saveFeatureLink();
-                        }}
+                    <p className="hint">The {projectManagementTool} tickets that track this feature.</p>
+                    <TicketLinkField
+                      links={feature.links ?? []}
+                      tool={projectManagementTool}
+                      error={featureTicketsError}
+                      saving={featureTicketsSaving}
+                      autoFocus
+                      onChange={(links) => saveFeatureTickets(links)}
+                    />
+                    <div className="dialog-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setFeatureTicketsOpen(false)}
                       >
-                        <p className="hint">
-                          The {projectManagementTool} ticket that tracks this feature. Clear
-                          the url to remove the link.
-                        </p>
-                        <div className="link-field">
-                          <ExternalLinkField
-                            draft={featureLinkDraft}
-                            onChange={(draft) => {
-                              setFeatureLinkError(null);
-                              setFeatureLinkDraft(draft);
-                            }}
-                            error={featureLinkError}
-                            autoFocus
-                            tool={projectManagementTool}
-                          />
-                        </div>
-                        <div className="dialog-actions">
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            onClick={() => setFeatureLinkDraft(null)}
-                          >
-                            Cancel
-                          </button>
-                          <button type="submit" className="btn btn-primary" disabled={featureLinkSaving}>
-                            {featureLinkSaving
-                              ? "Saving…"
-                              : feature.link && isBlankLinkDraft(featureLinkDraft)
-                                ? "Remove link"
-                                : "Save"}
-                          </button>
-                        </div>
-                      </form>
-                    )}
+                        Close
+                      </button>
+                    </div>
                   </Popover>
                 </span>
               )}

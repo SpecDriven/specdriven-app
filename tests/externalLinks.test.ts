@@ -4,15 +4,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as A from "@automerge/automerge";
 import {
+  dedupeTicketLinks,
   EXTERNAL_LINK_TYPES,
   externalLinkTypeOf,
   formatExternalLink,
   isExternalLink,
+  MAX_FEATURE_TICKETS,
   parseExternalLinkLine,
   parseFeature,
+  sameTicket,
   serializeFeature,
   splitExternalLink,
 } from "../src/server/parser";
+import { ticketLinksOf } from "../src/server/automerge/schema";
 import {
   docToFeature,
   isProjectionOf,
@@ -45,6 +49,8 @@ import {
   linkDraftOf,
   resolveLinkDraft,
   suggestLink,
+  ticketAddProblem,
+  ticketChipLabel,
   ticketFromUrl,
   withLinkUrl,
   withLinkUrlForTool,
@@ -144,7 +150,7 @@ test("the link is lifted off the top of a text, and only from there", () => {
 
 test("the parser lifts the feature's and each scenario's link out of the text", () => {
   const feature = parseFeature(SAMPLE);
-  expect(feature.link).toEqual(JIRA);
+  expect(feature.links).toEqual([JIRA]);
   expect(feature.description).toBe("Quotes for potential customers.");
   const [basic, declined] = feature.scenarios;
   expect(basic!.link).toEqual(LINEAR);
@@ -169,7 +175,7 @@ test("serializing with links off leaves every link line out", () => {
   expect(text).not.toContain("[Jira:");
   expect(text).not.toContain("[Linear:");
   const reread = parseFeature(text);
-  expect(reread.link).toBeUndefined();
+  expect(reread.links).toBeUndefined();
   expect(reread.scenarios[0]!.link).toBeUndefined();
   // Nothing else changed.
   expect(reread.description).toBe(feature.description);
@@ -197,7 +203,7 @@ test("with Publish external links off, the projection leaves the links out", () 
   const text = projectFeature(doc);
   expect(text).toBe(serializeFeature(parseFeature(SAMPLE), { links: false }));
   // The document still has them: the setting is about the markdown only.
-  expect(docToFeature(doc).link).toEqual(JIRA);
+  expect(docToFeature(doc).links).toEqual([JIRA]);
   // An explicit option overrides the setting.
   expect(projectFeature(doc, { publishExternalLinks: true })).toBe(WRITTEN);
 });
@@ -215,21 +221,21 @@ test("either form of the projection counts as the document's projection", () => 
 test("reconcile sets, replaces and clears links", () => {
   const plain = parseFeature(serializeFeature(parseFeature(SAMPLE), { links: false }));
   let doc = importFeatureDoc(plain);
-  expect(docToFeature(doc).link).toBeUndefined();
+  expect(docToFeature(doc).links).toBeUndefined();
 
   doc = reconcile(doc, parseFeature(SAMPLE));
-  expect(docToFeature(doc).link).toEqual(JIRA);
+  expect(docToFeature(doc).links).toEqual([JIRA]);
   expect(docToFeature(doc).scenarios[0]!.link).toEqual(LINEAR);
   expect(projectFeature(doc)).toBe(WRITTEN);
 
   const moved = { ...JIRA, ticket: "ABC-999", url: "https://acme.atlassian.net/browse/ABC-999" };
   const retargeted = parseFeature(SAMPLE);
-  retargeted.link = moved;
+  retargeted.links = [moved];
   doc = reconcile(doc, retargeted);
-  expect(docToFeature(doc).link).toEqual(moved);
+  expect(docToFeature(doc).links).toEqual([moved]);
 
   doc = reconcile(doc, plain);
-  expect(docToFeature(doc).link).toBeUndefined();
+  expect(docToFeature(doc).links).toBeUndefined();
   expect(docToFeature(doc).scenarios[0]!.link).toBeUndefined();
 });
 
@@ -255,22 +261,22 @@ test("a link added on one side survives a three-way merge", () => {
   const merged = threeWayFeature(base, base, theirs);
   expect(merged.ok).toBe(true);
   if (!merged.ok) return;
-  expect(merged.feature.link).toEqual(JIRA);
+  expect(merged.feature.links).toEqual([JIRA]);
   expect(merged.feature.scenarios.find((s) => s.name === "Basic Quote")!.link).toEqual(LINEAR);
 });
 
 test("when both sides change a link, ours wins; a removal on one side stands", () => {
   const base = parseFeature(SAMPLE);
   const ours = parseFeature(SAMPLE);
-  ours.link = { ...JIRA, ticket: "ABC-1" };
+  ours.links = [{ ...JIRA, ticket: "ABC-1" }];
   const theirs = parseFeature(SAMPLE);
-  theirs.link = { ...JIRA, ticket: "ABC-2" };
+  theirs.links = [{ ...JIRA, ticket: "ABC-2" }];
   const both = threeWayFeature(base, ours, theirs);
-  expect(both.ok && both.feature.link).toEqual(ours.link);
+  expect(both.ok && both.feature.links).toEqual(ours.links);
 
   const removed = parseFeature(serializeFeature(parseFeature(SAMPLE), { links: false }));
   const gone = threeWayFeature(base, base, removed);
-  expect(gone.ok && gone.feature.link).toBeUndefined();
+  expect(gone.ok && gone.feature.links).toBeUndefined();
 });
 
 // --- through the feature layer ------------------------------------------------
@@ -280,7 +286,7 @@ test("a saved link lands in the document and, with the setting on, in the file",
   await saveFeature(root, file, SAMPLE);
   expect(await readFeature(root, file)).toBe(WRITTEN);
   const loaded = await loadFeatureDoc(root, file);
-  expect(docToFeature(loaded!.doc).link).toEqual(JIRA);
+  expect(docToFeature(loaded!.doc).links).toEqual([JIRA]);
 });
 
 test("with the setting off, the file has no links but the editor still sees them", async () => {
@@ -296,8 +302,8 @@ test("with the setting off, the file has no links but the editor still sees them
   expect(await readFeatureForEditor(root, file)).toBe(WRITTEN);
   // And a later save that still carries them keeps them.
   const again = await saveFeature(root, file, SAMPLE.replace("is provided", "is emailed"));
-  expect(parseFeature(again.content).link).toEqual(JIRA);
-  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toEqual(JIRA);
+  expect(parseFeature(again.content).links).toEqual([JIRA]);
+  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).links).toEqual([JIRA]);
 });
 
 test("the editor can remove a link: a save without it clears the document", async () => {
@@ -305,11 +311,11 @@ test("the editor can remove a link: a save without it clears the document", asyn
   const file = await createFeature(root, "Quote Policy");
   await saveFeature(root, file, SAMPLE);
   const withoutFeatureLink = parseFeature(SAMPLE);
-  delete withoutFeatureLink.link;
+  delete withoutFeatureLink.links;
   const saved = await saveFeature(root, file, serializeFeature(withoutFeatureLink));
-  expect(parseFeature(saved.content).link).toBeUndefined();
+  expect(parseFeature(saved.content).links).toBeUndefined();
   expect(parseFeature(saved.content).scenarios[0]!.link).toEqual(LINEAR);
-  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toBeUndefined();
+  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).links).toBeUndefined();
 });
 
 test("flipping the setting rewrites every feature file to the new form", async () => {
@@ -337,7 +343,7 @@ test("a file in the other form is not drift: peers with different settings leave
   await Bun.write(join(root, file), withoutLinks);
   expect(await importDrift(root)).toBe("");
   expect(await readFeature(root, file)).toBe(withoutLinks);
-  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toEqual(JIRA);
+  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).links).toEqual([JIRA]);
   // The editor still sees the links.
   expect(await readFeatureForEditor(root, file)).toBe(WRITTEN);
 });
@@ -350,11 +356,11 @@ test("an outside edit that changes a link is absorbed like any other drift", asy
   expect(await importDrift(root)).toContain("absorbed 1");
   // Absorbed, and written back in the app's form: the scenarios numbered.
   expect(await readFeature(root, file)).toBe(WRITTEN.replace(JIRA_LINE, retargeted));
-  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).link).toEqual({
+  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).links).toEqual([{
     program: "Jira",
     ticket: "ABC-777",
     url: "https://acme.atlassian.net/browse/ABC-777",
-  });
+  }]);
 });
 
 test("publishing keeps the links, and a published scenario's link stays editable", async () => {
@@ -363,7 +369,7 @@ test("publishing keeps the links, and a published scenario's link stays editable
   const result = await publishFeature(root, file, SAMPLE);
   expect(result.status).toBe("published");
   const published = parseFeature((await readFeature(root, file))!);
-  expect(published.link).toEqual(JIRA);
+  expect(published.links).toEqual([JIRA]);
   expect(published.scenarios.every((s) => s.status === "published")).toBe(true);
   expect(published.scenarios[0]!.link).toEqual(LINEAR);
 
@@ -541,4 +547,132 @@ test("a url typed a character at a time ends with the whole ticket id, tool and 
   let draft = EMPTY_LINK_DRAFT;
   for (let n = 1; n <= full.length; n++) draft = withLinkUrlForTool(draft, full.slice(0, n), "Jira");
   expect(draft).toEqual({ program: "Jira", ticket: "ABC-124", url: full });
+});
+
+// --- several tickets on a feature ------------------------------------------------
+// specs/external-links/project-management-jira-linear-etc.feature.md "Several
+// tickets on a feature": a feature carries up to MAX_FEATURE_TICKETS tickets,
+// one line each; the list is one value, set whole; the single `link` of an
+// older document reads as a list of one.
+
+const JIRA2 = { program: "Jira", ticket: "ABC-124", url: "https://acme.atlassian.net/browse/ABC-124" };
+const JIRA3 = { program: "Jira", ticket: "ABC-125", url: "https://acme.atlassian.net/browse/ABC-125" };
+const JIRA2_LINE = formatExternalLink(JIRA2);
+const JIRA3_LINE = formatExternalLink(JIRA3);
+const THREE = SAMPLE.replace(JIRA_LINE, `${JIRA_LINE}\n${JIRA2_LINE}\n${JIRA3_LINE}`);
+const THREE_WRITTEN = WRITTEN.replace(JIRA_LINE, `${JIRA_LINE}\n${JIRA2_LINE}\n${JIRA3_LINE}`);
+
+test("a feature carries several tickets, one line each, in order, and writes them back together", () => {
+  const feature = parseFeature(THREE);
+  expect(feature.links).toEqual([JIRA, JIRA2, JIRA3]);
+  expect(feature.description).toBe("Quotes for potential customers.");
+  expect(serializeFeature(feature)).toBe(THREE_WRITTEN);
+  expect(parseFeature(THREE_WRITTEN)).toEqual(feature);
+  // Spread out, or mixed with the other metadata, they are still the tickets.
+  const spread = SAMPLE.replace(JIRA_LINE, `${JIRA_LINE}\n\n**Assigned:** Dana\n\n${JIRA2_LINE}`);
+  expect(parseFeature(spread).links).toEqual([JIRA, JIRA2]);
+  expect(parseFeature(spread).assigned).toBe("Dana");
+  expect(serializeFeature(parseFeature(spread), { links: false })).not.toContain("[Jira:");
+});
+
+test("a repeated ticket is dropped on parse, the first kept; a scenario still takes one", () => {
+  const sameUrl = { ...JIRA, ticket: "abc-123" };
+  const sameId = { ...JIRA, url: "https://acme.atlassian.net/browse/ABC-123/" };
+  const text = SAMPLE.replace(JIRA_LINE, `${JIRA_LINE}\n${formatExternalLink(sameUrl)}\n${formatExternalLink(sameId)}\n${JIRA2_LINE}`);
+  expect(parseFeature(text).links).toEqual([JIRA, JIRA2]);
+  expect(dedupeTicketLinks([JIRA, sameUrl, JIRA2, sameId])).toEqual([JIRA, JIRA2]);
+  expect(sameTicket(JIRA, LINEAR)).toBe(false);
+  // Under a scenario a second ticket line is content, as before.
+  const scenario = SAMPLE.replace("[Linear:ENG-42]", `${JIRA2_LINE}\n\n[Linear:ENG-42]`);
+  const [basic] = parseFeature(scenario).scenarios;
+  expect(basic!.link).toEqual(JIRA2);
+  expect(basic!.body.startsWith("[Linear:ENG-42]")).toBe(true);
+});
+
+test("the list is set whole — reconcile replaces it, an empty target clears it, a no-op leaves the heads", () => {
+  let doc = importFeatureDoc(parseFeature(SAMPLE));
+  doc = reconcile(doc, parseFeature(THREE));
+  expect(docToFeature(doc).links).toEqual([JIRA, JIRA2, JIRA3]);
+  expect(projectFeature(doc)).toBe(THREE_WRITTEN);
+  const heads = A.getHeads(doc);
+  expect(A.getHeads(reconcile(doc, parseFeature(THREE)))).toEqual(heads);
+  // Reordered is changed: the order is the file's.
+  const reordered = parseFeature(THREE);
+  reordered.links = [JIRA3, JIRA, JIRA2];
+  doc = reconcile(doc, reordered);
+  expect(docToFeature(doc).links).toEqual([JIRA3, JIRA, JIRA2]);
+  doc = reconcile(doc, parseFeature(serializeFeature(parseFeature(SAMPLE), { links: false })));
+  expect(docToFeature(doc).links).toBeUndefined();
+});
+
+test("an older document's single link reads as a list of one, and the first change retires it", () => {
+  const plain = parseFeature(serializeFeature(parseFeature(SAMPLE), { links: false }));
+  // A document written before the list: the scenario link in place, the
+  // feature's ticket under the old key.
+  const before = parseFeature(SAMPLE);
+  delete before.links;
+  const legacy = A.change(importFeatureDoc(before), (d) => {
+    d.link = { ...JIRA };
+  });
+  expect(ticketLinksOf(legacy)).toEqual([JIRA]);
+  expect(docToFeature(legacy).links).toEqual([JIRA]);
+  expect(projectFeature(legacy)).toBe(WRITTEN);
+  // Reconciling what it already projects is a no-op: the old key stays.
+  const same = reconcile(A.clone(legacy), parseFeature(SAMPLE));
+  expect(A.getHeads(same)).toEqual(A.getHeads(legacy));
+  expect(same.link).toEqual(JIRA);
+  expect(same.links).toBeUndefined();
+  // The first change writes the list and drops the old key.
+  const changed = reconcile(A.clone(legacy), parseFeature(THREE));
+  expect(changed.link).toBeUndefined();
+  expect(docToFeature(changed).links).toEqual([JIRA, JIRA2, JIRA3]);
+  // Clearing them drops both.
+  const cleared = reconcile(A.clone(legacy), plain);
+  expect(cleared.link).toBeUndefined();
+  expect(cleared.links).toBeUndefined();
+});
+
+test("a three-way merge takes the side that changed the list, ours when both did", () => {
+  const base = parseFeature(SAMPLE);
+  const theirs = parseFeature(THREE);
+  const added = threeWayFeature(base, base, theirs);
+  expect(added.ok && added.feature.links).toEqual([JIRA, JIRA2, JIRA3]);
+  const ours = parseFeature(SAMPLE);
+  ours.links = [JIRA, LINEAR];
+  const both = threeWayFeature(base, ours, theirs);
+  expect(both.ok && both.feature.links).toEqual([JIRA, LINEAR]);
+});
+
+test("with the setting off, the editor's view folds every ticket back; drift absorbs a hand-added one", async () => {
+  setProjectionOptions({ publishExternalLinks: false });
+  const file = await createFeature(root, "Quote Policy");
+  const saved = await saveFeature(root, file, THREE);
+  expect(saved.content).toBe(THREE_WRITTEN);
+  expect(await readFeature(root, file)).not.toContain("[Jira:");
+  expect(parseFeature((await readFeatureForEditor(root, file))!).links).toEqual([JIRA, JIRA2, JIRA3]);
+
+  setProjectionOptions({ publishExternalLinks: true });
+  expect(await reprojectFeatures(root)).toBe(1);
+  expect(await readFeature(root, file)).toBe(THREE_WRITTEN);
+  // A teammate adds a fourth by hand: absorbed, and kept in order.
+  const fourth = { program: "Jira", ticket: "ABC-126", url: "https://acme.atlassian.net/browse/ABC-126" };
+  await Bun.write(join(root, file), THREE_WRITTEN.replace(JIRA3_LINE, `${JIRA3_LINE}\n${formatExternalLink(fourth)}`));
+  expect(await importDrift(root)).toContain("absorbed 1");
+  expect(docToFeature((await loadFeatureDoc(root, file))!.doc).links).toEqual([JIRA, JIRA2, JIRA3, fourth]);
+});
+
+test("the chip reads the one ticket, or counts them, or offers to link one", () => {
+  expect(ticketChipLabel(undefined)).toBe("Link ticket");
+  expect(ticketChipLabel([])).toBe("Link ticket");
+  expect(ticketChipLabel([JIRA])).toBe("Jira:ABC-123");
+  expect(ticketChipLabel([JIRA, JIRA2, JIRA3])).toBe("3 tickets");
+});
+
+test("a repeat, or a sixth, cannot join the list", () => {
+  expect(ticketAddProblem([JIRA], JIRA2)).toBeNull();
+  expect(ticketAddProblem([JIRA], { ...JIRA, ticket: "abc-123" })).toContain("already linked");
+  expect(ticketAddProblem([JIRA], { ...LINEAR, url: JIRA.url })).toContain("already linked");
+  const five = [1, 2, 3, 4, 5].map((n) => ({ ...JIRA, ticket: `X-${n}`, url: `https://acme.atlassian.net/browse/X-${n}` }));
+  expect(MAX_FEATURE_TICKETS).toBe(5);
+  expect(ticketAddProblem(five, JIRA2)).toContain("up to 5");
 });
