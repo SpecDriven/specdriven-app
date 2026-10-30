@@ -184,6 +184,8 @@ function stubQtest(): string {
             parent_id: b.parent_id ? Number(b.parent_id) : c.parent_id,
             test_steps: b.test_steps ?? c.test_steps,
             precondition: b.precondition ?? c.precondition,
+            // Like qTest, properties sent replace those stored; none sent keeps them.
+            properties: b.properties ?? c.properties,
             version: c.version + 1,
           });
           return Response.json(rawCase(c));
@@ -368,6 +370,21 @@ describe("creating a feature's test cases", () => {
     expect(again.body.message).toBe("test case links unchanged");
   });
 
+  test("creating them again leaves the test cases' properties alone, so a Status set in qTest stays", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    // A tester moves the first test case's Status on from its default.
+    const moved = [
+      { field_id: 7310, field_value: 711 },
+      { field_id: 501, field_value: 701 },
+    ];
+    cases.get(1001)!.properties = moved;
+    seen = [];
+    expect((await publish(moduleUrl(1))).body).toMatchObject({ created: 0, updated: 2 });
+    for (const put of seen.filter((r) => r.method === "PUT")) expect(put.body).not.toHaveProperty("properties");
+    expect(cases.get(1001)!.properties).toEqual(moved);
+  });
+
   test("the linked module moves under a new parent; a deleted one is found by name, or made anew", async () => {
     await saveToken();
     await publish(moduleUrl(1));
@@ -407,6 +424,20 @@ describe("creating a feature's test cases", () => {
     const view = (await readFeatureView(data, FILE))!.parsed;
     expect(view.scenarios[0]!.qtest).toBeUndefined();
     expect(view.scenarios[1]!.qtest).toMatchObject({ ticket: "TC-1001" });
+  });
+
+  test("a feature on a Confluence page links each test case to its scenario there, not to the file", async () => {
+    await saveToken();
+    const page = "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy";
+    await saveFeature(data, FILE, SAMPLE.replace("# Quote Policy\n", `# Quote Policy\n\n[Confluence:99](${page})\n`));
+    expect((await publish(moduleUrl(1))).status).toBe(200);
+    const [first, second] = posts("/api/v3/projects/12/test-cases");
+    expect((first!.body as { description: string }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${page}#QuotePolicy-S1">${page}#QuotePolicy-S1</a>).`,
+    );
+    expect((second!.body as { description: string }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${page}#QuotePolicy-S2">${page}#QuotePolicy-S2</a>).`,
+    );
   });
 
   test("a test case qTest refuses stops the run, and what was written is still linked back", async () => {
