@@ -2015,41 +2015,41 @@ export function App() {
     return () => clearTimeout(id);
   }, [bootError, boot]);
 
-  // Mirror the server's cron reload (crud-feature.md): refresh the
-  // feature list on the same cadence so pulled changes show up, without
-  // clobbering an in-progress edit or conflict resolution.
+  // Show what a reload brought (crud-feature.md) — the feature list, the open
+  // feature, the README and every plugin's view — without clobbering an
+  // in-progress edit or conflict resolution. The cron mirror below and the
+  // Sync button both run it, so a page open in the Roadmap (or any plugin
+  // tab) refreshes on Sync too, not only on the next tick (issue #288).
+  const refreshView = async (): Promise<void> => {
+    const loads: Promise<unknown>[] = [loadFeatures()];
+    // The description editor holding an edit that hasn't landed yet keeps
+    // its feature as is, like the README below.
+    const descPending =
+      descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
+    if (selected && !dirty && !editing && !conflict && !descPending) {
+      loads.push(openFeature(selected));
+    }
+    // A pulled README shows up too — unless the home editor holds an edit
+    // that hasn't landed yet.
+    if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
+      loads.push(loadReadme());
+    }
+    // The plugins follow the same rule — each refreshes its own store (the
+    // special folders their page lists), and what is open on screen only
+    // while its editor holds nothing unsaved.
+    client.emit("reload/tick", pluginViewRef.current);
+    await Promise.all(loads);
+  };
+  const refreshViewRef = useRef(refreshView);
+  refreshViewRef.current = refreshView;
+
+  // Mirror the server's cron reload: refresh on the same cadence so pulled
+  // changes show up.
   useEffect(() => {
     if (loading || needsRepo || outdated || reloadSeconds <= 0) return;
-    const id = setInterval(() => {
-      void loadFeatures();
-      // The description editor holding an edit that hasn't landed yet keeps
-      // its feature as is, like the README below.
-      const descPending =
-        descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
-      if (selected && !dirty && !editing && !conflict && !descPending) void openFeature(selected);
-      // A pulled README shows up too — unless the home editor holds an edit
-      // that hasn't landed yet.
-      if (!selected && !pluginViewRef.current && readmeText.current === readmeSaved.current) {
-        void loadReadme();
-      }
-      // The plugins follow the same rule — each refreshes its own store (the
-      // special folders their page lists), and what is open on screen only
-      // while its editor holds nothing unsaved.
-      client.emit("reload/tick", pluginViewRef.current);
-    }, reloadSeconds * 1000);
+    const id = setInterval(() => void refreshViewRef.current(), reloadSeconds * 1000);
     return () => clearInterval(id);
-  }, [
-    loading,
-    needsRepo,
-    outdated,
-    reloadSeconds,
-    selected,
-    dirty,
-    editing,
-    conflict,
-    loadFeatures,
-    loadReadme,
-  ]);
+  }, [loading, needsRepo, outdated, reloadSeconds]);
 
   // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
   // meanings, "/" for search and the rest — is declared in one registry
@@ -3656,9 +3656,9 @@ export function App() {
 
   // Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
   // the server runs one reload tick (pull + push saved), then the view
-  // refreshes. Like the cron mirror above, an in-progress edit or conflict is
-  // not clobbered. Progress shows only on the button — no status line at the
-  // bottom of the page.
+  // refreshes the way the cron mirror does — open pages and plugin tabs
+  // included, an in-progress edit or conflict not clobbered. Progress shows
+  // only on the button — no status line at the bottom of the page.
   const syncNow = async () => {
     setSyncing(true);
     try {
@@ -3668,8 +3668,7 @@ export function App() {
         toast.error(data.error ?? "Sync failed");
         return;
       }
-      await loadFeatures();
-      if (selected && !dirty && !editing && !conflict) await openFeature(selected);
+      await refreshViewRef.current();
     } catch {
       toast.error("Sync failed — is the server running?");
     } finally {
