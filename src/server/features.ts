@@ -20,6 +20,7 @@ import {
   reconcile,
   removeDraftScenario,
   setConfluencePage,
+  setQtestModule,
   setPullRequests,
   setResourceLinks,
   setScenarioFiles,
@@ -58,6 +59,7 @@ import type {
   ConfluencePage,
   Feature,
   PullRequestLink,
+  QtestModule,
   ResourceLink,
   Scenario,
   ScenarioFile,
@@ -68,6 +70,7 @@ import type {
 } from "./parser";
 import { RESOURCE_LINK_TOOLS } from "./resourceLinks";
 import type { ResourceLinkKind } from "./resourceLinks";
+import { moduleIdFromUrl } from "./qtestUrl";
 import { cleanLine } from "./text";
 import { currentAuthor } from "./user";
 
@@ -597,6 +600,11 @@ async function featureView(
     ...(qtest ? { qtest } : {}),
     ...(confluence ? { confluence } : {}),
     ...(inDoc.confluencePage ? { confluencePage: inDoc.confluencePage } : {}),
+    // The module record stands only for the module the feature links now: a
+    // link changed by hand leaves the earlier module's parent unoffered.
+    ...(inDoc.qtestModule && qtest && moduleIdFromUrl(qtest.url) === inDoc.qtestModule.id
+      ? { qtestModule: inDoc.qtestModule }
+      : {}),
     ...(inDoc.prs ? { prs: inDoc.prs } : {}),
     ...resourcesOf(inDoc),
     ...authorsOf(inDoc),
@@ -1134,6 +1142,29 @@ export async function saveConfluencePage(dataDir: string, fileName: string, page
     if (loaded === null) throw new Error(`Could not create a document for ${name}`);
   }
   const next = setConfluencePage(loaded.doc, page);
+  if (next !== loaded.doc) await saveFeatureDoc(dataDir, name, next, loaded.heads);
+  return featureView(dataDir, name, content);
+}
+
+/**
+ * Record the qTest module the feature's test cases were just published into
+ * and the parent it went under (specs/external-links/qtest-test-cases
+ * .feature.md "Create qTest test cases from a feature") — a direct document
+ * operation like saveConfluencePage, so the dialog offers each feature the
+ * parent it was last published under. A feature with no document yet gets
+ * one minted from the file first.
+ */
+export async function saveQtestModule(dataDir: string, fileName: string, module: QtestModule): Promise<FeatureView> {
+  const name = safe(fileName);
+  const content = await readFeature(dataDir, name);
+  if (content === null) throw new Error(`Feature file not found: ${name}`);
+  let loaded = await loadFeatureDoc(dataDir, name);
+  if (loaded === null) {
+    await createFeatureDoc(dataDir, name, importFeatureDoc(parseFeature(content)));
+    loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Could not create a document for ${name}`);
+  }
+  const next = setQtestModule(loaded.doc, module);
   if (next !== loaded.doc) await saveFeatureDoc(dataDir, name, next, loaded.heads);
   return featureView(dataDir, name, content);
 }

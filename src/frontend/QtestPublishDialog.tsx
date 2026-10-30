@@ -6,16 +6,16 @@ import type { QtestSite } from "./QtestToken";
 import { PromptChoices } from "./ModalPrompts";
 import { FailureLine, type FailureDetails } from "./FailureDetails";
 
-// "Create qTest test cases…" from a feature's ⋯ menu
+// "Publish qTest Test Cases…" from a feature's ⋯ menu
 // (specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
 // from a feature"): the parent module to create them under, which scenarios
-// go in, and Create. The server makes a module named after the feature under
+// go in, and Publish. The server makes a module named after the feature under
 // it, one test case per scenario, and links each from the feature. A failure
 // shows as one line; clicking it opens what the server knows of the call
 // that failed — the request, what was sent, qTest's status and its answer —
 // the same exchange the Observability page shows under "qtest". A test case
 // qTest refuses stops the run: what was written is linked back, and the
-// dialog stays open on the failure so Create carries on from it.
+// dialog stays open on the failure so Publish carries on from it.
 
 export type PublishScope = "all" | "published";
 
@@ -25,6 +25,8 @@ export interface QtestPublishResult {
   cases: { scenarioName: string; id: string; pid: string; url: string; created: boolean }[];
   created: number;
   updated: number;
+  /** The requirement of the feature's Jira issue the test cases were linked to, when one was found. */
+  requirement?: { id: string; pid: string; name: string; url: string; linked: number; alreadyLinked: number };
   title: string;
   parentUrl: string;
   content: string;
@@ -121,7 +123,7 @@ export function QtestPublishDialog({
         className="dialog modal-dialog confluence-dialog qtest-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Create qTest test cases"
+        aria-label="Publish qTest Test Cases"
         ref={trapRef}
         onClick={(e) => e.stopPropagation()}
       >
@@ -132,7 +134,7 @@ export function QtestPublishDialog({
             void publish();
           }}
         >
-          <h3>Create qTest test cases</h3>
+          <h3>Publish qTest Test Cases</h3>
           <p>
             Each scenario of <strong>{featureName}</strong> becomes a test case in a module named after the feature,
             under the parent module
@@ -169,7 +171,7 @@ export function QtestPublishDialog({
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={busy || problem !== null}>
-              {busy ? "Creating…" : "Create test cases"}
+              {busy ? "Publishing…" : "Publish test cases"}
             </button>
           </div>
         </form>

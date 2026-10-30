@@ -56,10 +56,22 @@ interface StubCase {
   version: number;
 }
 
+interface StubRequirement {
+  id: number;
+  name: string;
+}
+
 let server: ReturnType<typeof Bun.serve>;
 let site: string;
 let modules: Map<number, StubModule>;
 let cases: Map<number, StubCase>;
+let requirements: Map<number, StubRequirement>;
+/** The test cases linked to each requirement, as qTest's traceability keeps them. */
+let reqLinks: Map<number, Set<number>>;
+/** What the stub answers a search with, when not the requirements. */
+let searchStatus: number | null;
+/** What the stub answers a link call with, when it does not link. */
+let linkStatus: number | null;
 let nextId: number;
 let seen: { method: string; path: string; auth: string | null; body: unknown }[];
 /** Whether the stub has revoked every token since the test began. */
@@ -76,6 +88,17 @@ const rawCase = (c: StubCase) => ({
   parent_id: c.parent_id,
   name: c.name,
   web_url: `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=1&id=${c.id}`,
+});
+const rawRequirement = (r: StubRequirement) => ({
+  id: r.id,
+  pid: `RQ-${r.id}`,
+  name: r.name,
+  web_url: `${site}/p/${PROJECT}/portal/project#tab=requirements&object=5&id=${r.id}`,
+});
+const rawLinks = (r: StubRequirement) => ({
+  id: r.id,
+  pid: `RQ-${r.id}`,
+  objects: [...(reqLinks.get(r.id) ?? [])].map((id) => ({ id, pid: `TC-${id}`, link_type: "is_covered_by" })),
 });
 
 const FIELDS = [
@@ -124,6 +147,33 @@ function stubQtest(): string {
       const rest = url.pathname.slice(p.length);
       if (rest === "/settings/test-cases/fields") {
         return fieldsStatus ? problem(fieldsStatus, "No permission") : Response.json(FIELDS);
+      }
+      // qTest's Data Query: `'Name' ~ 'text'` is "name contains text".
+      if (rest === "/search" && req.method === "POST") {
+        if (searchStatus) return problem(searchStatus, "No permission");
+        const b = body as { object_type?: string; query?: string };
+        if (b.object_type !== "requirements") return problem(400, "Unsupported object type");
+        const term = /~ '([^']*)'/.exec(b.query ?? "")?.[1]?.toLowerCase() ?? "";
+        const items = [...requirements.values()].filter((r) => r.name.toLowerCase().includes(term)).map(rawRequirement);
+        return Response.json({ page: 1, page_size: 100, total: items.length, items });
+      }
+      if (rest === "/linked-artifacts" && req.method === "GET") {
+        if (url.searchParams.get("type") !== "requirements") return problem(400, "Unsupported type");
+        const ids = url.searchParams.getAll("ids").map(Number);
+        return Response.json(ids.flatMap((id) => (requirements.has(id) ? [rawLinks(requirements.get(id)!)] : [])));
+      }
+      const link = rest.match(/^\/requirements\/(\d+)\/link$/);
+      if (link && req.method === "POST") {
+        if (linkStatus) return problem(linkStatus, "Not allowed");
+        if (url.searchParams.get("type") !== "test-cases") return problem(400, "Unsupported type");
+        const r = requirements.get(Number(link[1]));
+        if (!r) return problem(404, "Requirement not found");
+        if (!Array.isArray(body) || !body.every((id) => typeof id === "number")) return problem(400, "Ids expected");
+        const linked = reqLinks.get(r.id) ?? new Set<number>();
+        // Like qTest, an id already linked or not a test case is passed over.
+        for (const id of body as number[]) if (cases.has(id)) linked.add(id);
+        reqLinks.set(r.id, linked);
+        return Response.json([rawLinks(r)]);
       }
       if (rest === "/modules" || rest === "/modules/") {
         const parent = Number(url.searchParams.get("parentId"));
@@ -217,13 +267,20 @@ beforeEach(async () => {
   await writeState({ dataRepo: data }, root);
   modules = new Map();
   cases = new Map();
+  requirements = new Map();
+  reqLinks = new Map();
   nextId = 1000;
   seen = [];
   revoked = false;
   fieldsStatus = null;
+  searchStatus = null;
+  linkStatus = null;
   site = stubQtest();
   modules.set(1, { id: 1, name: "Specs", parent_id: null });
   modules.set(2, { id: 2, name: "Archive", parent_id: null });
+  // The requirement of the feature's Jira issue, and one whose name merely contains the key.
+  requirements.set(300, { id: 300, name: "ACME-571 Create new UI" });
+  requirements.set(301, { id: 301, name: "ACME-5710 Something else" });
 });
 
 afterEach(async () => {
@@ -260,6 +317,11 @@ const publish = (parentUrl: string, scope: string = "all") =>
 const moduleUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=0&id=${id}`;
 const caseUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=1&id=${id}`;
 const posts = (path: string) => seen.filter((r) => r.method === "POST" && r.path.startsWith(path));
+const requirementUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=requirements&object=5&id=${id}`;
+const JIRA_LINE = "[Jira:ACME-571](https://acme.atlassian.net/browse/ACME-571)";
+/** The sample feature linked to its Jira issue, the way the editor writes the line. */
+const withJira = (text: string, line = JIRA_LINE) => text.replace("# Quote Policy\n", `# Quote Policy\n\n${line}\n`);
+const NO_JIRA = "The feature has no Jira link, so its test cases were not tied to a qTest requirement.";
 
 describe("qTest tokens", () => {
   test("a token qTest accepts is kept, owner-only, and listed without the token", async () => {
@@ -350,11 +412,28 @@ describe("creating a feature's test cases", () => {
     expect(file).toContain(`# Quote Policy\n\n[qTest:MD-1000](${moduleUrl(1000)})\n\nQuotes for potential customers.`);
     expect(file).toContain(`## S1: Basic Quote @v1 [proposed]\n\n[qTest:TC-1001](${caseUrl(1001)})\n`);
     expect(file).toContain(`## S2: Declined Quote @v2 [published]\n\n[qTest:TC-1002](${caseUrl(1002)})\n`);
-    const parsed = res.body.parsed as { qtest: unknown; scenarios: { qtest: unknown }[] };
+    const parsed = res.body.parsed as { qtest: unknown; qtestModule: unknown; scenarios: { qtest: unknown }[] };
     expect(parsed.qtest).toEqual({ program: "qTest", ticket: "MD-1000", url: moduleUrl(1000) });
     expect(parsed.scenarios[1]!.qtest).toEqual({ program: "qTest", ticket: "TC-1002", url: caseUrl(1002) });
     expect((await readState(root)).qtestParentUrl).toBe(moduleUrl(1));
     expect((await call("GET", "/api/state")).body.qtestParentUrl).toBe(moduleUrl(1));
+    // The module and its parent, kept with the feature for the next dialog.
+    expect(parsed.qtestModule).toEqual({ id: "1000", parentUrl: moduleUrl(1) });
+  });
+
+  test("a feature published before offers the parent module it was published under, kept with the feature", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    const recorded = async () => (await readFeatureView(data, FILE))!.parsed.qtestModule;
+    expect(await recorded()).toEqual({ id: "1000", parentUrl: moduleUrl(1) });
+    // Publishing again under another parent remembers that one, even with no link line to change.
+    const again = await publish(moduleUrl(2));
+    expect(again.body.message).toBe("test case links unchanged");
+    expect((again.body.parsed as { qtestModule: unknown }).qtestModule).toEqual({ id: "1000", parentUrl: moduleUrl(2) });
+    expect(await recorded()).toEqual({ id: "1000", parentUrl: moduleUrl(2) });
+    // A module link changed by hand leaves the earlier module's parent unoffered.
+    await saveFeature(data, FILE, (await readFeature(data, FILE))!.replace(`[qTest:MD-1000](${moduleUrl(1000)})`, `[qTest:MD-77](${moduleUrl(77)})`));
+    expect(await recorded()).toBeUndefined();
   });
 
   test("creating them again updates the test cases the scenarios link, in the module the feature links", async () => {
@@ -458,7 +537,8 @@ describe("creating a feature's test cases", () => {
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ created: 2, updated: 0 });
-    expect(res.body.warning).toBeUndefined();
+    // The sample links no Jira issue; nothing else is amiss.
+    expect(res.body.warning).toBe(NO_JIRA);
     const failure = res.body.failure as { scenarioName: string; message: string; details: Record<string, unknown> };
     expect(failure.scenarioName).toBe("REFUSED Quote");
     expect(failure.message).toBe(
@@ -533,12 +613,154 @@ describe("creating a feature's test cases", () => {
     expect(modules.size).toBe(2);
   });
 
+  test("a feature with no Jira link gets its test cases, with a warning that no requirement covers them", async () => {
+    await saveToken();
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 2, warning: NO_JIRA });
+    expect(res.body.requirement).toBeUndefined();
+    expect(seen.some((r) => r.path.includes("/search") || r.path.includes("/link"))).toBe(false);
+  });
+
   test("the hosted app refuses qTest altogether", async () => {
     process.env.SPECDRIVEN_HOSTED = "1";
     expect((await call("GET", "/api/qtest/tokens")).status).toBe(403);
     expect((await saveToken()).status).toBe(403);
     expect((await publish(moduleUrl(1))).status).toBe(403);
     expect(seen).toHaveLength(0);
+  });
+});
+
+// specs/external-links/qtest-test-cases.feature.md "Each test case is linked
+// to the requirement of the feature's Jira issue": the requirement whose name
+// starts with the feature's Jira key, found through qTest's search, covers
+// every test case written — linked on the first publish, and on the next for
+// any not yet linked. Not finding one is a warning, never a failure.
+describe("linking the test cases to the Jira issue's requirement", () => {
+  const search = () => seen.filter((r) => r.path === "/api/v3/projects/12/search?pageSize=100&page=1");
+  const links = () => posts("/api/v3/projects/12/requirements/");
+
+  test("publishing links every test case to the requirement whose name starts with the feature's Jira key", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body.warning).toBeUndefined();
+    expect(res.body).toMatchObject({
+      created: 2,
+      requirement: { id: "300", pid: "RQ-300", name: "ACME-571 Create new UI", url: requirementUrl(300), linked: 2, alreadyLinked: 0 },
+    });
+    // Found with qTest's own query, before the module is made; "contains" is narrowed to "starts with" here.
+    expect(search()).toHaveLength(1);
+    expect(search()[0]!.body).toEqual({ object_type: "requirements", fields: ["*"], query: "'Name' ~ 'ACME-571'" });
+    const moduleAt = seen.findIndex((r) => r.method === "POST" && r.path.startsWith("/api/v3/projects/12/modules"));
+    expect(seen.findIndex((r) => r.path.includes("/search"))).toBeLessThan(moduleAt);
+    expect(links()).toHaveLength(1);
+    expect(links()[0]!.path).toBe("/api/v3/projects/12/requirements/300/link?type=test-cases");
+    expect(links()[0]!.body).toEqual([1001, 1002]);
+    expect([...reqLinks.get(300)!]).toEqual([1001, 1002]);
+    expect(reqLinks.get(301)).toBeUndefined();
+    // The requirement is not written into the feature: qTest keeps the link.
+    expect((await readFeature(data, FILE))!).not.toContain("RQ-300");
+  });
+
+  test("publishing again links only the test cases not yet linked, and says so", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    await publish(moduleUrl(1));
+    // A tester removed one link in qTest; the other stands.
+    reqLinks.get(300)!.delete(1002);
+    seen = [];
+    const again = await publish(moduleUrl(1));
+    expect(again.body).toMatchObject({ updated: 2, requirement: { pid: "RQ-300", linked: 1, alreadyLinked: 1 } });
+    expect(seen.map((r) => r.path)).toContain("/api/v3/projects/12/linked-artifacts?type=requirements&ids=300");
+    expect(links()).toHaveLength(1);
+    expect(links()[0]!.body).toEqual([1002]);
+    seen = [];
+    const third = await publish(moduleUrl(1));
+    expect(third.body).toMatchObject({ requirement: { linked: 0, alreadyLinked: 2 } });
+    expect(links()).toHaveLength(0);
+  });
+
+  test("a key the link's url names serves as well, whatever the tool it was filed under", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, withJira(SAMPLE, "[Other:tracker](https://acme.atlassian.net/browse/acme-571)"));
+    const res = await publish(moduleUrl(1));
+    expect(res.body).toMatchObject({ requirement: { pid: "RQ-300", linked: 2 } });
+    expect(search()[0]!.body).toMatchObject({ query: "'Name' ~ 'ACME-571'" });
+  });
+
+  test("no requirement starting with the key is a warning, and the test cases are written without one", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, withJira(SAMPLE, "[Jira:ACME-9](https://acme.atlassian.net/browse/ACME-9)"));
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 2 });
+    expect(res.body.requirement).toBeUndefined();
+    expect(res.body.warning).toBe('No qTest requirement in project 12 starts with "ACME-9"; the test cases were written without one.');
+    expect(links()).toHaveLength(0);
+    expect((await readFeature(data, FILE))!).toContain("[qTest:TC-1002]");
+    // "ACME-5710 Something else" contains ACME-571 but does not start with it.
+    requirements.delete(300);
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    expect((await publish(moduleUrl(1))).body.warning).toContain('starts with "ACME-571"');
+  });
+
+  test("several requirements starting with the key link the first by id, and say so", async () => {
+    await saveToken();
+    requirements.set(299, { id: 299, name: "ACME-571: Create new UI (copy)" });
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    const res = await publish(moduleUrl(1));
+    expect(res.body).toMatchObject({ requirement: { pid: "RQ-299", linked: 2 } });
+    expect(res.body.warning).toBe(
+      '2 qTest requirements start with "ACME-571"; the test cases were linked to RQ-299 “ACME-571: Create new UI (copy)”.',
+    );
+  });
+
+  test("a search qTest refuses is a warning, not a failure; a refused test case mid-run still links the ones written", async () => {
+    await saveToken();
+    searchStatus = 403;
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    const refused = await publish(moduleUrl(1));
+    expect(refused.status).toBe(200);
+    expect(refused.body).toMatchObject({ created: 2 });
+    expect(refused.body.warning).toBe(
+      "The qTest requirement for ACME-571 could not be looked up (qTest refused the request — the token cannot write to this project: No permission); the test cases were written without one.",
+    );
+    expect(modules.size).toBe(3);
+
+    searchStatus = null;
+    // The feature as linked back, plus a scenario qTest will refuse.
+    await saveFeature(data, FILE, `${(await readFeature(data, FILE))!}
+## REFUSED Quote @v1 [proposed]
+
+- Then: nothing
+`);
+    seen = [];
+    const partial = await publish(moduleUrl(1));
+    expect(partial.body).toMatchObject({ created: 0, updated: 2, requirement: { pid: "RQ-300", linked: 2 } });
+    expect((partial.body.failure as { scenarioName: string }).scenarioName).toBe("REFUSED Quote");
+    expect(partial.body.warning).toBeUndefined();
+    expect(links()[0]!.body).toEqual([1001, 1002]);
+  });
+
+  test("a link qTest refuses is a warning, and the test cases stay linked back from the feature", async () => {
+    await saveToken();
+    linkStatus = 403;
+    await saveFeature(data, FILE, withJira(SAMPLE));
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 2, requirement: { pid: "RQ-300", linked: 0, alreadyLinked: 0 } });
+    expect(res.body.warning).toBe(
+      "The test cases were written but could not be linked to requirement RQ-300: qTest refused the request — the token cannot write to this project: Not allowed",
+    );
+    expect(reqLinks.get(300)).toBeUndefined();
+    expect((await readFeature(data, FILE))!).toContain("[qTest:TC-1002]");
+    // Linked the next time, once the token may.
+    linkStatus = null;
+    seen = [];
+    expect((await publish(moduleUrl(1))).body).toMatchObject({ requirement: { linked: 2, alreadyLinked: 0 } });
+    expect(links()[0]!.body).toEqual([1001, 1002]);
   });
 });
 

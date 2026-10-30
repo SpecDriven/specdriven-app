@@ -1,6 +1,8 @@
 // Tricentis qTest Manager REST client (specs/external-links/qtest-test-cases
-// .feature.md "Create qTest test cases from a feature"), API v3:
+// .feature.md "Create qTest test cases from a feature", "Each test case is
+// linked to the requirement of the feature's Jira issue"), API v3:
 // https://docs.tricentis.com/qtest-saas/content/apis/apis/test_case_apis.htm
+// https://docs.tricentis.com/qtest-saas/content/apis/apis/requirement_apis.htm
 //
 // Every call carries a bearer token. A feature's scenarios are published as
 // test cases of one module named after the feature, under the parent module
@@ -10,7 +12,8 @@
 import type { Feature, Scenario } from "./parser";
 import { scenarioNumbers } from "./parser";
 import { scenarioToTestCase, type TestCaseDraft } from "./qtestSteps";
-import { moduleWebUrl, onQtestBase, testCaseIdFromUrl, testCaseWebUrl } from "./qtestUrl";
+import { moduleWebUrl, onQtestBase, requirementWebUrl, testCaseIdFromUrl, testCaseWebUrl } from "./qtestUrl";
+import { isJiraIssueKey, parseJiraIssueUrl } from "./jiraUrl";
 import { bodyExcerpt, failureAttributes, type FailureDetails } from "./httpFailure";
 import { getLogger } from "./telemetry";
 
@@ -192,6 +195,44 @@ interface RawTestCase {
 export interface Property {
   field_id: number;
   field_value: number | string;
+}
+
+interface RawRequirement {
+  id: number;
+  pid?: string;
+  name?: string;
+  web_url?: string;
+}
+
+/** A page of the search API's answer (PagedResource). */
+interface RawPage<T> {
+  items?: T[];
+  total?: number;
+}
+
+/** One source object with what is linked to it (LinkedArtifactContainer). */
+interface RawLinkedArtifacts {
+  id: number;
+  pid?: string;
+  objects?: { id: number; pid?: string }[];
+}
+
+/** A requirement as the publish flow needs it. */
+export interface RequirementInfo {
+  id: string;
+  pid: string;
+  name: string;
+  url: string;
+}
+
+function requirementInfo(base: string, projectId: string, raw: RawRequirement): RequirementInfo {
+  return {
+    id: String(raw.id),
+    pid: raw.pid ?? `RQ-${raw.id}`,
+    name: raw.name ?? "",
+    url:
+      raw.web_url && /^https?:\/\//.test(raw.web_url) ? raw.web_url : requirementWebUrl(base, projectId, String(raw.id)),
+  };
 }
 
 /** A module as the publish flow needs it. */
@@ -383,6 +424,110 @@ export async function updateTestCase(
   return testCaseInfo(base, projectId, raw);
 }
 
+// --- Requirements --------------------------------------------------------------------
+
+/** What a search for a Jira key's requirement found. */
+export interface RequirementMatch {
+  /** The requirement the test cases are linked to: the first, by id, whose name starts with the key. */
+  match: RequirementInfo | null;
+  /** Every requirement whose name starts with the key, the match first. */
+  candidates: RequirementInfo[];
+}
+
+/** Whether a requirement's name starts with the key as a whole word: ACME-571, not ACME-5710. */
+function startsWithKey(name: string, key: string): boolean {
+  const upper = name.trim().toUpperCase();
+  return upper.startsWith(key) && !/[A-Z0-9]/.test(upper.charAt(key.length));
+}
+
+// A search answers 100 per page; a key appearing in more names than this
+// many pages hold is not a project this app can reason about.
+const SEARCH_PAGE = 100;
+const SEARCH_PAGES = 10;
+
+/**
+ * The requirement a Jira key names, found the way qTest's Data Query finds it
+ * (`POST …/search`, object_type requirements, `'Name' ~ '<key>'`). "~" is
+ * contains, so the names are checked here to start with the key; several
+ * doing so are all returned, the lowest id first, for the caller to say so.
+ */
+export async function findRequirement(
+  base: string,
+  token: string,
+  projectId: string,
+  key: string,
+): Promise<RequirementMatch> {
+  const found: RawRequirement[] = [];
+  for (let page = 1; page <= SEARCH_PAGES; page++) {
+    const result = await qtest<RawPage<RawRequirement>>(
+      base,
+      `${project(projectId)}/search?pageSize=${SEARCH_PAGE}&page=${page}`,
+      token,
+      { method: "POST", json: { object_type: "requirements", fields: ["*"], query: `'Name' ~ '${key}'` } },
+    );
+    const items = Array.isArray(result?.items) ? result.items : [];
+    found.push(...items);
+    if (items.length < SEARCH_PAGE) break;
+  }
+  const candidates = found
+    .filter((r) => typeof r.name === "string" && startsWithKey(r.name, key))
+    .sort((a, b) => a.id - b.id)
+    .map((r) => requirementInfo(base, projectId, r));
+  return { match: candidates[0] ?? null, candidates };
+}
+
+/** The test cases already linked to a requirement, by id. */
+export async function linkedTestCaseIds(
+  base: string,
+  token: string,
+  projectId: string,
+  requirementId: string,
+): Promise<Set<string>> {
+  const raw = await qtest<RawLinkedArtifacts[]>(
+    base,
+    `${project(projectId)}/linked-artifacts?type=requirements&ids=${encodeURIComponent(requirementId)}`,
+    token,
+  );
+  const ids = new Set<string>();
+  for (const container of Array.isArray(raw) ? raw : []) {
+    if (String(container.id) !== requirementId) continue;
+    for (const o of container.objects ?? []) {
+      // A requirement's links are test cases, mostly; a pid says which object it is.
+      if (!o.pid || /^TC-/i.test(o.pid)) ids.add(String(o.id));
+    }
+  }
+  return ids;
+}
+
+/** Link test cases to a requirement, so qTest's traceability shows them covering it. */
+export async function linkTestCases(
+  base: string,
+  token: string,
+  projectId: string,
+  requirementId: string,
+  testCaseIds: string[],
+): Promise<void> {
+  await qtest<unknown>(
+    base,
+    `${project(projectId)}/requirements/${encodeURIComponent(requirementId)}/link?type=test-cases`,
+    token,
+    { method: "POST", json: testCaseIds.map((id) => Number(id)) },
+  );
+}
+
+/**
+ * The Jira issue key a feature's link names, upper-cased — from the ticket
+ * of a Jira link, else from the url of any link that is a Jira issue url —
+ * or null when the feature links no Jira issue.
+ */
+export function featureJiraKey(feature: Feature): string | null {
+  const link = feature.link;
+  if (!link) return null;
+  const ticket = link.ticket.trim();
+  if (link.program.trim().toLowerCase() === "jira" && isJiraIssueKey(ticket)) return ticket.toUpperCase();
+  return parseJiraIssueUrl(link.url)?.key ?? null;
+}
+
 // --- Publishing a feature ------------------------------------------------------------
 
 /** One scenario's test case after a publish. */
@@ -399,8 +544,98 @@ export interface PublishedCase {
 export interface PublishResult {
   module: ModuleInfo & { created: boolean };
   cases: PublishedCase[];
+  /**
+   * The requirement of the feature's Jira issue, when one was found: how
+   * many test cases this run linked to it, and how many already were.
+   */
+  requirement?: RequirementInfo & { linked: number; alreadyLinked: number };
+  /**
+   * What kept the test cases from being tied to a requirement — no Jira
+   * link, no such requirement, a refused search or link. Reported as
+   * warnings, never as a failure: the test cases are written either way.
+   */
+  notices: string[];
   /** The scenario whose test case could not be written, when one could not. */
   failed?: { index: number; scenarioName: string; error: string; details?: QtestFailureDetails };
+}
+
+/**
+ * The requirement the feature's Jira issue names, looked up before anything
+ * is written. Not finding one, or a search qTest refuses (an older site
+ * without the search API, a token that may not read requirements), is a
+ * notice: the test cases go without. A rejected token still stops the run,
+ * since nothing after it would be accepted either.
+ */
+async function requirementFor(p: {
+  base: string;
+  token: string;
+  projectId: string;
+  feature: Feature;
+  notices: string[];
+}): Promise<RequirementInfo | null> {
+  const key = featureJiraKey(p.feature);
+  const notice = (text: string) => {
+    p.notices.push(text);
+    log.warn(text, { project_id: p.projectId, ...(key ? { jira_key: key } : {}) });
+  };
+  if (!key) {
+    notice("The feature has no Jira link, so its test cases were not tied to a qTest requirement.");
+    return null;
+  }
+  let found: RequirementMatch;
+  try {
+    found = await findRequirement(p.base, p.token, p.projectId, key);
+  } catch (e) {
+    if (!(e instanceof QtestError) || e.status === 401) throw e;
+    notice(`The qTest requirement for ${key} could not be looked up (${e.message}); the test cases were written without one.`);
+    return null;
+  }
+  if (!found.match) {
+    notice(`No qTest requirement in project ${p.projectId} starts with "${key}"; the test cases were written without one.`);
+    return null;
+  }
+  if (found.candidates.length > 1) {
+    notice(
+      `${found.candidates.length} qTest requirements start with "${key}"; the test cases were linked to ${found.match.pid} “${found.match.name}”.`,
+    );
+  }
+  return found.match;
+}
+
+/**
+ * Link the test cases written to the requirement, leaving alone those linked
+ * before — on a second publish, the ones a first run linked. A site that
+ * cannot list the links (older than qTest 7.5) has them all sent, which qTest
+ * takes as a no-op for the ones that stand. A refused link is a notice.
+ */
+async function linkToRequirement(p: {
+  base: string;
+  token: string;
+  projectId: string;
+  requirement: RequirementInfo;
+  cases: PublishedCase[];
+  notices: string[];
+}): Promise<NonNullable<PublishResult["requirement"]>> {
+  // The test cases are in qTest by now, so nothing here may fail the run:
+  // the route must still link them back to their scenarios.
+  let already = new Set<string>();
+  try {
+    already = await linkedTestCaseIds(p.base, p.token, p.projectId, p.requirement.id);
+  } catch {
+    // Listed as none linked: the link call below is sent for all of them.
+  }
+  const missing = p.cases.map((c) => c.id).filter((id) => !already.has(id));
+  const alreadyLinked = p.cases.length - missing.length;
+  if (missing.length === 0) return { ...p.requirement, linked: 0, alreadyLinked };
+  try {
+    await linkTestCases(p.base, p.token, p.projectId, p.requirement.id, missing);
+  } catch (e) {
+    const text = `The test cases were written but could not be linked to requirement ${p.requirement.pid}: ${(e as Error).message}`;
+    p.notices.push(text);
+    log.warn(text, { project_id: p.projectId, requirement_id: p.requirement.id });
+    return { ...p.requirement, linked: 0, alreadyLinked };
+  }
+  return { ...p.requirement, linked: missing.length, alreadyLinked };
 }
 
 /**
@@ -475,6 +710,8 @@ export async function publishFeatureTestCases(p: {
   }
   // Read before anything is written, so a failure here leaves no empty module behind.
   const properties = await requiredProperties(p.base, p.token, p.projectId);
+  const notices: string[] = [];
+  const requirement = await requirementFor({ base: p.base, token: p.token, projectId: p.projectId, feature: p.feature, notices });
   const module = await featureModule({
     base: p.base,
     token: p.token,
@@ -489,6 +726,7 @@ export async function publishFeatureTestCases(p: {
   const page = p.feature.confluence;
   const source = { featureName: p.title, file: p.file, ...(page ? { confluencePage: { url: page.url, title: p.title } } : {}) };
   const cases: PublishedCase[] = [];
+  let failed: PublishResult["failed"];
   for (const [index, scenario] of p.feature.scenarios.entries()) {
     if (p.scope === "published" && scenario.status !== "published") continue;
     const draft = scenarioToTestCase(scenario, numbers[index] ?? null, source);
@@ -506,8 +744,17 @@ export async function publishFeatureTestCases(p: {
     } catch (e) {
       const error = e instanceof QtestError ? e.message : (e as Error).message;
       const details = e instanceof QtestError ? e.details : undefined;
-      return { module, cases, failed: { index, scenarioName: scenario.name, error, ...(details ? { details } : {}) } };
+      failed = { index, scenarioName: scenario.name, error, ...(details ? { details } : {}) };
+      break;
     }
   }
-  return { module, cases };
+  // The test cases written are linked to the requirement even when the run
+  // stopped short: the next run carries on from the refused one.
+  const linked =
+    requirement && cases.length > 0
+      ? await linkToRequirement({ base: p.base, token: p.token, projectId: p.projectId, requirement, cases, notices })
+      : requirement
+        ? { ...requirement, linked: 0, alreadyLinked: 0 }
+        : undefined;
+  return { module, cases, ...(linked ? { requirement: linked } : {}), notices, ...(failed ? { failed } : {}) };
 }
