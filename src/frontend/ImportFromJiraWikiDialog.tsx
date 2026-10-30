@@ -10,7 +10,8 @@ import type { JiraSite } from "./JiraToken";
 // "Import from Jira/Wiki here…" in a folder's ⋯ menu
 // (specs/external-links/jira-wiki-import.feature.md): the user collects up
 // to five Jira issue urls and five Confluence page urls, picks the agent
-// when more than one can answer, and Analyze has the server read them and
+// when more than one can answer, and the model it answers with (the
+// default set in Settings → Jira, or the agent's own), and Analyze has the server read them and
 // propose a feature title and up to fifteen scenarios. Those are reviewed
 // here — kept or dropped, renamed — before Create feature writes the file.
 // When the sources describe more than fifteen, the dialog says so and
@@ -60,6 +61,39 @@ export interface Proposal {
 }
 
 const AGENT_KEY = "specdriven.importAgent";
+const MODELS_KEY = "specdriven.importModels";
+
+/** The default model per agent id, as set in Settings → Jira, kept on this device. */
+export function importModels(): Record<string, string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MODELS_KEY) ?? "{}") as unknown;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+    return Object.fromEntries(
+      Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** Set (or, blank, clear) an agent's default model for imports. */
+export function setImportModel(agent: string, model: string): void {
+  const models = importModels();
+  if (model.trim()) models[agent] = model.trim();
+  else delete models[agent];
+  try {
+    localStorage.setItem(MODELS_KEY, JSON.stringify(models));
+  } catch {
+    // no storage: nothing to remember
+  }
+}
+
+/** What a model field holds that the server would refuse, or null. */
+export function modelProblem(model: string): string | null {
+  const m = model.trim();
+  if (!m || /^(?!-)[\w.:/@[\]-]{1,100}$/.test(m)) return null;
+  return "A model name is letters, digits and . - _ : / @ [ ], like claude-sonnet-4-6.";
+}
 
 /** The agents that answer one-shot turns here, by rank. */
 export function oneShotAgents(agents: AgentDescriptor[]): AgentDescriptor[] {
@@ -158,14 +192,18 @@ export function ImportFromJiraWikiDialog({
   const [url, setUrl] = useState("");
   const [rows, setRows] = useState<ImportSource[]>([]);
   const [agent, setAgent] = useState(() => lastAgent(choices));
+  const [model, setModel] = useState(() => importModels()[lastAgent(choices)] ?? "");
   const [proposal, setProposal] = useState<Proposal | null>(initialProposal ?? null);
   const [busy, setBusy] = useState<"analyze" | "more" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const problem = sourceProblem(url, rows, jiraSites, wikis);
   const chosen = choices.find((a) => a.id === agent) ?? choices[0];
+  const badModel = modelProblem(model);
 
   const chooseAgent = (next: string) => {
     setAgent(next);
+    // Another agent names its models differently: its own default.
+    setModel(importModels()[next] ?? "");
     try {
       localStorage.setItem(AGENT_KEY, next);
     } catch {
@@ -192,6 +230,7 @@ export function ImportFromJiraWikiDialog({
         body: JSON.stringify({
           sources: rows.map((r) => r.url),
           ...(chosen ? { agent: chosen.id } : {}),
+          ...(model.trim() ? { model: model.trim() } : {}),
           ...(earlier ? { exclude: earlier.scenarios.map((s) => s.name) } : {}),
         }),
       });
@@ -326,6 +365,29 @@ export function ImportFromJiraWikiDialog({
             ) : (
               <p className="hint">No agent can read the sources — install the Claude or Codex agent plugin.</p>
             )}
+            {chosen && (
+              <label>
+                Model
+                <input
+                  aria-label="Model"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={`${chosen.label}'s default`}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+              </label>
+            )}
+            {badModel ? (
+              <p className="hint">{badModel}</p>
+            ) : (
+              chosen && (
+                <p className="hint">
+                  Blank uses {chosen.label}&apos;s own default. Set the default for imports in Settings → Jira.
+                </p>
+              )
+            )}
             {error && <p className="error">{error}</p>}
             <div className="dialog-actions">
               <button type="button" className="btn btn-secondary" onClick={onClose}>
@@ -334,7 +396,7 @@ export function ImportFromJiraWikiDialog({
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={busy !== null || rows.length === 0 || !chosen}
+                disabled={busy !== null || rows.length === 0 || !chosen || badModel !== null}
                 onClick={() => void propose()}
               >
                 {busy === "analyze"
@@ -421,5 +483,49 @@ export function ImportFromJiraWikiDialog({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Settings → Jira: the model each agent that can analyze the sources answers
+ * an import with, unless the dialog names another. Blank leaves the agent's
+ * own default. Kept on this device: which models answer depends on its
+ * account or proxy.
+ */
+export function ImportModelSettings({ agents }: { agents: AgentDescriptor[] }) {
+  const choices = oneShotAgents(agents);
+  const [models, setModels] = useState(importModels);
+  if (choices.length === 0) return null;
+  return (
+    <>
+      {choices.map((a) => {
+        const value = models[a.id] ?? "";
+        const problem = modelProblem(value);
+        return (
+          <label key={a.id} className="settings-row">
+            <span className="settings-row-label">
+              {choices.length > 1 ? `Import model for ${a.label}` : "Import model"}
+              <span className="settings-row-hint">
+                {problem ??
+                  `The model ${a.label} uses for "Import from Jira/Wiki", unless the dialog names another. Blank uses ${a.label}'s own default. Remembered on this device.`}
+              </span>
+            </span>
+            <input
+              aria-label={`Import model for ${a.label}`}
+              value={value}
+              placeholder={`${a.label}'s default`}
+              spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
+              onChange={(e) => {
+                const next = e.target.value;
+                setModels((m) => ({ ...m, [a.id]: next }));
+                if (!modelProblem(next)) setImportModel(a.id, next);
+              }}
+            />
+          </label>
+        );
+      })}
+    </>
   );
 }

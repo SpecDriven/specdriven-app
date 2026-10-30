@@ -260,7 +260,7 @@ export function proposalFromResult(
 export async function proposeFeature(
   sources: SourceText[],
   cwd: string,
-  options: { agent?: string; exclude?: string[]; timeoutMs?: number } = {},
+  options: { agent?: string; model?: string; exclude?: string[]; timeoutMs?: number } = {},
 ): Promise<Proposal> {
   const provider = agents.oneShot(options.agent);
   if (!provider?.oneShot) throw new ImportError(503, IMPORT_AGENT_MISSING);
@@ -271,6 +271,7 @@ export async function proposeFeature(
       systemPrompt: SYSTEM_PROMPT,
       prompt: proposePrompt(sources, options.exclude ?? []),
       schema: PROPOSAL_SCHEMA,
+      ...(options.model ? { model: options.model } : {}),
       timeoutMs: options.timeoutMs ?? IMPORT_TIMEOUT_MS,
     });
     if (result.isError) {

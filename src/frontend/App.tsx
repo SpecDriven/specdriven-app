@@ -256,7 +256,7 @@ import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFo
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
-import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
+import { ImportFromJiraWikiDialog, ImportModelSettings } from "./ImportFromJiraWikiDialog";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
@@ -8638,6 +8638,7 @@ export function App() {
           hint="Read Jira issues into a new feature, with Confluence pages, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
         >
           <JiraTokens sites={jiraSites} onChange={setJiraSites} />
+          <ImportModelSettings agents={agents} />
         </PageSection>
       )}
       {/* specs/external-links/confluence-wiki.feature.md: a personal access

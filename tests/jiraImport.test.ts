@@ -302,6 +302,19 @@ describe("proposing a feature", () => {
     }
   });
 
+  test("the model asked for reaches the agent; none leaves the agent's own; an odd name is refused", async () => {
+    await saveToken();
+    const res = await propose([issueUrl("ABC-1")], { model: " claude-sonnet-4-6 " });
+    expect(res.status).toBe(200);
+    expect(asked[0]!.model).toBe("claude-sonnet-4-6");
+    await propose([issueUrl("ABC-1")], { model: "" });
+    expect("model" in asked[1]!).toBe(false);
+    const bad = await propose([issueUrl("ABC-1")], { model: "--dangerously-skip" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("Not a model name");
+    expect(asked).toHaveLength(2);
+  });
+
   test("a text-only JSON answer parses too; a failed turn or an odd answer says who could not", async () => {
     await saveToken();
     answer = { text: `Sure:\n${JSON.stringify(proposal({ more: ["Renewal"] }))}`, isError: false };

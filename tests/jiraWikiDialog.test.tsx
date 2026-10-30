@@ -3,12 +3,16 @@
 // Analyze), its review step (the title, each scenario kept or dropped, the
 // rest the sources describe), and the Settings → Jira form. App.tsx owns
 // the open state and the menu entry.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentDescriptor } from "../src/server/agentTypes";
 import {
   ImportFromJiraWikiDialog,
+  ImportModelSettings,
+  importModels,
+  modelProblem,
   oneShotAgents,
+  setImportModel,
   sourceProblem,
   sourceRow,
   type ImportSource,
@@ -56,6 +60,21 @@ const dialog = (over: Partial<Parameters<typeof ImportFromJiraWikiDialog>[0]> = 
   />
 );
 
+/** Run with a localStorage of its own, gone afterwards. */
+function withStorage(fn: () => void): void {
+  const items = new Map<string, string>();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => items.get(k) ?? null,
+    setItem: (k: string, v: string) => void items.set(k, v),
+    removeItem: (k: string) => void items.delete(k),
+  };
+  fn();
+}
+
+afterEach(() => {
+  delete (globalThis as { localStorage?: unknown }).localStorage;
+});
+
 describe("the sources step", () => {
   test("a modal dialog with the url field, Add and Analyze, naming the folder", () => {
     const markup = html(dialog());
@@ -80,6 +99,28 @@ describe("the sources step", () => {
     const none = html(dialog({ agents: [agent("codex", { oneShot: false }), agent("pi", { available: false })] }));
     expect(none).toContain("install the Claude or Codex agent plugin");
     expect(none).not.toContain('aria-label="Analyze with"');
+  });
+
+  test("a Model field, blank for the agent's own default, filled with the default set in Settings", () => {
+    const blank = html(dialog());
+    expect(blank).toContain('aria-label="Model"');
+    expect(blank).toContain('placeholder="Claude&#x27;s default"');
+    expect(blank).toContain("Set the default for imports in Settings → Jira.");
+    withStorage(() => {
+      setImportModel("claude", "claude-sonnet-4-6");
+      expect(html(dialog())).toMatch(/aria-label="Model"[^>]*value="claude-sonnet-4-6"/);
+      const none = html(dialog({ agents: [agent("pi", { available: false })] }));
+      expect(none).not.toContain('aria-label="Model"');
+    });
+  });
+
+  test("a model name is a CLI's name for one; anything else is said", () => {
+    expect(modelProblem("")).toBeNull();
+    expect(modelProblem("claude-sonnet-4-6[1m]")).toBeNull();
+    expect(modelProblem("us.anthropic.claude-sonnet-4-6:0")).toBeNull();
+    expect(modelProblem("openai/gpt-5.1-codex")).toBeNull();
+    expect(modelProblem("two words")).toContain("A model name is");
+    expect(modelProblem("--flag")).toContain("A model name is");
   });
 
   test("the agents offered are the available ones that answer one-shot turns", () => {
@@ -180,5 +221,27 @@ describe("Settings → Jira", () => {
     expect(markup).toContain('aria-label="Jira personal access token" type="password"');
     expect(markup).toMatch(/<button class="secondary" disabled="">Save token<\/button>/);
     expect(markup).toContain("nothing is ever written to Jira");
+  });
+});
+
+describe("Settings → Jira, the import model", () => {
+  test("one row per agent that can analyze, filled with its default; none without one", () => {
+    withStorage(() => {
+      setImportModel("codex", "gpt-5.1-codex");
+      const two = html(<ImportModelSettings agents={[agent("claude"), agent("codex")]} />);
+      expect(two).toContain('aria-label="Import model for Claude"');
+      expect(two).toMatch(/aria-label="Import model for Codex"[^>]*value="gpt-5.1-codex"/);
+      expect(two).toContain("Remembered on this device.");
+      expect(html(<ImportModelSettings agents={[agent("codex", { oneShot: false })]} />)).toBe("");
+    });
+  });
+
+  test("a blank model clears the agent's default", () => {
+    withStorage(() => {
+      setImportModel("claude", "claude-sonnet-4-6");
+      expect(importModels()).toEqual({ claude: "claude-sonnet-4-6" });
+      setImportModel("claude", "  ");
+      expect(importModels()).toEqual({});
+    });
   });
 });

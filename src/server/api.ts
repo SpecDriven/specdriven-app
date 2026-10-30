@@ -1494,7 +1494,12 @@ const deleteJiraToken: Handler = async (req) => {
 // Not in the demo (no tokens, no agent) nor the hosted app.
 const postImportPropose = withDataDir(async (dir, req) => {
   if (isDemoMode()) return json({ error: "Importing from Jira or Confluence is off in demo mode" }, 403);
-  const body = (await req.json().catch(() => ({}))) as { sources?: unknown; agent?: unknown; exclude?: unknown };
+  const body = (await req.json().catch(() => ({}))) as {
+    sources?: unknown;
+    agent?: unknown;
+    model?: unknown;
+    exclude?: unknown;
+  };
   const urls = Array.isArray(body.sources) ? body.sources.filter((u): u is string => typeof u === "string") : [];
   if (urls.length === 0) return json({ error: "Add at least one Jira issue or Confluence page url" }, 400);
   if (urls.length > MAX_JIRA_SOURCES + MAX_WIKI_SOURCES) {
@@ -1508,9 +1513,13 @@ const postImportPropose = withDataDir(async (dir, req) => {
   }
   const exclude = Array.isArray(body.exclude) ? body.exclude.filter((n): n is string => typeof n === "string") : [];
   const agent = typeof body.agent === "string" && body.agent ? body.agent : undefined;
+  const model = typeof body.model === "string" ? body.model.trim() : "";
+  if (model && !/^(?!-)[\w.:/@[\]-]{1,100}$/.test(model)) {
+    return json({ error: `Not a model name: ${model.slice(0, 100)}` }, 400);
+  }
   try {
     const sources = await readSources(refs);
-    const proposal = await proposeFeature(sources, dir, { agent, exclude });
+    const proposal = await proposeFeature(sources, dir, { agent, exclude, ...(model ? { model } : {}) });
     const links: SourceLink[] = sources.map((s) => ({ kind: s.kind, url: s.url, title: s.title }));
     return json({ ...proposal, sources: links });
   } catch (e) {
