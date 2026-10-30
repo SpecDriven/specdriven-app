@@ -288,6 +288,14 @@ describe("qTest tokens", () => {
     expect(seen).toHaveLength(0);
   });
 
+  test("a token pasted with a leading Bearer is kept as the token alone", async () => {
+    expect((await saveToken(` Bearer ${GOOD} `)).status).toBe(200);
+    expect((await qtestToken(site))!.token).toBe(GOOD);
+    expect((await saveToken(`bearer\t${GOOD}`)).status).toBe(200);
+    expect((await qtestToken(site))!.token).toBe(GOOD);
+    expect((await saveToken("Bearer ")).status).toBe(400);
+  });
+
   test("a saved token replaces the site's last one, and can be removed", async () => {
     await saveToken();
     await saveToken(GOOD, moduleUrl(1));
