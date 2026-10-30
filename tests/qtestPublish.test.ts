@@ -64,6 +64,8 @@ let nextId: number;
 let seen: { method: string; path: string; auth: string | null; body: unknown }[];
 /** Whether the stub has revoked every token since the test began. */
 let revoked: boolean;
+/** What the stub answers for the project's test case fields, when not the fields. */
+let fieldsStatus: number | null;
 
 const problem = (status: number, message: string) => Response.json({ message }, { status });
 
@@ -120,7 +122,9 @@ function stubQtest(): string {
       const p = `/api/v3/projects/${PROJECT}`;
       if (!url.pathname.startsWith(p)) return problem(404, "Project not found");
       const rest = url.pathname.slice(p.length);
-      if (rest === "/settings/test-cases/fields") return Response.json(FIELDS);
+      if (rest === "/settings/test-cases/fields") {
+        return fieldsStatus ? problem(fieldsStatus, "No permission") : Response.json(FIELDS);
+      }
       if (rest === "/modules" || rest === "/modules/") {
         const parent = Number(url.searchParams.get("parentId"));
         if (req.method === "GET") {
@@ -214,6 +218,7 @@ beforeEach(async () => {
   nextId = 1000;
   seen = [];
   revoked = false;
+  fieldsStatus = null;
   site = stubQtest();
   modules.set(1, { id: 1, name: "Specs", parent_id: null });
   modules.set(2, { id: 2, name: "Archive", parent_id: null });
@@ -250,7 +255,7 @@ const call = async (method: string, path: string, body?: unknown) => {
 const saveToken = (token = GOOD, base = site) => call("POST", "/api/qtest/tokens", { base, token });
 const publish = (parentUrl: string, scope: string = "all") =>
   call("POST", `/api/features/${encodeURIComponent(FILE)}/qtest`, { parentUrl, scope });
-const moduleUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=2&id=${id}`;
+const moduleUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=0&id=${id}`;
 const caseUrl = (id: number | string) => `${site}/p/${PROJECT}/portal/project#tab=testdesign&object=1&id=${id}`;
 const posts = (path: string) => seen.filter((r) => r.method === "POST" && r.path.startsWith(path));
 
@@ -467,6 +472,26 @@ describe("creating a feature's test cases", () => {
     const res = await publish(moduleUrl(1));
     expect(res.status).toBe(401);
     expect(res.body.error).toBe("qTest rejected the token; save a new one in Settings → qTest.");
+  });
+
+  test("a token that cannot read the project's fields still makes the module and the test cases", async () => {
+    await saveToken();
+    fieldsStatus = 403;
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ module: { id: "1000", created: true }, created: 2 });
+    expect(res.body.failure).toBeUndefined();
+    expect(posts("/api/v3/projects/12/test-cases")[0]!.body).toMatchObject({ parent_id: "1000", properties: [] });
+  });
+
+  test("the fields are read before the module is made, so a failure there leaves none behind", async () => {
+    await saveToken();
+    fieldsStatus = 500;
+    const res = await publish(moduleUrl(1));
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("qTest answered HTTP 500: No permission");
+    expect(posts("/api/v3/projects/12/modules")).toHaveLength(0);
+    expect(modules.size).toBe(2);
   });
 
   test("the hosted app refuses qTest altogether", async () => {

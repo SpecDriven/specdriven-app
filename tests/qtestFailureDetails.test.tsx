@@ -55,7 +55,7 @@ import { QtestPublishDialog, type QtestPublishResult } from "../src/frontend/Qte
 import { QtestTokens } from "../src/frontend/QtestToken";
 
 const SITE = { base: "https://acme.qtestnet.com", user: "3 projects" };
-const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=2&id=901";
+const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901";
 const DETAILS = {
   method: "POST",
   url: "https://acme.qtestnet.com/api/v3/projects/12/test-cases",
@@ -185,7 +185,7 @@ describe("a token qTest refuses in Settings → qTest", () => {
         el.dispatchEvent(new window.KeyboardEvent("keyup", { key: "a", bubbles: true }) as unknown as Event);
       });
     type(input("qTest url"), "https://acme.qtestnet.com");
-    type(input("qTest API token"), "tok-bad");
+    type(input("qTest Bearer token"), "tok-bad");
     const save = [...host.querySelectorAll("button")].find((b) => b.textContent === "Save token")!;
     await act(async () => save.click());
     const line = host.querySelector("button.error-link") as HTMLButtonElement;

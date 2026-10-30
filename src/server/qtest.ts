@@ -313,10 +313,18 @@ const DIRECT_FIELDS = new Set(["name", "description", "precondition"]);
  * The properties a new test case must carry: every required field of the
  * project's test cases, at its default value — the allowed value flagged as
  * default, else the first allowed one, else blank. Field ids differ per
- * project, so they are read, never assumed.
+ * project, so they are read, never assumed. Reading them takes the right to
+ * see the project's settings, which a tester's token often lacks: refused
+ * that (403), the test cases go without, and qTest names any field it misses.
  */
 export async function requiredProperties(base: string, token: string, projectId: string): Promise<Property[]> {
-  const fields = await qtest<RawField[]>(base, `${project(projectId)}/settings/test-cases/fields`, token);
+  let fields: RawField[];
+  try {
+    fields = await qtest<RawField[]>(base, `${project(projectId)}/settings/test-cases/fields`, token);
+  } catch (e) {
+    if (e instanceof QtestError && e.status === 403) return [];
+    throw e;
+  }
   return (Array.isArray(fields) ? fields : []).flatMap((f) => {
     if (!f.required || DIRECT_FIELDS.has((f.label ?? "").trim().toLowerCase())) return [];
     const values = f.allowed_values ?? [];
@@ -461,6 +469,8 @@ export async function publishFeatureTestCases(p: {
       e.details,
     );
   }
+  // Read before anything is written, so a failure here leaves no empty module behind.
+  const properties = await requiredProperties(p.base, p.token, p.projectId);
   const module = await featureModule({
     base: p.base,
     token: p.token,
@@ -469,7 +479,6 @@ export async function publishFeatureTestCases(p: {
     name: p.title,
     existingModuleId: p.existingModuleId,
   });
-  const properties = await requiredProperties(p.base, p.token, p.projectId);
   const numbers = scenarioNumbers(p.feature.scenarios);
   const cases: PublishedCase[] = [];
   for (const [index, scenario] of p.feature.scenarios.entries()) {
