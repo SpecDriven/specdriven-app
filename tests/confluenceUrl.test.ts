@@ -4,7 +4,7 @@
 // page part — its context path included.
 
 import { test, expect, describe } from "bun:test";
-import { normalizeConfluenceBase, onBase, parseParentPageUrl, sameBase } from "../src/server/confluenceUrl";
+import { normalizeConfluenceBase, onBase, parseParentPageUrl, sameBase, scenarioAnchorUrl } from "../src/server/confluenceUrl";
 
 describe("parseParentPageUrl", () => {
   test("reads the /spaces/KEY/pages/ID form, title or not", () => {
@@ -81,5 +81,20 @@ describe("the wiki's base", () => {
     expect(onBase("https://acme.com/other/pages/1", "https://acme.com/wiki")).toBe(false);
     expect(onBase("https://wiki.acme.com/pages/1", "https://wiki.acme.com")).toBe(true);
     expect(onBase("https://evil.com/pages/1", "https://wiki.acme.com")).toBe(false);
+  });
+});
+
+describe("a scenario's deep link", () => {
+  // Fragments as wiki.ariba.com (Data Center 9.2) writes them for the S<n> anchors.
+  test("names the anchor after the page title, spaces and hyphens dropped, other punctuation kept", () => {
+    const page = "https://wiki.acme.com/spaces/QA/pages/99/SCM+-+Dashboard+Global+Filters";
+    expect(scenarioAnchorUrl(page, "SCM - Dashboard (Global Filters)", 3)).toBe(`${page}#SCMDashboard(GlobalFilters)-S3`);
+    expect(scenarioAnchorUrl(page, "Security & Scoped Configuration", 1)).toBe(`${page}#Security%26ScopedConfiguration-S1`);
+  });
+
+  test("replaces a fragment the page url had; a draft, with no number, links the page", () => {
+    const page = "https://wiki.acme.com/pages/viewpage.action?pageId=99";
+    expect(scenarioAnchorUrl(`${page}#Old-S1`, "Quote Policy", 2)).toBe(`${page}#QuotePolicy-S2`);
+    expect(scenarioAnchorUrl(`${page}#Old-S1`, "Quote Policy", null)).toBe(page);
   });
 });

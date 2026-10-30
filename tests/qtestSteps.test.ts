@@ -89,6 +89,26 @@ describe("the test case a scenario makes", () => {
     ]);
   });
 
+  test("with a Confluence page, the description links the scenario's anchor there; a draft links the page", () => {
+    const page = { url: "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy", title: "Quote Policy" };
+    const anchor = "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy#QuotePolicy-S3";
+    expect(scenarioToTestCase(scenario(""), 3, { ...source, confluencePage: page }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${anchor}">${anchor}</a>).`,
+    );
+    const pageUrl = "https://wiki.acme.com/spaces/QA/pages/99/Quote+Policy";
+    expect(scenarioToTestCase(scenario(""), null, { ...source, confluencePage: page }).description).toBe(
+      `Scenario of the SpecDriven feature “Quote Policy” (<a href="${pageUrl}">${pageUrl}</a>).`,
+    );
+  });
+
+  test("the description is HTML, so the feature's name and the link are escaped", () => {
+    const page = { url: "https://wiki.acme.com/pages/viewpage.action?pageId=99", title: "Terms & <Conditions>" };
+    const anchor = "https://wiki.acme.com/pages/viewpage.action?pageId=99#Terms%26%3CConditions%3E-S1";
+    expect(
+      scenarioToTestCase(scenario(""), 1, { ...source, featureName: "Terms & <Conditions>", confluencePage: page }).description,
+    ).toBe(`Scenario of the SpecDriven feature “Terms &amp; &lt;Conditions&gt;” (<a href="${anchor}">${anchor}</a>).`);
+  });
+
   test("a scenario with no steps gets one step so qTest accepts it", () => {
     expect(scenarioToTestCase(scenario(""), 3, source).test_steps).toEqual([
       { description: "Basic Quote", expected: "" },
