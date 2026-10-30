@@ -24,6 +24,11 @@ export interface JiraIssueRef {
 const MARKERS = ["/browse/", "/projects/", "/secure/"] as const;
 const KEY = /^[A-Z][A-Z0-9_]*-\d+$/i;
 
+/** Whether text is shaped like an issue key — ABC-123 — whatever its case. */
+export function isJiraIssueKey(text: string): boolean {
+  return KEY.test(text.trim());
+}
+
 function httpUrl(raw: string): URL | null {
   try {
     const url = new URL(raw.trim());
