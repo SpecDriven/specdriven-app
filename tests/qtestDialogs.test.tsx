@@ -1,7 +1,7 @@
 // specs/external-links/qtest-test-cases.feature.md "Create qTest test cases
 // from a feature" and "A qTest token is kept per site on this device" as
 // static markup: the dialog (the parent module, which scenarios go in,
-// Create test cases) and the Settings → qTest form (the sites with a token,
+// Publish test cases) and the Settings → qTest form (the sites with a token,
 // and how to add one). App.tsx owns the open state, the menu entry and the
 // chips.
 import { describe, expect, test } from "bun:test";
@@ -15,7 +15,7 @@ const SITE = { base: "https://acme.qtestnet.com", user: "3 projects" };
 const PARENT = "https://acme.qtestnet.com/p/12/portal/project#tab=testdesign&object=0&id=901";
 
 describe("QtestPublishDialog", () => {
-  test("a modal dialog with the parent module url, the two scopes and Create test cases", () => {
+  test("a modal dialog with the parent module url, the two scopes and Publish test cases", () => {
     const markup = html(
       <QtestPublishDialog
         file="specs/quote.feature.md"
@@ -28,13 +28,13 @@ describe("QtestPublishDialog", () => {
     );
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('aria-modal="true"');
-    expect(markup).toContain("Create qTest test cases");
+    expect(markup).toContain("Publish qTest Test Cases");
     expect(markup).toContain("<strong>Quote Policy</strong>");
     expect(markup).toContain('aria-label="Parent module url"');
     expect(markup).toContain(`value="${PARENT.replace(/&/g, "&amp;")}"`);
     expect(markup).toContain('aria-label="All scenarios"');
     expect(markup).toContain('aria-label="Published scenarios only"');
-    expect(markup).toMatch(/<button type="submit" class="btn btn-primary">Create test cases<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary">Publish test cases<\/button>/);
   });
 
   test("a feature whose test cases were created before says creating them again updates its module", () => {
@@ -66,7 +66,7 @@ describe("QtestPublishDialog", () => {
       <QtestPublishDialog file="f" featureName="F" initialParentUrl={PARENT} sites={[]} onPublished={noop} onClose={noop} />,
     );
     expect(markup).toContain("No token for https://acme.qtestnet.com");
-    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Create test cases<\/button>/);
+    expect(markup).toMatch(/<button type="submit" class="btn btn-primary" disabled="">Publish test cases<\/button>/);
   });
 });
 

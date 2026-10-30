@@ -1774,12 +1774,16 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     state.qtestParentUrl = parentUrl;
     await writeState(state, getAppRoot());
   }
-  const warnings: string[] = [];
+  // What kept the test cases from being tied to the Jira issue's requirement
+  // is a warning: the test cases are written and linked back either way.
+  const warnings: string[] = [...result.notices];
   const summary = {
     module: { id: result.module.id, pid: result.module.pid, url: result.module.url, created: result.module.created },
     cases: result.cases.map(({ scenarioName, id, pid, url, created }) => ({ scenarioName, id, pid, url, created })),
     created: result.cases.filter((c) => c.created).length,
     updated: result.cases.filter((c) => !c.created).length,
+    // The requirement of the feature's Jira issue the test cases cover, when one was found.
+    ...(result.requirement ? { requirement: result.requirement } : {}),
     title,
     parentUrl,
     // The test case qTest refused: the dialog stays open on it, with its details.

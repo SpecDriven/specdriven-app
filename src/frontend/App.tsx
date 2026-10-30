@@ -3558,7 +3558,7 @@ export function App() {
     }
   };
 
-  // "Create qTest test cases…" (specs/external-links/qtest-test-cases.feature.md
+  // "Publish qTest Test Cases…" (specs/external-links/qtest-test-cases.feature.md
   // "A feature with no Confluence page asks first"): each test case links its
   // scenario on the feature's Confluence page, so without one it would only
   // name the spec file — asked before the dialog opens.
@@ -8617,7 +8617,7 @@ export function App() {
             <span className="settings-row-label">
               Create test cases from a feature
               <span className="settings-row-hint">
-                With a token for the site, a feature's ⋯ menu offers "Create qTest test cases…": one module
+                With a token for the site, a feature's ⋯ menu offers "Publish qTest Test Cases…": one module
                 named after the feature under a parent module you pick, one test case per scenario.
               </span>
               <QtestTokens sites={qtestSites} onChange={setQtestSites} />
@@ -10744,7 +10744,7 @@ export function App() {
                         : [
                             {
                               id: "qtest",
-                              label: "Create qTest test cases…",
+                              label: "Publish qTest Test Cases…",
                               icon: <ClipboardCheck size={13} />,
                               onSelect: () => void openQtestPublish(feature),
                             },
@@ -11892,6 +11892,10 @@ export function App() {
             const what = [
               data.created > 0 ? `created ${data.created}` : "",
               data.updated > 0 ? `updated ${data.updated}` : "",
+              // The requirement of the feature's Jira issue they cover, when one was found.
+              data.requirement && data.requirement.linked + data.requirement.alreadyLinked > 0
+                ? `linked to ${data.requirement.pid}`
+                : "",
             ]
               .filter(Boolean)
               .join(", ");
