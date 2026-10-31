@@ -74,5 +74,12 @@ jobs:
       # doesn't apply. @electron/get@5 drops got, but electron-builder passes
       # it got-only proxy/TLS options, so it can't be overridden. Drop this
       # ignore once electron-builder moves off @electron/get@3 or a fix ships.
+      #
+      # GHSA-g3hv-75wg-m249 (minimatch <11.0.1, globparts DoS) is fixed only
+      # in minimatch 11. Every copy we install comes through dev or build
+      # tooling (eslint, typescript-eslint, ts-morph, electron-builder), which
+      # matches only our own glob patterns, and glob@7 / dir-compare still
+      # need the minimatch 3 API, so a blanket override would break packaging.
+      # Drop this ignore once those tools move to minimatch 11.
       - name: Audit dependencies
-        run: bun audit --ignore GHSA-ch52-4w7c-c8xp
+        run: bun audit --ignore GHSA-ch52-4w7c-c8xp --ignore GHSA-g3hv-75wg-m249
