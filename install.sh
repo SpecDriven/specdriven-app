@@ -196,11 +196,44 @@ fi
 # --- point `current` at it ------------------------------------------------------
 
 current="$APP_DIR/current"
+previous=""
 if [ -L "$current" ] || [ ! -e "$current" ]; then
+  if [ -L "$current" ] && command -v readlink >/dev/null 2>&1; then
+    previous="$(readlink "$current" || true)"
+    previous="${previous%/}"
+    previous="${previous##*/}"
+    previous="${previous#specdriven-}"
+  fi
   rm -f "$current"
   ln -s "specdriven-$VERSION" "$current"
 else
   info "warning: $current is not a symlink; not pointing it at specdriven-$VERSION."
+fi
+
+# --- keep one version to go back to ---------------------------------------------
+
+# Every update unpacks a whole tree — a gigabyte or more once built — so the
+# older ones go: the version `current` pointed at until now stays, to go back
+# to, and every other specdriven-<version> goes with its zip. Only when
+# `current` moved from one version to another: a first install, a reinstall of
+# the same version, or a `current` this script did not make clears nothing.
+# Before the build, so a build that fails still has the old version beside it.
+if is_version "$previous" && [ "$previous" != "$VERSION" ]; then
+  removed=""
+  for entry in "$APP_DIR"/specdriven-*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    name="${entry##*/}"
+    old="${name#specdriven-}"
+    old="${old%.sha256}"
+    old="${old%-src.zip}"
+    is_version "$old" || continue
+    case "$old" in "$VERSION"|"$previous") continue ;; esac
+    rm -rf -- "$entry"
+    case " $removed " in *" $old "*) ;; *) removed="$removed $old" ;; esac
+  done
+  if [ -n "$removed" ]; then
+    info "Removed older versions:$removed (kept $previous to go back to)."
+  fi
 fi
 
 # --- Bun, which builds it -------------------------------------------------------

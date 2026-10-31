@@ -45,7 +45,7 @@ function findTool(name: string): string | null {
 /** Everything the installer shells out to, apart from the tools a test varies. */
 const BASE_TOOLS = [
   "uname", "mktemp", "rm", "mv", "ln", "mkdir", "grep", "cut", "sed", "tail",
-  "tr", "cat", "unzip", "sha256sum", "shasum", "printf", "id",
+  "tr", "cat", "unzip", "sha256sum", "shasum", "printf", "id", "readlink",
 ];
 
 /**
@@ -386,10 +386,80 @@ test("a `current` that is a real directory is never replaced", async () => {
   const current = join(home, ".specdriven", "app", "current");
   mkdirSync(current, { recursive: true });
   writeFileSync(join(current, "mine"), "");
+  seedVersion(home, "0.1.37");
   const { code, stdout } = await runInstaller(good.url, home);
   expect(code).toBe(0);
   expect(existsSync(join(current, "mine"))).toBe(true);
   expect(stdout).toContain(`warning: ${current} is not a symlink`);
+  // With no telling what was in use, no older version is cleared out.
+  expect(existsSync(join(home, ".specdriven", "app", "specdriven-0.1.37"))).toBe(true);
+});
+
+// --- clearing out older versions ---------------------------------------------
+
+/** An earlier install of `version`: its tree (built, by the look of it), zip and checksum. */
+function seedVersion(home: string, version: string): void {
+  const app = join(home, ".specdriven", "app");
+  mkdirSync(join(app, `specdriven-${version}`, "node_modules"), { recursive: true });
+  writeFileSync(join(app, `specdriven-${version}`, "package.json"), "{}");
+  writeFileSync(join(app, `specdriven-${version}-src.zip`), "zip");
+  writeFileSync(join(app, `specdriven-${version}-src.zip.sha256`), "sum");
+}
+
+test("an update keeps the version it replaces and clears out the older ones", async () => {
+  const home = freshHome();
+  const app = join(home, ".specdriven", "app");
+  seedVersion(home, "0.1.36");
+  seedVersion(home, "0.1.37");
+  seedVersion(home, OLDER);
+  // Whoever made this link spelled it out in full; it still names the version.
+  symlinkSync(join(app, `specdriven-${OLDER}`), join(app, "current"));
+  // Not versions: whatever these are, they are not the installer's to remove.
+  mkdirSync(join(app, "specdriven-mine"));
+  writeFileSync(join(app, "notes.txt"), "");
+
+  const { code, stdout, stderr } = await runInstaller(good.url, home);
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(appEntries(home)).toEqual([
+    "current",
+    "notes.txt",
+    `specdriven-${OLDER}`,
+    `specdriven-${OLDER}-src.zip`,
+    `specdriven-${OLDER}-src.zip.sha256`,
+    `specdriven-${VERSION}`,
+    `specdriven-${VERSION}-src.zip`,
+    `specdriven-${VERSION}-src.zip.sha256`,
+    "specdriven-mine",
+  ]);
+  expect(readlinkSync(join(app, "current"))).toBe(`specdriven-${VERSION}`);
+  expect(stdout).toContain(`Removed older versions: 0.1.36 0.1.37 (kept ${OLDER} to go back to).`);
+});
+
+test("going back to an older version keeps the newer one it replaces", async () => {
+  const home = freshHome();
+  const app = join(home, ".specdriven", "app");
+  seedVersion(home, "0.1.37");
+  await runInstaller(good.url, home);
+  const { code } = await runInstaller(good.url, home, { env: { SPECDRIVEN_VERSION: OLDER } });
+  expect(code).toBe(0);
+  expect(readlinkSync(join(app, "current"))).toBe(`specdriven-${OLDER}`);
+  expect(existsSync(join(app, `specdriven-${VERSION}`, "package.json"))).toBe(true);
+  expect(existsSync(join(app, "specdriven-0.1.37"))).toBe(false);
+});
+
+test("a first install, or the same version again, clears nothing out", async () => {
+  const home = freshHome();
+  const app = join(home, ".specdriven", "app");
+  seedVersion(home, "0.1.36");
+  seedVersion(home, "0.1.37");
+  for (let run = 0; run < 2; run++) {
+    const { code, stdout } = await runInstaller(good.url, home);
+    expect(code).toBe(0);
+    expect(stdout).not.toContain("Removed older versions");
+    expect(existsSync(join(app, "specdriven-0.1.36", "package.json"))).toBe(true);
+    expect(existsSync(join(app, "specdriven-0.1.37-src.zip"))).toBe(true);
+  }
 });
 
 // --- the machine it runs on --------------------------------------------------

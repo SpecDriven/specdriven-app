@@ -178,13 +178,41 @@
     # rights nor Developer Mode.
     $current = Join-Path $appDir 'current'
     $existing = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+    $previous = ''
     if ($existing -and -not ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
       Say "warning: $current is not a link; not pointing it at specdriven-$version."
     } else {
+      if ($existing -and @($existing.Target).Count -gt 0) {
+        $previous = (Split-Path -Leaf ([string]@($existing.Target)[0]).TrimEnd('\', '/')) -replace '^specdriven-', ''
+      }
       # Delete() without recursion removes the link alone, never what it points at.
       if ($existing) { $existing.Delete() }
       $linkType = if ($onWindows) { 'Junction' } else { 'SymbolicLink' }
       New-Item -ItemType $linkType -Path $current -Target $target | Out-Null
+    }
+
+    # --- keep one version to go back to ---------------------------------------
+
+    # As install.sh: the version `current` pointed at until now stays, to go
+    # back to, and every other specdriven-<version> goes with its zip -- only
+    # when `current` moved from one version to another, and before the build.
+    if ((Test-Version $previous) -and $previous -ne $version) {
+      $removed = New-Object System.Collections.Generic.List[string]
+      foreach ($entry in @(Get-ChildItem -LiteralPath $appDir -Force -Filter 'specdriven-*')) {
+        $old = $entry.Name -replace '^specdriven-', '' -replace '\.sha256$', '' -replace '-src\.zip$', ''
+        if (-not (Test-Version $old) -or $old -eq $version -or $old -eq $previous) { continue }
+        if ($entry.PSIsContainer -and -not ($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+          # .NET's recursive delete removes a junction inside the tree without
+          # following it, which Windows PowerShell 5.1's Remove-Item may not.
+          [System.IO.Directory]::Delete($entry.FullName, $true)
+        } else {
+          $entry.Delete()
+        }
+        if (-not $removed.Contains($old)) { $removed.Add($old) }
+      }
+      if ($removed.Count -gt 0) {
+        Say "Removed older versions: $($removed -join ' ') (kept $previous to go back to)."
+      }
     }
 
     # --- Bun, which builds it -------------------------------------------------
