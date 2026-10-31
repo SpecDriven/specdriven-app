@@ -54,10 +54,12 @@ import {
   NOTEBOOK,
   NOTEBOOK_FOLDER,
   PAGE_FOLDERS,
+  PROJECT_PAGE,
   ROADMAP,
   TASKS,
   isPageFile,
   isPageFolderPath,
+  isProjectPage,
   pageFolderNamed,
 } from "./pageFolders";
 import type { PageFolder } from "./pageFolders";
@@ -70,8 +72,10 @@ export {
   ROADMAP_FOLDER,
   TASKS,
   TASKS_FOLDER,
+  PROJECT_PAGE,
   isPageFile,
   isPageFolderPath,
+  isProjectPage,
   pageFolderNamed,
 } from "./pageFolders";
 export type { PageFolder } from "./pageFolders";
@@ -101,6 +105,23 @@ export interface PageListing {
   supersedes?: Supersedes;
 }
 
+/**
+ * What the sidebar shows for one project — a subfolder of the tasks
+ * (specs/app/tasks.feature.md "Projects group tasks"): its name and owner,
+ * read from its page.
+ */
+export interface ProjectListing {
+  /** The project's folder, repo-relative: `tasks/website-relaunch`. */
+  folder: string;
+  /** The page's `# <name>` heading, else the folder's name as a title. */
+  name: string;
+  /** The project member the project is assigned to, if any. */
+  assigned?: string;
+  /** The project's page, when it has one yet — a folder made before
+      projects had pages gets its page the first time it is opened. */
+  fileName?: string;
+}
+
 /** A page as the editor sees it: its listing, plus the markdown itself. */
 export interface PageView extends PageListing {
   content: string;
@@ -126,7 +147,7 @@ export async function ensurePageFolder(dataDir: string, kind: PageFolder): Promi
  * other's in name order.
  */
 export async function listPages(dataDir: string, kind: PageFolder): Promise<PageListing[]> {
-  const sorted = await pageFiles(dataDir, kind.folder);
+  const sorted = await taskFiles(dataDir, kind, kind.folder);
   const files = kind.ordered ? await inFolderOrder(dataDir, sorted) : sorted;
   return Promise.all(
     files.map(async (fileName) => {
@@ -201,6 +222,7 @@ export async function createPage(
   const stem = options.prefix ? `${options.prefix}-${slug}` : slug;
   const folder = [kind.folder, ...segments.map(slugify).filter(Boolean)].join("/");
   const fileName = safe(kind, `${folder}/${stem}.md`);
+  refuseProjectPage(kind, fileName);
   if (await fileExists(`${dataDir}/${fileName}`)) {
     throw new Error(`${capitalize(kind.label)} already exists: ${fileName}`);
   }
@@ -251,6 +273,7 @@ export async function renamePageFile(
   options: RenamePageOptions = {},
 ): Promise<{ fileName: string; name: string; message: string }> {
   const from = safe(kind, fileName);
+  if (isProjectPage(kind, from)) throw new Error("Rename the project instead");
   const current = await readTextFile(`${dataDir}/${from}`);
   if (current === null) throw new Error(`${capitalize(kind.label)} not found: ${from}`);
   // A flat folder takes the name whole, as createPage does; a nested page
@@ -261,6 +284,7 @@ export async function renamePageFile(
   if (!slug) throw new Error(`${capitalize(kind.label)} name is required`);
   const folder = from.split("/").slice(0, -1).join("/");
   const to = safe(kind, `${folder}/${datePrefixed(kind, from, slug)}.md`);
+  refuseProjectPage(kind, to);
 
   // The heading is repaired whether or not the file moves: an entry that
   // already drifted — a new title over the old file name — is renamed back to
@@ -285,7 +309,7 @@ export async function renamePageFile(
     ? [{ from: pageDocDirRel(from), to: pageDocDirRel(to) }]
     : [];
   // A renamed task keeps its place: the order names it by its new file.
-  const order = kind.ordered ? await folderOrder(dataDir, folder) : null;
+  const order = kind.ordered ? await folderOrder(dataDir, kind, folder) : null;
   const sync = await moveAndPush(
     dataDir,
     from,
@@ -325,6 +349,7 @@ export async function deletePage(
   fileName: string,
 ): Promise<{ message: string }> {
   const file = safe(kind, fileName);
+  if (isProjectPage(kind, file)) throw new Error("Delete the project instead");
   if (!(await fileExists(`${dataDir}/${file}`))) {
     throw new Error(`${capitalize(kind.label)} not found: ${file}`);
   }
@@ -336,7 +361,7 @@ export async function deletePage(
   if (kind.ordered) {
     const folder = parentOf(file);
     if ((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) !== null) {
-      await writeOrder(dataDir, folder, await folderOrder(dataDir, folder));
+      await writeOrder(dataDir, folder, await folderOrder(dataDir, kind, folder));
     }
   }
   return { message: sync.message };
@@ -360,6 +385,7 @@ export async function movePage(
 ): Promise<{ fileName: string; message: string }> {
   if (!kind.ordered) throw new Error(`${capitalize(kind.label)}s keep their name order`);
   const from = safe(kind, fileName);
+  if (isProjectPage(kind, from)) throw new Error("A project's page stays with its project");
   const folder = safeFolder(kind, toFolder);
   if (!(await fileExists(`${dataDir}/${from}`))) {
     throw new Error(`${capitalize(kind.label)} not found: ${from}`);
@@ -367,6 +393,7 @@ export async function movePage(
   if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
   const base = from.slice(from.lastIndexOf("/") + 1);
   const to = `${folder}/${base}`;
+  refuseProjectPage(kind, to);
   const anchor = before === null ? null : safe(kind, before);
   if (anchor !== null && parentOf(anchor) !== folder) {
     throw new Error(`${anchor} is not in ${folder}`);
@@ -385,10 +412,10 @@ export async function movePage(
     const sync = await moveAndPush(dataDir, from, to, `Move ${kind.label}: ${from} -> ${to}`, moves);
     message = sync.message;
     if ((await readTextFile(`${dataDir}/${left}/${PAGE_ORDER_FILE}`)) !== null) {
-      await writeOrder(dataDir, left, await folderOrder(dataDir, left));
+      await writeOrder(dataDir, left, await folderOrder(dataDir, kind, left));
     }
   }
-  const order = (await folderOrder(dataDir, folder)).filter((name) => name !== base);
+  const order = (await folderOrder(dataDir, kind, folder)).filter((name) => name !== base);
   const at = anchor === null ? -1 : order.indexOf(anchor.slice(anchor.lastIndexOf("/") + 1));
   order.splice(at === -1 ? order.length : at, 0, base);
   await writeOrder(dataDir, folder, order);
@@ -416,10 +443,55 @@ export async function listPageFolders(dataDir: string, kind: PageFolder): Promis
 }
 
 /**
+ * The projects of a folder whose subfolders are projects
+ * (specs/app/tasks.feature.md "Projects group tasks"), in the subfolders'
+ * order: each one's name and owner from its page, the folder's own name
+ * where it has none yet. Empty for any other folder.
+ */
+export async function listProjects(dataDir: string, kind: PageFolder): Promise<ProjectListing[]> {
+  if (!kind.projects) return [];
+  return Promise.all(
+    (await listPageFolders(dataDir, kind)).map(async (folder) => {
+      const fileName = `${folder}/${PROJECT_PAGE}`;
+      const text = await readTextFile(`${dataDir}/${fileName}`);
+      const page = text === null ? null : parsePage(text);
+      return {
+        folder,
+        name: page?.name || titleFromFileName(folder),
+        ...(page?.assigned ? { assigned: page.assigned } : {}),
+        ...(text === null ? {} : { fileName }),
+      };
+    }),
+  );
+}
+
+/**
+ * A project's page, made when it has none — a folder made before projects
+ * had pages, or one made by hand — headed with the folder's name as a
+ * title. Local, like a save: the sync tick commits it. Returns its path.
+ */
+export async function ensureProjectPage(
+  dataDir: string,
+  kind: PageFolder,
+  path: string,
+): Promise<string> {
+  if (!kind.projects) throw new Error(`The ${kind.folder} folder has no projects`);
+  const folder = safeFolder(kind, path);
+  if (folder === kind.folder) throw new Error("Project name is required");
+  if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Project not found: ${folder}`);
+  const fileName = `${folder}/${PROJECT_PAGE}`;
+  if (!(await fileExists(`${dataDir}/${fileName}`))) {
+    await writeProjectPage(dataDir, fileName, titleFromFileName(folder));
+  }
+  return fileName;
+}
+
+/**
  * A subfolder for pages (the Specs tree's "New folder here", for tasks):
  * each segment slugified like a page's file name, a leading folder name
  * accepted rather than doubled. Git keeps no empty folder, so it starts with
- * an empty order file, which the sync tick commits.
+ * an empty order file, which the sync tick commits. A project — a subfolder
+ * of the tasks — starts with its page too, headed with the name as typed.
  */
 export async function createPageFolder(
   dataDir: string,
@@ -434,6 +506,10 @@ export async function createPageFolder(
   if (await isDirectory(`${dataDir}/${folder}`)) throw new Error(`Folder already exists: ${folder}`);
   await mkdir(`${dataDir}/${folder}`, { recursive: true });
   await writeTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`, "");
+  if (kind.projects) {
+    const name = cleanLine(path.split("/").pop() ?? "");
+    await writeProjectPage(dataDir, `${folder}/${PROJECT_PAGE}`, name);
+  }
   return folder;
 }
 
@@ -441,7 +517,8 @@ export async function createPageFolder(
  * Rename a subfolder: it keeps its place and takes a new last segment,
  * slugified. With pages in it, a `git mv` of the folder and of its pages'
  * documents, committed and pushed like a renamed Specs folder; without,
- * renamed on disk for the sync tick to commit.
+ * renamed on disk for the sync tick to commit. A project's page takes the
+ * new name as its heading, as typed.
  */
 export async function renamePageFolder(
   dataDir: string,
@@ -452,16 +529,36 @@ export async function renamePageFolder(
   const from = safeFolder(kind, path);
   if (from === kind.folder) throw new Error("Folder name is required");
   if (!(await isDirectory(`${dataDir}/${from}`))) throw new Error(`Folder not found: ${from}`);
-  const stem = slugify(cleanLine(name).split("/").pop() ?? "");
+  const title = cleanLine(cleanLine(name).split("/").pop() ?? "");
+  const stem = slugify(title);
   if (!stem) throw new Error("Folder name is required");
   const to = safeFolder(kind, `${parentOf(from)}/${stem}`);
+  const renamed = await moveFolder(dataDir, kind, from, to);
+  if (kind.projects) {
+    const page = `${to}/${PROJECT_PAGE}`;
+    const text = await readTextFile(`${dataDir}/${page}`);
+    if (text === null) await writeProjectPage(dataDir, page, title);
+    else if (parsePage(text).name !== title) {
+      await savePage(dataDir, kind, page, serializePage({ ...parsePage(text), name: title }), text);
+    }
+  }
+  return renamed;
+}
+
+/** The folder move behind renamePageFolder. */
+async function moveFolder(
+  dataDir: string,
+  kind: PageFolder,
+  from: string,
+  to: string,
+): Promise<{ path: string; message: string }> {
   if (to === from) return { path: from, message: "already named that" };
   if (await isDirectory(`${dataDir}/${to}`)) throw new Error(`Folder already exists: ${to}`);
   const docFrom = pageDocDirRel(from);
   const docMoves = (await isDirectory(`${dataDir}/${docFrom}`))
     ? [{ from: docFrom, to: pageDocDirRel(to) }]
     : [];
-  if ((await pageFiles(dataDir, from)).length === 0) {
+  if ((await taskFiles(dataDir, kind, from)).length === 0) {
     for (const m of [{ from, to }, ...docMoves]) {
       await mkdir(`${dataDir}/${parentOf(m.to)}`, { recursive: true });
       await rename(`${dataDir}/${m.from}`, `${dataDir}/${m.to}`);
@@ -485,7 +582,7 @@ export async function deletePageFolder(
   const folder = safeFolder(kind, path);
   if (folder === kind.folder) throw new Error("Folder name is required");
   if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
-  const pages = (await pageFiles(dataDir, folder)).length;
+  const pages = (await taskFiles(dataDir, kind, folder)).length;
   const docFolder = pageDocDirRel(folder);
   const paths = [folder, ...((await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : [])];
   let message = "folder deleted";
@@ -688,9 +785,30 @@ async function inFolderOrder(dataDir: string, files: string[]): Promise<string[]
   return out;
 }
 
+/**
+ * The pages under a folder that are the folder's own kind of page: every
+ * markdown page but a project's own (specs/app/tasks.feature.md "Projects
+ * group tasks") — what is listed, ordered and counted as tasks.
+ */
+async function taskFiles(dataDir: string, kind: PageFolder, rel: string): Promise<string[]> {
+  return (await pageFiles(dataDir, rel)).filter((file) => !isProjectPage(kind, file));
+}
+
+/** A task cannot take the file name a project's own page has. */
+function refuseProjectPage(kind: PageFolder, fileName: string): void {
+  if (isProjectPage(kind, fileName)) {
+    throw new Error(`“${PROJECT_PAGE}” is the project's own page — name the ${kind.label} differently`);
+  }
+}
+
+/** Write a project's page, through its document — local, for the sync tick to commit. */
+async function writeProjectPage(dataDir: string, fileName: string, name: string): Promise<void> {
+  await writeTextFile(`${dataDir}/${fileName}`, await absorb(dataDir, fileName, serializePage({ name, body: "" })));
+}
+
 /** A folder's pages' file names in its order — its own pages, not its subfolders'. */
-async function folderOrder(dataDir: string, folder: string): Promise<string[]> {
-  const names = (await pageFiles(dataDir, folder))
+async function folderOrder(dataDir: string, kind: PageFolder, folder: string): Promise<string[]> {
+  const names = (await taskFiles(dataDir, kind, folder))
     .filter((file) => parentOf(file) === folder)
     .map((file) => file.slice(folder.length + 1));
   return inOrder(names, parseOrder((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) ?? ""));

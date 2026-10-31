@@ -8,7 +8,8 @@
 
 import { useSyncExternalStore } from "react";
 import { ListTodo, Map as MapIcon, NotebookPen, type LucideIcon } from "lucide-react";
-import type { PageListing } from "../../server/pages";
+import { PROJECT_PAGE, isProjectPage } from "../../server/pageFolders";
+import type { PageListing, ProjectListing } from "../../server/pages";
 
 /** One special folder's tab: what it is called and what its pages can do. */
 export interface PageTab {
@@ -42,6 +43,12 @@ export interface PageTab {
    * roadmap pages"). The server keeps the order (src/server/pageOrder.ts).
    */
   ordered?: boolean;
+  /**
+   * Whether its subfolders are projects (specs/app/tasks.feature.md
+   * "Projects group tasks"): each one headed by its name and owner, opening
+   * its own page — the tasks only. Elsewhere a subfolder is just a folder.
+   */
+  projects?: boolean;
   icon: LucideIcon;
   /** The `g` chord that opens the tab on its first page. */
   shortcut: string;
@@ -69,6 +76,7 @@ export const TASKS_TAB: PageTab = {
   done: true,
   calendar: true,
   ordered: true,
+  projects: true,
   icon: ListTodo,
   shortcut: "g t",
   order: 20,
@@ -97,11 +105,13 @@ export interface PagesState {
   /** An ordered tab's subfolders, repo-relative — empty ones included, so a
       folder just made has a row before a page lands in it. */
   folders: string[];
+  /** The tasks' projects — their subfolders — each with its name and owner. */
+  projects: ProjectListing[];
   /** Whether `GET /api/<folder>` has answered since the last reset. */
   loaded: boolean;
 }
 
-const EMPTY: PagesState = { pages: [], supersededBy: {}, folders: [], loaded: false };
+const EMPTY: PagesState = { pages: [], supersededBy: {}, folders: [], projects: [], loaded: false };
 
 export interface PagesStore {
   subscribe(listener: () => void): () => void;
@@ -142,11 +152,13 @@ export function createPagesStore(folder: string): PagesStore {
         pages?: PageListing[];
         supersededBy?: Record<string, PageListing>;
         folders?: string[];
+        projects?: ProjectListing[];
       };
       set({
         pages: Array.isArray(data.pages) ? data.pages : [],
         supersededBy: data.supersededBy ?? {},
         folders: Array.isArray(data.folders) ? data.folders : [],
+        projects: Array.isArray(data.projects) ? data.projects : [],
         loaded: true,
       });
     },
@@ -154,6 +166,18 @@ export function createPagesStore(folder: string): PagesStore {
       set(EMPTY);
     },
     upsert(listing) {
+      // A project's page names its project: the header follows its heading
+      // and its owner, as a task's row follows its own.
+      const j = state.projects.findIndex((p) => p.fileName === listing.fileName);
+      if (j !== -1) {
+        const was = state.projects[j]!;
+        if (was.name === listing.name && (was.assigned ?? "") === (listing.assigned ?? "")) return;
+        const { assigned: _was, ...rest } = was;
+        const projects = [...state.projects];
+        projects[j] = { ...rest, name: listing.name, ...(listing.assigned ? { assigned: listing.assigned } : {}) };
+        set({ ...state, projects });
+        return;
+      }
       const i = state.pages.findIndex((p) => p.fileName === listing.fileName);
       if (i === -1 || pageListingMetaEqual(state.pages[i]!, listing)) return;
       const pages = [...state.pages];
@@ -233,6 +257,20 @@ export function pageGroups(
   return [...groups]
     .sort(([a], [b]) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b)))
     .map(([dir, list]) => ({ dir, pages: list }));
+}
+
+/**
+ * Whether a file is a project's own page rather than one of the tab's pages
+ * (specs/app/tasks.feature.md "Projects group tasks") — the header it gets
+ * is the project's: no Done button, no calendar chip.
+ */
+export function isProjectPageOf(tab: PageTab, fileName: string): boolean {
+  return Boolean(tab.projects) && isProjectPage({ folder: tab.folder, label: tab.noun, projects: true }, fileName);
+}
+
+/** A project's page, in its folder: `tasks/launch` -> `tasks/launch/project.md`. */
+export function projectPageOf(folder: string): string {
+  return `${folder}/${PROJECT_PAGE}`;
 }
 
 /** The repo-relative folder a page is in: `tasks/sub/a.md` -> `tasks/sub`. */

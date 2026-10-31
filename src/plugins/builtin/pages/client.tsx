@@ -56,8 +56,10 @@ export function pagesClient(folder: PageTab): Plugin<Context, ClientConfig | und
     return listed ? { fileName: listed.fileName } : null;
   };
 
+  // A project's page goes by its project's name, not by `project.md`.
   const nameOf = (fileName: string): string =>
     store.state().pages.find((p) => p.fileName === fileName)?.name ??
+    store.state().projects.find((p) => p.fileName === fileName)?.name ??
     titleFromFileName(fileName.replace(/\.md$/, ""));
 
   function Pane({ view, app, navigate }: ComponentProps<TabPlugin<PageRoute>["Pane"]>) {
