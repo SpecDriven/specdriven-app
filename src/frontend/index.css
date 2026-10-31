@@ -9684,3 +9684,18 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   justify-content: space-between;
   gap: 0.5rem;
 }
+
+/* A project's header in the Tasks sidebar (specs/app/tasks.feature.md
+   "Projects group tasks"): the name links to the project's page, and the
+   owner's initials sit beside it. */
+.page-folder .project-name {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.page-folder .project-owner {
+  flex: none;
+  text-transform: none;
+  letter-spacing: normal;
+}
