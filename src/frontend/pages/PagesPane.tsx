@@ -25,7 +25,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import type { PageListing } from "../../server/pages";
+import type { PageListing, ProjectListing } from "../../server/pages";
 import type { ProjectMember } from "../../server/members";
 import { parsePage, serializePage } from "../../server/parser";
 import {
@@ -53,11 +53,13 @@ import { shareUrl } from "../shareLink";
 import { cleanLine } from "../../server/text";
 import {
   dropPlacement,
+  isProjectPageOf,
   pageFolderOf,
   pageGroups,
   pageListingMetaEqual,
   pageListingOf,
   pageRowTitle,
+  projectPageOf,
   stepPlacement,
   usePageSettings,
   usePages,
@@ -549,6 +551,15 @@ export function PagePane({
   );
   const replacedBy = supersededBy[page.fileName];
   const kind = entryKindOf(page);
+  /**
+   * A project's own page (specs/app/tasks.feature.md "Projects group
+   * tasks"): assigned like a task, but never ticked off or put on the
+   * calendar — its tasks are, and the header counts them instead.
+   */
+  const project = isProjectPageOf(tab, page.fileName);
+  const projectTasks = project
+    ? folderPages.filter((p) => pageFolderOf(p.fileName) === pageFolderOf(page.fileName))
+    : [];
 
   return (
     <>
@@ -587,6 +598,16 @@ export function PagePane({
       </header>
       {(app.assignments || tab.done || tab.dated) && (
         <div className="props">
+          {project && (
+            <span className="chip muted project-progress">
+              <CheckCircle2 size={14} aria-hidden="true" />
+              {projectTasks.length === 0
+                ? "No tasks yet"
+                : `${projectTasks.filter((p) => p.done).length} of ${projectTasks.length} ${
+                    projectTasks.length === 1 ? "task" : "tasks"
+                  } done`}
+            </span>
+          )}
           {/* A notebook entry's header
               (specs/app/engineering-notebook.feature.md): the kind chip that
               changes it, the decision it supersedes, and the author and date
@@ -693,7 +714,7 @@ export function PagePane({
           {/* The Done button (specs/app/tasks.feature.md): a task is finished
               or it is not, and the chip says which. Tasks only — a roadmap
               page is never ticked off. */}
-          {tab.done && (
+          {tab.done && !project && (
             <button
               type="button"
               className={`chip page-done${page.done ? " is-done" : " muted"}`}
@@ -713,7 +734,7 @@ export function PagePane({
               Google Calendar"): the task's estimate, or the invitation to
               make one and put the task on the calendar. Tasks only, and only
               with the Google Calendar switch on. */}
-          {tab.calendar && googleCalendar && (
+          {tab.calendar && googleCalendar && !project && (
             <span className="chip-anchor calendar-anchor">
               <button
                 type="button"
@@ -801,7 +822,7 @@ export function PagePane({
         value={text}
         onChange={setText}
         highlight={terms ?? undefined}
-        placeholder={`Write this ${tab.noun} in Markdown…`}
+        placeholder={project ? "Describe this project in Markdown…" : `Write this ${tab.noun} in Markdown…`}
       />
     </>
   );
@@ -885,7 +906,9 @@ export async function newPageFlow(
  * (specs/app/roadmap.feature.md "Reorder roadmap pages") — also lets a row be
  * dragged into place, adds Move up, Move down and Move to folder… to its
  * menu, and gives each subfolder the ⋯ menu a Specs folder has: New task
- * here, New folder here, Rename, Delete.
+ * here, New folder here, Rename, Delete. The tasks' subfolders are projects
+ * (specs/app/tasks.feature.md "Projects group tasks"): each header shows the
+ * project's name and owner and opens the project's page.
  */
 export function PagesSidebar({
   tab,
@@ -904,7 +927,7 @@ export function PagesSidebar({
   /** The open page's editor, if the pane holds one of this tab's pages. */
   openPage: () => OpenPageHandle | null;
 }) {
-  const { pages, supersededBy, folders } = usePages(store);
+  const { pages, supersededBy, folders, projects } = usePages(store);
   /** A row's ⋯ menu (file name, or `folder:<path>` for a folder's), if open. */
   const [menu, setMenu] = useState<string | null>(null);
   /** The page being dragged, if any — an ordered tab's only. */
@@ -917,6 +940,35 @@ export function PagesSidebar({
   const groups = tab.dated ? entryGroups(pages) : pageGroups(pages, ordered ? folders : []);
   const folderPath = (dir: string) => (dir ? `${tab.folder}/${dir}` : tab.folder);
   const folderMenuKey = (dir: string) => `folder:${dir}`;
+  /** What a subfolder is called: a project, in the tasks. */
+  const folderWord = tab.projects ? "project" : "folder";
+  /** A subfolder's project — its name and owner — when the tab has projects. */
+  const projectOf = (dir: string) =>
+    tab.projects ? projects.find((p) => p.folder === folderPath(dir)) : undefined;
+  /** What a subfolder's header and prompts call it. */
+  const folderName = (dir: string) => projectOf(dir)?.name ?? dir;
+
+  /**
+   * Open a project's page — made first when the project has none yet, a
+   * folder from before projects had pages.
+   */
+  const openProject = async (dir: string) => {
+    const known = projectOf(dir)?.fileName;
+    if (known) {
+      navigate({ fileName: known }, { push: true });
+      return;
+    }
+    const res = await fetch(`/api/${tab.folder}-folders/${encodeURIComponent(folderPath(dir))}/page`, {
+      method: "POST",
+    });
+    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
+    if (!res.ok || !data.fileName) {
+      toast.error(data.error ?? "Could not open the project");
+      return;
+    }
+    await store.load();
+    navigate({ fileName: data.fileName }, { push: true });
+  };
 
   const endDrag = () => {
     setDragging(null);
@@ -1041,13 +1093,22 @@ export function PagesSidebar({
     const from = pageFolderOf(page.fileName);
     const options = [tab.folder, ...folders]
       .filter((f) => f !== from)
-      .map((f) => ({ value: f, label: f === tab.folder ? `Top of ${tab.title}` : f.slice(tab.folder.length + 1) }));
+      .map((f) => ({
+        value: f,
+        label:
+          f === tab.folder
+            ? tab.projects
+              ? `No project — top of ${tab.title}`
+              : `Top of ${tab.title}`
+            : folderName(f.slice(tab.folder.length + 1)),
+      }));
     const to = await app.pick({
       title: `Move “${page.name}”`,
-      hint: "To another folder — a git mv, committed and pushed.",
-      placeholder: "Find a folder…",
+      hint: `To another ${folderWord} — a git mv, committed and pushed.`,
+      placeholder: `Find a ${folderWord}…`,
       options,
-      empty: options.length === 0 ? "There is no other folder to move it to." : "No folder matches.",
+      empty:
+        options.length === 0 ? `There is no other ${folderWord} to move it to.` : `No ${folderWord} matches.`,
     });
     if (to === null) return;
     await placePage(page.fileName, to, null);
@@ -1056,9 +1117,9 @@ export function PagesSidebar({
   /** New folder: at the top level from the sidebar's button, else inside one. */
   const createFolderIn = async (dir: string) => {
     const input = await app.prompt({
-      title: dir ? `New folder in “${dir}”` : "New folder",
+      title: dir ? `New ${folderWord} in “${folderName(dir)}”` : `New ${folderWord}`,
       hint: dir ? undefined : "Use / for nesting.",
-      confirmLabel: "Create folder",
+      confirmLabel: `Create ${folderWord}`,
     });
     if (!input) return;
     const res = await fetch(`/api/${tab.folder}-folders`, {
@@ -1068,19 +1129,22 @@ export function PagesSidebar({
     });
     const data = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
     if (!res.ok) {
-      toast.error(data.error ?? "Could not create the folder");
+      toast.error(data.error ?? `Could not create the ${folderWord}`);
       return;
     }
     await store.load();
   };
 
-  /** Rename a folder: it keeps its place, and its tasks' urls follow it. */
+  /**
+   * Rename a folder: it keeps its place, and its tasks' urls follow it. A
+   * project's page takes the name as typed.
+   */
   const renameFolder = async (dir: string) => {
     const path = folderPath(dir);
-    const current = dir.split("/").pop()!;
+    const current = projectOf(dir)?.name ?? dir.split("/").pop()!;
     const name = await app.prompt({
-      title: "Rename folder",
-      hint: "The folder keeps its place; names are slugified like file names.",
+      title: `Rename ${folderWord}`,
+      hint: `The ${folderWord} keeps its place; its folder name is slugified like a file name.`,
       initial: current,
       confirmLabel: "Rename",
     });
@@ -1095,12 +1159,20 @@ export function PagesSidebar({
     });
     const data = (await res.json().catch(() => ({}))) as { path?: string; error?: string };
     if (!res.ok || !data.path) {
-      toast.error(data.error ?? "Could not rename the folder");
+      toast.error(data.error ?? `Could not rename the ${folderWord}`);
       return;
     }
     await store.load();
-    if (data.path === path) return;
-    toast.success(`Renamed folder to ${data.path.split("/").pop()}.`);
+    // The open project page shows its new heading.
+    if (data.path === path) {
+      if (inside) await openPage()?.reload();
+      return;
+    }
+    toast.success(
+      tab.projects
+        ? `Renamed project to “${cleanLine(name)}”.`
+        : `Renamed folder to ${data.path.split("/").pop()}.`,
+    );
     const still = openPage();
     if (inside && still?.fileName.startsWith(`${path}/`)) {
       navigate({ fileName: `${data.path}${still.fileName.slice(path.length)}` });
@@ -1113,12 +1185,12 @@ export function PagesSidebar({
     const count = pages.filter((p) => p.fileName.startsWith(`${path}/`)).length;
     const nouns = `${tab.noun}${count === 1 ? "" : "s"}`;
     const ok = await app.confirm({
-      title: "Delete folder",
+      title: `Delete ${folderWord}`,
       body:
         count === 0
-          ? `Delete the empty folder “${dir}”?`
-          : `Delete “${dir}” and the ${count} ${nouns} in it? They are removed from the repository, committed and pushed.`,
-      confirmLabel: count === 0 ? "Delete folder" : `Delete folder and ${count} ${nouns}`,
+          ? `Delete the empty ${folderWord} “${folderName(dir)}”?`
+          : `Delete “${folderName(dir)}” and the ${count} ${nouns} in it? They are removed from the repository, committed and pushed.`,
+      confirmLabel: count === 0 ? `Delete ${folderWord}` : `Delete ${folderWord} and ${count} ${nouns}`,
     });
     if (!ok) return;
     const open = openPage();
@@ -1131,10 +1203,10 @@ export function PagesSidebar({
     });
     const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
     if (!res.ok) {
-      toast.error(data.error ?? "Could not delete the folder");
+      toast.error(data.error ?? `Could not delete the ${folderWord}`);
       return;
     }
-    toast.success(`Deleted folder “${dir}”${data.message ? ` — ${data.message}` : ""}.`);
+    toast.success(`Deleted ${folderWord} “${folderName(dir)}”${data.message ? ` — ${data.message}` : ""}.`);
     await store.load();
   };
 
@@ -1146,10 +1218,17 @@ export function PagesSidebar({
       aria-labelledby={`side-tab-${tab.folder}`}
     >
       <div className="sidebar-actions">
+        {/* A project holds tasks, so it comes first; a plain folder follows
+            the page it would hold. */}
+        {ordered && tab.projects && (
+          <button onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
+        )}
         <button onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}>
           + New {tab.noun}
         </button>
-        {ordered && <button onClick={() => void createFolderIn("")}>+ New folder</button>}
+        {ordered && !tab.projects && (
+          <button onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
+        )}
       </div>
       <div className="page-rows">
         {groups.map(({ dir, pages: group }) => (
@@ -1175,13 +1254,23 @@ export function PagesSidebar({
                   dropOn({ folder: folderPath(dir) });
                 }}
               >
-                <span className="page-folder-name">{dir}</span>
+                {tab.projects ? (
+                  <ProjectHeader
+                    project={projectOf(dir)}
+                    dir={dir}
+                    href={pageLink(projectPageOf(folderPath(dir)))}
+                    active={active === projectPageOf(folderPath(dir))}
+                    onOpen={() => void openProject(dir)}
+                  />
+                ) : (
+                  <span className="page-folder-name">{dir}</span>
+                )}
                 <span className="tree-row-menu">
                   <Tooltip label="More actions">
                     <button
                       type="button"
                       className="tree-menu-btn"
-                      aria-label={`Menu for folder ${dir}`}
+                      aria-label={`Menu for ${folderWord} ${folderName(dir)}`}
                       aria-haspopup="menu"
                       aria-expanded={menu === folderMenuKey(dir)}
                       onClick={() =>
@@ -1194,7 +1283,7 @@ export function PagesSidebar({
                   <Menu
                     open={menu === folderMenuKey(dir)}
                     onClose={() => setMenu(null)}
-                    label={`Menu for folder ${dir}`}
+                    label={`Menu for ${folderWord} ${folderName(dir)}`}
                     className="tree-menu"
                     containerSelector=".tree-row-menu"
                     items={[
@@ -1207,7 +1296,7 @@ export function PagesSidebar({
                       },
                       {
                         id: "new-folder",
-                        label: "New folder here",
+                        label: `New ${folderWord} here`,
                         icon: <NewFolderIcon size={13} />,
                         onSelect: () => void createFolderIn(dir),
                       },
@@ -1340,7 +1429,7 @@ export function PagesSidebar({
                               },
                               {
                                 id: "move",
-                                label: "Move to folder…",
+                                label: `Move to ${folderWord}…`,
                                 icon: <FolderInput size={13} />,
                                 onSelect: () => void movePagePrompt(page),
                               },
@@ -1376,5 +1465,45 @@ export function PagesSidebar({
         {pages.length === 0 && <p className="empty">{tab.empty}</p>}
       </div>
     </div>
+  );
+}
+
+/**
+ * A project's header in the Tasks sidebar (specs/app/tasks.feature.md
+ * "Projects group tasks"): its name, and its owner's initials when it is
+ * assigned — a link to the project's page.
+ */
+function ProjectHeader({
+  project,
+  dir,
+  href,
+  active,
+  onOpen,
+}: {
+  /** The project's listing — missing only before the first load lands. */
+  project: ProjectListing | undefined;
+  /** The folder under the tab's own, `website-relaunch`. */
+  dir: string;
+  href: string;
+  /** Whether the project's page is the one open in the pane. */
+  active: boolean;
+  onOpen: () => void;
+}) {
+  const name = project?.name ?? dir;
+  return (
+    <a
+      href={href}
+      className={`page-folder-name project-name${active ? " active" : ""}`}
+      title={project?.assigned ? `${name} — assigned to ${project.assigned}` : name}
+      aria-current={active ? "page" : undefined}
+      onClick={(e) => spaClick(e, onOpen)}
+    >
+      {name}
+      {project?.assigned && (
+        <span className="avatar chip-avatar project-owner" aria-label={`Assigned to ${project.assigned}`}>
+          {initialsOf(project.assigned)}
+        </span>
+      )}
+    </a>
   );
 }

@@ -25,6 +25,13 @@ export interface PageFolder {
    * roadmap's pages (specs/app/roadmap.feature.md "Reorder roadmap pages").
    */
   ordered?: boolean;
+  /**
+   * Whether its subfolders are projects (specs/app/tasks.feature.md
+   * "Projects group tasks"): each one a group of tasks with a page of its
+   * own — a `project.md` beside them holding the project's name, the member
+   * it is assigned to and what it is about. The tasks only.
+   */
+  projects?: boolean;
 }
 
 export const ROADMAP_FOLDER = "roadmap";
@@ -35,7 +42,27 @@ export const NOTEBOOK_FOLDER = "notebook";
 export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page", ordered: true };
 
 /** The tasks folder: the same pages, called tasks (tasks.feature.md). */
-export const TASKS: PageFolder = { folder: TASKS_FOLDER, label: "task", ordered: true };
+export const TASKS: PageFolder = {
+  folder: TASKS_FOLDER,
+  label: "task",
+  ordered: true,
+  projects: true,
+};
+
+/** A project's own page, in its folder beside its tasks. */
+export const PROJECT_PAGE = "project.md";
+
+/**
+ * True for a project's own page — `tasks/<project>/project.md`, never a
+ * task: it is left out of the task list, its order and its counts. A
+ * `project.md` at the top of the folder is an ordinary task, since only a
+ * subfolder is a project.
+ */
+export function isProjectPage(kind: PageFolder, fileName: string): boolean {
+  if (!kind.projects) return false;
+  const segments = fileName.split("/");
+  return segments.length >= 3 && segments[0] === kind.folder && segments.at(-1) === PROJECT_PAGE;
+}
 
 /**
  * The notebook folder: the same pages again, called entries and kept flat

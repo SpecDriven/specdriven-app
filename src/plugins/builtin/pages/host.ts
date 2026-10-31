@@ -25,9 +25,11 @@ import {
   deletePage,
   deletePageFolder,
   ensurePageFolder,
+  ensureProjectPage,
   importPageDrift,
   listPageFolders,
   listPages,
+  listProjects,
   movePage,
   readPage,
   renamePageFile,
@@ -153,11 +155,13 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
         });
       } else {
         // An ordered folder lists its subfolders too, empty ones included,
-        // so a folder just made has a row to drop a task on.
+        // so a folder just made has a row to drop a task on — and the tasks'
+        // subfolders as the projects they are, each with its name and owner.
         add("GET", base, async (dir) =>
           json({
             pages: await listPages(dir, kind),
             ...(kind.ordered ? { folders: await listPageFolders(dir, kind) } : {}),
+            ...(kind.projects ? { projects: await listProjects(dir, kind) } : {}),
           }),
         );
         add("POST", base, async (dir, req) => {
@@ -190,6 +194,15 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
         });
         add("DELETE", `${base}-folders/:path`, async (dir, _req, params) =>
           json(await deletePageFolder(dir, kind, params.path ?? "")),
+        );
+      }
+
+      // A project's page (specs/app/tasks.feature.md "Projects group
+      // tasks"), made the first time a project without one is opened; read,
+      // saved and assigned like any task's page from then on.
+      if (kind.projects) {
+        add("POST", `${base}-folders/:path/page`, async (dir, _req, params) =>
+          json({ fileName: await ensureProjectPage(dir, kind, params.path ?? "") }),
         );
       }
 
