@@ -20,6 +20,7 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { delimiter, join } from "node:path";
@@ -280,6 +281,34 @@ test.skipIf(!PWSH)("a version already unpacked is left alone, and `current` move
   expect(run.stdout).toContain(`SpecDriven ${OLDER} is already unpacked`);
   expect(existsSync(join(app, `specdriven-${OLDER}`, "mine"))).toBe(true);
   expect(realpathSync(join(app, "current"))).toBe(realpathSync(join(app, `specdriven-${OLDER}`)));
+});
+
+test.skipIf(!PWSH)("an update keeps the version it replaces and clears out the older ones", async () => {
+  const home = freshHome();
+  const app = join(home, ".specdriven", "app");
+  for (const old of ["0.1.36", "0.1.37"]) {
+    mkdirSync(join(app, `specdriven-${old}`, "node_modules"), { recursive: true });
+    writeFileSync(join(app, `specdriven-${old}-src.zip`), "zip");
+    writeFileSync(join(app, `specdriven-${old}-src.zip.sha256`), "sum");
+  }
+  mkdirSync(join(app, "specdriven-mine"));
+  await runInstaller(good.url, home, { env: { SPECDRIVEN_VERSION: OLDER } });
+  // The first install had nothing it replaced, so nothing went.
+  expect(existsSync(join(app, "specdriven-0.1.36"))).toBe(true);
+
+  const { code, stdout } = await runInstaller(good.url, home);
+  expect(code).toBe(0);
+  expect(appEntries(home)).toEqual([
+    "current",
+    `specdriven-${OLDER}`,
+    `specdriven-${OLDER}-src.zip`,
+    `specdriven-${OLDER}-src.zip.sha256`,
+    `specdriven-${VERSION}`,
+    `specdriven-${VERSION}-src.zip`,
+    `specdriven-${VERSION}-src.zip.sha256`,
+    "specdriven-mine",
+  ]);
+  expect(stdout).toContain(`Removed older versions: 0.1.36 0.1.37 (kept ${OLDER} to go back to).`);
 });
 
 test.skipIf(!PWSH)("a `current` that is a real directory is never replaced", async () => {
