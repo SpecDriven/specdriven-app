@@ -33,6 +33,7 @@ import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setAhaTokenBackend } from "../server/ahaTokens";
 import { LEGACY_SECRET_FILES, setSecretBackendFactory } from "../server/secrets";
 import { DESKTOP_SCHEME } from "../frontend/route";
+import { contextMenuTemplate } from "./contextMenu";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
 import {
@@ -252,7 +253,26 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Spell check (specs/editor/common-editor.feature.md "Spell check"):
+      // Chromium's checker, Electron's default, named so nobody wonders. The
+      // OS checker on macOS; Hunspell on Windows and Linux, whose dictionary
+      // for the OS language downloads on first use. Which fields it checks
+      // is the renderer's call (src/frontend/spellCheckPref.ts).
+      spellcheck: true,
     },
+  });
+
+  // The right-click menu (src/electron/contextMenu.ts): suggestions for a
+  // misspelt word and the edit verbs — Electron has no menu of its own, so
+  // without this the underline led nowhere.
+  win.webContents.on("context-menu", (_event, params) => {
+    const wc = win?.webContents;
+    if (!wc) return;
+    const template = contextMenuTemplate(params, {
+      replaceMisspelling: (word) => wc.replaceMisspelling(word),
+      addToDictionary: (word) => void wc.session.addWordToSpellCheckerDictionary(word),
+    });
+    if (template && win) Menu.buildFromTemplate(template).popup({ window: win });
   });
 
   if (saved?.maximized) win.maximize();

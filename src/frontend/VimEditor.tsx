@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -21,6 +21,7 @@ import { atQuery, filterChoices } from "./entityFields";
 import type { FieldChoice } from "./entityFields";
 import { termsPattern } from "./highlight";
 import { isOpenLinkClick, webLinkAt, webLinks } from "./weblinks";
+import { spellCheckContentAttributes, useSpellCheck } from "./spellCheckPref";
 
 // Vim mode (specs/ui/ui.feature.md "Settings"): the Markdown editor's Vim tab
 // is a CodeMirror 6 editor running the Replit vim extension — modal editing
@@ -179,6 +180,12 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
   latest.current = { onChange, onPasteFiles, onShortcut, onCaretMove, completions, onOpenLink };
   const terms = highlight && highlight.length > 0 ? highlight : null;
   const termsKey = terms?.join(" ") ?? "";
+  // Spell check (src/frontend/spellCheckPref.ts): CodeMirror turns the
+  // browser's checker off on its editable element; the Vim tab holds prose,
+  // so it follows the Settings switch like the Write tab's textarea does. A
+  // compartment, so a flip reaches an editor that is already open.
+  const spellCheck = useSpellCheck();
+  const spellCheckConf = useRef(new Compartment());
 
   useImperativeHandle(ref, () => ({
     focus: () => view.current?.focus(),
@@ -260,6 +267,9 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
           history(),
           drawSelection(),
           EditorView.lineWrapping,
+          spellCheckConf.current.of(
+            EditorView.contentAttributes.of(spellCheckContentAttributes(spellCheck)),
+          ),
           markdown(),
           syntaxHighlighting(markdownStyle),
           placeholder ? placeholderExt(placeholder) : [],
@@ -330,6 +340,14 @@ export const VimEditor = forwardRef<TextSurface, VimEditorProps>(function VimEdi
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [termsKey, placeholder]);
+
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: spellCheckConf.current.reconfigure(
+        EditorView.contentAttributes.of(spellCheckContentAttributes(spellCheck)),
+      ),
+    });
+  }, [spellCheck]);
 
   // Controlled value: an edit made elsewhere (the scenario table widget, the
   // toolbar) lands as the smallest change, so the caret keeps its place.
