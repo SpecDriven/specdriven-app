@@ -44,6 +44,7 @@ import { ImageSizingContext } from "./MarkdownImage";
 import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
 import { FONT_SCALES, applyFontScale, stepFontScale, useFontScale } from "./fontSizePref";
+import { useSpellCheck } from "./spellCheckPref";
 import { atQuery, entityFields, filterChoices, insertChoice, useEntityFields } from "./entityFields";
 import type { FieldChoice } from "./entityFields";
 import { anchorVisible, measureOffset, placePopup } from "./caretPosition";
@@ -122,6 +123,8 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const vimOn = useVimMode();
   const fontScale = useFontScale();
+  // Spell check (src/frontend/spellCheckPref.ts): the Write tab holds prose.
+  const spellCheck = useSpellCheck();
   const [tab, setTab] = useState<Tab>(
     readOnly || initialTab === "preview" ? "preview" : vimOn ? "vim" : "write",
   );
@@ -833,7 +836,7 @@ export function MarkdownEditor({
             value={value}
             readOnly={readOnly}
             placeholder={placeholder}
-            spellCheck={false}
+            spellCheck={spellCheck}
             onChange={(e) => {
               sel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
               setCaret(e.target.selectionStart);

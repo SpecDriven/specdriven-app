@@ -112,6 +112,7 @@ import { SaveIndicator, Toaster, toast } from "./Toasts";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
+import { applySpellCheckPref, useSpellCheck } from "./spellCheckPref";
 import {
   applyExcalidrawPref,
   setExcalidrawDemoMode,
@@ -1810,6 +1811,9 @@ export function App() {
   // Excalidraw support (specs/editor/excalidraw-support.feature.md): device-
   // local too; every Markdown editor's toolbar follows the switch.
   const excalidrawOn = useExcalidrawEnabled();
+  // Spell check (specs/editor/common-editor.feature.md "Spell check"): on by
+  // default, device-local; every prose field follows (src/frontend/spellCheckPref.ts).
+  const spellCheckOn = useSpellCheck();
   // The Pomodoro (specs/app/pomodoro.feature.md): off until asked for, and
   // device-local like the rest (src/frontend/pomodoroPref.ts). Off means the
   // bar, the `p` key and the palette's entries are all gone.
@@ -8090,6 +8094,28 @@ export function App() {
           </span>
         </label>
         )}
+        {/* Spell check (specs/editor/common-editor.feature.md "Spell check"):
+            the browser's checker in every prose field, on by default and
+            remembered on this device (src/frontend/spellCheckPref.ts). */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Spell check
+            <span className="settings-row-hint">
+              Underlines misspelt words in every editor and message box, with
+              suggestions on right-click. Fields that hold urls, names and code are
+              left alone. Remembered on this device.
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={spellCheckOn}
+              onChange={(e) => applySpellCheckPref(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
         {/* Excalidraw support (specs/editor/excalidraw-support.feature.md):
             a diagram button in every Markdown editor's toolbar, remembered
             on this device. The demo keeps the row and starts it on
@@ -11761,7 +11787,7 @@ export function App() {
                 className="conflict-draft"
                 value={conflictDraft}
                 onChange={(e) => setConflictDraft(e.target.value)}
-                spellCheck={false}
+                spellCheck={spellCheckOn}
               />
             </section>
             <div className="dialog-actions conflict-actions">

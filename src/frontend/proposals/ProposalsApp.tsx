@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { renderMarkdown } from "../markdown";
+import { useSpellCheck } from "../spellCheckPref";
 
 export interface Quota {
   used: number;
@@ -133,6 +134,7 @@ export interface ScenarioFormProps {
 }
 
 export function ScenarioFields(p: Omit<ScenarioFormProps, "busy" | "onSubmit">) {
+  const spellCheck = useSpellCheck();
   return (
     <>
       <label>
@@ -152,6 +154,7 @@ export function ScenarioFields(p: Omit<ScenarioFormProps, "busy" | "onSubmit">) 
           value={p.body}
           rows={6}
           required
+          spellCheck={spellCheck}
           disabled={p.disabled}
           onChange={(e) => p.onBody(e.target.value)}
         />
@@ -209,6 +212,7 @@ export function ProposalsApp() {
   const [featureName, setFeatureName] = useState("");
   const [featureFolder, setFeatureFolder] = useState("specs");
   const [description, setDescription] = useState("");
+  const spellCheck = useSpellCheck();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string; href?: string } | null>(() => {
     const problem = signInProblem(new URLSearchParams(window.location.search).get("signin"));
@@ -397,6 +401,7 @@ export function ProposalsApp() {
                   value={description}
                   rows={3}
                   disabled={!allowed}
+                  spellCheck={spellCheck}
                   onChange={(e) => setDescription(e.target.value)}
                 />
               </label>

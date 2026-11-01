@@ -28,6 +28,7 @@ import { Menu, type MenuItem } from "./Menu";
 import type { PromptOptions } from "./ModalPrompts";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
+import { useSpellCheck } from "./spellCheckPref";
 import { toast } from "./Toasts";
 import { cleanLine, cleanText } from "../server/text";
 import {
@@ -865,6 +866,7 @@ function PermissionCard({
 }) {
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState("");
+  const spellCheck = useSpellCheck();
   const done = item.resolved;
   const who = agent.label;
   const remember = agent.capabilities.rememberPermissions;
@@ -894,6 +896,7 @@ function PermissionCard({
             type="text"
             aria-label="Why not"
             placeholder={`Why not? Optional — ${who} reads it`}
+            spellCheck={spellCheck}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             onKeyDown={(e) => {
@@ -949,6 +952,7 @@ function QuestionCard({
 }) {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
+  const spellCheck = useSpellCheck();
   const done = item.resolved;
   const toggle = (q: Question, label: string) =>
     setPicked((p) => {
@@ -1010,6 +1014,7 @@ function QuestionCard({
             type="text"
             aria-label={`Other answer to: ${q.question}`}
             placeholder="Other…"
+            spellCheck={spellCheck}
             value={other[q.question] ?? ""}
             onChange={(e) => setOther((x) => ({ ...x, [q.question]: e.target.value }))}
           />
@@ -1036,6 +1041,8 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
   const status = session.meta.status;
   const who = agent.label;
   const [draft, setDraft] = useState("");
+  // Spell check (src/frontend/spellCheckPref.ts): a message is prose.
+  const spellCheck = useSpellCheck();
   const [caret, setCaret] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
@@ -1152,6 +1159,7 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
         disabled={final}
         aria-label="Message"
         aria-autocomplete="list"
+        spellCheck={spellCheck}
         aria-controls={popup ? listId : undefined}
         aria-activedescendant={popup ? `${listId}-${slashIndex}` : undefined}
         onChange={(e) => {
