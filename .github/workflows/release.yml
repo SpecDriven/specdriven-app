@@ -5,6 +5,17 @@ name: Release
 # and install.ps1 — the ones `curl | sh` and `irm | iex` fetch — are served
 # straight from `main` (specs/app/installation.feature.md), and every release
 # carries the copies it shipped with.
+#
+# A release is verifiable by origin, not only by checksum (docs/releasing.md
+# "Signing and provenance"):
+# - SHASUMS256.txt is signed with the release signing key (an SSH Ed25519
+#   key, `ssh-keygen -Y sign`), and the signature ships as
+#   SHASUMS256.txt.sig. The installers embed the public key and refuse a
+#   release whose signature is missing or does not verify. The private key
+#   is the SPECDRIVEN_RELEASE_SIGNING_KEY secret.
+# - The zip and SHASUMS256.txt get GitHub build provenance (a Sigstore
+#   attestation naming this workflow and commit), checked with
+#   `gh attestation verify`.
 # See README.md "Versioning" and "Distribution".
 
 on:
@@ -13,6 +24,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   publish:
@@ -41,6 +54,40 @@ jobs:
           sha256sum "specdriven-$VERSION-src.zip" > SHASUMS256.txt
           cat SHASUMS256.txt
 
+      # ssh-keygen signs the checksum file with the release signing key, in
+      # the "specdriven-release" namespace, as release@specdriven.app. Then
+      # the signature is checked against the public key install.sh embeds:
+      # a rotated secret that the installers do not know yet fails here, not
+      # on every user's machine.
+      - name: Sign SHASUMS256.txt
+        env:
+          SIGNING_KEY: ${{ secrets.SPECDRIVEN_RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then
+            echo "the SPECDRIVEN_RELEASE_SIGNING_KEY secret is not set; see docs/releasing.md" >&2
+            exit 1
+          fi
+          key="$(mktemp)"
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          ssh-keygen -Y sign -f "$key" -n specdriven-release SHASUMS256.txt
+          rm -f "$key"
+          pubkey="$(sed -n 's/^SIGNER_KEY="\(ssh-ed25519 [^"]*\)"$/\1/p' install.sh)"
+          printf 'release@specdriven.app %s\n' "$pubkey" > allowed_signers
+          ssh-keygen -Y verify -f allowed_signers -I release@specdriven.app \
+            -n specdriven-release -s SHASUMS256.txt.sig < SHASUMS256.txt
+          grep -qF "$pubkey" install.ps1 \
+            || { echo "install.ps1 does not embed the key install.sh does" >&2; exit 1; }
+
+      # Before the release exists, so a published release always has its
+      # provenance: a failure here leaves no release behind, and the re-run
+      # starts over.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            specdriven-${{ steps.meta.outputs.version }}-src.zip
+            SHASUMS256.txt
+
       # A release that already exists is not overwritten: re-running on the
       # same tag fails, on purpose.
       - name: Create release
@@ -48,15 +95,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+          notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
             "Source snapshot of $GITHUB_REPOSITORY at v$VERSION ($GITHUB_SHA)." \
-            "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, verifies it against \`SHASUMS256.txt\`, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
+            "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, checks the signature on \`SHASUMS256.txt\` and the zip's checksum against it, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
             "**Install on Windows** (PowerShell): \`irm https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.ps1 | iex\` does the same under \`%USERPROFILE%\\.specdriven\\app\`, adds SpecDriven to the Start menu and starts it." \
-            "**To review the source before it runs:** download \`specdriven-$VERSION-src.zip\`, verify it against \`SHASUMS256.txt\`, and unzip it yourself." \
-            "SpecDriven is built with [Bun](https://bun.sh): \`bun install\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
+            "**To review the source before it runs:** download \`specdriven-$VERSION-src.zip\`, \`SHASUMS256.txt\` and \`SHASUMS256.txt.sig\`, verify them as below, and unzip it yourself." \
+            "**To verify this release by hand:** \`gh attestation verify specdriven-$VERSION-src.zip --repo $GITHUB_REPOSITORY\` checks GitHub's build provenance (this workflow, this commit). Offline, \`SHASUMS256.txt.sig\` is an SSH signature by the SpecDriven release key, \`release@specdriven.app\`; with the key the installers embed in a one-line \`allowed_signers\` file, \`ssh-keygen -Y verify -f allowed_signers -I release@specdriven.app -n specdriven-release -s SHASUMS256.txt.sig < SHASUMS256.txt\`, then \`sha256sum -c SHASUMS256.txt\`. The steps are spelled out in [docs/installation.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/installation.md)." \
+            "SpecDriven is built with [Bun](https://bun.sh): \`bun install --frozen-lockfile\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
             "GitHub also attaches its own *Source code (zip)* and *Source code (tar.gz)* to every release; \`specdriven-$VERSION-src.zip\` is the one \`SHASUMS256.txt\` vouches for and the installers download.")"
           gh release create "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --title "SpecDriven v$VERSION" \
             --notes "$notes" \
-            "specdriven-$VERSION-src.zip" SHASUMS256.txt install.sh install.ps1
+            "specdriven-$VERSION-src.zip" SHASUMS256.txt SHASUMS256.txt.sig install.sh install.ps1

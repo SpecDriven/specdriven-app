@@ -37,8 +37,8 @@ Product information is at [specdriven.app](https://specdriven.app).
 
 SpecDriven ships as a source zip so you can review the code and bring your
 own supply chain before building. One command fetches the latest release,
-verifies its checksum, builds the desktop app with [Bun](https://bun.sh) and
-starts it.
+checks its signature and checksum, builds the desktop app with
+[Bun](https://bun.sh) and starts it.
 
 macOS and Linux:
 

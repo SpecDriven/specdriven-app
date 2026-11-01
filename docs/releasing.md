@@ -40,17 +40,89 @@ which:
 - zips the tagged tree with `git archive` (tracked files only — no
   `node_modules`, `dist`, or `.env`; paths marked `export-ignore` in
   [.gitattributes](../.gitattributes) are left out too);
+- signs `SHASUMS256.txt` with the release signing key (below), as
+  `SHASUMS256.txt.sig`, and checks the signature against the public key
+  `install.sh` and `install.ps1` embed;
+- attests the zip and `SHASUMS256.txt` with GitHub build provenance;
 - creates a `v<version>` release on this repository with the zip, its
-  `SHASUMS256.txt`, `install.sh` and `install.ps1` attached.
+  `SHASUMS256.txt` and `SHASUMS256.txt.sig`, `install.sh` and `install.ps1`
+  attached.
 
-It publishes with the workflow's own `GITHUB_TOKEN` (`contents: write`), so no
-secret is needed. The `curl | sh` and `irm | iex` lines fetch `install.sh` and
-`install.ps1` from `main`. A release that already exists is not overwritten —
-re-running on the same tag fails, on purpose.
+It publishes with the workflow's own `GITHUB_TOKEN` (`contents: write`, plus
+`id-token: write` and `attestations: write` for the provenance); the one
+secret it needs is the signing key. The `curl | sh` and `irm | iex` lines
+fetch `install.sh` and `install.ps1` from `main`. A release that already
+exists is not overwritten — re-running on the same tag fails, on purpose.
 
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
 build from any other commit is mislabelled.
+
+## Signing and provenance
+
+A release can be verified by origin, not only by checksum
+([installation.md](installation.md#verifying-a-release-by-hand) has the
+commands):
+
+- **GitHub build provenance.** `actions/attest-build-provenance` records,
+  in Sigstore's public log, that `specdriven-<version>-src.zip` and
+  `SHASUMS256.txt` were produced by this workflow at this commit; `gh
+  attestation verify specdriven-<version>-src.zip --repo
+  SpecDriven/specdriven-app` checks it. It needs no key of ours: the
+  workflow's OIDC identity is what is signed. The attestation is made
+  before the release is created, so a published release always has one.
+- **The release signature.** `SHASUMS256.txt.sig` is an SSH signature
+  (`ssh-keygen -Y sign`) by the SpecDriven release key, as
+  `release@specdriven.app` in the `specdriven-release` namespace. This is
+  what the installers check, since `ssh-keygen` is on every machine they
+  run on and `gh` is not. The public key is the `SIGNER_KEY` line in
+  `install.sh` and the `$signerKey` line in `install.ps1`; the workflow
+  reads it out of `install.sh`, verifies its own signature against it, and
+  refuses to publish when `install.ps1` carries a different one — so the
+  secret and the installers cannot drift apart unnoticed.
+
+### The signing key
+
+The private key is an Ed25519 SSH key, made with `ssh-keygen -t ed25519`
+and no passphrase, kept as the repository secret
+`SPECDRIVEN_RELEASE_SIGNING_KEY` (the whole private key file, `-----BEGIN
+OPENSSH PRIVATE KEY-----` to the end). The workflow writes it to a `mktemp`
+file for the one `ssh-keygen -Y sign` call and deletes it; it never appears
+in a log or an artifact. Only repository admins can read or change secrets,
+and only an admin can push a `v*` tag (the tag ruleset), so publishing a
+release that the installers accept takes both.
+
+The maintainer keeps the only other copy offline, outside any repository,
+at `~/.specdriven/release-signing/specdriven-release` (mode 0600, in a 0700
+directory) with the public half beside it. It is never committed, never
+pasted into a chat or an issue, and never used for anything but releases.
+
+To set the secret from that copy:
+
+```sh
+gh secret set SPECDRIVEN_RELEASE_SIGNING_KEY --repo SpecDriven/specdriven-app < ~/.specdriven/release-signing/specdriven-release
+```
+
+### Rotating the key
+
+If the private key may have leaked, or is lost:
+
+1. `ssh-keygen -t ed25519 -N '' -C 'SpecDriven release signing (release@specdriven.app)' -f ~/.specdriven/release-signing/specdriven-release`
+   (move the old pair aside first).
+2. Put the new public key — `cut -d' ' -f1,2 specdriven-release.pub` — in
+   `install.sh` (`SIGNER_KEY=`), `install.ps1` (`$signerKey =`) and
+   [installation.md](installation.md#verifying-a-release-by-hand), and merge
+   that to `main`. The test "the installers trust the one key the release
+   workflow checks against" in `tests/install.test.ts` holds the three
+   together.
+3. Set the secret from the new private key, as above.
+4. Cut a release.
+
+Installers fetched from `main` after step 2 accept releases signed with
+the new key and refuse the old ones; `SPECDRIVEN_VERSION=<older>` therefore
+stops working for releases signed before the rotation, which is the point.
+Someone holding an installer from before the rotation sees "not signed by
+the SpecDriven release key" with a pointer at the current `install.sh`.
 
 ## Deleting a release
 

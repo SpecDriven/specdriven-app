@@ -1,8 +1,9 @@
 // Automates specs/app/installation.feature.md "install on Windows from
 // PowerShell": install.ps1 is install.sh's twin for Windows — it fetches a
-// release's source zip, verifies it against SHASUMS256.txt, unpacks it under
-// ~/.specdriven/app, builds the desktop app with Bun and starts it, and
-// leaves nothing behind when the download cannot be trusted.
+// release's source zip, checks that its SHASUMS256.txt is signed by the
+// release key and that the zip matches it, unpacks it under ~/.specdriven/app,
+// builds the desktop app with Bun and starts it, and leaves nothing behind
+// when the download cannot be trusted.
 //
 // The script runs under PowerShell 7, and every run of it starts one — too
 // slow for the suite every pull request runs. So those tests are opt-in: they
@@ -25,7 +26,7 @@ import {
 import { tmpdir, userInfo } from "node:os";
 import { delimiter, join } from "node:path";
 import { cachedExecutable, linkExecutable } from "./helpers/fakeBin";
-import { fakeReleases, sha256, shasums, sourceZip } from "./helpers/fakeReleases";
+import { fakeReleases, generateSshKey, releaseKey, sha256, shasums, signedAssets, sourceZip } from "./helpers/fakeReleases";
 
 const INSTALL_PS1 = join(import.meta.dir, "..", "install.ps1");
 const VERSION = "0.1.40";
@@ -84,6 +85,8 @@ async function runInstaller(releasesUrl: string, home: string, opts: RunOptions 
       // The machine's own tools (id, git, ln) but never the developer's Bun.
       PATH: [opts.tools ?? tools(), "/usr/bin", "/bin"].join(delimiter),
       SPECDRIVEN_RELEASES_URL: releasesUrl,
+      // The fake releases are signed with a key of the suite's own.
+      SPECDRIVEN_RELEASE_PUBKEY: (await releaseKey()).publicKey,
       // Nobody is asked anything and no Bun is installed behind the
       // developer's back; the tests of the question set it themselves.
       SPECDRIVEN_INSTALL_BUN: "0",
@@ -129,18 +132,8 @@ beforeAll(async () => {
   latestZip = await sourceZip(VERSION);
   olderZip = await sourceZip(OLDER);
   good = fakeReleases(VERSION, {
-    [VERSION]: {
-      assets: {
-        [`specdriven-${VERSION}-src.zip`]: latestZip,
-        "SHASUMS256.txt": shasums({ [`specdriven-${VERSION}-src.zip`]: latestZip }),
-      },
-    },
-    [OLDER]: {
-      assets: {
-        [`specdriven-${OLDER}-src.zip`]: olderZip,
-        "SHASUMS256.txt": shasums({ [`specdriven-${OLDER}-src.zip`]: olderZip }),
-      },
-    },
+    [VERSION]: { assets: await signedAssets(VERSION, latestZip) },
+    [OLDER]: { assets: await signedAssets(OLDER, olderZip) },
   });
 });
 
@@ -171,6 +164,7 @@ test.skipIf(!PWSH)("the latest release is downloaded, verified and unpacked unde
   const { code, stdout, stderr } = await runInstaller(good.url, home);
   expect(stderr).toBe("");
   expect(code).toBe(0);
+  expect(stdout).toContain("Signature verified (release@specdriven.app).");
   expect(stdout).toContain("Checksum verified.");
 
   const app = join(home, ".specdriven", "app");
@@ -212,12 +206,10 @@ test.skipIf(!PWSH)("a version that is not version-shaped is refused before any d
 });
 
 test.skipIf(!PWSH)("a checksum mismatch aborts without unpacking anything", async () => {
+  // Signed, so the signature passes and the checksum is what gives it away.
   const tampered = fakeReleases(VERSION, {
     [VERSION]: {
-      assets: {
-        [`specdriven-${VERSION}-src.zip`]: latestZip,
-        "SHASUMS256.txt": shasums({ [`specdriven-${VERSION}-src.zip`]: olderZip }),
-      },
+      assets: await signedAssets(VERSION, latestZip, { sums: shasums({ [`specdriven-${VERSION}-src.zip`]: olderZip }) }),
     },
   });
   const home = freshHome();
@@ -243,10 +235,7 @@ test.skipIf(!PWSH)("a release without SHASUMS256.txt, or one not listing the zip
 
   const unlisted = fakeReleases(VERSION, {
     [VERSION]: {
-      assets: {
-        [`specdriven-${VERSION}-src.zip`]: latestZip,
-        "SHASUMS256.txt": shasums({ "something-else.zip": latestZip }),
-      },
+      assets: await signedAssets(VERSION, latestZip, { sums: shasums({ "something-else.zip": latestZip }) }),
     },
   });
   home = freshHome();
@@ -254,6 +243,72 @@ test.skipIf(!PWSH)("a release without SHASUMS256.txt, or one not listing the zip
   unlisted.stop();
   expect(run.code).toBe(1);
   expect(run.stderr).toContain(`no checksum listed for specdriven-${VERSION}-src.zip`);
+  expect(existsSync(join(home, ".specdriven"))).toBe(false);
+});
+
+// --- the signature -----------------------------------------------------------
+
+test.skipIf(!PWSH)("a release without SHASUMS256.txt.sig is refused rather than installed unsigned", async () => {
+  const assets = await signedAssets(VERSION, latestZip);
+  delete assets["SHASUMS256.txt.sig"];
+  const unsigned = fakeReleases(VERSION, { [VERSION]: { assets } });
+  const home = freshHome();
+  const { code, stderr, stdout } = await runInstaller(unsigned.url, home);
+  unsigned.stop();
+  expect(code).toBe(1);
+  expect(stderr).toContain(`failed to download ${unsigned.url}/download/v${VERSION}/SHASUMS256.txt.sig`);
+  expect(stderr).toContain("refusing to install unsigned");
+  expect(stdout).not.toContain("verified");
+  expect(existsSync(join(home, ".specdriven"))).toBe(false);
+});
+
+test.skipIf(!PWSH)("a release swapped for another, checksum file and all, fails the signature and is refused", async () => {
+  // Someone replaces the zip and rewrites SHASUMS256.txt to match: the
+  // signature was made over the real checksum file, so it no longer
+  // verifies, and the checksum — which would have matched — is never compared.
+  const real = await signedAssets(VERSION, latestZip);
+  const swapped = fakeReleases(VERSION, {
+    [VERSION]: {
+      assets: {
+        [`specdriven-${VERSION}-src.zip`]: olderZip,
+        "SHASUMS256.txt": shasums({ [`specdriven-${VERSION}-src.zip`]: olderZip }),
+        "SHASUMS256.txt.sig": real["SHASUMS256.txt.sig"]!,
+      },
+    },
+  });
+  const home = freshHome();
+  const { code, stderr, stdout } = await runInstaller(swapped.url, home);
+  swapped.stop();
+  expect(code).toBe(1);
+  expect(stderr).toContain("SHASUMS256.txt is not signed by the SpecDriven release key (release@specdriven.app)");
+  expect(stderr).toContain("refusing to install");
+  expect(stdout).not.toContain("Signature verified");
+  expect(stdout).not.toContain("Checksum verified");
+  expect(existsSync(join(home, ".specdriven"))).toBe(false);
+});
+
+test.skipIf(!PWSH)("a release signed with some other key is refused, and says a newer install.ps1 may know it", async () => {
+  const impostor = fakeReleases(VERSION, {
+    [VERSION]: { assets: await signedAssets(VERSION, latestZip, { signedAs: await generateSshKey("someone else") }) },
+  });
+  const home = freshHome();
+  const { code, stderr } = await runInstaller(impostor.url, home);
+  impostor.stop();
+  expect(code).toBe(1);
+  expect(stderr).toContain("not signed by the SpecDriven release key");
+  expect(stderr).toContain("https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1");
+  expect(existsSync(join(home, ".specdriven"))).toBe(false);
+});
+
+test.skipIf(!PWSH)("an ssh-keygen that cannot verify stops the install, in its own words", async () => {
+  // With /usr/bin on PATH the real one is always found, so a broken one
+  // stands in: whatever it says reaches the user, and nothing is written.
+  const noKeygen = tools({ "ssh-keygen": "#!/bin/sh\necho 'not here' >&2\nexit 127\n" });
+  const home = freshHome();
+  const { code, stderr } = await runInstaller(good.url, home, { tools: noKeygen });
+  expect(code).toBe(1);
+  expect(stderr).toContain("not signed by the SpecDriven release key");
+  expect(stderr).toContain("not here");
   expect(existsSync(join(home, ".specdriven"))).toBe(false);
 });
 
