@@ -2658,6 +2658,17 @@ export function App() {
     setAppPage(page);
   };
   const openSettings = () => openAppPage("settings");
+  /** Settings, scrolled to one section (`settings-<id>`) once the page has drawn it. */
+  const openSettingsAt = (sectionId: string) => {
+    openAppPage("settings");
+    let tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(sectionId);
+      if (el) el.scrollIntoView({ block: "start" });
+      else if (++tries < 40) setTimeout(scroll, 25);
+    };
+    setTimeout(scroll, 0);
+  };
   const openPlugins = () => openAppPage("plugins");
   /** A marketplace plugin the Plugins page opens scrolled to, when the agent pane sent the user there. */
   const [pluginsWanted, setPluginsWanted] = useState<string | null>(null);
@@ -11898,6 +11909,9 @@ export function App() {
             setPluginsWanted(wanted ?? null);
             openPlugins();
           }}
+          agentSettings={(id) =>
+            pluginSettingsSections.some((s) => s.id === id) ? () => openSettingsAt(`settings-${id}`) : undefined
+          }
         />
       )}
       {/* crud-feature.md "Publish feature with merge conflict": a
