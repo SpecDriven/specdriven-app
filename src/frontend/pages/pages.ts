@@ -339,9 +339,11 @@ export function pageRowTitle(page: PageListing): string {
 export interface PageSettings {
   googleCalendar: boolean;
   canEstimate: boolean;
+  /** The read-only site (src/server/readOnlyMode.ts): pages are shown, never edited. */
+  readOnly: boolean;
 }
 
-let settings: PageSettings = { googleCalendar: false, canEstimate: false };
+let settings: PageSettings = { googleCalendar: false, canEstimate: false, readOnly: false };
 const settingsListeners = new Set<() => void>();
 
 export const pageSettings = {
@@ -357,8 +359,13 @@ export const pageSettings = {
     const next = {
       googleCalendar: state.googleCalendar === true,
       canEstimate: state.canEstimate === true,
+      readOnly: state.readOnly === true,
     };
-    if (next.googleCalendar === settings.googleCalendar && next.canEstimate === settings.canEstimate) {
+    if (
+      next.googleCalendar === settings.googleCalendar &&
+      next.canEstimate === settings.canEstimate &&
+      next.readOnly === settings.readOnly
+    ) {
       return;
     }
     settings = next;
