@@ -57,7 +57,7 @@ describe("getCurrentUser", () => {
     }
   });
 
-  test("signed out: the identity is git's as resolved in the data repo, not the app's folder", async () => {
+  test("signed out, the identity is git's as resolved in the data repo, not the app's folder", async () => {
     // The desktop app runs from its user-data folder, where only the global
     // identity applies; the commits are made in the data repo, whose own
     // config (or an includeIf rule matching it) may name someone else.
