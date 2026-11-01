@@ -119,8 +119,13 @@
       $process = [System.Diagnostics.Process]::Start($psi)
       try {
         $bytes = [System.IO.File]::ReadAllBytes($signedPath)
-        $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-        $process.StandardInput.Close()
+        try {
+          $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+          $process.StandardInput.Close()
+        } catch {
+          # It stopped reading -- an ssh-keygen that gave up before looking
+          # at stdin. Its exit code and its words, below, say why.
+        }
         $output = $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
         $process.WaitForExit()
         return @{ ok = ($process.ExitCode -eq 0); output = $output.Trim() }

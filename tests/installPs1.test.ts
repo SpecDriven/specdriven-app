@@ -303,7 +303,9 @@ test.skipIf(!PWSH)("a release signed with some other key is refused, and says a 
 test.skipIf(!PWSH)("an ssh-keygen that cannot verify stops the install, in its own words", async () => {
   // With /usr/bin on PATH the real one is always found, so a broken one
   // stands in: whatever it says reaches the user, and nothing is written.
-  const noKeygen = tools({ "ssh-keygen": "#!/bin/sh\necho 'not here' >&2\nexit 127\n" });
+  // It closes stdin before it exits, as one that fails before reading what
+  // was signed does, so the installer's write to it breaks the pipe.
+  const noKeygen = tools({ "ssh-keygen": "#!/bin/sh\nexec 0<&-\necho 'not here' >&2\nexit 127\n" });
   const home = freshHome();
   const { code, stderr } = await runInstaller(good.url, home, { tools: noKeygen });
   expect(code).toBe(1);
