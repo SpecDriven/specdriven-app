@@ -1000,8 +1000,8 @@ interface Listing {
 }
 
 /** The user menu's link to the running build's source
-    (specs/app/open-source-license.feature.md): the app is AGPL-3.0-only, so
-    every copy — the public demo included — offers it. None until the state
+    (specs/app/open-source-license.feature.md): the app is open source
+    (Apache-2.0), and every copy — the public demo included — offers it. None until the state
     has named the url. */
 export function sourceCodeMenuItems(
   url: string | null,
@@ -1012,7 +1012,7 @@ export function sourceCodeMenuItems(
     {
       id: "source-code",
       label: "Source code",
-      description: "AGPL-3.0",
+      description: "Apache-2.0",
       icon: <ExternalLink size={13} />,
       title: url,
       onSelect: () => open(url),
@@ -9817,7 +9817,7 @@ export function App() {
                     },
                   ]
                 : []),
-              // The running build's source, which the AGPL asks every copy to offer.
+              // The running build's source, which every copy offers.
               ...sourceCodeMenuItems(sourceUrl),
             ]}
           />

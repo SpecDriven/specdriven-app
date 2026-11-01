@@ -358,8 +358,8 @@ test("state carries the app version — the demo shows it beside the user", asyn
   expect(state.version).toBe(pkgVersion);
 });
 
-// specs/app/open-source-license.feature.md: the public demo is a network
-// service, so the AGPL asks it to offer its source — the user menu links it.
+// specs/app/open-source-license.feature.md: the public demo, like every copy,
+// offers its source — the user menu links it.
 test("state carries the source url of the running version", async () => {
   const state = await bootState();
   expect(state.sourceUrl).toBe(sourceUrl(pkgVersion));

@@ -7,7 +7,7 @@
   "main": "dist/electron/boot.js",
   "type": "module",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "desktopName": "specdriven.desktop",
   "trustedDependencies": [
     "electron"

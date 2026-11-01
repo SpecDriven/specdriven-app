@@ -1,20 +1,20 @@
 Copyright (c) 2026 David Vydra (https://specdriven.app)
 
-specdriven.app is free software: you can redistribute it and/or modify it
-under the terms of the GNU Affero General Public License, version 3 only
-(SPDX: AGPL-3.0-only), as published by the Free Software Foundation.
+Licensed under the Apache License, Version 2.0 (SPDX: Apache-2.0); you may
+not use this software except in compliance with the License.
 LICENSE.md holds the full text.
 
-It is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-A PARTICULAR PURPOSE. See the GNU Affero General Public License for details.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
 
-If you run a modified copy as a network service, the license asks you to
-offer its users the source of your version; set SPECDRIVEN_SOURCE_URL so the
-app's "Source code" link points at it.
+The app's "Source code" link points at the source of the running version;
+if you run a modified copy, set SPECDRIVEN_SOURCE_URL to point it at yours.
 
 No trademark rights are granted. "SpecDriven" and "specdriven.app" are not
-licensed under the AGPL.
+licensed under the Apache License (see its section 6).
 
 We do not accept pull requests; see CONTRIBUTING.md for how to propose specs
 instead.
