@@ -1,4 +1,4 @@
-// A stand-in for github.com/SpecDriven/specdriven-app-release/releases, and
+// A stand-in for github.com/SpecDriven/specdriven-app/releases, and
 // the source zips it serves — what install.sh and install.ps1 install from.
 // It answers the two URL shapes GitHub uses: /latest redirecting to
 // /tag/v<version>, and /download/v<version>/<asset>. The zips are cut with

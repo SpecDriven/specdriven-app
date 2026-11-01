@@ -1,7 +1,7 @@
 # Versioning and releasing
 
 How a version is bumped, tagged and published as a release on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release).
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app).
 What the published installers do is in [installation.md](installation.md).
 
 ## Versioning
@@ -40,18 +40,13 @@ which:
 - zips the tagged tree with `git archive` (tracked files only — no
   `node_modules`, `dist`, or `.env`; paths marked `export-ignore` in
   [.gitattributes](../.gitattributes) are left out too);
-- creates a `v<version>` release on `specdriven-app-release` with the zip,
-  its `SHASUMS256.txt`, `install.sh` and `install.ps1` attached;
-- just before that, pushes this repository's [install.sh](../install.sh) and
-  [install.ps1](../install.ps1) to the root of `specdriven-app-release`
-  whenever they differ — those are the copies the `curl | sh` and `irm | iex`
-  lines fetch, so they are never newer or older than the releases they
-  install.
+- creates a `v<version>` release on this repository with the zip, its
+  `SHASUMS256.txt`, `install.sh` and `install.ps1` attached.
 
-Writing to another repository needs the `RELEASE_REPO_TOKEN` Actions secret:
-a fine-grained personal access token with *Contents: read and write* on
-`specdriven-app-release` alone. A release that already exists is not
-overwritten — re-running on the same tag fails, on purpose.
+It publishes with the workflow's own `GITHUB_TOKEN` (`contents: write`), so no
+secret is needed. The `curl | sh` and `irm | iex` lines fetch `install.sh` and
+`install.ps1` from `main`. A release that already exists is not overwritten —
+re-running on the same tag fails, on purpose.
 
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
@@ -60,5 +55,5 @@ build from any other commit is mislabelled.
 ## Deleting a release
 
 ```sh
-gh release delete v0.1.x --repo SpecDriven/specdriven-app-release --cleanup-tag --yes
+gh release delete v0.1.x --repo SpecDriven/specdriven-app --cleanup-tag --yes
 ```

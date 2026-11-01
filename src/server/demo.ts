@@ -51,7 +51,7 @@ function demoSource(): string {
  * Every optional module is on. A visitor has no reason to guess which
  * switches hide the rest of the app, and the demo dataset ships content for
  * each: roadmap and tasks pages, test cases, assignable members in
- * demo-data/project-settings.json, and the release repo's issues — and an
+ * demo-data/project-settings.json, and the app repo's issues — and an
  * Event Model of the water damage claim (demo-data/models/claims/
  * home-claims/) for the Models plugin, which is not built in any more: the
  * demo installs it from the marketplace at start (installDemoPlugins) and

@@ -465,3 +465,11 @@ test.skipIf(!PWSH)("a build that fails stops the run and says where the checkout
   expect(existsSync(join(target, "package.json"))).toBe(true);
   expect(logLines(home).some((line) => line.startsWith("started"))).toBe(false);
 });
+
+// Releases live on the app's own repository (specs/app/installation.feature.md).
+// Read off the script rather than run, so it holds without a pwsh too.
+test("with no override, the releases come from SpecDriven/specdriven-app", () => {
+  const text = readFileSync(INSTALL_PS1, "utf8");
+  const fallback = text.match(/\$releasesUrl = if \(\$env:SPECDRIVEN_RELEASES_URL\) \{[^}]*\} else \{\s*'([^']*)'/);
+  expect(fallback?.[1]).toBe("https://github.com/SpecDriven/specdriven-app/releases");
+});

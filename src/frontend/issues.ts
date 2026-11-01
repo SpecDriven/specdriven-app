@@ -15,7 +15,7 @@ import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 
 export type { GitHubRepo, Issue, IssueComment, IssueState };
 
-// Demo mode (src/server/demo.ts): the demo reads the public release repo's
+// Demo mode (src/server/demo.ts): the demo reads the app's own public repo's
 // issues so its Issues tab has something real to show, but cannot change
 // them — a visitor is signed in to nothing, so every write would be an
 // anonymous one on someone else's repository. The server refuses them

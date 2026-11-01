@@ -44,13 +44,13 @@ New scenarios arrive as `[proposed]`; we decide which ones to publish.
 account and propose a scenario on an existing feature, or a new feature,
 straight into the specs repo — committed as `[proposed]` under your name, with
 a few proposals a day per account. Until it is live, open an issue on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release/issues)
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app/issues)
 with your proposal in the format above.
 
 ## Bugs
 
 Report bugs as issues on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release/issues):
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app/issues):
 what you did, what you expected, what happened, and the version from the
 user menu.
 

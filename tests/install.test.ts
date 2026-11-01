@@ -472,7 +472,7 @@ test("Windows shells are sent to install.ps1, or the releases page", async () =>
   expect(code).toBe(1);
   expect(stderr).toContain("this installer needs a Unix shell");
   expect(stderr).toContain(
-    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex",
+    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex",
   );
   expect(stderr).toContain(good.url);
   expect(good.hits).toEqual([]);
@@ -932,4 +932,19 @@ test("the deb target's homepage travels in package.json, not in .git", async () 
   expect(typeof homepage).toBe("string");
   expect(() => new URL(homepage)).not.toThrow();
   expect(new URL(homepage).protocol).toBe("https:");
+});
+
+// Releases live on the app's own repository (specs/app/installation.feature.md).
+// A curl that writes down what it was asked for and fails, so nothing reaches
+// GitHub: the first thing the installer asks for is the latest release.
+test("with no override, the releases come from SpecDriven/specdriven-app", async () => {
+  const home = freshHome();
+  const log = join(home, "curl.log");
+  const fakeCurl = `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_LOG"\nexit 22\n`;
+  const tools = toolbox(BASE_TOOLS, { curl: fakeCurl });
+  const { code } = await runInstaller("", home, { tools, env: { FAKE_LOG: log } });
+  expect(code).not.toBe(0);
+  const asked = readFileSync(log, "utf8").trim().split("\n");
+  expect(asked[0]).toEndWith(" https://github.com/SpecDriven/specdriven-app/releases/latest");
+  expect(appEntries(home)).toEqual([]);
 });

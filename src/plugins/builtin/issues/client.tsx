@@ -23,7 +23,7 @@ import { manifest } from "./manifest";
 import { issuesPath, parseIssuesRoute, type IssuesRoute } from "./route";
 
 interface IssuesConfig {
-  /** Demo mode: the tab reads the release repo and offers no writes. */
+  /** Demo mode: the tab reads the app's own repo and offers no writes. */
   demo: boolean;
 }
 
@@ -64,7 +64,7 @@ const tabOf = (config: IssuesConfig): TabPlugin<IssuesRoute> => ({
         href: hit.href,
         view: hit.view,
       })),
-    // Not in the demo: its Issues tab reads the release repo and writes
+    // Not in the demo: its Issues tab reads the app's own repo and writes
     // nothing (src/frontend/issues.ts), so the palette offers no new issue.
     commands: ({ navigate }) =>
       config.demo

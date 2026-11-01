@@ -2,11 +2,11 @@
 #
 # SpecDriven installer — specs/app/installation.feature.md "install via curl".
 #
-#   curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh
 #
 # SpecDriven ships as a source zip so you can put the code through your own
 # security checks before building it. This script downloads the zip of a
-# release from https://github.com/SpecDriven/specdriven-app-release, verifies
+# release from https://github.com/SpecDriven/specdriven-app, verifies
 # it against that release's SHASUMS256.txt, unpacks it under
 # ~/.specdriven/app, builds it, and starts it (on macOS, opens the .dmg).
 # Building needs Bun, so if Bun
@@ -29,7 +29,7 @@
 
 set -eu
 
-RELEASES_URL="${SPECDRIVEN_RELEASES_URL:-https://github.com/SpecDriven/specdriven-app-release/releases}"
+RELEASES_URL="${SPECDRIVEN_RELEASES_URL:-https://github.com/SpecDriven/specdriven-app/releases}"
 RELEASES_URL="${RELEASES_URL%/}"
 PREFIX="${SPECDRIVEN_HOME:-$HOME/.specdriven}"
 APP_DIR="$PREFIX/app"
@@ -64,7 +64,7 @@ case "$(uname -s)" in
     die "this installer needs a Unix shell.
 On Windows, install from PowerShell instead:
 
-  irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+  irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex
 
 or download specdriven-<version>-src.zip from
 $RELEASES_URL, check it against SHASUMS256.txt, and unzip it."

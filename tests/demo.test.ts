@@ -321,17 +321,17 @@ test("GitHub sign-in routes refuse in demo mode", async () => {
 });
 
 // The Issues tab is the one place the demo does reach GitHub: it reads the
-// public release repo (src/server/demo.ts DEMO_ISSUES_REPO) so the tab has
+// app's own public repo (src/server/demo.ts DEMO_ISSUES_REPO) so the tab has
 // real issues to show. Writes stay refused — a visitor is signed in to
 // nothing, so every one would be anonymous on someone else's repository.
-test("the demo tracks the release repo's issues and refuses every write", async () => {
+test("the demo tracks the app repo's issues and refuses every write", async () => {
   await enable("issues");
   const { issuesRepo } = await (await api("/api/features")).json();
   expect(issuesRepo).toEqual({
-    url: "https://github.com/SpecDriven/specdriven-app-release",
+    url: "https://github.com/SpecDriven/specdriven-app",
     host: "github.com",
     owner: "SpecDriven",
-    name: "specdriven-app-release",
+    name: "specdriven-app",
   });
 
   for (const [method, path] of [
