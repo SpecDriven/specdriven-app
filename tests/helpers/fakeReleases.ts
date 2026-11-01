@@ -2,9 +2,11 @@
 // the source zips it serves — what install.sh and install.ps1 install from.
 // It answers the two URL shapes GitHub uses: /latest redirecting to
 // /tag/v<version>, and /download/v<version>/<asset>. The zips are cut with
-// `git archive`, exactly as .github/workflows/release.yml cuts the real one.
+// `git archive`, exactly as .github/workflows/release.yml cuts the real one,
+// and each release's SHASUMS256.txt is signed the way the workflow signs it
+// (`ssh-keygen -Y sign`), with a release key of the tests' own.
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,6 +43,70 @@ export function sha256(bytes: Uint8Array): string {
 /** The `sha256sum` line the workflow writes: two spaces between hash and name. */
 export function shasums(entries: Record<string, Uint8Array>): string {
   return Object.entries(entries).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join("");
+}
+
+// --- signing ------------------------------------------------------------------
+
+export interface SshKey {
+  /** The private key file, for `ssh-keygen -Y sign -f`. */
+  privateKeyPath: string;
+  /** `ssh-ed25519 AAAA…`, the line an allowed_signers entry or SPECDRIVEN_RELEASE_PUBKEY takes. */
+  publicKey: string;
+}
+
+/** A fresh Ed25519 SSH key, as `ssh-keygen -t ed25519` makes one. */
+export async function generateSshKey(comment = "test key"): Promise<SshKey> {
+  const dir = mkdtempSync(join(tmpdir(), "specdriven-key-"));
+  const privateKeyPath = join(dir, "key");
+  const p = Bun.spawn(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", privateKeyPath], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());
+  const publicKey = readFileSync(`${privateKeyPath}.pub`, "utf8").trim().split(" ").slice(0, 2).join(" ");
+  return { privateKeyPath, publicKey };
+}
+
+/** What the installers take for release@specdriven.app's key, in this process: made once. */
+let releaseKeyPromise: Promise<SshKey> | undefined;
+export function releaseKey(): Promise<SshKey> {
+  releaseKeyPromise ??= generateSshKey("SpecDriven release signing (test)");
+  return releaseKeyPromise;
+}
+
+/** The signer and namespace the workflow signs as and the installers verify against. */
+export const SIGNER = "release@specdriven.app";
+export const SIGNATURE_NAMESPACE = "specdriven-release";
+
+/** `ssh-keygen -Y sign` over `text`, as the workflow signs SHASUMS256.txt: the .sig file's text. */
+export async function sshSign(text: string, key?: SshKey, namespace = SIGNATURE_NAMESPACE): Promise<string> {
+  const { privateKeyPath } = key ?? await releaseKey();
+  const dir = mkdtempSync(join(tmpdir(), "specdriven-sig-"));
+  const file = join(dir, "SHASUMS256.txt");
+  writeFileSync(file, text);
+  const p = Bun.spawn(["ssh-keygen", "-Y", "sign", "-f", privateKeyPath, "-n", namespace, file], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  if ((await p.exited) !== 0) throw new Error(await new Response(p.stderr).text());
+  return readFileSync(`${file}.sig`, "utf8");
+}
+
+/**
+ * A release's assets as the workflow publishes them: the zip, SHASUMS256.txt
+ * and its signature by the release key. `sums` stands in for the checksum
+ * file (to list the wrong hash, or nothing); `signedAs` signs with another key.
+ */
+export async function signedAssets(
+  version: string,
+  zip: Uint8Array<ArrayBuffer>,
+  opts: { sums?: string; signedAs?: SshKey } = {},
+): Promise<Record<string, Uint8Array<ArrayBuffer> | string>> {
+  const name = `specdriven-${version}-src.zip`;
+  const sums = opts.sums ?? shasums({ [name]: zip });
+  return {
+    [name]: zip,
+    "SHASUMS256.txt": sums,
+    "SHASUMS256.txt.sig": await sshSign(sums, opts.signedAs),
+  };
 }
 
 export interface Release {
