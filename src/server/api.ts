@@ -230,7 +230,14 @@ import {
 } from "../plugins/host/loader";
 import { profileManifests } from "../plugins/builtin/manifests";
 import { applyPluginPatch, pluginPatchRefusal, pluginSettingsOf } from "../plugins/host/pluginSettings";
-import { AUTO_INSTALLED_KEY, agentOffers, autoInstallDeps, autoInstalled, ensureCommandPlugins } from "../plugins/host/autoInstall";
+import {
+  AUTO_INSTALLED_KEY,
+  agentOffers,
+  autoInstallDeps,
+  autoInstalled,
+  ensureCommandPlugins,
+  refreshMarketplacesOnStart,
+} from "../plugins/host/autoInstall";
 import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
@@ -370,14 +377,36 @@ export async function applyStartupState(): Promise<void> {
   // agent-plugins.feature.md "Agent plugins are installed for the commands
   // found on this machine"): not awaited either — the marketplace may be
   // offline, and the pane learns of a new plugin through /api/plugins/events.
-  startupInstall = installAgentPlugins(state);
+  // The marketplaces are pulled first when any external plugin is installed
+  // (specs/app/plugins.feature.md "The marketplaces are refreshed on start
+  // when external plugins are installed"), so the install reads the index as
+  // it is now and never runs git in a marketplace folder beside the pull.
+  startupInstall = refreshStartupMarketplaces(state).then(() => installAgentPlugins(state));
 }
 
 let startupInstall: Promise<void> = Promise.resolve();
 
-/** Settled once the start's agent plugin install is over — for the tests. */
+/** Settled once the start's marketplace refresh and agent plugin install are over — for the tests. */
 export function autoInstalledOnStart(): Promise<void> {
   return startupInstall;
+}
+
+/** Whether the start may reach the marketplaces: the gates installAgentPlugins names. */
+function startupReachesMarketplaces(): boolean {
+  return !(isHostedMode() || isDemoMode() || isReadOnlyMode() || process.env.SPECDRIVEN_NO_AUTO_INSTALL === "1");
+}
+
+/**
+ * Pull the marketplaces when any external plugin is installed, so Update is
+ * offered for what changed since the last start. Same gates as the install.
+ */
+async function refreshStartupMarketplaces(state: SpecDrivenState): Promise<void> {
+  if (!startupReachesMarketplaces()) return;
+  try {
+    await refreshMarketplacesOnStart(state as Record<string, unknown>, autoInstallDeps());
+  } catch (e) {
+    console.error(`[plugins] refreshing the marketplaces: ${(e as Error).message}`);
+  }
 }
 
 /**
@@ -387,7 +416,7 @@ export function autoInstalledOnStart(): Promise<void> {
  * SPECDRIVEN_NO_AUTO_INSTALL=1 keeps a test or a kiosk from reaching out.
  */
 async function installAgentPlugins(state: SpecDrivenState): Promise<void> {
-  if (isHostedMode() || isDemoMode() || isReadOnlyMode() || process.env.SPECDRIVEN_NO_AUTO_INSTALL === "1") return;
+  if (!startupReachesMarketplaces()) return;
   try {
     const result = await ensureCommandPlugins(state as Record<string, unknown>, async (s) => {
       // Only the record of what was installed goes to disk, onto the file as

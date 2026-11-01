@@ -14,7 +14,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleApi, matchApi } from "../src/server/api";
+import { applyStartupState, autoInstalledOnStart, handleApi, matchApi, reloader, syncedOnStart } from "../src/server/api";
 import { setGitEngine, type GitEngine } from "../src/server/git";
 import { readState, writeState } from "../src/server/state";
 import { pluginStates, rescanPlugins, stopWatching, syncPlugins } from "../src/plugins/host/loader";
@@ -528,3 +528,45 @@ test("the hosted demo installs the Event Models from the marketplace at start an
   await installDemoPlugins([{ name: "specdriven", source: market }]);
   expect(await installedFolders()).toEqual(["models"]);
 });
+
+// The start (src/server/api.ts applyStartupState, specs/app/plugins.feature.md
+// "The marketplaces are refreshed on start when external plugins are
+// installed"): with a marketplace plugin installed the cached index is
+// pulled in the background, so Update is offered without a Refresh; with
+// the built-ins alone the cache is left as it was.
+async function startAfterUpstreamMoved(withExternal: boolean) {
+  const noInstall = process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+  delete process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+  const market = join(work, "market");
+  const data = join(root, "data");
+  await mkdir(data, { recursive: true });
+  await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.0.0" }], { hello: { version: "1.0.0" } });
+  await boot([{ name: "local", source: market }]);
+  if (withExternal) {
+    const done = await json(await api("POST", "/api/plugins/install", { marketplace: "local", name: "hello", step: "confirm" }));
+    expect(done.status).toBe(200);
+  } else {
+    expect((await json(await api("GET", "/api/plugins/marketplaces"))).status).toBe(200);
+  }
+  const cached = async () =>
+    JSON.parse(await readFile(join(marketplacesHome(), "local", "marketplace.json"), "utf8")).plugins[0].version;
+  expect(await cached()).toBe("1.0.0");
+
+  // Upstream moves on while the app is closed.
+  await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.1.0" }], { hello: { version: "1.1.0" } });
+  await writeState({ ...(await readState(root)), dataRepo: data, reloadFrequencySeconds: 0 }, root);
+  try {
+    await applyStartupState();
+    await autoInstalledOnStart();
+    expect(await cached()).toBe(withExternal ? "1.1.0" : "1.0.0");
+  } finally {
+    await syncedOnStart();
+    reloader.stop();
+    if (noInstall === undefined) delete process.env.SPECDRIVEN_NO_AUTO_INSTALL;
+    else process.env.SPECDRIVEN_NO_AUTO_INSTALL = noInstall;
+  }
+}
+
+test("a start pulls the marketplaces when an external plugin is installed", () => startAfterUpstreamMoved(true));
+
+test("a start leaves the marketplaces alone with the built-ins only", () => startAfterUpstreamMoved(false));

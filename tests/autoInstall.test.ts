@@ -11,7 +11,14 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentOffers, autoInstalled, ensureCommandPlugins, rememberAutoInstalled, setAutoInstallDeps } from "../src/plugins/host/autoInstall";
+import {
+  agentOffers,
+  autoInstalled,
+  ensureCommandPlugins,
+  refreshMarketplacesOnStart,
+  rememberAutoInstalled,
+  setAutoInstallDeps,
+} from "../src/plugins/host/autoInstall";
 import { agents } from "../src/plugins/host/agents";
 import { pluginStates, stopWatching, syncPlugins } from "../src/plugins/host/loader";
 import { marketplacesHome, pluginsHome } from "../src/plugins/host/sources";
@@ -189,4 +196,38 @@ test("a start installs the agent plugin for a command it finds, mounts it, and r
     if (noInstall === undefined) delete process.env.SPECDRIVEN_NO_AUTO_INSTALL;
     else process.env.SPECDRIVEN_NO_AUTO_INSTALL = noInstall;
   }
+});
+
+// The start's marketplace refresh (refreshMarketplacesOnStart, specs/app/
+// plugins.feature.md "The marketplaces are refreshed on start when
+// external plugins are installed"): every marketplace is pulled when a
+// folder plugin is known, none with the built-ins alone.
+test("the start's refresh pulls every marketplace only when an external plugin is installed, and logs one it cannot reach", async () => {
+  const pulled: string[][] = [];
+  const lines: string[] = [];
+  const other: MarketplaceRef = { name: "other", source: "https://example.test/other" };
+  const deps = {
+    marketplaces: [market, other],
+    refresh: async (entries: readonly MarketplaceRef[]) => {
+      pulled.push(entries.map((e) => e.name));
+      return entries.map((e) => (e.name === "other" ? { name: e.name, error: "offline" } : { name: e.name }));
+    },
+    log: (line: string) => lines.push(line),
+  };
+
+  expect(await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => [] })).toBeNull();
+  expect(pulled).toEqual([]);
+
+  const result = await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => ["models"] });
+  expect(result).toEqual({ refreshed: ["specdriven"], errors: ["other: offline"] });
+  expect(pulled).toEqual([["specdriven", "other"]]);
+  expect(lines.some((l) => l.includes("other not refreshed on start"))).toBe(true);
+
+  // Without a seam the profile's marketplaces are the ones pulled.
+  pulled.length = 0;
+  await refreshMarketplacesOnStart(
+    { plugins: { marketplaces: [other] } },
+    { refresh: deps.refresh, log: () => {}, externalPlugins: () => ["models"] },
+  );
+  expect(pulled).toEqual([["other"]]);
 });
