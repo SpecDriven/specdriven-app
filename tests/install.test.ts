@@ -472,7 +472,7 @@ test("Windows shells are sent to install.ps1, or the releases page", async () =>
   expect(code).toBe(1);
   expect(stderr).toContain("this installer needs a Unix shell");
   expect(stderr).toContain(
-    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex",
+    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex",
   );
   expect(stderr).toContain(good.url);
   expect(good.hits).toEqual([]);
@@ -932,4 +932,21 @@ test("the deb target's homepage travels in package.json, not in .git", async () 
   expect(typeof homepage).toBe("string");
   expect(() => new URL(homepage)).not.toThrow();
   expect(new URL(homepage).protocol).toBe("https:");
+});
+
+// --- where the releases are ---------------------------------------------------
+
+// Every other test points SPECDRIVEN_RELEASES_URL at the loopback stand-in, so
+// this is the one that pins the default: the releases, and the PowerShell line
+// a Windows shell is sent to, both live on SpecDriven/specdriven-app.
+test("with no override, the releases come from SpecDriven/specdriven-app", async () => {
+  const home = freshHome();
+  const tools = toolbox([...BASE_TOOLS, "curl"], { uname: "#!/bin/sh\necho MINGW64_NT-10.0-19045\n" });
+  const { code, stderr } = await runInstaller("", home, { tools });
+  expect(code).toBe(1);
+  expect(stderr).toContain("https://github.com/SpecDriven/specdriven-app/releases,");
+  expect(stderr).toContain(
+    "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex",
+  );
+  expect(readFileSync(INSTALL_SH, "utf8")).not.toContain("specdriven-app-release");
 });

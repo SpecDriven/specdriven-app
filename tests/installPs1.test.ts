@@ -465,3 +465,12 @@ test.skipIf(!PWSH)("a build that fails stops the run and says where the checkout
   expect(existsSync(join(target, "package.json"))).toBe(true);
   expect(logLines(home).some((line) => line.startsWith("started"))).toBe(false);
 });
+
+// --- where the releases are ---------------------------------------------------
+
+test("with no override, the releases come from SpecDriven/specdriven-app", () => {
+  const text = readFileSync(INSTALL_PS1, "utf8");
+  expect(text).toContain("'https://github.com/SpecDriven/specdriven-app/releases'");
+  expect(text).toContain("irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex");
+  expect(text).not.toContain("specdriven-app-release");
+});
