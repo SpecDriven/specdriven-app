@@ -32,6 +32,13 @@ export interface PageFolder {
    * it is assigned to and what it is about. The tasks only.
    */
   projects?: boolean;
+  /**
+   * Whether its pages can be archived (specs/app/roadmap.feature.md
+   * "Archive a roadmap page"): taken out of the folder — the markdown
+   * removed from the data repo — while the page's Automerge document is
+   * kept, so the page can be restored later. The roadmap only.
+   */
+  archivable?: boolean;
 }
 
 export const ROADMAP_FOLDER = "roadmap";
@@ -39,7 +46,12 @@ export const TASKS_FOLDER = "tasks";
 export const NOTEBOOK_FOLDER = "notebook";
 
 /** The roadmap folder: markdown pages, one sidebar tab (roadmap.feature.md). */
-export const ROADMAP: PageFolder = { folder: ROADMAP_FOLDER, label: "roadmap page", ordered: true };
+export const ROADMAP: PageFolder = {
+  folder: ROADMAP_FOLDER,
+  label: "roadmap page",
+  ordered: true,
+  archivable: true,
+};
 
 /** The tasks folder: the same pages, called tasks (tasks.feature.md). */
 export const TASKS: PageFolder = {

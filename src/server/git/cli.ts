@@ -440,6 +440,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     repoDir: string,
     paths: string | string[],
     message: string,
+    alsoAdd: string[] = [],
   ): Promise<SyncResult> {
     const all = Array.isArray(paths) ? paths : [paths];
     if (!(await isRepoRoot(repoDir))) {
@@ -451,7 +452,11 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if (rmRes.exitCode !== 0) {
       throw new Error(`git rm failed: ${(rmRes.stderr + rmRes.stdout).trim()}`);
     }
-    await commit(repoDir, "-m", message, "--", ...all);
+    // What is kept rides the same commit — an archived page's document,
+    // which must never reach a peer without the removal or the other way
+    // round (specs/app/roadmap.feature.md "Archive a roadmap page").
+    if (alsoAdd.length > 0) await git(repoDir, "add", ...alsoAdd);
+    await commit(repoDir, "-m", message, "--", ...all, ...alsoAdd);
     const res = await push(repoDir);
     return {
       pushed: res.pushed,

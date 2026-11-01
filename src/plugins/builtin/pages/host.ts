@@ -20,13 +20,16 @@ import { json, type Handler, type Params } from "../../../server/http";
 import {
   NOTEBOOK,
   TASKS,
+  archivePage,
   createPage,
   createPageFolder,
+  deleteArchivedPage,
   deletePage,
   deletePageFolder,
   ensurePageFolder,
   ensureProjectPage,
   importPageDrift,
+  listArchivedPages,
   listPageFolders,
   listPages,
   listProjects,
@@ -34,6 +37,7 @@ import {
   readPage,
   renamePageFile,
   renamePageFolder,
+  restorePage,
   savePage,
   type PageFolder,
 } from "../../../server/pages";
@@ -52,6 +56,7 @@ import { normalizeGoogleCalendar, readState } from "../../../server/state";
 import { getAppRoot } from "../../../server/paths";
 import { isDemoMode } from "../../../server/demoMode";
 import { HOSTED_REFUSAL, isHostedMode } from "../../../server/hostedMode";
+import { currentAuthor } from "../../../server/user";
 
 type DirHandler = (dir: string, req: Request, params: Params) => Response | Promise<Response>;
 
@@ -203,6 +208,25 @@ export function pagesHost(kind: PageFolder): Plugin<Context> {
       if (kind.projects) {
         add("POST", `${base}-folders/:path/page`, async (dir, _req, params) =>
           json({ fileName: await ensureProjectPage(dir, kind, params.path ?? "") }),
+        );
+      }
+
+      // Archiving (specs/app/roadmap.feature.md "Archive a roadmap page"):
+      // the markdown leaves the data repo and the page's document is kept,
+      // listed under `<base>-archive` until it is restored or deleted for
+      // good. Each is committed and pushed. Not on the read-only site's
+      // allowlist (src/server/readOnlyMode.ts): an archived page is not
+      // shown there.
+      if (kind.archivable) {
+        add("POST", `${base}/:file/archive`, async (dir, _req, params) =>
+          json(await archivePage(dir, kind, params.file ?? "", { by: await currentAuthor() })),
+        );
+        add("GET", `${base}-archive`, async (dir) => json({ pages: await listArchivedPages(dir, kind) }));
+        add("POST", `${base}-archive/:file/restore`, async (dir, _req, params) =>
+          json(await restorePage(dir, kind, params.file ?? "")),
+        );
+        add("DELETE", `${base}-archive/:file`, async (dir, _req, params) =>
+          json(await deleteArchivedPage(dir, kind, params.file ?? "")),
         );
       }
 

@@ -205,8 +205,14 @@ export async function removeAndPush(
   repoDir: string,
   paths: string | string[],
   message: string,
+  alsoAdd?: string[],
 ): Promise<SyncResult> {
-  return traced("remove_and_push", repoDir, () => backend().removeAndPush(repoDir, paths, message), syncOutcome);
+  return traced(
+    "remove_and_push",
+    repoDir,
+    () => backend().removeAndPush(repoDir, paths, message, alsoAdd),
+    syncOutcome,
+  );
 }
 
 export async function commitAndPush(

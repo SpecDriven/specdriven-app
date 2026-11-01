@@ -23,6 +23,7 @@ import {
   isPageProjectionOf,
   projectPage,
   reconcilePage,
+  setArchived,
 } from "./automerge/page";
 import {
   createPageDoc,
@@ -128,6 +129,22 @@ export interface PageView extends PageListing {
 }
 
 /**
+ * What the Archived list shows for one archived page
+ * (specs/app/roadmap.feature.md "Archive a roadmap page"): read from its
+ * document alone, since an archived page has no markdown.
+ */
+export interface ArchivedListing {
+  /** The file name the page had — where Restore puts it back. */
+  fileName: string;
+  /** The page's heading, else derived from that file name. */
+  name: string;
+  /** When it was archived, ISO 8601. */
+  archivedAt: string;
+  /** Who archived it, when known. */
+  archivedBy?: string;
+}
+
+/**
  * Scenario "Create roadmap folder if necessary" (and its twin for tasks):
  * with the setting on, the folder exists — created here when it does not. Git
  * does not track empty directories, so a fresh one holds nothing to commit
@@ -184,6 +201,9 @@ export async function savePage(
   base?: string,
 ): Promise<PageView> {
   const file = safe(kind, fileName);
+  // An editor left open on a page archived meanwhile — here or by a
+  // teammate — must not write the file back: Restore is how it returns.
+  if (!(await fileExists(`${dataDir}/${file}`))) await refuseArchived(dataDir, kind, file);
   const projection = await absorb(dataDir, file, content, base);
   await writeTextFile(`${dataDir}/${file}`, projection);
   return { ...listing(file, parsePage(projection)), content: projection };
@@ -226,6 +246,7 @@ export async function createPage(
   if (await fileExists(`${dataDir}/${fileName}`)) {
     throw new Error(`${capitalize(kind.label)} already exists: ${fileName}`);
   }
+  await refuseArchived(dataDir, kind, fileName);
   await mkdir(`${dataDir}/${folder}`, { recursive: true });
   const { body = "", ...meta } = options.page ?? {};
   const projection = await absorb(
@@ -297,6 +318,7 @@ export async function renamePageFile(
   if (await fileExists(`${dataDir}/${to}`)) {
     throw new Error(`${capitalize(kind.label)} already exists: ${to}`);
   }
+  await refuseArchived(dataDir, kind, to);
 
   // Before the move, so no failure leaves a link pointing at a file that is
   // no longer there. Nothing resolves a link to a file as it is written, so
@@ -368,6 +390,120 @@ export async function deletePage(
 }
 
 /**
+ * Archive a page (specs/app/roadmap.feature.md "Archive a roadmap page"):
+ * its markdown leaves the data repo — a `git rm` — while its document stays
+ * where it was, marked archived, and rides the same commit, so no peer ever
+ * sees the file gone without the mark (its drift pass would drop the
+ * document) or the mark without the removal. What the file held is what is
+ * archived: an edit the sync tick has not absorbed yet is folded in first.
+ */
+export async function archivePage(
+  dataDir: string,
+  kind: PageFolder,
+  fileName: string,
+  options: { by?: string; at?: string } = {},
+): Promise<{ message: string }> {
+  refuseUnarchivable(kind);
+  const file = safe(kind, fileName);
+  if (isProjectPage(kind, file)) throw new Error("A project's page stays with its project");
+  const text = await readTextFile(`${dataDir}/${file}`);
+  if (text === null) throw new Error(`${capitalize(kind.label)} not found: ${file}`);
+  const loaded =
+    (await loadPageDoc(dataDir, file)) ??
+    (await createPageDoc(dataDir, file, importPageDoc(parsePage(text))));
+  let doc = loaded.doc;
+  if (!isPageProjectionOf(text, doc)) doc = reconcilePage(doc, parsePage(text));
+  doc = setArchived(doc, { at: options.at ?? new Date().toISOString(), by: options.by });
+  await savePageDoc(dataDir, file, doc, loaded.heads);
+  const sync = await removeAndPush(
+    dataDir,
+    [file],
+    `Archive ${kind.label}: ${file}`,
+    [pageDocDirRel(file)],
+  );
+  // The order forgets it, as for a delete; a restored page comes back last.
+  if (kind.ordered) {
+    const folder = parentOf(file);
+    if ((await readTextFile(`${dataDir}/${folder}/${PAGE_ORDER_FILE}`)) !== null) {
+      await writeOrder(dataDir, folder, await folderOrder(dataDir, kind, folder));
+    }
+  }
+  return { message: sync.message };
+}
+
+/**
+ * The folder's archived pages, most recently archived first: every document
+ * marked archived whose markdown is not there — read from the documents
+ * alone, the only copy an archived page has.
+ */
+export async function listArchivedPages(dataDir: string, kind: PageFolder): Promise<ArchivedListing[]> {
+  if (!kind.archivable) return [];
+  const found: ArchivedListing[] = [];
+  for (const fileName of await listPageDocs(dataDir, kind.folder)) {
+    if (await fileExists(`${dataDir}/${fileName}`)) continue;
+    const archived = (await loadPageDoc(dataDir, fileName))?.doc;
+    if (!archived?.archived) continue;
+    found.push({
+      fileName,
+      name: archived.name || titleFromFileName(entryStem(fileName)),
+      archivedAt: archived.archived.at,
+      ...(archived.archived.by ? { archivedBy: archived.archived.by } : {}),
+    });
+  }
+  return found.sort((a, b) => b.archivedAt.localeCompare(a.archivedAt) || a.fileName.localeCompare(b.fileName));
+}
+
+/**
+ * Restore an archived page: the mark comes off its document and the
+ * markdown is projected back under the file name it had — its folder made
+ * again if it went meanwhile — committed and pushed together. It comes back
+ * at the bottom of its folder.
+ */
+export async function restorePage(
+  dataDir: string,
+  kind: PageFolder,
+  fileName: string,
+): Promise<{ fileName: string; message: string }> {
+  refuseUnarchivable(kind);
+  const file = safe(kind, fileName);
+  const loaded = await loadPageDoc(dataDir, file);
+  if (!loaded?.doc.archived) throw new Error(`No archived ${kind.label}: ${file}`);
+  if (await fileExists(`${dataDir}/${file}`)) {
+    throw new Error(`${capitalize(kind.label)} already exists: ${file}`);
+  }
+  const doc = setArchived(loaded.doc, null);
+  await savePageDoc(dataDir, file, doc, loaded.heads);
+  await mkdir(`${dataDir}/${parentOf(file)}`, { recursive: true });
+  await writeTextFile(`${dataDir}/${file}`, projectPage(doc));
+  const sync = await commitAndPush(
+    dataDir,
+    [file, pageDocDirRel(file)],
+    `Restore ${kind.label}: ${file}`,
+  );
+  return { fileName: file, message: sync.message };
+}
+
+/**
+ * Delete an archived page for good: its document — the only copy — goes,
+ * committed and pushed. The client confirms first.
+ */
+export async function deleteArchivedPage(
+  dataDir: string,
+  kind: PageFolder,
+  fileName: string,
+): Promise<{ message: string }> {
+  refuseUnarchivable(kind);
+  const file = safe(kind, fileName);
+  const loaded = await loadPageDoc(dataDir, file);
+  if (!loaded?.doc.archived || (await fileExists(`${dataDir}/${file}`))) {
+    throw new Error(`No archived ${kind.label}: ${file}`);
+  }
+  const sync = await removeAndPush(dataDir, [pageDocDirRel(file)], `Delete archived ${kind.label}: ${file}`);
+  await removePageDoc(dataDir, file);
+  return { message: sync.message };
+}
+
+/**
  * Put a page in a folder, before another page of that folder or after its
  * last (specs/app/tasks.feature.md "Reorder tasks by dragging"): what a drag
  * in the sidebar and its Move up, Move down and Move to folder… do. Within
@@ -405,6 +541,7 @@ export async function movePage(
     if (await fileExists(`${dataDir}/${to}`)) {
       throw new Error(`${capitalize(kind.label)} already exists: ${to}`);
     }
+    await refuseArchived(dataDir, kind, to);
     const left = parentOf(from);
     const moves = (await hasPageDoc(dataDir, from))
       ? [{ from: pageDocDirRel(from), to: pageDocDirRel(to) }]
@@ -584,7 +721,17 @@ export async function deletePageFolder(
   if (!(await isDirectory(`${dataDir}/${folder}`))) throw new Error(`Folder not found: ${folder}`);
   const pages = (await taskFiles(dataDir, kind, folder)).length;
   const docFolder = pageDocDirRel(folder);
-  const paths = [folder, ...((await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : [])];
+  // An archived page in it is not one of its pages any more: its document
+  // stays, and Restore makes the folder again (specs/app/roadmap.feature.md
+  // "Archive a roadmap page").
+  const archived = await archivedDocsUnder(dataDir, kind, folder);
+  const docs =
+    archived.length === 0
+      ? (await isDirectory(`${dataDir}/${docFolder}`)) ? [docFolder] : []
+      : (await listPageDocs(dataDir, folder))
+          .filter((file) => !archived.includes(file))
+          .map(pageDocDirRel);
+  const paths = [folder, ...docs];
   let message = "folder deleted";
   if (pages > 0) {
     const label = `${kind.label}${pages === 1 ? "" : "s"}`;
@@ -610,6 +757,7 @@ export async function importPageDrift(dataDir: string, kind: PageFolder): Promis
     async (span) => {
       let imported = 0;
       let absorbed = 0;
+      let unarchived = 0;
       for (const fileName of await pageFiles(dataDir, kind.folder)) {
         const text = await readTextFile(`${dataDir}/${fileName}`);
         if (text === null) continue;
@@ -622,6 +770,17 @@ export async function importPageDrift(dataDir: string, kind: PageFolder): Promis
           imported++;
           continue;
         }
+        // Markdown beside an archived document is the page back — put there
+        // by hand, or brought by a teammate's restore whose chunks this
+        // peer cannot read: the markdown is the interchange format.
+        if (loaded.doc.archived) {
+          const next = reconcilePage(setArchived(loaded.doc, null), parsePage(text));
+          await savePageDoc(dataDir, fileName, next, loaded.heads);
+          const projection = projectPage(next);
+          if (projection !== text) await writeTextFile(`${dataDir}/${fileName}`, projection);
+          unarchived++;
+          continue;
+        }
         if (isPageProjectionOf(text, loaded.doc)) continue;
         const next = reconcilePage(loaded.doc, parsePage(text));
         await savePageDoc(dataDir, fileName, next, loaded.heads);
@@ -630,18 +789,22 @@ export async function importPageDrift(dataDir: string, kind: PageFolder): Promis
       }
       let removed = 0;
       for (const fileName of await listPageDocs(dataDir, kind.folder)) {
-        if (!(await fileExists(`${dataDir}/${fileName}`))) {
-          await removePageDoc(dataDir, fileName);
-          removed++;
-        }
+        if (await fileExists(`${dataDir}/${fileName}`)) continue;
+        // An archived page has no markdown by design: its document is the
+        // only copy (specs/app/roadmap.feature.md "Archive a roadmap page").
+        if ((await loadPageDoc(dataDir, fileName))?.doc.archived) continue;
+        await removePageDoc(dataDir, fileName);
+        removed++;
       }
       span.setAttributes({
         "sync.pages_imported": imported,
         "sync.pages_absorbed": absorbed,
         "sync.pages_removed": removed,
+        "sync.pages_unarchived": unarchived,
       });
       const parts = [];
       if (imported > 0) parts.push(`imported ${imported} ${kind.label}(s) into documents`);
+      if (unarchived > 0) parts.push(`brought back ${unarchived} archived ${kind.label}(s) found on disk`);
       if (absorbed > 0) parts.push(`absorbed ${absorbed} externally edited ${kind.label}(s)`);
       if (removed > 0) parts.push(`dropped ${removed} document(s) for deleted ${kind.label}(s)`);
       return parts.join("; ");
@@ -792,6 +955,32 @@ async function inFolderOrder(dataDir: string, files: string[]): Promise<string[]
  */
 async function taskFiles(dataDir: string, kind: PageFolder, rel: string): Promise<string[]> {
   return (await pageFiles(dataDir, rel)).filter((file) => !isProjectPage(kind, file));
+}
+
+/** Only an archivable folder's pages are archived (the roadmap's). */
+function refuseUnarchivable(kind: PageFolder): void {
+  if (!kind.archivable) throw new Error(`${capitalize(kind.label)}s are not archived`);
+}
+
+/**
+ * A new or moved page cannot take an archived page's file name: the two
+ * would share one document, and the archived page's would be lost.
+ */
+async function refuseArchived(dataDir: string, kind: PageFolder, fileName: string): Promise<void> {
+  if (!kind.archivable) return;
+  if ((await loadPageDoc(dataDir, fileName))?.doc.archived) {
+    throw new Error(
+      `An archived ${kind.label} has that name — restore it, or name this ${kind.label} differently`,
+    );
+  }
+}
+
+/** The archived pages under a subfolder, by the file name each had. */
+async function archivedDocsUnder(dataDir: string, kind: PageFolder, folder: string): Promise<string[]> {
+  if (!kind.archivable) return [];
+  return (await listArchivedPages(dataDir, kind))
+    .map((page) => page.fileName)
+    .filter((file) => file.startsWith(`${folder}/`));
 }
 
 /** A task cannot take the file name a project's own page has. */
