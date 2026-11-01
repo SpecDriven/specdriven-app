@@ -7,7 +7,17 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AgentEmptyGuide, modeDescription, statusLabel } from "../src/frontend/AgentPane";
-import { agentLabel, agentsFromState, describeAgent, hasModes, offersFromState, usableAgents } from "../src/frontend/agentChat";
+import {
+  agentChat,
+  agentChatState,
+  agentLabel,
+  agentPaneOffered,
+  agentsFromState,
+  describeAgent,
+  hasModes,
+  offersFromState,
+  usableAgents,
+} from "../src/frontend/agentChat";
 import { byRank, fallbackDescriptor } from "../src/server/agentTypes";
 import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agent, agentsWith } from "./fixtures/agents";
 
@@ -44,6 +54,26 @@ describe("agent descriptors on the client", () => {
     expect(agentsFromState({})).toEqual([]);
     expect(offersFromState({ agentOffers: [{ plugin: "agent-gemini", marketplace: "specdriven", label: "Gemini", description: "", cli: "gemini", cliFound: true }, 3] })).toHaveLength(1);
     expect(offersFromState({})).toEqual([]);
+  });
+
+  test("an agent plugin that arrives while the window is open offers the pane", () => {
+    // The re-read after a plugin is installed, updated or rebuilt (App.tsx
+    // refreshPlugins) goes through applyState like the boot load does; it
+    // once updated only the plugin rows, so the pane button stayed hidden
+    // until a reload.
+    agentChat.setAgents([], []);
+    expect(agentPaneOffered()).toBe(false);
+    const known = agentChat.applyState({ agents: [CODEX_AGENT, CLAUDE_AGENT], agentOffers: [] });
+    expect(known.map((a) => a.id)).toEqual(["codex", "claude"]);
+    expect(agentChatState().agents.map((a) => a.id)).toEqual(["claude", "codex"]);
+    expect(agentPaneOffered()).toBe(true);
+    // Gone again (switched off), with an installable one for a CLI that is
+    // here: still offered, through the offer.
+    agentChat.applyState({ agentOffers: [{ plugin: "agent-gemini", marketplace: "specdriven", label: "Gemini", description: "", cli: "gemini", cliFound: true }] });
+    expect(agentChatState().agents).toEqual([]);
+    expect(agentPaneOffered()).toBe(true);
+    agentChat.applyState({});
+    expect(agentPaneOffered()).toBe(false);
   });
 });
 

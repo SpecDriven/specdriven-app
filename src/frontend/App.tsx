@@ -34,7 +34,6 @@ import type { ProjectMember } from "../server/members";
 import type { GitHubRepo } from "../server/issues";
 import type { SearchResultItem } from "../server/search";
 import type { CurrentUser } from "../server/user";
-import type { AgentDescriptor, AgentOffer } from "../server/agentTypes";
 import {
   codeGenTargetLabel,
   readCodeGenTarget,
@@ -165,8 +164,7 @@ import {
   AGENT_DEFAULT_WIDTH,
   AGENT_MIN_WIDTH,
   agentChat,
-  agentsFromState,
-  offersFromState,
+  agentPaneOffered,
   clampAgentWidth,
   defaultSessionName,
   useAgentChat,
@@ -1617,18 +1615,15 @@ export function App() {
   const [canOpenClaudeDesktop, setCanOpenClaudeDesktop] = useState(false);
   /** The last "Run in" choice, remembered in settings; null means not chosen yet. */
   const [codeGenTarget, setCodeGenTarget] = useState<CodeGenTarget | null>(null);
-  /** The coding agents the plugins supply (specs/agents/agent-plugins
-      .feature.md), by rank, each saying whether its CLI is on PATH. */
-  const [agents, setAgents] = useState<AgentDescriptor[]>([]);
-  /** Marketplace plugins that would supply an agent, not installed. */
-  const [agentOffers, setAgentOffers] = useState<AgentOffer[]>([]);
-  /** The pane is offered when an agent plugin is there, or one could be
-      installed for a CLI that is. */
-  const canOpenAgentPane = agents.length > 0 || agentOffers.some((o) => o.cliFound);
   // The coding agent pane's own state (src/frontend/agentChat.ts): open,
   // width, sessions. Restored once on boot — the pane, its width and the
   // last session come back the way they were left.
   const pane = useAgentChat();
+  /** The coding agents the plugins supply (specs/agents/agent-plugins
+      .feature.md), by rank, each saying whether its CLI is on PATH. The
+      store holds them, so every /api/state reader updates them in one place. */
+  const agents = pane.agents;
+  const canOpenAgentPane = agentPaneOffered(pane);
   // The coding agent pane shows only while code gen is on at all.
   const paneShown = pane.open && codeGen;
   /** The editor can be hidden only while the agent pane is a column beside
@@ -1950,14 +1945,7 @@ export function App() {
           setCodeGen(state.codeGen);
         }
         setCanOpenClaudeDesktop(Boolean(state.canOpenClaudeDesktop));
-        {
-          const known = agentsFromState(state);
-          const offers = offersFromState(state);
-          setAgents(known);
-          setAgentOffers(offers);
-          agentChat.setAgents(known, offers);
-          setCodeGenTarget(readCodeGenTarget(state.codeGenTarget, known));
-        }
+        setCodeGenTarget(readCodeGenTarget(state.codeGenTarget, agentChat.applyState(state)));
         if (typeof state.deletePublished === "boolean") {
           setDeletePublished(state.deletePublished);
         }
@@ -2717,6 +2705,10 @@ export function App() {
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
+    // An agent plugin installed, updated or rebuilt arrives here, not through
+    // a Settings change: without this the pane button stayed hidden until a
+    // reload.
+    agentChat.applyState(data);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     setSettingsPayload(data);
     client.emit("settings/changed", data);
@@ -4533,14 +4525,7 @@ export function App() {
     if (data.codeGen === false) setSpecSelection(new Map());
     setCodeGen(data.codeGen !== false);
     setCanOpenClaudeDesktop(Boolean(data.canOpenClaudeDesktop));
-    {
-      const known = agentsFromState(data);
-      const offers = offersFromState(data);
-      setAgents(known);
-      setAgentOffers(offers);
-      agentChat.setAgents(known, offers);
-      setCodeGenTarget(readCodeGenTarget(data.codeGenTarget, known));
-    }
+    setCodeGenTarget(readCodeGenTarget(data.codeGenTarget, agentChat.applyState(data)));
     setDeletePublished(data.deletePublished === true);
     setAssignments(data.assignments === true);
     setFeatureFlags(data.featureFlags === true);
@@ -4551,6 +4536,10 @@ export function App() {
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
+    // An agent plugin installed, updated or rebuilt arrives here, not through
+    // a Settings change: without this the pane button stayed hidden until a
+    // reload.
+    agentChat.applyState(data);
     await syncClientPlugins(data.plugins, { demo: Boolean(data.demo), settings: data });
     setSettingsPayload(data);
     // The mounted ones follow the other switches they read — the tasks'

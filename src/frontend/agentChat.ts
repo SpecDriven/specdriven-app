@@ -656,7 +656,22 @@ export interface CreateSessionOptions {
   cwd?: string;
 }
 
+/** The pane is offered when an agent plugin is there, or one could be
+    installed for a CLI that is. */
+export function agentPaneOffered(s: Pick<AgentChatStore, "agents" | "agentOffers"> = state): boolean {
+  return s.agents.length > 0 || s.agentOffers.some((o) => o.cliFound);
+}
+
 export const agentChat = {
+  /** Take the agents off an /api/state answer, and return them. Every reader
+      of that answer calls this — the boot load, a Settings change, and the
+      re-read after a plugin is installed, updated or rebuilt — so the pane
+      button follows an agent plugin that arrives while the window is open. */
+  applyState(data: { agents?: unknown; agentOffers?: unknown }): AgentDescriptor[] {
+    const known = agentsFromState(data);
+    agentChat.setAgents(known, offersFromState(data));
+    return known;
+  },
   /** What /api/state said of the agents; unchanged lists leave the store alone. */
   setAgents(agents: AgentDescriptor[], agentOffers: AgentOffer[] = state.agentOffers): void {
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
