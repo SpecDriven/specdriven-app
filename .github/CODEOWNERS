@@ -1,0 +1,18 @@
+# Review ownership for what runs on users' machines and in CI. The main
+# ruleset does not require code-owner review today; these owners are
+# requested on every pull request touching the paths, and become mandatory
+# the day "Require review from Code Owners" is switched on.
+
+/.github/            @vydra
+/install.sh          @vydra
+/install.ps1         @vydra
+/scripts/bump-version.ts   @vydra
+/scripts/build-desktop.ts  @vydra
+/scripts/build.ts    @vydra
+/package.json        @vydra
+/bun.lock            @vydra
+/bunfig.toml         @vydra
+/Dockerfile          @vydra
+/Dockerfile.hosted   @vydra
+/railway.json        @vydra
+/SECURITY.md         @vydra

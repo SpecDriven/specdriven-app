@@ -374,7 +374,7 @@ test.skipIf(!PWSH)("SPECDRIVEN_INSTALL_BUN=1 installs Bun as the user, into thei
   // The Bun just installed is the one that builds, PATH or no PATH.
   const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
   expect(logLines(home).slice(0, 2)).toEqual([
-    `${realpathSync(target)} | install`,
+    `${realpathSync(target)} | install --frozen-lockfile`,
     `${realpathSync(target)} | run build:desktop --local`,
   ]);
 });
@@ -447,7 +447,7 @@ test.skipIf(!PWSH)("the run ends with the app built and started from release/win
   const unpacked = join(realpathSync(target), "release", "win-unpacked");
   expect(await waits(() => logLines(home).length === 3)).toBe(true);
   expect(logLines(home)).toEqual([
-    `${realpathSync(target)} | install`,
+    `${realpathSync(target)} | install --frozen-lockfile`,
     `${realpathSync(target)} | run build:desktop --local`,
     `started | ${unpacked}`,
   ]);

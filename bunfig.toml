@@ -5,3 +5,10 @@ preload = ["./tests/helpers/preload.ts"]
 # Only the app's own tests: a desktop crash test (bun run test:desktop) leaves
 # the plugins it auto-installs, their .ts tests included, under dist/.
 root = "tests"
+
+[install]
+# A version must be this old (seconds; 3 days) before `bun install`, `bun add`
+# or `bun update` will resolve to it. Compromised packages are usually pulled
+# within hours of publication, so waiting keeps them out of the lockfile.
+# Installs from an existing lockfile are unaffected.
+minimumReleaseAge = 259200
