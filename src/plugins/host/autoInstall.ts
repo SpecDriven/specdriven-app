@@ -7,7 +7,9 @@
 // user removed is not installed again; a start that cannot reach the
 // marketplace installs nothing and says so in the log. Not in the hosted
 // app, and not in the demo, whose agent is its own simulation. Called from
-// applyStartupState (src/server/api.ts) without being awaited. The offers
+// applyStartupState (src/server/api.ts) without being awaited, after the
+// marketplaces are pulled when any external plugin is installed
+// (refreshMarketplacesOnStart). The offers
 // (what the pane shows as installable) read the cached indexes only, so a
 // start never waits on git for them.
 
@@ -15,6 +17,7 @@ import { which } from "../../server/run";
 import type { AgentOffer } from "../../server/agentTypes";
 import { PROFILE_KEY } from "../profile";
 import { DEFAULT_MARKETPLACES, marketplaceEntries, type MarketplacePlugin, type MarketplaceRef } from "../marketplace";
+import { externalPluginIds } from "./loader";
 import { cachedMarketplaceIndexes, confirmInstall, loadMarketplaces } from "./marketplace";
 import { discoverPlugins } from "./sources";
 import { version as appVersion } from "../../../package.json";
@@ -54,6 +57,10 @@ export interface AutoInstallDeps {
   install?: (entry: MarketplaceRef, name: string) => Promise<unknown>;
   /** Read the indexes; default: loadMarketplaces without a refresh. */
   indexes?: (entries: readonly MarketplaceRef[]) => Promise<{ entry: MarketplaceRef; plugins: MarketplacePlugin[]; error?: string }[]>;
+  /** The folder plugins the loader knows; default: src/plugins/host/loader.ts externalPluginIds. */
+  externalPlugins?: () => string[];
+  /** Pull the marketplaces; default: loadMarketplaces with a refresh. */
+  refresh?: (entries: readonly MarketplaceRef[]) => Promise<{ name: string; error?: string }[]>;
   log?: (line: string) => void;
 }
 
@@ -77,6 +84,46 @@ export interface AutoInstallResult {
   installed: string[];
   skipped: { name: string; why: string }[];
   errors: string[];
+}
+
+export interface StartupRefreshResult {
+  refreshed: string[];
+  errors: string[];
+}
+
+/**
+ * Pull every marketplace once at start when any plugin comes from outside
+ * the app (specs/app/plugins.feature.md "The marketplaces are refreshed on
+ * start when external plugins are installed"), so Settings → Plugins offers
+ * Update for what changed since, and the agent install that follows reads
+ * the index as it is now. With only built-ins nothing is pulled: null. A
+ * marketplace that cannot be reached keeps its cache and is logged.
+ */
+export async function refreshMarketplacesOnStart(
+  state: State,
+  deps: AutoInstallDeps = {},
+): Promise<StartupRefreshResult | null> {
+  const log = deps.log ?? ((line) => console.log(`[plugins] ${line}`));
+  const externals = (deps.externalPlugins ?? externalPluginIds)();
+  if (externals.length === 0) return null;
+  const marketplaces = deps.marketplaces ?? marketplaceEntries(profileSection(state));
+  const refresh =
+    deps.refresh ??
+    (async (entries: readonly MarketplaceRef[]) =>
+      (await loadMarketplaces(entries, { refresh: true })).map((m) => ({ name: m.name, ...(m.error ? { error: m.error } : {}) })));
+  const result: StartupRefreshResult = { refreshed: [], errors: [] };
+  for (const { name, error } of await refresh(marketplaces)) {
+    if (error) {
+      result.errors.push(`${name}: ${error}`);
+      log(`marketplace ${name} not refreshed on start; its cache stays (${error})`);
+    } else {
+      result.refreshed.push(name);
+    }
+  }
+  if (result.refreshed.length > 0) {
+    log(`refreshed ${result.refreshed.join(", ")} on start for ${externals.length} external plugin(s)`);
+  }
+  return result;
 }
 
 /**

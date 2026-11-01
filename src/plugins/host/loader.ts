@@ -393,6 +393,11 @@ export function externalPlugin(
     : undefined;
 }
 
+/** The ids of the folder plugins the loader knows — installed, linked or the data folder's. */
+export function externalPluginIds(): string[] {
+  return [...external.keys()];
+}
+
 /** The bundle route's url for a plugin's browser half at a revision. */
 export function clientUrl(id: string, rev: string): string {
   return `/plugins/${encodeURIComponent(id)}/client.js?rev=${rev}`;
