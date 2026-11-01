@@ -738,7 +738,7 @@ test("the run ends with the .dmg opened, and nothing started", async () => {
   // Both commands run inside the checkout, in that order; the .dmg is opened
   // last, once everything else has been said, and the .app is not.
   expect(logLines(log)).toEqual([
-    `${target} | install`,
+    `${target} | install --frozen-lockfile`,
     `${target} | run build:desktop --local`,
     `open | ${dmg}`,
   ]);
@@ -805,7 +805,7 @@ test("the run ends with the AppImage made runnable and started", async () => {
   expect(stdout).toContain(`SpecDriven ${VERSION} is running.`);
   expect(lstatSync(image).mode & 0o111).not.toBe(0);
   expect(await waits(() => logLines(log).includes("appimage | started"))).toBe(true);
-  expect(logLines(log).slice(0, 2)).toEqual([`${target} | install`, `${target} | run build:desktop --local`]);
+  expect(logLines(log).slice(0, 2)).toEqual([`${target} | install --frozen-lockfile`, `${target} | run build:desktop --local`]);
 });
 
 test("with no display the app is built but left unstarted", async () => {
