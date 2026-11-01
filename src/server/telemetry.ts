@@ -47,7 +47,7 @@ import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { SeverityNumber, logs } from "@opentelemetry/api-logs";
-import type { Logger as OtelLogger } from "@opentelemetry/api-logs";
+import type { AnyValueMap, Logger as OtelLogger } from "@opentelemetry/api-logs";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -547,7 +547,9 @@ export function getLogger(component: string): ComponentLogger {
       severityNumber: SEVERITY[level],
       severityText: level.toUpperCase(),
       body: message,
-      attributes,
+      // api 1.10 widened Attributes values to unknown; api-logs still types
+      // them narrowly. What we log is always the simple-value subset.
+      attributes: attributes as AnyValueMap | undefined,
     });
   };
   return {
