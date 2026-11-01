@@ -623,8 +623,8 @@ async function stateFields(state: SpecDrivenState) {
     // Hosted mode (src/server/hostedMode.ts): the client sends GitHub
     // sign-in to the gateway's account page and offers no local agents.
     hosted: isHostedMode(),
-    // The running app's version (package.json). The demo shows it beside the
-    // user name, so a public demo says which build is on screen.
+    // The running app's version (package.json), shown beside the user name
+    // so every copy, the public demo included, says which build is on screen.
     version: appVersion,
     // The running build's source (src/server/sourceUrl.ts): every copy,
     // network-served ones included, offers it, so the user menu links to it.
