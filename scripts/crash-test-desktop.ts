@@ -736,7 +736,8 @@ async function launchOnce(run: number, launch: Launch): Promise<RunResult> {
   current = null;
 
   result.exitCode = proc.exitCode;
-  result.signal = proc.signalCode;
+  // Bun reports a numeric code for signals it cannot name.
+  result.signal = proc.signalCode === null ? null : String(proc.signalCode);
   const text = chunks.join("");
   writeFileSync(result.log, text);
   result.findings = scanLog(text);
