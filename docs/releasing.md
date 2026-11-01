@@ -37,31 +37,57 @@ The tag push runs [.github/workflows/release.yml](../.github/workflows/release.y
 which:
 
 - checks the tag against `package.json`;
-- builds the Windows installers, `SpecDriven-<version>-x64-setup.exe` and
-  `SpecDriven-<version>-arm64-setup.exe`, each on a GitHub Windows runner of
-  its own architecture (`bun run build:desktop --win --host-arch`), installs
-  each one silently and checks the installed app opens its window;
 - zips the tagged tree with `git archive` (tracked files only — no
   `node_modules`, `dist`, or `.env`; paths marked `export-ignore` in
   [.gitattributes](../.gitattributes) are left out too);
 - signs `SHASUMS256.txt` with the release signing key (below), as
   `SHASUMS256.txt.sig`, and checks the signature against the public key
   `install.sh` and `install.ps1` embed;
-- lists the zip and both installers in `SHASUMS256.txt`;
-- attests the zip, the installers and `SHASUMS256.txt` with GitHub build
-  provenance;
-- creates a `v<version>` release on this repository with the zip, the two
-  Windows installers, `SHASUMS256.txt` and `SHASUMS256.txt.sig`,
-  `install.sh` and `install.ps1` attached.
+- lists the zip in `SHASUMS256.txt`;
+- attests the zip and `SHASUMS256.txt` with GitHub build provenance;
+- creates a `v<version>` release on this repository, marked latest, with
+  the zip, `SHASUMS256.txt` and `SHASUMS256.txt.sig`, `install.sh` and
+  `install.ps1` attached.
 
-Releases on this repository are immutable: nothing can be attached to one
-after it is created, and once a release has existed its tag name can never
-be used again. So the release is only created after both Windows builds have
-passed. If one fails, nothing is published. Fix it and re-run the workflow
-on the same tag, or cut the next version. A pull request that touches
-`release.yml`, `scripts/build-desktop.ts`, `src/electron/`, `package.json`
-or `bun.lock` runs the Windows builds on their own, without publishing, so a
-broken build shows up before a tag is spent on it.
+It takes seconds. Releases on this repository are immutable: nothing can be
+attached to one after it is created, and once a release has existed its tag
+name can never be used again. If the workflow fails, nothing is published:
+fix it and re-run the workflow on the same tag, or cut the next version.
+
+## Windows installers
+
+The prebuilt Windows installers take minutes to build, so they are not part
+of every release. Build them for a published release on request:
+
+```sh
+gh workflow run release-windows.yml --repo SpecDriven/specdriven-app -f version=<version>
+```
+
+or Actions → *Release Windows installers* → *Run workflow*. Without a
+version it builds the latest release.
+[.github/workflows/release-windows.yml](../.github/workflows/release-windows.yml):
+
+- checks that `v<version>` has a release and `windows-v<version>` has none;
+- builds `SpecDriven-<version>-x64-setup.exe` and
+  `SpecDriven-<version>-arm64-setup.exe` from the `v<version>` tag, each on a
+  GitHub Windows runner of its own architecture (`bun run build:desktop
+  --win --host-arch`), installs each one silently and checks the installed
+  app opens its window;
+- lists both in a `SHASUMS256.txt` of their own, signs it with the release
+  signing key and attests the installers and `SHASUMS256.txt`;
+- creates a `windows-v<version>` release at the tagged commit with the two
+  installers, `SHASUMS256.txt` and `SHASUMS256.txt.sig` attached.
+
+The installers cannot go into the `v<version>` release, which is immutable
+by the time they are built, hence the release of their own. It is never
+marked latest: `install.sh`, `install.ps1` and the app's "new version"
+notice follow `/releases/latest` to the `v<version>` release, and
+`release.yml` passes `--latest` so a newer `v<version>` always takes the
+place back. If a build fails, nothing is published; re-run it. A pull
+request that touches `release-windows.yml`, `scripts/build-desktop.ts`,
+`src/electron/`, `package.json` or `bun.lock` runs the Windows builds on
+their own, without publishing, so a broken build shows up before anyone
+asks for installers.
 
 The Windows installers are not code-signed yet, so SmartScreen asks before
 running one. How to add signing is described in the header of
@@ -85,7 +111,8 @@ commands):
 
 - **GitHub build provenance.** `actions/attest-build-provenance` records,
   in Sigstore's public log, that `specdriven-<version>-src.zip` and
-  `SHASUMS256.txt` were produced by this workflow at this commit; `gh
+  `SHASUMS256.txt` (or the Windows installers) were produced by the
+  workflow at this commit; `gh
   attestation verify specdriven-<version>-src.zip --repo
   SpecDriven/specdriven-app` checks it. It needs no key of ours: the
   workflow's OIDC identity is what is signed. The attestation is made

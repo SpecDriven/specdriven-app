@@ -66,7 +66,7 @@ test("--local packages only the installer this machine starts, for its own archi
   expect(() => electronBuilderArgs(["linux"], "local", "ppc64")).toThrow(/ppc64 architecture/);
 });
 
-// release.yml builds each Windows installer on a runner of its architecture:
+// release-windows.yml builds each Windows installer on a runner of its architecture:
 // cbor-extract's native module is only installed for the machine bun ran on.
 test("--host-arch packages the release installers for this machine's architecture only", () => {
   expect(electronBuilderArgs(["win"], "host-arch", "x64")).toEqual(["--win", "nsis", "--x64"]);
