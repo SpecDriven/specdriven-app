@@ -30,7 +30,7 @@ create.
   plugin system for module tabs of your own.
 
 Try it without installing anything at
-[specdrivenapp-demo.up.railway.app](https://specdrivenapp-demo.up.railway.app).
+[demo.specdriven.app](https://demo.specdriven.app).
 Product information is at [specdriven.app](https://specdriven.app).
 
 ## Install
