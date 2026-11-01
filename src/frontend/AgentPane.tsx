@@ -125,6 +125,12 @@ export function folderPath(path: string): string {
   return path.replace(/(?<=[^\\/:])[\\/]+$/, "");
 }
 
+/**
+ * The opener of an agent's own Settings section — where its sign-in lives —
+ * or undefined when it has none. A plugin's section shares its agent's id.
+ */
+export type AgentSettingsOpener = (agentId: string) => (() => void) | undefined;
+
 export function AgentPane({
   compact,
   demo,
@@ -134,6 +140,7 @@ export function AgentPane({
   browseFolder,
   onClose,
   onOpenPlugins,
+  agentSettings,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -147,6 +154,8 @@ export function AgentPane({
   onClose: () => void;
   /** Open Settings → Plugins, scrolled to a marketplace plugin when named. */
   onOpenPlugins?: (wanted?: string) => void;
+  /** Opens an agent's own Settings section, for one that has it. */
+  agentSettings?: AgentSettingsOpener;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
@@ -176,7 +185,7 @@ export function AgentPane({
       />
       {session && agent ? (
         <>
-          <Transcript session={session} agent={agent} />
+          <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
           <Composer session={session} agent={agent} />
         </>
       ) : (
@@ -187,6 +196,7 @@ export function AgentPane({
           dataRepo={dataRepo}
           askFolder={askFolder}
           onOpenPlugins={onOpenPlugins}
+          agentSettings={agentSettings}
         />
       )}
       {demo && <SimulationWatermark />}
@@ -499,17 +509,21 @@ export function modeItems(
  * .feature.md "The pane offers to install an agent plugin"): agents come as
  * plugins, so the way out is Settings → Plugins — named plainly when there
  * is nothing, per offer when the marketplace has one, and with the
- * provider's own words when a plugin is there but its CLI is not. Nothing
- * installs from here; the Plugins page has the consent flow.
+ * provider's own words when a plugin is there but its CLI is not — with the
+ * way to its own Settings section when it has one, where it can be set up
+ * (Claude: the email sign-in, which fetches Claude Code). Nothing installs
+ * from here; the Plugins page has the consent flow.
  */
 export function AgentEmptyGuide({
   agents,
   offers,
   onOpenPlugins,
+  agentSettings,
 }: {
   agents: readonly AgentDescriptor[];
   offers: readonly AgentOffer[];
   onOpenPlugins?: (wanted?: string) => void;
+  agentSettings?: AgentSettingsOpener;
 }) {
   const open = (wanted?: string) =>
     onOpenPlugins ? (
@@ -529,11 +543,22 @@ export function AgentEmptyGuide({
   return (
     <div className="agent-empty" data-guide="offers">
       <h3>Coding agent</h3>
-      {agents.map((a) => (
-        <p key={a.id} className="agent-guide-row">
-          {a.missingMessage}
-        </p>
-      ))}
+      {agents.map((a) => {
+        const settings = agentSettings?.(a.id);
+        return (
+          <p key={a.id} className="agent-guide-row">
+            {a.missingMessage}
+            {settings && (
+              <>
+                {" "}
+                <button type="button" className="agent-folder-change" onClick={settings}>
+                  Set up {a.label}
+                </button>
+              </>
+            )}
+          </p>
+        );
+      })}
       {offers.map((o) => (
         <p key={o.plugin} className="agent-guide-row">
           {o.cliFound ? (
@@ -565,6 +590,7 @@ function EmptyState({
   dataRepo,
   askFolder,
   onOpenPlugins,
+  agentSettings,
 }: {
   store: AgentChatStore;
   demo: boolean;
@@ -572,6 +598,7 @@ function EmptyState({
   dataRepo: string | null;
   askFolder?: (initial: string) => Promise<string | null>;
   onOpenPlugins?: (wanted?: string) => void;
+  agentSettings?: AgentSettingsOpener;
 }) {
   const [name, setName] = useState(() => defaultSessionName());
   /** A folder picked here; null keeps the default (code repo, else data repo). */
@@ -584,7 +611,14 @@ function EmptyState({
   const defaultDir = codeRepo ?? dataRepo;
   const workDir = folder ?? defaultDir;
   if (agents.length === 0) {
-    return <AgentEmptyGuide agents={store.agents} offers={store.agentOffers} onOpenPlugins={onOpenPlugins} />;
+    return (
+      <AgentEmptyGuide
+        agents={store.agents}
+        offers={store.agentOffers}
+        onOpenPlugins={onOpenPlugins}
+        agentSettings={agentSettings}
+      />
+    );
   }
   const picked = agents.find((a) => a.id === agentId) ?? agents[0]!;
   const start = async () => {
@@ -683,7 +717,15 @@ function EmptyState({
   );
 }
 
-function Transcript({ session, agent }: { session: SessionState; agent: AgentDescriptor }) {
+function Transcript({
+  session,
+  agent,
+  openSettings,
+}: {
+  session: SessionState;
+  agent: AgentDescriptor;
+  openSettings?: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const [unseen, setUnseen] = useState(false);
@@ -729,7 +771,7 @@ function Transcript({ session, agent }: { session: SessionState; agent: AgentDes
         <p className="agent-note">{statusLabel(session.meta.status, agent)}</p>
       )}
       {items.map((item) => (
-        <TranscriptRow key={item.id} item={item} agent={agent} onAnswer={answer} />
+        <TranscriptRow key={item.id} item={item} agent={agent} onAnswer={answer} openSettings={openSettings} />
       ))}
       {session.connection === "reconnecting" && (
         <p className="agent-note" data-level="error">
@@ -750,10 +792,13 @@ export function TranscriptRow({
   item,
   agent = describeAgent("claude"),
   onAnswer,
+  openSettings,
 }: {
   item: TranscriptItem;
   agent?: AgentDescriptor;
   onAnswer?: (answer: Answer) => void;
+  /** The agent's own Settings section, offered under a sign-in failure. */
+  openSettings?: () => void;
 }) {
   switch (item.kind) {
     case "user":
@@ -793,6 +838,14 @@ export function TranscriptRow({
                 <>
                   {" "}
                   <code>{agent.loginHint.command}</code>
+                </>
+              )}
+              {openSettings && (
+                <>
+                  {" "}
+                  <button type="button" className="agent-folder-change" onClick={openSettings}>
+                    Open Settings
+                  </button>
                 </>
               )}
             </span>

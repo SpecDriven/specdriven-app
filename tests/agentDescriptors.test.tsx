@@ -2,11 +2,12 @@
 // AgentPane.tsx; specs/agents/agent-plugins.feature.md): what /api/state
 // says of each plugin's agent is all the client knows, a session whose
 // plugin is gone renders through a fallback, and the empty state points at
-// Settings → Plugins when nothing can start.
+// Settings → Plugins when nothing can start — or at the agent's own Settings
+// section, where it can be set up.
 
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AgentEmptyGuide, modeDescription, statusLabel } from "../src/frontend/AgentPane";
+import { AgentEmptyGuide, TranscriptRow, modeDescription, statusLabel } from "../src/frontend/AgentPane";
 import {
   agentChat,
   agentChatState,
@@ -102,6 +103,40 @@ describe("AgentEmptyGuide", () => {
     expect(html).toContain("Codex CLI not found");
     expect(html).toContain("Pi CLI not found");
     expect(html).toContain('data-guide="offers"');
+  });
+
+  test("an agent with its own Settings section offers the way there, and only that agent", () => {
+    const opened: string[] = [];
+    const agentSettings = (id: string) => (id === "claude" ? () => opened.push(id) : undefined);
+    const html = renderToStaticMarkup(
+      <AgentEmptyGuide agents={agentsWith()} offers={[]} onOpenPlugins={() => {}} agentSettings={agentSettings} />,
+    );
+    expect(html).toContain("Set up Claude");
+    expect(html).not.toContain("Set up Codex");
+    expect(html).not.toContain("Set up Pi");
+    expect(renderToStaticMarkup(<AgentEmptyGuide agents={agentsWith()} offers={[]} />)).not.toContain("Set up");
+  });
+
+  test("a turn that failed to sign in offers the agent's Settings section beside its hint", () => {
+    const failed = {
+      id: "r1",
+      kind: "result" as const,
+      isError: true,
+      subtype: "success",
+      text: "Not logged in · Please run /login",
+      costUsd: null,
+      durationMs: 1200,
+      numTurns: 1,
+      at: "2026-11-01T10:00:00Z",
+    };
+    const claude = { ...CLAUDE_AGENT, loginHint: { text: "Sign in with your email in Settings → Claude." } };
+    const html = renderToStaticMarkup(<TranscriptRow item={failed} agent={claude} openSettings={() => {}} />);
+    expect(html).toContain("Sign in with your email in Settings → Claude.");
+    expect(html).toContain("Open Settings");
+    expect(renderToStaticMarkup(<TranscriptRow item={failed} agent={claude} />)).not.toContain("Open Settings");
+    // A turn that failed for another reason offers nothing.
+    const other = renderToStaticMarkup(<TranscriptRow item={{ ...failed, text: "Rate limited" }} agent={claude} openSettings={() => {}} />);
+    expect(other).not.toContain("Open Settings");
   });
 
   test("a marketplace offer is installable when its CLI is there, and names the CLI first when not", () => {
