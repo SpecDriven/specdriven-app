@@ -6,6 +6,7 @@
 
 import { Bot, FileDiff, Hammer, Image as ImageIcon, RotateCcw, Undo2, Wrench } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { useSpellCheck } from "./spellCheckPref";
 import type { Confirm, Navigate as TabNavigate } from "../plugins/client/tabs";
 import { selfFixPath, type SelfFixRoute } from "../plugins/builtin/self-fix/route";
 import { agentChat } from "./agentChat";
@@ -148,6 +149,7 @@ function imageFiles(list: FileList | DataTransferItemList | null | undefined): F
 function NewView({ repoCrumb, onNavigate, onOpenSettings }: PaneProps) {
   const store = useSelfFix();
   const [description, setDescription] = useState("");
+  const spellCheck = useSpellCheck();
   const [shots, setShots] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -216,6 +218,7 @@ function NewView({ repoCrumb, onNavigate, onOpenSettings }: PaneProps) {
           aria-label="Bug description"
           autoFocus
           rows={10}
+          spellCheck={spellCheck}
           onChange={(e) => setDescription(e.target.value)}
           onPaste={onPaste}
         />

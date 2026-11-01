@@ -9,6 +9,7 @@
 // static-markup tests (tests/issuesPane.test.tsx).
 
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useSpellCheck } from "./spellCheckPref";
 import {
   Bug,
   CircleCheck,
@@ -376,6 +377,7 @@ export function IssueRow({ issue, go, menu }: { issue: Issue; go: Navigate; menu
 
 function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
   const [title, setTitle] = useState("");
+  const spellCheck = useSpellCheck();
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const dirty = title.trim() !== "" || body.trim() !== "";
@@ -435,6 +437,7 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
           placeholder="Title"
           aria-label="Issue title"
           autoFocus
+          spellCheck={spellCheck}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
