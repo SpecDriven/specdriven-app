@@ -178,7 +178,7 @@ export async function repoOfFolder(dir: string, enterpriseHost?: string): Promis
  * on its host: that is how the app knows the host is a GitHub at all.
  *
  * The demo is the exception: its dataset is a copy with no .git anywhere, so
- * no remote can be read from it. It tracks the public release repo instead
+ * no remote can be read from it. It tracks the app's own public repo instead
  * (DEMO_ISSUES_REPO), read-only through the anonymous rate limit, so the
  * Issues tab has something real to show.
  */

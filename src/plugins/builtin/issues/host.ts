@@ -5,7 +5,7 @@
 // Every call goes to GitHub as the user; a data repo whose code repo is not
 // a GitHub one has no issues to show.
 //
-// The demo reads the public release repo (demo.ts DEMO_ISSUES_REPO) so its
+// The demo reads the app's own public repo (demo.ts DEMO_ISSUES_REPO) so its
 // Issues tab shows real issues, but stays read-only: a visitor is signed in
 // to nothing, so a write would be an anonymous one on a public repository —
 // refused here rather than sent to GitHub to fail.

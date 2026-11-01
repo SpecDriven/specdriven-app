@@ -7,9 +7,9 @@ import { useState } from "react";
 /** The header the server sets on every API answer while the folder is blocked. */
 export const DATA_TOO_NEW_HEADER = "X-SpecDriven-Data-Too-New";
 
-export const RELEASE_REPO_URL = "https://github.com/SpecDriven/specdriven-app-release";
+export const RELEASE_REPO_URL = "https://github.com/SpecDriven/specdriven-app";
 const LATEST_RELEASE_URL = `${RELEASE_REPO_URL}/releases/latest`;
-const RAW_URL = "https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main";
+const RAW_URL = "https://raw.githubusercontent.com/SpecDriven/specdriven-app/main";
 
 export type UpgradePlatform = "desktop" | "windows" | "unix";
 

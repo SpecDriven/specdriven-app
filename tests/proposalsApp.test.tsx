@@ -18,7 +18,7 @@ const base: Session = {
   signedIn: false,
   perDay: 5,
   repo: { owner: "SpecDriven", name: "specs-specdriven", url: "https://github.com/SpecDriven/specs-specdriven" },
-  sourceUrl: "https://github.com/SpecDriven/specdriven-app-release/releases/tag/v1.0.0",
+  sourceUrl: "https://github.com/SpecDriven/specdriven-app/releases/tag/v1.0.0",
 };
 const signedIn: Session = {
   ...base,

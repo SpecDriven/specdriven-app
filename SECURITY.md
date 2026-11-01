@@ -15,4 +15,4 @@ while we fix it, and credit you in the release notes if you would like.
 ## Supported versions
 
 We fix security issues in the latest release only. Releases are published
-on [SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release/releases).
+on [SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app/releases).
