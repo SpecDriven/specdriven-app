@@ -11,6 +11,12 @@
  *                                    platform and architecture, as the
  *                                    AppImage (Linux), .dmg (macOS) or
  *                                    unpacked SpecDriven.exe (Windows)
+ *   bun run build:desktop --win --host-arch
+ *                                    this platform's release installers, for
+ *                                    this machine's architecture only:
+ *                                    release/SpecDriven-<version>-<arch>-setup.exe
+ *                                    — what release.yml builds on one native
+ *                                    Windows runner per architecture
  *   bun run build:desktop --bundle-only [--fix <id>]
  *                                    the bundles alone, no installer: what a
  *                                    self-fix rebuilds under the installed
@@ -45,11 +51,19 @@
  *        APPLE_TEAM_ID=<team-id>
  *
  *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
+ *
+ * Windows signing: the installers release.yml attaches are not code-signed
+ * yet, so SmartScreen asks before running them. When they are, Azure
+ * Trusted Signing is the likely route: `build.win.azureSignOptions` in
+ * package.json (publisherName, endpoint, certificateProfileName,
+ * codeSigningAccountName), with AZURE_TENANT_ID, AZURE_CLIENT_ID and
+ * AZURE_CLIENT_SECRET as repository secrets passed to the release.yml
+ * "windows" job's build step. Verify with `signtool verify /pa <installer>`.
  */
 import { $, type BunPlugin } from "bun";
 import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { version } from "../package.json";
+import packageJson, { version } from "../package.json";
 import type { PatchManifest } from "../src/electron/bootPolicy";
 
 export type Platform = "mac" | "linux" | "win";
@@ -103,6 +117,11 @@ export function selectPlatforms(args: string[], osPlatform: string): Platform[] 
  */
 const LOCAL_TARGET: Record<Platform, string> = { linux: "AppImage", mac: "dmg", win: "dir" };
 
+/** The targets package.json's "build" section packages a platform's release as. */
+export function releaseTargets(platform: Platform): string[] {
+  return packageJson.build[platform].target.map((t) => t.target);
+}
+
 /** electron-builder's architecture flag for a `process.arch`. */
 export function archFlag(osArch: string): string {
   if (osArch === "x64" || osArch === "arm64") return `--${osArch}`;
@@ -112,17 +131,40 @@ export function archFlag(osArch: string): string {
 }
 
 /**
+ * How much electron-builder packages: every target and architecture in
+ * package.json (`release`), the host's runnable installer for its own
+ * architecture (`local`), or the release targets for the host's own
+ * architecture (`host-arch`).
+ */
+export type BuildMode = "release" | "local" | "host-arch";
+
+/**
  * The electron-builder arguments. A release build takes the targets and
  * architectures in package.json; `--local` narrows that to the host's own
  * architecture and runnable installer. That keeps install.sh off the .deb,
  * whose fpm runs a bundled Ruby that needs libcrypt.so.1 — which Arch and
  * other non-Debian distros lack — and off cross-architecture builds nobody
- * on that machine will start.
+ * on that machine will start. `--host-arch` keeps the release targets but
+ * only the host's architecture: a native module (cbor-extract) is only
+ * installed for the machine bun ran on, so each architecture's Windows
+ * installer is built on its own runner. The target names go on the command
+ * line with the architecture, as for `--local`, so that it overrides the
+ * architectures package.json lists.
  */
-export function electronBuilderArgs(platforms: Platform[], local: boolean, osArch: string): string[] {
-  if (!local) return platforms.map((p) => `--${p}`);
+export function electronBuilderArgs(platforms: Platform[], mode: BuildMode, osArch: string): string[] {
+  if (mode === "release") return platforms.map((p) => `--${p}`);
   const [platform] = platforms;
-  return [`--${platform}`, LOCAL_TARGET[platform!], archFlag(osArch)];
+  const targets = mode === "local" ? [LOCAL_TARGET[platform!]] : releaseTargets(platform!);
+  return [`--${platform}`, ...targets, archFlag(osArch)];
+}
+
+/** `--local` or `--host-arch`, at most one of them; the rest of the arguments follow. */
+export function buildMode(args: string[]): { mode: BuildMode; rest: string[] } {
+  const local = args.includes("--local");
+  const hostArch = args.includes("--host-arch");
+  if (local && hostArch) throw new Error("--local and --host-arch do not go together");
+  const mode: BuildMode = local ? "local" : hostArch ? "host-arch" : "release";
+  return { mode, rest: args.filter((a) => a !== "--local" && a !== "--host-arch") };
 }
 
 /** `--bundle-only [--fix <id>]`, parsed; the rest of the arguments follow. */
@@ -326,7 +368,9 @@ async function build(builderArgs: string[]): Promise<void> {
   await bundleDesktop();
 
   console.log(`Packaging with electron-builder (${builderArgs.join(" ")})…`);
-  await $`bunx electron-builder ${builderArgs}`;
+  // Never publish: electron-builder uploads on its own when it sees a CI
+  // tag build and a GitHub token. release.yml publishes the release itself.
+  await $`bunx electron-builder ${builderArgs} --publish never`;
 
   console.log("Done — artifacts in release/");
 }
@@ -348,15 +392,14 @@ if (import.meta.main) {
     console.log(bundle.fixId ? `Done — dist/ carries fix ${bundle.fixId}` : "Done — bundles in dist/");
     process.exit(0);
   }
-  const args = bundle.rest;
-  const local = args.includes("--local");
   let builderArgs: string[];
   try {
-    const platforms = selectPlatforms(args.filter((a) => a !== "--local"), process.platform);
-    if (local && (platforms.length !== 1 || platforms[0] !== hostPlatform(process.platform))) {
-      throw new Error("--local builds only this machine's platform");
+    const { mode, rest } = buildMode(bundle.rest);
+    const platforms = selectPlatforms(rest, process.platform);
+    if (mode !== "release" && (platforms.length !== 1 || platforms[0] !== hostPlatform(process.platform))) {
+      throw new Error(`--${mode} builds only this machine's platform`);
     }
-    builderArgs = electronBuilderArgs(platforms, local, process.arch);
+    builderArgs = electronBuilderArgs(platforms, mode, process.arch);
   } catch (e) {
     console.error(`build:desktop: ${(e as Error).message}`);
     process.exit(1);
