@@ -19,6 +19,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import type { Stats } from "node:fs";
+import { dirname } from "node:path";
 import type { FileStat, FileSystem } from "just-git";
 
 /** node:fs Stats in the shape just-git reads. */
@@ -78,8 +79,12 @@ export const nodeFileSystem: FileSystem = {
   mv: (src, dest) => rename(src, dest),
 };
 
-/** Parent directory of a POSIX path — just-git speaks only in those. */
+/**
+ * Parent directory of a path just-git built. It joins with `/`, but the
+ * working directory it joins onto is the app's own and on Windows carries
+ * backslashes (`C:\Users\…\repos\specs/.git/HEAD`), so the platform's
+ * dirname does the splitting rather than a search for the last slash.
+ */
 function dirOf(path: string): string {
-  const cut = path.lastIndexOf("/");
-  return cut <= 0 ? "/" : path.slice(0, cut);
+  return dirname(path);
 }
