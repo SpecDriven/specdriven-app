@@ -38,6 +38,7 @@ import type { SpecDrivenState } from "./state";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
+import { isReadOnlyMode, READ_ONLY_REFUSAL, readOnlyAllows, readOnlySite } from "./readOnlyMode";
 import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   cliGitAvailable,
@@ -386,7 +387,7 @@ export function autoInstalledOnStart(): Promise<void> {
  * SPECDRIVEN_NO_AUTO_INSTALL=1 keeps a test or a kiosk from reaching out.
  */
 async function installAgentPlugins(state: SpecDrivenState): Promise<void> {
-  if (isHostedMode() || isDemoMode() || process.env.SPECDRIVEN_NO_AUTO_INSTALL === "1") return;
+  if (isHostedMode() || isDemoMode() || isReadOnlyMode() || process.env.SPECDRIVEN_NO_AUTO_INSTALL === "1") return;
   try {
     const result = await ensureCommandPlugins(state as Record<string, unknown>, async (s) => {
       // Only the record of what was installed goes to disk, onto the file as
@@ -508,10 +509,12 @@ async function syncHostPlugins(state: SpecDrivenState): Promise<void> {
   const raw = state as Record<string, unknown>;
   // A hosted worker shares its container with other users' workers, so it
   // runs the built-in plugins alone: a plugin folder is code (hostedMode.ts).
+  // So does the read-only site, which runs no code but the app's: its data
+  // folder is whatever the public repo holds.
   return syncPlugins(raw, {
-    sources: !isHostedMode(),
-    paths: !isDemoMode(),
-    dataDir: isDemoMode() ? null : await currentDataDir(),
+    sources: !isHostedMode() && !isReadOnlyMode(),
+    paths: !isDemoMode() && !isReadOnlyMode(),
+    dataDir: isDemoMode() || isReadOnlyMode() ? null : await currentDataDir(),
     // Only the profile section goes to disk, onto the file as it is now: a
     // sync runs beside other writers (a demo reseed, a Settings change),
     // and the state it was handed may be behind them.
@@ -650,11 +653,44 @@ const getState: Handler = async (req) => {
   await syncHostPlugins(state);
   return json({
     ...(await stateFields(state)),
+    ...readOnlyFields(),
     // specs/user-info-settings.feature.md: the OS user by default, with
     // the git identity that authors data-repo commits.
     user: await getCurrentUser(),
   });
 };
+
+/**
+ * What the read-only site (src/server/readOnlyMode.ts) reports over the
+ * usual state: the public repo where the folder's path would be — the
+ * snapshot under /tmp is nobody's business — no sign-in, nothing to run,
+ * and the refresh cadence the open page re-reads on, though the server's
+ * own sync cron stays off (src/server/readOnly.ts refreshes instead).
+ */
+function readOnlyFields() {
+  if (!isReadOnlyMode()) return { readOnly: false };
+  const site = readOnlySite();
+  const repo = site?.repo ?? null;
+  return {
+    readOnly: true,
+    dataRepo: repo,
+    recentDataRepos: repo ? [repo] : [],
+    recentDataRepoDirs: {},
+    reloadFrequencySeconds: site?.refreshSeconds ?? 0,
+    canOpenInIdea: false,
+    canOpenClaudeDesktop: false,
+    canChooseFolder: false,
+    canEstimate: false,
+    codeGen: false,
+    agents: [],
+    agentOffers: [],
+    pluginSources: [],
+    pluginMarketplaces: [],
+    syncServerUrl: null,
+    auth: { signedIn: false as const },
+    gh: { available: false, signedIn: false, login: null, inUse: false },
+  };
+}
 
 /**
  * What a hosted worker (src/server/hostedMode.ts) refuses to change in
@@ -2876,7 +2912,8 @@ const MODE_ERROR = `permissionMode must be one of ${PERMISSION_MODES.join(", ")}
 
 // A hosted worker runs no agents; its pane lists none rather than refusing,
 // so the client's boot-time restore stays quiet (src/server/hostedMode.ts).
-const getAgentChats: Handler = () => json({ sessions: isHostedMode() ? [] : listChatSessions() });
+const getAgentChats: Handler = () =>
+  json({ sessions: isHostedMode() || isReadOnlyMode() ? [] : listChatSessions() });
 
 const getAgentChat: Handler = (_req, params) => {
   const meta = getChatSession(params.id!);
@@ -3101,6 +3138,7 @@ const getTestName: Handler = async (req) => {
     return json({ error: "url must be a GitHub file url with a #L<line> anchor" }, 400);
   }
   if (isDemoMode()) return json({ name: null, reason: "Test names are not read from GitHub in demo mode." });
+  if (isReadOnlyMode()) return json({ name: null, reason: "Test names are not read from GitHub here." });
   return json(await resolveTestName(url));
 };
 
@@ -3137,6 +3175,11 @@ const getPullRequestRoute: Handler = async (req) => {
       title: null,
       reason: "Pull requests are not read from GitHub in demo mode.",
     };
+    return json(answer);
+  }
+  // The read-only site spends no GitHub rate limit on a visitor's page.
+  if (isReadOnlyMode()) {
+    const answer: PullRequestLookup = { title: null, reason: "Pull requests are not read from GitHub here." };
     return json(answer);
   }
   try {
@@ -3321,6 +3364,11 @@ const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|logs|auth|data)(\/
 export async function handleApi(req: Request): Promise<Response | null> {
   const pathname = new URL(req.url).pathname;
   const match = matchApi(req.method, pathname);
+  // The read-only site (src/server/readOnlyMode.ts) answers its allowlist
+  // alone; every other route — a write above all — is refused unrun.
+  if (isReadOnlyMode() && !(match && readOnlyAllows(req.method, match.pattern))) {
+    return pathname.startsWith("/api/") ? json({ error: READ_ONLY_REFUSAL }, 403) : null;
+  }
   if (!match) return null;
   if (!anyIncompatible()) return match.handler(req, match.params);
   // specs/app/data-format.feature.md: nothing writes to data a newer app
