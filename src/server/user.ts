@@ -2,6 +2,7 @@ import { userInfo } from "node:os";
 import { getAuth } from "./auth";
 import { DEMO_USER, isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
+import { isReadOnlyMode, READ_ONLY_USER } from "./readOnlyMode";
 import { cliGitAvailable, currentEngine, ghAccount, ghAccountInUse } from "./git";
 import { run } from "./run";
 
@@ -45,6 +46,8 @@ export async function currentAuthor(): Promise<string> {
 export async function getCurrentUser(): Promise<CurrentUser> {
   // The demo has no real user behind it: everyone who opens it is Test User.
   if (isDemoMode()) return { ...DEMO_USER };
+  // Nor does the read-only site: every visitor is the same anonymous one.
+  if (isReadOnlyMode()) return { ...READ_ONLY_USER };
   // A hosted worker's OS user is the container's; its user is the account
   // the gateway signed in (src/gateway/workers.ts).
   const username = (isHostedMode() && process.env.SPECDRIVEN_ACCOUNT_EMAIL) || userInfo().username;

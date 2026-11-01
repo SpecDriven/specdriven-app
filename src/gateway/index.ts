@@ -18,10 +18,12 @@ import { RecentRepos } from "./repos";
 import { SecretStore } from "./secrets";
 import { runDemo } from "./demo";
 import { runProposals } from "./proposals";
+import { runReadOnly } from "./readOnly";
 import { createGateway } from "./server";
 import { workerIsolation, WorkerPool } from "./workers";
 import { isDemoMode } from "../server/demoMode";
 import { isProposalsMode } from "../server/proposalsMode";
+import { isReadOnlyMode } from "../server/readOnlyMode";
 
 if (process.argv[2] === "genkey") {
   console.log(generateMasterKey());
@@ -32,6 +34,8 @@ if (process.argv[2] === "genkey") {
 if (isDemoMode()) await runDemo();
 // A SPECDRIVEN_PROPOSALS service is the public spec-proposals service (proposals.ts).
 if (isProposalsMode()) await runProposals();
+// A SPECDRIVEN_READONLY service is the public read-only spec site (readOnly.ts).
+if (isReadOnlyMode()) await runReadOnly();
 
 const config = readConfig();
 // Everything the gateway writes — the database first — is its own alone.

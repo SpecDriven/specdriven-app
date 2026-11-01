@@ -9699,3 +9699,30 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   text-transform: none;
   letter-spacing: normal;
 }
+
+/* The read-only site (src/server/readOnlyMode.ts): the tree's and the cards'
+   ⋯ menus and Edit buttons hold nothing a visitor may do. */
+.read-only .tree-row-menu,
+.read-only .card-actions {
+  display: none;
+}
+
+/* Its README and scenario pages: rendered markdown in a scrolling column,
+   framed like a feature's description. */
+.read-only-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.6rem 0.9rem;
+}
+
+.read-only-scenario .md-preview {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.read-only .page-list .sidebar-actions {
+  display: none;
+}

@@ -128,7 +128,7 @@ export function PagePane({
   onHandle: (handle: OpenPageHandle | null) => void;
 }) {
   const { pages: folderPages, supersededBy } = usePages(store);
-  const { googleCalendar, canEstimate } = usePageSettings();
+  const { googleCalendar, canEstimate, readOnly } = usePageSettings();
   const link = pageLink(fileName);
   /** The page's listing (name, assignment, …) and what its editor holds. */
   const [page, setPage] = useState<PageListing | null>(null);
@@ -591,12 +591,14 @@ export function PagePane({
               )}
             </button>
           </Tooltip>
-          <span className="readme-hint">
-            {`Autosaves every ${app.autosaveSeconds}s; the next sync pushes it.`}
-          </span>
+          {!readOnly && (
+            <span className="readme-hint">
+              {`Autosaves every ${app.autosaveSeconds}s; the next sync pushes it.`}
+            </span>
+          )}
         </div>
       </header>
-      {(app.assignments || tab.done || tab.dated) && (
+      {!readOnly && (app.assignments || tab.done || tab.dated) && (
         <div className="props">
           {project && (
             <span className="chip muted project-progress">
@@ -822,6 +824,8 @@ export function PagePane({
         value={text}
         onChange={setText}
         highlight={terms ?? undefined}
+        // The read-only site shows the page rendered, its source a tab away.
+        readOnly={readOnly}
         placeholder={project ? "Describe this project in Markdown…" : `Write this ${tab.noun} in Markdown…`}
       />
     </>
