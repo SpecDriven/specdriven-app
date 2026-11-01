@@ -203,7 +203,8 @@ gets HSTS and `nosniff`.
    `Dockerfile.hosted` and the `/healthz` health check. It applies to every
    service built from this repository: a service with `DEMO_MODE=1` runs the
    public demo from the same image instead of the gateway, needs none of the
-   variables below and no volume (`src/gateway/demo.ts`).
+   variables below and no volume (`src/gateway/demo.ts`); so does one with
+   `SPECDRIVEN_READONLY=1`, the [public read-only site](#public-read-only-site).
 2. **Add a volume mounted at `/data`.** It holds `app.db` and every user's
    folders. A service with a volume runs as a single replica, and a redeploy
    has a short gap while the volume moves to the new container. That suits a
@@ -251,6 +252,7 @@ The services run under `specdriven.app`, whose DNS is on Cloudflare:
 |---|---|---|
 | gateway | `private.specdriven.app` | `specdriven-app.up.railway.app` |
 | demo (`DEMO_MODE=1`) | `demo.specdriven.app` | `specdrivenapp-demo.up.railway.app` |
+| read-only site (`SPECDRIVEN_READONLY=1`) | `specs.specdriven.app` | assigned when the service is created |
 
 1. **In Railway**, on the service: Settings → Networking → Public Networking →
    **+ Custom Domain**. Enter the domain, and the port the service's
@@ -408,3 +410,66 @@ WHERE login = '…'`); the `proposals` table is the audit log.
 | `src/server/actingAs.ts` | the visitor's identity for one proposal's commit |
 | `src/frontend/proposals/`, `src/proposals.html` | the page |
 | `src/gateway/proposals.ts` | the hosted image's hand-over to the service |
+
+## Public read-only site
+
+A fourth service from the same image: `SPECDRIVEN_READONLY=1` runs the app as a
+public site that shows one spec repository to anyone, with no sign-in, and lets
+nobody change anything. It serves https://specs.specdriven.app from
+[SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven).
+
+- **What a visitor sees:** the app's own UI with the Specs tab (the feature
+  tree, every feature and every scenario, rendered), the Roadmap tab, the
+  README and search. Every way to create, edit, move, publish or delete is
+  hidden, and so are Sync, the folder switch, Settings, Plugins, the logs, the
+  data viewer and the coding agents. A scenario's page is rendered, not an
+  editor.
+- **What the server allows:** a short list of GET routes
+  (`src/server/readOnlyMode.ts` `ALLOWED`). Every other request, every write
+  first of all, gets `403 This site is read-only` before its handler runs.
+  Only the built-in Roadmap plugin is mounted; plugin folders, marketplace
+  installs and agent plugins are off, so a file in the repo can't run code.
+- **Where the specs come from:** the repository must be **public**. At start,
+  the service makes a shallow clone with no credentials under
+  `/tmp/specdriven-readonly/mirror`, and the app serves a copy of it with
+  `.git` left out. With no `.git`, every git operation of the app's is
+  skipped, so nothing it does can commit or push. Every minute it fetches the
+  branch. When the branch has moved, it makes a new copy, brings the
+  documents in step with the markdown, and switches to it. Open pages re-read
+  on the same cadence. The service needs no volume: a restart clones again.
+- **When the repo can't be cloned** (private, renamed, GitHub down), the
+  service exits at start and Railway restarts it. A refresh that fails later
+  is logged, and the site keeps showing what it has.
+
+To deploy it:
+
+1. **Make the spec repository public** on GitHub.
+2. **Create the service** from this repository (no volume) and set:
+
+   | Variable | Value |
+   |---|---|
+   | `SPECDRIVEN_READONLY` | `1` |
+   | `SPECDRIVEN_READONLY_REPO` | optional, default `https://github.com/SpecDriven/specs-specdriven` |
+   | `SPECDRIVEN_READONLY_BRANCH` | optional, default `main` |
+   | `SPECDRIVEN_READONLY_REFRESH_SECONDS` | optional, default 60; `0` never refreshes |
+
+   The site answers any Host, like the demo; set `SPECDRIVEN_ALLOWED_HOSTS`
+   to `specs.specdriven.app` to narrow that. It drops from root to the
+   image's `bun` user (`src/gateway/readOnly.ts`).
+3. **Add the domain** `specs.specdriven.app`
+   ([on Cloudflare](#custom-domains-on-cloudflare)). The site has no sign-in,
+   so Cloudflare's proxy is harmless here too.
+
+| File | Role |
+|---|---|
+| `src/server/readOnlyMode.ts` | the flag, the settings and the route allowlist |
+| `src/server/readOnly.ts` | start: clone, snapshot, refresh timer |
+| `src/server/api.ts` `handleApi`, `readOnlyFields` | the refusal; what `/api/state` reports |
+| `src/frontend/App.tsx` `readOnly`, `src/frontend/pages/` | what the UI hides |
+| `src/gateway/readOnly.ts` | the hosted image's hand-over to the site |
+
+Run it locally against any repo, a local path included:
+
+```sh
+SPECDRIVEN_READONLY=1 SPECDRIVEN_READONLY_REPO=$PWD/../specs-specdriven SPECDRIVEN_ROOT=/tmp/sd-readonly bun src/index.ts
+```

@@ -13,6 +13,8 @@ import type { SearchSource } from "../../server/search";
 export interface ApiMatch {
   handler: Handler;
   params: Params;
+  /** The route's pattern as registered (`/api/features/:file`). */
+  pattern: string;
 }
 
 export interface RouteRegistry {
@@ -150,7 +152,7 @@ export function createRouteRegistry(): RouteRegistry {
             break;
           }
         }
-        if (ok) return { handler, params };
+        if (ok) return { handler, params, pattern };
       }
       return null;
     },

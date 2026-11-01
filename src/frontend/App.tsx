@@ -1179,6 +1179,26 @@ function decodeSegment(segment: string): string {
   }
 }
 
+/** The shortcuts the read-only site keeps (beside each tab's `go-…`): moving around, never writing. */
+const READ_ONLY_SHORTCUTS = new Set([
+  "search",
+  "sheet",
+  "editor-pane",
+  "go-home",
+  "theme",
+  "sidebar",
+  "escape",
+  "next",
+  "prev",
+  "open",
+  "editor-prev",
+  "editor-next",
+  "copy-link",
+  "divider",
+]);
+/** The command palette's actions on the read-only site. */
+const READ_ONLY_PALETTE = new RegExp(`^action:(${[...READ_ONLY_SHORTCUTS].join("|")}|go-[\\w-]+|theme-\\w+)$`);
+
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
   // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
@@ -1233,6 +1253,11 @@ export function App() {
   // Demo mode: the data directory is a fixed ephemeral copy — everything that
   // changes or syncs it (✎, recents ▾, Sync, git/GitHub settings) hides.
   const [demo, setDemo] = useState(false);
+  // Read-only mode (src/server/readOnlyMode.ts): the public spec site. The
+  // server refuses every write; the client hides what would make one — the
+  // folder switch and Sync, every create, edit, move and delete, settings,
+  // agents — and opens editors as previews.
+  const [readOnly, setReadOnly] = useState(false);
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
   const [hosted, setHosted] = useState(false);
@@ -1676,6 +1701,9 @@ export function App() {
    * or null. Like a plugin's view it owns the pane and its url.
    */
   const [appPage, setAppPage] = useState<AppPage | null>(null);
+  // The read-only site opens none of the app's own pages: a /settings or
+  // /data link lands on what the url would show beneath it.
+  const appPageShown = readOnly ? null : appPage;
   /** Whether opening the page pushed a history entry that closing can pop. */
   const appPagePushed = useRef(false);
   const [settingsDraft, setSettingsDraft] = useState(String(DEFAULT_AUTOSYNC_SECONDS));
@@ -1947,6 +1975,7 @@ export function App() {
         setSyncServerUrl(typeof state.syncServerUrl === "string" ? state.syncServerUrl : null);
         setCanChooseFolder(Boolean(state.canChooseFolder));
         setDemo(Boolean(state.demo));
+        setReadOnly(Boolean(state.readOnly));
         setHosted(Boolean(state.hosted));
         // The demo pins Vim mode off (src/frontend/vimPref.ts): any editor open
         // when this lands drops its Vim tab, and the Settings row hides.
@@ -6271,7 +6300,7 @@ export function App() {
         data-file={f.fileName}
         /* The checkbox and the twisty carry the depth indent before it. */
         style={{ paddingLeft: "0.2rem" }}
-        draggable
+        draggable={!readOnly}
         onDragStart={(e) => {
           e.dataTransfer.setData("text/plain", f.fileName);
           e.dataTransfer.effectAllowed = "move";
@@ -6453,7 +6482,7 @@ export function App() {
                        the whole row, so it is not added twice. */
                     style={{ paddingLeft: `${(codeGen ? 1.5 : 0.6) + depth * 0.9}rem` }}
                     title={`${s.name} v${s.version}`}
-                    draggable
+                    draggable={!readOnly}
                     onDragStart={(e) => {
                       e.stopPropagation();
                       e.dataTransfer.setData("text/plain", scenarioPath(f.fileName, s));
@@ -6658,7 +6687,7 @@ export function App() {
               aria-expanded={!collapsed.has(child.path)}
               data-folder={child.path}
               title={child.description ? child.path : undefined}
-              draggable
+              draggable={!readOnly}
               onDragStart={(e) => {
                 e.stopPropagation();
                 e.dataTransfer.setData("text/plain", child.path);
@@ -7008,7 +7037,7 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
-  const shortcuts: Shortcut[] = [
+  const allShortcuts: Shortcut[] = [
     {
       id: "search",
       keys: ["mod+k", "/", "mod+f"],
@@ -7333,6 +7362,10 @@ export function App() {
       run: () => false,
     },
   ];
+  // The read-only site keeps the ways around and nothing that writes.
+  const shortcuts = readOnly
+    ? allShortcuts.filter((x) => READ_ONLY_SHORTCUTS.has(x.id) || x.id.startsWith("go-"))
+    : allShortcuts;
   useShortcuts(shortcuts);
 
   // The command palette's contents (src/frontend/CommandPalette.tsx): the
@@ -7507,7 +7540,12 @@ export function App() {
       }),
     ),
     shortcutAction("sheet", <Keyboard size={14} />),
-  ].filter((x): x is PaletteItem => x !== null);
+  ]
+    .filter((x): x is PaletteItem => x !== null)
+    // The read-only site: the keyboard's own commands left above, plus the
+    // theme — no create, move, publish, sync or settings, and none of a
+    // plugin tab's own commands.
+    .filter((x) => !readOnly || READ_ONLY_PALETTE.test(x.id));
 
   const scenarioStatus = (fileName: string, s: { name: string; version: number }) =>
     features
@@ -8968,7 +9006,7 @@ export function App() {
 
   return (
     <main
-      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}`}
+      className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${readOnly ? " read-only" : ""}`}
       style={{ "--sidebar-w": `${sidebarWidth}px`, "--agent-w": `${pane.width}px` } as CSSProperties}
     >
       {compact && (
@@ -9167,7 +9205,7 @@ export function App() {
                 only — the full path is the tooltip. Picking one switches
                 to it and opens its README; the current folder is ticked,
                 and picking it just goes home to the README. */}
-            {dataRepo && !demo && (
+            {dataRepo && !demo && !readOnly && (
               <div className="repo-recent">
                 <button
                   type="button"
@@ -9229,7 +9267,7 @@ export function App() {
                 />
               </div>
             )}
-            {!demo && (
+            {!demo && !readOnly && (
               <Tooltip label="Change data directory">
                 <button
                   type="button"
@@ -9247,7 +9285,7 @@ export function App() {
                 label while running, the icon turning; no status line at the
                 bottom of the page. Up here it works from the home view too, not
                 only with a feature open. */}
-            {!demo && (
+            {!demo && !readOnly && (
               <button
                 type="button"
                 className="repo-sync"
@@ -9496,6 +9534,7 @@ export function App() {
               count of checked specs rides on its button. Timing your own
               work is the Pomodoro at the foot of the sidebar
               (specs/app/pomodoro.feature.md), not a kind of session. */}
+          {!readOnly && (
           <span className="head-actions">
             <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
               <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
@@ -9553,6 +9592,7 @@ export function App() {
               </button>
             </Tooltip>
           </span>
+          )}
         </div>
         {filtering && (
           <div className="filter-chips">
@@ -9673,7 +9713,9 @@ export function App() {
             label="User menu"
             className="user-menu"
             containerSelector=".user-corner"
-            items={[
+            // The read-only site's visitor has no settings, plugins or logs:
+            // the menu offers the app's source alone.
+            items={readOnly ? sourceCodeMenuItems(sourceUrl) : [
               {
                 id: "user-info",
                 label: "User info",
@@ -9887,9 +9929,9 @@ export function App() {
         <ErrorBoundary
           key={appPage ?? selected ?? pluginViewKey ?? "home"}
         >
-        {appPage === "settings" ? (
+        {appPageShown === "settings" ? (
           renderSettingsPage()
-        ) : appPage === "plugins" ? (
+        ) : appPageShown === "plugins" ? (
           /* Plugins (specs/app/plugins.feature.md): its own page, opened
              from the user menu — the plugins on in tab order, the ones off,
              the folders they load from and the marketplaces. */
@@ -9912,7 +9954,7 @@ export function App() {
             onOpenSettings={openSettings}
             onClose={closeAppPage}
           />
-        ) : appPage === "observability" ? (
+        ) : appPageShown === "observability" ? (
           /* Observability: browse and search the app's own logs, and set
              how verbose they are. */
           <ObservabilityPage
@@ -9921,12 +9963,102 @@ export function App() {
             copyText={copyText}
             initialComponent={observabilityComponent}
           />
-        ) : appPage === "data" ? (
+        ) : appPageShown === "data" ? (
           /* Data: the Automerge store as tables, documents and history. */
           <DataPage onClose={closeAppPage} />
-        ) : appPage === "images" ? (
+        ) : appPageShown === "images" ? (
           /* Images: every stored image with where it is used; delete the unreferenced. */
           <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
+        ) : readOnly && editing && selected && feature ? (
+          /* The read-only site: a scenario's page is a page, not the editor —
+             its trail, the way to its neighbours, and the scenario rendered
+             with its links. */
+          <div className="scenario-pane">
+            <div className="editor-bar scenario-pane-bar page-header">
+              <div className="scenario-pane-title">
+                <Breadcrumbs
+                  items={[
+                    repoCrumb,
+                    ...folderCrumbs(selected),
+                    {
+                      label: feature.name || titleFromFileName(selected),
+                      href: featurePath(selected),
+                      title: `Back to ${feature.name || titleFromFileName(selected)}`,
+                      onClick: (e) => {
+                        e.preventDefault();
+                        backToFeature();
+                      },
+                    },
+                  ]}
+                />
+              </div>
+              <div className="editor-actions scenario-pane-actions">
+                <span className="scenario-nav" role="group" aria-label="Scenario navigation">
+                  <Tooltip label="Previous scenario" keys="<">
+                    <button
+                      type="button"
+                      className="ibtn"
+                      aria-label="Previous scenario"
+                      disabled={scenarioNav.prev === null}
+                      onClick={() => stepScenario(-1)}
+                    >
+                      <ChevronLeft size={18} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label="Next scenario" keys=">">
+                    <button
+                      type="button"
+                      className="ibtn"
+                      aria-label="Next scenario"
+                      disabled={scenarioNav.next === null}
+                      onClick={() => stepScenario(1)}
+                    >
+                      <ChevronRight size={18} aria-hidden="true" />
+                    </button>
+                  </Tooltip>
+                </span>
+              </div>
+            </div>
+            <div className="scenario-pane-head">
+              {editing.index !== null && scenarioNumbers(feature.scenarios)[editing.index] != null && (
+                <span className="scenario-number">S{scenarioNumbers(feature.scenarios)[editing.index]}</span>
+              )}
+              <h2 className="scenario-pane-heading">{editing.scenario.name}</h2>
+              <span className="version">v{editing.scenario.version}</span>
+              <span className="chip static">
+                <StatusIcon status={editing.scenario.status} size={14} />
+                {editing.scenario.status}
+              </span>
+            </div>
+            <div className="scenario-pane-body read-only-scenario">
+              <div className="md-preview">{renderMarkdown(editing.scenario.body)}</div>
+              {showTestLinks && testsTable(editing.scenario.tests)}
+              {(editing.scenario.link || (editing.scenario.prs ?? []).length > 0) && (
+                <div className="props">
+                  {editing.scenario.link && (
+                    <a
+                      className="chip"
+                      href={editing.scenario.link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={editing.scenario.link.url}
+                    >
+                      <Ticket size={14} aria-hidden="true" />
+                      {externalLinkLabel(editing.scenario.link)}
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
+                  {(editing.scenario.prs ?? []).map((pr) => (
+                    <a key={pr.url} className="chip" href={pr.url} target="_blank" rel="noreferrer" title={pr.url}>
+                      <GitPullRequest size={14} aria-hidden="true" />
+                      {pr.title || pr.url.replace(/^https:\/\/github\.com\//, "")}
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         ) : editing && selected && feature ? (
           /* specs/editor/spec-editor.feature.md "Spec editor pane": the
              scenario editor takes the feature pane's slot — the sidebar stays
@@ -10579,7 +10711,9 @@ export function App() {
               <Breadcrumbs
                 items={[repoCrumb, ...folderCrumbs(selected), ...pluginCrumbs(selected)]}
                 tail={
-                  renameDraft === null ? (
+                  readOnly ? (
+                    <span className="crumb current">{feature.name || titleFromFileName(selected)}</span>
+                  ) : renameDraft === null ? (
                     <Tooltip label="Rename feature">
                       <button
                         type="button"
@@ -10634,6 +10768,8 @@ export function App() {
                     Button"): from the header, pinned above the list, so it is
                     always in view — at the end of the feature; a card's ⋯
                     adds one below that card. */}
+                {!readOnly && (
+                <>
                 <Tooltip label="New scenario" keys="c">
                   <button
                     type="button"
@@ -10772,6 +10908,8 @@ export function App() {
                     ]}
                   />
                 </span>
+                </>
+                )}
               </div>
             </header>
             {/* Properties as chips (specs/ui/ui.feature.md "Design system"):
@@ -10780,6 +10918,44 @@ export function App() {
                 off unless Settings turns assignments on); the ticket
                 (specs/external-links/project-management-jira-linear-etc
                 .feature.md "Add link to feature"), edited in a popover. */}
+            {readOnly ? (
+              /* The read-only site: the same properties, as plain chips and
+                 links — nothing to assign, link or publish. */
+              <div className="props">
+                <span className="chip static">
+                  <StatusIcon status="published" size={14} />
+                  {feature.scenarios.filter((s) => s.status === "published").length} /{" "}
+                  {feature.scenarios.length} published
+                </span>
+                {authorshipLine(feature) && (
+                  <span className="chip static feature-authors">
+                    <UserRound size={14} aria-hidden="true" />
+                    {authorshipLine(feature)}
+                  </span>
+                )}
+                {(feature.links ?? []).map((l) => (
+                  <a key={l.url} className="chip" href={l.url} target="_blank" rel="noreferrer" title={l.url}>
+                    <Ticket size={14} aria-hidden="true" />
+                    {externalLinkLabel(l)}
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </a>
+                ))}
+                {(feature.prs ?? []).map((pr) => (
+                  <a key={pr.url} className="chip" href={pr.url} target="_blank" rel="noreferrer" title={pr.url}>
+                    <GitPullRequest size={14} aria-hidden="true" />
+                    {pr.title || pr.url.replace(/^https:\/\/github\.com\//, "")}
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </a>
+                ))}
+                {feature.confluence && (
+                  <a className="chip" href={feature.confluence.url} target="_blank" rel="noreferrer">
+                    <BookOpen size={14} aria-hidden="true" />
+                    Confluence
+                    <ExternalLink size={12} aria-hidden="true" />
+                  </a>
+                )}
+              </div>
+            ) : (
             <div className="props">
               {/* The publish rollup, and the way to Publish All (crud-feature
                   .md "publish each scenario individually"): its menu marks
@@ -11213,6 +11389,7 @@ export function App() {
                 );
               })}
             </div>
+            )}
             {descOpen && descEdit ? (
               /* specs/editor/feature-editor.feature.md "Edit feature
                  descrition": the description pane becomes the editor, sized
@@ -11261,10 +11438,10 @@ export function App() {
                 /* Clicking the rendered description opens the editor too —
                    links inside it still open as links. */
                 <div
-                  className="feature-desc md-preview editable"
-                  title="Click to edit the description"
+                  className={`feature-desc md-preview${readOnly ? "" : " editable"}`}
+                  title={readOnly ? undefined : "Click to edit the description"}
                   onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("a")) return;
+                    if (readOnly || (e.target as HTMLElement).closest("a")) return;
                     openDescriptionEditor(selected, feature.description);
                   }}
                 >
@@ -11308,7 +11485,7 @@ export function App() {
                   className={`scenario-card ${s.status}${i === selectedScenario ? " selected" : ""}${dropEdge}${
                     isCard(scenarioDrag) ? " dragging" : ""
                   }`}
-                  draggable
+                  draggable={!readOnly}
                   onDragStart={(e) => {
                     e.dataTransfer.setData("text/plain", scenarioPath(selected, s));
                     e.dataTransfer.effectAllowed = "move";
@@ -11350,7 +11527,7 @@ export function App() {
                   // A right-click opens the card's ⋯ menu, on the card it
                   // also highlights.
                   onContextMenu={(e) => {
-                    if (isCardControl(e.target)) return;
+                    if (readOnly || isCardControl(e.target)) return;
                     e.preventDefault();
                     setSelectedScenario(i);
                     setCardMenu(i);
@@ -11430,7 +11607,7 @@ export function App() {
                         <PolarityPill
                           compact
                           negative={!!s.negative}
-                          disabled={editing !== null}
+                          disabled={editing !== null || readOnly}
                           onToggle={() => void toggleScenarioPolarityAt(i)}
                         />
                       )}
@@ -11599,7 +11776,9 @@ export function App() {
                   </p>
                 )}
               {feature.scenarios.length === 0 && (
-                <p className="empty">No scenarios yet. Press c, or the + above, to add one.</p>
+                <p className="empty">
+                  {readOnly ? "No scenarios yet." : "No scenarios yet. Press c, or the + above, to add one."}
+                </p>
               )}
             </div>
           </>
@@ -11622,6 +11801,7 @@ export function App() {
                 items={[repoCrumb]}
                 tail={<span className="crumb current plain">README.md</span>}
               />
+              {!readOnly && (
               <div className="editor-actions page-actions">
                 <SaveIndicator
                   saving={saving}
@@ -11634,8 +11814,11 @@ export function App() {
                     : `Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
                 </span>
               </div>
+              )}
             </header>
-            {readme !== null && (
+            {/* The read-only site shows the README rendered, as a page. */}
+            {readme !== null && readOnly && <div className="md-preview read-only-page">{renderMarkdown(readme)}</div>}
+            {readme !== null && !readOnly && (
               <MarkdownEditor
                 value={readme}
                 onChange={setReadme}
