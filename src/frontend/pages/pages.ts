@@ -9,7 +9,7 @@
 import { useSyncExternalStore } from "react";
 import { ListTodo, Map as MapIcon, NotebookPen, type LucideIcon } from "lucide-react";
 import { PROJECT_PAGE, isProjectPage } from "../../server/pageFolders";
-import type { PageListing, ProjectListing } from "../../server/pages";
+import type { ArchivedListing, PageListing, ProjectListing } from "../../server/pages";
 
 /** One special folder's tab: what it is called and what its pages can do. */
 export interface PageTab {
@@ -49,6 +49,12 @@ export interface PageTab {
    * its own page — the tasks only. Elsewhere a subfolder is just a folder.
    */
   projects?: boolean;
+  /**
+   * Whether its pages can be archived — taken out of the folder, kept in
+   * their documents, listed under Archived until restored
+   * (specs/app/roadmap.feature.md "Archive a roadmap page"). The roadmap only.
+   */
+  archivable?: boolean;
   icon: LucideIcon;
   /** The `g` chord that opens the tab on its first page. */
   shortcut: string;
@@ -63,6 +69,7 @@ export const ROADMAP_TAB: PageTab = {
   empty: "No roadmap pages yet",
   done: false,
   ordered: true,
+  archivable: true,
   icon: MapIcon,
   shortcut: "g r",
   order: 10,
@@ -107,11 +114,21 @@ export interface PagesState {
   folders: string[];
   /** The tasks' projects — their subfolders — each with its name and owner. */
   projects: ProjectListing[];
+  /** An archivable tab's archived pages, most recently archived first —
+      empty elsewhere, and on the read-only site, which lists none. */
+  archived: ArchivedListing[];
   /** Whether `GET /api/<folder>` has answered since the last reset. */
   loaded: boolean;
 }
 
-const EMPTY: PagesState = { pages: [], supersededBy: {}, folders: [], projects: [], loaded: false };
+const EMPTY: PagesState = {
+  pages: [],
+  supersededBy: {},
+  folders: [],
+  projects: [],
+  archived: [],
+  loaded: false,
+};
 
 export interface PagesStore {
   subscribe(listener: () => void): () => void;
@@ -130,7 +147,12 @@ export interface PagesStore {
   upsert(listing: PageListing): void;
 }
 
-export function createPagesStore(folder: string): PagesStore {
+/**
+ * `archive` also reads the folder's archived pages from `GET
+ * /api/<folder>-archive` on each load (specs/app/roadmap.feature.md "Archive
+ * a roadmap page"); a refusal — the read-only site's — lists none.
+ */
+export function createPagesStore(folder: string, options: { archive?: boolean } = {}): PagesStore {
   let state = EMPTY;
   const listeners = new Set<() => void>();
   const set = (next: PagesState) => {
@@ -146,8 +168,14 @@ export function createPagesStore(folder: string): PagesStore {
     },
     state: () => state,
     async load() {
-      const res = await fetch(`/api/${folder}`).catch(() => null);
+      const [res, archive] = await Promise.all([
+        fetch(`/api/${folder}`).catch(() => null),
+        options.archive ? fetch(`/api/${folder}-archive`).catch(() => null) : null,
+      ]);
       if (!res?.ok) return;
+      const archived = archive?.ok
+        ? ((await archive.json().catch(() => ({}))) as { pages?: ArchivedListing[] }).pages
+        : undefined;
       const data = (await res.json().catch(() => ({}))) as {
         pages?: PageListing[];
         supersededBy?: Record<string, PageListing>;
@@ -159,6 +187,7 @@ export function createPagesStore(folder: string): PagesStore {
         supersededBy: data.supersededBy ?? {},
         folders: Array.isArray(data.folders) ? data.folders : [],
         projects: Array.isArray(data.projects) ? data.projects : [],
+        archived: Array.isArray(archived) ? archived : [],
         loaded: true,
       });
     },

@@ -306,6 +306,16 @@ export type PageDoc = {
    * mix of two.
    */
   supersedes?: { title: string; url: string };
+  /**
+   * When the page was archived and by whom (specs/app/roadmap.feature.md
+   * "Archive a roadmap page"). An archived page has no markdown: the file
+   * is removed from the data repo and this document — kept where it was,
+   * under the page's old file name — is the only copy, until the page is
+   * restored and projected back. Set whole, like `assigned`, so two people
+   * archiving at once agree on one record. Never projected: the markdown of
+   * a restored page carries no trace of it.
+   */
+  archived?: { at: string; by?: string };
 };
 
 // Test management (specs/app/tests.feature.md): a lightweight

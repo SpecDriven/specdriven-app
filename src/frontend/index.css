@@ -5970,6 +5970,68 @@ aside header .collapse-btn {
   margin-right: 0.15rem;
 }
 
+/* ---- Archived roadmap pages (specs/app/roadmap.feature.md "Archive a
+   roadmap page"): a collapsed head at the foot of the list, then quiet rows
+   that are not links — an archived page has no file to open. ---- */
+.page-archive {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+button.page-archive-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.page-archive-head:hover {
+  background: var(--hover);
+  color: var(--text-2);
+}
+
+.page-archive-twist {
+  transition: transform 120ms ease;
+}
+
+.page-archive-head[aria-expanded="true"] .page-archive-twist {
+  transform: rotate(90deg);
+}
+
+.page-archive-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
+}
+
+.page-row > .archived-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.38rem 0.6rem 0.38rem 1.2rem;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.archived-day {
+  margin-left: auto;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Notebook entries (specs/app/engineering-notebook.feature.md) ----
    A dated row rather than a one-line name: the title, then a second line
    with the kind chip, who signed it and the day. */

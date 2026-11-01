@@ -28,7 +28,7 @@ import type { SearchResultItem } from "../../../server/search";
 import { pageLink, pagesPath, parsePageRoute, type PageRoute } from "./route";
 
 export function pagesClient(folder: PageTab): Plugin<Context, ClientConfig | undefined> {
-  const store = createPagesStore(folder.folder);
+  const store = createPagesStore(folder.folder, { archive: folder.archivable });
 
   /**
    * Bumped on each reload tick so an open page re-reads its file — which it

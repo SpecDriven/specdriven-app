@@ -9,11 +9,14 @@
 
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import {
+  Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   CalendarPlus,
   Check,
   CheckCircle2,
+  ChevronRight,
   Circle,
   Ellipsis,
   Eye,
@@ -25,7 +28,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import type { PageListing, ProjectListing } from "../../server/pages";
+import type { ArchivedListing, PageListing, ProjectListing } from "../../server/pages";
 import type { ProjectMember } from "../../server/members";
 import { parsePage, serializePage } from "../../server/parser";
 import {
@@ -905,7 +908,9 @@ export async function newPageFlow(
  * then the pages grouped by their subfolder under the folder — the
  * notebook's entries by the month they were written in instead
  * (specs/app/engineering-notebook.feature.md) — each with a ⋯ menu: Rename,
- * Copy link, Delete. An ordered tab — the tasks (specs/app/tasks.feature.md
+ * Copy link, Delete, and Archive where the tab's pages are archived, which
+ * then lists them under a collapsed Archived head at the foot of the list
+ * (specs/app/roadmap.feature.md "Archive a roadmap page"). An ordered tab — the tasks (specs/app/tasks.feature.md
  * "Reorder tasks by dragging", "Task folder menu") and the roadmap
  * (specs/app/roadmap.feature.md "Reorder roadmap pages") — also lets a row be
  * dragged into place, adds Move up, Move down and Move to folder… to its
@@ -931,7 +936,8 @@ export function PagesSidebar({
   /** The open page's editor, if the pane holds one of this tab's pages. */
   openPage: () => OpenPageHandle | null;
 }) {
-  const { pages, supersededBy, folders, projects } = usePages(store);
+  const { pages, supersededBy, folders, projects, archived } = usePages(store);
+  const { readOnly } = usePageSettings();
   /** A row's ⋯ menu (file name, or `folder:<path>` for a folder's), if open. */
   const [menu, setMenu] = useState<string | null>(null);
   /** The page being dragged, if any — an ordered tab's only. */
@@ -1031,6 +1037,68 @@ export function PagesSidebar({
       app.goHome();
     }
     const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}`, {
+      method: "DELETE",
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? `Could not delete the ${tab.noun}`);
+      return;
+    }
+    toast.success(`Deleted “${page.name}”${data.message ? ` — ${data.message}` : ""}.`);
+    await store.load();
+  };
+
+  /**
+   * Archive a page (specs/app/roadmap.feature.md "Archive a roadmap page"):
+   * out of the list and out of the data repo, its document kept — so no
+   * confirmation, just an Undo, which restores it. The open page lands what
+   * it holds first, so that is what is archived, then leaves without its
+   * parting save, which would write the file back.
+   */
+  const archivePage = async (page: PageListing) => {
+    const open = openPage();
+    if (open?.fileName === page.fileName) {
+      await open.flush();
+      open.seal();
+      app.goHome();
+    }
+    const res = await fetch(`/api/${tab.folder}/${encodeURIComponent(page.fileName)}/archive`, {
+      method: "POST",
+    });
+    const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    if (!res.ok) {
+      toast.error(data.error ?? `Could not archive the ${tab.noun}`);
+      return;
+    }
+    toast.success(`Archived “${page.name}”.`, {
+      action: { label: "Undo", run: () => void restorePage(page) },
+    });
+    await store.load();
+  };
+
+  /** Restore an archived page to where it was, last in its folder. */
+  const restorePage = async (page: { fileName: string; name: string }) => {
+    const res = await fetch(`/api/${tab.folder}-archive/${encodeURIComponent(page.fileName)}/restore`, {
+      method: "POST",
+    });
+    const data = (await res.json().catch(() => ({}))) as { fileName?: string; error?: string };
+    if (!res.ok || !data.fileName) {
+      toast.error(data.error ?? `Could not restore the ${tab.noun}`);
+      return;
+    }
+    toast.success(`Restored “${page.name}”.`);
+    await store.load();
+  };
+
+  /** Delete an archived page for good — its document is the only copy left. */
+  const removeArchived = async (page: ArchivedListing) => {
+    const ok = await app.confirm({
+      title: `Delete archived ${tab.noun}`,
+      body: `Delete “${page.name}” for good? Its archived copy is the only one left; this is committed and pushed right away.`,
+      confirmLabel: `Delete ${tab.noun}`,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/${tab.folder}-archive/${encodeURIComponent(page.fileName)}`, {
       method: "DELETE",
     });
     const data = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
@@ -1451,6 +1519,16 @@ export function PagesSidebar({
                           icon: <Link size={13} />,
                           onSelect: () => app.copyLink(pageLink(page.fileName)),
                         },
+                        ...(tab.archivable
+                          ? [
+                              {
+                                id: "archive",
+                                label: "Archive",
+                                icon: <Archive size={13} />,
+                                onSelect: () => void archivePage(page),
+                              },
+                            ]
+                          : []),
                         {
                           id: "delete",
                           label: "Delete",
@@ -1467,7 +1545,106 @@ export function PagesSidebar({
           </div>
         ))}
         {pages.length === 0 && <p className="empty">{tab.empty}</p>}
+        {tab.archivable && !readOnly && archived.length > 0 && (
+          <ArchivedPages
+            archived={archived}
+            menu={menu}
+            setMenu={setMenu}
+            onRestore={(page) => void restorePage(page)}
+            onDelete={(page) => void removeArchived(page)}
+          />
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The Archived head at the foot of the Roadmap list
+ * (specs/app/roadmap.feature.md "Archive a roadmap page"): collapsed to its
+ * count until opened, then the archived pages, most recently archived
+ * first, each saying when and by whom, with a ⋯ menu of Restore and Delete.
+ * An archived page has no file to open, so its row is not a link.
+ */
+function ArchivedPages({
+  archived,
+  menu,
+  setMenu,
+  onRestore,
+  onDelete,
+}: {
+  archived: ArchivedListing[];
+  /** The sidebar's open ⋯ menu — `archived:<file>` for one of these rows. */
+  menu: string | null;
+  setMenu: (update: (m: string | null) => string | null) => void;
+  onRestore: (page: ArchivedListing) => void;
+  onDelete: (page: ArchivedListing) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="page-archive">
+      <button
+        type="button"
+        className="page-group page-archive-head"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <ChevronRight size={12} aria-hidden="true" className="page-archive-twist" />
+        Archived
+        <span className="page-archive-count">{archived.length}</span>
+      </button>
+      {open &&
+        archived.map((page) => {
+          const key = `archived:${page.fileName}`;
+          const when = page.archivedAt.slice(0, 10);
+          return (
+            <div key={page.fileName} className="page-row archived-row">
+              <span
+                className="page-entry archived-entry"
+                title={`${page.name} — archived ${when}${page.archivedBy ? ` by ${page.archivedBy}` : ""}`}
+              >
+                {page.name}
+                <span className="archived-day">{when}</span>
+              </span>
+              <span className="tree-row-menu">
+                <Tooltip label="More actions">
+                  <button
+                    type="button"
+                    className="tree-menu-btn"
+                    aria-label={`Menu for archived ${page.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu === key}
+                    onClick={() => setMenu((m) => (m === key ? null : key))}
+                  >
+                    <Ellipsis size={14} aria-hidden="true" />
+                  </button>
+                </Tooltip>
+                <Menu
+                  open={menu === key}
+                  onClose={() => setMenu(() => null)}
+                  label={`Menu for archived ${page.name}`}
+                  className="tree-menu"
+                  containerSelector=".tree-row-menu"
+                  items={[
+                    {
+                      id: "restore",
+                      label: "Restore",
+                      icon: <ArchiveRestore size={13} />,
+                      onSelect: () => onRestore(page),
+                    },
+                    {
+                      id: "delete",
+                      label: "Delete",
+                      icon: <Trash2 size={13} />,
+                      danger: true,
+                      onSelect: () => onDelete(page),
+                    },
+                  ]}
+                />
+              </span>
+            </div>
+          );
+        })}
     </div>
   );
 }
