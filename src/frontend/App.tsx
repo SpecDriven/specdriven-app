@@ -11901,7 +11901,9 @@ export function App() {
           compact={compact}
           demo={demo}
           codeRepo={codeRepo}
-          dataRepo={dataRepo}
+          // An agent works in a folder: a GitHub url's own clone, so the
+          // folder menu offers it once, not as the url and again as its path.
+          dataRepo={dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo)}
           prompt={prompt}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}

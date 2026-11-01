@@ -35,6 +35,7 @@ import {
   normalizeQtestParentUrl,
 } from "./state";
 import type { SpecDrivenState } from "./state";
+import { onePerRepo, sameRepoAs } from "./sameRepo";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
@@ -570,6 +571,9 @@ function cloneDirs(repos: string[]): Record<string, string> {
 }
 
 async function stateFields(state: SpecDrivenState) {
+  // One entry per repository (specs/app/spec-folders.feature.md): a list
+  // saved before that rule may still name a repo by its url and by a folder.
+  const recent = await onePerRepo(recentDataRepos(state), getAppRoot());
   return {
     dataRepo: state.dataRepo ?? null,
     needsDataRepo: needsDataRepo(state),
@@ -637,12 +641,12 @@ async function stateFields(state: SpecDrivenState) {
     syncServerUrl: state.syncServerUrl ?? null,
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
-    recentDataRepos: recentDataRepos(state),
+    recentDataRepos: recent,
     // Where each GitHub url on that list is cloned on this computer
     // (specs/app/spec-folders.feature.md "Manage specification folders"),
     // which the Spec folders dialog shows under the url. The hosted server's
     // disk is not the user's, so it reports none.
-    recentDataRepoDirs: isHostedMode() ? {} : cloneDirs(recentDataRepos(state)),
+    recentDataRepoDirs: isHostedMode() ? {} : cloneDirs(recent),
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
@@ -921,6 +925,9 @@ const putState: Handler = async (req) => {
     // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
     // to the front, the oldest past ten falls off.
     rememberDataRepo(state, dataRepo);
+    // One entry per repository (specs/app/spec-folders.feature.md): the
+    // picked folder replaces the url or folder it shares a repository with.
+    state.recentDataRepos = await onePerRepo(state.recentDataRepos ?? [], getAppRoot());
   }
   // Manage specification folders (specs/app/spec-folders.feature.md): take
   // a folder off the list. Only the list entry goes — nothing on disk is
@@ -933,7 +940,12 @@ const putState: Handler = async (req) => {
     if (target === (state.dataRepo && normalizeDataRepo(state.dataRepo))) {
       return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
     }
-    forgetDataRepo(state, target);
+    // Any other name the list kept for that repository goes with it, so it
+    // never comes back in its place — the open folder excepted.
+    const open = state.dataRepo && normalizeDataRepo(state.dataRepo);
+    for (const entry of await sameRepoAs(target, state.recentDataRepos ?? [], getAppRoot())) {
+      if (entry !== open) forgetDataRepo(state, entry);
+    }
   }
   if (body.reloadFrequencySeconds !== undefined) {
     const n = body.reloadFrequencySeconds;
