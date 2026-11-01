@@ -12,13 +12,16 @@ curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/inst
 ```
 
 [install.sh](../install.sh) (POSIX sh; curl or wget; unzip, bsdtar or
-python3) needs macOS 13 or later on a Mac — Electron 44 dropped macOS 12 —
-and:
+python3; sha256sum or shasum; ssh-keygen) needs macOS 13 or later on a Mac —
+Electron 44 dropped macOS 12 — and:
 
 1. follows the redirect from the releases page's `latest` to find the newest
    `v<version>`;
-2. downloads `specdriven-<version>-src.zip` and `SHASUMS256.txt` from that
-   release and verifies the checksum;
+2. downloads `specdriven-<version>-src.zip`, `SHASUMS256.txt` and
+   `SHASUMS256.txt.sig` from that release, checks that the signature was
+   made by the SpecDriven release key (the public key is embedded in the
+   script), and then that the zip's checksum is the one `SHASUMS256.txt`
+   lists;
 3. unpacks the zip to `~/.specdriven/app/specdriven-<version>`, points
    `~/.specdriven/app/current` at it, and keeps the verified zip and its
    checksum alongside;
@@ -28,9 +31,33 @@ and:
    only when there is a display to start it on.
 
 This is the unattended path. To review the source before any of it runs,
-take the zip from the releases page and unpack it yourself, then build by
-hand (below). The behaviour is specified in
+take the zip from the releases page, [verify it by hand](#verifying-a-release-by-hand)
+and unpack it yourself, then build by hand (below). The behaviour is
+specified in
 [specs/app/installation.feature.md](../specs/app/installation.feature.md).
+
+### Why a signature, and why ssh-keygen
+
+A checksum proves the zip is the one `SHASUMS256.txt` names — which is only
+worth something if `SHASUMS256.txt` itself came from SpecDriven. Anyone who
+could put a release on the releases page could put a matching checksum file
+beside it. So the release workflow signs `SHASUMS256.txt` with the SpecDriven
+release key, and the installers refuse a release whose signature is missing,
+made by another key, made in another namespace, or made over a different
+checksum file: the signature is checked first, the checksum second, and
+nothing is unpacked until both pass. See
+[releasing.md](releasing.md#signing-and-provenance) for where the key lives.
+
+The signature is an [SSH signature](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig)
+(`ssh-keygen -Y`), rather than a Sigstore or minisign one, because
+verifying it needs only `ssh-keygen`: OpenSSH 8.1 or later, which every
+macOS since Catalina, nearly every Linux, and Windows 10 and 11 (the OpenSSH
+Client, installed by default) already have. A keyless Sigstore signature
+cannot be checked from POSIX sh without `cosign` or `gh`, and nothing ships
+`minisign`. A machine without `ssh-keygen` is refused, like one without a
+sha256 tool: Debian and Ubuntu have it in `openssh-client`, Fedora and Arch
+in `openssh`, Alpine in `openssh-keygen`; on Windows it is the OpenSSH Client
+optional feature (`Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`).
 
 ### Bun
 
@@ -47,11 +74,15 @@ error, with the verified checkout left in place.
 
 ### Failure modes and overrides
 
-It fails closed: a checksum mismatch, a missing or incomplete
-`SHASUMS256.txt`, a 404, or a machine with no sha256 tool aborts without
-writing anything, and a version that is already unpacked is not re-extracted
-— someone may have edited or built in it — though the build then runs on it
-as it stands. A Bun install that fails is reported and left at that.
+It fails closed: a signature that is missing or does not verify, a checksum
+mismatch, a missing or incomplete `SHASUMS256.txt`, a 404, or a machine with
+no sha256 tool or no `ssh-keygen` aborts without writing anything, and a
+version that is already unpacked is not re-extracted — someone may have
+edited or built in it — though the build then runs on it as it stands. A Bun
+install that fails is reported and left at that. A signature that fails
+against the embedded key can also mean the key was rotated after this copy
+of the installer was fetched; the message says so and names the current
+`install.sh`.
 
 | variable | meaning |
 | --- | --- |
@@ -60,6 +91,7 @@ as it stands. A Bun install that fails is reported and left at that.
 | `SPECDRIVEN_INSTALL_BUN` | `1` or `0`: answer the Bun question in advance |
 | `BUN_INSTALL` | where Bun's installer puts Bun (default `~/.bun`) |
 | `SPECDRIVEN_RELEASES_URL` | anything serving GitHub's `/latest` → `/tag/v<version>` redirect and `/download/v<version>/<asset>` layout, which is what [tests/install.test.ts](../tests/install.test.ts) stands up on loopback |
+| `SPECDRIVEN_RELEASE_PUBKEY` | the `ssh-ed25519 AAAA…` key releases must be signed with, instead of the SpecDriven one embedded in the script — for a release server of your own, signed with a key of your own; the tests sign their fake releases this way |
 
 A Windows shell (Git Bash, MSYS, Cygwin) is pointed at install.ps1 instead:
 `curl | sh` needs a Unix shell.
@@ -71,10 +103,12 @@ irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1
 ```
 
 [install.ps1](../install.ps1) does the same in the same order — the same
-overrides, the same checksum rules, the same Bun question — under
-`%USERPROFILE%\.specdriven\app`, with `current` a junction (which needs
-neither admin rights nor Developer Mode) rather than a symlink. It downloads
-with `Invoke-WebRequest`, verifies with `Get-FileHash` and unpacks with
+overrides, the same signature and checksum rules, the same Bun question —
+under `%USERPROFILE%\.specdriven\app`, with `current` a junction (which
+needs neither admin rights nor Developer Mode) rather than a symlink. It
+downloads with `Invoke-WebRequest`, verifies the signature with the
+`ssh-keygen` of Windows' OpenSSH Client (on PATH, or under
+`System32\OpenSSH`), the checksum with `Get-FileHash`, and unpacks with
 .NET's `ZipFile`, so it needs nothing Windows 10 and 11 do not ship. Bun
 comes from Bun's own `install.ps1`, downloaded first and then run in a
 PowerShell of its own, never from an elevated (Administrator) one. After
@@ -96,6 +130,48 @@ when `SPECDRIVEN_TEST_PWSH` names a `pwsh` —
 and otherwise skip. The
 [install.ps1 workflow](../.github/workflows/install-ps1.yml) runs them on
 pushes and pull requests that change the installer or those tests.
+
+## Verifying a release by hand
+
+Every release on the [releases page](https://github.com/SpecDriven/specdriven-app/releases)
+carries `specdriven-<version>-src.zip`, `SHASUMS256.txt` and
+`SHASUMS256.txt.sig`, and two proofs of where they came from. Either one is
+enough; the installers use the second.
+
+**GitHub build provenance.** The release workflow attests the zip and
+`SHASUMS256.txt` with
+[actions/attest-build-provenance](https://github.com/actions/attest-build-provenance):
+a Sigstore-signed statement, kept by GitHub, that this file was built by
+`.github/workflows/release.yml` on `SpecDriven/specdriven-app` at a given
+commit. With the [GitHub CLI](https://cli.github.com) signed in:
+
+```sh
+gh attestation verify specdriven-<version>-src.zip --repo SpecDriven/specdriven-app
+```
+
+It downloads the attestation, checks the signature against Sigstore's
+public log and the file's digest, and prints the workflow and commit it was
+built from. `--repo` is what ties it to this repository: an attestation from
+some other repository's workflow does not pass.
+
+**The release signature**, which needs only `ssh-keygen` and works offline.
+`SHASUMS256.txt.sig` is an SSH signature by the SpecDriven release key, as
+`release@specdriven.app`, in the `specdriven-release` namespace. Write the
+public key — the `SIGNER_KEY` line in [install.sh](../install.sh) — into a
+one-line `allowed_signers` file, and check the signature, then the checksum:
+
+```sh
+echo 'release@specdriven.app ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIdkUdY/iFmbDwh8/NPieR+Wkrx/vaAzXXf1+L5jovKx' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I release@specdriven.app -n specdriven-release -s SHASUMS256.txt.sig < SHASUMS256.txt
+sha256sum -c SHASUMS256.txt      # shasum -a 256 -c on macOS
+```
+
+The first prints `Good "specdriven-release" signature for release@specdriven.app
+with ED25519 key SHA256:…`; the second, `specdriven-<version>-src.zip: OK`.
+Anything else — `Could not verify signature`, a namespace or principal that
+does not match, a checksum that fails — means the files are not the ones the
+workflow published, or the key has been rotated since this page was written;
+the current key is always the one in `install.sh` on `main`.
 
 ## Building by hand
 
