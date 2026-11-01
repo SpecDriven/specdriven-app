@@ -61,11 +61,11 @@ describe("the proposals page", () => {
     expect(renderToStaticMarkup(<ScenarioForm {...props} disabled />)).toContain('disabled=""');
   });
 
-  test("the footer links the spec repo and the source code under the AGPL", () => {
+  test("the footer links the spec repo and the source code under the Apache-2.0 license", () => {
     const html = renderToStaticMarkup(<Footer session={base} />);
     expect(html).toContain('href="https://github.com/SpecDriven/specs-specdriven"');
     expect(html).toContain(`href="${base.sourceUrl}"`);
-    expect(html).toContain("AGPL-3.0");
+    expect(html).toContain("Apache-2.0");
     expect(html).toContain("We don&#x27;t accept pull requests");
   });
 

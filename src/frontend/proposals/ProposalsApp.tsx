@@ -188,7 +188,7 @@ export function Footer({ session }: { session: Session }) {
         agree your text is published there under that repository's license. We don't accept pull requests.
       </p>
       <p>
-        SpecDriven is free software under the AGPL-3.0 ·{" "}
+        SpecDriven is open source under the Apache-2.0 license ·{" "}
         <a href={session.sourceUrl} target="_blank" rel="noreferrer">
           Source code
         </a>

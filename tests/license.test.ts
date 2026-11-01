@@ -1,5 +1,5 @@
 // Automates specs/app/open-source-license.feature.md: the app is
-// AGPL-3.0-only, every copy links to the source of the version it runs, and
+// Apache-2.0, every copy links to the source of the version it runs, and
 // pull requests from outside the team are closed.
 
 import { afterEach, expect, test } from "bun:test";
@@ -15,16 +15,16 @@ afterEach(() => {
 });
 
 test("package.json names the license by its SPDX id", () => {
-  expect(pkg.license).toBe("AGPL-3.0-only");
+  expect(pkg.license).toBe("Apache-2.0");
 });
 
-test("LICENSE.md is the GNU AGPL version 3 and NOTICE.md says version 3 only", async () => {
+test("LICENSE.md is the Apache License 2.0 and NOTICE.md names the copyright holder", async () => {
   const license = await Bun.file(new URL("../LICENSE.md", import.meta.url)).text();
-  expect(license.trimStart().startsWith("GNU AFFERO GENERAL PUBLIC LICENSE")).toBe(true);
-  expect(license).toContain("Version 3, 19 November 2007");
-  expect(license).toContain("13. Remote Network Interaction; Use with the GNU General Public License.");
+  expect(license.trimStart().startsWith("Apache License")).toBe(true);
+  expect(license).toContain("Version 2.0, January 2004");
+  expect(license).toContain("4. Redistribution.");
   const notice = await Bun.file(new URL("../NOTICE.md", import.meta.url)).text();
-  expect(notice).toContain("AGPL-3.0-only");
+  expect(notice).toContain("Apache-2.0");
   expect(notice).toContain("Copyright (c) 2026 David Vydra");
 });
 
@@ -50,7 +50,7 @@ test("the user menu offers Source code, which opens the source url", () => {
   const opened: string[] = [];
   const items = sourceCodeMenuItems("https://example.com/src", (u) => opened.push(u));
   expect(items.map((i) => [i.id, i.label, i.description])).toEqual([
-    ["source-code", "Source code", "AGPL-3.0"],
+    ["source-code", "Source code", "Apache-2.0"],
   ]);
   items[0]!.onSelect!();
   expect(opened).toEqual(["https://example.com/src"]);
