@@ -3,12 +3,12 @@
 SpecDriven is distributed as a **source zip**, so you can apply your own
 security review to the code — and your own supply chain to the dependencies
 — before building a binary. Releases live on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release).
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app).
 
 ## macOS and Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh
 ```
 
 [install.sh](../install.sh) (POSIX sh; curl or wget; unzip, bsdtar or
@@ -67,7 +67,7 @@ A Windows shell (Git Bash, MSYS, Cygwin) is pointed at install.ps1 instead:
 ## Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex
 ```
 
 [install.ps1](../install.ps1) does the same in the same order — the same
@@ -111,12 +111,12 @@ bun run build:desktop    # desktop installer in release/ — dmg on macOS, AppIm
 
 See [building.md](building.md) for the build options.
 
-## What the release repository must provide
+## What the repository must provide
 
-Two things the release repository has to be for the installers to work:
-**public** — GitHub answers a private repository's release assets and raw
-files with a 404, not a login prompt — and carrying `install.sh` and
-`install.ps1` at its root, which the release workflow keeps in step (see
-[releasing.md](releasing.md)). Both are also attached to every release, so
-`https://github.com/SpecDriven/specdriven-app-release/releases/latest/download/install.sh`
+For the installers to work the repository has to be **public**: GitHub
+answers a private repository's release assets and raw files with a 404, not a
+login prompt. The `curl | sh` and `irm | iex` lines fetch `install.sh` and
+`install.ps1` from `main`; both are also attached to every release (see
+[releasing.md](releasing.md)), so
+`https://github.com/SpecDriven/specdriven-app/releases/latest/download/install.sh`
 serves the copy that shipped with the latest one.

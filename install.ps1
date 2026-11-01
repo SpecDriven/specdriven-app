@@ -1,12 +1,12 @@
 # SpecDriven installer for Windows -- specs/app/installation.feature.md
 # "install on Windows from PowerShell".
 #
-#   irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex
 #
 # The PowerShell twin of install.sh. SpecDriven ships as a source zip so you
 # can put the code through your own security checks before building it. This
 # script downloads the zip of a release from
-# https://github.com/SpecDriven/specdriven-app-release, verifies it against
+# https://github.com/SpecDriven/specdriven-app, verifies it against
 # that release's SHASUMS256.txt, unpacks it under %USERPROFILE%\.specdriven\app,
 # builds the desktop app with Bun, adds it to the Start menu and starts it.
 # If Bun is missing it offers to install it, and installs it only if you say
@@ -63,7 +63,7 @@
     }
 
     $releasesUrl = if ($env:SPECDRIVEN_RELEASES_URL) { $env:SPECDRIVEN_RELEASES_URL } else {
-      'https://github.com/SpecDriven/specdriven-app-release/releases'
+      'https://github.com/SpecDriven/specdriven-app/releases'
     }
     $releasesUrl = $releasesUrl.TrimEnd('/')
     $prefix = if ($env:SPECDRIVEN_HOME) { $env:SPECDRIVEN_HOME } else { Join-Path $HOME '.specdriven' }

@@ -3,7 +3,7 @@
 **A workspace for evolutionary spec-driven development.**
 
 [![Test](https://github.com/SpecDriven/specdriven-app/actions/workflows/test.yml/badge.svg)](https://github.com/SpecDriven/specdriven-app/actions/workflows/test.yml)
-[![Release](https://img.shields.io/github/v/release/SpecDriven/specdriven-app-release?label=release)](https://github.com/SpecDriven/specdriven-app-release/releases/latest)
+[![Release](https://img.shields.io/github/v/release/SpecDriven/specdriven-app?label=release)](https://github.com/SpecDriven/specdriven-app/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE.md)
 
 SpecDriven is a desktop and web app for writing software specifications as
@@ -43,17 +43,17 @@ starts it.
 macOS and Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh
 ```
 
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex
 ```
 
 Releases are published on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release).
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app).
 What the installers do, how to review the source first, and how to build by
 hand are in [docs/installation.md](docs/installation.md).
 
@@ -102,7 +102,7 @@ What we do welcome is **specs**. This app is built from the specifications in
 and a proposed feature with Given / When / Then scenarios is the most useful
 thing you can send us. [CONTRIBUTING.md](CONTRIBUTING.md) says how; report
 bugs on the
-[release repository's issues](https://github.com/SpecDriven/specdriven-app-release/issues)
+[issues](https://github.com/SpecDriven/specdriven-app/issues)
 and vulnerabilities as [SECURITY.md](SECURITY.md) describes.
 
 ## License
