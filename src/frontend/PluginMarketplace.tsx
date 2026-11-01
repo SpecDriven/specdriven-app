@@ -3,10 +3,13 @@
 // marketplace is installed with consent"): the git urls this machine reads,
 // each cloned or pulled through the app's git engine when the list is
 // opened or refreshed, and every plugin an index lists with its name,
-// version, category and description — marked when installed, with Install,
-// Update or Remove beside it. Install shows what the manifest declares and a
-// note that the plugin runs with the app's own rights, and fetches nothing
-// into the profile until the user confirms. The hosted demo lists its
+// version, category and description — marked when installed, with Update,
+// Reinstall or Remove beside it. Install shows what the manifest declares
+// and a note that the plugin runs with the app's own rights, and fetches
+// nothing into the profile until the user confirms. Reinstall — and Install
+// of a plugin whose id is installed already, from this marketplace or one
+// that was removed and added back under another name — says what it
+// replaces and swaps a fresh copy in on confirmation. The hosted demo lists its
 // marketplaces, open from the start, and offers none of the actions.
 
 import { useCallback, useEffect, useState } from "react";
@@ -27,6 +30,8 @@ interface InstallPreview {
   version: string;
   permissions: string[];
   ref?: string;
+  /** What is installed under the id now, which a confirmation replaces. */
+  replaces?: { id: string; version?: string; marketplace?: string; name?: string };
 }
 
 export interface PluginMarketplaceProps {
@@ -72,6 +77,13 @@ export function consentBody(preview: InstallPreview, marketplace: string): strin
     "This is a third-party plugin. It runs inside SpecDriven with the app's own rights: your files, your git and GitHub access, this machine." +
       (preview.ref ? ` It is pinned to ${preview.ref} and is not updated on its own.` : " It is not updated on its own."),
   );
+  if (preview.replaces) {
+    const was = preview.replaces;
+    const from = was.marketplace ? ` from ${was.marketplace}` : "";
+    lines.push(
+      `${was.id}${was.version ? ` v${was.version}` : ""}${from} is installed already. Its folder under ~/.specdriven/plugins is replaced by this fresh copy; its files in the data folder stay.`,
+    );
+  }
   return lines.join("\n\n");
 }
 
@@ -142,16 +154,22 @@ export function PluginMarketplace({
     run(`${marketplace}/${name}`, async () => {
       const staged = await post("/api/plugins/install", { marketplace, name, step: "stage" });
       const preview = staged.preview as InstallPreview;
+      const verb = preview.replaces ? "Reinstall" : "Install";
       const ok = await confirm({
-        title: `Install ${preview.displayName}${preview.version ? ` ${preview.version}` : ""}?`,
+        title: `${verb} ${preview.displayName}${preview.version ? ` ${preview.version}` : ""}?`,
         body: consentBody(preview, marketplace),
-        confirmLabel: "Install",
+        confirmLabel: verb,
       });
       if (!ok) {
         await post("/api/plugins/install", { marketplace, name, step: "cancel" });
         return;
       }
-      await post("/api/plugins/install", { marketplace, name, step: "confirm" });
+      await post("/api/plugins/install", {
+        marketplace,
+        name,
+        step: "confirm",
+        ...(preview.replaces ? { replace: true } : {}),
+      });
       await onChanged();
     });
 
@@ -228,6 +246,15 @@ export function PluginMarketplace({
           <span className="plugin-market-row-actions">
             <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
               Update
+            </button>
+            <button
+              type="button"
+              className="link"
+              disabled={working}
+              title="Fetch a fresh copy at the ref the index names and replace the installed folder"
+              onClick={() => void install(marketplace, row.name)}
+            >
+              {working ? "Reinstalling…" : "Reinstall"}
             </button>
             <button type="button" className="link" disabled={working} onClick={() => void remove(installed)}>
               Remove
