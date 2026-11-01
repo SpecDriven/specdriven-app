@@ -321,7 +321,7 @@ fi
 
 info ""
 info "Installing dependencies…"
-( cd "$TARGET" && "$BUN" install ) || die "\`bun install\` failed in $TARGET"
+( cd "$TARGET" && "$BUN" install --frozen-lockfile ) || die "\`bun install\` failed in $TARGET"
 
 info ""
 info "Building the desktop app — this fetches Electron and takes a few minutes…"

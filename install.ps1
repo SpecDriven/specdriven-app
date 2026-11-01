@@ -326,7 +326,7 @@
     try {
       Say ''
       Say 'Installing dependencies...'
-      & $bun install
+      & $bun install --frozen-lockfile
       if ($LASTEXITCODE -ne 0) { Fail "``bun install`` failed in $target" }
 
       Say ''
