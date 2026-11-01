@@ -119,15 +119,18 @@ holds SpecDriven's data, is not on PATH.
 
 ### The prebuilt installer
 
-Every release also carries a prebuilt desktop installer for Windows:
+A release can also have a prebuilt desktop installer for Windows,
 `SpecDriven-<version>-x64-setup.exe`, and `SpecDriven-<version>-arm64-setup.exe`
-for Windows on ARM. It needs neither Bun nor a build. It installs for the
+for Windows on ARM. They are built on request rather than for every
+release, and published as a release of their own, `windows-v<version>`, on
+the [releases page](https://github.com/SpecDriven/specdriven-app/releases).
+It needs neither Bun nor a build. It installs for the
 current user under `%LOCALAPPDATA%\Programs\SpecDriven` and adds a Start menu
 shortcut. It does not update itself: install the next release's installer
 over it. The installers are not code-signed yet, so SmartScreen asks first:
 choose *More info*, then *Run anyway*. To check one before running it, compare
 `certutil -hashfile SpecDriven-<version>-x64-setup.exe SHA256` with its line
-in the release's signed `SHASUMS256.txt`, or run
+in the `windows-v<version>` release's signed `SHASUMS256.txt`, or run
 `gh attestation verify SpecDriven-<version>-x64-setup.exe --repo SpecDriven/specdriven-app`.
 
 ### install.ps1 details
@@ -157,8 +160,8 @@ enough; the installers use the second.
 `SHASUMS256.txt` with
 [actions/attest-build-provenance](https://github.com/actions/attest-build-provenance):
 a Sigstore-signed statement, kept by GitHub, that this file was built by
-`.github/workflows/release.yml` on `SpecDriven/specdriven-app` at a given
-commit. With the [GitHub CLI](https://cli.github.com) signed in:
+`.github/workflows/release.yml` (`release-windows.yml` for the Windows
+installers) on `SpecDriven/specdriven-app` at a given commit. With the [GitHub CLI](https://cli.github.com) signed in:
 
 ```sh
 gh attestation verify specdriven-<version>-src.zip --repo SpecDriven/specdriven-app

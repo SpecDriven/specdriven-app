@@ -15,8 +15,8 @@
  *                                    this platform's release installers, for
  *                                    this machine's architecture only:
  *                                    release/SpecDriven-<version>-<arch>-setup.exe
- *                                    — what release.yml builds on one native
- *                                    Windows runner per architecture
+ *                                    — what release-windows.yml builds on one
+ *                                    native Windows runner per architecture
  *   bun run build:desktop --bundle-only [--fix <id>]
  *                                    the bundles alone, no installer: what a
  *                                    self-fix rebuilds under the installed
@@ -52,13 +52,14 @@
  *
  *   3. Verify the result: `xcrun stapler validate release/mac-arm64/SpecDriven.app`
  *
- * Windows signing: the installers release.yml attaches are not code-signed
- * yet, so SmartScreen asks before running them. When they are, Azure
- * Trusted Signing is the likely route: `build.win.azureSignOptions` in
+ * Windows signing: the installers release-windows.yml publishes are not
+ * code-signed yet, so SmartScreen asks before running them. When they are,
+ * Azure Trusted Signing is the likely route: `build.win.azureSignOptions` in
  * package.json (publisherName, endpoint, certificateProfileName,
  * codeSigningAccountName), with AZURE_TENANT_ID, AZURE_CLIENT_ID and
- * AZURE_CLIENT_SECRET as repository secrets passed to the release.yml
- * "windows" job's build step. Verify with `signtool verify /pa <installer>`.
+ * AZURE_CLIENT_SECRET as repository secrets passed to the
+ * release-windows.yml "windows" job's build step. Verify with
+ * `signtool verify /pa <installer>`.
  */
 import { $, type BunPlugin } from "bun";
 import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -369,7 +370,7 @@ async function build(builderArgs: string[]): Promise<void> {
 
   console.log(`Packaging with electron-builder (${builderArgs.join(" ")})…`);
   // Never publish: electron-builder uploads on its own when it sees a CI
-  // tag build and a GitHub token. release.yml publishes the release itself.
+  // tag build and a GitHub token. The release workflows publish themselves.
   await $`bunx electron-builder ${builderArgs} --publish never`;
 
   console.log("Done — artifacts in release/");

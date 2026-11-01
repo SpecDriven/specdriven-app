@@ -29,6 +29,7 @@ import { fakeReleases, generateSshKey, releaseKey, sha256, shasums, signedAssets
 const INSTALL_SH = join(import.meta.dir, "..", "install.sh");
 const INSTALL_PS1 = join(import.meta.dir, "..", "install.ps1");
 const RELEASE_YML = join(import.meta.dir, "..", ".github", "workflows", "release.yml");
+const RELEASE_WINDOWS_YML = join(import.meta.dir, "..", ".github", "workflows", "release-windows.yml");
 const VERSION = "0.1.40";
 const OLDER = "0.1.39";
 
@@ -414,9 +415,13 @@ test("SPECDRIVEN_RELEASE_PUBKEY aside, the installers trust the one key the rele
   // install.sh, install.ps1 and release.yml each name the key: the workflow
   // reads it out of install.sh with this sed, verifies its own signature
   // against it, and refuses to publish unless install.ps1 carries the same.
+  // release-windows.yml checks the signature on its own SHASUMS256.txt the
+  // same way.
   const sh = readFileSync(INSTALL_SH, "utf8");
-  const sedPattern = readFileSync(RELEASE_YML, "utf8").match(/sed -n '(s\/\^SIGNER_KEY=.*?)' install\.sh/)?.[1];
+  const keyFromInstallSh = /sed -n '(s\/\^SIGNER_KEY=.*?)' install\.sh/;
+  const sedPattern = readFileSync(RELEASE_YML, "utf8").match(keyFromInstallSh)?.[1];
   expect(sedPattern).toBeDefined();
+  expect(readFileSync(RELEASE_WINDOWS_YML, "utf8").match(keyFromInstallSh)?.[1]).toBe(sedPattern!);
   const p = Bun.spawn(["sed", "-n", sedPattern!, INSTALL_SH], { stdout: "pipe" });
   const fromSh = (await new Response(p.stdout).text()).trim();
   expect(fromSh).toMatch(/^ssh-ed25519 AAAA[A-Za-z0-9+/=]+$/);
