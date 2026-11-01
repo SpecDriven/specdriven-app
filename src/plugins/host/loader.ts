@@ -774,6 +774,21 @@ export function changeListeners(): number {
   return streams.size;
 }
 
+// An agent whose sign-in or setup changed (AgentRegistry.changed) has a new
+// descriptor — Claude Code fetched by the email sign-in is now there — and
+// the pages read descriptors off /api/state, which this stream has them
+// re-read. Without it the pane kept saying "not set up" until a restart.
+// The registry outlives a `bun --hot` reload and these streams do not, so a
+// reload replaces the earlier listener.
+{
+  const WATCH = Symbol.for("specdriven.plugins.agentWatch");
+  const g = globalThis as Record<symbol, unknown>;
+  (g[WATCH] as (() => void) | undefined)?.();
+  g[WATCH] = agents.subscribe((change) => {
+    if (change.type === "changed") notifyPluginChange();
+  });
+}
+
 routes.add("GET", "/api/plugins/events", () => {
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let self: ReadableStreamDefaultController<Uint8Array> | undefined;

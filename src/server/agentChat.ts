@@ -542,22 +542,50 @@ export async function endAllChatSessions(): Promise<void> {
 }
 
 // A provider that goes (its plugin switched off) takes its live sessions
-// with it: nothing could answer them. Subscribed once; the registry is on
-// globalThis, so a `bun --hot` reload must not add a second listener.
+// with it: nothing could answer them. One whose sign-in changed has its live
+// sessions drop the old one (AgentSession.refresh) — without that, a session
+// kept the account it started with until the app was restarted. Subscribed
+// once; the registry is on globalThis, so a `bun --hot` reload must not add
+// a second listener.
 const WATCH = Symbol.for("specdriven.agentChat.providerWatch");
 {
   const flags = globalThis as Record<symbol, unknown>;
   if (!flags[WATCH]) {
     flags[WATCH] = true;
     agents.subscribe((change) => {
-      if (change.type !== "removed") return;
+      if (change.type === "added") return;
       for (const session of registry().values()) {
         if (session.meta.agent !== change.id || isFinalStatus(session.meta.status)) continue;
+        if (change.type === "changed") {
+          refreshSession(session);
+          continue;
+        }
         void finish(session, "ended", `The ${session.provider.label} plugin was switched off.`);
         session.abort.abort();
       }
     });
   }
+}
+
+/** Hand a live session the provider's new sign-in; a failure is a note, not the end. */
+function refreshSession(session: ChatSession): void {
+  const provider = session.session;
+  if (!provider?.refresh) return;
+  let pending: void | Promise<void>;
+  try {
+    pending = provider.refresh();
+  } catch (e) {
+    pending = Promise.reject(e);
+  }
+  void Promise.resolve(pending).catch((e: Error) => {
+    if (isFinalStatus(session.meta.status)) return;
+    emit(session, {
+      kind: "note",
+      level: "error",
+      code: "api",
+      text: `Could not pick up the new ${session.provider.label} sign-in: ${e.message} — start a new session.`,
+    });
+  });
 }
 
 // `exit` handlers cannot await; aborting is synchronous and each provider

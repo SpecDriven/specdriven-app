@@ -123,6 +123,11 @@ export interface AgentSession {
   setPermissionMode(mode: PermissionMode): Promise<void>;
   /** Kill the child; must be safe to call from an exit hook (no await). */
   close(): void;
+  /** The agent's sign-in changed (AgentRegistry.changed): drop what the
+      session holds of the old one — its credentials, the account the pane
+      shows — and pick up the new. A turn under way may finish first;
+      absent, the session keeps what it started with. */
+  refresh?(): void | Promise<void>;
 }
 
 export interface OneShotRequest {
@@ -154,7 +159,8 @@ export class AgentError extends Error {
 }
 
 export interface AgentChange {
-  type: "added" | "removed";
+  /** "changed": what the provider is or who it is signed in as moved on. */
+  type: "added" | "removed" | "changed";
   id: string;
 }
 
@@ -162,6 +168,12 @@ export interface AgentRegistry {
   /** The same id again (a `bun --hot` reload) replaces the provider and warns. */
   register(provider: AgentProvider): Disposer;
   get(id: string): AgentProvider | undefined;
+  /**
+   * The provider's sign-in or setup changed — an account signed in or out,
+   * its CLI fetched: open pages re-read the descriptors, and its live
+   * sessions refresh (AgentSession.refresh). An id not registered is nothing.
+   */
+  changed(id: string): void;
   /** By rank, then id. */
   list(): AgentProvider[];
   describe(): AgentDescriptor[];
@@ -227,6 +239,9 @@ export function createAgentRegistry(): AgentRegistry {
       };
     },
     get: (id) => providers.get(id),
+    changed(id) {
+      if (providers.has(id)) notify({ type: "changed", id });
+    },
     list: sorted,
     describe: () => sorted().map(describeProvider),
     default: () => sorted().find((p) => p.available()),
