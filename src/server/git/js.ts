@@ -13,8 +13,9 @@
 // and fails fast on private ones, and leaves the identity to whatever git
 // config the machine has.
 
+import { mkdir } from "node:fs/promises";
 import { homedir, hostname, userInfo } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createGit } from "just-git";
 import type { CredentialProvider, IdentityOverride } from "just-git";
 import { getAuth } from "../auth";
@@ -23,7 +24,7 @@ import { readTextFile } from "../fsx";
 import { urlOnHost } from "../github";
 import type { RunResult } from "../run";
 import type { GitBackend } from "./backend";
-import { createGitBackend } from "./cli";
+import { cloneFailure, createGitBackend } from "./cli";
 import type { GitRun } from "./cli";
 import { nodeFileSystem } from "./nodeFs";
 
@@ -134,8 +135,14 @@ async function identity(): Promise<IdentityOverride> {
  * sign-in mid-session is picked up by the next operation, exactly as the
  * subprocess engines re-resolve their context every time.
  *
- * `repoDir` is null only for `clone`, whose target directory the app always
- * gives as an absolute path; the working directory is then immaterial.
+ * `repoDir` is the directory the command runs in, and it matters for every
+ * command, `clone` included: just-git resolves each path it is handed against
+ * that directory and recognises only POSIX absolute paths (a leading `/`),
+ * so nothing here may rely on it to understand a Windows one. The commands
+ * createGitBackend issues name repository-relative paths, which resolve the
+ * same way on every platform; the one exception, the clone target, is handled
+ * by jsClone. The `process.cwd()` fallback only exists to satisfy the GitRun
+ * signature — this engine is never run with a null directory.
  */
 const jsRun: GitRun = async (repoDir, ...args) => {
   const git = createGit({
@@ -152,4 +159,27 @@ const jsRun: GitRun = async (repoDir, ...args) => {
   return { exitCode: res.exitCode, stdout: res.stdout, stderr: res.stderr } satisfies RunResult;
 };
 
-export const jsBackend: GitBackend = createGitBackend({ name: "js", git: jsRun });
+/**
+ * `git clone` on the bundled engine. The app gives the target as an absolute
+ * path, and just-git resolves it against the working directory, recognising
+ * only POSIX absolute paths — so on Windows a target like
+ * `C:\Users\…\repos\specs` is taken for a relative one and the clone is
+ * attempted at `<process.cwd()>/C:\Users\…`, which is where the first-run
+ * clone of v0.1.204 failed with an ENOENT on that doubled path. So the target
+ * is never handed over whole: the clone runs *in* the target's parent
+ * directory and names only the last segment, which is a relative path on
+ * every platform. just-git creates the target itself but expects the
+ * directory it runs in to exist, hence the parent is made first — as the
+ * other engines' `git clone` does for the whole path.
+ *
+ * Exported for the unit test that checks what just-git is handed; the app
+ * reaches it through jsBackend.
+ */
+export async function jsClone(git: GitRun, url: string, dir: string): Promise<void> {
+  const parent = dirname(dir);
+  await mkdir(parent, { recursive: true });
+  const res = await git(parent, "clone", url, basename(dir));
+  if (res.exitCode !== 0) throw cloneFailure(url, res);
+}
+
+export const jsBackend: GitBackend = createGitBackend({ name: "js", git: jsRun, clone: jsClone });

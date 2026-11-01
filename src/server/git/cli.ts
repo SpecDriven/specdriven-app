@@ -123,15 +123,21 @@ export function isAuthFailure(output: string): boolean {
   );
 }
 
+/**
+ * The error a failed clone surfaces as, on every engine: git's own output,
+ * or the sign-in hint when that output is a credential problem.
+ */
+export function cloneFailure(url: string, res: RunResult): Error {
+  const output = res.stderr + res.stdout;
+  return new Error(
+    `Could not clone ${url}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
+  );
+}
+
 /** The default `git clone`, reused by gh.ts for anything gh cannot clone. */
 export async function gitClone(git: GitRun, url: string, dir: string): Promise<void> {
   const res = await git(null, "clone", url, dir);
-  if (res.exitCode !== 0) {
-    const output = res.stderr + res.stdout;
-    throw new Error(
-      `Could not clone ${url}: ${isAuthFailure(output) ? signInHint() : output.trim()}`,
-    );
-  }
+  if (res.exitCode !== 0) throw cloneFailure(url, res);
 }
 
 /**

@@ -5,7 +5,7 @@
 // so nothing here talks to real GitHub.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
@@ -24,6 +24,8 @@ import {
   setGitEngine,
   theirsVersion,
 } from "../src/server/git";
+import type { GitRun } from "../src/server/git/cli";
+import { jsClone } from "../src/server/git/js";
 import { FAKE_GH_ACCOUNT, installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
 import { git, seededOrigin, stopServers, twoClones } from "./helpers/fixtures";
@@ -295,5 +297,53 @@ test("a merge conflict raised by the bundled engine is a real git conflict", asy
   const resolved = await resolveConflict(a, "specs/seed.feature.md", "# Seed\n\nmerged\n");
   expect(resolved.pushed).toBe(true);
   expect((await git(a, "status", "--porcelain")).stdout.toString().trim()).toBe("");
+  stopServers();
+});
+
+// A Windows user on v0.1.204 could not clone at all on the bundled engine:
+// just-git resolves the target directory against its working directory and
+// recognises only POSIX absolute paths, so `C:\Users\…\repos\specs` was taken
+// for a relative one and the clone failed with an ENOENT on
+// `<unpacked release dir>\C:\Users\…\repos\specs`. The engine now clones from
+// inside the target's parent, naming only the last segment, so just-git never
+// has to recognise the absolute target at all.
+test("the bundled engine never hands just-git the absolute clone target", async () => {
+  const calls: Array<[string | null, string[]]> = [];
+  const recording: GitRun = async (repoDir, ...args) => {
+    calls.push([repoDir, args]);
+    return { exitCode: 0, stdout: "", stderr: "" };
+  };
+  const target = join(root, "not", "yet", "there", "specs");
+  await jsClone(recording, "https://github.com/octo/specs", target);
+
+  expect(calls).toEqual([[join(root, "not", "yet", "there"), ["clone", "https://github.com/octo/specs", "specs"]]]);
+  // just-git creates the target itself but needs the directory it runs in.
+  expect(await stat(join(root, "not", "yet", "there")).then((s) => s.isDirectory())).toBe(true);
+});
+
+test("a failed clone on the bundled engine reports the url and git's output", async () => {
+  const failing: GitRun = async () => ({ exitCode: 128, stdout: "", stderr: "repository 'x' does not exist\n" });
+  await expect(jsClone(failing, "https://github.com/octo/nope", join(root, "x"))).rejects.toThrow(
+    "Could not clone https://github.com/octo/nope: repository 'x' does not exist",
+  );
+  const denied: GitRun = async () => ({ exitCode: 128, stdout: "", stderr: "HTTP 401 fetching refs\n" });
+  await expect(jsClone(denied, "https://github.com/octo/private", join(root, "y"))).rejects.toThrow(
+    /Could not clone https:\/\/github.com\/octo\/private: (?!HTTP 401)/,
+  );
+});
+
+// The same through the engine, end to end: an absolute target whose parent
+// does not exist yet lands exactly where the app asked, not under the
+// process's working directory.
+test("the bundled engine clones into an absolute target whose parent does not exist", async () => {
+  const { originDir } = await twoClones(root);
+  const target = join(root, "deep", "er", "clone");
+  process.env.PATH = "/nonexistent";
+  setGitEngine("js");
+
+  await clone(originDir, target);
+  expect(await Bun.file(join(target, "specs/seed.feature.md")).exists()).toBe(true);
+  expect(await stat(join(target, ".git")).then((s) => s.isDirectory())).toBe(true);
+  expect(await stat(join(process.cwd(), root.replace(/^\//, ""))).catch(() => null)).toBeNull();
   stopServers();
 });
