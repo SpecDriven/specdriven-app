@@ -1265,7 +1265,7 @@ export function App() {
   // user menu. Null outside the hosted app, or until the gateway answers.
   const [hostedAccount, setHostedAccount] = useState<HostedAccount | null>(null);
   const hostedAdmin = hostedAccount?.admin ?? false;
-  // The running app's version, shown beside the user name in demo mode.
+  // The running app's version, shown beside the user name.
   const [appVersion, setAppVersion] = useState<string | null>(null);
   // Where that version's source lives — the user menu links to it.
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
@@ -9888,8 +9888,8 @@ export function App() {
               {initials}
             </span>
             <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
-            {/* Demo mode: the build on screen, right of the user name. */}
-            {demo && appVersion && <span className="app-version">v{appVersion}</span>}
+            {/* The build on screen, right of the user name. */}
+            {appVersion && <span className="app-version">v{appVersion}</span>}
           </button>
         </div>
       </aside>
