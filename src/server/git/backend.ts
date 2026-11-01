@@ -54,7 +54,13 @@ export interface GitBackend {
     message: string,
     extraMoves?: PathMove[],
   ): Promise<SyncResult>;
-  removeAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
+  /** Extra paths (e.g. an archived page's doc dir) are staged into the same commit. */
+  removeAndPush(
+    repoDir: string,
+    paths: string | string[],
+    message: string,
+    alsoAdd?: string[],
+  ): Promise<SyncResult>;
   commitAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
   /**

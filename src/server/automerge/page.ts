@@ -111,3 +111,18 @@ function sameLink(a?: { title: string; url: string }, b?: { title: string; url: 
   if (!a || !b) return !a && !b;
   return a.title === b.title && a.url === b.url;
 }
+
+/**
+ * Archive or restore a page (specs/app/roadmap.feature.md "Archive a roadmap
+ * page"): the record set whole, or taken out. Nothing else of the document
+ * changes, so a restored page projects to exactly what it was archived as.
+ */
+export function setArchived(
+  doc: A.Doc<PageDoc>,
+  archived: { at: string; by?: string } | null,
+): A.Doc<PageDoc> {
+  return A.change(doc, (d) => {
+    if (archived) d.archived = { at: archived.at, ...(archived.by ? { by: archived.by } : {}) };
+    else delete d.archived;
+  });
+}
