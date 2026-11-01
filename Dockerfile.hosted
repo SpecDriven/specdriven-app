@@ -6,7 +6,7 @@
 # what lets the gateway start each user's worker as a uid of its own
 # (setpriv, from util-linux in the base image), owning only that user's
 # folder (src/gateway/workers.ts).
-FROM oven/bun:1.3-slim
+FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04
 
 # git for the system-git engine; without it the bundled JS engine is used.
 RUN apt-get update \

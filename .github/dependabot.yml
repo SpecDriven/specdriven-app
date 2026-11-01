@@ -1,0 +1,39 @@
+# Dependency updates, opened as pull requests the Test workflow runs on.
+# Every ecosystem waits 7 days after a release before proposing it
+# (cooldown): a compromised package version is usually pulled within hours,
+# and bunfig.toml's minimumReleaseAge keeps `bun install` to the same rule.
+# Security updates (Dependabot alerts) ignore the cooldown, as they should.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      # One pull request a week for the routine bumps; majors stay separate
+      # so a breaking change is reviewed on its own.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+
+  # Keeps the SHA-pinned actions in .github/workflows current (the repository
+  # requires SHA pinning, so a tag bump alone would not run).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+
+  # The digest-pinned oven/bun base image in Dockerfile and Dockerfile.hosted.
+  - package-ecosystem: docker
+    directories: ["/"]
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
