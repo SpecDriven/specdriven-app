@@ -8,6 +8,7 @@
 // for the static-markup tests (tests/testsPane.test.tsx).
 
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useSpellCheck } from "./spellCheckPref";
 import {
   Check,
   ChevronDown,
@@ -1302,6 +1303,7 @@ export function ResultRow({
 }) {
   const result = run.results[caseId] ?? { status: "untested" as ResultStatus, comment: "" };
   const [comment, setComment] = useState(result.comment);
+  const spellCheck = useSpellCheck();
   const commentKey = useRef(result.comment);
   if (commentKey.current !== result.comment) {
     // A result landed (ours, or a teammate's): the field follows it.
@@ -1365,6 +1367,7 @@ export function ResultRow({
           placeholder={readOnly ? "" : "Notes, defect link…"}
           value={comment}
           readOnly={readOnly}
+          spellCheck={spellCheck}
           onChange={(e) => setComment(e.target.value)}
           onBlur={() => {
             // Saved cleaned (specs/ui/ui.feature.md "User-entered text is
