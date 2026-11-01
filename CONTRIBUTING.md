@@ -14,7 +14,7 @@ We are unable to accept pull requests, for two reasons:
 
 Pull requests opened against this repository are closed automatically, with
 a link back here. Forks are welcome — the code is
-[AGPL-3.0-only](LICENSE.md).
+[Apache-2.0](LICENSE.md).
 
 ## Propose specs instead
 

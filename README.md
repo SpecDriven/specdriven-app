@@ -533,10 +533,11 @@ report vulnerabilities as [SECURITY.md](SECURITY.md) describes.
 
 ## License
 
-specdriven.app is free software under the
-[GNU Affero General Public License v3.0 only](https://choosealicense.com/licenses/agpl-3.0/)
-(`AGPL-3.0-only`). You may use, change and share it; if you run a modified
-copy as a network service, the license asks you to offer its users your
-source, and the app's **Source code** link (the user menu) points at it —
-set `SPECDRIVEN_SOURCE_URL` to your own. Read [LICENSE.md](LICENSE.md) and
-[NOTICE.md](NOTICE.md). No trademark rights are granted.
+specdriven.app is open source under the
+[Apache License 2.0](https://choosealicense.com/licenses/apache-2.0/)
+(`Apache-2.0`). You may use, change and share it, including in closed-source
+work, as long as you keep the license and notices. The app's **Source code**
+link (the user menu) points at the source of the running version; if you run
+a modified copy, set `SPECDRIVEN_SOURCE_URL` to your own. Read
+[LICENSE.md](LICENSE.md) and [NOTICE.md](NOTICE.md). No trademark rights are
+granted.

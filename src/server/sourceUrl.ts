@@ -1,6 +1,6 @@
 // Where the running build's source lives (specs/app/open-source-license.feature.md).
-// The app is AGPL-3.0-only, and §13 asks a network-served copy — the public
-// demo, the hosted service — to offer its users the Corresponding Source.
+// The app is open source (Apache-2.0), and every copy — the public demo, the
+// hosted service — offers its users the source of the version it runs.
 // Every release publishes a source zip of that exact version on the public
 // release repository, so the default points at that release. A deployment
 // that runs modified code names its own source with SPECDRIVEN_SOURCE_URL.
