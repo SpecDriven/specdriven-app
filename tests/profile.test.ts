@@ -1,4 +1,4 @@
-// `--profile <dir>` (README "Settings"): a settings folder of its own for a
+// `--profile <dir>` (docs/running.md "Settings"): a settings folder of its own for a
 // dev run, filled in through the variables every location already reads.
 
 import { test, expect, afterEach } from "bun:test";

@@ -13,6 +13,7 @@ import { shell } from "./plugins/host/loader";
 import { installDemoPlugins, isDemoMode, setupDemo } from "./server/demo";
 import { isHostedMode } from "./server/hostedMode";
 import { isProposalsMode } from "./server/proposalsMode";
+import { isReadOnlyMode } from "./server/readOnlyMode";
 import { createEnvBackend, setTokenBackend } from "./server/tokenStore";
 import { allowedHosts, listenHostname, rejectRequest } from "./server/requestGuard";
 import { initTelemetry } from "./server/telemetry";
@@ -34,6 +35,11 @@ if (isDemoMode()) {
   await setupDemo();
   void installDemoPlugins();
 }
+
+// Read-only mode (src/server/readOnlyMode.ts): the public spec site. Clone
+// the repo it shows and open its first snapshot before startup reads any
+// settings; a repo that cannot be cloned stops the start here.
+if (isReadOnlyMode()) await (await import("./server/readOnly")).setupReadOnly();
 
 // Hosted mode (src/server/hostedMode.ts): one user's worker behind the
 // gateway, which hands it that user's GitHub token in the environment — set
