@@ -25,7 +25,7 @@ it.
 
 ## Deleting old releases
 
-```gh release delete v0.1.x --repo SpecDriven/specdriven-app-release --cleanup-tag --yes```
+```gh release delete v0.1.x --repo SpecDriven/specdriven-app --cleanup-tag --yes```
 
 ## Writing a plugin
 

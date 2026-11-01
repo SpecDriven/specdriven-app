@@ -34,8 +34,8 @@ export const DEMO_USER = {
  * the module's usual "sign in" message.
  */
 export const DEMO_ISSUES_REPO: GitHubRepo = {
-  url: "https://github.com/SpecDriven/specdriven-app-release",
+  url: "https://github.com/SpecDriven/specdriven-app",
   host: "github.com",
   owner: "SpecDriven",
-  name: "specdriven-app-release",
+  name: "specdriven-app",
 };

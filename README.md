@@ -9,12 +9,12 @@ A premium version may use a server database.
 We distribute the app as a source zip, so customers can apply their own
 security protocols to the code — and their own supply chain to the
 dependencies — before building their own binaries. Releases live on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release).
+[SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app).
 
 The installer fetches the latest one:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh
 ```
 
 It downloads `specdriven-<version>-src.zip`, verifies it against the release's
@@ -367,16 +367,12 @@ git push origin main --follow-tags
 The tag push runs [.github/workflows/release.yml](.github/workflows/release.yml),
 which checks the tag against `package.json`, zips the tagged tree with
 `git archive` (tracked files only — no `node_modules`, `dist`, or `.env`), and
-creates a `v<version>` release on
-[SpecDriven/specdriven-app-release](https://github.com/SpecDriven/specdriven-app-release)
+creates a `v<version>` release on this repository's
+[releases page](https://github.com/SpecDriven/specdriven-app/releases)
 with the zip, its `SHASUMS256.txt`, `install.sh` and `install.ps1` attached.
-Just before that it pushes this repository's [install.sh](install.sh) and
-[install.ps1](install.ps1) to the root of `specdriven-app-release` whenever
-they differ — those are the copies the `curl | sh` and `irm | iex` lines fetch,
-so they are never newer or older than the releases they install. Writing to another repository needs the `RELEASE_REPO_TOKEN`
-Actions secret: a fine-grained personal access token with *Contents: read and
-write* on `specdriven-app-release` alone. A release that already exists is not
-overwritten — re-running on the same tag fails, on purpose.
+It publishes with the workflow's own `GITHUB_TOKEN` (`contents: write`), so no
+secret is needed. A release that already exists is not overwritten —
+re-running on the same tag fails, on purpose.
 
 Build the desktop artifacts from the tagged commit, not from whatever is
 checked out — electron-builder reads the version out of `package.json`, so a
@@ -387,7 +383,7 @@ build from any other commit is mislabelled.
 Users install with:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh
 ```
 
 [install.sh](install.sh) (POSIX sh; curl or wget; unzip, bsdtar or python3)
@@ -432,7 +428,7 @@ install.ps1 instead: `curl | sh` needs a Unix shell.
 On Windows, users install from PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex
 ```
 
 [install.ps1](install.ps1) does the same in the same order — the same
@@ -458,12 +454,11 @@ names a `pwsh` — `SPECDRIVEN_TEST_PWSH=$(command -v pwsh) bun test tests/insta
 [install.ps1 workflow](.github/workflows/install-ps1.yml) runs them on pushes
 and pull requests that change the installer or those tests.
 
-Two things the release repository has to be for this to work: **public** —
-GitHub answers a private repository's release assets and raw files with a 404,
-not a login prompt — and carrying `install.sh` and `install.ps1` at its root,
-which the release workflow keeps in step (see "Versioning"). Both are also
-attached to every release, so
-`https://github.com/SpecDriven/specdriven-app-release/releases/latest/download/install.sh`
+For this to work the repository has to be **public**: GitHub answers a
+private repository's release assets and raw files with a 404, not a login
+prompt. The `curl | sh` and `irm | iex` lines fetch `install.sh` and
+`install.ps1` from `main`; both are also attached to every release, so
+`https://github.com/SpecDriven/specdriven-app/releases/latest/download/install.sh`
 serves the copy that shipped with the latest one. The compiled-binary
 distribution behind `specdriven.app` is still to come; the hosted multi-user
 setup is in [docs/deployment-railway.md](docs/deployment-railway.md).

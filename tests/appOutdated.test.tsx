@@ -42,7 +42,7 @@ describe("AppOutdated — data saved by a newer app blocks this one", () => {
 
   test("macOS and Linux get the curl installer", () => {
     expect(render("unix")).toContain(
-      "curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.sh | sh",
+      "curl -fsSL https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh | sh",
     );
   });
 
@@ -50,7 +50,7 @@ describe("AppOutdated — data saved by a newer app blocks this one", () => {
     const markup = render("windows");
     expect(markup).toContain("In PowerShell, run:");
     expect(markup).toContain(
-      "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app-release/main/install.ps1 | iex",
+      "irm https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1 | iex",
     );
   });
 
@@ -59,7 +59,7 @@ describe("AppOutdated — data saved by a newer app blocks this one", () => {
     const markup = render("desktop");
     expect(markup).not.toContain("<code");
     expect(markup).toContain(
-      'href="https://github.com/SpecDriven/specdriven-app-release/releases/latest"',
+      'href="https://github.com/SpecDriven/specdriven-app/releases/latest"',
     );
   });
 });
