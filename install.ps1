@@ -6,14 +6,18 @@
 # The PowerShell twin of install.sh. SpecDriven ships as a source zip so you
 # can put the code through your own security checks before building it. This
 # script downloads the zip of a release from
-# https://github.com/SpecDriven/specdriven-app, verifies it against
-# that release's SHASUMS256.txt, unpacks it under %USERPROFILE%\.specdriven\app,
-# builds the desktop app with Bun, adds it to the Start menu and starts it.
+# https://github.com/SpecDriven/specdriven-app, checks that the release's
+# SHASUMS256.txt is signed by the SpecDriven release key (the public half is
+# below) and that the zip matches it, unpacks it under
+# %USERPROFILE%\.specdriven\app, builds the desktop app with Bun, adds it to
+# the Start menu and starts it.
 # If Bun is missing it offers to install it, and installs it only if you say
 # yes; without Bun it stops after unpacking and says what to run by hand.
 #
 # To read the code before any of it runs, take the zip from the releases page
-# instead and unpack it yourself -- this script is the unattended path.
+# instead and unpack it yourself -- this script is the unattended path. How
+# to verify a release by hand, with ssh-keygen or `gh attestation verify`, is
+# in docs/installation.md.
 #
 # Environment overrides:
 #   SPECDRIVEN_VERSION       release to install, e.g. 0.1.40   (default: latest)
@@ -22,6 +26,8 @@
 #   SPECDRIVEN_INSTALL_BUN   answer the Bun question up front   (default: ask; 1 installs, 0 skips)
 #   BUN_INSTALL              where Bun would go                 (default: %USERPROFILE%\.bun)
 #   SPECDRIVEN_BUN_INSTALLER_URL  Bun's installer               (default: https://bun.sh/install.ps1)
+#   SPECDRIVEN_RELEASE_PUBKEY  the key releases must be signed with (default: the one below;
+#                            for installing from a release server of your own)
 #
 # Written for Windows PowerShell 5.1, which every Windows 10 and 11 has, and
 # PowerShell 7. ASCII only: 5.1 reads a script file without a BOM in the
@@ -70,6 +76,63 @@
     $appDir = Join-Path $prefix 'app'
     $version = if ($env:SPECDRIVEN_VERSION) { $env:SPECDRIVEN_VERSION } else { 'latest' }
     if ($version.StartsWith('v')) { $version = $version.Substring(1) }
+
+    # The SpecDriven release signing key, the same line install.sh carries:
+    # .github/workflows/release.yml signs each release's SHASUMS256.txt with
+    # its private half (an SSH signature, as release@specdriven.app in the
+    # "specdriven-release" namespace) and checks the result against it.
+    $signerKey = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIdkUdY/iFmbDwh8/NPieR+Wkrx/vaAzXXf1+L5jovKx'
+    $signer = 'release@specdriven.app'
+    $signatureNamespace = 'specdriven-release'
+    $trustedKey = if ($env:SPECDRIVEN_RELEASE_PUBKEY) { $env:SPECDRIVEN_RELEASE_PUBKEY } else { $signerKey }
+
+    # --- pick a signature verifier ------------------------------------------
+
+    # The checksum file is signed, so a release cannot be swapped for one that
+    # merely comes with a matching checksum. The signature is an SSH
+    # signature, which ssh-keygen verifies on its own: Windows 10 and 11 ship
+    # it with the OpenSSH Client, on PATH or under System32\OpenSSH.
+    $sshKeygen = Get-Command ssh-keygen -CommandType Application -ErrorAction SilentlyContinue |
+      Select-Object -First 1 -ExpandProperty Source
+    if (-not $sshKeygen -and $env:SystemRoot) {
+      $builtIn = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh-keygen.exe'
+      if (Test-Path -LiteralPath $builtIn) { $sshKeygen = $builtIn }
+    }
+    if (-not $sshKeygen) {
+      Fail ("need ssh-keygen to verify the release signature. On Windows it is the OpenSSH Client: " +
+        "Settings > System > Optional features, or `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`.")
+    }
+
+    # ssh-keygen reads what was signed from stdin. Through .NET's Process, so
+    # the bytes go in as downloaded: a PowerShell pipeline would re-encode
+    # them and add a newline, and the signature covers every byte.
+    function Test-Signature([string]$allowedSigners, [string]$signaturePath, [string]$signedPath) {
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $sshKeygen
+      $quoted = @('-Y', 'verify', '-f', $allowedSigners, '-I', $signer, '-n', $signatureNamespace, '-s', $signaturePath) |
+        ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }
+      $psi.Arguments = $quoted -join ' '
+      $psi.UseShellExecute = $false
+      $psi.RedirectStandardInput = $true
+      $psi.RedirectStandardOutput = $true
+      $psi.RedirectStandardError = $true
+      $process = [System.Diagnostics.Process]::Start($psi)
+      try {
+        $bytes = [System.IO.File]::ReadAllBytes($signedPath)
+        try {
+          $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+          $process.StandardInput.Close()
+        } catch {
+          # It stopped reading -- an ssh-keygen that gave up before looking
+          # at stdin. Its exit code and its words, below, say why.
+        }
+        $output = $process.StandardOutput.ReadToEnd() + $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        return @{ ok = ($process.ExitCode -eq 0); output = $output.Trim() }
+      } finally {
+        $process.Dispose()
+      }
+    }
 
     if (-not $onWindows) {
       Say 'This installer is written for Windows; on macOS and Linux, install.sh is the one to use.'
@@ -124,14 +187,33 @@
       $base = "$releasesUrl/download/v$version"
       $zipPath = Join-Path $tmpDir $zipName
       $sumsPath = Join-Path $tmpDir 'SHASUMS256.txt'
+      $sigPath = Join-Path $tmpDir 'SHASUMS256.txt.sig'
 
       Say "Downloading SpecDriven $version source..."
       try { Download "$base/$zipName" $zipPath } catch { Fail "failed to download $base/$zipName" }
       try { Download "$base/SHASUMS256.txt" $sumsPath } catch {
         Fail "failed to download $base/SHASUMS256.txt -- refusing to install unverified"
       }
+      try { Download "$base/SHASUMS256.txt.sig" $sigPath } catch {
+        Fail "failed to download $base/SHASUMS256.txt.sig -- refusing to install unsigned"
+      }
 
       # --- verify -------------------------------------------------------------
+
+      # The signature first: it is what says SHASUMS256.txt came from
+      # SpecDriven's release workflow, and so that the checksum in it is worth
+      # comparing with.
+      $allowedSigners = Join-Path $tmpDir 'allowed_signers'
+      [System.IO.File]::WriteAllText($allowedSigners, "$signer $trustedKey`n")
+      $verdict = Test-Signature $allowedSigners $sigPath $sumsPath
+      if (-not $verdict.ok) {
+        Fail ("SHASUMS256.txt is not signed by the SpecDriven release key ($signer) -- refusing to install.`n" +
+          "  $($verdict.output)`n" +
+          "Either the download was tampered with, or the release was signed with a key this copy of`n" +
+          "install.ps1 does not know: the current one is at`n" +
+          "https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.ps1")
+      }
+      Say "Signature verified ($signer)."
 
       # sha256sum's format: the hash, then a space and a space (text mode) or
       # a star (binary mode), then the name.

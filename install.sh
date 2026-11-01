@@ -6,15 +6,18 @@
 #
 # SpecDriven ships as a source zip so you can put the code through your own
 # security checks before building it. This script downloads the zip of a
-# release from https://github.com/SpecDriven/specdriven-app, verifies
-# it against that release's SHASUMS256.txt, unpacks it under
+# release from https://github.com/SpecDriven/specdriven-app, checks that the
+# release's SHASUMS256.txt is signed by the SpecDriven release key (the public
+# half is below) and that the zip matches it, unpacks it under
 # ~/.specdriven/app, builds it, and starts it (on macOS, opens the .dmg).
 # Building needs Bun, so if Bun
 # is missing it offers to install that, and installs it only if you say yes;
 # without Bun it stops after unpacking and says what to run by hand.
 #
 # To read the code before any of it runs, take the zip from the releases page
-# instead and unpack it yourself — this script is the unattended path.
+# instead and unpack it yourself — this script is the unattended path. How to
+# verify a release by hand, with ssh-keygen or `gh attestation verify`, is in
+# docs/installation.md.
 #
 # Environment overrides:
 #   SPECDRIVEN_VERSION       release to install, e.g. 0.1.40   (default: latest)
@@ -23,6 +26,8 @@
 #   SPECDRIVEN_INSTALL_BUN   answer the Bun question up front   (default: ask; 1 installs, 0 skips)
 #   BUN_INSTALL              where Bun would go                 (default: $HOME/.bun)
 #   SPECDRIVEN_BUN_INSTALLER_URL  Bun's installer               (default: https://bun.sh/install)
+#   SPECDRIVEN_RELEASE_PUBKEY  the key releases must be signed with (default: the one below;
+#                            for installing from a release server of your own)
 #
 # POSIX sh on purpose: this runs on whatever /bin/sh the machine has, before
 # we know anything about it.
@@ -35,6 +40,15 @@ PREFIX="${SPECDRIVEN_HOME:-$HOME/.specdriven}"
 APP_DIR="$PREFIX/app"
 VERSION="${SPECDRIVEN_VERSION:-latest}"
 VERSION="${VERSION#v}"
+
+# The SpecDriven release signing key. .github/workflows/release.yml signs each
+# release's SHASUMS256.txt with its private half (an SSH signature, as
+# release@specdriven.app in the "specdriven-release" namespace) and checks
+# the result against this very line, so the two cannot drift apart unnoticed.
+SIGNER_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIdkUdY/iFmbDwh8/NPieR+Wkrx/vaAzXXf1+L5jovKx"
+SIGNER="release@specdriven.app"
+SIGNATURE_NAMESPACE="specdriven-release"
+TRUSTED_KEY="${SPECDRIVEN_RELEASE_PUBKEY:-$SIGNER_KEY}"
 
 TMP_DIR=""
 UNPACK_DIR=""
@@ -118,6 +132,17 @@ else
   die "need sha256sum or shasum to verify the download"
 fi
 
+# --- pick a signature verifier ------------------------------------------------
+
+# The checksum file is signed, so a release cannot be swapped for one that
+# merely comes with a matching checksum. The signature is an SSH signature,
+# which ssh-keygen (OpenSSH 8.1 and later) verifies on its own — and OpenSSH
+# is on every macOS, nearly every Linux, and Windows 10 and 11.
+command -v ssh-keygen >/dev/null 2>&1 \
+  || die "need ssh-keygen (OpenSSH 8.1 or later) to verify the release signature.
+It comes with openssh-client (Debian, Ubuntu), openssh (Fedora, Arch) or
+openssh-keygen (Alpine)."
+
 # --- resolve the version --------------------------------------------------------
 
 # Digits and dots only, three fields: anything else is a mistyped override, a
@@ -163,8 +188,24 @@ else
     || die "failed to download $base/$ZIP"
   download "$base/SHASUMS256.txt" "$TMP_DIR/SHASUMS256.txt" \
     || die "failed to download $base/SHASUMS256.txt — refusing to install unverified"
+  download "$base/SHASUMS256.txt.sig" "$TMP_DIR/SHASUMS256.txt.sig" \
+    || die "failed to download $base/SHASUMS256.txt.sig — refusing to install unsigned"
 
   # --- verify ---------------------------------------------------------------------
+
+  # The signature first: it is what says SHASUMS256.txt came from SpecDriven's
+  # release workflow, and so that the checksum in it is worth comparing with.
+  printf '%s %s\n' "$SIGNER" "$TRUSTED_KEY" > "$TMP_DIR/allowed_signers"
+  if ! result="$(ssh-keygen -Y verify -f "$TMP_DIR/allowed_signers" -I "$SIGNER" \
+      -n "$SIGNATURE_NAMESPACE" -s "$TMP_DIR/SHASUMS256.txt.sig" \
+      < "$TMP_DIR/SHASUMS256.txt" 2>&1)"; then
+    die "SHASUMS256.txt is not signed by the SpecDriven release key ($SIGNER) — refusing to install.
+  $result
+Either the download was tampered with, or the release was signed with a key this
+copy of install.sh does not know: the current one is at
+https://raw.githubusercontent.com/SpecDriven/specdriven-app/main/install.sh"
+  fi
+  info "Signature verified ($SIGNER)."
 
   expected="$(grep " $ZIP\$" "$TMP_DIR/SHASUMS256.txt" | cut -d' ' -f1 || true)"
   [ -n "$expected" ] || die "no checksum listed for $ZIP — refusing to install"
