@@ -113,5 +113,5 @@ any order, duplicate test URLs (first wins, by design).
 
 ## Probe scripts
 
-`/private/tmp/claude-501/-Users-I574426-dev-personal-SpecDriven-specdriven-app--claude-worktrees-specs-tests-recent-prs-d4e8ce/acf18d64-5534-49b5-b00f-9e8bfa61ad1e/scratchpad/probe.ts` … `probe5.ts`
+`/private/tmp/claude-501/-Users-me-dev-personal-SpecDriven-specdriven-app--claude-worktrees-specs-tests-recent-prs-d4e8ce/acf18d64-5534-49b5-b00f-9e8bfa61ad1e/scratchpad/probe.ts` … `probe5.ts`
 (session scratchpad; copy them into `tests/` if any become regression tests).

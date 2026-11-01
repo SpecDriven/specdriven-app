@@ -24,8 +24,8 @@ describe("a module url", () => {
   });
 
   test("reads the fragment in qTest's own order, id first", () => {
-    const url = "https://sapariba.qtestnet.com/p/90966/portal/project#id=72617637&object=0&tab=testdesign";
-    expect(parseModuleUrl(url)).toEqual({ base: "https://sapariba.qtestnet.com", projectId: "90966", moduleId: "72617637" });
+    const url = "https://acme.qtestnet.com/p/12345/portal/project#id=67890&object=0&tab=testdesign";
+    expect(parseModuleUrl(url)).toEqual({ base: "https://acme.qtestnet.com", projectId: "12345", moduleId: "67890" });
   });
 
   test("keeps an on-premise context path in the site", () => {

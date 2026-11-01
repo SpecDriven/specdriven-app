@@ -85,7 +85,7 @@ describe("the wiki's base", () => {
 });
 
 describe("a scenario's deep link", () => {
-  // Fragments as wiki.ariba.com (Data Center 9.2) writes them for the S<n> anchors.
+  // Fragments as a Confluence Data Center 9.2 site writes them for the S<n> anchors.
   test("names the anchor after the page title, spaces and hyphens dropped, other punctuation kept", () => {
     const page = "https://wiki.acme.com/spaces/QA/pages/99/SCM+-+Dashboard+Global+Filters";
     expect(scenarioAnchorUrl(page, "SCM - Dashboard (Global Filters)", 3)).toBe(`${page}#SCMDashboard(GlobalFilters)-S3`);
