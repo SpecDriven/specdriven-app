@@ -306,10 +306,50 @@ test("a subdirectory plugin is staged and described first, and installed only on
   expect((await profile()).enabled).toEqual(["hello"]);
   expect(await (await api("GET", "/api/hello"))!.json()).toEqual({ version: "1.0.0" });
 
-  // Installing again is refused; Update is for that.
+  // Installing again names what it replaces, and a confirmation that does
+  // not say so is refused.
   const again = await json(await api("POST", "/api/plugins/install", { marketplace: "local", name: "hello", step: "stage" }));
-  expect(again.status).toBe(400);
-  expect(again.body.error).toMatch(/already installed/);
+  expect(again.status).toBe(200);
+  expect(again.body.preview.replaces).toEqual({ id: "hello", version: "1.0.0", marketplace: "local", name: "hello" });
+  const refused = await json(await api("POST", "/api/plugins/install", { marketplace: "local", name: "hello", step: "confirm" }));
+  expect(refused.status).toBe(400);
+  expect(refused.body.error).toMatch(/already installed/);
+  expect(await readdir(join(pluginsHome(), ".staging")).catch(() => [])).toEqual([]);
+  expect(await (await api("GET", "/api/hello"))!.json()).toEqual({ version: "1.0.0" });
+});
+
+test("a plugin is reinstalled from a marketplace that was removed and added back under another name", async () => {
+  const market = join(work, "market");
+  await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.0.0" }], { hello: { version: "1.0.0" } });
+  await boot([{ name: "local", source: market }]);
+  await api("POST", "/api/plugins/install", { marketplace: "local", name: "hello", step: "confirm" });
+  expect(row("hello")).toMatchObject({ active: true, install: { marketplace: "local", version: "1.0.0" } });
+  const first = JSON.parse(await readFile(join(pluginsHome(), "hello", INSTALL_RECORD_FILE), "utf8"));
+
+  // The marketplace goes and comes back under another name, with a newer
+  // plugin; the install record still names the old one, so Update cannot
+  // find it, and Install sees the id installed already.
+  await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.1.0" }], { hello: { version: "1.1.0" } });
+  const state = (await readState(root)) as { plugins: Record<string, unknown> };
+  await writeState({ ...state, plugins: { ...state.plugins, marketplaces: [{ name: "plugins", source: market }] } } as never, root);
+  const update = await json(await api("POST", "/api/plugins/hello/update", {}));
+  expect(update.status).toBe(400);
+  expect(update.body.error).toMatch(/"local" is no longer configured/);
+
+  // Reinstall: the same consent, naming what it replaces, then the swap.
+  const staged = await json(await api("POST", "/api/plugins/install", { marketplace: "plugins", name: "hello", step: "stage" }));
+  expect(staged.status).toBe(200);
+  expect(staged.body.preview).toMatchObject({ id: "hello", version: "1.1.0", marketplace: "plugins", replaces: { id: "hello", version: "1.0.0", marketplace: "local", name: "hello" } });
+  const done = await json(await api("POST", "/api/plugins/install", { marketplace: "plugins", name: "hello", step: "confirm", replace: true }));
+  expect(done.status).toBe(200);
+  expect(done.body).toMatchObject({ id: "hello", replaced: true, plugin: { id: "hello", enabled: true, active: true, install: { marketplace: "plugins", name: "hello", version: "1.1.0" } } });
+  expect(await installedFolders()).toEqual(["hello"]);
+  expect(await readdir(join(pluginsHome(), ".staging")).catch(() => [])).toEqual([]);
+  const record = JSON.parse(await readFile(join(pluginsHome(), "hello", INSTALL_RECORD_FILE), "utf8"));
+  expect(record).toMatchObject({ marketplace: "plugins", name: "hello", version: "1.1.0" });
+  expect(record.commit).not.toBe(first.commit);
+  expect((await profile()).enabled).toEqual(["hello"]);
+  expect(await (await api("GET", "/api/hello"))!.json()).toEqual({ version: "1.1.0" });
 });
 
 test("a plugin the app cannot run is refused with the reason and nothing is left behind", async () => {

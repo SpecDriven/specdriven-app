@@ -8,8 +8,11 @@
 // and checks it against this app, and only a confirming call moves it into
 // `~/.specdriven/plugins/<id>` — so a refused plugin leaves nothing behind
 // and nothing runs before the user has seen what it is. Update fetches the
-// ref the index names now; Remove deletes the folder. The loader notices the
-// folder change and mounts, remounts or unwinds the plugin.
+// ref the index names now; Remove deletes the folder; Reinstall — or Install
+// of an id already installed, from this marketplace or another — stages a
+// fresh copy the same way and, on a confirmation that says so, swaps it in
+// for the folder that is there. The loader notices the folder change and
+// mounts, remounts or unwinds the plugin.
 
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
@@ -132,6 +135,19 @@ export interface InstallPreview {
   source: string;
   ref?: string;
   commit?: string;
+  /**
+   * The plugin already installed under this id, which a confirmation with
+   * `replace` swaps out: what the consent step says a Reinstall replaces.
+   */
+  replaces?: InstalledPlugin;
+}
+
+/** An installed plugin as the consent step names it. */
+export interface InstalledPlugin {
+  id: string;
+  version?: string;
+  marketplace?: string;
+  name?: string;
 }
 
 /** One install, update or removal at a time per plugin. */
@@ -156,8 +172,9 @@ function stagingDir(name: string): string {
  * Fetch a plugin the index names into the staging folder and read what it
  * is — nothing is added to the profile and nothing runs. A plugin the app
  * refuses (its api, its minimum app version, no manifest) is deleted again
- * with the reason. A folder already installed under the id is refused too;
- * Update is for that.
+ * with the reason. A plugin already installed under the id is named in the
+ * preview as what a confirmation with `replace` swaps out; one linked from
+ * a folder or shipped with the data folder cannot be replaced and is refused.
  */
 export async function stageInstall(
   entry: MarketplaceRef,
@@ -183,9 +200,7 @@ export async function stageInstall(
       if (builtinManifests.some((m) => m.id === manifest.id)) {
         throw new Error(`the id "${manifest.id}" belongs to a built-in plugin`);
       }
-      if (await installedDir(manifest.id)) {
-        throw new Error(`${manifest.id} is already installed; use Update to fetch the ref the index names now`);
-      }
+      const replaces = await installedPlugin(manifest.id);
       const record: InstallRecord = {
         marketplace: entry.name,
         name,
@@ -207,6 +222,7 @@ export async function stageInstall(
         source: row.source,
         ...(row.ref ? { ref: row.ref } : {}),
         commit,
+        ...(replaces ? { replaces } : {}),
       };
     } catch (e) {
       await rm(staging, { recursive: true, force: true });
@@ -223,9 +239,16 @@ export async function discardStaged(name: string): Promise<void> {
 /**
  * The confirmation: move the staged plugin into `~/.specdriven/plugins`,
  * staging it first when the consent step's folder is gone. The loader's
- * rescan then adds it to the profile and mounts it.
+ * rescan then adds it to the profile and mounts it. A folder already there
+ * under the id is refused unless the confirmation says `replace`: then it is
+ * deleted and the fresh copy takes its place — a reinstall — and the loader
+ * remounts the plugin from the new folder.
  */
-export async function confirmInstall(entry: MarketplaceRef, name: string): Promise<{ id: string; dir: string }> {
+export async function confirmInstall(
+  entry: MarketplaceRef,
+  name: string,
+  opts: { replace?: boolean } = {},
+): Promise<{ id: string; dir: string; replaced: boolean }> {
   const staging = stagingDir(name);
   if (!(await exists(join(staging, INSTALL_RECORD_FILE)))) await stageInstall(entry, name);
   return exclusive(name, "installed", async () => {
@@ -234,13 +257,25 @@ export async function confirmInstall(entry: MarketplaceRef, name: string): Promi
       await rm(staging, { recursive: true, force: true });
       throw new Error(found?.error ?? "the staged plugin has no manifest");
     }
-    const dir = join(pluginsHome(), safeId(found.manifest.id));
-    if (await exists(dir)) {
+    const id = found.manifest.id;
+    const dir = join(pluginsHome(), safeId(id));
+    const there = await installedPlugin(id).catch(async (e) => {
       await rm(staging, { recursive: true, force: true });
-      throw new Error(`${found.manifest.id} is already installed`);
+      throw e;
+    });
+    const present = there !== null || (await exists(dir));
+    if (present && !opts.replace) {
+      await rm(staging, { recursive: true, force: true });
+      throw new Error(`${id} is already installed; confirm with replace to reinstall it`);
+    }
+    if (present) {
+      await assertUnderHome(dir);
+      // Windows refuses a folder a handle is still open on for a moment
+      // after the plugin unwinds: retry before giving up.
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
     await rename(staging, dir);
-    return { id: found.manifest.id, dir };
+    return { id, dir, replaced: present };
   });
 }
 
@@ -298,13 +333,30 @@ async function refuseEscapingSymlinks(root: string): Promise<void> {
   await walk(root);
 }
 
-/** The folder an id is installed under, or null. */
-async function installedDir(id: string): Promise<string | null> {
-  const dir = join(pluginsHome(), safeId(id));
-  if (await exists(join(dir, "package.json"))) return dir;
-  // A folder named by hand may still carry the id: ask the loader.
+/**
+ * The plugin installed under an id, or null. One the loader knows from a
+ * linked folder or the data folder is not the marketplace's to replace, so
+ * it throws.
+ */
+async function installedPlugin(id: string): Promise<InstalledPlugin | null> {
   const known = externalPlugin(id);
-  return known?.source === "home" ? known.dir : null;
+  if (known && known.source !== "home") {
+    throw new Error(
+      known.source === "path"
+        ? `${id} is a linked folder; unlink it before installing it from the marketplace`
+        : `${id} came with the data folder; delete it from the repository before installing it from the marketplace`,
+    );
+  }
+  // A folder named by hand may carry the id too: the loader knows its dir.
+  const dir = known?.dir ?? join(pluginsHome(), safeId(id));
+  if (!(await exists(join(dir, "package.json")))) return null;
+  const found = await readPluginFolder(dir, "home", appVersion);
+  const install = found?.install ?? known?.install;
+  return {
+    id,
+    ...(found?.manifest?.version ? { version: found.manifest.version } : {}),
+    ...(install ? { marketplace: install.marketplace, name: install.name } : {}),
+  };
 }
 
 // ---- updating and removing ---------------------------------------------------
@@ -475,9 +527,21 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
         return json({ ok: true });
       }
       if (step === "confirm") {
-        const { id } = await confirmInstall(entry, name);
+        const { id, replaced } = await confirmInstall(entry, name, { replace: body.replace === true });
+        if (replaced) {
+          // A reinstall starts over like a fresh install: dropped from
+          // `seen`, the rescan adopts the new folder and switches it on
+          // when its manifest says so, unless it is on already.
+          const state = await deps.readState();
+          const section = state[PROFILE_KEY] as Record<string, unknown> | undefined;
+          if (section && Array.isArray(section.seen) && section.seen.includes(id)) {
+            section.seen = section.seen.filter((x) => x !== id);
+            await deps.persist(state);
+          }
+        }
         await rescanPlugins();
-        return json({ id, plugin: row(id) ?? null });
+        if (replaced) notifyPluginChange();
+        return json({ id, replaced, plugin: row(id) ?? null });
       }
       return json({ preview: await stageInstall(entry, name) });
     }),
