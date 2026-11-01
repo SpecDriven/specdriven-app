@@ -2,14 +2,18 @@ import { userInfo } from "node:os";
 import { getAuth } from "./auth";
 import { DEMO_USER, isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
+import { getAppRoot } from "./paths";
 import { isReadOnlyMode, READ_ONLY_USER } from "./readOnlyMode";
-import { cliGitAvailable, currentEngine, ghAccount, ghAccountInUse } from "./git";
+import { cliGitAvailable, currentEngine, ghAccount, ghAccountInUse, isRepoRoot } from "./git";
+import { dataRepoDir } from "./repo";
 import { run } from "./run";
+import { readState } from "./state";
 
 // Current user (specs/user-info-settings.feature.md): by default the user on
 // the OS, plus the identity that authors the app's commits to the data
 // repo — the signed-in GitHub account, the GitHub CLI's account when that
-// engine is in effect, or the system git identity. Reported via /api/state
+// engine is in effect, or the system git identity as git resolves it in the
+// data repo. Reported via /api/state
 // and shown in the sidebar's user corner.
 
 export interface CurrentUser {
@@ -23,9 +27,24 @@ export interface CurrentUser {
   email: string | null;
 }
 
-async function gitConfig(key: string): Promise<string | null> {
+/**
+ * The data repo's folder when it is already a repository, else null. Git
+ * config is read there because that is where the commits are made: the
+ * repo's own `.git/config` and any `includeIf "gitdir:…"` rule in the user's
+ * config apply to it, while the app's own folder (the desktop app runs from
+ * its user-data directory) would only ever see the global identity.
+ */
+async function dataRepoFolder(): Promise<string | null> {
+  const root = getAppRoot();
+  const { dataRepo } = await readState(root);
+  if (!dataRepo) return null;
+  const dir = dataRepoDir(dataRepo, root);
+  return (await isRepoRoot(dir)) ? dir : null;
+}
+
+async function gitConfig(key: string, cwd: string | null): Promise<string | null> {
   if (!cliGitAvailable()) return null;
-  const out = await run("git", ["config", key]);
+  const out = await run("git", ["config", key], cwd ? { cwd } : {});
   const value = out.stdout.trim();
   return out.exitCode === 0 && value ? value : null;
 }
@@ -67,10 +86,11 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   if (gh) {
     return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
   }
+  const repo = await dataRepoFolder();
   return {
     username,
     login: null,
-    name: await gitConfig("user.name"),
-    email: await gitConfig("user.email"),
+    name: await gitConfig("user.name", repo),
+    email: await gitConfig("user.email", repo),
   };
 }

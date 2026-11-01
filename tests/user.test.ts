@@ -3,6 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { userInfo } from "node:os";
 import { join } from "node:path";
+import { setGitEngine } from "../src/server/git";
+import { run } from "../src/server/run";
+import { writeState } from "../src/server/state";
 import { getCurrentUser } from "../src/server/user";
 import { createFileBackend, saveToken, setTokenBackend } from "../src/server/tokenStore";
 
@@ -11,14 +14,27 @@ import { createFileBackend, saveToken, setTokenBackend } from "../src/server/tok
 // the signed-in GitHub account, or the system git identity when signed out.
 
 let dir: string;
+const realRoot = process.env.SPECDRIVEN_ROOT;
+const realHome = process.env.SPECDRIVEN_HOME;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "specdriven-user-"));
   setTokenBackend(createFileBackend(join(dir, "token.json")));
+  // No data repo configured unless a test records one.
+  process.env.SPECDRIVEN_ROOT = join(dir, "app");
+  process.env.SPECDRIVEN_HOME = join(dir, "home");
 });
 
 afterEach(async () => {
   setTokenBackend(createFileBackend());
+  setGitEngine(null);
+  for (const [name, value] of [
+    ["SPECDRIVEN_ROOT", realRoot],
+    ["SPECDRIVEN_HOME", realHome],
+  ] as const) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -39,6 +55,22 @@ describe("getCurrentUser", () => {
         expect(value.length).toBeGreaterThan(0);
       }
     }
+  });
+
+  test("signed out, the identity is git's as resolved in the data repo, not the app's folder", async () => {
+    // The desktop app runs from its user-data folder, where only the global
+    // identity applies; the commits are made in the data repo, whose own
+    // config (or an includeIf rule matching it) may name someone else.
+    setGitEngine("cli");
+    const app = join(dir, "app");
+    const data = join(dir, "data");
+    await run("git", ["init", "-q", data]);
+    await run("git", ["config", "user.name", "Repo Author"], { cwd: data });
+    await run("git", ["config", "user.email", "author@repo.example"], { cwd: data });
+    await writeState({ dataRepo: data }, app);
+    const user = await getCurrentUser();
+    expect(user.name).toBe("Repo Author");
+    expect(user.email).toBe("author@repo.example");
   });
 
   test("signed in: the GitHub identity wins", async () => {
