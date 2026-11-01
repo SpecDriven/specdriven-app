@@ -2761,8 +2761,8 @@ aside > .user-corner {
   white-space: nowrap;
 }
 
-/* Demo mode: the app version sits right of the user name — muted, and it
-   keeps its full width while the name ellipses. */
+/* The app version sits right of the user name — muted, and it keeps its
+   full width while the name ellipses. */
 .user-chip .app-version {
   flex: none;
   margin-left: auto;
