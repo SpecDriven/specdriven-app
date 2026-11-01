@@ -117,6 +117,21 @@ PowerShell of its own, never from an elevated (Administrator) one. After
 next install moves it along — and starts the app; it warns when git, which
 holds SpecDriven's data, is not on PATH.
 
+### The prebuilt installer
+
+Every release also carries a prebuilt desktop installer for Windows:
+`SpecDriven-<version>-x64-setup.exe`, and `SpecDriven-<version>-arm64-setup.exe`
+for Windows on ARM. It needs neither Bun nor a build. It installs for the
+current user under `%LOCALAPPDATA%\Programs\SpecDriven` and adds a Start menu
+shortcut. It does not update itself: install the next release's installer
+over it. The installers are not code-signed yet, so SmartScreen asks first:
+choose *More info*, then *Run anyway*. To check one before running it, compare
+`certutil -hashfile SpecDriven-<version>-x64-setup.exe SHA256` with its line
+in the release's signed `SHASUMS256.txt`, or run
+`gh attestation verify SpecDriven-<version>-x64-setup.exe --repo SpecDriven/specdriven-app`.
+
+### install.ps1 details
+
 It runs in one script block, so `irm | iex` leaves nothing in the caller's
 session, and a failure ends the script without closing their window. It is
 ASCII only: Windows PowerShell 5.1 reads a script file without a BOM in the

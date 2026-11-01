@@ -10,6 +10,7 @@ import {
   CBOR_EXTRACT_DIR,
   PATCH_MANIFEST_FILE,
   bakedPaths,
+  buildMode,
   bundleOptions,
   rewriteBakedModule,
   electronBuilderArgs,
@@ -48,21 +49,34 @@ test("an unsupported host or a mistyped flag stops before packaging", () => {
 });
 
 test("a release build packages every target and architecture in package.json", () => {
-  expect(electronBuilderArgs(["mac", "linux"], false, "arm64")).toEqual(["--mac", "--linux"]);
+  expect(electronBuilderArgs(["mac", "linux"], "release", "arm64")).toEqual(["--mac", "--linux"]);
 });
 
 test("--local packages only the installer this machine starts, for its own architecture", () => {
   // No .deb: its fpm needs libcrypt.so.1, which Arch and friends lack.
-  expect(electronBuilderArgs(["linux"], true, "arm64")).toEqual(["--linux", "AppImage", "--arm64"]);
-  expect(electronBuilderArgs(["linux"], true, "x64")).toEqual(["--linux", "AppImage", "--x64"]);
+  expect(electronBuilderArgs(["linux"], "local", "arm64")).toEqual(["--linux", "AppImage", "--arm64"]);
+  expect(electronBuilderArgs(["linux"], "local", "x64")).toEqual(["--linux", "AppImage", "--x64"]);
   // Electron 44 stopped publishing 32-bit ARM binaries: say so instead of
   // letting electron-builder fail on a download it cannot make.
-  expect(() => electronBuilderArgs(["linux"], true, "arm")).toThrow(/32-bit ARM/);
-  expect(electronBuilderArgs(["mac"], true, "arm64")).toEqual(["--mac", "dmg", "--arm64"]);
+  expect(() => electronBuilderArgs(["linux"], "local", "arm")).toThrow(/32-bit ARM/);
+  expect(electronBuilderArgs(["mac"], "local", "arm64")).toEqual(["--mac", "dmg", "--arm64"]);
   // Windows gets the app itself, unpacked, which install.ps1 starts in place.
-  expect(electronBuilderArgs(["win"], true, "x64")).toEqual(["--win", "dir", "--x64"]);
-  expect(electronBuilderArgs(["win"], true, "arm64")).toEqual(["--win", "dir", "--arm64"]);
-  expect(() => electronBuilderArgs(["linux"], true, "ppc64")).toThrow(/ppc64 architecture/);
+  expect(electronBuilderArgs(["win"], "local", "x64")).toEqual(["--win", "dir", "--x64"]);
+  expect(electronBuilderArgs(["win"], "local", "arm64")).toEqual(["--win", "dir", "--arm64"]);
+  expect(() => electronBuilderArgs(["linux"], "local", "ppc64")).toThrow(/ppc64 architecture/);
+});
+
+// release.yml builds each Windows installer on a runner of its architecture:
+// cbor-extract's native module is only installed for the machine bun ran on.
+test("--host-arch packages the release installers for this machine's architecture only", () => {
+  expect(electronBuilderArgs(["win"], "host-arch", "x64")).toEqual(["--win", "nsis", "--x64"]);
+  expect(electronBuilderArgs(["win"], "host-arch", "arm64")).toEqual(["--win", "nsis", "--arm64"]);
+  expect(electronBuilderArgs(["linux"], "host-arch", "x64")).toEqual(["--linux", "AppImage", "deb", "--x64"]);
+  expect(electronBuilderArgs(["mac"], "host-arch", "arm64")).toEqual(["--mac", "dmg", "zip", "--arm64"]);
+  expect(buildMode(["--win", "--host-arch"])).toEqual({ mode: "host-arch", rest: ["--win"] });
+  expect(buildMode(["--local"])).toEqual({ mode: "local", rest: [] });
+  expect(buildMode(["--all"])).toEqual({ mode: "release", rest: ["--all"] });
+  expect(() => buildMode(["--local", "--host-arch"])).toThrow(/do not go together/);
 });
 
 // specs/app/self-healing.feature.md: a self-fix rebuilds the bundles alone,

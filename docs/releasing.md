@@ -37,16 +37,35 @@ The tag push runs [.github/workflows/release.yml](../.github/workflows/release.y
 which:
 
 - checks the tag against `package.json`;
+- builds the Windows installers, `SpecDriven-<version>-x64-setup.exe` and
+  `SpecDriven-<version>-arm64-setup.exe`, each on a GitHub Windows runner of
+  its own architecture (`bun run build:desktop --win --host-arch`), installs
+  each one silently and checks the installed app opens its window;
 - zips the tagged tree with `git archive` (tracked files only — no
   `node_modules`, `dist`, or `.env`; paths marked `export-ignore` in
   [.gitattributes](../.gitattributes) are left out too);
 - signs `SHASUMS256.txt` with the release signing key (below), as
   `SHASUMS256.txt.sig`, and checks the signature against the public key
   `install.sh` and `install.ps1` embed;
-- attests the zip and `SHASUMS256.txt` with GitHub build provenance;
-- creates a `v<version>` release on this repository with the zip, its
-  `SHASUMS256.txt` and `SHASUMS256.txt.sig`, `install.sh` and `install.ps1`
-  attached.
+- lists the zip and both installers in `SHASUMS256.txt`;
+- attests the zip, the installers and `SHASUMS256.txt` with GitHub build
+  provenance;
+- creates a `v<version>` release on this repository with the zip, the two
+  Windows installers, `SHASUMS256.txt` and `SHASUMS256.txt.sig`,
+  `install.sh` and `install.ps1` attached.
+
+Releases on this repository are immutable: nothing can be attached to one
+after it is created, and once a release has existed its tag name can never
+be used again. So the release is only created after both Windows builds have
+passed. If one fails, nothing is published. Fix it and re-run the workflow
+on the same tag, or cut the next version. A pull request that touches
+`release.yml`, `scripts/build-desktop.ts`, `src/electron/`, `package.json`
+or `bun.lock` runs the Windows builds on their own, without publishing, so a
+broken build shows up before a tag is spent on it.
+
+The Windows installers are not code-signed yet, so SmartScreen asks before
+running one. How to add signing is described in the header of
+[scripts/build-desktop.ts](../scripts/build-desktop.ts).
 
 It publishes with the workflow's own `GITHUB_TOKEN` (`contents: write`, plus
 `id-token: write` and `attestations: write` for the provenance); the one

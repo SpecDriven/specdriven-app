@@ -144,6 +144,9 @@
     "appImage": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
     "deb": {
       "depends": [
         "libgtk-3-0",
