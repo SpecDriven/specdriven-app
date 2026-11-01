@@ -85,4 +85,34 @@ describe("agent registry", () => {
     expect(changes).toHaveLength(4);
     expect(() => registry.register({ ...first, id: "" })).toThrow();
   });
+
+  test("a provider's sign-in change is a change for its id alone; an unknown id is nothing", () => {
+    const registry = createAgentRegistry();
+    const changes: string[] = [];
+    registry.subscribe((c) => changes.push(`${c.type}:${c.id}`));
+    registry.register(fakeProvider({ id: "claude" }).provider);
+    registry.changed("claude");
+    registry.changed("codex");
+    expect(changes).toEqual(["added:claude", "changed:claude"]);
+  });
+});
+
+test("an agent's sign-in change has every open page re-read the agents", async () => {
+  // The pane reads the descriptors off /api/state: after the email sign-in
+  // fetched Claude Code it kept saying "not set up" until a restart.
+  const { handleApi } = await import("../src/server/api");
+  const { agents } = await import("../src/plugins/host/agents");
+  const res = (await handleApi(new Request("http://x/api/plugins/events")))!;
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const next = async () => decoder.decode((await reader.read()).value);
+  expect(await next()).toContain(": connected");
+  const dispose = agents.register(fakeProvider({ id: "signin-test" }).provider);
+  try {
+    agents.changed("signin-test");
+    expect(await next()).toBe(`data: {"type":"changed"}\n\n`);
+  } finally {
+    dispose();
+    await reader.cancel();
+  }
 });

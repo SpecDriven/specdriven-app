@@ -18,6 +18,8 @@ export interface FakeSession extends AgentSession {
   interrupts: number;
   modes: PermissionMode[];
   closed: boolean;
+  /** How often the engine handed it a changed sign-in (AgentSession.refresh). */
+  refreshes: number;
 }
 
 export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start" | "capabilities">> {
@@ -28,6 +30,10 @@ export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start"
   sendError?: Error;
   /** Call host.ready() as soon as start() runs. Default true. */
   readyAtStart?: boolean;
+  /** Give the sessions no refresh(), as a provider that predates it. */
+  noRefresh?: boolean;
+  /** refresh() rejects with this. */
+  refreshError?: Error;
 }
 
 export function fakeProvider(options: FakeProviderOptions = {}): { provider: AgentProvider; sessions: FakeSession[] } {
@@ -63,6 +69,7 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         interrupts: 0,
         modes: [],
         closed: false,
+        refreshes: 0,
         async send(text) {
           if (options.sendError) throw options.sendError;
           session.sent.push(text);
@@ -76,6 +83,14 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         close() {
           session.closed = true;
         },
+        ...(options.noRefresh
+          ? {}
+          : {
+              async refresh() {
+                session.refreshes += 1;
+                if (options.refreshError) throw options.refreshError;
+              },
+            }),
       };
       opts.signal.addEventListener("abort", () => session.close(), { once: true });
       sessions.push(session);

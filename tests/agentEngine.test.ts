@@ -275,6 +275,42 @@ test("no plugin, the wrong plugin, or a missing CLI is a clear refusal, and the 
   expect(list.sessions.map((s) => s.agent)).toEqual(["zed"]);
 });
 
+test("a provider's sign-in change refreshes its live sessions, and a failed refresh is a note", async () => {
+  // Signed in to Claude while a session ran: without the refresh, the
+  // session kept the account it started with until the app was restarted.
+  const fake = register({ id: "claude", label: "Claude" });
+  const first = await ready(fake);
+  const second = await ready(fake);
+  const other = register({ id: "zed" });
+  const untouched = await ready(other);
+  const ended = await ready(fake);
+  ended.session.host.ended("Claude exited.");
+  await untilStatus(ended.id, "ended");
+
+  agents.changed("claude");
+  await until(() => [first.session.refreshes, second.session.refreshes], (n) => n.every((c) => c === 1));
+  expect(untouched.session.refreshes).toBe(0);
+  expect(ended.session.refreshes).toBe(0);
+  expect(getChatSession(first.id)!.status).toBe("idle");
+
+  const failing = register({ id: "gemini", label: "Gemini", refreshError: new Error("keychain locked") });
+  const broken = await ready(failing);
+  agents.changed("gemini");
+  const note = await until(
+    () => getChatEvents(broken.id).find((e) => e.kind === "note" && e.level === "error"),
+    (e) => e !== undefined,
+  );
+  expect(note).toMatchObject({ text: "Could not pick up the new Gemini sign-in: keychain locked — start a new session." });
+  expect(getChatSession(broken.id)!.status).toBe("idle");
+
+  // A provider whose sessions cannot refresh leaves them as they are.
+  const old = register({ id: "pi", noRefresh: true });
+  const kept = await ready(old);
+  agents.changed("pi");
+  await Bun.sleep(10);
+  expect(getChatEvents(kept.id).some((e) => e.kind === "note")).toBe(false);
+});
+
 test("switching a plugin off ends the sessions its provider was driving", async () => {
   const fake = register({ id: "gemini", label: "Gemini" });
   const { id, session } = await ready(fake);
