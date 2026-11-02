@@ -40,10 +40,7 @@ A reviewer who doesn't use the app reads a feature as a PDF.
 
 New scenarios arrive as `[proposed]`; we decide which ones to publish.
 
-**How to send one.** Our proposals site lets you sign in with your GitHub
-account and propose a scenario on an existing feature, or a new feature,
-straight into the specs repo — committed as `[proposed]` under your name, with
-a few proposals a day per account. Until it is live, open an issue on
+**How to send one.** Open an issue on
 [SpecDriven/specdriven-app](https://github.com/SpecDriven/specdriven-app/issues)
 with your proposal in the format above.
 

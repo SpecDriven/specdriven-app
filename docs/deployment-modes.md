@@ -28,17 +28,6 @@ service with `Dockerfile.hosted`: set `DEMO_MODE=1` on the demo service and
 its entry point runs this demo instead of the sign-in gateway, with no
 hosted-mode variables required (`src/gateway/demo.ts`).
 
-## Spec proposals
-
-`SPECDRIVEN_PROPOSALS=1` runs the public spec-proposals site: anyone signs
-in with GitHub and proposes a scenario on an existing feature, or a new
-feature, into one spec repository (`SPECDRIVEN_PROPOSALS_REPO`, default
-`SpecDriven/specs-specdriven`). Proposals are committed straight to its
-default branch as `[proposed]`, authored by the visitor and pushed with a bot
-token (`SPECDRIVEN_PROPOSALS_BOT_TOKEN`), with a daily allowance per account.
-Nothing else can be changed there. See
-[deployment-railway.md](deployment-railway.md#spec-proposals-service).
-
 ## Hosted (multi-user)
 
 `bun run start:hosted` runs the hosted gateway (`src/gateway`): email and

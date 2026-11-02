@@ -680,7 +680,7 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
  *
  * The name is relative to the spec tree: a leading `specs/` is accepted (the
  * client lists folders with it) but never doubled. `message` words the commit
- * (a spec proposal names its proposer there, src/server/proposals/service.ts).
+ * (an import names its source there).
  */
 export async function createFeature(
   dataDir: string,

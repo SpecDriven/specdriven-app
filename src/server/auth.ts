@@ -19,7 +19,6 @@ import {
   githubClientSecret,
   githubWebBase,
 } from "./github";
-import { actingAs } from "./actingAs";
 import { clearToken, loadToken, saveToken } from "./tokenStore";
 import type { TokenRecord } from "./tokenStore";
 
@@ -184,7 +183,7 @@ export function startWebFlow(origin: string): { authorizeUrl: string } {
 }
 
 /** A fresh state nonce and PKCE verifier for one browser sign-in. */
-export function newWebFlowSecrets(): { state: string; verifier: string } {
+function newWebFlowSecrets(): { state: string; verifier: string } {
   return { state: base64url(randomBytes(24)), verifier: base64url(randomBytes(32)) };
 }
 
@@ -204,7 +203,7 @@ export function authorizeUrl(flow: { redirectUri: string; state: string; verifie
 }
 
 /** Trade the code GitHub sent to the callback for a user token. */
-export async function exchangeCode(flow: { code: string; redirectUri: string; verifier: string }): Promise<string> {
+async function exchangeCode(flow: { code: string; redirectUri: string; verifier: string }): Promise<string> {
   const res = await fetch(`${githubWebBase()}/login/oauth/access_token`, {
     method: "POST",
     headers: JSON_HEADERS,
@@ -322,13 +321,9 @@ export async function signInWithToken(token: string, host: string = GITHUB_HOST)
   return identity;
 }
 
-/**
- * The stored sign-in, or null when signed out — unless the call runs inside
- * actAs (src/server/actingAs.ts), whose identity it answers instead.
- */
+/** The stored sign-in, or null when signed out. */
 export function getAuth(): Promise<TokenRecord | null> {
-  const acting = actingAs();
-  return acting ? Promise.resolve(acting) : loadToken();
+  return loadToken();
 }
 
 export async function signOut(): Promise<void> {
