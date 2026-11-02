@@ -193,6 +193,16 @@ export function scenarioPath(
 }
 
 /**
+ * The scenario's url with no version, which opens whatever version is latest
+ * (specs/ui/navigation.feature.md "versionless scenario link") — what the
+ * public specs site shares, so a link handed out keeps working after the
+ * scenario gets a new version.
+ */
+export function latestScenarioPath(fileName: string, scenario: Pick<Scenario, "name">): string {
+  return `${featurePath(fileName)}/scenarios/${slugify(scenario.name)}`;
+}
+
+/**
  * The url of what is on screen (specs/ui/navigation.feature.md "URL scheme"):
  * the scenario's own url while its page is open, otherwise the feature's, and
  * `/` with no feature open. A plugin's view — a roadmap page or a task, say —
