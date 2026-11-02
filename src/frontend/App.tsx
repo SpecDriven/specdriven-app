@@ -241,6 +241,7 @@ import {
   folderNamesMoved,
   initialCaseDisplayName,
   folderMoveOptions,
+  revealed,
   folderOptions,
   folderRenamed,
   scenarioDrop,
@@ -1445,6 +1446,15 @@ export function App() {
   const [renaming, setRenaming] = useState(false);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
+  /** The sidebar's folder tree, for scrolling its highlighted row into view. */
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * True from a selection change until the tree has scrolled its highlighted
+   * row into view (specs/ui/navigation.feature.md "the tree follows the open
+   * feature") — the row may only render a commit or two later, once the
+   * folders above it open and the listing is in.
+   */
+  const revealPending = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<EditState | null>(null);
   /**
@@ -2153,17 +2163,41 @@ export function App() {
     }
   }, [paneRequest, feature]);
 
-  // Reveal the open scenario in the tree (specs/ui/navigation.feature.md
-  // "Scenario navigation"): a pane opened from a link, a card or the palette
-  // expands its feature's outline, so the row that is highlighted is one that
-  // can be seen — the same courtesy a new feature gets in a collapsed folder.
+  // The tree follows the open feature (specs/ui/navigation.feature.md "the
+  // tree follows the open feature"): whatever opened it — a search hit, a
+  // link, a card, the palette — the folders above it open, a scenario pane
+  // expands its feature's outline, and the highlighted row is scrolled into
+  // view. The scroll itself waits for the next commit (the effect below),
+  // since the row it wants may not be rendered yet.
+  const paneKey = paneScenario ? `${paneScenario.name}@v${paneScenario.version}` : null;
   useEffect(() => {
-    if (!selected || paneScenario === null) return;
-    setOutlined((prev) => {
-      if (prev.has(selected)) return prev;
-      return new Set(prev).add(selected);
-    });
-  }, [selected, paneScenario !== null]);
+    if (!selected) return;
+    revealPending.current = true;
+    setCollapsed((prev) => revealed(prev, selected));
+    if (paneKey !== null)
+      setOutlined((prev) => {
+        if (prev.has(selected)) return prev;
+        return new Set(prev).add(selected);
+      });
+  }, [selected, paneKey]);
+
+  // After every commit: the pending reveal scrolls the tree's highlighted
+  // row — the open scenario's while a pane is open, else the feature's —
+  // into view, and is done once it found it. A listing still loading, a
+  // folder still opening or an outline still expanding leaves it pending for
+  // the next commit; a pane must wait for its own row, since the feature's is
+  // there a commit earlier and the scenario's may sit below the fold.
+  useEffect(() => {
+    if (!revealPending.current) return;
+    const tree = treeRef.current;
+    if (!tree) return;
+    const row = tree.querySelector<HTMLElement>(
+      paneKey !== null ? "a.tree-scenario.active" : "a.tree-feature.active",
+    );
+    if (!row) return;
+    revealPending.current = false;
+    row.scrollIntoView({ block: "nearest" });
+  });
 
   // The marks belong to the pane the hit opened: closing it takes them along,
   // so the scenario reopened from its card shows plain text. Not while a pane
@@ -9696,6 +9730,7 @@ export function App() {
         {(
           <div
             className={`tree${(dragging !== null || folderDrag !== null) && dropTarget === "" ? " drop-target" : ""}`}
+            ref={treeRef}
             role="tree"
             aria-label="Features"
             onKeyDown={onTreeKeyDown}
