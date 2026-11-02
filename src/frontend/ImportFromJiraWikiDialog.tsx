@@ -6,13 +6,14 @@ import { classifySource, MAX_JIRA_SOURCES, MAX_SCENARIOS, MAX_WIKI_SOURCES } fro
 import type { AgentDescriptor } from "../server/agentTypes";
 import type { ConfluenceWiki } from "./ConfluenceToken";
 import type { JiraSite } from "./JiraToken";
-import { ModelSelect, type AgentModels } from "./AgentModels";
+import { ModelSelect, chosenModel, type AgentModels } from "./AgentModels";
 
 // "Import from Jira/Wiki here…" in a folder's ⋯ menu
 // (specs/external-links/jira-wiki-import.feature.md): the user collects up
 // to five Jira issue urls and five Confluence page urls, picks the agent
 // when more than one can answer, and the model it answers with (the
-// default set in Settings → Jira, or the agent's own), and Analyze has the server read them and
+// default set in Settings → Jira, else the first the agent's list names), and
+// Analyze has the server read them and
 // propose a feature title and up to fifteen scenarios. Those are reviewed
 // here — kept or dropped, renamed — before Create feature writes the file.
 // When the sources describe more than fifteen, the dialog says so and
@@ -202,11 +203,13 @@ export function ImportFromJiraWikiDialog({
   const [error, setError] = useState<string | null>(null);
   const problem = sourceProblem(url, rows, jiraSites, wikis);
   const chosen = choices.find((a) => a.id === agent) ?? choices[0];
-  const badModel = modelProblem(model);
+  // What the Model dropdown shows is what the agent answers with.
+  const sentModel = chosen ? chosenModel(agentModels[chosen.id] ?? [], model) : "";
+  const badModel = modelProblem(sentModel);
 
   const chooseAgent = (next: string) => {
     setAgent(next);
-    // Another agent names its models differently: its own default.
+    // Another agent names its models differently: its import default.
     setModel(importModels()[next] ?? "");
     try {
       localStorage.setItem(AGENT_KEY, next);
@@ -234,7 +237,7 @@ export function ImportFromJiraWikiDialog({
         body: JSON.stringify({
           sources: rows.map((r) => r.url),
           ...(chosen ? { agent: chosen.id } : {}),
-          ...(model.trim() ? { model: model.trim() } : {}),
+          ...(sentModel ? { model: sentModel } : {}),
           ...(earlier ? { exclude: earlier.scenarios.map((s) => s.name) } : {}),
         }),
       });
@@ -374,7 +377,6 @@ export function ImportFromJiraWikiDialog({
                 Model
                 <ModelSelect
                   ariaLabel="Model"
-                  agentLabel={chosen.label}
                   models={agentModels[chosen.id] ?? []}
                   value={model}
                   onChange={setModel}
@@ -522,7 +524,6 @@ export function ImportModelSettings({
             </span>
             <ModelSelect
               ariaLabel={`Import model for ${a.label}`}
-              agentLabel={a.label}
               models={agentModels[a.id] ?? []}
               value={value}
               onChange={(next) => {

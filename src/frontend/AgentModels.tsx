@@ -2,7 +2,8 @@
 // "Each agent offers the models the data repo lists"): Settings → AI agents
 // edits one list per agent, kept in the data repo's
 // .specdriven/agent-models.json (src/server/agentModels.ts), and every model
-// field is a dropdown of its agent's list — the agent's own default first.
+// field is a dropdown of its agent's list, the first model chosen until
+// another is.
 
 import { useEffect, useState } from "react";
 import type { AgentDescriptor } from "../server/agentTypes";
@@ -36,27 +37,41 @@ export function parseModelList(text: string): string[] {
 }
 
 /**
- * A model field: the agent's own default (the empty value), then the models
- * its list names. A value the list no longer holds — chosen before the list
- * changed — stays on offer, so opening the menu never changes it.
+ * The model a field holds: the one chosen, else the first its agent's list
+ * names — blank only when the list is empty.
+ */
+export function chosenModel(models: readonly string[], value: string): string {
+  return value.trim() || models[0] || "";
+}
+
+/**
+ * A model field: the models its agent's list names, the first chosen until
+ * another is. A value the list no longer holds — chosen before the list
+ * changed — stays on offer, so opening the menu never changes it. An empty
+ * list leaves nothing to choose.
  */
 export function ModelSelect({
-  agentLabel,
   models,
   value,
   onChange,
   ariaLabel,
 }: {
-  agentLabel: string;
   models: readonly string[];
   value: string;
   onChange: (model: string) => void;
   ariaLabel: string;
 }) {
-  const options = value && !models.includes(value) ? [...models, value] : models;
+  const chosen = chosenModel(models, value);
+  if (!chosen) {
+    return (
+      <select aria-label={ariaLabel} value="" disabled>
+        <option value="">No models listed</option>
+      </select>
+    );
+  }
+  const options = models.includes(chosen) ? models : [...models, chosen];
   return (
-    <select aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{agentLabel}&apos;s default</option>
+    <select aria-label={ariaLabel} value={chosen} onChange={(e) => onChange(e.target.value)}>
       {options.map((m) => (
         <option key={m} value={m}>
           {m}
@@ -143,7 +158,7 @@ function AgentModelList({
       <span className="settings-row-label">
         {agent.label} models
         <span className="settings-row-hint">
-          {error ?? `One per line, as ${agent.label} names them; its model menus offer these after ${agent.label}'s own default.`}
+          {error ?? `One per line, as ${agent.label} names them; its model menus offer these, the first chosen until another is.`}
         </span>
       </span>
       <textarea

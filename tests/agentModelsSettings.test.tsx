@@ -53,6 +53,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AgentModelsSettings,
   ModelSelect,
+  chosenModel,
   agentModelsOf,
   parseModelList,
   type AgentModels,
@@ -154,16 +155,20 @@ describe("Settings → AI agents", () => {
 });
 
 describe("the model dropdown", () => {
-  test("the agent's own default first, then its list; a value the list lost stays on offer", () => {
-    const html = (value: string) =>
-      renderToStaticMarkup(
-        <ModelSelect ariaLabel="Model" agentLabel="Claude" models={["opus", "sonnet"]} value={value} onChange={() => {}} />,
-      );
+  test("only the agent's list, its first chosen until another is; a value the list lost stays on offer", () => {
+    const html = (value: string, models = ["opus", "sonnet"]) =>
+      renderToStaticMarkup(<ModelSelect ariaLabel="Model" models={models} value={value} onChange={() => {}} />);
     expect(html("")).toBe(
-      '<select aria-label="Model"><option value="" selected="">Claude&#x27;s default</option><option value="opus">opus</option><option value="sonnet">sonnet</option></select>',
+      '<select aria-label="Model"><option value="opus" selected="">opus</option><option value="sonnet">sonnet</option></select>',
     );
     expect(html("sonnet")).toContain('<option value="sonnet" selected="">sonnet</option>');
     expect(html("haiku")).toContain('<option value="sonnet">sonnet</option><option value="haiku" selected="">haiku</option>');
+    expect(html("", [])).toBe(
+      '<select aria-label="Model" disabled=""><option value="" selected="">No models listed</option></select>',
+    );
+    expect(chosenModel(["opus", "sonnet"], "")).toBe("opus");
+    expect(chosenModel(["opus"], "haiku")).toBe("haiku");
+    expect(chosenModel([], "")).toBe("");
   });
 
   test("the lists come from the state payload; anything else is none", () => {
