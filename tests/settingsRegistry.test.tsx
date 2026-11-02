@@ -26,17 +26,20 @@ const section = (id: string, order: number, when?: SettingsSection["when"]): Set
 describe("settings sections", () => {
   test("sit between the core sections their order puts them between, in order", () => {
     const registry = new Registry<SettingsSection>((s) => s.order);
-    registry.add(section("late", 950));
+    registry.add(section("late", 920));
+    registry.add(section("on-agents", CORE_SETTINGS_ORDER.agents));
     registry.add(section("early", 50));
     registry.add(section("mid", 350));
     registry.add(section("also-mid", 320));
     registry.add(section("on-git", CORE_SETTINGS_ORDER.git));
     registry.add(section("after-git", 1500));
     const all = registry.list();
-    expect(all.map((s) => s.id)).toEqual(["early", "also-mid", "mid", "late", "on-git", "after-git"]);
+    expect(all.map((s) => s.id)).toEqual(["early", "also-mid", "mid", "late", "on-agents", "on-git", "after-git"]);
     expect(sectionsBeforeAll(all).map((s) => s.id)).toEqual(["early"]);
     expect(sectionsAfter(all, "specs").map((s) => s.id)).toEqual(["also-mid", "mid"]);
     expect(sectionsAfter(all, "workflow").map((s) => s.id)).toEqual(["late"]);
+    // An agent plugin's section (Claude, at 950) follows AI agents.
+    expect(sectionsAfter(all, "agents").map((s) => s.id)).toEqual(["on-agents"]);
     // One ordered exactly on a core section comes right after it.
     expect(sectionsAfter(all, "git").map((s) => s.id)).toEqual(["on-git", "after-git"]);
     expect(sectionsAfter(all, "general")).toEqual([]);

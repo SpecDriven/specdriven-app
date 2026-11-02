@@ -102,13 +102,27 @@ describe("the sources step", () => {
   });
 
   test("a Model field, blank for the agent's own default, filled with the default set in Settings", () => {
-    const blank = html(dialog());
-    expect(blank).toContain('aria-label="Model"');
-    expect(blank).toContain('placeholder="Claude&#x27;s default"');
-    expect(blank).toContain("Set the default for imports in Settings → Jira.");
+    // A dropdown of the models Settings → AI agents lists for the agent,
+    // after the agent's own default.
+    const unlisted = html(dialog());
+    expect(unlisted).toContain('<select aria-label="Model"><option value="" selected="">Claude&#x27;s default</option></select>');
+    expect(unlisted).toContain("List Claude&#x27;s models in Settings → AI agents to choose one here.");
+    const listed = html(dialog({ agentModels: { claude: ["opus", "sonnet"], codex: ["gpt-5-codex"] } }));
+    expect(listed).toContain(
+      '<select aria-label="Model"><option value="" selected="">Claude&#x27;s default</option><option value="opus">opus</option><option value="sonnet">sonnet</option></select>',
+    );
+    expect(listed).not.toContain("gpt-5-codex");
+    expect(listed).toContain("Set the default for imports in Settings → Jira.");
     withStorage(() => {
+      setImportModel("claude", "sonnet");
+      expect(html(dialog({ agentModels: { claude: ["opus", "sonnet"] } }))).toContain(
+        '<option value="sonnet" selected="">sonnet</option>',
+      );
+      // A default the list no longer holds stays chosen, on offer after the list.
       setImportModel("claude", "claude-sonnet-4-6");
-      expect(html(dialog())).toMatch(/aria-label="Model"[^>]*value="claude-sonnet-4-6"/);
+      expect(html(dialog({ agentModels: { claude: ["opus"] } }))).toContain(
+        '<option value="opus">opus</option><option value="claude-sonnet-4-6" selected="">claude-sonnet-4-6</option>',
+      );
       const none = html(dialog({ agents: [agent("pi", { available: false })] }));
       expect(none).not.toContain('aria-label="Model"');
     });
@@ -228,9 +242,18 @@ describe("Settings → Jira, the import model", () => {
   test("one row per agent that can analyze, filled with its default; none without one", () => {
     withStorage(() => {
       setImportModel("codex", "gpt-5.1-codex");
-      const two = html(<ImportModelSettings agents={[agent("claude"), agent("codex")]} />);
-      expect(two).toContain('aria-label="Import model for Claude"');
-      expect(two).toMatch(/aria-label="Import model for Codex"[^>]*value="gpt-5.1-codex"/);
+      const two = html(
+        <ImportModelSettings
+          agents={[agent("claude"), agent("codex")]}
+          agentModels={{ claude: ["opus"], codex: ["gpt-5.1-codex", "gpt-5-codex"] }}
+        />,
+      );
+      expect(two).toContain(
+        '<select aria-label="Import model for Claude"><option value="" selected="">Claude&#x27;s default</option><option value="opus">opus</option></select>',
+      );
+      expect(two).toContain(
+        '<select aria-label="Import model for Codex"><option value="">Codex&#x27;s default</option><option value="gpt-5.1-codex" selected="">gpt-5.1-codex</option><option value="gpt-5-codex">gpt-5-codex</option></select>',
+      );
       expect(two).toContain("Remembered on this device.");
       expect(html(<ImportModelSettings agents={[agent("codex", { oneShot: false })]} />)).toBe("");
     });

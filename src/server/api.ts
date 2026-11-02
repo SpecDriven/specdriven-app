@@ -186,6 +186,7 @@ import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import { readCustomAttributes, writeCustomAttributes } from "./customAttributesFile";
+import { readAgentModels, writeAgentModels } from "./agentModels";
 import type { SessionSection } from "./agent";
 import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
@@ -526,6 +527,13 @@ async function currentDataDir(): Promise<string | null> {
   }
 }
 
+/** The data repo's agent model lists for /api/state; none while no folder is open. */
+async function agentModelsField() {
+  if (isHostedMode()) return {};
+  const dir = await currentDataDir();
+  return dir ? readAgentModels(dir) : {};
+}
+
 /**
  * The plugins the settings ask for (src/plugins/host/loader.ts): the
  * built-ins the profile lists and whatever the plugin folders hold, a
@@ -618,6 +626,10 @@ async function stateFields(state: SpecDrivenState) {
     agentOffers: isHostedMode() || isDemoMode() ? [] : await agentOffers(state as Record<string, unknown>, agentIds()),
     // Whether some agent answers one no-tools turn (src/server/estimate.ts).
     canEstimate: !isHostedMode() && agents.oneShot() !== undefined,
+    // The models each agent offers (src/server/agentModels.ts), keyed by
+    // agent id, from the data repo's .specdriven/agent-models.json — what
+    // the model dropdowns choose from. A hosted worker runs no agents.
+    agentModels: await agentModelsField(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
     assignments: normalizeAssignments(state.assignments),
     featureFlags: normalizeFeatureFlags(state.featureFlags),
@@ -2063,6 +2075,18 @@ const putCustomAttributes = withDataDir(async (dir, req) => {
   }
 });
 
+// Settings → AI agents (specs/agents/agent-plugins.feature.md "Each agent
+// offers the models the data repo lists"): one agent's list, replaced whole.
+// A local write the reload cron commits and pushes, like custom attributes.
+const putAgentModels = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => null)) as { models?: unknown } | null;
+  try {
+    return json({ agentModels: await writeAgentModels(dir, params.agent ?? "", body?.models) });
+  } catch (e) {
+    return json({ error: (e as Error).message }, 400);
+  }
+});
+
 const getSearch = withDataDir(async (dir, req) => {
   const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
@@ -3338,6 +3362,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
   ["PUT", "/api/custom-attributes", putCustomAttributes],
+  ["PUT", "/api/agent-models/:agent", unlessHosted(putAgentModels)],
   ["GET", "/api/test-name", getTestName],
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],

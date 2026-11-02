@@ -9788,3 +9788,31 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .read-only .page-list .sidebar-actions {
   display: none;
 }
+
+/* Settings → AI agents (specs/agents/agent-plugins.feature.md "Each agent
+   offers the models the data repo lists"): a model per line, beside the
+   row's label like any settings field. */
+.agent-models-row {
+  align-items: flex-start;
+}
+
+.app-page .agent-models-list {
+  flex: 1;
+  min-width: 0;
+  max-width: 50%;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.app-page .agent-models-list:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
