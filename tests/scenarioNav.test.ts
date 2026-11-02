@@ -9,6 +9,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildTree,
+  foldersAbove,
+  revealed,
   scenarioNeighbors,
   scenarioRows,
   scenarioSequence,
@@ -211,5 +213,31 @@ describe("stepping through every scenario from the editor", () => {
     ]);
     const s = scenarioSequence(versions, null, null);
     expect(scenarioNeighbors(s, "specs/v.feature.md", { name: "x", version: 2 }).prev?.scenario.version).toBe(1);
+  });
+});
+
+// specs/ui/navigation.feature.md "the tree follows the open feature": the
+// folders above the open feature open so its row can be seen, wherever it
+// was opened from.
+describe("the tree follows the open feature", () => {
+  test("foldersAbove lists the folders over a file, outermost first, without the root", () => {
+    expect(foldersAbove("specs/billing/eu/quote.feature.md")).toEqual(["specs/billing", "specs/billing/eu"]);
+    expect(foldersAbove("specs/billing/quote.feature.md")).toEqual(["specs/billing"]);
+    expect(foldersAbove("specs/quote.feature.md")).toEqual([]);
+  });
+
+  test("revealed opens every collapsed folder above the file and leaves the rest", () => {
+    const collapsed = new Set(["specs/billing", "specs/billing/eu", "specs/other"]);
+    const next = revealed(collapsed, "specs/billing/eu/quote.feature.md");
+    expect([...next]).toEqual(["specs/other"]);
+    // A fresh set: the state update re-renders the tree.
+    expect(next).not.toBe(collapsed);
+    expect(collapsed.size).toBe(3);
+  });
+
+  test("revealed hands the same set back when nothing above the file is collapsed", () => {
+    const collapsed = new Set(["specs/other"]);
+    expect(revealed(collapsed, "specs/billing/quote.feature.md")).toBe(collapsed);
+    expect(revealed(collapsed, "specs/quote.feature.md")).toBe(collapsed);
   });
 });

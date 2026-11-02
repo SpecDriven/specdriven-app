@@ -478,3 +478,29 @@ export function scenarioPlace(
   const prev = scenarios[i - 1];
   return prev ? { name: prev.name, version: prev.version, after: true } : null;
 }
+
+/**
+ * The folders a feature file sits under, outermost first, the root left out
+ * (`specs/billing/eu/quote.feature.md` → `specs/billing`, `specs/billing/eu`).
+ * The ones to open so the file's row can be seen (specs/ui/navigation.
+ * feature.md "the tree follows the open feature").
+ */
+export function foldersAbove(fileName: string): string[] {
+  const segments = fileName.split("/").slice(0, -1);
+  const above: string[] = [];
+  for (let i = 2; i <= segments.length; i++) above.push(segments.slice(0, i).join("/"));
+  return above;
+}
+
+/**
+ * The collapsed-folder set with every folder above `fileName` opened — the
+ * same set back when none of them was collapsed, so a state update can skip
+ * the re-render.
+ */
+export function revealed(collapsed: Set<string>, fileName: string): Set<string> {
+  const above = foldersAbove(fileName).filter((path) => collapsed.has(path));
+  if (above.length === 0) return collapsed;
+  const next = new Set(collapsed);
+  for (const path of above) next.delete(path);
+  return next;
+}
