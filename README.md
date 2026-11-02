@@ -87,7 +87,7 @@ throwaway profiles and debugging.
 | [Building](docs/building.md) | Standalone binaries and the Electron desktop app |
 | [Installation](docs/installation.md) | What `install.sh` and `install.ps1` do |
 | [Releasing](docs/releasing.md) | Versioning, tagging and the release workflow |
-| [Deployment modes](docs/deployment-modes.md) | Demo mode, the spec-proposals site, hosted multi-user |
+| [Deployment modes](docs/deployment-modes.md) | Demo mode, hosted multi-user |
 | [Hosted on Railway](docs/deployment-railway.md) | The multi-user gateway deployment |
 | [Observability](docs/observability.md) | OpenTelemetry export, log files, the in-app log viewer |
 

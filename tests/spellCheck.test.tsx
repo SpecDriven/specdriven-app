@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
-import { ScenarioFields } from "../src/frontend/proposals/ProposalsApp";
 import {
   applySpellCheckPref,
   readSpellCheckPref,
@@ -95,17 +94,6 @@ describe("the Markdown editor's Write tab", () => {
     applySpellCheckPref(false);
     const markup = html(<MarkdownEditor value="Given a polcy" onChange={() => {}} />);
     expect(spellcheckOf(markup, TEXTAREA)).toBe("false");
-  });
-});
-
-describe("the proposal form", () => {
-  const fields = () =>
-    html(<ScenarioFields name="" body="" disabled={false} onName={() => {}} onBody={() => {}} />);
-
-  test("checks the steps a visitor writes", () => {
-    expect(spellcheckOf(fields(), /<textarea[^>]*>/)).toBe("true");
-    applySpellCheckPref(false);
-    expect(spellcheckOf(fields(), /<textarea[^>]*>/)).toBe("false");
   });
 });
 

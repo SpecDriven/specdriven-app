@@ -22,7 +22,7 @@ export interface TokenRecord {
    * The GitHub the token belongs to: github.com, or a GitHub Enterprise host
    * such as github.acme.com or acme.ghe.com. Git hands the token to that
    * host only. Absent means github.com — every record saved before GitHub
-   * Enterprise, and the ones the hosted gateway and proposals service build.
+   * Enterprise, and the ones the hosted gateway builds.
    */
   host?: string;
 }

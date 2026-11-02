@@ -286,9 +286,7 @@ The services run under `specdriven.app`, whose DNS is on Cloudflare:
      browser keeps the link's `#token`.
 
    The demo answers any host (`SPECDRIVEN_ALLOWED_HOSTS` defaults to `*` in
-   `src/gateway/demo.ts`) and needs no variable. The
-   [proposals service](#spec-proposals-service) answers only `PUBLIC_URL`'s
-   host, like the gateway, and its GitHub App's callback URL changes with it.
+   `src/gateway/demo.ts`) and needs no variable.
 
 **Leave Cloudflare's proxy off.** The gateway takes the rightmost
 `X-Forwarded-For` entry as the client's address, for the per-address
@@ -338,82 +336,9 @@ When no variables are set:
 | `src/server/hostedMode.ts` | what a hosted worker refuses |
 | `src/server/agentKeys.ts` | agent keys for future remote-agent integrations |
 
-## Spec proposals service
-
-A third service from the same image: `SPECDRIVEN_PROPOSALS=1` runs the public
-spec-proposals site (specs/app/spec-proposals.feature.md) instead of the
-gateway. We don't accept pull requests (CONTRIBUTING.md); this is where people
-propose specs instead.
-
-- **Who:** anyone with a GitHub account signs in (the browser flow with PKCE;
-  the visitor's token is used once to read who they are and never stored).
-- **What:** a visitor can only *add*: a new scenario on an existing feature, or
-  a new feature in an existing folder with its first scenario. The server
-  builds the markdown from a name and a text, always as `@v1 [proposed]`, and
-  checks before committing that every existing scenario is untouched. Every
-  other API route answers 403 (`src/server/proposals/server.ts`).
-- **Where it lands:** straight on the spec repo's default branch, pushed with
-  the bot token. The commit is authored by the visitor (as their
-  `<id>+<login>@users.noreply.github.com` address) and carries a
-  `Proposed-by:` trailer, and the scenario's Automerge document records them as
-  its creator (specs/app/specs-authorship.feature.md).
-- **How much:** `SPECDRIVEN_PROPOSALS_PER_DAY` proposals per GitHub account per
-  UTC day (default 5) — accounts with write access to the spec repo are exempt
-  — and `SPECDRIVEN_PROPOSALS_GLOBAL_PER_DAY` for the whole service (default
-  100), the backstop against throwaway accounts. A refused proposal costs
-  nothing.
-- **Readable by everyone:** the site shows the spec repo's feature files to
-  anyone who opens it, signed in or not. Point it only at a repository you are
-  happy to make public.
-
-To deploy it:
-
-1. **Create a GitHub App for sign-in only** (Settings → Developer settings →
-   GitHub Apps): no repository permissions, callback URL
-   `https://<your domain>/api/proposals/auth/callback`. Note its client id and
-   generate a client secret.
-2. **Create the bot token:** a fine-grained personal access token on a bot
-   account, scoped to the spec repository only, with *Contents: read and
-   write*. If `main` is protected, let that account bypass the rule. Anyone
-   holding it can write to the spec repo — keep it in Railway only and rotate
-   it now and then.
-3. **Create the service** from this repository with a volume at `/data` (it
-   holds the clone and `proposals.db`: accounts, sessions, the audit log) and
-   set:
-
-   | Variable | Value |
-   |---|---|
-   | `SPECDRIVEN_PROPOSALS` | `1` |
-   | `SPECDRIVEN_PROPOSALS_REPO` | `SpecDriven/specs-specdriven` (the default) |
-   | `SPECDRIVEN_PROPOSALS_BOT_TOKEN` | the bot token |
-   | `SPECDRIVEN_GITHUB_CLIENT_ID`, `SPECDRIVEN_GITHUB_CLIENT_SECRET` | the sign-in app's |
-   | `PUBLIC_URL` | `https://propose.specdriven.app` — the callback is built from it, and it is the only Host answered |
-   | `SPECDRIVEN_PROPOSALS_PER_DAY`, `SPECDRIVEN_PROPOSALS_GLOBAL_PER_DAY` | optional, default 5 and 100 |
-
-   The service refuses to start without the bot token, a working one, or
-   `PUBLIC_URL`. It drops from root to the image's `bun` user and keeps
-   everything under `/data/proposals` (`src/gateway/proposals.ts`).
-4. **Add the domain** you named in `PUBLIC_URL` and the GitHub App
-   ([on Cloudflare](#custom-domains-on-cloudflare)).
-
-To stop an account from proposing, set `banned_at` on its row in
-`/data/proposals/proposals.db` (`UPDATE users SET banned_at = unixepoch() * 1000
-WHERE login = '…'`); the `proposals` table is the audit log.
-
-| File | Role |
-|---|---|
-| `src/server/proposalsMode.ts` | the flag and the settings |
-| `src/server/proposals/setup.ts` | start: bot sign-in, clone, resync timer |
-| `src/server/proposals/server.ts` | the allowlisted API, GitHub sign-in, sessions |
-| `src/server/proposals/service.ts` | building, checking, committing and pushing a proposal; quotas |
-| `src/server/proposals/db.ts` | accounts, sessions, sign-ins in flight, audit log |
-| `src/server/actingAs.ts` | the visitor's identity for one proposal's commit |
-| `src/frontend/proposals/`, `src/proposals.html` | the page |
-| `src/gateway/proposals.ts` | the hosted image's hand-over to the service |
-
 ## Public read-only site
 
-A fourth service from the same image: `SPECDRIVEN_READONLY=1` runs the app as a
+A third service from the same image: `SPECDRIVEN_READONLY=1` runs the app as a
 public site that shows one spec repository to anyone, with no sign-in, and lets
 nobody change anything. It serves https://specs.specdriven.app from
 [SpecDriven/specs-specdriven](https://github.com/SpecDriven/specs-specdriven).
