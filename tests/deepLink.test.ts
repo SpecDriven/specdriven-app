@@ -4,6 +4,7 @@ import {
   desktopLink,
   featurePath,
   isLinkEntry,
+  latestScenarioPath,
   linkEntry,
   matchAppPage,
   parseRoute,
@@ -64,6 +65,16 @@ describe("parseDesktopLink", () => {
     });
     expect(parseRoute(parseDesktopLink(desktopLink(featurePath(file)))!)).toEqual({ feature: file });
   });
+});
+
+// specs/app/public-specs-site.feature.md "copies a deep link": the public site
+// shares a scenario's versionless url, which opens whatever version is latest.
+test("a versionless scenario link names no version and round-trips to its route", () => {
+  const file = "specs/billing/quotes.feature.md";
+  const path = latestScenarioPath(file, { name: "ESC key closes the dialog" });
+  expect(path).toBe("/features/billing/quotes/scenarios/esc-key-closes-the-dialog");
+  expect(parseRoute(path)).toEqual({ feature: file, scenario: { slug: "esc-key-closes-the-dialog" } });
+  expect(scenarioPath(file, { name: "ESC key closes the dialog", version: 3 })).toBe(`${path}/v3`);
 });
 
 describe("links that name their spec folder", () => {

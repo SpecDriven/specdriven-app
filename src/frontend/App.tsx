@@ -204,6 +204,7 @@ import {
   appPagePath,
   featurePath,
   isLinkEntry,
+  latestScenarioPath,
   matchAppPage,
   pagePath,
   parseRoute,
@@ -1177,6 +1178,35 @@ function decodeSegment(segment: string): string {
   } catch {
     return segment;
   }
+}
+
+/**
+ * "Copy link" as an icon button (specs/ui/navigation.feature.md "share a
+ * link"): a link icon that flips to a check mark while `copied`.
+ */
+function CopyLinkButton({
+  copied,
+  onCopy,
+  disabled,
+  size = 16,
+  keys,
+  label = "Copy link",
+}: {
+  copied: boolean;
+  onCopy: () => void;
+  disabled?: boolean;
+  size?: number;
+  /** The shortcut, where mod+shift+c copies this same url. */
+  keys?: string;
+  label?: string;
+}) {
+  return (
+    <Tooltip label={copied ? "Copied" : "Copy link"} keys={keys}>
+      <button type="button" className="ibtn" aria-label={label} disabled={disabled} onClick={onCopy}>
+        {copied ? <Check size={size} aria-hidden="true" /> : <Link size={size} aria-hidden="true" />}
+      </button>
+    </Tooltip>
+  );
 }
 
 /** The shortcuts the read-only site keeps (beside each tab's `go-…`): moving around, never writing. */
@@ -3791,6 +3821,12 @@ export function App() {
     setCopied(path);
     window.setTimeout(() => setCopied((p) => (p === path ? null : p)), 2000);
   };
+  // The scenario url "Copy link" shares. The public specs site hands links to
+  // people outside the team, so there it is the versionless url, which still
+  // opens after the scenario gets a new version (specs/app/public-specs-site
+  // .feature.md "copies a deep link"); everywhere else, the versioned one.
+  const scenarioLink = (fileName: string, s: Pick<Scenario, "name" | "version">) =>
+    readOnly ? latestScenarioPath(fileName, s) : scenarioPath(fileName, s);
 
   // crud-feature.md ("Scenario is automatically saved locally and
   // pushed to GitHub"): a landed save updates the header's Saved indicator.
@@ -7330,7 +7366,7 @@ export function App() {
       when: () => !quiet && (selected !== null || pluginView !== null),
       palette: () => !quietBehindPalette && (selected !== null || pluginView !== null),
       run: () => {
-        if (selected && editing) void copyLink(scenarioPath(selected, editing.scenario));
+        if (selected && editing) void copyLink(scenarioLink(selected, editing.scenario));
         else if (selected) void copyLink(featurePath(selected));
         // A plugin's view — an open roadmap page or task, say — has its own url.
         else if (pluginView && activeTab) void copyLink(activeTab.route.path(pluginView.view));
@@ -10070,6 +10106,11 @@ export function App() {
                     </button>
                   </Tooltip>
                 </span>
+                <CopyLinkButton
+                  keys="mod+shift+c"
+                  copied={copied === scenarioLink(selected, editing.scenario)}
+                  onCopy={() => void copyLink(scenarioLink(selected, editing.scenario))}
+                />
               </div>
             </div>
             <div className="scenario-pane-head">
@@ -10817,6 +10858,15 @@ export function App() {
                   savedAt={savedAt}
                   dirty={dirty || (!!descEdit && descEdit.text !== descSaved.current)}
                 />
+                {/* The read-only site has no ⋯ menu, so the feature's
+                    "Copy link" is a button of its own. */}
+                {readOnly && (
+                  <CopyLinkButton
+                    keys="mod+shift+c"
+                    copied={copied === featurePath(selected)}
+                    onCopy={() => void copyLink(featurePath(selected))}
+                  />
+                )}
                 {/* New scenario (specs/ui/ui.feature.md "Add A Scenario
                     Button"): from the header, pinned above the list, so it is
                     always in view — at the end of the feature; a card's ⋯
@@ -11665,6 +11715,20 @@ export function App() {
                         />
                       )}
                     </span>
+                    {readOnly ? (
+                      /* The read-only site's card offers only its link
+                         (specs/app/public-specs-site.feature.md "copies a
+                         deep link"), on hover, focus or selection like the
+                         editing card's actions. */
+                      <span className="card-actions">
+                        <CopyLinkButton
+                          size={14}
+                          label={`Copy link to ${s.name}`}
+                          copied={copied === scenarioLink(selected, s)}
+                          onCopy={() => void copyLink(scenarioLink(selected, s))}
+                        />
+                      </span>
+                    ) : (
                     <span className="card-actions">
                       {/* Edit up front, the rest behind ⋯ — Publish or New
                           version, Copy link (crud-feature.md
@@ -11767,6 +11831,7 @@ export function App() {
                         ]}
                       />
                     </span>
+                    )}
                   </header>
                   {/* Its custom attributes (specs/app/custom-attributes.feature.md),
                       a row of chips under the title whenever it carries any. */}

@@ -9762,10 +9762,9 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   letter-spacing: normal;
 }
 
-/* The read-only site (src/server/readOnlyMode.ts): the tree's and the cards'
-   ⋯ menus and Edit buttons hold nothing a visitor may do. */
-.read-only .tree-row-menu,
-.read-only .card-actions {
+/* The read-only site (src/server/readOnlyMode.ts): the tree's ⋯ menus hold
+   nothing a visitor may do; a card's actions there are only its Copy link. */
+.read-only .tree-row-menu {
   display: none;
 }
 
