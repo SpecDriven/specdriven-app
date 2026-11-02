@@ -101,15 +101,17 @@ describe("the sources step", () => {
     expect(none).not.toContain('aria-label="Analyze with"');
   });
 
-  test("a Model field, blank for the agent's own default, filled with the default set in Settings", () => {
-    // A dropdown of the models Settings → AI agents lists for the agent,
-    // after the agent's own default.
+  test("a Model field of the agent's list, its first chosen unless Settings set the default", () => {
+    // A dropdown of the models Settings → AI agents lists for the agent —
+    // nothing to choose until it lists some.
     const unlisted = html(dialog());
-    expect(unlisted).toContain('<select aria-label="Model"><option value="" selected="">Claude&#x27;s default</option></select>');
+    expect(unlisted).toContain(
+      '<select aria-label="Model" disabled=""><option value="" selected="">No models listed</option></select>',
+    );
     expect(unlisted).toContain("List Claude&#x27;s models in Settings → AI agents to choose one here.");
     const listed = html(dialog({ agentModels: { claude: ["opus", "sonnet"], codex: ["gpt-5-codex"] } }));
     expect(listed).toContain(
-      '<select aria-label="Model"><option value="" selected="">Claude&#x27;s default</option><option value="opus">opus</option><option value="sonnet">sonnet</option></select>',
+      '<select aria-label="Model"><option value="opus" selected="">opus</option><option value="sonnet">sonnet</option></select>',
     );
     expect(listed).not.toContain("gpt-5-codex");
     expect(listed).toContain("Set the default for imports in Settings → Jira.");
@@ -239,7 +241,7 @@ describe("Settings → Jira", () => {
 });
 
 describe("Settings → Jira, the import model", () => {
-  test("one row per agent that can analyze, filled with its default; none without one", () => {
+  test("one row per agent that can analyze, filled with its default or its list's first; none without one", () => {
     withStorage(() => {
       setImportModel("codex", "gpt-5.1-codex");
       const two = html(
@@ -249,10 +251,10 @@ describe("Settings → Jira, the import model", () => {
         />,
       );
       expect(two).toContain(
-        '<select aria-label="Import model for Claude"><option value="" selected="">Claude&#x27;s default</option><option value="opus">opus</option></select>',
+        '<select aria-label="Import model for Claude"><option value="opus" selected="">opus</option></select>',
       );
       expect(two).toContain(
-        '<select aria-label="Import model for Codex"><option value="">Codex&#x27;s default</option><option value="gpt-5.1-codex" selected="">gpt-5.1-codex</option><option value="gpt-5-codex">gpt-5-codex</option></select>',
+        '<select aria-label="Import model for Codex"><option value="gpt-5.1-codex" selected="">gpt-5.1-codex</option><option value="gpt-5-codex">gpt-5-codex</option></select>',
       );
       expect(two).toContain("Remembered on this device.");
       expect(html(<ImportModelSettings agents={[agent("codex", { oneShot: false })]} />)).toBe("");
