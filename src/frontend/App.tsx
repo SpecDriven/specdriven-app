@@ -259,6 +259,7 @@ import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./G
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { ImportFromJiraWikiDialog, ImportModelSettings } from "./ImportFromJiraWikiDialog";
+import { AgentModelsSettings, agentModelsOf, type AgentModels } from "./AgentModels";
 import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
@@ -1672,6 +1673,10 @@ export function App() {
   // order puts it among the core sections.
   const pluginSettingsSections = visibleSettingsSections(useRegistry(settingsSections), { demo, hosted });
   const [settingsPayload, setSettingsPayload] = useState<Record<string, unknown>>({});
+  // The models each agent offers (Settings → AI agents), from the data
+  // repo's .specdriven/agent-models.json — what every model dropdown lists.
+  const agentModels = useMemo(() => agentModelsOf(settingsPayload), [settingsPayload]);
+  const saveAgentModels = (next: AgentModels) => setSettingsPayload((p) => ({ ...p, agentModels: next }));
   const [pluginView, setPluginView] = useState<PluginView | null>(null);
   const pluginViewRef = useRef<PluginView | null>(null);
   pluginViewRef.current = pluginView;
@@ -8068,6 +8073,8 @@ export function App() {
         ...pluginSettingsNav("confluence"),
         { id: "settings-workflow", title: "Workflow" },
         ...pluginSettingsNav("workflow"),
+        ...(demo || hosted || agents.length === 0 ? [] : [{ id: "settings-agents", title: "AI agents" }]),
+        ...pluginSettingsNav("agents"),
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
         ...pluginSettingsNav("git"),
       ]}
@@ -8711,7 +8718,7 @@ export function App() {
           hint="Read Jira issues into a new feature, with Confluence pages, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
         >
           <JiraTokens sites={jiraSites} onChange={setJiraSites} />
-          <ImportModelSettings agents={agents} />
+          <ImportModelSettings agents={agents} agentModels={agentModels} />
         </PageSection>
       )}
       {/* specs/external-links/confluence-wiki.feature.md: a personal access
@@ -8854,6 +8861,26 @@ export function App() {
         </label>
       </PageSection>
       {renderPluginSettings("workflow")}
+      {/* specs/agents/agent-plugins.feature.md "Each agent offers the
+          models the data repo lists": a list per installed agent, kept in
+          the data repo for the team; the agent plugins' own sections
+          follow. A local agent only, so not in the demo or hosted app. */}
+      {!demo && !hosted && agents.length > 0 && (
+        <PageSection
+          id="settings-agents"
+          title="AI agents"
+          hint={
+            <>
+              The models each coding agent offers in its model menus — the import dialog&apos;s, Settings → Jira&apos;s,
+              an agent&apos;s default model. Kept in the data repo&apos;s <code>.specdriven/agent-models.json</code>,
+              shared with the team.
+            </>
+          }
+        >
+          <AgentModelsSettings agents={agents} agentModels={agentModels} onSaved={saveAgentModels} />
+        </PageSection>
+      )}
+      {renderPluginSettings("agents")}
       {/* Git engine (git-operations.md): which one carries
           the operations out and who supplies GitHub credentials.
           Hidden in demo mode along with the sign-in — the demo
@@ -12142,6 +12169,7 @@ export function App() {
           jiraSites={jiraSites}
           wikis={confluenceWikis}
           agents={agents}
+          agentModels={agentModels}
           trapRef={importTrapRef}
           onClose={() => setImportOpen(null)}
           onCreated={(data) => {

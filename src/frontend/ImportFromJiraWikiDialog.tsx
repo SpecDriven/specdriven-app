@@ -6,6 +6,7 @@ import { classifySource, MAX_JIRA_SOURCES, MAX_SCENARIOS, MAX_WIKI_SOURCES } fro
 import type { AgentDescriptor } from "../server/agentTypes";
 import type { ConfluenceWiki } from "./ConfluenceToken";
 import type { JiraSite } from "./JiraToken";
+import { ModelSelect, type AgentModels } from "./AgentModels";
 
 // "Import from Jira/Wiki here…" in a folder's ⋯ menu
 // (specs/external-links/jira-wiki-import.feature.md): the user collects up
@@ -172,6 +173,7 @@ export function ImportFromJiraWikiDialog({
   jiraSites,
   wikis,
   agents,
+  agentModels = {},
   trapRef,
   initialProposal,
   onCreated,
@@ -182,6 +184,8 @@ export function ImportFromJiraWikiDialog({
   jiraSites: JiraSite[];
   wikis: ConfluenceWiki[];
   agents: AgentDescriptor[];
+  /** The models each agent offers (Settings → AI agents), by agent id. */
+  agentModels?: AgentModels;
   trapRef?: Ref<HTMLDivElement>;
   /** Start at the review step with this proposal (tests). */
   initialProposal?: Proposal;
@@ -368,14 +372,12 @@ export function ImportFromJiraWikiDialog({
             {chosen && (
               <label>
                 Model
-                <input
-                  aria-label="Model"
+                <ModelSelect
+                  ariaLabel="Model"
+                  agentLabel={chosen.label}
+                  models={agentModels[chosen.id] ?? []}
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={`${chosen.label}'s default`}
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
+                  onChange={setModel}
                 />
               </label>
             )}
@@ -384,7 +386,9 @@ export function ImportFromJiraWikiDialog({
             ) : (
               chosen && (
                 <p className="hint">
-                  Blank uses {chosen.label}&apos;s own default. Set the default for imports in Settings → Jira.
+                  {(agentModels[chosen.id] ?? []).length > 0
+                    ? "Set the default for imports in Settings → Jira."
+                    : `List ${chosen.label}'s models in Settings → AI agents to choose one here.`}
                 </p>
               )
             )}
@@ -492,7 +496,13 @@ export function ImportFromJiraWikiDialog({
  * own default. Kept on this device: which models answer depends on its
  * account or proxy.
  */
-export function ImportModelSettings({ agents }: { agents: AgentDescriptor[] }) {
+export function ImportModelSettings({
+  agents,
+  agentModels = {},
+}: {
+  agents: AgentDescriptor[];
+  agentModels?: AgentModels;
+}) {
   const choices = oneShotAgents(agents);
   const [models, setModels] = useState(importModels);
   if (choices.length === 0) return null;
@@ -507,18 +517,15 @@ export function ImportModelSettings({ agents }: { agents: AgentDescriptor[] }) {
               {choices.length > 1 ? `Import model for ${a.label}` : "Import model"}
               <span className="settings-row-hint">
                 {problem ??
-                  `The model ${a.label} uses for "Import from Jira/Wiki", unless the dialog names another. Blank uses ${a.label}'s own default. Remembered on this device.`}
+                  `The model ${a.label} uses for "Import from Jira/Wiki", unless the dialog names another — one of the models Settings → AI agents lists for ${a.label}. Remembered on this device.`}
               </span>
             </span>
-            <input
-              aria-label={`Import model for ${a.label}`}
+            <ModelSelect
+              ariaLabel={`Import model for ${a.label}`}
+              agentLabel={a.label}
+              models={agentModels[a.id] ?? []}
               value={value}
-              placeholder={`${a.label}'s default`}
-              spellCheck={false}
-              autoCapitalize="off"
-              autoCorrect="off"
-              onChange={(e) => {
-                const next = e.target.value;
+              onChange={(next) => {
                 setModels((m) => ({ ...m, [a.id]: next }));
                 if (!modelProblem(next)) setImportModel(a.id, next);
               }}
