@@ -13,6 +13,7 @@ import {
   DATA_FORMAT_FILE,
   DATA_TOO_NEW_HEADER,
   checkDataFormat,
+  incompatibility,
   readDataFormat,
   resetDataFormatFlags,
 } from "../src/server/dataFormat";
@@ -68,20 +69,56 @@ async function originHead(): Promise<string> {
   return (await git(repos.originDir, "rev-parse", "main")).stdout.toString().trim();
 }
 
+const LOCAL_EDIT = "specs/local.feature.md";
+
+async function localHead(): Promise<string> {
+  return (await git(repos.a, "rev-parse", "HEAD")).stdout.toString().trim();
+}
+
 test("a blocked app does not push", async () => {
   const raised = await teammateRaisesFormat();
-  // Clone a holds a local edit its next tick would otherwise commit and push.
-  await Bun.write(join(repos.a, "specs/local.feature.md"), "# Local\n");
+  // Clone a holds a local edit its next tick would otherwise import into a
+  // document, commit and push.
+  await Bun.write(join(repos.a, LOCAL_EDIT), "# Local\n");
 
   const message = await syncDataDir(repos.a);
 
   expect(message).toContain("skipped sync");
-  expect(await originHead()).toBe(raised);
-  // The pull still landed — that is how the tick found out — and the edit
-  // is left as it was, uncommitted.
+  // The pull still landed — that is how the tick found out.
   expect((await readDataFormat(repos.a))?.format).toBe(DATA_FORMAT + 1);
+  expect(await localHead()).toBe(raised);
+  // Nothing was committed or pushed, and the edit is the only thing on disk
+  // that git does not know: an unblocked tick would also have written the
+  // features' documents, the format marker and AGENTS.md (see the test
+  // below), and none of those appeared.
+  expect(await originHead()).toBe(raised);
   const status = (await git(repos.a, "status", "--porcelain")).stdout.toString();
-  expect(status).toContain("specs/local.feature.md");
+  expect(status).toBe(`?? ${LOCAL_EDIT}\n`);
+});
+
+test("later ticks keep pulling, so a rolled-back folder syncs again", async () => {
+  await teammateRaisesFormat();
+  await Bun.write(join(repos.a, LOCAL_EDIT), "# Local\n");
+  expect(await syncDataDir(repos.a)).toContain("skipped sync");
+  expect(incompatibility(repos.a)).not.toBeNull();
+
+  // The teammate takes the raise back — a revert, as a team would do once
+  // it found a colleague stuck on the update screen — and pushes.
+  await git(repos.b, "revert", "--no-edit", "HEAD");
+  await git(repos.b, "push", "origin", "HEAD:main");
+  const reverted = await originHead();
+
+  const message = await syncDataDir(repos.a);
+
+  expect(message).not.toContain("skipped sync");
+  expect(incompatibility(repos.a)).toBeNull();
+  // The tick ran through: the edit it had left alone is committed and
+  // pushed, so origin moved past the revert.
+  expect(await originHead()).not.toBe(reverted);
+  const status = (await git(repos.a, "status", "--porcelain")).stdout.toString();
+  expect(status).toBe("");
+  const pushed = (await git(repos.originDir, "ls-tree", "--name-only", "main", "specs/")).stdout.toString();
+  expect(pushed).toContain(LOCAL_EDIT);
 });
 
 test("a compatible tick raises a first-format folder to this app's", async () => {
@@ -126,6 +163,39 @@ test("the API refuses writes to a blocked folder and marks its reads", async () 
     minAppVersion: "9.9.9",
     reason: expect.stringContaining("9.9.9"),
   });
+});
+
+test("switching folders, Sync, sign-in, the log and the data viewer still work", async () => {
+  await writeState({ dataRepo: repos.a, reloadFrequencySeconds: 0 }, root);
+  await teammateRaisesFormat();
+  await git(repos.a, "pull");
+  await checkDataFormat(repos.a);
+
+  // None of these writes to the data repo, so none is refused and none
+  // carries the header — the client must not mistake them for the verdict.
+  const allowed = [
+    new Request("http://localhost/api/reload", { method: "POST" }),
+    new Request("http://localhost/api/logs"),
+    new Request("http://localhost/api/data/tables"),
+    new Request("http://localhost/api/auth/github/poll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+    new Request("http://localhost/api/choose-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+  ];
+  for (const req of allowed) {
+    const res = await handleApi(req);
+    expect(res!.status, req.url).not.toBe(409);
+    expect(res!.headers.get(DATA_TOO_NEW_HEADER), req.url).toBeNull();
+  }
+  // Sync is the tick itself, which stops after its pull as usual.
+  const sync = await handleApi(new Request("http://localhost/api/reload", { method: "POST" }));
+  expect(((await sync!.json()) as { message: string }).message).toContain("skipped sync");
 });
 
 test("data saved by a newer app blocks this one at start", async () => {

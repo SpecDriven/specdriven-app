@@ -17,6 +17,8 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 COPY src ./src
+# The What's new page bundles CHANGELOG.md (src/frontend/WhatsNewPage.tsx imports ../../CHANGELOG.md).
+COPY CHANGELOG.md ./
 COPY demo-data ./demo-data
 
 ENV NODE_ENV=production \
