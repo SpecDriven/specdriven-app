@@ -1,8 +1,9 @@
-# The image COPYs only package.json, bun.lock, src/, demo-data/ and
+# The image COPYs only package.json, bun.lock, CHANGELOG.md, src/, demo-data/ and
 # build/icon.svg — keep the rest of the checkout out of the build context.
 *
 !package.json
 !bun.lock
+!CHANGELOG.md
 !src
 !demo-data
 !build/icon.svg
