@@ -210,6 +210,16 @@ export function PluginMarketplace({
     await patchSettings({ plugins: { marketplaces: [...marketplaces, { name, source }] } });
   };
 
+  // A cache that cannot be pulled any more (its upstream history rewritten)
+  // is thrown away and cloned again; the list shows it as cloned.
+  const recloneMarketplace = (name: string) =>
+    run(`marketplace:${name}`, async () => {
+      const data = await post(`/api/plugins/marketplaces/${encodeURIComponent(name)}/reclone`, {});
+      const fresh = data.marketplace as MarketplaceStatus;
+      setStatuses((prev) => [...(prev ?? []).filter((s) => s.name !== name), fresh]);
+      setOpen(true);
+    });
+
   const removeMarketplace = (name: string) =>
     patchSettings({ plugins: { marketplaces: marketplaces.filter((m) => m.name !== name) } });
 
@@ -344,19 +354,33 @@ export function PluginMarketplace({
                 </code>
               </span>
               {!readOnly && (
-                <button
-                  type="button"
-                  className="link"
-                  aria-label={`Remove marketplace ${m.name}`}
-                  onClick={() => void removeMarketplace(m.name)}
-                >
-                  Remove
-                </button>
+                <span className="plugin-market-row-actions">
+                  <button
+                    type="button"
+                    className="link"
+                    aria-label={`Re-clone marketplace ${m.name}`}
+                    title="Delete the local copy of this marketplace and clone it again — for a copy that can no longer be refreshed"
+                    disabled={busy === `marketplace:${m.name}`}
+                    onClick={() => void recloneMarketplace(m.name)}
+                  >
+                    {busy === `marketplace:${m.name}` ? "Re-cloning…" : "Re-clone"}
+                  </button>
+                  <button
+                    type="button"
+                    className="link"
+                    aria-label={`Remove marketplace ${m.name}`}
+                    onClick={() => void removeMarketplace(m.name)}
+                  >
+                    Remove
+                  </button>
+                </span>
               )}
             </div>
             {status?.error && (
               <span className="settings-row-hint plugin-row-error" role="alert">
                 {status.error}
+                {!readOnly && status.error.startsWith("Could not refresh") &&
+                  " — Re-clone throws the local copy away and clones it again."}
               </span>
             )}
             {index && index.plugins.length === 0 && (

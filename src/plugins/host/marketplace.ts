@@ -87,6 +87,37 @@ async function cacheMarketplace(entry: MarketplaceRef, dir: string, refresh: boo
 }
 
 /**
+ * Throw a marketplace's cache away and clone it afresh: what a cache that
+ * can no longer be pulled needs — its upstream history rewritten ("refusing
+ * to merge unrelated histories"), a checkout left half-done. The clone goes
+ * into a folder beside the cache and takes its place only once it is whole,
+ * so a remote that cannot be reached leaves the old copy where it was.
+ * Installed plugins are not touched: a subdirectory plugin was copied out
+ * of the cache, not linked to it.
+ */
+export async function recloneMarketplace(entry: MarketplaceRef): Promise<MarketplaceStatus> {
+  return exclusive(`marketplace ${entry.name}`, "re-cloned", async () => {
+    const dir = join(marketplacesHome(), entry.name);
+    const fresh = join(marketplacesHome(), `.${entry.name}.reclone`);
+    await rm(fresh, { recursive: true, force: true });
+    await mkdir(marketplacesHome(), { recursive: true });
+    try {
+      await clone(entry.source, fresh);
+    } catch (e) {
+      await rm(fresh, { recursive: true, force: true });
+      throw e;
+    }
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    await rename(fresh, dir);
+    try {
+      return { ...entry, dir, index: await readIndex(dir) };
+    } catch (e) {
+      return { ...entry, dir, error: (e as Error).message };
+    }
+  });
+}
+
+/**
  * The indexes already on disk, without touching git: what a start that
  * cannot reach the marketplaces still knows. A marketplace with no cache
  * or a bad index is left out.
@@ -485,12 +516,14 @@ export interface MarketplaceRouteDeps {
 
 /**
  * The marketplace routes, for api.ts to register among the core rows:
- * `GET /api/plugins/marketplaces[?refresh=1]`, `POST /api/plugins/install`
+ * `GET /api/plugins/marketplaces[?refresh=1]`,
+ * `POST /api/plugins/marketplaces/:name/reclone`, `POST /api/plugins/install`
  * with `{ marketplace, name, step: "stage" | "confirm" | "cancel" }`,
  * `POST /api/plugins/:id/update` and `DELETE /api/plugins/:id`.
  */
 export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   getMarketplaces: Handler;
+  postReclone: Handler;
   postInstall: Handler;
   postUpdate: Handler;
   deletePlugin: Handler;
@@ -514,6 +547,12 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       const marketplaces = await loadMarketplaces(await entries(), { refresh });
       return json({ marketplaces });
     }, true),
+    postReclone: guard(async (_req, params) => {
+      const name = params.name ?? "";
+      const entry = (await entries()).find((m) => m.name === name);
+      if (!entry) return json({ error: `No marketplace named "${name}" is configured` }, 404);
+      return json({ marketplace: await recloneMarketplace(entry) });
+    }),
     postInstall: guard(async (req) => {
       const body = await bodyOf(req);
       const { marketplace, name, step } = body;
