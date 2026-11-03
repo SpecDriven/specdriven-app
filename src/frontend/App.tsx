@@ -262,10 +262,11 @@ import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
 import { ImportFromJiraWikiDialog, ImportModelSettings } from "./ImportFromJiraWikiDialog";
 import { AgentModelsSettings, agentModelsOf, type AgentModels } from "./AgentModels";
-import { ConfluencePublishDialog } from "./ConfluencePublishDialog";
+import { ConfluencePublishDialog, type ConfluencePublishResult } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
-import { QtestPublishDialog } from "./QtestPublishDialog";
+import { QtestPublishDialog, type QtestPublishResult } from "./QtestPublishDialog";
+import { WikiQtestPublishDialog } from "./WikiQtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { AhaImportDialog } from "./AhaImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
@@ -1633,6 +1634,10 @@ export function App() {
   const [qtestSites, setQtestSites] = useState<QtestSite[]>([]);
   const [qtestParentUrl, setQtestParentUrl] = useState("");
   const [qtestPublishOpen, setQtestPublishOpen] = useState(false);
+  /** "Publish to Wiki & qTest…" (specs/external-links/qtest-test-cases.feature.md
+      "Publish the page and the test cases from one dialog"): the page first,
+      then the test cases, from one dialog. */
+  const [wikiQtestPublishOpen, setWikiQtestPublishOpen] = useState(false);
   /** Aha! (specs/external-links/aha-import.feature.md): the sites this
       device holds an API key for, and the folder an open import lands in
       (null for the top level) — or null while the dialog is closed. */
@@ -2266,6 +2271,7 @@ export function App() {
   const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
   const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
   const qtestTrapRef = useFocusTrap(qtestPublishOpen);
+  const wikiQtestTrapRef = useFocusTrap(wikiQtestPublishOpen);
   const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
   const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
@@ -3668,6 +3674,48 @@ export function App() {
     }
   };
 
+  // A feature's page is published (specs/external-links/confluence-wiki.feature.md
+  // "Publish a feature to Confluence"): the feature now links it, shown as
+  // saved, and the toast offers "Open page". Shared by the Confluence
+  // dialog and the Wiki & qTest one.
+  const confluencePublished = (data: ConfluencePublishResult) => {
+    if (!selected) return;
+    setFeature(featureFromResponse(data, selected));
+    setDirty(false);
+    markSaved();
+    const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
+    toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
+    if (data.warning) toast.error(data.warning);
+  };
+
+  // A feature's test cases are written (specs/external-links/qtest-test-cases.feature.md
+  // "Create qTest test cases from a feature"): the feature and its scenarios
+  // link them, the parent module is remembered for next time, and the toast
+  // says how many were created and offers "Open module". Shared by the qTest
+  // dialog and the Wiki & qTest one; each decides whether to stay open.
+  const qtestPublished = (data: QtestPublishResult) => {
+    if (!selected) return;
+    setFeature(featureFromResponse(data, selected));
+    setDirty(false);
+    markSaved();
+    setQtestParentUrl(data.parentUrl);
+    const open = { label: "Open module", run: () => window.open(data.module.url, "_blank", "noreferrer") };
+    const what = [
+      data.created > 0 ? `created ${data.created}` : "",
+      data.updated > 0 ? `updated ${data.updated}` : "",
+      // The requirements of the feature's Jira issues they cover, those found and linked.
+      (() => {
+        const pids = (data.requirements ?? []).filter((r) => r.linked + r.alreadyLinked > 0).map((r) => r.pid);
+        return pids.length > 0 ? `linked to ${pids.join(", ")}` : "";
+      })(),
+    ]
+      .filter(Boolean)
+      .join(", ");
+    // A run refused at its first test case wrote nothing to report.
+    if (what || !data.failure) toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
+    if (data.warning) toast.error(data.warning);
+  };
+
   // "Publish qTest Test Cases…" (specs/external-links/qtest-test-cases.feature.md
   // "A feature with no Confluence page asks first"): each test case links its
   // scenario on the feature's Confluence page, so without one it would only
@@ -4364,7 +4412,11 @@ export function App() {
   // The Confluence wikis this device holds a token for: read when Settings
   // or a publish dialog opens, so a token added in one shows in the other.
   useEffect(() => {
-    if (hosted || (!settingsShown && !confluencePublishOpen && !confluenceFolderOpen && importOpen === null)) return;
+    if (
+      hosted ||
+      (!settingsShown && !confluencePublishOpen && !confluenceFolderOpen && !wikiQtestPublishOpen && importOpen === null)
+    )
+      return;
     let live = true;
     void fetchConfluenceTokens().then((wikis) => {
       if (live) setConfluenceWikis(wikis);
@@ -4372,7 +4424,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [hosted, settingsShown, confluencePublishOpen, confluenceFolderOpen, importOpen]);
+  }, [hosted, settingsShown, confluencePublishOpen, confluenceFolderOpen, wikiQtestPublishOpen, importOpen]);
   // The Jira sites this device holds a token for, read the same way.
   useEffect(() => {
     if (hosted || (!settingsShown && importOpen === null)) return;
@@ -4386,7 +4438,7 @@ export function App() {
   }, [hosted, settingsShown, importOpen]);
   // The qTest sites this device holds a token for, read the same way.
   useEffect(() => {
-    if (hosted || (!settingsShown && !qtestPublishOpen)) return;
+    if (hosted || (!settingsShown && !qtestPublishOpen && !wikiQtestPublishOpen)) return;
     let live = true;
     void fetchQtestTokens().then((sites) => {
       if (live) setQtestSites(sites);
@@ -4394,7 +4446,7 @@ export function App() {
     return () => {
       live = false;
     };
-  }, [hosted, settingsShown, qtestPublishOpen]);
+  }, [hosted, settingsShown, qtestPublishOpen, wikiQtestPublishOpen]);
   // The Aha! sites this device holds an API key for, read the same way.
   useEffect(() => {
     if (hosted || (!settingsShown && ahaImportOpen === null)) return;
@@ -7068,6 +7120,7 @@ export function App() {
     if (confluencePublishOpen) return setConfluencePublishOpen(false);
     if (confluenceFolder) return setConfluenceFolder(null);
     if (qtestPublishOpen) return setQtestPublishOpen(false);
+    if (wikiQtestPublishOpen) return setWikiQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
     if (importOpen !== null) return setImportOpen(null);
     if (featureLinkOpen) return setFeatureTicketsOpen(false);
@@ -8769,7 +8822,8 @@ export function App() {
               Create test cases from a feature
               <span className="settings-row-hint">
                 With a token for the site, a feature's ⋯ menu offers "Publish qTest Test Cases…": one module
-                named after the feature under a parent module you pick, one test case per scenario.
+                named after the feature under a parent module you pick, one test case per scenario. "Publish to
+                Wiki &amp; qTest…" publishes the Confluence page first and then the test cases, which link it.
               </span>
               <QtestTokens sites={qtestSites} onChange={setQtestSites} />
             </span>
@@ -11032,6 +11086,15 @@ export function App() {
                               icon: <ClipboardCheck size={13} />,
                               onSelect: () => void openQtestPublish(feature),
                             },
+                            // Both at once ("Publish the page and the test
+                            // cases from one dialog"): the page first, so the
+                            // test cases link their scenarios on it.
+                            {
+                              id: "wiki-qtest",
+                              label: "Publish to Wiki & qTest…",
+                              icon: <ClipboardCheck size={13} />,
+                              onSelect: () => setWikiQtestPublishOpen(true),
+                            },
                           ]),
                       {
                         id: "delete",
@@ -12152,13 +12215,8 @@ export function App() {
             openObservability("confluence");
           }}
           onPublished={(data) => {
-            setFeature(featureFromResponse(data, selected));
-            setDirty(false);
-            markSaved();
+            confluencePublished(data);
             setConfluencePublishOpen(false);
-            const open = { label: "Open page", run: () => window.open(data.url, "_blank", "noreferrer") };
-            toast.success(`${data.created ? "Published" : "Updated"} “${data.title}” in Confluence`, { action: open });
-            if (data.warning) toast.error(data.warning);
           }}
         />
       )}
@@ -12209,27 +12267,32 @@ export function App() {
             openObservability("qtest");
           }}
           onPublished={(data) => {
-            setFeature(featureFromResponse(data, selected));
-            setDirty(false);
-            markSaved();
-            setQtestParentUrl(data.parentUrl);
+            qtestPublished(data);
             // A test case qTest refused keeps the dialog open on it, with its details.
             if (!data.failure) setQtestPublishOpen(false);
-            const open = { label: "Open module", run: () => window.open(data.module.url, "_blank", "noreferrer") };
-            const what = [
-              data.created > 0 ? `created ${data.created}` : "",
-              data.updated > 0 ? `updated ${data.updated}` : "",
-              // The requirements of the feature's Jira issues they cover, those found and linked.
-              (() => {
-                const pids = (data.requirements ?? []).filter((r) => r.linked + r.alreadyLinked > 0).map((r) => r.pid);
-                return pids.length > 0 ? `linked to ${pids.join(", ")}` : "";
-              })(),
-            ]
-              .filter(Boolean)
-              .join(", ");
-            // A run refused at its first test case wrote nothing to report.
-            if (what || !data.failure) toast.success(`qTest: ${what || "nothing to write"} for “${data.title}”`, { action: open });
-            if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {wikiQtestPublishOpen && selected && feature && (
+        <WikiQtestPublishDialog
+          file={selected}
+          featureName={feature.name}
+          linkedPageUrl={feature.confluence?.url}
+          linkedModuleUrl={feature.qtest?.url}
+          initialParentPageUrl={feature.confluencePage?.parentUrl ?? ""}
+          initialParentModuleUrl={feature.qtestModule?.parentUrl ?? qtestParentUrl}
+          wikis={confluenceWikis}
+          sites={qtestSites}
+          trapRef={wikiQtestTrapRef}
+          onClose={() => setWikiQtestPublishOpen(false)}
+          onOpenLogs={(service) => {
+            setWikiQtestPublishOpen(false);
+            openObservability(service);
+          }}
+          onPagePublished={confluencePublished}
+          onCasesPublished={(data) => {
+            qtestPublished(data);
+            if (!data.failure) setWikiQtestPublishOpen(false);
           }}
         />
       )}
