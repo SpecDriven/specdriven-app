@@ -23,6 +23,12 @@ import { projectFeature } from "../../src/server/automerge/project";
 import { parseFeature } from "../../src/server/parser";
 import { readFeature, saveFeature } from "../../src/server/features";
 import { writeTextFile } from "../../src/server/fsx";
+import {
+  DATA_FORMAT,
+  DATA_FORMAT_FILE,
+  checkDataFormat,
+  resetDataFormatFlags,
+} from "../../src/server/dataFormat";
 import { FakeSyncServer } from "../helpers/fakeSyncServer";
 
 let root: string;
@@ -37,6 +43,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const bridge of bridges) await bridge.stop();
   bridges = [];
+  resetDataFormatFlags();
   await serverRepo?.shutdown();
   serverRepo = null;
   wss?.close();
@@ -229,4 +236,46 @@ test("stopping waits for an absorb in flight, and absorbs nothing after", async 
   await saveFeature(a, FILE, SEED.replace("- line two", "- line two, after B stopped"));
   await deliver!((await loadFeatureDoc(a, FILE))!.doc);
   expect(await readFeature(b, FILE)).toBe(atStop);
+});
+
+// specs/app/data-format.feature.md "A blocked app does not push": the
+// bridge writes nothing to a folder whose data a newer app wrote, the same
+// as the sync tick and the API.
+test("a live-sync peer's operations are not absorbed while the folder is blocked", async () => {
+  const { a, b } = await twoDirs();
+  const server = new FakeSyncServer();
+  const peerA = await bridge(a, server);
+  const peerB = await bridge(b, server);
+
+  // B's folder is blocked the way the tick blocks it: a teammate's pull
+  // brought a newer marker, and the tick read it.
+  await writeTextFile(
+    join(b, DATA_FORMAT_FILE),
+    JSON.stringify({ format: DATA_FORMAT + 1, minAppVersion: "9.9.9" }),
+  );
+  expect(await checkDataFormat(b)).not.toBeNull();
+  const before = await readFeature(b, FILE);
+  const headsBefore = (await loadFeatureDoc(b, FILE))!.heads;
+
+  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A"));
+  await server.settle(peerA, peerB);
+
+  // The server fanned A's edit out, and B let it pass: neither the file nor
+  // the document moved.
+  expect(await readFeature(b, FILE)).toBe(before);
+  expect((await loadFeatureDoc(b, FILE))!.heads).toEqual(headsBefore);
+
+  // Rolled back to a format this app reads, the next delivery brings
+  // everything B let pass, since a peer's copy carries the whole history.
+  await writeTextFile(
+    join(b, DATA_FORMAT_FILE),
+    JSON.stringify({ format: DATA_FORMAT, minAppVersion: "0.1.0" }),
+  );
+  expect(await checkDataFormat(b)).toBeNull();
+  await saveFeature(a, FILE, SEED.replace("- line one", "- line one, edited on A").replace("- line two", "- line two, after the rollback"));
+  await server.settle(peerA, peerB);
+  const after = await readFeature(b, FILE);
+  expect(after).toContain("edited on A");
+  expect(after).toContain("after the rollback");
+  expect(after).toBe(await readFeature(a, FILE));
 });
