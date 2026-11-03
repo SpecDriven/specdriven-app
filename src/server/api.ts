@@ -212,7 +212,7 @@ import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs"
 import { getDataDoc, getDataDocAt, getDataDocHistory, getDataTable, getDataTables } from "./dataViewer";
 import { version as appVersion } from "../../package.json";
 import { sourceUrl } from "./sourceUrl";
-import { appUpdateHandlers } from "./appUpdate";
+import { appUpdateHandlers, maybeCheckDaily, updateAvailable } from "./appUpdate";
 import {
   anyIncompatible,
   checkDataFormat,
@@ -672,6 +672,9 @@ async function stateFields(state: SpecDrivenState) {
     // The running app's version (package.json), shown beside the user name
     // so every copy, the public demo included, says which build is on screen.
     version: appVersion,
+    // A newer release the app's own daily check, or a manual one, found
+    // (specs/app/app-updates.feature.md): the version chip marks it.
+    updateAvailable: updateAvailable(),
     // The running build's source (src/server/sourceUrl.ts): every copy,
     // network-served ones included, offers it, so the user menu links to it.
     sourceUrl: sourceUrl(),
@@ -693,6 +696,11 @@ const getState: Handler = async (req) => {
   if (isDemoMode() && new URL(req.url).searchParams.has("boot")) {
     await reseedDemo();
   }
+  // The desktop app's daily look at the releases page
+  // (specs/app/app-updates.feature.md): started here, on the boot-time
+  // fetch and the routine ones, and not waited for — the answer reaches
+  // the client on its next state read.
+  maybeCheckDaily();
   const state = await readState(getAppRoot());
   // A demo reseed above rewrote the switches; the plugins follow them, and a
   // plugin folder that appeared meanwhile is picked up.

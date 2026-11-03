@@ -2771,8 +2771,10 @@ aside > .user-corner {
   white-space: nowrap;
 }
 
-/* A release whose notes are not read yet (What's new). */
-.unseen-dot {
+/* A release whose notes are not read yet (What's new), and a newer release
+   the daily check found (the version chip, Check for Updates…). */
+.unseen-dot,
+.update-dot {
   display: inline-block;
   width: 6px;
   height: 6px;

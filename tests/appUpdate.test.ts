@@ -14,10 +14,13 @@ import { handleApi } from "../src/server/api";
 import {
   builtApp,
   checkForUpdate,
+  DAILY_CHECK_MS,
+  dailyCheckSettled,
   installState,
   installUpdate,
   installerCommand,
   latestFromLocation,
+  maybeCheckDaily,
   NO_ACTIVATOR,
   findShell,
   preconditions,
@@ -28,6 +31,7 @@ import {
   SHELL_MISSING,
   sourceMismatch,
   streamRun,
+  updateAvailable,
   WEB_RUNTIME,
   type StreamOptions,
   type StreamRunner,
@@ -399,5 +403,93 @@ describe("the routes", () => {
     expect((await api("/api/app-update")).status).toBe(403);
     expect((await api("/api/app-update/check", "POST")).status).toBe(403);
     delete process.env.SPECDRIVEN_HOSTED;
+  });
+});
+
+// specs/app/app-updates.feature.md "the desktop app checks once a day":
+// the check the app makes of its own accord, and what the version chip
+// learns from /api/state.
+describe("the daily check", () => {
+  /** A check stand-in that counts its calls and answers as told. */
+  function fakeCheck(answer: () => Promise<{ latest: string; newer: boolean }>) {
+    const calls: number[] = [];
+    const check = async () => {
+      calls.push(1);
+      const a = await answer();
+      return { current: appVersion, latest: a.latest, newer: a.newer, url: `https://example.test/tag/v${a.latest}`, checkedAt: new Date().toISOString() };
+    };
+    return { calls, check };
+  }
+
+  test("the desktop app checks once a day, counted from the last check, and /api/state names the newer version", async () => {
+    let clock = new Date("2026-11-02T08:00:00Z").getTime();
+    const found = fakeCheck(async () => ({ latest: NEWER, newer: true }));
+    setUpdateDeps({ runtime: () => "desktop", now: () => new Date(clock), check: found.check });
+
+    expect(updateAvailable()).toBeNull();
+    expect(maybeCheckDaily()).toBe(true);
+    // Not waited for: the version is known once the check has settled.
+    expect(updateAvailable()).toBeNull();
+    await dailyCheckSettled();
+    expect(updateAvailable()).toBe(NEWER);
+    expect(((await (await api("/api/app-update")).json()) as UpdateIndex).check).toMatchObject({ latest: NEWER, newer: true });
+
+    // A second look an hour later, or just under a day later, asks nothing.
+    clock += 60 * 60 * 1000;
+    expect(maybeCheckDaily()).toBe(false);
+    clock += DAILY_CHECK_MS - 2 * 60 * 60 * 1000;
+    expect(maybeCheckDaily()).toBe(false);
+    expect(found.calls.length).toBe(1);
+    // A day on, it asks again.
+    clock += 60 * 60 * 1000;
+    expect(maybeCheckDaily()).toBe(true);
+    await dailyCheckSettled();
+    expect(found.calls.length).toBe(2);
+
+    // The boot-time state fetch is what starts it, and the payload carries the answer.
+    const state = (await (await api("/api/state")).json()) as { updateAvailable: string | null; version: string };
+    expect(state.version).toBe(appVersion);
+    expect(state.updateAvailable).toBe(NEWER);
+  });
+
+  test("the version running, or a newer one, leaves the chip unmarked", async () => {
+    const upToDate = fakeCheck(async () => ({ latest: appVersion, newer: false }));
+    setUpdateDeps({ runtime: () => "desktop", check: upToDate.check });
+    expect(maybeCheckDaily()).toBe(true);
+    await dailyCheckSettled();
+    expect(updateAvailable()).toBeNull();
+    expect(((await (await api("/api/state")).json()) as { updateAvailable: string | null }).updateAvailable).toBeNull();
+  });
+
+  test("the web server, the demo and a hosted copy never check by themselves", async () => {
+    const found = fakeCheck(async () => ({ latest: NEWER, newer: true }));
+    setUpdateDeps({ runtime: () => "web", check: found.check });
+    expect(maybeCheckDaily()).toBe(false);
+    setUpdateDeps({ runtime: () => "desktop", check: found.check });
+    process.env.DEMO_MODE = "1";
+    expect(maybeCheckDaily()).toBe(false);
+    delete process.env.DEMO_MODE;
+    process.env.SPECDRIVEN_HOSTED = "1";
+    expect(maybeCheckDaily()).toBe(false);
+    delete process.env.SPECDRIVEN_HOSTED;
+    await dailyCheckSettled();
+    expect(found.calls.length).toBe(0);
+    expect(updateAvailable()).toBeNull();
+  });
+
+  test("a check that fails is swallowed, counts as the day's check, and leaves the last answer alone", async () => {
+    let clock = new Date("2026-11-02T08:00:00Z").getTime();
+    const failing = fakeCheck(async () => {
+      throw new Error("could not reach https://example.test/latest: no network");
+    });
+    setUpdateDeps({ runtime: () => "desktop", now: () => new Date(clock), check: failing.check });
+    expect(maybeCheckDaily()).toBe(true);
+    await dailyCheckSettled();
+    expect(updateAvailable()).toBeNull();
+    expect(((await (await api("/api/app-update")).json()) as UpdateIndex).check).toBeNull();
+    // Not again until tomorrow — the manual check is there meanwhile.
+    clock += 60 * 60 * 1000;
+    expect(maybeCheckDaily()).toBe(false);
+    expect(failing.calls.length).toBe(1);
   });
 });

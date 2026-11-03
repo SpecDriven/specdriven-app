@@ -99,6 +99,7 @@ import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
+import { checkForUpdatesMenuItem, VersionChip } from "./updateHint";
 import { Popover } from "./Popover";
 import { HeightResizer } from "./HeightResizer";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
@@ -1055,6 +1056,8 @@ export const LOAD_RETRY_MS = 300;
 export const BOOT_RETRY_MS = 3000;
 /** How long the boot read waits for an answer before it calls the server stuck. */
 export const BOOT_TIMEOUT_MS = 20_000;
+/** When, after boot, the desktop app re-reads the state for the daily update check's answer: soon, and twice more for a slow releases page. */
+const UPDATE_FOLLOW_UP_MS = [750, 4000, 20000];
 
 /**
  * Fetch the feature listing, retrying the failures that a later try can
@@ -1325,6 +1328,12 @@ export function App() {
   const hostedAdmin = hostedAccount?.admin ?? false;
   // The running app's version, shown beside the user name.
   const [appVersion, setAppVersion] = useState<string | null>(null);
+  // A newer release the server's daily check, or a manual one, found
+  // (src/frontend/updateHint.tsx): the version chip and the menu mark it.
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  const applyUpdateAvailable = (state: Record<string, unknown>) => {
+    setUpdateAvailable(typeof state.updateAvailable === "string" ? state.updateAvailable : null);
+  };
   // Where that version's source lives — the user menu links to it.
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const repoInputRef = useRef<HTMLInputElement>(null);
@@ -2052,6 +2061,7 @@ export function App() {
         // first finding Settings. Turning it off there still sticks.
         setExcalidrawDemoMode(Boolean(state.demo));
         setAppVersion(typeof state.version === "string" ? state.version : null);
+        applyUpdateAvailable(state);
         setSourceUrl(typeof state.sourceUrl === "string" ? state.sourceUrl : null);
         setGitEngineState(state.gitEngine ?? null);
         setGitEngineEffective(state.gitEngineEffective ?? "cli");
@@ -2797,6 +2807,27 @@ export function App() {
   }, [appPage, appVersion]);
   /** Updates (src/frontend/UpdatesPage.tsx): Check for Updates…, and the desktop app updating itself. */
   const openUpdates = () => openAppPage("updates");
+  // The server starts its daily check on the boot-time state fetch and
+  // answers without waiting for it, so the desktop app reads the state again
+  // a moment later: the dot shows within a second of boot, not at the next
+  // routine refresh — and twice more, for a releases page slow to answer.
+  // Only where a check runs at all.
+  useEffect(() => {
+    if (loading || !canCheckForUpdates || demo || hosted) return;
+    let cancelled = false;
+    const timers = UPDATE_FOLLOW_UP_MS.map((ms) =>
+      setTimeout(() => {
+        void fetch("/api/state")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => !cancelled && data && applyUpdateAvailable(data))
+          .catch(() => {});
+      }, ms),
+    );
+    return () => {
+      cancelled = true;
+      for (const t of timers) clearTimeout(t);
+    };
+  }, [loading, canCheckForUpdates, demo, hosted]);
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -2828,6 +2859,7 @@ export function App() {
     const res = await fetch("/api/state");
     if (!res.ok) return;
     const data = await res.json();
+    applyUpdateAvailable(data);
     setPlugins(Array.isArray(data.plugins) ? data.plugins : []);
     setPluginSources(Array.isArray(data.pluginSources) ? data.pluginSources : []);
     setPluginMarketplaces(Array.isArray(data.pluginMarketplaces) ? data.pluginMarketplaces : []);
@@ -4572,6 +4604,7 @@ export function App() {
     const state = await (await fetch("/api/state")).json();
     if (state.user) setUser(state.user);
     setGh(state.gh ?? null);
+    applyUpdateAvailable(state);
   };
 
   // Signing out also stops the app using the GitHub CLI's account
@@ -9980,15 +10013,10 @@ export function App() {
               // copy never change.
               ...(canCheckForUpdates && !demo && !hosted
                 ? [
-                    {
-                      id: "updates",
-                      label: "Check for Updates…",
-                      icon: <RefreshCw size={13} />,
-                      onSelect: () => {
-                        setDrawerOpen(false);
-                        openUpdates();
-                      },
-                    },
+                    checkForUpdatesMenuItem(updateAvailable, () => {
+                      setDrawerOpen(false);
+                      openUpdates();
+                    }),
                   ]
                 : []),
               // The app's own logs and their verbosity; the hosted demo's
@@ -10112,13 +10140,7 @@ export function App() {
             </span>
             <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
             {/* The build on screen, right of the user name. */}
-            {appVersion && (
-              <span className="app-version">
-                v{appVersion}
-                {/* An update whose notes are not read yet (What's new). */}
-                {notesUnseen && <span className="unseen-dot" role="img" aria-label="new release notes" />}
-              </span>
-            )}
+            {appVersion && <VersionChip version={appVersion} notesUnseen={notesUnseen} updateAvailable={updateAvailable} />}
           </button>
         </div>
       </aside>
