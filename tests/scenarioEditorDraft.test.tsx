@@ -149,3 +149,39 @@ describe("opening a draft scenario", () => {
     expect(host!.querySelector('[aria-label="Resize the body editor"]')).not.toBeNull();
   });
 });
+
+// specs/ui/ui.feature.md "Add A Scenario Button": the `+` asks for a name and
+// the new scenario opens as a draft. A draft nobody typed into yet is still a
+// scenario — it is written into the feature the moment it opens, empty body
+// and all, not only once the body changes.
+describe("adding a scenario with the + button", () => {
+  test("saves the named draft right away, with an empty body", async () => {
+    await openLink("/features/quotes");
+    await until(() => host!.querySelector('[aria-label="New scenario"]') !== null, "the feature page");
+    await act(async () => (host!.querySelector('[aria-label="New scenario"]') as HTMLButtonElement).click());
+    const name = document.querySelector('input[placeholder="Scenario name"]') as HTMLInputElement;
+    await act(async () => {
+      name.focus();
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!.call(name, "Cancel a quote");
+      name.dispatchEvent(new window.KeyboardEvent("keyup", { key: "e", bubbles: true }) as unknown as Event);
+    });
+    const create = [...document.querySelectorAll("button")].find((b) => b.textContent === "Create")!;
+    await act(async () => create.click());
+
+    const saved = async () => {
+      const res = await handleApi(new Request("http://localhost/api/features/" + encodeURIComponent("specs/quotes.feature.md")));
+      return JSON.stringify(await res!.json());
+    };
+    let body = "";
+    for (let i = 0; i < 50 && !body.includes("Cancel a quote"); i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      body = await saved();
+    }
+    const scenarios = (JSON.parse(body) as { parsed: { scenarios: { name: string; status: string; body: string }[] } })
+      .parsed.scenarios;
+    expect(scenarios.map((s) => s.name)).toEqual(["Renewal", "Cancel a quote"]);
+    expect(scenarios[1]).toMatchObject({ status: "draft", body: "" });
+  });
+});

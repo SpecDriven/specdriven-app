@@ -1548,6 +1548,9 @@ export function App() {
   // request, so the late PUT would write this scenario into the folder that
   // comes next.
   const autosaved = useRef<string | null>(null);
+  /** A scenario just added with `+` (specs/ui/ui.feature.md "Add A Scenario
+      Button") is saved the moment its pane opens, empty body and all. */
+  const saveOnOpen = useRef(false);
   /** The tick still saving, resolving to where it left the scenario — null when none is away. */
   const autosaveInFlight = useRef<Promise<Placement> | null>(null);
   const scenarioSaveQueue = useRef(createPromiseQueue());
@@ -4288,6 +4291,17 @@ export function App() {
   useEffect(() => {
     autosaveTick.current = autosaveScenario;
   });
+  // A scenario added with `+` is in the feature from the moment its pane
+  // opens, even if nothing is ever typed into its body: nothing counts as
+  // saved yet, and one tick goes out right away. Should that tick stand down
+  // (the name field holding the caret, say), the next one — or leaving the
+  // pane — still saves it.
+  useEffect(() => {
+    if (!saveOnOpen.current || !editing) return;
+    saveOnOpen.current = false;
+    autosaved.current = null;
+    void autosaveTick.current();
+  }, [editing]);
   useEffect(() => {
     if (!editingOpen) return;
     const id = setInterval(() => void autosaveTick.current(), autosaveSeconds * 1000);
@@ -5849,6 +5863,7 @@ export function App() {
     await scenarioSaveQueue.current.idle();
     if (selectedRef.current !== file || featureEditorsSealed.current) return;
     const scenarios = placed?.feature.scenarios ?? feature.scenarios;
+    saveOnOpen.current = true;
     setEditing(newScenarioDraft(name, insertAfterScenario(scenarios, current, id, fallback)));
   };
 
@@ -7135,6 +7150,7 @@ export function App() {
     });
     if (!name || !cleanLine(name)) return;
     // At `insertAt` — "New scenario below" on a card — or at the end.
+    saveOnOpen.current = true;
     setEditing(newScenarioDraft(name, insertAt));
   };
   // specs/ui/ui.feature.md "Select scenarios via up and down keys": the
