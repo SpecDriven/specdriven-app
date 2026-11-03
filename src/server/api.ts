@@ -3310,6 +3310,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
+  ["POST", "/api/plugins/marketplaces/:name/reclone", unlessHosted(market.postReclone)],
   ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
