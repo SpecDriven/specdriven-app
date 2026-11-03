@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.222 — 2026-11-03
+
+- A scenario added with + is saved the moment it opens, empty body and all ([#365](https://github.com/SpecDriven/specdriven-app/pull/365))
+
 ## v0.1.221 — 2026-11-02
 
 - The desktop app checks for updates once a day and marks the version chip ([#364](https://github.com/SpecDriven/specdriven-app/pull/364))
