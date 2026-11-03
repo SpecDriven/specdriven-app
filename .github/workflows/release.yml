@@ -98,12 +98,24 @@ jobs:
       # same tag fails, on purpose. --latest, because /releases/latest is how
       # the installers and the app find the newest version, and a
       # windows-v<version> release must never take that place.
+      #
+      # The body starts with what changed: the version's section of
+      # CHANGELOG.md, which `bun run bump` wrote into the release commit
+      # (docs/releasing.md "Release notes"). A tag whose tree has no section
+      # for its version was not cut by bump, and is not published.
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
-          notes="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
+          changes="$(awk -v want="## v$VERSION" '
+            index($0, "## ") == 1 { if (on) exit; on = ($0 == want || index($0, want " ") == 1); next }
+            on' CHANGELOG.md | sed '/./,$!d')"
+          if [ -z "$changes" ]; then
+            echo "CHANGELOG.md has no section for v$VERSION; cut releases with \`bun run bump\`" >&2
+            exit 1
+          fi
+          install="$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s' \
             "Source snapshot of $GITHUB_REPOSITORY at v$VERSION ($GITHUB_SHA)." \
             "**Install:** \`curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | sh\` downloads \`specdriven-$VERSION-src.zip\`, checks the signature on \`SHASUMS256.txt\` and the zip's checksum against it, unpacks it under \`~/.specdriven/app\`, builds it and starts it. It offers to install [Bun](https://bun.sh) first if the machine has none." \
             "**Install on Windows** (PowerShell): \`irm https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.ps1 | iex\` does the same under \`%USERPROFILE%\\.specdriven\\app\`, adds SpecDriven to the Start menu and starts it." \
@@ -112,10 +124,11 @@ jobs:
             "**To verify this release by hand:** \`gh attestation verify specdriven-$VERSION-src.zip --repo $GITHUB_REPOSITORY\` checks GitHub's build provenance (this workflow, this commit). Offline, \`SHASUMS256.txt.sig\` is an SSH signature by the SpecDriven release key, \`release@specdriven.app\`; with the key the installers embed in a one-line \`allowed_signers\` file, \`ssh-keygen -Y verify -f allowed_signers -I release@specdriven.app -n specdriven-release -s SHASUMS256.txt.sig < SHASUMS256.txt\`, then \`sha256sum -c SHASUMS256.txt\`. The steps are spelled out in [docs/installation.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSION/docs/installation.md)." \
             "SpecDriven is built with [Bun](https://bun.sh): \`bun install --frozen-lockfile\`, then \`bun run start\` for the web app or \`bun run build:desktop\` for the desktop installer." \
             "GitHub also attaches its own *Source code (zip)* and *Source code (tar.gz)* to every release; \`specdriven-$VERSION-src.zip\` is the one \`SHASUMS256.txt\` vouches for and the installers download.")"
+          printf "## What's changed\n\n%s\n\n## Install and verify\n\n%s\n" "$changes" "$install" > release-notes.md
           gh release create "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --title "SpecDriven v$VERSION" \
-            --notes "$notes" \
+            --notes-file release-notes.md \
             --latest \
             "specdriven-$VERSION-src.zip" \
             SHASUMS256.txt SHASUMS256.txt.sig install.sh install.ps1

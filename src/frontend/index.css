@@ -2771,6 +2771,54 @@ aside > .user-corner {
   white-space: nowrap;
 }
 
+/* A release whose notes are not read yet (What's new). */
+.unseen-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.whats-new-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* What's new: one section per release, a line per change. */
+.settings-group.release-notes {
+  padding: 0.55rem 0.9rem;
+}
+
+.release-notes ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  line-height: 1.45;
+}
+
+.release-note-pr {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.release-note-empty {
+  color: var(--text-2);
+}
+
+.release-installed {
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
 .user-menu {
   bottom: calc(100% + 0.35rem);
   left: 0;
