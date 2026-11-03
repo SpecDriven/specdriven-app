@@ -127,6 +127,7 @@ import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
 import { DataPage } from "./DataPage";
 import { ImagesPage } from "./ImagesPage";
+import { UpdatesPage } from "./UpdatesPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -1290,6 +1291,9 @@ export function App() {
   // folder switch and Sync, every create, edit, move and delete, settings,
   // agents — and opens editors as previews.
   const [readOnly, setReadOnly] = useState(false);
+  // Check for Updates… belongs to the desktop app (src/frontend/main.tsx marks
+  // it): the web server cannot replace itself, so its menu does not offer it.
+  const canCheckForUpdates = typeof document !== "undefined" && Boolean(document.documentElement.dataset.desktop);
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
   const [hosted, setHosted] = useState(false);
@@ -2324,7 +2328,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : "Observability"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : appPage === "updates" ? "Updates" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -2757,6 +2761,8 @@ export function App() {
   const openData = () => openAppPage("data");
   /** Images (src/frontend/ImagesPage.tsx): the stored images, the unreferenced ones to delete. */
   const openImages = () => openAppPage("images");
+  /** Updates (src/frontend/UpdatesPage.tsx): Check for Updates…, and the desktop app updating itself. */
+  const openUpdates = () => openAppPage("updates");
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -9935,6 +9941,22 @@ export function App() {
                   openPlugins();
                 },
               },
+              // Check for Updates… (specs/app/app-updates.feature.md): the
+              // desktop app alone can replace itself; the demo and a hosted
+              // copy never change.
+              ...(canCheckForUpdates && !demo && !hosted
+                ? [
+                    {
+                      id: "updates",
+                      label: "Check for Updates…",
+                      icon: <RefreshCw size={13} />,
+                      onSelect: () => {
+                        setDrawerOpen(false);
+                        openUpdates();
+                      },
+                    },
+                  ]
+                : []),
               // The app's own logs and their verbosity; the hosted demo's
               // server logs are not a visitor's to read.
               ...(demo
@@ -10147,6 +10169,9 @@ export function App() {
         ) : appPageShown === "images" ? (
           /* Images: every stored image with where it is used; delete the unreferenced. */
           <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
+        ) : appPageShown === "updates" ? (
+          /* Updates: the newest release, and the desktop app installing it. */
+          <UpdatesPage onClose={closeAppPage} />
         ) : readOnly && editing && selected && feature ? (
           /* The read-only site: a scenario's page is a page, not the editor —
              its trail, the way to its neighbours, and the scenario rendered

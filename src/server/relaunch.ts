@@ -55,3 +55,36 @@ export function parseBootInfo(value: string | undefined): BootInfo {
 export function bootInfo(): BootInfo {
   return parseBootInfo(process.env.SPECDRIVEN_BOOT);
 }
+
+// ---------------------------------------------------------------------------
+// Switching to an installed newer version (specs/app/app-updates.feature.md
+// "restart into the new version"): the desktop shell registers how — it
+// alone knows which executable runs and can start another after it quits —
+// and the web server registers nothing, so Restart there is the user's.
+
+export type ActivationResult =
+  | { restart: "relaunching" }
+  /** The shell cannot swap itself here; the new app is at `path`. */
+  | { restart: "manual"; reason: string; path: string | null };
+
+/** Put the version built under `newSourceDir` in place of the running one and restart into it. */
+export type Activator = (newSourceDir: string) => Promise<ActivationResult>;
+
+let activator: Activator | null = null;
+
+export function setActivator(fn: Activator | null): Activator | null {
+  const previous = activator;
+  activator = fn;
+  return previous;
+}
+
+/** Whether something is registered to restart into a newer version. */
+export function canActivate(): boolean {
+  return activator !== null;
+}
+
+/** Restart into the version under `newSourceDir`; throws when nothing is registered to. */
+export async function activate(newSourceDir: string): Promise<ActivationResult> {
+  if (!activator) throw new Error("This app cannot restart into a new version by itself; start the new one by hand");
+  return activator(newSourceDir);
+}

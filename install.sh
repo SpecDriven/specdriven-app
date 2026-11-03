@@ -28,6 +28,8 @@
 #   SPECDRIVEN_BUN_INSTALLER_URL  Bun's installer               (default: https://bun.sh/install)
 #   SPECDRIVEN_RELEASE_PUBKEY  the key releases must be signed with (default: the one below;
 #                            for installing from a release server of your own)
+#   SPECDRIVEN_HANDOVER      start the app (Linux) or open the .dmg (macOS) at the end
+#                            (default: 1; 0 builds and stops — how the app updates itself)
 #
 # POSIX sh on purpose: this runs on whatever /bin/sh the machine has, before
 # we know anything about it.
@@ -40,6 +42,9 @@ PREFIX="${SPECDRIVEN_HOME:-$HOME/.specdriven}"
 APP_DIR="$PREFIX/app"
 VERSION="${SPECDRIVEN_VERSION:-latest}"
 VERSION="${VERSION#v}"
+# 0: build, but neither start the app nor open the .dmg — the running app
+# updating itself (specs/app/app-updates.feature.md) does its own restart.
+HANDOVER="${SPECDRIVEN_HANDOVER:-1}"
 
 # The SpecDriven release signing key. .github/workflows/release.yml signs each
 # release's SHASUMS256.txt with its private half (an SSH signature, as
@@ -376,14 +381,18 @@ info "Building the desktop app — this fetches Electron and takes a few minutes
 
 # On Linux the AppImage is the app, so it is started here. On macOS nothing is
 # started: the .dmg is opened at the very end instead, for dragging the app
-# into Applications.
+# into Applications. With SPECDRIVEN_HANDOVER=0 neither happens: the AppImage
+# is still made executable, since that is part of building it.
 started=""
 case "$(uname -s)" in
   Linux)
     for image in "$TARGET"/release/*.AppImage; do
       if [ -f "$image" ]; then
         chmod +x "$image"
-        if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+        if [ "$HANDOVER" = "0" ]; then
+          info ""
+          info "Not starting ${image}: SPECDRIVEN_HANDOVER=0."
+        elif [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
           info ""
           info "Starting ${image}…"
           # Detached, so the app outlives the shell that installed it.
@@ -413,7 +422,8 @@ info "  bun run start            # http://localhost:3000"
 
 # The .dmg is the copy to hand on; opening it last mounts it in Finder so it can
 # be dragged into Applications. Linux has no equivalent, so nothing runs there.
-case "$(uname -s)" in
+# Not with SPECDRIVEN_HANDOVER=0: the app updating itself swaps the bundle in.
+[ "$HANDOVER" = "0" ] || case "$(uname -s)" in
   Darwin)
     # -arm64 on Apple silicon; electron-builder leaves the x64 suffix off.
     for dmg in "$TARGET"/release/SpecDriven-"$VERSION"*.dmg; do

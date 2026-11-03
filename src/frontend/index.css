@@ -9846,3 +9846,55 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .publish-step-failed .publish-step-state {
   color: var(--danger-fg);
 }
+
+/* The Updates page (src/frontend/UpdatesPage.tsx). */
+.update-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.update-status .update-headline {
+  margin: 0;
+  font-weight: 600;
+}
+
+.update-status p {
+  margin: 0;
+}
+
+.update-status .update-error {
+  color: var(--danger-fg);
+}
+
+.update-status .update-log {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-manual {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.update-manual .upgrade-command {
+  flex: 1;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}

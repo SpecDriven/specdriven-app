@@ -169,6 +169,10 @@ the new key and refuse the old ones; `SPECDRIVEN_VERSION=<older>` therefore
 stops working for releases signed before the rotation, which is the point.
 Someone holding an installer from before the rotation sees "not signed by
 the SpecDriven release key" with a pointer at the current `install.sh`.
+So does the app's own *Check for Updates…* ([installation.md](installation.md#updating)),
+which runs the installer that shipped in the installed source: the first
+release after a rotation has to be installed with the one-liner from `main`
+once, and in-app updates work again from there.
 
 ## Deleting a release
 

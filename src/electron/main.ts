@@ -15,16 +15,18 @@ import {
   session,
   shell,
 } from "electron";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { constants, existsSync } from "node:fs";
+import { access, readFile, realpath, rename, rm } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { endAllChatSessions } from "../server/agentChat";
 import { applyStartupState, handleApi } from "../server/api";
+import { specdrivenHome } from "../server/appSource";
 import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
-import { setRelauncher } from "../server/relaunch";
+import { setActivator, setRelauncher, type ActivationResult } from "../server/relaunch";
+import { run } from "../server/run";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceTokenBackend } from "../server/confluenceTokens";
@@ -32,7 +34,8 @@ import { setJiraTokenBackend } from "../server/jiraTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setAhaTokenBackend } from "../server/ahaTokens";
 import { LEGACY_SECRET_FILES, setSecretBackendFactory } from "../server/secrets";
-import { DESKTOP_SCHEME } from "../frontend/route";
+import { appPagePath, DESKTOP_SCHEME } from "../frontend/route";
+import { appMenuTemplate } from "./appMenu";
 import { contextMenuTemplate } from "./contextMenu";
 import { startInspector, devtoolsUrl } from "./debugger";
 import { parseDesktopLink } from "./deepLink";
@@ -52,6 +55,7 @@ import {
   safeStorageAvailable,
 } from "./secureToken";
 import { mimeType, shellHtml, staticFilePath } from "./static";
+import { bundleOf, planActivation, previousBundle, swapBundle } from "./updateActivation";
 import {
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
@@ -64,6 +68,8 @@ import {
 } from "./windowState";
 
 const APP_ORIGIN = "app://specdriven";
+/** The Updates page (src/frontend/UpdatesPage.tsx), where Check for Updates… goes. */
+const UPDATES_PATH = appPagePath("updates");
 const DEV_URL = process.env.ELECTRON_DEV
   ? `http://localhost:${process.env.PORT || 3000}`
   : null;
@@ -277,6 +283,10 @@ function createWindow(): void {
 
   if (saved?.maximized) win.maximize();
 
+  // A window on screen is what an update's restart was for: the bundle it
+  // renamed aside can go (src/electron/updateActivation.ts).
+  win.webContents.once("did-finish-load", removePreviousBundle);
+
   win.on("closed", () => {
     win = null;
   });
@@ -332,11 +342,13 @@ function createWindow(): void {
 }
 
 /**
- * Development builds only: Electron's default menu plus a Debug menu that
- * starts and stops the main-process inspector (src/electron/debugger.ts).
- * A packaged app keeps the default menu and never opens a debug port.
+ * The application menu (src/electron/appMenu.ts): the standard roles plus
+ * Check for Updates…, which shows the Updates page in the window — the
+ * one deep links use. Development builds add a Debug menu that starts and
+ * stops the main-process inspector (src/electron/debugger.ts); a packaged
+ * app never opens a debug port.
  */
-function installDebugMenu(): void {
+function installAppMenu(): void {
   const setRunning = (running: boolean) => {
     const stop = Menu.getApplicationMenu()?.getMenuItemById("debugger-stop");
     if (stop) stop.enabled = running;
@@ -367,34 +379,81 @@ function installDebugMenu(): void {
     if (response === 0) void clipboard.writeText(devtoolsUrl(url));
     if (response === 1) void clipboard.writeText(url);
   };
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
-      ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
-      { role: "fileMenu" },
-      { role: "editMenu" },
-      { role: "viewMenu" },
-      { role: "windowMenu" },
-      {
-        label: "Debug",
-        submenu: [
-          // Starts the inspector, or shows the url of the one already
-          // running (a launch with --inspect).
-          { label: "Main-Process Debugger…", click: () => void start() },
-          {
-            id: "debugger-stop",
-            label: "Stop Main-Process Debugger",
-            enabled: Boolean(inspector.url()),
-            click: () => {
-              inspector.close();
-              setRunning(false);
-            },
-          },
-          { type: "separator" },
-          { role: "toggleDevTools", label: "Toggle Window DevTools" },
-        ],
+  const debug: Electron.MenuItemConstructorOptions[] = [
+    // Starts the inspector, or shows the url of the one already
+    // running (a launch with --inspect).
+    { label: "Main-Process Debugger…", click: () => void start() },
+    {
+      id: "debugger-stop",
+      label: "Stop Main-Process Debugger",
+      enabled: Boolean(inspector.url()),
+      click: () => {
+        inspector.close();
+        setRunning(false);
       },
-    ]),
+    },
+    { type: "separator" },
+    { role: "toggleDevTools", label: "Toggle Window DevTools" },
+  ];
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      appMenuTemplate({
+        platform: process.platform,
+        onCheckForUpdates: () => links.open(UPDATES_PATH),
+        ...(app.isPackaged ? {} : { debug }),
+      }),
+    ),
   );
+}
+
+/** The install's app directory, ~/.specdriven/app, whose `current` link names the installed source. */
+const installAppDir = join(specdrivenHome(process.env, homedir()), "app");
+
+/**
+ * Restarting into an installed newer version (src/electron/updateActivation.ts):
+ * the plan, carried out — the bundle swapped on a Mac — then this instance
+ * relaunched as the new executable once the route's answer is out.
+ */
+async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
+  const plan = await planActivation({
+    platform: process.platform,
+    execPath: process.execPath,
+    newSourceDir,
+    appDir: installAppDir,
+    fs: {
+      realpath: (p) => realpath(p),
+      writable: (dir) =>
+        access(dir, constants.W_OK).then(
+          () => true,
+          () => false,
+        ),
+    },
+  });
+  if (plan.kind === "manual") return { restart: "manual", reason: plan.reason, path: plan.path };
+  if (plan.kind === "swap-bundle") {
+    await swapBundle(plan, {
+      rename: (from, to) => rename(from, to),
+      remove: (p) => rm(p, { recursive: true, force: true }),
+      copy: async (from, to) => {
+        const result = await run("ditto", [from, to]);
+        if (result.exitCode !== 0) throw new Error(`ditto failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`);
+      },
+    });
+  }
+  app.relaunch({ execPath: plan.execPath, args: [] });
+  // quit, not exit: will-quit still ends the agent sessions and flushes.
+  setTimeout(() => app.quit(), RELAUNCH_DELAY_MS);
+  return { restart: "relaunching" };
+}
+
+/** A beat after the restart route has answered, so the client hears it. */
+const RELAUNCH_DELAY_MS = 300;
+
+/** The bundle an update renamed aside, removed once this launch has shown its window. */
+function removePreviousBundle(): void {
+  const bundle = bundleOf(process.execPath);
+  if (!bundle) return;
+  void rm(previousBundle(bundle), { recursive: true, force: true }).catch(() => {});
 }
 
 // One main window (specs/app/desktop-app.feature.md "Window"): a second launch
@@ -444,10 +503,8 @@ if (!app.requestSingleInstanceLock()) {
           : await dialog.showOpenDialog(opts);
       return picked.canceled ? null : (picked.filePaths[0] ?? null);
     });
-    if (!app.isPackaged) {
-      installDebugMenu();
-      if (process.platform === "darwin" && existsSync(iconFile)) app.dock?.setIcon(iconFile);
-    }
+    installAppMenu();
+    if (!app.isPackaged && process.platform === "darwin" && existsSync(iconFile)) app.dock?.setIcon(iconFile);
     // A self-fix's "Rebuild & restart" (specs/app/self-healing.feature.md):
     // the next launch goes through the boot shim, which picks the bundle.
     setRelauncher(() => {
@@ -455,6 +512,8 @@ if (!app.requestSingleInstanceLock()) {
       // quit, not exit: will-quit still ends the agent sessions and flushes.
       app.quit();
     });
+    // Check for Updates' "Restart now" (specs/app/app-updates.feature.md).
+    setActivator(activateUpdate);
     await applyStartupState();
     // Launched by a link on Windows or Linux; on macOS open-url already ran.
     links.holdLaunchLink(process.argv);

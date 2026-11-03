@@ -1,0 +1,179 @@
+// Automates specs/app/app-updates.feature.md "restart into the new version"
+// on the desktop shell's side (src/electron/updateActivation.ts): which
+// executable the next launch is on each platform, when the running Mac
+// bundle is replaced in place, and how that swap is undone if the copy
+// fails. Pure decisions over temp directories — no Electron.
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { bundleOf, planActivation, previousBundle, swapBundle, type ActivationFs } from "../src/electron/updateActivation";
+
+let root: string;
+let appDir: string;
+/** The new version's source tree, built. */
+let newSource: string;
+let newApp: string;
+
+async function makeBuilt(dir: string, os: NodeJS.Platform): Promise<string> {
+  if (os === "darwin") {
+    const bundle = join(dir, "release", "mac-arm64", "SpecDriven.app");
+    await mkdir(join(bundle, "Contents", "MacOS"), { recursive: true });
+    await writeFile(join(bundle, "Contents", "MacOS", "SpecDriven"), "");
+    return bundle;
+  }
+  if (os === "win32") {
+    const exe = join(dir, "release", "win-unpacked", "SpecDriven.exe");
+    await mkdir(dirname(exe), { recursive: true });
+    await writeFile(exe, "");
+    return exe;
+  }
+  const image = join(dir, "release", "SpecDriven-9.9.9-x86_64.AppImage");
+  await mkdir(dirname(image), { recursive: true });
+  await writeFile(image, "");
+  return image;
+}
+
+const writableDirs = new Set<string>();
+const fs: ActivationFs = {
+  realpath: (p) => realpath(p),
+  writable: async (dir) => writableDirs.has(dir),
+};
+
+beforeEach(async () => {
+  root = await realpath(await mkdtemp(join(tmpdir(), "specdriven-activate-")));
+  appDir = join(root, "home", "app");
+  newSource = join(appDir, "specdriven-9.9.9");
+  await mkdir(newSource, { recursive: true });
+  newApp = await makeBuilt(newSource, "darwin");
+  writableDirs.clear();
+});
+
+afterEach(async () => {
+  await rm(root, { recursive: true, force: true });
+});
+
+describe("which executable the next launch is", () => {
+  test("a Mac app in Applications is replaced where it is, and started from there", async () => {
+    const applications = join(root, "Applications");
+    const running = join(applications, "SpecDriven.app");
+    await mkdir(join(running, "Contents", "MacOS"), { recursive: true });
+    writableDirs.add(applications);
+    const plan = await planActivation({
+      platform: "darwin",
+      execPath: join(running, "Contents", "MacOS", "SpecDriven"),
+      newSourceDir: newSource,
+      appDir,
+      fs,
+    });
+    expect(plan).toEqual({
+      kind: "swap-bundle",
+      bundle: running,
+      newBundle: newApp,
+      execPath: join(running, "Contents", "MacOS", "SpecDriven"),
+    });
+  });
+
+  test("a Mac app run from the install's own release directory is not copied anywhere, the new one just starts", async () => {
+    const oldSource = join(appDir, "specdriven-0.1.220");
+    const oldApp = await makeBuilt(oldSource, "darwin");
+    const plan = await planActivation({
+      platform: "darwin",
+      execPath: join(oldApp, "Contents", "MacOS", "SpecDriven"),
+      newSourceDir: newSource,
+      appDir,
+      fs,
+    });
+    expect(plan).toEqual({ kind: "relaunch-into", execPath: join(newApp, "Contents", "MacOS", "SpecDriven") });
+  });
+
+  test("an Applications folder that is not writable, or no bundle at all, leaves the swap to the user and says where the new app is", async () => {
+    const applications = join(root, "Applications");
+    const running = join(applications, "SpecDriven.app");
+    await mkdir(join(running, "Contents", "MacOS"), { recursive: true });
+    const locked = await planActivation({
+      platform: "darwin",
+      execPath: join(running, "Contents", "MacOS", "SpecDriven"),
+      newSourceDir: newSource,
+      appDir,
+      fs,
+    });
+    expect(locked).toEqual({
+      kind: "manual",
+      reason: `${applications} is not writable, so SpecDriven.app cannot be replaced from here`,
+      path: newApp,
+    });
+    const dev = await planActivation({ platform: "darwin", execPath: join(root, "node_modules", "electron", "electron"), newSourceDir: newSource, appDir, fs });
+    expect(dev).toEqual({ kind: "manual", reason: "This SpecDriven is not running from an app bundle", path: newApp });
+  });
+
+  test("Windows and Linux start the new build where the installer left it", async () => {
+    const win = join(root, "win-source");
+    const exe = await makeBuilt(win, "win32");
+    expect(await planActivation({ platform: "win32", execPath: "C:\\old\\SpecDriven.exe", newSourceDir: win, appDir, fs })).toEqual({
+      kind: "relaunch-into",
+      execPath: exe,
+    });
+    const linux = join(root, "linux-source");
+    const image = await makeBuilt(linux, "linux");
+    expect(await planActivation({ platform: "linux", execPath: "/tmp/.mount_x/specdriven", newSourceDir: linux, appDir, fs })).toEqual({
+      kind: "relaunch-into",
+      execPath: image,
+    });
+  });
+
+  test("a new version with no built app cannot be started", async () => {
+    const unbuilt = join(appDir, "specdriven-9.9.10");
+    await mkdir(unbuilt, { recursive: true });
+    expect(await planActivation({ platform: "linux", execPath: "/x", newSourceDir: unbuilt, appDir, fs })).toEqual({
+      kind: "manual",
+      reason: `There is no built app under ${join(unbuilt, "release")}`,
+      path: null,
+    });
+  });
+
+  test("the bundle of an executable is its .app", () => {
+    expect(bundleOf("/Applications/SpecDriven.app/Contents/MacOS/SpecDriven")).toBe("/Applications/SpecDriven.app");
+    expect(bundleOf("/Users/me/Apps/SpecDriven.app/Contents/MacOS/SpecDriven")).toBe("/Users/me/Apps/SpecDriven.app");
+    expect(bundleOf("/usr/local/bin/electron")).toBeNull();
+    expect(previousBundle("/Applications/SpecDriven.app")).toBe("/Applications/SpecDriven.app.previous");
+  });
+});
+
+describe("swapping the running bundle", () => {
+  const plan = (bundle: string, newBundle: string) =>
+    ({ kind: "swap-bundle", bundle, newBundle, execPath: join(bundle, "Contents", "MacOS", "SpecDriven") }) as const;
+
+  test("the running bundle steps aside as .previous, a stale .previous first going, and the new one is copied to its path", async () => {
+    const log: string[] = [];
+    await swapBundle(plan("/Applications/SpecDriven.app", newApp), {
+      rename: async (a, b) => void log.push(`rename ${a} -> ${b}`),
+      remove: async (p) => void log.push(`remove ${p}`),
+      copy: async (a, b) => void log.push(`copy ${a} -> ${b}`),
+    });
+    expect(log).toEqual([
+      "remove /Applications/SpecDriven.app.previous",
+      "rename /Applications/SpecDriven.app -> /Applications/SpecDriven.app.previous",
+      `copy ${newApp} -> /Applications/SpecDriven.app`,
+    ]);
+  });
+
+  test("a copy that fails puts the running bundle back and reports the failure", async () => {
+    const log: string[] = [];
+    await expect(
+      swapBundle(plan("/Applications/SpecDriven.app", newApp), {
+        rename: async (a, b) => void log.push(`rename ${a} -> ${b}`),
+        remove: async (p) => void log.push(`remove ${p}`),
+        copy: async () => {
+          throw new Error("ditto failed: No space left on device");
+        },
+      }),
+    ).rejects.toThrow("ditto failed: No space left on device");
+    expect(log).toEqual([
+      "remove /Applications/SpecDriven.app.previous",
+      "rename /Applications/SpecDriven.app -> /Applications/SpecDriven.app.previous",
+      "remove /Applications/SpecDriven.app",
+      "rename /Applications/SpecDriven.app.previous -> /Applications/SpecDriven.app",
+    ]);
+  });
+});
