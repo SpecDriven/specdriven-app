@@ -22,13 +22,11 @@
  * happen, notes included, without touching anything.
  */
 import { $ } from "bun";
+import { compareVersions, parseVersion, SEMVER } from "../src/server/version";
 import { changelogSection, prependSection } from "../src/frontend/releaseNotes";
 import { CHANGELOG, notesSince, today } from "./release-notes";
 
 const PKG = "package.json";
-
-/** Release versions are plain X.Y.Z — no prerelease or build metadata. */
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 
 export interface Options {
   /** "major", "minor", "patch", or an explicit X.Y.Z. */
@@ -58,17 +56,9 @@ export function parseArgs(args: string[]): Options {
 }
 
 function parts(version: string): [number, number, number] {
-  const m = SEMVER.exec(version);
-  if (!m) throw new Error(`"${version}" is not a X.Y.Z version`);
-  return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-/** Negative, zero or positive as `a` sorts before, with, or after `b`. */
-function compare(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i++) {
-    if (a[i]! !== b[i]!) return a[i]! - b[i]!;
-  }
-  return 0;
+  const p = parseVersion(version);
+  if (!p) throw new Error(`"${version}" is not a X.Y.Z version`);
+  return p;
 }
 
 /**
@@ -91,7 +81,7 @@ export function nextVersion(current: string, bump: string): string {
   if (!SEMVER.test(bump)) {
     throw new Error(`"${bump}" is neither major, minor, patch, nor a version like 1.2.3`);
   }
-  if (compare(parts(bump), [major, minor, patch]) <= 0) {
+  if (compareVersions(bump, current) <= 0) {
     throw new Error(`${bump} does not come after the current ${current}`);
   }
   return bump;

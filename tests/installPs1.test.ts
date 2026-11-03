@@ -510,6 +510,25 @@ test.skipIf(!PWSH)("the run ends with the app built and started from release/win
   ]);
 });
 
+test.skipIf(!PWSH)("SPECDRIVEN_HANDOVER=0 builds the app and adds the shortcut, but does not start it", async () => {
+  const home = freshHome();
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const run = await runInstaller(good.url, home, {
+    tools: tools({ bun: FAKE_BUN }),
+    env: { FAKE_ON_BUILD: BUILDS_APP, SPECDRIVEN_HANDOVER: "0" },
+  });
+  expect(run.stderr).toBe("");
+  expect(run.code).toBe(0);
+  expect(run.stdout).toContain("Not starting ");
+  expect(run.stdout).toContain(`SpecDriven ${VERSION} is built.`);
+  expect(run.stdout).not.toContain("is running.");
+  await Bun.sleep(200);
+  expect(logLines(home)).toEqual([
+    `${realpathSync(target)} | install --frozen-lockfile`,
+    `${realpathSync(target)} | run build:desktop --local`,
+  ]);
+});
+
 test.skipIf(!PWSH)("a build that fails stops the run and says where the checkout is", async () => {
   const home = freshHome();
   const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);

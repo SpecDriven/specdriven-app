@@ -28,6 +28,8 @@
 #   SPECDRIVEN_BUN_INSTALLER_URL  Bun's installer               (default: https://bun.sh/install.ps1)
 #   SPECDRIVEN_RELEASE_PUBKEY  the key releases must be signed with (default: the one below;
 #                            for installing from a release server of your own)
+#   SPECDRIVEN_HANDOVER      start the app at the end (default: 1; 0 builds and stops --
+#                            how the app updates itself)
 #
 # Written for Windows PowerShell 5.1, which every Windows 10 and 11 has, and
 # PowerShell 7. ASCII only: 5.1 reads a script file without a BOM in the
@@ -75,6 +77,9 @@
     $prefix = if ($env:SPECDRIVEN_HOME) { $env:SPECDRIVEN_HOME } else { Join-Path $HOME '.specdriven' }
     $appDir = Join-Path $prefix 'app'
     $version = if ($env:SPECDRIVEN_VERSION) { $env:SPECDRIVEN_VERSION } else { 'latest' }
+    # 0: build, but do not start the app -- the running app updating itself
+    # (specs/app/app-updates.feature.md) does its own restart.
+    $handover = if ($env:SPECDRIVEN_HANDOVER) { $env:SPECDRIVEN_HANDOVER } else { '1' }
     if ($version.StartsWith('v')) { $version = $version.Substring(1) }
 
     # The SpecDriven release signing key, the same line install.sh carries:
@@ -461,12 +466,17 @@
     }
 
     Say ''
-    Say "Starting $exe..."
-    # Detached, so the app outlives the shell that installed it.
-    Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe)
-
-    Say ''
-    Say "SpecDriven $version is running."
+    if ($handover -eq '0') {
+      Say "Not starting ${exe}: SPECDRIVEN_HANDOVER=0."
+      Say ''
+      Say "SpecDriven $version is built."
+    } else {
+      Say "Starting $exe..."
+      # Detached, so the app outlives the shell that installed it.
+      Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe)
+      Say ''
+      Say "SpecDriven $version is running."
+    }
     Say "The app is in $(Split-Path -Parent $exe); the web app runs from $current with:"
     Say ''
     Say '  bun run start            # http://localhost:3000'

@@ -869,6 +869,64 @@ test("the run ends with the .dmg opened, and nothing started", async () => {
   expect(stdout.trim().split("\n").at(-1)).toBe(`Opening ${dmg}…`);
 });
 
+test("SPECDRIVEN_HANDOVER=0 builds the macOS app and opens nothing", async () => {
+  // The running app updating itself (specs/app/app-updates.feature.md)
+  // swaps the new bundle in and restarts on its own, so the installer must
+  // leave the hand-over to it.
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const app = join(target, "release", "mac-arm64", "SpecDriven.app");
+  const dmg = join(target, "release", `SpecDriven-${VERSION}-arm64.dmg`);
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Darwin"),
+    bun: FAKE_BUN,
+    open: FAKE_OPEN,
+  });
+  const env = { ...fakeRun(log, `mkdir -p ${shellQuote(app)}/Contents && : > ${shellQuote(dmg)}`), SPECDRIVEN_HANDOVER: "0" };
+
+  const { stdout, stderr, code } = await runInstaller(good.url, home, { tools, env });
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(logLines(log)).toEqual([`${target} | install --frozen-lockfile`, `${target} | run build:desktop --local`]);
+  expect(stdout).toContain(`SpecDriven ${VERSION} is built.`);
+  expect(stdout).not.toContain("Opening ");
+  expect(stdout).not.toContain("is running.");
+  expect(existsSync(join(app, "Contents"))).toBe(true);
+});
+
+test("SPECDRIVEN_HANDOVER=0 makes the AppImage runnable but does not start it", async () => {
+  const home = freshHome();
+  const log = join(home, "bun.log");
+  const target = join(home, ".specdriven", "app", `specdriven-${VERSION}`);
+  const image = join(target, "release", `SpecDriven-${VERSION}-x86_64.AppImage`);
+  const tools = toolbox(BUILD_TOOLS, {
+    uname: fakeUname("Linux"),
+    bun: FAKE_BUN,
+  });
+  const env = fakeRun(
+    log,
+    `mkdir -p ${shellQuote(join(target, "release"))}\n` +
+      `printf '#!/bin/sh\\nprintf "appimage | started\\\\n" >> ${shellQuote(log)}\\n' > ${shellQuote(image)}\n` +
+      `chmod 644 ${shellQuote(image)}`,
+  );
+
+  // A display is there; the flag alone keeps the app from starting.
+  const { stdout, stderr, code } = await runInstaller(good.url, home, {
+    tools,
+    env: { ...env, DISPLAY: ":0", SPECDRIVEN_HANDOVER: "0" },
+  });
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+  expect(stdout).toContain(`Not starting ${image}: SPECDRIVEN_HANDOVER=0.`);
+  expect(stdout).toContain(`SpecDriven ${VERSION} is built.`);
+  expect(stdout).not.toContain("is running.");
+  // Executable all the same: that is part of building it.
+  expect(lstatSync(image).mode & 0o111).not.toBe(0);
+  await Bun.sleep(100);
+  expect(logLines(log)).toEqual([`${target} | install --frozen-lockfile`, `${target} | run build:desktop --local`]);
+});
+
 test("the messages survive a single-byte locale", async () => {
   // In a Latin-1 locale the bytes of "…" count as letters, so "$app…" is read
   // as a variable named app-plus-junk and `set -u` stops the run there. Every

@@ -212,6 +212,7 @@ import { getLogSettings, getLogs, putLogSettings, savedVerbosity } from "./logs"
 import { getDataDoc, getDataDocAt, getDataDocHistory, getDataTable, getDataTables } from "./dataViewer";
 import { version as appVersion } from "../../package.json";
 import { sourceUrl } from "./sourceUrl";
+import { appUpdateHandlers } from "./appUpdate";
 import {
   anyIncompatible,
   checkDataFormat,
@@ -3184,6 +3185,14 @@ const unlessDemo =
       ? json({ error: "GitHub sign-in is disabled in demo mode" }, 403)
       : handler(req, params);
 
+/** 403 in demo mode — the demo cannot change itself. */
+const unlessDemoUpdate =
+  (handler: Handler): Handler =>
+  (req, params) =>
+    isDemoMode() ? json({ error: "The demo cannot update itself" }, 403) : handler(req, params);
+
+const appUpdate = appUpdateHandlers();
+
 /** 403 in demo mode — the demo has no Claude to sign in. */
 // The test management module's routes live in its plugin
 // (src/plugins/builtin/tests/host.ts) and exist only while it is mounted.
@@ -3309,6 +3318,12 @@ const market = marketplaceRoutes({
 const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
+  // Check for Updates (src/server/appUpdate.ts): the desktop app updating
+  // itself. Neither the demo nor a hosted worker installs anything.
+  ["GET", "/api/app-update", unlessHosted(unlessDemoUpdate(appUpdate.index!))],
+  ["POST", "/api/app-update/check", unlessHosted(unlessDemoUpdate(appUpdate.check!))],
+  ["POST", "/api/app-update/install", unlessHosted(unlessDemoUpdate(appUpdate.install!))],
+  ["POST", "/api/app-update/restart", unlessHosted(unlessDemoUpdate(appUpdate.restart!))],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
   ["POST", "/api/plugins/marketplaces/:name/reclone", unlessHosted(market.postReclone)],
   ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],

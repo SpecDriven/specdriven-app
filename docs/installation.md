@@ -92,6 +92,7 @@ of the installer was fetched; the message says so and names the current
 | `BUN_INSTALL` | where Bun's installer puts Bun (default `~/.bun`) |
 | `SPECDRIVEN_RELEASES_URL` | anything serving GitHub's `/latest` → `/tag/v<version>` redirect and `/download/v<version>/<asset>` layout, which is what [tests/install.test.ts](../tests/install.test.ts) stands up on loopback |
 | `SPECDRIVEN_RELEASE_PUBKEY` | the `ssh-ed25519 AAAA…` key releases must be signed with, instead of the SpecDriven one embedded in the script — for a release server of your own, signed with a key of your own; the tests sign their fake releases this way |
+| `SPECDRIVEN_HANDOVER` | `0` builds and stops: the AppImage is not started and the `.dmg` is not opened. The running app sets it when it [updates itself](#updating) |
 
 A Windows shell (Git Bash, MSYS, Cygwin) is pointed at install.ps1 instead:
 `curl | sh` needs a Unix shell.
@@ -148,6 +149,29 @@ when `SPECDRIVEN_TEST_PWSH` names a `pwsh` —
 and otherwise skip. The
 [install.ps1 workflow](../.github/workflows/install-ps1.yml) runs them on
 pushes and pull requests that change the installer or those tests.
+
+## Updating
+
+**Check for Updates…** in the desktop app — the user menu at the lower left,
+or the app menu on macOS (Help on Windows and Linux) — asks the releases
+page which release is newest and, where a newer one exists, installs it with
+the same installer: the `install.sh` (`install.ps1`) that shipped in the
+running app's source under `~/.specdriven/app/current`, run for that version
+with `SPECDRIVEN_INSTALL_BUN=0` and `SPECDRIVEN_HANDOVER=0`. Everything above
+applies — the signature and checksum, the atomic unpack, `current` moved,
+older versions cleared, the build with Bun — and the installer's output shows
+on the page as it runs. Then *Restart now*: on Windows and Linux the app
+starts the new tree's `SpecDriven.exe` or `.AppImage`; on macOS the app in
+Applications is renamed aside as `SpecDriven.app.previous`, the new one is
+copied to its path with `ditto`, and the app starts again from there, removing
+the previous bundle once it has shown a window. The behaviour is specified in
+[specs/app/app-updates.feature.md](../specs/app/app-updates.feature.md).
+
+The one-liners above do the same thing by hand — and are what to use after
+a [key rotation](releasing.md#rotating-the-key), since the in-app update runs
+the installer that was installed, which refuses a release signed with a key
+it does not know. The web server (`bun run start`) cannot replace itself: its
+Updates page offers the one-liner.
 
 ## Verifying a release by hand
 
