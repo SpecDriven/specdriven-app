@@ -167,6 +167,13 @@ copied to its path with `ditto`, and the app starts again from there, removing
 the previous bundle once it has shown a window. The behaviour is specified in
 [specs/app/app-updates.feature.md](../specs/app/app-updates.feature.md).
 
+The desktop app also looks for a newer release by itself: once a day while
+it runs, starting when it opens, without holding up the start. A newer
+release puts a dot on the version at the lower left and on **Check for
+Updates…**; hovering says which version is out, and either opens the
+Updates page. The web server, the demo and a hosted copy never check by
+themselves, and a check that fails is a debug line in the log, nothing more.
+
 The one-liners above do the same thing by hand — and are what to use after
 a [key rotation](releasing.md#rotating-the-key), since the in-app update runs
 the installer that was installed, which refuses a release signed with a key

@@ -19,13 +19,18 @@ import { homedir, platform } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { version as appVersion } from "../../package.json";
 import { appSourceDir } from "./appSource";
+import { isDemoMode } from "./demoMode";
 import { directoryExists, fileExists } from "./fsx";
+import { isHostedMode } from "./hostedMode";
 import { json, type Handler } from "./http";
 import { activate, appRuntime, canActivate, type ActivationResult } from "./relaunch";
 import { which } from "./run";
 import { BUN_MISSING, discoverSource, findBun, NO_SOURCE, type SourceInfo } from "./selfFix";
 import { RELEASE_REPO_URL } from "./sourceUrl";
+import { getLogger } from "./telemetry";
 import { isNewer, parseVersion } from "./version";
+
+const log = getLogger("app-update");
 
 type Env = Record<string, string | undefined>;
 
@@ -391,8 +396,63 @@ let lastCheck: UpdateCheck | null = null;
 /** For tests: no check, no install, the module's own dependencies. */
 export function resetUpdateState(): void {
   lastCheck = null;
+  lastDailyCheckAt = null;
+  dailyCheck = null;
   resetInstall();
   setUpdateDeps(null);
+}
+
+// ---------------------------------------------------------------------------
+// The daily check (specs/app/app-updates.feature.md "checks once a day"):
+// the desktop app asks of its own accord, so the version chip can say a
+// newer release is out before anyone thinks to look.
+
+export const DAILY_CHECK_MS = 24 * 60 * 60 * 1000;
+
+/** When this process last checked by itself — in memory, so a restart asks again. */
+let lastDailyCheckAt: number | null = null;
+let dailyCheck: Promise<void> | null = null;
+
+/** The newer version the last check found, manual or daily; null while this is the newest, or until a check. */
+export function updateAvailable(): string | null {
+  return lastCheck?.newer ? lastCheck.latest : null;
+}
+
+/**
+ * Check for a newer release without being asked: the desktop app alone
+ * (the web server cannot update itself, the demo and a hosted copy never
+ * change), at most once a day, counted from the last such check in this
+ * process whether it found a release or not. The answer lands in the same
+ * place the manual check's does, so GET /api/app-update and /api/state's
+ * `updateAvailable` show it; the caller is not kept waiting, and a check
+ * that fails — no network, a page that is not GitHub's — is a debug line,
+ * never a toast. Says whether a check was started.
+ */
+export function maybeCheckDaily(): boolean {
+  if (moduleDeps.runtime() !== "desktop" || isDemoMode() || isHostedMode()) return false;
+  const now = moduleDeps.now().getTime();
+  if (lastDailyCheckAt !== null && now - lastDailyCheckAt < DAILY_CHECK_MS) return false;
+  lastDailyCheckAt = now;
+  dailyCheck = moduleDeps
+    .check()
+    .then(
+      (check) => {
+        lastCheck = check;
+        log.debug(check.newer ? `SpecDriven ${check.latest} is available` : `SpecDriven ${check.current} is up to date`);
+      },
+      (e: unknown) => {
+        log.debug(`daily update check failed: ${(e as Error).message}`);
+      },
+    )
+    .finally(() => {
+      dailyCheck = null;
+    });
+  return true;
+}
+
+/** For tests: resolves once the daily check under way, if any, has settled. */
+export function dailyCheckSettled(): Promise<void> {
+  return dailyCheck ?? Promise.resolve();
 }
 
 function fail(e: unknown): Response {
