@@ -17,12 +17,39 @@ bun run bump major    # 0.1.4 -> 1.0.0
 bun run bump 1.2.3    # an explicit version
 ```
 
-The bump rewrites that one line in `package.json`, commits it, and tags
-`v<version>`. It refuses a dirty tree — so the release commit is the bump
+The bump rewrites that one line in `package.json`, adds the version's release
+notes to `CHANGELOG.md` (below), commits the two files, and tags `v<version>`.
+It refuses a dirty tree — so the release commit is the bump and its notes
 alone — a tag that already exists, and a version that does not come after the
 current one, since a released version names artifacts people already have.
-`--dry-run` shows the move without making it; `--no-git` writes `package.json`
-and stops there. See [scripts/bump-version.ts](../scripts/bump-version.ts).
+`--dry-run` shows the move and the notes without making them; `--no-git`
+writes `package.json` and stops there. See
+[scripts/bump-version.ts](../scripts/bump-version.ts).
+
+## Release notes
+
+[CHANGELOG.md](../CHANGELOG.md) lists what each release changed, newest
+first. Nobody writes it by hand: the bump makes the new version's section
+from the pull requests merged since the last `v*` tag — each squash-merged
+pull request's title, linked to the pull request — and leaves out the
+release commits, `chore` commits and dependency bumps. So a pull request's
+title is its release note: write it as what the user can now do or see.
+
+The same section is shown in three places:
+
+- `CHANGELOG.md`, in the release commit and so in every release's source zip;
+- the GitHub release, whose body starts with it under *What's changed* —
+  the release workflow copies it from the tagged `CHANGELOG.md` and refuses
+  to publish a tag whose file has no section for its version;
+- the app's *What's new* page (user menu, or the version beside the user
+  name), which the build bundles from `CHANGELOG.md`.
+
+To fix a note after the fact, edit `CHANGELOG.md` on `main`: the app and the
+next releases' zips pick that up. A published GitHub release keeps the body it
+was created with. `bun scripts/release-notes.ts section v<version>` prints one
+version's section; `bun scripts/release-notes.ts backfill` rewrites the whole
+file from the tags (it was made that way once, for the releases before notes
+existed). See [scripts/release-notes.ts](../scripts/release-notes.ts).
 
 ## Publishing
 
@@ -45,8 +72,9 @@ which:
   `install.sh` and `install.ps1` embed;
 - lists the zip in `SHASUMS256.txt`;
 - attests the zip and `SHASUMS256.txt` with GitHub build provenance;
-- creates a `v<version>` release on this repository, marked latest, with
-  the zip, `SHASUMS256.txt` and `SHASUMS256.txt.sig`, `install.sh` and
+- creates a `v<version>` release on this repository, marked latest, its body
+  the version's section of `CHANGELOG.md` above the install and verify notes,
+  with the zip, `SHASUMS256.txt` and `SHASUMS256.txt.sig`, `install.sh` and
   `install.ps1` attached.
 
 It takes seconds. Releases on this repository are immutable: nothing can be

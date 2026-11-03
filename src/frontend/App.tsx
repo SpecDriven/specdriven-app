@@ -93,6 +93,7 @@ import {
   CloudUpload,
   Database,
   Images,
+  Sparkles,
 } from "lucide-react";
 import { PublishRing, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
@@ -127,6 +128,7 @@ import { PluginsPage } from "./PluginsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
 import { DataPage } from "./DataPage";
 import { ImagesPage } from "./ImagesPage";
+import { WhatsNewPage, hasUnseenNotes, markNotesSeen } from "./WhatsNewPage";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import type { PromptOptions } from "./ModalPrompts";
 import { StartSessionDialog, aiTabState } from "./StartSessionDialog";
@@ -1002,6 +1004,25 @@ interface Listing {
   customAttributes: string;
 }
 
+/**
+ * What's new (specs/app/release-notes.feature.md): the release notes page,
+ * on every copy's user menu, the read-only site's included. `unseen` marks
+ * an installed version whose notes the user has not opened yet.
+ */
+export function whatsNewMenuItem(unseen: boolean, open: () => void): MenuItem {
+  return {
+    id: "whats-new",
+    label: (
+      <span className="whats-new-label">
+        What's new
+        {unseen && <span className="unseen-dot" role="img" aria-label="new release notes" />}
+      </span>
+    ),
+    icon: <Sparkles size={13} />,
+    onSelect: open,
+  };
+}
+
 /** The user menu's link to the running build's source
     (specs/app/open-source-license.feature.md): the app is open source
     (Apache-2.0), and every copy — the public demo included — offers it. None until the state
@@ -1747,9 +1768,9 @@ export function App() {
    * or null. Like a plugin's view it owns the pane and its url.
    */
   const [appPage, setAppPage] = useState<AppPage | null>(null);
-  // The read-only site opens none of the app's own pages: a /settings or
-  // /data link lands on what the url would show beneath it.
-  const appPageShown = readOnly ? null : appPage;
+  // The read-only site opens none of the app's own pages but What's new: a
+  // /settings or /data link lands on what the url would show beneath it.
+  const appPageShown = readOnly && appPage !== "whats-new" ? null : appPage;
   /** Whether opening the page pushed a history entry that closing can pop. */
   const appPagePushed = useRef(false);
   const [settingsDraft, setSettingsDraft] = useState(String(DEFAULT_AUTOSYNC_SECONDS));
@@ -2324,7 +2345,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : "Observability"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : appPage === "whats-new" ? "What's new" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -2757,6 +2778,19 @@ export function App() {
   const openData = () => openAppPage("data");
   /** Images (src/frontend/ImagesPage.tsx): the stored images, the unreferenced ones to delete. */
   const openImages = () => openAppPage("images");
+  /** What's new (src/frontend/WhatsNewPage.tsx): the release notes, newest first. */
+  const openWhatsNew = () => openAppPage("whats-new");
+  /** The running version's notes not opened yet in this browser. */
+  const [notesUnseen, setNotesUnseen] = useState(false);
+  useEffect(() => {
+    setNotesUnseen(hasUnseenNotes(appVersion));
+  }, [appVersion]);
+  // However the page opens — the menu, a link, Back — its notes count as seen.
+  useEffect(() => {
+    if (appPage !== "whats-new" || !appVersion) return;
+    markNotesSeen(appVersion);
+    setNotesUnseen(false);
+  }, [appPage, appVersion]);
   /** ✕ or ESC: back to what was open, or home after a deep link. */
   const closeAppPage = () => {
     if (appPagePushed.current) {
@@ -9892,8 +9926,8 @@ export function App() {
             className="user-menu"
             containerSelector=".user-corner"
             // The read-only site's visitor has no settings, plugins or logs:
-            // the menu offers the app's source alone.
-            items={readOnly ? sourceCodeMenuItems(sourceUrl) : [
+            // the menu offers the release notes and the app's source alone.
+            items={readOnly ? [whatsNewMenuItem(notesUnseen, openWhatsNew), ...sourceCodeMenuItems(sourceUrl)] : [
               {
                 id: "user-info",
                 label: "User info",
@@ -10037,7 +10071,11 @@ export function App() {
                     },
                   ]
                 : []),
-              // The running build's source, which every copy offers.
+              // The release notes and the running build's source, which every copy offers.
+              whatsNewMenuItem(notesUnseen, () => {
+                setDrawerOpen(false);
+                openWhatsNew();
+              }),
               ...sourceCodeMenuItems(sourceUrl),
             ]}
           />
@@ -10052,7 +10090,13 @@ export function App() {
             </span>
             <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
             {/* The build on screen, right of the user name. */}
-            {appVersion && <span className="app-version">v{appVersion}</span>}
+            {appVersion && (
+              <span className="app-version">
+                v{appVersion}
+                {/* An update whose notes are not read yet (What's new). */}
+                {notesUnseen && <span className="unseen-dot" role="img" aria-label="new release notes" />}
+              </span>
+            )}
           </button>
         </div>
       </aside>
@@ -10147,6 +10191,9 @@ export function App() {
         ) : appPageShown === "images" ? (
           /* Images: every stored image with where it is used; delete the unreferenced. */
           <ImagesPage onClose={closeAppPage} confirm={confirm} demo={demo} />
+        ) : appPageShown === "whats-new" ? (
+          /* What's new: every release's notes, the installed one marked. */
+          <WhatsNewPage installed={appVersion} onClose={closeAppPage} />
         ) : readOnly && editing && selected && feature ? (
           /* The read-only site: a scenario's page is a page, not the editor —
              its trail, the way to its neighbours, and the scenario rendered

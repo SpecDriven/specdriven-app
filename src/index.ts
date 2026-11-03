@@ -74,6 +74,8 @@ const shellRoutes = () => ({
   "/data": index,
   // Images (src/frontend/ImagesPage.tsx): the stored images, the unused ones first.
   "/images": index,
+  // What's new (src/frontend/WhatsNewPage.tsx): the release notes.
+  "/whats-new": index,
   // The plugins' urls (specs/app/plugins.feature.md "Plugin urls serve the
   // app shell") — the special folders' pages among them: each module
   // behind the kernel names its prefix in its manifest, on or off, so a

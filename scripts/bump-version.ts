@@ -10,16 +10,20 @@
  * package.json is the one place the version lives — it is what
  * electron-builder names the desktop artifacts after, what the release is
  * tagged as, and what install.sh looks for under releases/download/v<version>.
- * This writes it, commits that one file, and tags v<version>.
+ * This writes it, adds the new version's release notes to CHANGELOG.md — the
+ * pull requests merged since the last release tag (scripts/release-notes.ts)
+ * — commits the two files, and tags v<version>.
  *
  * Pushing is left to you, since pushing the tag is what publishes the release:
  *
  *   git push origin <branch> --follow-tags
  *
  * Pass --no-git to write package.json alone, or --dry-run to see what would
- * happen without touching anything.
+ * happen, notes included, without touching anything.
  */
 import { $ } from "bun";
+import { changelogSection, prependSection } from "../src/frontend/releaseNotes";
+import { CHANGELOG, notesSince, today } from "./release-notes";
 
 const PKG = "package.json";
 
@@ -124,7 +128,7 @@ async function assertGitReady(tag: string): Promise<void> {
   if (dirty) {
     throw new Error(
       `working tree is not clean — commit or stash first, so the release commit ` +
-        `is the bump alone:\n${dirty}`,
+        `is the bump and its notes alone:\n${dirty}`,
     );
   }
   const exists = await $`git rev-parse -q --verify refs/tags/${tag}`.nothrow().quiet();
@@ -139,18 +143,32 @@ async function run(opts: Options): Promise<void> {
 
   if (opts.git) await assertGitReady(tag);
 
+  // The notes come from git history, so --no-git writes none.
+  const notes = opts.git ? await notesSince(next, today()) : null;
+  const changelogFile = Bun.file(CHANGELOG);
+  const changelog = notes && (await changelogFile.exists()) ? await changelogFile.text() : "";
+  const nextChangelog = notes ? prependSection(changelog, notes) : null;
+
   if (opts.dryRun) {
     console.log(`Would bump ${current} -> ${next} in ${PKG}`);
-    if (opts.git) console.log(`Would commit ${PKG} and tag ${tag}`);
+    if (notes) {
+      console.log(`Would add to ${CHANGELOG}:\n\n${changelogSection(notes)}`);
+      console.log(`Would commit ${PKG} and ${CHANGELOG} and tag ${tag}`);
+    }
     return;
   }
 
   await Bun.write(PKG, setVersion(pkgJson, next));
   console.log(`  ✓ ${PKG}  ${current} -> ${next}`);
 
-  if (!opts.git) return;
+  if (!opts.git || !notes || nextChangelog === null) return;
 
-  await $`git commit -q -m ${`chore: release ${tag}`} -- ${PKG}`;
+  await Bun.write(CHANGELOG, nextChangelog);
+  const count = notes.entries.length;
+  console.log(`  ✓ ${CHANGELOG}  ${count} change${count === 1 ? "" : "s"} since the last release`);
+
+  await $`git add -- ${CHANGELOG}`.quiet();
+  await $`git commit -q -m ${`chore: release ${tag}`} -- ${PKG} ${CHANGELOG}`;
   await $`git tag -a ${tag} -m ${tag}`;
   console.log(`  ✓ committed and tagged ${tag}`);
 
