@@ -4,6 +4,14 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.221 — 2026-11-02
+
+- The desktop app checks for updates once a day and marks the version chip ([#364](https://github.com/SpecDriven/specdriven-app/pull/364))
+- Check for Updates…: the desktop app updates itself ([#363](https://github.com/SpecDriven/specdriven-app/pull/363))
+- Include CHANGELOG.md in the Docker images ([#362](https://github.com/SpecDriven/specdriven-app/pull/362))
+- Release notes in CHANGELOG.md, on the GitHub release and in the app ([#361](https://github.com/SpecDriven/specdriven-app/pull/361))
+- Test every step of "A blocked app does not push" ([#360](https://github.com/SpecDriven/specdriven-app/pull/360))
+
 ## v0.1.220 — 2026-11-02
 
 - Publish a feature to the Wiki and qTest from one dialog ([#359](https://github.com/SpecDriven/specdriven-app/pull/359))
