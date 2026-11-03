@@ -56,6 +56,41 @@ export function parentModuleProblem(parentUrl: string, sites: QtestSite[]): stri
   return null;
 }
 
+/** How one run through the qTest route ended, as the dialogs show it. */
+export type QtestPublishOutcome =
+  | { kind: "done"; result: QtestPublishResult }
+  | { kind: "failed"; error: string; status?: number; details?: FailureDetails };
+
+/**
+ * Create a feature's test cases through its route: the module and the
+ * cases written (`result.failure` set when qTest refused one mid-run), or
+ * the failure as one sentence with what the server knows of the call.
+ */
+export async function postQtestPublish(
+  file: string,
+  p: { parentUrl: string; scope: PublishScope },
+): Promise<QtestPublishOutcome> {
+  try {
+    const res = await fetch(`/api/features/${encodeURIComponent(file)}/qtest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parentUrl: p.parentUrl.trim(), scope: p.scope }),
+    });
+    const data = (await res.json()) as QtestPublishResult & { error?: string; details?: FailureDetails };
+    if (!res.ok) {
+      return {
+        kind: "failed",
+        error: data.error ?? `Creating the test cases failed (HTTP ${res.status})`,
+        status: res.status,
+        ...(data.details ? { details: data.details } : {}),
+      };
+    }
+    return { kind: "done", result: data };
+  } catch {
+    return { kind: "failed", error: "Could not reach the server — is it running?" };
+  }
+}
+
 export function QtestPublishDialog({
   file,
   featureName,
@@ -93,28 +128,18 @@ export function QtestPublishDialog({
     setBusy(true);
     setError(null);
     setDetails(null);
-    try {
-      const res = await fetch(`/api/features/${encodeURIComponent(file)}/qtest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ parentUrl: parentUrl.trim(), scope }),
-      });
-      const data = (await res.json()) as QtestPublishResult & { error?: string; details?: FailureDetails };
-      if (!res.ok) {
-        setError(data.error ?? `Creating the test cases failed (HTTP ${res.status})`);
-        setDetails(data.details ?? null);
-        return;
-      }
-      if (data.failure) {
-        setError(data.failure.message);
-        setDetails(data.failure.details ?? null);
-      }
-      onPublished(data);
-    } catch {
-      setError("Could not reach the server — is it running?");
-    } finally {
-      setBusy(false);
+    const outcome = await postQtestPublish(file, { parentUrl, scope });
+    setBusy(false);
+    if (outcome.kind === "failed") {
+      setError(outcome.error);
+      setDetails(outcome.details ?? null);
+      return;
     }
+    if (outcome.result.failure) {
+      setError(outcome.result.failure.message);
+      setDetails(outcome.result.failure.details ?? null);
+    }
+    onPublished(outcome.result);
   };
 
   return (
