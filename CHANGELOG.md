@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.225 — 2026-11-04
+
+- Publishing qTest test cases again deletes the test cases of scenarios no longer in the feature ([#370](https://github.com/SpecDriven/specdriven-app/pull/370))
+- Saving an image markup no longer fails on a flat line or a lone pen dot ([#368](https://github.com/SpecDriven/specdriven-app/pull/368))
+- The editor's toolbar has a Font color menu next to Bold ([#369](https://github.com/SpecDriven/specdriven-app/pull/369))
+
 ## v0.1.224 — 2026-11-04
 
 - The coding agent pane's composer bar stays on one row, and the pane is at least 420px wide ([#367](https://github.com/SpecDriven/specdriven-app/pull/367))
