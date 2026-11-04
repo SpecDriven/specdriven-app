@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.226 — 2026-11-04
+
+- The Updates page on macOS says Admin privileges may be needed to update ([#372](https://github.com/SpecDriven/specdriven-app/pull/372))
+- Restarting into a new version no longer fails with ENOTEMPTY on the previous bundle ([#371](https://github.com/SpecDriven/specdriven-app/pull/371))
+
 ## v0.1.225 — 2026-11-04
 
 - Publishing qTest test cases again deletes the test cases of scenarios no longer in the feature ([#370](https://github.com/SpecDriven/specdriven-app/pull/370))
