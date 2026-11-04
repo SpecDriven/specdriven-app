@@ -10,6 +10,10 @@
 // step the text of every editor up and down, on every tab, and the size
 // stays on this device.
 //
+// "Font color": a button next to Bold opens a menu of colors; picking one
+// wraps the selection in `<span style="color: …">`, which the Preview tab
+// shows in that color, and "Default color" takes it off again.
+//
 // React needs a DOM to run the Write tab's handlers, so this file borrows one
 // from happy-dom — only the globals React touches, given back afterwards, as
 // tests/descriptionFolderSwitch.test.tsx explains.
@@ -18,7 +22,8 @@ import { Window } from "happy-dom";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { renderMarkdown } from "../src/frontend/markdown";
+import { TEXT_COLORS, renderMarkdown, setColor } from "../src/frontend/markdown";
+import { safeColor } from "../src/frontend/markdownSyntax";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import { isOpenLinkClick, webLinkAt, webLinks } from "../src/frontend/weblinks";
 import { FONT_SCALES, stepFontScale } from "../src/frontend/fontSizePref";
@@ -398,5 +403,161 @@ describe("font size", () => {
     for (const editor of editors()) {
       expect(labels(editor)).toEqual(["Decrease font size (100%)", "Increase font size (100%)"]);
     }
+  });
+});
+
+describe("setColor", () => {
+  const red = "#e5484d";
+  const blue = "#0090ff";
+
+  test("wraps the selection in a colored span, leaving the text selected", () => {
+    expect(setColor("make this red", 10, 13, red)).toEqual({
+      text: `make this <span style="color: ${red}">red</span>`,
+      start: 39,
+      end: 42,
+    });
+  });
+
+  test("with nothing selected, leaves the caret inside an empty colored span", () => {
+    expect(setColor("ab", 1, 1, red)).toEqual({
+      text: `a<span style="color: ${red}"></span>b`,
+      start: 30,
+      end: 30,
+    });
+  });
+
+  test("recolors a span the selection is in, rather than nesting another", () => {
+    const text = `x <span style="color: ${red}">word</span> y`;
+    const inner = text.indexOf("word");
+    const r = setColor(text, inner, inner + 4, blue);
+    expect(r.text).toBe(`x <span style="color: ${blue}">word</span> y`);
+    expect(r.text.slice(r.start, r.end)).toBe("word");
+  });
+
+  test("recolors a span selected whole, tags and all", () => {
+    const text = `<span style="color: ${red}">word</span>`;
+    const r = setColor(text, 0, text.length, blue);
+    expect(r.text).toBe(`<span style="color: ${blue}">word</span>`);
+    expect(r.text.slice(r.start, r.end)).toBe("word");
+  });
+
+  test("Default color takes the span off, and leaves plain text alone", () => {
+    const text = `x <span style="color: ${red}">word</span> y`;
+    const inner = text.indexOf("word");
+    const r = setColor(text, inner + 1, inner + 3, null);
+    expect(r.text).toBe("x word y");
+    expect(r.text.slice(r.start, r.end)).toBe("or");
+    expect(setColor("plain", 0, 5, null)).toEqual({ text: "plain", start: 0, end: 5 });
+  });
+
+  test("offers colors every one of which is a color the preview accepts", () => {
+    expect(TEXT_COLORS.length).toBeGreaterThan(4);
+    for (const c of TEXT_COLORS) expect(safeColor(c.value)).toBe(c.value);
+  });
+});
+
+describe("colored text in the preview", () => {
+  test("shows a colored span in its color, with the markdown inside it read", () => {
+    expect(html(`a <span style="color: #e5484d">**red**</span> b`)).toBe(
+      `<p>a <span class="md-color" style="color:#e5484d"><strong>red</strong></span> b</p>`,
+    );
+    expect(html(`<span style='color:blue;'>x</span>`)).toBe(
+      `<p><span class="md-color" style="color:blue">x</span></p>`,
+    );
+  });
+
+  test("reads no other style, and no color that could break out of one", () => {
+    expect(safeColor("red; background: url(x)")).toBeNull();
+    expect(safeColor("expression(alert(1))")).toBeNull();
+    expect(safeColor("rgb(1, 2, 3)")).toBe("rgb(1, 2, 3)");
+    expect(html(`<span style="background: red">x</span>`)).toBe(
+      `<p>&lt;span style=&quot;background: red&quot;&gt;x&lt;/span&gt;</p>`,
+    );
+  });
+});
+
+describe("font color", () => {
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    localStorage.clear();
+    globalThis.fetch = (async () => new Response("[]")) as unknown as typeof fetch;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = undefined;
+    globalThis.fetch = realFetch;
+  });
+
+  let latest = "";
+  function Editor({ initial = "make this red" }: { initial?: string }) {
+    const [value, setValue] = useState(initial);
+    latest = value;
+    return <MarkdownEditor value={value} onChange={setValue} initialTab="write" />;
+  }
+
+  async function mount(el: React.ReactElement) {
+    root = createRoot(host!);
+    await act(async () => root!.render(el));
+    return host!.querySelector("textarea")!;
+  }
+
+  const labels = () =>
+    [...host!.querySelectorAll(".md-tools button")].map((b) => b.getAttribute("aria-label"));
+  const colorButton = () => host!.querySelector<HTMLButtonElement>('button[aria-label="Font color"]')!;
+  const menu = () => document.querySelector<HTMLElement>('[role="menu"][aria-label="Font color"]');
+  const item = (label: string) =>
+    [...menu()!.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find(
+      (b) => b.textContent === label,
+    )!;
+
+  test("the button sits next to the Bold button", async () => {
+    await mount(<Editor />);
+    const at = labels().indexOf("Bold");
+    expect(at).toBeGreaterThan(-1);
+    expect(labels()[at + 1]).toBe("Font color");
+  });
+
+  test("picking a color colors the selection; Default color takes it off", async () => {
+    const ta = await mount(<Editor />);
+    act(() => {
+      ta.focus();
+      ta.setSelectionRange(10, 13);
+    });
+    act(() => colorButton().click());
+    expect(menu()).not.toBeNull();
+    expect([...menu()!.querySelectorAll("[role=menuitem]")].map((b) => b.textContent)).toEqual([
+      ...TEXT_COLORS.map((c) => c.label),
+      "Default color",
+    ]);
+    act(() => item("Red").click());
+    expect(latest).toBe(`make this <span style="color: ${TEXT_COLORS[0]!.value}">red</span>`);
+    expect(menu()).toBeNull();
+
+    // The selection is still the word, so the menu acts on its span.
+    const start = latest.indexOf(">red") + 1;
+    act(() => {
+      ta.focus();
+      ta.setSelectionRange(start, start + 3);
+    });
+    act(() => colorButton().click());
+    act(() => item("Default color").click());
+    expect(latest).toBe("make this red");
+  });
+
+  test("ESC closes the menu and leaves the text alone", async () => {
+    await mount(<Editor />);
+    act(() => colorButton().click());
+    act(() => {
+      menu()!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }) as unknown as Event);
+    });
+    expect(menu()).toBeNull();
+    expect(latest).toBe("make this red");
   });
 });

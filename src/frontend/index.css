@@ -2389,6 +2389,48 @@ button.link:disabled {
   font-size: calc(0.75rem * var(--md-font-scale, 1));
 }
 
+/* Font color (specs/editor/common-editor.feature.md "Font color"): the
+   button's menu floats over the page (the editor clips), from under the
+   button or, short of room, over it. */
+.md-color-tool {
+  display: inline-flex;
+}
+
+.md-color-pop {
+  position: fixed;
+  z-index: 100;
+  width: 0;
+  height: 0;
+}
+
+.md-color-pop .md-color-menu {
+  top: 0;
+  right: 0;
+}
+
+.md-color-pop.above .md-color-menu {
+  top: auto;
+  bottom: 0;
+}
+
+.md-color-swatch {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+}
+
+.md-color-swatch.none {
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 0.5px),
+    var(--text-3) calc(50% - 0.5px),
+    var(--text-3) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
 .md-tools button:disabled {
   opacity: 0.35;
   cursor: default;

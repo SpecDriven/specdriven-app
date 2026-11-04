@@ -49,6 +49,13 @@ describe("inline", () => {
     );
   });
 
+  test("colored text keeps its color, the way Confluence stores one", () => {
+    expect(renderInlineStorage(`<span style="color: #e5484d">**red**</span>`)).toBe(
+      '<span style="color: #e5484d;"><strong>red</strong></span>',
+    );
+    expect(renderInlineStorage(`<span style="color: nope(1)">x</span>`)).toBe("x");
+  });
+
   test("links only to safe destinations; a javascript url stays text", () => {
     expect(renderInlineStorage("[docs](https://acme.com/a?b=1&c=2)")).toBe(
       '<a href="https://acme.com/a?b=1&amp;c=2">docs</a>',
