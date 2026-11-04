@@ -190,10 +190,10 @@ describe("filterCommands", () => {
 
 describe("geometry", () => {
   test("the pane stays between its minimum and 60% of the window", () => {
-    expect(clampAgentWidth(100, 1280)).toBe(320);
+    expect(clampAgentWidth(100, 1280)).toBe(420);
     expect(clampAgentWidth(500, 1280)).toBe(500);
     expect(clampAgentWidth(2000, 1280)).toBe(768);
-    expect(clampAgentWidth(500, 400)).toBe(320);
+    expect(clampAgentWidth(500, 400)).toBe(420);
   });
 
   test("the transcript follows new output only near its bottom", () => {

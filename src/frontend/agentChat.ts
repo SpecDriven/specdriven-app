@@ -392,8 +392,10 @@ export function applyCommand(command: SlashCommandInfo): string {
 
 // --- Geometry --------------------------------------------------------------
 
-export const AGENT_MIN_WIDTH = 320;
-export const AGENT_DEFAULT_WIDTH = 420;
+// Wide enough for the composer bar's one row — folder, model, effort, mode
+// and Send — with the names still readable.
+export const AGENT_MIN_WIDTH = 420;
+export const AGENT_DEFAULT_WIDTH = 460;
 
 /** Between the minimum and 60% of the window — the editor keeps the rest. */
 export function clampAgentWidth(width: number, innerWidth: number): number {
