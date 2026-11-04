@@ -28,6 +28,8 @@ import type {
 } from "../plugins/host/agents";
 import { AgentError, agents } from "../plugins/host/agents";
 import type {
+  AgentChoices,
+  AgentDefaultsPatch,
   ChatAgent,
   ChatEvent,
   ChatEventBody,
@@ -35,6 +37,7 @@ import type {
   ChatStatus,
   PermissionAnswer,
   PermissionMode,
+  EffortLevel,
   PermissionSuggestion,
   SlashCommandInfo,
 } from "./agentTypes";
@@ -144,6 +147,7 @@ function recordOf(session: ChatSession) {
     cwd: m.cwd,
     ...(m.agentSessionId ? { agentSessionId: m.agentSessionId } : {}),
     ...(m.model ? { model: m.model } : {}),
+    ...(m.effort ? { effort: m.effort } : {}),
     permissionMode: m.permissionMode,
     status: m.status,
     specs: [],
@@ -171,12 +175,14 @@ function applyInfo(session: ChatSession, info: Partial<AgentReadyInfo>): Omit<Ex
   const m = session.meta;
   if (info.agentSessionId) m.agentSessionId = info.agentSessionId;
   if (info.model) m.model = info.model;
+  if (info.effort) m.effort = info.effort;
   if (info.account) m.account = info.account;
   if (info.permissionMode) m.permissionMode = info.permissionMode;
   if (info.commands) session.commands = info.commands;
   return {
     ...(info.agentSessionId ? { agentSessionId: info.agentSessionId } : {}),
     ...(info.model ? { model: info.model } : {}),
+    ...(info.effort ? { effort: info.effort } : {}),
     ...(info.account ? { account: info.account } : {}),
     ...(info.permissionMode ? { permissionMode: info.permissionMode } : {}),
     ...(info.tools ? { tools: info.tools } : {}),
@@ -189,7 +195,7 @@ function hostFor(session: ChatSession): AgentHost {
   const announce = (info: Partial<AgentReadyInfo>, quiet = false) => {
     if (final()) return;
     const extra = applyInfo(session, info);
-    if (info.agentSessionId || info.model || info.permissionMode) void saveRecord(session);
+    if (info.agentSessionId || info.model || info.effort || info.permissionMode) void saveRecord(session);
     if (session.meta.status === "starting") {
       // Ready: the status event says the session can be typed into, and
       // carries what it is made of.
@@ -316,6 +322,10 @@ export interface CreateChatOptions {
   /** Sent as the first user message, before the pane says anything. */
   prompt?: string;
   permissionMode?: PermissionMode;
+  /** The model to start on; absent, the agent's default. */
+  model?: string;
+  /** The effort to start at, for an agent that takes one; absent, its default. */
+  effort?: EffortLevel;
   /** <settings dir>/sessions — see sessionsDirectory in agent.ts. */
   sessionsDir: string;
   id?: string;
@@ -357,6 +367,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     modes.length > 0 && opts.permissionMode && modes.includes(opts.permissionMode)
       ? opts.permissionMode
       : provider.defaultPermissionMode;
+  // Effort only where the agent takes one; a model any agent may be handed.
+  const effort = provider.capabilities.effort ? opts.effort : undefined;
   const session: ChatSession = {
     meta: {
       id,
@@ -367,6 +379,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       ...(opts.place.codeRepo ? { codeRepo: opts.place.codeRepo } : {}),
       startedAt: now.toISOString(),
       status: "starting",
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(effort ? { effort } : {}),
       permissionMode,
       lastSeq: 0,
     },
@@ -398,6 +412,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       dataRepo: opts.place.dataRepo,
       ...(opts.place.codeRepo ? { codeRepo: opts.place.codeRepo } : {}),
       permissionMode,
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(effort ? { effort } : {}),
       ...(opts.prompt ? { prompt: opts.prompt } : {}),
       signal: session.abort.signal,
       host: hostFor(session),
@@ -515,6 +531,100 @@ export async function setChatPermissionMode(id: string, mode: PermissionMode): P
   session.meta.permissionMode = mode;
   emit(session, { kind: "mode", permissionMode: mode });
   void saveRecord(session);
+}
+
+/** A session that can take a switch now: not ended, started. */
+function switchable(id: string): ChatSession & { session: AgentSession } {
+  const session = get(id);
+  if (isFinalStatus(session.meta.status)) throw new ChatError(409, "The session has ended");
+  if (session.meta.status === "starting" || !session.session) {
+    throw new ChatError(409, `${session.provider.label} is still starting`);
+  }
+  return session as ChatSession & { session: AgentSession };
+}
+
+/** What the pane picked becomes what new sessions start on; a provider
+    that cannot keep it leaves the default as it was. */
+async function keepAsDefault(provider: AgentProvider, patch: AgentDefaultsPatch): Promise<void> {
+  try {
+    await provider.setDefaults?.(patch);
+  } catch (e) {
+    console.error(`[agents] ${provider.id}: saving the default ${Object.keys(patch).join(", ")}: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * Switch a running session's model (null: the agent's own default) from its
+ * next request on, and make it the agent's default for new sessions.
+ */
+export async function setChatModel(id: string, model: string | null): Promise<void> {
+  const session = switchable(id);
+  const { provider } = session;
+  if (!provider.capabilities.canChangeModelMidSession || !session.session.setModel) {
+    throw new ChatError(409, `${provider.label} cannot switch models in a running session — start a new one`);
+  }
+  try {
+    await session.session.setModel(model);
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw e;
+  }
+  if (model) session.meta.model = model;
+  else delete session.meta.model;
+  emit(session, { kind: "model", model });
+  void saveRecord(session);
+  await keepAsDefault(provider, { model });
+}
+
+/** Switch a running session's effort (null: the agent's own default), and
+    make it the agent's default for new sessions. */
+export async function setChatEffort(id: string, effort: EffortLevel | null): Promise<void> {
+  const session = switchable(id);
+  const { provider } = session;
+  if (!provider.capabilities.effort || !session.session.setEffort) {
+    throw new ChatError(409, `${provider.label} has no effort setting`);
+  }
+  try {
+    await session.session.setEffort(effort);
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw e;
+  }
+  if (effort) session.meta.effort = effort;
+  else delete session.meta.effort;
+  emit(session, { kind: "effort", effort });
+  void saveRecord(session);
+  await keepAsDefault(provider, { effort });
+}
+
+/** The models an agent offers and what a new session starts on; null for
+    an agent with no choices to make. */
+export async function agentChoices(agent: ChatAgent, dataRepo: string | null): Promise<AgentChoices | null> {
+  const provider = agents.get(agent);
+  if (!provider) throw new ChatError(404, `No agent plugin provides "${agent}"`);
+  if (!provider.choices) return null;
+  try {
+    return await provider.choices({ dataRepo });
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw new ChatError(502, `${provider.label} could not list its models: ${(e as Error).message}`);
+  }
+}
+
+/** Make a model or effort what an agent's new sessions start on. */
+export async function setAgentDefaults(agent: ChatAgent, patch: AgentDefaultsPatch): Promise<void> {
+  const provider = agents.get(agent);
+  if (!provider) throw new ChatError(404, `No agent plugin provides "${agent}"`);
+  if (!provider.setDefaults) throw new ChatError(409, `${provider.label} keeps no default model or effort`);
+  if (patch.effort !== undefined && !provider.capabilities.effort) {
+    throw new ChatError(409, `${provider.label} has no effort setting`);
+  }
+  try {
+    await provider.setDefaults(patch);
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw e;
+  }
 }
 
 /** End the chat and forget it: the subprocess is aborted, the record kept. */

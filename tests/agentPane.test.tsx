@@ -5,17 +5,24 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  AgentPane,
   MODE_LABEL,
   STATUS_LABEL,
   SimulationWatermark,
   TranscriptRow,
+  effortItems,
+  effortsFor,
   folderItems,
   folderPath,
   knownFolders,
   modeItems,
+  modelItems,
+  modelLabel,
+  nameFromMessage,
 } from "../src/frontend/AgentPane";
 import {
   EMPTY_TRANSCRIPT,
+  agentChat,
   applyCommand,
   applyEvent,
   clampAgentWidth,
@@ -25,7 +32,7 @@ import {
   shouldFollow,
   toolSummary,
 } from "../src/frontend/agentChat";
-import type { ChatEvent, TranscriptItem } from "../src/frontend/agentChat";
+import type { AgentChoices, ChatEvent, TranscriptItem } from "../src/frontend/agentChat";
 import { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/codeGenTarget";
 import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agentsWith } from "./fixtures/agents";
 
@@ -395,5 +402,92 @@ describe("SimulationWatermark", () => {
     expect(html).toContain("agent-sim-watermark");
     expect(html).toContain("aria-hidden=\"true\"");
     expect(html.match(/Simulation…/g)?.length).toBeGreaterThan(1);
+  });
+});
+
+// The composer bar (specs/agents/agent-pane.feature.md "The composer bar
+// picks the folder, model, effort and mode"): the model and effort menus are
+// built from what the agent offers (AgentProvider.choices), and the
+// new-session screen is the same message box with the bar under it.
+describe("composer bar", () => {
+  const choices: AgentChoices = {
+    models: [
+      { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", description: "Most capable", efforts: ["low", "medium", "high", "xhigh", "max"] },
+      { value: "sonnet", resolvedModel: "claude-sonnet-5-5", displayName: "Sonnet 5.5", efforts: ["low", "medium", "high"] },
+      { value: "haiku", displayName: "Haiku 5.5", efforts: [] },
+      { value: "custom-model", displayName: "custom-model" },
+    ],
+    model: "opus",
+    effort: "high",
+  };
+
+  test("the model menu lists the agent's models, the running one checked and the default badged", () => {
+    const picked: (string | null)[] = [];
+    // A session reports the id its alias stands for; the row still matches.
+    const items = modelItems(choices, "claude-sonnet-5-5", CLAUDE_AGENT, (m) => picked.push(m));
+    expect(items.map((i) => i.id)).toEqual(["model:opus", "model:sonnet", "model:haiku", "model:custom-model"]);
+    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:sonnet"]);
+    expect(items.map((i) => i.keys)).toEqual(["1", "2", "3", "4"]);
+    expect(renderToStaticMarkup(<>{items[0]!.label}</>)).toContain("Default");
+    expect(items[0]!.description).toBe("Most capable");
+    items[2]!.onSelect!();
+    expect(picked).toEqual(["haiku"]);
+    expect(modelLabel(choices, "claude-opus-5-5")).toBe("Opus 5.5");
+    expect(modelLabel(choices, "elsewhere-1")).toBe("elsewhere-1");
+    expect(modelLabel(null, undefined)).toBe("Default model");
+  });
+
+  test("a model off the list still shows, and with no default the agent's own leads the menu", () => {
+    const items = modelItems({ ...choices, model: null }, "elsewhere-1", CLAUDE_AGENT, () => {});
+    expect(items.map((i) => i.id).slice(0, 2)).toEqual(["model:default", "model:elsewhere-1"]);
+    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:elsewhere-1"]);
+    expect(items[0]!.description).toBe("Whatever Claude picks on its own");
+    const fresh = modelItems({ ...choices, model: null }, null, CLAUDE_AGENT, () => {});
+    expect(fresh.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:default"]);
+  });
+
+  test("the effort menu offers the levels the model takes, after the agent's own default", () => {
+    expect(effortsFor(choices, "claude-sonnet-5-5")).toEqual(["low", "medium", "high"]);
+    expect(effortsFor(choices, "haiku")).toEqual([]);
+    // A row that does not say, or no row, offers every level.
+    expect(effortsFor(choices, "custom-model")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(effortsFor(null, "x")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // No model picked yet: the default model's levels.
+    expect(effortsFor(choices, null)).toHaveLength(5);
+    const picked: (string | null)[] = [];
+    const items = effortItems(["low", "medium", "high"], "high", CLAUDE_AGENT, (e) => picked.push(e));
+    expect(items.map((i) => i.label)).toEqual(["Default", "Low", "Medium", "High"]);
+    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["effort:high"]);
+    expect(items[0]!.description).toBe("Claude decides for the model");
+    items[0]!.onSelect!();
+    items[1]!.onSelect!();
+    expect(picked).toEqual([null, "low"]);
+    expect(effortItems(["max"], null, CLAUDE_AGENT, () => {}).filter((i) => i.checked).map((i) => i.id)).toEqual([
+      "effort:default",
+    ]);
+  });
+
+  test("a session is named after the first line of its first message", () => {
+    expect(nameFromMessage("\n  Fix the login bug  \nwith details")).toBe("Fix the login bug");
+    expect(nameFromMessage("x".repeat(80))).toBe(`${"x".repeat(57)}…`);
+    expect(nameFromMessage("   ")).toBe("");
+  });
+
+  test("a new session starts from the message box, with the folder and mode in its bar", () => {
+    agentChat.setAgents([CLAUDE_AGENT, CODEX_AGENT]);
+    const html = renderToStaticMarkup(
+      <AgentPane compact={false} demo={false} codeRepo="/w/code" dataRepo="/w/data" onClose={() => {}} />,
+    );
+    expect(html).toContain("New Claude session");
+    expect(html).toContain('placeholder="Describe a task for Claude"');
+    expect(html).toContain('aria-label="Agent: Claude"');
+    expect(html).toContain('aria-label="Folder: /w/code"');
+    expect(html).toContain('aria-label="Permission mode: Auto"');
+    expect(html).toContain('aria-label="Send"');
+    expect(html).toContain("in the code repo");
+    // The old form is gone: no name field, no Start chat button.
+    expect(html).not.toContain("Session name");
+    expect(html).not.toContain("Start chat");
+    agentChat.setAgents([]);
   });
 });

@@ -200,6 +200,105 @@ test("Stop and the mode go to the provider, and are refused where it declares ne
   expect((await outside.json()).error).toContain("Few offers only default, plan");
 });
 
+test("a session starts on the model and effort the pane picked, and refuses ones that are none", async () => {
+  const fake = register({ id: "gemini", capabilities: { effort: true } });
+  const { id, session } = await ready(fake, { model: "opus", effort: "high" });
+  expect(session.opts).toMatchObject({ model: "opus", effort: "high" });
+  // The agent's own word on the model (its init) replaces the alias.
+  expect(getChatSession(id)).toMatchObject({ model: "fake-1", effort: "high" });
+  const record = JSON.parse(await readFile(join(root, ".specdriven", "sessions", id, "session.json"), "utf8"));
+  expect(record.effort).toBe("high");
+
+  const badModel = await api("/api/agent/chat", "POST", { name: "x", agent: "gemini", model: "two words" });
+  expect(badModel.status).toBe(400);
+  expect((await badModel.json()).error).toContain("model must be");
+  const badEffort = await api("/api/agent/chat", "POST", { name: "x", agent: "gemini", effort: "extreme" });
+  expect(badEffort.status).toBe(400);
+  expect((await badEffort.json()).error).toContain("effort must be one of low, medium, high, xhigh, max");
+
+  // An agent with no effort setting is never handed one.
+  const plain = register({ id: "plain" });
+  const started = await ready(plain, { effort: "max" });
+  expect(started.session.opts.effort).toBeUndefined();
+  expect(getChatSession(started.id)!.effort).toBeUndefined();
+});
+
+test("the pane switches a running session's model and effort, and the pick becomes the agent's default", async () => {
+  const defaults: object[] = [];
+  const fake = register({
+    id: "gemini",
+    label: "Gemini",
+    capabilities: { effort: true, canChangeModelMidSession: true },
+    setDefaults: async (patch) => {
+      defaults.push(patch);
+    },
+  });
+  const { id, session } = await ready(fake);
+  const model = await api(`/api/agent/chat/${id}/model`, "PUT", { model: "sonnet" });
+  expect(model.status).toBe(200);
+  expect((await model.json()).meta.model).toBe("sonnet");
+  const effort = await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "xhigh" });
+  expect(effort.status).toBe(200);
+  expect(session.models).toEqual(["sonnet"]);
+  expect(session.efforts).toEqual(["xhigh"]);
+  expect(getChatSession(id)).toMatchObject({ model: "sonnet", effort: "xhigh" });
+  expect(getChatEvents(id).filter((e) => e.kind === "model" || e.kind === "effort")).toMatchObject([
+    { kind: "model", model: "sonnet" },
+    { kind: "effort", effort: "xhigh" },
+  ]);
+  // null is the agent's own default again.
+  await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: null });
+  expect(getChatSession(id)!.effort).toBeUndefined();
+  expect(defaults).toEqual([{ model: "sonnet" }, { effort: "xhigh" }, { effort: null }]);
+  expect((await api(`/api/agent/chat/${id}/effort`, "PUT", { effort: "huge" })).status).toBe(400);
+  expect((await api(`/api/agent/chat/${id}/model`, "PUT", { model: "a b" })).status).toBe(400);
+
+  // An agent that declares neither refuses both.
+  const plain = register({ id: "plain", label: "Plain" });
+  const other = await ready(plain);
+  const noModel = await api(`/api/agent/chat/${other.id}/model`, "PUT", { model: "sonnet" });
+  expect(noModel.status).toBe(409);
+  expect((await noModel.json()).error).toContain("Plain cannot switch models in a running session");
+  const noEffort = await api(`/api/agent/chat/${other.id}/effort`, "PUT", { effort: "low" });
+  expect(noEffort.status).toBe(409);
+  expect((await noEffort.json()).error).toContain("Plain has no effort setting");
+});
+
+test("an agent's choices and defaults are listed for the pane and kept through the provider", async () => {
+  let current: { model: string | null; effort: "low" | "high" | null } = { model: "opus", effort: null };
+  const seen: (string | null)[] = [];
+  register({
+    id: "gemini",
+    capabilities: { effort: true },
+    choices: async ({ dataRepo }) => {
+      seen.push(dataRepo);
+      return { models: [{ value: "opus", displayName: "Opus", efforts: ["low", "high"] }], ...current };
+    },
+    setDefaults: async (patch) => {
+      current = { ...current, ...(patch as typeof current) };
+    },
+  });
+  const listed = await api("/api/agent/agents/gemini/choices");
+  expect(listed.status).toBe(200);
+  expect((await listed.json()).choices).toEqual({
+    models: [{ value: "opus", displayName: "Opus", efforts: ["low", "high"] }],
+    model: "opus",
+    effort: null,
+  });
+  expect(seen[0]).toBe(data);
+  const saved = await api("/api/agent/agents/gemini/defaults", "PUT", { model: null, effort: "high" });
+  expect(saved.status).toBe(200);
+  expect((await saved.json()).choices).toMatchObject({ model: null, effort: "high" });
+  expect((await api("/api/agent/agents/gemini/defaults", "PUT", {})).status).toBe(400);
+  expect((await api("/api/agent/agents/gemini/defaults", "PUT", { effort: "huge" })).status).toBe(400);
+
+  // An agent with no choices answers null; it keeps no defaults either.
+  register({ id: "plain" });
+  expect((await (await api("/api/agent/agents/plain/choices")).json()).choices).toBeNull();
+  expect((await api("/api/agent/agents/plain/defaults", "PUT", { model: "opus" })).status).toBe(409);
+  expect((await api("/api/agent/agents/nobody/choices")).status).toBe(404);
+});
+
 test("a turn the provider refuses is noted and the composer freed; a provider that dies ends the session", async () => {
   const fake = register({ id: "gemini", label: "Gemini", sendError: new Error("Gemini refused the turn: busy") });
   const { id, session } = await ready(fake);

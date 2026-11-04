@@ -52,7 +52,11 @@ export type {
 } from "../host/agents";
 export type {
   AgentCapabilities,
+  AgentChoices,
+  AgentDefaultsPatch,
   AgentDescriptor,
+  AgentModelOption,
+  EffortLevel,
   AgentOffer,
   AgentOutput,
   AssistantBlock,
@@ -65,7 +69,7 @@ export type {
   PermissionSuggestion,
   SlashCommandInfo,
 } from "../../server/agentTypes";
-export { normalizePermissionMode } from "../../server/agentTypes";
+export { EFFORT_LEVELS, normalizeEffort, normalizeModel, normalizePermissionMode } from "../../server/agentTypes";
 export { getLogger, withSpan } from "../../server/telemetry";
 export type { Context, Disposer, Plugin } from "../kernel";
 export type {
