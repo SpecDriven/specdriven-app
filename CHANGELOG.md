@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.224 — 2026-11-04
+
+- The coding agent pane's composer bar stays on one row, and the pane is at least 420px wide ([#367](https://github.com/SpecDriven/specdriven-app/pull/367))
+
 ## v0.1.223 — 2026-11-04
 
 - The coding agent pane picks folder, model, effort and mode in a bar under the message box ([#366](https://github.com/SpecDriven/specdriven-app/pull/366))
