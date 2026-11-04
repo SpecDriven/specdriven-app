@@ -26,8 +26,9 @@ import {
   TASK_ITEM,
   UL_ITEM,
   imageTagAttrs,
-  safeColor,
   safeUrl,
+  spanStyle,
+  spanStyleDeclarations,
 } from "../frontend/markdownSyntax";
 import { renderTestInEditor } from "../frontend/testref";
 import { webLinkEnd } from "../frontend/weblinks";
@@ -139,10 +140,10 @@ export function renderInlineStorage(input: string, links = true): string {
     } else if (g.strike !== undefined) {
       out += `<del>${renderInlineStorage(g.strike, links)}</del>`;
     } else if (g.colored !== undefined) {
-      // Confluence keeps text color the same way: a span's style.
-      const color = safeColor(g.color!);
+      // Confluence keeps text color and highlight the same way: a span's style.
+      const decls = spanStyleDeclarations(spanStyle(g.style!));
       const inner = renderInlineStorage(g.colored, links);
-      out += color ? `<span style="color: ${color};">${inner}</span>` : inner;
+      out += decls.length > 0 ? `<span style="${decls.map((d) => `${d};`).join(" ")}">${inner}</span>` : inner;
     } else if (g.src !== undefined) {
       out += image(g.src, g.alt ?? "", m[0]);
     } else if (g.tag !== undefined) {

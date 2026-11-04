@@ -1,7 +1,10 @@
 // specs/search.feature.md: the words a hit matched on are marked where the hit
 // lands — in the palette's snippet and in the editor the hit opens, source
 // and preview alike — and the marks agree because one helper makes them.
-import { describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { Window } from "happy-dom";
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { markNodes, markText, termsPattern } from "../src/frontend/highlight";
 import { renderMarkdown } from "../src/frontend/markdown";
@@ -61,15 +64,79 @@ describe("markNodes", () => {
   });
 });
 
+// The source pane is a CodeMirror editor, which needs a DOM to paint its
+// marks; this file borrows one from happy-dom the way
+// tests/commonEditor.test.tsx does.
+const DOM_GLOBALS = [
+  "window",
+  "document",
+  "navigator",
+  "HTMLElement",
+  "Element",
+  "Node",
+  "Event",
+  "MouseEvent",
+  "MutationObserver",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+  "localStorage",
+  "IS_REACT_ACT_ENVIRONMENT",
+] as const;
+
+const saved = new Map<string, PropertyDescriptor | undefined>();
+let happyWindow: Window | undefined;
+
+beforeAll(() => {
+  happyWindow = new Window({ url: "http://localhost/" });
+  const w = happyWindow as unknown as Record<string, unknown>;
+  for (const key of DOM_GLOBALS) {
+    saved.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    const value = key === "IS_REACT_ACT_ENVIRONMENT" ? true : (w[key] ?? w.window);
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  }
+});
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 0));
+  for (const [key, descriptor] of saved) {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else delete (globalThis as unknown as Record<string, unknown>)[key];
+  }
+  saved.clear();
+  await happyWindow?.happyDOM.close();
+});
+
 describe("the editor opened from a hit", () => {
-  test("the source carries the marks in a mirror behind the textarea", () => {
-    const out = renderToStaticMarkup(
+  let root: Root | undefined;
+  let host: HTMLElement | undefined;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = (async () => new Response("[]")) as unknown as typeof fetch;
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    host?.remove();
+    root = undefined;
+    globalThis.fetch = realFetch;
+  });
+
+  async function mount(el: React.ReactElement) {
+    root = createRoot(host!);
+    await act(async () => root!.render(el));
+  }
+
+  test("the source paints the marks over its text", async () => {
+    await mount(
       <MarkdownEditor value="Given a premium policy" onChange={() => {}} highlight={["premium"]} />,
     );
-    expect(out).toContain('class="md-write highlighted"');
-    expect(out).toContain('<div class="md-highlights" aria-hidden="true">Given a <mark>premium</mark> policy\n</div>');
-    // The textarea itself still holds the plain text.
-    expect(out).toContain(">Given a premium policy</textarea>");
+    const marks = [...host!.querySelectorAll(".md-source-mark")].map((m) => m.textContent);
+    expect(marks).toEqual(["premium"]);
+    // The text itself is as it was.
+    expect(host!.querySelector(".cm-content")?.textContent).toBe("Given a premium policy");
   });
 
   test("a published scenario's preview marks the rendered text", () => {
@@ -79,10 +146,9 @@ describe("the editor opened from a hit", () => {
     expect(out).toContain('<div class="md-preview"><p>Given a <mark>premium</mark> policy</p></div>');
   });
 
-  test("without terms the editor is as it was — no mirror, no marks", () => {
-    const out = renderToStaticMarkup(<MarkdownEditor value="Given a premium policy" onChange={() => {}} />);
-    expect(out).toContain('class="md-write"');
-    expect(out).not.toContain("md-highlights");
-    expect(out).not.toContain("<mark>");
+  test("without terms the editor is as it was — no marks", async () => {
+    await mount(<MarkdownEditor value="Given a premium policy" onChange={() => {}} />);
+    expect(host!.querySelector(".md-source-mark")).toBeNull();
+    expect(host!.querySelector(".cm-content")?.textContent).toBe("Given a premium policy");
   });
 });

@@ -2067,69 +2067,8 @@ button.link:disabled {
   font-size: 0.6875rem;
 }
 
-.md-editor .md-textarea {
-  flex: 1;
-  min-height: 0;
-  border: none;
-  border-radius: 0;
-  resize: none;
-  padding: 0.6rem 0.75rem;
-  font-family: var(--font-mono);
-  font-size: calc(0.8125rem * var(--md-font-scale, 1));
-  line-height: 1.55;
-}
-
-.md-editor .md-textarea:focus {
-  outline: none;
-  box-shadow: none;
-  border: none;
-}
-
-.md-editor .md-textarea:read-only {
-  color: var(--text-2);
-}
-
-/* Search marks in the source (specs/search.feature.md): a mirror of the
-   textarea's text sits behind it — the same font, padding and wrapping, its
-   ink transparent — painting only the marks; the textarea over it goes
-   transparent so they show through. Its size follows the textarea's client
-   box from script, so a scrollbar narrows both alike. Marks carry no
-   horizontal padding: a pixel either side would push the mirror's text out
-   of step with the textarea's. */
-.md-write {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.md-write .md-textarea {
-  position: relative; /* paints over the mirror */
-}
-
-.md-write.highlighted .md-textarea {
-  background: transparent;
-}
-
-.md-highlights {
-  position: absolute;
-  top: 0;
-  left: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-  padding: 0.6rem 0.75rem;
-  font-family: var(--font-mono);
-  font-size: calc(0.8125rem * var(--md-font-scale, 1));
-  font-weight: 400;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  color: transparent;
-  pointer-events: none;
-}
-
-.md-highlights mark,
+/* Search marks in the preview (specs/search.feature.md); the source pane
+   paints its own (.md-source-mark below). */
 .md-editor .md-preview mark {
   padding: 0;
   border-radius: 2px;
@@ -2137,69 +2076,12 @@ button.link:disabled {
   color: inherit;
 }
 
-/* Entity-field completion (specs/editor/data-model-integration-in-editor
-   .feature.md): the list Tab opens after an `@`, anchored to that `@` — its
-   top-left corner just below the character it completes, or its bottom just
-   above it where the pane has no room below. `left` and `top` are measured
-   and set from script (src/frontend/caretPosition.ts); the pane clips
-   nothing, so the list is kept inside it there rather than here.
-   The same shape as the AI session's slash-command list. */
-.md-complete {
-  position: absolute;
-  z-index: 6;
-  width: max-content;
-  min-width: 14rem;
-  max-width: min(28rem, calc(100% - 1.2rem));
-  max-height: 14rem;
-  overflow-y: auto;
-  padding: 0.3rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
-  box-shadow: var(--shadow-md);
-}
-
-.md-complete-item {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.3rem 0.5rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-1);
-  font-size: 0.8125rem;
-  text-align: left;
-  cursor: pointer;
-}
-
-.md-complete-item[aria-selected="true"],
-.md-complete-item:hover {
-  background: var(--accent-soft);
-}
-
-.md-complete-name {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-}
-
-.md-complete-desc {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-2);
-  font-size: 0.75rem;
-}
-
-/* Vim tab (specs/ui.spec.md "Settings"): a CodeMirror editor running the vim
-   extension, dressed like the textarea beside it — same font, padding and
-   colours, the block cursor and status line in the accent. CodeMirror's own
-   theme classes are generated, so these rules win on specificity alone. */
-.md-vim {
+/* The source pane (src/frontend/SourceEditor.tsx): a CodeMirror editor behind
+   the Write tab and, running the vim extension, the Vim tab — the app's font,
+   padding and colours, the block cursor and status line in the accent.
+   CodeMirror's own theme classes are generated, so these rules win on
+   specificity alone. */
+.md-source {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -2213,64 +2095,68 @@ button.link:disabled {
   color: var(--text-3);
 }
 
-.md-vim .cm-editor {
+.md-source .cm-editor {
   flex: 1;
   min-height: 0;
   background: var(--surface-2);
   color: var(--text-1);
 }
 
-.md-vim .cm-editor.cm-focused {
+.md-source .cm-editor.cm-focused {
   outline: none;
 }
 
-.md-vim .cm-editor .cm-scroller {
+.md-source .cm-editor .cm-content[contenteditable="false"] {
+  color: var(--text-2);
+}
+
+.md-source .cm-editor .cm-scroller {
   font-family: var(--font-mono);
   font-size: calc(0.8125rem * var(--md-font-scale, 1));
   line-height: 1.55;
   padding: 0.6rem 0.75rem;
 }
 
-.md-vim .cm-editor .cm-content {
+.md-source .cm-editor .cm-content {
   padding: 0;
   caret-color: var(--text-1);
 }
 
-.md-vim .cm-editor .cm-line {
+.md-source .cm-editor .cm-line {
   padding: 0;
 }
 
-.md-vim .cm-editor .cm-placeholder {
+.md-source .cm-editor .cm-placeholder {
   color: var(--text-3);
 }
 
-.md-vim .cm-editor .cm-cursor,
-.md-vim .cm-editor .cm-dropCursor {
+.md-source .cm-editor .cm-cursor,
+.md-source .cm-editor .cm-dropCursor {
   border-left-color: var(--text-1);
 }
 
 /* Normal mode's block cursor. */
-.md-vim .cm-editor .cm-fat-cursor {
+.md-source .cm-editor .cm-fat-cursor {
   background: var(--accent);
   color: var(--on-accent);
   outline: none;
 }
 
-.md-vim .cm-editor:not(.cm-focused) .cm-fat-cursor {
+.md-source .cm-editor:not(.cm-focused) .cm-fat-cursor {
   background: transparent;
   color: inherit;
   outline: 1px solid var(--accent);
 }
 
-.md-vim .cm-editor .cm-selectionBackground,
-.md-vim .cm-editor.cm-focused .cm-selectionBackground,
-.md-vim .cm-editor .cm-content ::selection {
+.md-source .cm-editor .cm-selectionBackground,
+.md-source .cm-editor.cm-focused .cm-selectionBackground,
+.md-source .cm-editor .cm-content ::selection {
   background: var(--accent-soft);
 }
 
 /* The entity-field list (specs/editor/data-model-integration-in-editor
    .feature.md), dressed like the write pane's. */
-.md-vim .cm-tooltip.cm-tooltip-autocomplete {
+.md-source .cm-tooltip.cm-tooltip-autocomplete {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface-2);
@@ -2278,31 +2164,31 @@ button.link:disabled {
   padding: 0.3rem;
 }
 
-.md-vim .cm-tooltip-autocomplete > ul {
+.md-source .cm-tooltip-autocomplete > ul {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   max-height: 14rem;
 }
 
-.md-vim .cm-tooltip-autocomplete > ul > li {
+.md-source .cm-tooltip-autocomplete > ul > li {
   padding: 0.3rem 0.5rem;
   border-radius: var(--radius-sm);
   color: var(--text-1);
 }
 
-.md-vim .cm-tooltip-autocomplete > ul > li[aria-selected] {
+.md-source .cm-tooltip-autocomplete > ul > li[aria-selected] {
   background: var(--accent-soft);
   color: var(--text-1);
 }
 
-.md-vim .cm-tooltip-autocomplete .cm-completionDetail {
+.md-source .cm-tooltip-autocomplete .cm-completionDetail {
   margin-left: 0.5rem;
   color: var(--text-2);
   font-style: normal;
 }
 
 /* The file the chosen field came from, beside the list. */
-.md-vim .cm-tooltip.cm-completionInfo {
+.md-source .cm-tooltip.cm-completionInfo {
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2314,26 +2200,39 @@ button.link:disabled {
 }
 
 /* Search marks (specs/search.feature.md), the same as the other tabs'. */
-.md-vim .md-vim-mark {
+.md-source .md-source-mark {
   border-radius: 2px;
   background: var(--accent-mark);
 }
 
 /* A web link in the text (specs/editor/common-editor.feature.md): underlined,
    so it reads as something ⌘-click opens. */
-.md-vim .md-vim-link {
+.md-source .md-source-link {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
+/* Colored and highlighted text (specs/editor/common-editor.feature.md "Font
+   color", "Highlight") reads as it will: the span's style is painted on its
+   text, and its tags are hidden until the caret is on the span, when they
+   show, receding, so the markup can be edited. */
+.md-source .md-source-styled {
+  border-radius: 2px;
+}
+
+.md-source .md-source-tag {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
 /* The vim status line: the mode, and the : command line while one is typed. */
-.md-vim .cm-editor .cm-panels {
+.md-source .cm-editor .cm-panels {
   background: var(--surface-1);
   color: var(--text-2);
   border-color: var(--border);
 }
 
-.md-vim .cm-editor .cm-vim-panel {
+.md-source .cm-editor .cm-vim-panel {
   padding: 0.15rem 0.75rem;
   min-height: 1.4rem;
   font-family: var(--font-mono);
@@ -2342,7 +2241,7 @@ button.link:disabled {
   color: var(--text-2);
 }
 
-.md-vim .cm-editor .cm-vim-panel input {
+.md-source .cm-editor .cm-vim-panel input {
   border: none;
   outline: none;
   background: transparent;
@@ -2363,9 +2262,9 @@ button.link:disabled {
 
 /* Editor font size (specs/editor/common-editor.feature.md "Increase and
    decrease font size"): the toolbar's buttons set --md-font-scale on the
-   editor, and every tab's text — the Write and Vim sources, the search-mark
-   mirror behind the textarea, the Preview with its headings — scales by it
-   alike. Unset, it is 1 and the editor reads as it always has. */
+   editor, and every tab's text — the Write and Vim sources, the Preview with
+   its headings — scales by it alike. Unset, it is 1 and the editor reads as
+   it always has. */
 .md-editor .md-preview {
   font-size: calc(0.8125rem * var(--md-font-scale, 1));
 }

@@ -4,7 +4,7 @@
 // the Write and Vim tabs, where a plain click has to keep placing the caret,
 // ⌘-click (Ctrl-click off the Mac) opens it, and the toolbar offers to open
 // the one the caret is in (src/frontend/MarkdownEditor.tsx,
-// src/frontend/VimEditor.tsx). One finder for all three, so they agree on
+// src/frontend/SourceEditor.tsx). One finder for all three, so they agree on
 // where a link starts and ends.
 
 /** A web link in the text: where it sits, and the url it opens. */

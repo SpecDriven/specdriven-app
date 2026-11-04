@@ -8334,7 +8334,7 @@ export function App() {
           </select>
         </label>
         {/* Vim mode: adds a Vim tab to every Markdown editor, remembered
-            on this device like the theme (src/frontend/VimEditor.tsx).
+            on this device like the theme (src/frontend/SourceEditor.tsx).
             Hidden in the demo, which pins it off — modal editing is a
             trap for a visitor who did not ask for it. */}
         {!demo && (

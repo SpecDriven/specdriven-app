@@ -10,6 +10,7 @@ import { Window } from "happy-dom";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { EditorView } from "@codemirror/view";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import { renderMarkdown } from "../src/frontend/markdown";
 
@@ -142,8 +143,11 @@ describe("the table dialog", () => {
   async function mount(initial: string, variables = false) {
     root = createRoot(host!);
     await act(async () => root!.render(<Editor initial={initial} variables={variables} />));
-    return host!.querySelector("textarea")!;
+    return source();
   }
+
+  /** The Write tab's CodeMirror editor. */
+  const source = () => EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!;
 
   const button = (label: string) =>
     host!.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
@@ -174,19 +178,17 @@ describe("the table dialog", () => {
         new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }) as unknown as Event,
       );
     });
-  /** Place the caret as a click would; React reads it off the mouseup that ends the click. */
-  const caretTo = (ta: HTMLTextAreaElement, at: number) =>
+  /** Place the caret as a click would; the editor tells the toolbar where it landed. */
+  const caretTo = (view: EditorView, at: number) =>
     act(() => {
-      ta.focus();
-      ta.setSelectionRange(at, at);
-      ta.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true }) as unknown as Event);
+      view.focus();
+      view.dispatch({ selection: { anchor: at } });
     });
 
   // "edit the table as a grid"
   test("opens on the table at the caret and saves the edited grid into it", async () => {
-    await mount(`before\n\n${TABLE}\n\nafter`);
-    const ta = host!.querySelector("textarea")!;
-    caretTo(ta, 12);
+    const view = await mount(`before\n\n${TABLE}\n\nafter`);
+    caretTo(view, 12);
     click("Edit table");
     expect(dialog()?.getAttribute("aria-label")).toBe("Edit table");
     expect(cell(-1, 0).value).toBe("amount");
@@ -232,7 +234,7 @@ describe("the table dialog", () => {
     press(document.body, "Escape");
     await act(async () => {});
     expect(dialog()).toBeNull();
-    expect(host!.querySelector("textarea")).not.toBeNull();
+    expect(host!.querySelector(".cm-editor")).not.toBeNull();
   });
 
   test("removing a column moves focus to the one before it", async () => {
@@ -263,7 +265,7 @@ describe("the table dialog", () => {
 
   test("the last column cannot be removed; Delete table takes the table out", async () => {
     await mount(`before\n\n| a |\n| --- |\n| 1 |\n\nafter`);
-    caretTo(host!.querySelector("textarea")!, 10);
+    caretTo(source(), 10);
     click("Edit table");
     expect(button("Remove column a")?.disabled).toBe(true);
     const del = [...host!.querySelectorAll("button")].find((b) => b.textContent === "Delete table")!;
@@ -315,8 +317,8 @@ describe("the table dialog", () => {
   // "variable creates a column"
   describe("with variables", () => {
     test("a new table opens with a column per {var}, locked", async () => {
-      const ta = await mount("enter {amount} and see {result}\n", true);
-      caretTo(ta, ta.value.length);
+      const view = await mount("enter {amount} and see {result}\n", true);
+      caretTo(view, view.state.doc.length);
       click("Insert table");
       expect(cell(-1, 0).value).toBe("amount");
       expect(cell(-1, 1).value).toBe("result");
@@ -326,7 +328,7 @@ describe("the table dialog", () => {
 
     test("an existing table gains the missing column", async () => {
       await mount(`uses {amount} and {other}\n\n${TABLE}`, true);
-      caretTo(host!.querySelector("textarea")!, 30);
+      caretTo(source(), 30);
       click("Edit table");
       expect([...host!.querySelectorAll('thead input')].map((i) => (i as HTMLInputElement).value)).toEqual([
         "amount",

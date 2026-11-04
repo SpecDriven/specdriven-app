@@ -7,7 +7,7 @@
 // opens, forgotten when the data folder changes.
 //
 // The text helpers below are pure so the completion can be tested without
-// a DOM: the same `atQuery` decides, for the textarea and for CodeMirror,
+// a DOM: the same `atQuery` decides, for the Write tab and for the Vim tab,
 // whether the caret sits at the end of an `@…` run worth completing.
 
 import { useSyncExternalStore } from "react";
