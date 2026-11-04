@@ -16,7 +16,7 @@ import {
   shell,
 } from "electron";
 import { constants, existsSync } from "node:fs";
-import { access, readFile, realpath, rename, rm } from "node:fs/promises";
+import { access, readFile, realpath, rename } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -433,7 +433,7 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
   if (plan.kind === "swap-bundle") {
     await swapBundle(plan, {
       rename: (from, to) => rename(from, to),
-      remove: (p) => rm(p, { recursive: true, force: true }),
+      remove: removeBundle,
       copy: async (from, to) => {
         const result = await run("ditto", [from, to]);
         if (result.exitCode !== 0) throw new Error(`ditto failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`);
@@ -449,11 +449,26 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
 /** A beat after the restart route has answered, so the client hears it. */
 const RELAUNCH_DELAY_MS = 300;
 
+/**
+ * Remove an .app bundle tree. Not `fs.rm({ recursive })`: inside Electron
+ * the asar layer reports a valid `app.asar` as a directory, so Node's
+ * recursive remove tries to `rmdir` it, reads the ENOTDIR as "already
+ * gone", leaves the archive in place and then fails on its parent with
+ * ENOTEMPTY — which is how a leftover `.previous` once blocked the next
+ * update's swap. `rm -rf` in a child process sees the archive as the file
+ * it is, and unlike `process.noAsar` it cannot disturb this process's own
+ * module loads from its archive while the removal runs.
+ */
+async function removeBundle(path: string): Promise<void> {
+  const result = await run("/bin/rm", ["-rf", path]);
+  if (result.exitCode !== 0) throw new Error(`rm -rf ${path} failed: ${result.stderr.trim() || `exit ${result.exitCode}`}`);
+}
+
 /** The bundle an update renamed aside, removed once this launch has shown its window. */
 function removePreviousBundle(): void {
   const bundle = bundleOf(process.execPath);
   if (!bundle) return;
-  void rm(previousBundle(bundle), { recursive: true, force: true }).catch(() => {});
+  void removeBundle(previousBundle(bundle)).catch(() => {});
 }
 
 // One main window (specs/app/desktop-app.feature.md "Window"): a second launch
