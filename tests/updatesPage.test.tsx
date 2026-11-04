@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EMPTY_INSTALL, type InstallState } from "../src/server/appUpdate";
 import { EMPTY_UPDATE, logTail, updateControls, updateHeadline, updateStage, type UpdateIndex, type UpdateStore } from "../src/frontend/appUpdate";
-import { UpdateStatus, upgradePlatform } from "../src/frontend/UpdatesPage";
+import { MAC_ADMIN_NOTE, UpdateStatus, upgradePlatform } from "../src/frontend/UpdatesPage";
 
 const index = (extra: Partial<UpdateIndex> = {}): UpdateIndex => ({
   runtime: "desktop",
@@ -85,6 +85,17 @@ describe("the page", () => {
     expect(html).toContain(`href="${found.url}"`);
     expect(html).toContain("fetches Electron and takes a few minutes");
     expect(html).not.toContain("curl -fsSL");
+  });
+
+  test("on macOS, a newer release warns that Admin privileges may be needed", () => {
+    expect(render(store({ index: index({ check: found }) }))).toContain(MAC_ADMIN_NOTE);
+    const failed = { ...installing, phase: "failed" as const, error: "The installer failed (exit 1)" };
+    expect(render(store({ index: index({ check: found, install: failed }) }))).toContain(MAC_ADMIN_NOTE);
+    // Not on other machines, nor before a newer release is found or once it is installing.
+    expect(render(store({ index: index({ check: found, platform: "linux" }) }))).not.toContain(MAC_ADMIN_NOTE);
+    expect(render(store({ index: index({ check: found, platform: "win32" }) }))).not.toContain(MAC_ADMIN_NOTE);
+    expect(render(store({ index: index() }))).not.toContain(MAC_ADMIN_NOTE);
+    expect(render(store({ index: index({ check: found, install: installing }) }))).not.toContain(MAC_ADMIN_NOTE);
   });
 
   test("while installing, the installer's output is on the page and nothing is offered", () => {
