@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
-import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, KeyboardEvent, MouseEvent, ReactElement, ReactNode, UIEvent } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from "react";
 import {
   AArrowDown,
   AArrowUp,
@@ -9,6 +9,7 @@ import {
   Code,
   ExternalLink,
   Heading,
+  Highlighter,
   Image,
   Italic,
   Link,
@@ -16,12 +17,15 @@ import {
   ListOrdered,
   PencilRuler,
   Quote,
+  Redo2,
   SquarePen,
   Table,
+  Undo2,
 } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 import { Menu } from "./Menu";
 import {
+  HIGHLIGHT_COLORS,
   imageAtOffset,
   imageRefs,
   insertImage,
@@ -29,6 +33,7 @@ import {
   renderMarkdown,
   setImageSrc,
   setColor,
+  setHighlight,
   setImageWidth,
   TEXT_COLORS,
   toggleHeading,
@@ -40,7 +45,7 @@ import { diagramName, isDiagram, isExcalidrawFile } from "./excalidraw/diagram";
 import type { ExcalidrawEdit } from "./excalidraw/ExcalidrawPane";
 import { canMarkUp } from "./excalidraw/markup";
 import type { MarkupResult } from "./excalidraw/MarkupPane";
-import { markNodes, markText } from "./highlight";
+import { markNodes } from "./highlight";
 import { TableEditContext } from "./MarkdownTable";
 import { TableDialog } from "./TableDialog";
 import { extractVars, findTables, insertTable, replaceTableBlock, tableAt, withVarColumns } from "./mdtable";
@@ -49,20 +54,16 @@ import { ImageSizingContext } from "./MarkdownImage";
 import type { ImageSizing } from "./MarkdownImage";
 import { useVimMode } from "./vimPref";
 import { FONT_SCALES, applyFontScale, stepFontScale, useFontScale } from "./fontSizePref";
-import { useSpellCheck } from "./spellCheckPref";
-import { atQuery, entityFields, filterChoices, insertChoice, useEntityFields } from "./entityFields";
-import type { FieldChoice } from "./entityFields";
-import { anchorVisible, measureOffset, placePopup } from "./caretPosition";
+import { entityFields, useEntityFields } from "./entityFields";
 import { useExcalidrawEnabled } from "./excalidrawPref";
-import type { TextSurface } from "./VimEditor";
+import { SourceEditor } from "./SourceEditor";
+import type { TextSurface } from "./SourceEditor";
 import { isOpenLinkClick, openWebLink, webLinkAt } from "./weblinks";
 
-// CodeMirror and the vim extension are only mounted once a Vim tab is shown.
-// Loaded lazily so a bundler that splits can keep them out of the main bundle
-// (Bun's dev bundle inlines them; a server render shows the fallback).
-const VimEditor = lazy(() => import("./VimEditor").then((m) => ({ default: m.VimEditor })));
-// Excalidraw (specs/editor/excalidraw-support.feature.md) the same way: the
-// pane, and the library with it, load the first time a diagram is drawn.
+// Excalidraw (specs/editor/excalidraw-support.feature.md) is loaded lazily,
+// so a bundler that splits can keep it out of the main bundle: the pane, and
+// the library with it, load the first time a diagram is drawn (Bun's dev
+// bundle inlines them; a server render shows the fallback).
 const ExcalidrawPane = lazy(() =>
   import("./excalidraw/ExcalidrawPane").then((m) => ({ default: m.ExcalidrawPane })),
 );
@@ -113,9 +114,9 @@ type Tab = "write" | "vim" | "preview";
 /**
  * Embedded markdown editor for the scenario body
  * (specs/editor/spec-editor.feature.md "Spec editor pane"): a formatting
- * toolbar over a source textarea, with a rendered Preview tab — and, with Vim
- * mode on in Settings, a Vim tab editing the same text with Vim's keys
- * (src/frontend/VimEditor.tsx).
+ * toolbar over a source pane (src/frontend/SourceEditor.tsx), with a rendered
+ * Preview tab — and, with Vim mode on in Settings, a Vim tab editing the same
+ * text with Vim's keys.
  */
 export function MarkdownEditor({
   value,
@@ -128,8 +129,6 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const vimOn = useVimMode();
   const fontScale = useFontScale();
-  // Spell check (src/frontend/spellCheckPref.ts): the Write tab holds prose.
-  const spellCheck = useSpellCheck();
   const [tab, setTab] = useState<Tab>(
     readOnly || initialTab === "preview" ? "preview" : vimOn ? "vim" : "write",
   );
@@ -141,8 +140,7 @@ export function MarkdownEditor({
     if (!vimOn && tab === "vim") setTab("write");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vimOn, readOnly]);
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const vimRef = useRef<TextSurface>(null);
+  const editorRef = useRef<TextSurface>(null);
   const editing = tab === "write" || tab === "vim";
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(0);
@@ -170,22 +168,24 @@ export function MarkdownEditor({
   // whether it is over a diagram's link. Only followed while the switch is
   // on: nothing else in the toolbar cares where the caret is.
   const [caret, setCaret] = useState(0);
-  // The font color menu, opened from its toolbar button. The editor clips
-  // what overflows it, so the menu floats over the page from where the
-  // button is: under it, or over it where the window has no room below.
-  const colorRef = useRef<HTMLSpanElement>(null);
-  const [colorMenu, setColorMenu] = useState<{ top: number; right: number; above: boolean } | null>(
+  // The font color and highlight menus, each opened from its toolbar
+  // button, one at a time. The editor clips what overflows it, so a menu
+  // floats over the page from where its button is: under it, or over it
+  // where the window has no room below.
+  type MenuKind = "color" | "highlight";
+  const menuRefs = { color: useRef<HTMLSpanElement>(null), highlight: useRef<HTMLSpanElement>(null) };
+  const [menu, setMenu] = useState<{ kind: MenuKind; top: number; right: number; above: boolean } | null>(
     null,
   );
-  const toggleColorMenu = () => {
-    if (colorMenu) {
-      setColorMenu(null);
+  const toggleMenu = (kind: MenuKind) => {
+    if (menu?.kind === kind) {
+      setMenu(null);
       return;
     }
-    const r = colorRef.current?.getBoundingClientRect();
+    const r = menuRefs[kind].current?.getBoundingClientRect();
     if (!r) return;
     const above = r.bottom + 280 > window.innerHeight && r.top > 280;
-    setColorMenu({ top: above ? r.top - 4 : r.bottom + 4, right: window.innerWidth - r.right, above });
+    setMenu({ kind, top: above ? r.top - 4 : r.bottom + 4, right: window.innerWidth - r.right, above });
   };
   // The table dialog (specs/editor/table-editor.feature.md): opened on the
   // table the caret is in, or on one in the preview, to rewrite it — or,
@@ -195,138 +195,36 @@ export function MarkdownEditor({
   );
 
   // Entity-field completion (specs/editor/data-model-integration-in-editor
-  // .feature.md): Tab at the end of an `@…` run opens a list of the code
-  // repo's entity fields, filtered by whatever follows the `@` — typing
-  // keeps going into the textarea, the list narrows. `complete` remembers
-  // where the run started; the caret leaving it, a tab change, or focus
-  // going elsewhere closes the list. The choices load when an editor
-  // opens: a read-only body never completes, and never asks.
+  // .feature.md): the code repo's entity fields, which the source pane
+  // offers after an `@`. The choices load when an editor opens: a read-only
+  // body never completes, and never asks.
   const { fields } = useEntityFields();
   useEffect(() => {
     if (!readOnly) void entityFields.load();
   }, [readOnly]);
-  const [complete, setComplete] = useState<{ start: number } | null>(null);
-  const [completeIndex, setCompleteIndex] = useState(0);
-  const run = complete && tab === "write" && !readOnly ? atQuery(value, caret) : null;
-  const active = run && complete && run.start === complete.start ? run : null;
-  const items = active ? filterChoices(fields, active.query) : [];
-  const popup = active !== null && items.length > 0;
-  const listId = useId();
-  useEffect(() => setCompleteIndex(0), [active?.query]);
-  useEffect(() => {
-    setComplete(null);
-    setColorMenu(null);
-  }, [tab]);
+  useEffect(() => setMenu(null), [tab]);
 
-  // The list opens next to the `@` it is completing, not in a corner: the
-  // `@` is measured in the textarea (src/frontend/caretPosition.ts) and the
-  // list placed under it, or above it where the pane has no room below.
-  // Measured after layout, so the list's own size is known — until then it
-  // stays hidden rather than showing for a frame where it does not belong.
-  const listRef = useRef<HTMLDivElement>(null);
-  const [place, setPlace] = useState<{ left: number; top: number; flipped: boolean } | null>(null);
-  // Measuring the `@` and placing the list over it. Held in a ref so the
-  // scroll handler further down can ask for it again without the two going
-  // out of step.
-  const remeasure = useRef<() => void>(() => {});
-  remeasure.current = () => {
-    const ta = ref.current;
-    const list = listRef.current;
-    const start = complete?.start;
-    if (!ta || !list || start === undefined) return;
-    const anchor = measureOffset(ta, start);
-    if (!anchor) return;
-    const pane = { width: ta.clientWidth, height: ta.clientHeight };
-    // Scrolled past the `@`, the list has nothing left to point at: it
-    // closes rather than following the run off the edge of the pane.
-    if (!anchorVisible(anchor, pane)) {
-      setComplete(null);
-      return;
-    }
-    setPlace(
-      placePopup({
-        anchor,
-        pane,
-        popup: { width: list.offsetWidth, height: list.offsetHeight },
-      }),
-    );
-  };
-  // Re-measured whenever the run, the text or the list's length changes —
-  // the list narrows as the user types, so its height moves with it.
-  const placeKey = popup ? `${complete?.start}:${active?.query}:${items.length}:${value}` : null;
-  useLayoutEffect(() => {
-    if (!popup) setPlace(null);
-    else remeasure.current();
-  }, [popup, placeKey]);
-
-  // Search-term marks (specs/search.feature.md). A textarea cannot carry
-  // markup, so a mirror of its text sits behind it — same font, padding and
-  // wrapping, transparent ink — painting only the marks; the textarea over
-  // it is made transparent so they show through. The mirror follows the
-  // textarea's scroll and its client width (a scrollbar narrows the text).
+  // Search-term marks (specs/search.feature.md): the source pane paints its
+  // own; the preview marks the rendered text and lands on the first mark a
+  // third of the way down the pane, so the lines around it read too. Once
+  // per set of terms and tab, not on every keystroke.
   const marks = highlight && highlight.length > 0 ? highlight : null;
-  const mirrorRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
-  // Scrolling moves the marks' mirror with the text, and takes the open
-  // field list along with the `@` it points at.
-  const onScroll = (e: UIEvent<HTMLTextAreaElement>) => {
-    if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop;
-    if (popup) remeasure.current();
-  };
-  useEffect(() => {
-    const ta = ref.current;
-    const mirror = mirrorRef.current;
-    if (!ta || !mirror || typeof ResizeObserver === "undefined") return;
-    const fit = () => {
-      mirror.style.width = `${ta.clientWidth}px`;
-      mirror.style.height = `${ta.clientHeight}px`;
-      mirror.scrollTop = ta.scrollTop;
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(ta);
-    return () => ro.disconnect();
-  }, [marks !== null, tab]);
-  // Land on the first mark: a third of the way down the pane, so the lines
-  // around it read too. Once per set of terms and tab, not on every keystroke.
   const marksKey = marks?.join(" ") ?? "";
   useEffect(() => {
-    if (!marks) return;
-    const pane = tab === "write" ? ref.current : previewRef.current;
-    const marked = (tab === "write" ? mirrorRef.current : previewRef.current)?.querySelector("mark");
+    if (!marks || tab !== "preview") return;
+    const pane = previewRef.current;
+    const marked = pane?.querySelector("mark");
     if (!pane || !marked) return;
     const top =
       marked.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
     pane.scrollTop = Math.max(0, top - pane.clientHeight / 3);
-    if (mirrorRef.current) mirrorRef.current.scrollTop = pane.scrollTop;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marksKey, tab]);
 
-  // The scenario table widget rewrites the body outside this textarea (e.g.
-  // typing "{amount}" appends a table below the caret). A controlled textarea
-  // would snap the caret to the end when the committed value differs from
-  // what was typed — restore the position recorded at the last keystroke.
-  const sel = useRef<{ start: number; end: number } | null>(null);
-  useLayoutEffect(() => {
-    const ta = ref.current;
-    const s = sel.current;
-    if (!ta || !s || document.activeElement !== ta) return;
-    if (ta.selectionStart !== s.start || ta.selectionEnd !== s.end)
-      ta.setSelectionRange(s.start, s.end);
-  }, [value]);
-
-  // The pane being edited, seen the same way whichever it is: the toolbar
-  // and shortcuts read the selection from it and put it back after an edit.
-  const surface = (): TextSurface | null => {
-    if (tab === "vim") return vimRef.current;
-    const ta = ref.current;
-    if (!ta) return null;
-    return {
-      focus: () => ta.focus(),
-      get: () => ({ text: ta.value, start: ta.selectionStart, end: ta.selectionEnd }),
-      select: (start, end) => ta.setSelectionRange(start, end),
-    };
-  };
+  // The pane being edited: the toolbar and shortcuts read the selection
+  // from it and put it back after an edit.
+  const surface = (): TextSurface | null => editorRef.current;
 
   const apply = (edit: (text: string, start: number, end: number) => Edit) => {
     const s = surface();
@@ -334,12 +232,8 @@ export function MarkdownEditor({
     const { text, start, end } = s.get();
     const r = edit(text, start, end);
     onChange(r.text);
-    // Where the edit left the caret. setSelectionRange does not raise a
-    // select event, so the toolbar is told here instead — otherwise it would
-    // go on acting on whatever the caret was in before. The layout effect
-    // above restores `sel` on commit: told the same place, it agrees with
-    // the frame below instead of putting the old caret back for a frame.
-    sel.current = { start: r.start, end: r.end };
+    // Where the edit left the caret, so the toolbar acts on what is there
+    // now rather than on whatever the caret was in before.
     setCaret(r.start);
     // Restore focus and selection once React has committed the new value.
     requestAnimationFrame(() => {
@@ -481,38 +375,10 @@ export function MarkdownEditor({
     void addImages(files.filter((f) => f !== scene));
   };
 
-  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
-      f.type.startsWith("image/"),
-    );
-    if (files.length === 0) return; // plain text pastes as usual
-    e.preventDefault();
-    void addImages(files);
-  };
-
-  // Picking a field replaces the `@…` run with it, through apply() like any
-  // toolbar edit, so the caret lands after it and the toolbar hears.
-  const pick = (choice: FieldChoice) => {
-    const start = complete?.start;
-    if (start === undefined) return;
-    apply((t, _s, en) => insertChoice(t, start, en, choice));
-    setComplete(null);
-  };
-
   // Web links (specs/editor/common-editor.feature.md "web links are
   // clickable"): a plain click in the source places the caret, as it must
   // for the url to be edited at all, so ⌘-click (Ctrl-click off the Mac)
-  // is what opens one — the gesture code editors use. The click has already
-  // put the caret where it landed; the link is the one around it.
-  const onSourceClick = (e: MouseEvent<HTMLTextAreaElement>) => {
-    if (!isOpenLinkClick(e)) return;
-    const ta = e.currentTarget;
-    if (ta.selectionStart !== ta.selectionEnd) return;
-    const link = webLinkAt(ta.value, ta.selectionStart);
-    if (!link) return;
-    e.preventDefault();
-    openWebLink(link.url);
-  };
+  // is what opens one — the gesture code editors use (the source pane's).
   // The link the caret is in, for the toolbar's Open link button — the
   // same link a ⌘-click there would open, reachable without knowing the
   // gesture, and from the keyboard.
@@ -563,8 +429,8 @@ export function MarkdownEditor({
     const r = replaceTableBlock(text, block, next);
     latest.current.onChange(r.text);
     if (editing) {
-      sel.current = { start: r.start, end: r.end };
       setCaret(r.start);
+      requestAnimationFrame(() => surface()?.select(r.start, r.end));
     }
   };
   const tableWasOpen = useRef(false);
@@ -574,41 +440,9 @@ export function MarkdownEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table]);
 
+  // The formatting shortcuts, from either pane: ⌘B, ⌘I, ⌘K. Undo and redo
+  // (⌘Z, ⇧⌘Z) are the pane's own.
   const onKeyDown = (e: KeyboardEvent<HTMLElement> | globalThis.KeyboardEvent) => {
-    if (tab === "write" && !readOnly) {
-      if (popup) {
-        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-          e.preventDefault();
-          const step = e.key === "ArrowDown" ? 1 : items.length - 1;
-          setCompleteIndex((i) => (i + step) % items.length);
-          return;
-        }
-        if (e.key === "Tab" || e.key === "Enter") {
-          e.preventDefault();
-          pick(items[completeIndex] ?? items[0]!);
-          return;
-        }
-        if (e.key === "Escape") {
-          // Closes the list, not the pane around it (the app's Escape shortcut).
-          e.preventDefault();
-          e.stopPropagation();
-          setComplete(null);
-          return;
-        }
-      } else if (e.key === "Tab" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-        // Only at the end of an `@…` run, with something to offer: any
-        // other Tab keeps moving focus on (specs/editor/spec-editor.feature.md).
-        const ta = ref.current;
-        const at =
-          ta && ta.selectionStart === ta.selectionEnd ? atQuery(ta.value, ta.selectionStart) : null;
-        if (ta && at && fields.length > 0) {
-          e.preventDefault();
-          setCaret(ta.selectionStart);
-          setComplete({ start: at.start });
-          return;
-        }
-      }
-    }
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     const k = e.key.toLowerCase();
     if (k === "b") {
@@ -660,48 +494,68 @@ export function MarkdownEditor({
       run: () => applyFontScale(stepFontScale(fontScale, 1)),
     },
   ];
+  // The font color and highlight menus (specs/editor/common-editor.feature.md
+  // "Font color", "Highlight"): colors readable on the light and the dark
+  // theme, and one to take the color or highlight off.
+  const styleMenu = (
+    kind: MenuKind,
+    label: string,
+    colors: { id: string; label: string; value: string }[],
+    none: string,
+    set: (text: string, start: number, end: number, color: string | null) => Edit,
+  ) =>
+    menu?.kind === kind &&
+    createPortal(
+      <div
+        className={`md-color-pop${menu.above ? " above" : ""}`}
+        style={{ top: menu.top, right: menu.right }}
+      >
+        <Menu
+          open
+          onClose={() => setMenu(null)}
+          label={label}
+          className="md-color-menu"
+          containerSelector={`.md-${kind}-tool`}
+          items={[
+            ...colors.map((c) => ({
+              id: c.id,
+              label: c.label,
+              icon: <span className="md-color-swatch" style={{ background: c.value }} />,
+              onSelect: () => apply((t, s, e) => set(t, s, e, c.value)),
+            })),
+            {
+              id: "default",
+              label: none,
+              icon: <span className="md-color-swatch none" />,
+              onSelect: () => apply((t, s, e) => set(t, s, e, null)),
+            },
+          ]}
+        />
+      </div>,
+      document.body,
+    );
+  // Undo and redo (specs/editor/common-editor.feature.md "Undo and redo"),
+  // first: the pane's own history, reachable without knowing the keys.
+  const historyTools: Tool[] = [
+    { icon: <Undo2 size={size} />, title: "Undo", keys: "⌘Z", run: () => surface()?.undo() },
+    { icon: <Redo2 size={size} />, title: "Redo", keys: "⇧⌘Z", run: () => surface()?.redo() },
+  ];
   const tools: Tool[] = [
     { icon: <Heading size={size} />, title: "Heading", run: () => apply((t, s, e) => toggleHeading(t, s, e)) },
     { icon: <Bold size={size} />, title: "Bold", keys: "⌘B", run: () => apply((t, s, e) => toggleInline(t, s, e, "**")) },
-    // Font color (specs/editor/common-editor.feature.md "Font color"), next
-    // to Bold: a menu of colors readable on the light and the dark theme,
-    // and one to take the color off.
     {
       id: "color",
       icon: <Baseline size={size} />,
       title: "Font color",
-      run: toggleColorMenu,
-      menu:
-        colorMenu &&
-        createPortal(
-          <div
-            className={`md-color-pop${colorMenu.above ? " above" : ""}`}
-            style={{ top: colorMenu.top, right: colorMenu.right }}
-          >
-            <Menu
-              open
-              onClose={() => setColorMenu(null)}
-              label="Font color"
-              className="md-color-menu"
-              containerSelector=".md-color-tool"
-              items={[
-                ...TEXT_COLORS.map((c) => ({
-                  id: c.id,
-                  label: c.label,
-                  icon: <span className="md-color-swatch" style={{ background: c.value }} />,
-                  onSelect: () => apply((t, s, e) => setColor(t, s, e, c.value)),
-                })),
-                {
-                  id: "default",
-                  label: "Default color",
-                  icon: <span className="md-color-swatch none" />,
-                  onSelect: () => apply((t, s, e) => setColor(t, s, e, null)),
-                },
-              ]}
-            />
-          </div>,
-          document.body,
-        ),
+      run: () => toggleMenu("color"),
+      menu: styleMenu("color", "Font color", TEXT_COLORS, "Default color", setColor),
+    },
+    {
+      id: "highlight",
+      icon: <Highlighter size={size} />,
+      title: "Highlight",
+      run: () => toggleMenu("highlight"),
+      menu: styleMenu("highlight", "Highlight", HIGHLIGHT_COLORS, "No highlight", setHighlight),
     },
     { icon: <Italic size={size} />, title: "Italic", keys: "⌘I", run: () => apply((t, s, e) => toggleInline(t, s, e, "*")) },
     { icon: <Code size={size} />, title: "Inline code", run: () => apply((t, s, e) => toggleInline(t, s, e, "`")) },
@@ -821,7 +675,11 @@ export function MarkdownEditor({
         <div className="md-tools">
           {uploadError && <span className="md-upload-error">{uploadError}</span>}
           {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
-          {[...fontTools, ...(!readOnly && editing ? tools : [])].map((t) => {
+          {[
+            ...(!readOnly && editing ? historyTools : []),
+            ...fontTools,
+            ...(!readOnly && editing ? tools : []),
+          ].map((t) => {
             const button = (
               <Tooltip key={t.id ?? t.title} label={t.title} keys={t.keys}>
                 <button
@@ -836,7 +694,11 @@ export function MarkdownEditor({
               </Tooltip>
             );
             return t.menu !== undefined ? (
-              <span key={t.id ?? t.title} ref={t.id === "color" ? colorRef : undefined} className={`md-${t.id}-tool`}>
+              <span
+                key={t.id ?? t.title}
+                ref={t.id === "color" || t.id === "highlight" ? menuRefs[t.id] : undefined}
+                className={`md-${t.id}-tool`}
+              >
                 {button}
                 {t.menu}
               </span>
@@ -911,88 +773,21 @@ export function MarkdownEditor({
           />
         </Suspense>
       )}
-      {tab === "write" ? (
-        <div className={`md-write${marks ? " highlighted" : ""}`}>
-          {marks && (
-            <div ref={mirrorRef} className="md-highlights" aria-hidden="true">
-              {/* The trailing newline keeps a final empty line, as the textarea does. */}
-              {markText(value, marks)}
-              {"\n"}
-            </div>
-          )}
-          <textarea
-            ref={ref}
-            className="md-textarea"
-            value={value}
-            readOnly={readOnly}
-            placeholder={placeholder}
-            spellCheck={spellCheck}
-            onChange={(e) => {
-              sel.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
-              setCaret(e.target.selectionStart);
-              onChange(e.target.value);
-            }}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-            onClick={onSourceClick}
-            onScroll={marks || popup ? onScroll : undefined}
-            onKeyDown={readOnly ? undefined : onKeyDown}
-            onPaste={readOnly ? undefined : onPaste}
-            onBlur={() => setComplete(null)}
-            aria-autocomplete={readOnly ? undefined : "list"}
-            aria-controls={popup ? listId : undefined}
-            aria-activedescendant={popup ? `${listId}-${completeIndex}` : undefined}
-          />
-          {popup && (
-            <div
-              ref={listRef}
-              className="md-complete"
-              role="listbox"
-              id={listId}
-              aria-label="Entity fields"
-              data-flipped={place?.flipped ? "" : undefined}
-              // Placed over the `@` once measured; hidden for the frame
-              // before that, so it never shows where it does not belong.
-              style={
-                place
-                  ? { left: place.left, top: place.top }
-                  : { left: 0, top: 0, visibility: "hidden" }
-              }
-            >
-              {items.map((c, i) => (
-                <button
-                  type="button"
-                  key={c.label}
-                  role="option"
-                  id={`${listId}-${i}`}
-                  aria-selected={i === completeIndex}
-                  className="md-complete-item"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pick(c)}
-                >
-                  <span className="md-complete-name">{c.label}</span>
-                  <span className="md-complete-desc">
-                    {c.entity} · {c.file}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : tab === "vim" ? (
-        <Suspense fallback={<div className="md-vim-loading">Loading Vim…</div>}>
-          <VimEditor
-            ref={vimRef}
-            value={value}
-            onChange={onChange}
-            placeholder={placeholder}
-            highlight={marks}
-            onPasteFiles={(files) => void addImages(files)}
-            onShortcut={onKeyDown}
-            onCaretMove={setCaret}
-            onOpenLink={openWebLink}
-            completions={fields}
-          />
-        </Suspense>
+      {tab !== "preview" ? (
+        <SourceEditor
+          ref={editorRef}
+          vim={tab === "vim"}
+          readOnly={readOnly}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          highlight={marks}
+          onPasteFiles={readOnly ? undefined : (files) => void addImages(files)}
+          onShortcut={readOnly ? undefined : onKeyDown}
+          onCaretMove={setCaret}
+          onOpenLink={openWebLink}
+          completions={readOnly ? undefined : fields}
+        />
       ) : (
         <div ref={previewRef} className="md-preview">
           {preview === null ? (

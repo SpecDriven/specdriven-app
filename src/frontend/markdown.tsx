@@ -3,17 +3,19 @@ import { MarkdownImage } from "./MarkdownImage";
 import { MarkdownTable } from "./MarkdownTable";
 import {
   BLOCK_START,
+  encodeAttr,
   HR,
+  imageTagAttrs,
   INLINE,
   OL_ITEM,
+  safeUrl,
+  spanStyle,
+  spanStyleDeclarations,
   TABLE_DIVIDER,
   TASK_ITEM,
-  UL_ITEM,
-  encodeAttr,
-  imageTagAttrs,
-  safeColor,
-  safeUrl,
   type ImageAttrs,
+  type SpanStyle,
+  UL_ITEM,
 } from "./markdownSyntax";
 import { renderTestInEditor } from "./testref";
 import { webLinkEnd } from "./weblinks";
@@ -163,10 +165,18 @@ function parseInline(
     } else if (g.strike !== undefined) {
       out.push(<del key={key}>{parseInline(g.strike, key, start + 2, ctx, links)}</del>);
     } else if (g.colored !== undefined) {
-      const color = safeColor(g.color!);
+      const style = spanStyle(g.style!);
       const inner = parseInline(g.colored, key, start + m[0].indexOf(">") + 1, ctx, links);
       out.push(
-        <span key={key} className="md-color" style={color ? { color } : undefined}>
+        <span
+          key={key}
+          className="md-color"
+          style={
+            style.color || style.background
+              ? { color: style.color, backgroundColor: style.background }
+              : undefined
+          }
+        >
           {inner}
         </span>,
       );
@@ -563,39 +573,88 @@ export const TEXT_COLORS: { id: string; label: string; value: string }[] = [
   { id: "gray", label: "Gray", value: "#8b8d98" },
 ];
 
-/** The colored span (`<span style="color: …">…</span>`) around a range, if any. */
-const COLOR_SPAN = /<span\s+style\s*=\s*(["'])\s*color\s*:\s*[^"'<>;]+?\s*;?\s*\1\s*>([\s\S]*?)<\/span>/g;
+/**
+ * The highlights the toolbar offers: translucent, so they read on the light
+ * theme and the dark one alike, over any text color.
+ */
+export const HIGHLIGHT_COLORS: { id: string; label: string; value: string }[] = [
+  { id: "yellow", label: "Yellow", value: "#ffd60066" },
+  { id: "green", label: "Green", value: "#30d15866" },
+  { id: "blue", label: "Blue", value: "#0a84ff59" },
+  { id: "pink", label: "Pink", value: "#ff375f59" },
+  { id: "orange", label: "Orange", value: "#ff9f0a66" },
+  { id: "purple", label: "Purple", value: "#bf5af266" },
+];
 
-function colorSpanAround(
-  text: string,
-  start: number,
-  end: number,
-): { start: number; end: number; inner: number; innerEnd: number } | null {
-  for (const m of text.matchAll(COLOR_SPAN)) {
-    const s = m.index!;
-    const e = s + m[0].length;
-    const inner = s + m[0].indexOf(">") + 1;
-    const innerEnd = e - "</span>".length;
+/** A styled span (`<span style="…">…</span>`): its tags and the text between them. */
+const STYLE_SPAN = /<span\s+style\s*=\s*(["'])([^"'<>]*?)\1\s*>(.*?)<\/span>/g;
+
+export interface StyledSpan {
+  /** The span, tags included. */
+  start: number;
+  end: number;
+  /** The text between the tags. */
+  inner: number;
+  innerEnd: number;
+  style: SpanStyle;
+}
+
+/**
+ * The styled spans in a line of text, in order — what the source editor
+ * paints in place of the tags (src/frontend/SourceEditor.tsx). Spans do not
+ * cross lines, as the renderer reads none that do.
+ */
+export function styledSpans(text: string): StyledSpan[] {
+  const out: StyledSpan[] = [];
+  for (const m of text.matchAll(STYLE_SPAN)) {
+    const start = m.index!;
+    const end = start + m[0].length;
+    const inner = start + m[0].indexOf(">") + 1;
+    out.push({ start, end, inner, innerEnd: end - "</span>".length, style: spanStyle(m[2]!) });
+  }
+  return out;
+}
+
+function styledSpanAround(text: string, start: number, end: number): StyledSpan | null {
+  for (const span of styledSpans(text)) {
     // The selection is the whole span, its text, or lies inside its text.
-    if ((start === s && end === e) || (start >= inner && end <= innerEnd)) {
-      return { start: s, end: e, inner, innerEnd };
-    }
+    if (
+      (start === span.start && end === span.end) ||
+      (start >= span.inner && end <= span.innerEnd)
+    )
+      return span;
   }
   return null;
 }
 
+/** A change to a span's style: a color to set, `null` to take it off, or nothing. */
+interface StylePatch {
+  color?: string | null;
+  background?: string | null;
+}
+
 /**
- * Color the selection (specs/editor/common-editor.feature.md "Font color"):
- * wrap it in `<span style="color: …">`, leaving the text selected. A
- * selection already in a colored span recolors that span instead of nesting
- * another; `null` takes the color off, leaving the text as it was.
+ * Restyle the selection: wrap it in `<span style="…">`, leaving the text
+ * selected. A selection already in a styled span restyles that span instead
+ * of nesting another — a color joins a highlight there, and the other way
+ * round — and a span left with no style comes off, leaving the text as it was.
  */
-export function setColor(text: string, start: number, end: number, color: string | null): Edit {
-  const around = colorSpanAround(text, start, end);
+function setSpanStyle(text: string, start: number, end: number, patch: StylePatch): Edit {
+  const around = styledSpanAround(text, start, end);
   if (around) {
+    const style: SpanStyle = { ...around.style };
+    if (patch.color !== undefined) {
+      if (patch.color) style.color = patch.color;
+      else delete style.color;
+    }
+    if (patch.background !== undefined) {
+      if (patch.background) style.background = patch.background;
+      else delete style.background;
+    }
+    const decls = spanStyleDeclarations(style);
     const inner = text.slice(around.inner, around.innerEnd);
-    const open = color === null ? "" : `<span style="color: ${color}">`;
-    const close = color === null ? "" : "</span>";
+    const open = decls.length === 0 ? "" : `<span style="${decls.join("; ")}">`;
+    const close = decls.length === 0 ? "" : "</span>";
     const next = text.slice(0, around.start) + open + inner + close + text.slice(around.end);
     // Keep the same characters selected, wherever the opening tag moved them.
     const shift = around.start + open.length - around.inner;
@@ -604,14 +663,34 @@ export function setColor(text: string, start: number, end: number, color: string
       ? { text: next, start: around.start + open.length, end: around.start + open.length + inner.length }
       : { text: next, start: start + shift, end: end + shift };
   }
-  if (color === null) return { text, start, end };
-  const open = `<span style="color: ${color}">`;
+  const decls = spanStyleDeclarations({
+    color: patch.color ?? undefined,
+    background: patch.background ?? undefined,
+  });
+  if (decls.length === 0) return { text, start, end };
+  const open = `<span style="${decls.join("; ")}">`;
   const sel = text.slice(start, end);
   return {
     text: text.slice(0, start) + open + sel + "</span>" + text.slice(end),
     start: start + open.length,
     end: start + open.length + sel.length,
   };
+}
+
+/**
+ * Color the selection (specs/editor/common-editor.feature.md "Font color"):
+ * `null` takes the color off.
+ */
+export function setColor(text: string, start: number, end: number, color: string | null): Edit {
+  return setSpanStyle(text, start, end, { color });
+}
+
+/**
+ * Highlight the selection (specs/editor/common-editor.feature.md
+ * "Highlight"): a color behind the text; `null` takes the highlight off.
+ */
+export function setHighlight(text: string, start: number, end: number, color: string | null): Edit {
+  return setSpanStyle(text, start, end, { background: color });
 }
 
 /** Turn the selection into a markdown link, leaving "url" selected. */

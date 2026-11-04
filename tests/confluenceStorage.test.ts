@@ -56,6 +56,15 @@ describe("inline", () => {
     expect(renderInlineStorage(`<span style="color: nope(1)">x</span>`)).toBe("x");
   });
 
+  test("highlighted text keeps its highlight, beside its color", () => {
+    expect(renderInlineStorage(`<span style="background-color: #ffd60066">lit</span>`)).toBe(
+      '<span style="background-color: #ffd60066;">lit</span>',
+    );
+    expect(renderInlineStorage(`<span style="color: red; background-color: #ffd60066">x</span>`)).toBe(
+      '<span style="color: red; background-color: #ffd60066;">x</span>',
+    );
+  });
+
   test("links only to safe destinations; a javascript url stays text", () => {
     expect(renderInlineStorage("[docs](https://acme.com/a?b=1&c=2)")).toBe(
       '<a href="https://acme.com/a?b=1&amp;c=2">docs</a>',

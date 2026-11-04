@@ -12,7 +12,13 @@
 //
 // "Font color": a button next to Bold opens a menu of colors; picking one
 // wraps the selection in `<span style="color: …">`, which the Preview tab
-// shows in that color, and "Default color" takes it off again.
+// shows in that color, and "Default color" takes it off again. "Highlight"
+// does the same with a color behind the text, in the same span. The Write
+// tab shows both as they will read, hiding the span tags until the caret
+// is on them.
+//
+// "Undo and redo": ⌘Z takes back the last edit, typed or from the toolbar,
+// and ⇧⌘Z brings it back; the toolbar has a button for each.
 //
 // React needs a DOM to run the Write tab's handlers, so this file borrows one
 // from happy-dom — only the globals React touches, given back afterwards, as
@@ -22,7 +28,8 @@ import { Window } from "happy-dom";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TEXT_COLORS, renderMarkdown, setColor } from "../src/frontend/markdown";
+import { EditorView } from "@codemirror/view";
+import { HIGHLIGHT_COLORS, TEXT_COLORS, renderMarkdown, setColor, setHighlight } from "../src/frontend/markdown";
 import { safeColor } from "../src/frontend/markdownSyntax";
 import { MarkdownEditor } from "../src/frontend/MarkdownEditor";
 import { isOpenLinkClick, webLinkAt, webLinks } from "../src/frontend/weblinks";
@@ -222,62 +229,67 @@ describe("the Write tab", () => {
     return <MarkdownEditor value={value} onChange={setValue} readOnly={readOnly} initialTab="write" />;
   }
 
+  /** The source pane's CodeMirror editor, once a Write (or Source) tab shows one. */
+  const source = () => {
+    const dom = host!.querySelector<HTMLElement>(".cm-editor");
+    return dom ? EditorView.findFromDOM(dom) : null;
+  };
+
   // Async, so the entity-field load the editor starts lands inside act().
   async function mount(el: React.ReactElement) {
     root = createRoot(host!);
     await act(async () => root!.render(el));
-    return host!.querySelector("textarea")!;
+    return source()!;
   }
 
-  /** A click that lands the caret at `offset`, as the browser does before the click event. */
-  function clickAt(ta: HTMLTextAreaElement, offset: number, mods: MouseEventInit = {}) {
+  /** A click that lands the caret at `offset`, as the press does before the click event. */
+  function clickAt(view: EditorView, offset: number, mods: MouseEventInit = {}) {
     act(() => {
-      ta.focus();
-      ta.setSelectionRange(offset, offset);
-      // React reads a moved selection off the mouseup that ends a click.
-      ta.dispatchEvent(new window.MouseEvent("mouseup", { bubbles: true, ...mods }) as unknown as Event);
-      ta.dispatchEvent(
-        new window.MouseEvent("click", { bubbles: true, cancelable: true, ...mods }) as unknown as Event,
+      view.focus();
+      view.dispatch({ selection: { anchor: offset } });
+      view.contentDOM.dispatchEvent(
+        new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...mods }) as unknown as Event,
       );
     });
   }
 
   test("⌘-click on a web link opens it", async () => {
-    const ta = await mount(<Editor />);
-    clickAt(ta, 30, { metaKey: true });
+    const view = await mount(<Editor />);
+    clickAt(view, 30, { metaKey: true });
     expect(opened).toEqual(["https://abc.com"]);
   });
 
   test("Ctrl-click opens it too, and in a read-only body's source", async () => {
-    const ta = await mount(<Editor readOnly />);
-    // A read-only body opens on Preview; its Source tab is the textarea.
-    const source = [...host!.querySelectorAll("button[role=tab]")].find(
+    const view = await mount(<Editor readOnly />);
+    // A read-only body opens on Preview; its Source tab is the same pane, read-only.
+    const tab = [...host!.querySelectorAll("button[role=tab]")].find(
       (b) => b.textContent === "Source",
     ) as HTMLButtonElement;
-    expect(ta).toBeNull();
-    act(() => source.click());
-    clickAt(host!.querySelector("textarea")!, 25, { ctrlKey: true });
+    expect(view).toBeNull();
+    act(() => tab.click());
+    expect(source()!.state.readOnly).toBe(true);
+    clickAt(source()!, 25, { ctrlKey: true });
     expect(opened).toEqual(["https://abc.com"]);
   });
 
   test("a plain click only places the caret, so the url can be edited", async () => {
-    const ta = await mount(<Editor />);
-    clickAt(ta, 30);
+    const view = await mount(<Editor />);
+    clickAt(view, 30);
     expect(opened).toEqual([]);
   });
 
   test("⌘-click away from a link opens nothing", async () => {
-    const ta = await mount(<Editor />);
-    clickAt(ta, 5, { metaKey: true });
+    const view = await mount(<Editor />);
+    clickAt(view, 5, { metaKey: true });
     expect(opened).toEqual([]);
   });
 
   test("the toolbar offers to open the link the caret is in, and only then", async () => {
-    const ta = await mount(<Editor />);
+    const view = await mount(<Editor />);
     const open = () => host!.querySelector('button[aria-label="Open https://abc.com"]') as HTMLButtonElement | null;
-    clickAt(ta, 5);
+    clickAt(view, 5);
     expect(open()).toBeNull();
-    clickAt(ta, 30);
+    clickAt(view, 30);
     expect(open()).not.toBeNull();
     act(() => open()!.click());
     expect(opened).toEqual(["https://abc.com"]);
@@ -351,7 +363,9 @@ describe("font size", () => {
 
   test("the buttons sit next to the Heading button", async () => {
     await mount(<Editor />);
-    expect(labels().slice(0, 3)).toEqual([
+    const at = labels().indexOf("Heading");
+    expect(at).toBeGreaterThan(1);
+    expect(labels().slice(at - 2, at + 1)).toEqual([
       "Decrease font size (100%)",
       "Increase font size (100%)",
       "Heading",
@@ -456,6 +470,45 @@ describe("setColor", () => {
   });
 });
 
+describe("setHighlight", () => {
+  const red = "#e5484d";
+  const yellow = "#ffd60066";
+
+  test("wraps the selection in a highlighted span, leaving the text selected", () => {
+    expect(setHighlight("mark this word", 10, 14, yellow)).toEqual({
+      text: `mark this <span style="background-color: ${yellow}">word</span>`,
+      start: 52,
+      end: 56,
+    });
+  });
+
+  test("joins a highlight to a colored span, and a color to a highlighted one", () => {
+    const colored = `x <span style="color: ${red}">word</span> y`;
+    const inner = colored.indexOf("word");
+    const both = setHighlight(colored, inner, inner + 4, yellow);
+    expect(both.text).toBe(`x <span style="color: ${red}; background-color: ${yellow}">word</span> y`);
+    expect(both.text.slice(both.start, both.end)).toBe("word");
+    const highlighted = `<span style="background-color: ${yellow}">word</span>`;
+    const r = setColor(highlighted, 0, highlighted.length, red);
+    expect(r.text).toBe(`<span style="color: ${red}; background-color: ${yellow}">word</span>`);
+  });
+
+  test("No highlight takes the highlight off, and the span with it once nothing is left", () => {
+    const both = `x <span style="color: ${red}; background-color: ${yellow}">word</span> y`;
+    const inner = both.indexOf("word");
+    const colored = setHighlight(both, inner, inner + 4, null);
+    expect(colored.text).toBe(`x <span style="color: ${red}">word</span> y`);
+    const at = colored.text.indexOf("word");
+    expect(setColor(colored.text, at, at + 4, null).text).toBe("x word y");
+    expect(setHighlight("plain", 0, 5, null)).toEqual({ text: "plain", start: 0, end: 5 });
+  });
+
+  test("offers highlights every one of which is a color the preview accepts", () => {
+    expect(HIGHLIGHT_COLORS.length).toBeGreaterThan(3);
+    for (const c of HIGHLIGHT_COLORS) expect(safeColor(c.value)).toBe(c.value);
+  });
+});
+
 describe("colored text in the preview", () => {
   test("shows a colored span in its color, with the markdown inside it read", () => {
     expect(html(`a <span style="color: #e5484d">**red**</span> b`)).toBe(
@@ -466,12 +519,23 @@ describe("colored text in the preview", () => {
     );
   });
 
+  test("shows a highlighted span with its color behind the text, and both together", () => {
+    expect(html(`a <span style="background-color: #ffd60066">lit</span> b`)).toBe(
+      `<p>a <span class="md-color" style="background-color:#ffd60066">lit</span> b</p>`,
+    );
+    expect(html(`<span style="color: #e5484d; background-color: #ffd60066">x</span>`)).toBe(
+      `<p><span class="md-color" style="color:#e5484d;background-color:#ffd60066">x</span></p>`,
+    );
+  });
+
   test("reads no other style, and no color that could break out of one", () => {
     expect(safeColor("red; background: url(x)")).toBeNull();
     expect(safeColor("expression(alert(1))")).toBeNull();
     expect(safeColor("rgb(1, 2, 3)")).toBe("rgb(1, 2, 3)");
-    expect(html(`<span style="background: red">x</span>`)).toBe(
-      `<p>&lt;span style=&quot;background: red&quot;&gt;x&lt;/span&gt;</p>`,
+    // A style with nothing it reads styles nothing; one it half reads keeps that half.
+    expect(html(`<span style="font-weight: bold">x</span>`)).toBe(`<p><span class="md-color">x</span></p>`);
+    expect(html(`<span style="color: red; background: url(x)">x</span>`)).toBe(
+      `<p><span class="md-color" style="color:red">x</span></p>`,
     );
   });
 });
@@ -505,15 +569,34 @@ describe("font color", () => {
   async function mount(el: React.ReactElement) {
     root = createRoot(host!);
     await act(async () => root!.render(el));
-    return host!.querySelector("textarea")!;
+    return EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!;
   }
+  const select = (view: EditorView, start: number, end: number) =>
+    act(() => {
+      view.focus();
+      view.dispatch({ selection: { anchor: start, head: end } });
+    });
+  /**
+   * A key chord in the editor. CodeMirror read the platform off Bun's own
+   * navigator when it loaded, before the window below was borrowed: its Mod
+   * is ⌘ on a Mac and Ctrl elsewhere.
+   */
+  const mod = process.platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+  const press = (view: EditorView, key: string, init: KeyboardEventInit = {}) =>
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }) as unknown as Event,
+      );
+    });
 
   const labels = () =>
     [...host!.querySelectorAll(".md-tools button")].map((b) => b.getAttribute("aria-label"));
-  const colorButton = () => host!.querySelector<HTMLButtonElement>('button[aria-label="Font color"]')!;
-  const menu = () => document.querySelector<HTMLElement>('[role="menu"][aria-label="Font color"]');
-  const item = (label: string) =>
-    [...menu()!.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find(
+  const button = (label: string) => host!.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+  const colorButton = () => button("Font color");
+  const menu = (label = "Font color") =>
+    document.querySelector<HTMLElement>(`[role="menu"][aria-label="${label}"]`);
+  const item = (label: string, of = "Font color") =>
+    [...menu(of)!.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find(
       (b) => b.textContent === label,
     )!;
 
@@ -525,11 +608,8 @@ describe("font color", () => {
   });
 
   test("picking a color colors the selection; Default color takes it off", async () => {
-    const ta = await mount(<Editor />);
-    act(() => {
-      ta.focus();
-      ta.setSelectionRange(10, 13);
-    });
+    const view = await mount(<Editor />);
+    select(view, 10, 13);
     act(() => colorButton().click());
     expect(menu()).not.toBeNull();
     expect([...menu()!.querySelectorAll("[role=menuitem]")].map((b) => b.textContent)).toEqual([
@@ -542,13 +622,94 @@ describe("font color", () => {
 
     // The selection is still the word, so the menu acts on its span.
     const start = latest.indexOf(">red") + 1;
-    act(() => {
-      ta.focus();
-      ta.setSelectionRange(start, start + 3);
-    });
+    select(view, start, start + 3);
     act(() => colorButton().click());
     act(() => item("Default color").click());
     expect(latest).toBe("make this red");
+  });
+
+  test("the Highlight button sits next to Font color, and its menu highlights the selection", async () => {
+    const view = await mount(<Editor />);
+    const at = labels().indexOf("Font color");
+    expect(labels()[at + 1]).toBe("Highlight");
+    select(view, 10, 13);
+    act(() => button("Highlight").click());
+    expect([...menu("Highlight")!.querySelectorAll("[role=menuitem]")].map((b) => b.textContent)).toEqual([
+      ...HIGHLIGHT_COLORS.map((c) => c.label),
+      "No highlight",
+    ]);
+    act(() => item("Yellow", "Highlight").click());
+    const yellow = HIGHLIGHT_COLORS[0]!.value;
+    expect(latest).toBe(`make this <span style="background-color: ${yellow}">red</span>`);
+    expect(menu("Highlight")).toBeNull();
+    // Only one menu at a time: opening the other closes it.
+    act(() => button("Highlight").click());
+    act(() => colorButton().click());
+    expect(menu("Highlight")).toBeNull();
+    expect(menu()).not.toBeNull();
+    act(() => item("Red").click());
+    expect(latest).toBe(`make this <span style="color: ${TEXT_COLORS[0]!.value}; background-color: ${yellow}">red</span>`);
+  });
+
+  test("the Write tab shows the text in its color, with the tags hidden until the caret is on it", async () => {
+    const red = TEXT_COLORS[0]!.value;
+    const view = await mount(<Editor initial={`make this <span style="color: ${red}">red</span> now`} />);
+    const content = () => host!.querySelector(".cm-content")!;
+    const styled = () => host!.querySelector<HTMLElement>(".md-source-styled");
+    // The caret opens at the start, away from the span: the text reads as it will.
+    expect(content().textContent).toBe("make this red now");
+    expect(styled()?.textContent).toBe("red");
+    expect(styled()?.style.color).toBe(red);
+    // A caret in the word, or the word selected, leaves them hidden: a click
+    // there must not shift the word.
+    const inner = view.state.doc.toString().indexOf(">red") + 1;
+    select(view, inner + 1, inner + 1);
+    expect(content().textContent).toBe("make this red now");
+    select(view, inner, inner + 3);
+    expect(content().textContent).toBe("make this red now");
+    // At the span's edge the tags show, receding, so they can be edited.
+    const start = view.state.doc.toString().indexOf("<span");
+    select(view, start, start);
+    expect(content().textContent).toBe(`make this <span style="color: ${red}">red</span> now`);
+    expect([...host!.querySelectorAll(".md-source-tag")].map((t) => t.textContent)).toEqual([
+      `<span style="color: ${red}">`,
+      "</span>",
+    ]);
+    // Away again, they go.
+    select(view, 0, 0);
+    expect(content().textContent).toBe("make this red now");
+  });
+
+  test("the caret steps over a hidden tag, to the span's edge, where the tags then show", async () => {
+    const red = TEXT_COLORS[0]!.value;
+    const view = await mount(<Editor initial={`a <span style="color: ${red}">b</span> c`} />);
+    const text = view.state.doc.toString();
+    const inner = text.indexOf(">b") + 1;
+    select(view, inner, inner);
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }) as unknown as Event,
+      );
+    });
+    expect(view.state.selection.main.head).toBe(text.indexOf("<span"));
+    expect(host!.querySelector(".cm-content")!.textContent).toBe(text);
+  });
+
+  test("⌘Z takes a toolbar edit back whole, ⇧⌘Z brings it back, and the toolbar has both", async () => {
+    const view = await mount(<Editor />);
+    select(view, 10, 13);
+    act(() => colorButton().click());
+    act(() => item("Red").click());
+    const colored = `make this <span style="color: ${TEXT_COLORS[0]!.value}">red</span>`;
+    expect(latest).toBe(colored);
+    press(view, "z", mod);
+    expect(latest).toBe("make this red");
+    press(view, "z", { ...mod, shiftKey: true });
+    expect(latest).toBe(colored);
+    act(() => button("Undo").click());
+    expect(latest).toBe("make this red");
+    act(() => button("Redo").click());
+    expect(latest).toBe(colored);
   });
 
   test("ESC closes the menu and leaves the text alone", async () => {
