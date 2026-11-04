@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.227 — 2026-11-04
+
+- The editor shows colored and highlighted text as it reads, and undoes with ⌘Z ([#373](https://github.com/SpecDriven/specdriven-app/pull/373))
+
 ## v0.1.226 — 2026-11-04
 
 - The Updates page on macOS says Admin privileges may be needed to update ([#372](https://github.com/SpecDriven/specdriven-app/pull/372))
