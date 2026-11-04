@@ -13,6 +13,8 @@ import {
   CircleHelp,
   FilePen,
   FileText,
+  ArrowUp,
+  Folder,
   FolderOpen,
   Globe,
   PanelRightClose,
@@ -45,15 +47,19 @@ import {
   usableAgents,
   useAgentChat,
   type AgentChatStore,
+  type AgentChoices,
   type AgentDescriptor,
+  type AgentModelOption,
   type AgentOffer,
   type ChatSessionMeta,
   type ChatStatus,
+  type EffortLevel,
   type PermissionMode,
   type Question,
   type SessionState,
   type TranscriptItem,
 } from "./agentChat";
+import { EFFORT_LABEL, EFFORT_LEVELS } from "../server/agentTypes";
 
 /**
  * The coding agent pane (specs/agents/agent-pane.feature.md): a live
@@ -173,20 +179,14 @@ export function AgentPane({
           })
         )?.trim() || null
     : undefined;
+  const folders = knownFolders(codeRepo, dataRepo, store.list);
   return (
     <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
-      <AgentHeader
-        store={store}
-        session={session}
-        demo={demo}
-        folders={knownFolders(codeRepo, dataRepo, store.list)}
-        askFolder={askFolder}
-        onClose={onClose}
-      />
+      <AgentHeader store={store} session={session} demo={demo} onClose={onClose} />
       {session && agent ? (
         <>
           <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
-          <Composer session={session} agent={agent} />
+          <Composer session={session} agent={agent} store={store} folders={folders} askFolder={askFolder} />
         </>
       ) : (
         <EmptyState
@@ -194,6 +194,7 @@ export function AgentPane({
           demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
+          folders={folders}
           askFolder={askFolder}
           onOpenPlugins={onOpenPlugins}
           agentSettings={agentSettings}
@@ -241,20 +242,14 @@ function AgentHeader({
   store,
   session,
   demo,
-  folders,
-  askFolder,
   onClose,
 }: {
   store: AgentChatStore;
   session: SessionState | null;
   demo: boolean;
-  folders: string[];
-  askFolder?: (initial: string) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
-  const [folderOpen, setFolderOpen] = useState(false);
   const meta = session?.meta ?? null;
   const agent = meta ? describeAgent(meta.agent, store.agents) : null;
   const fail = (e: Error) => toast.error(e.message);
@@ -311,44 +306,6 @@ function AgentHeader({
         />
       </div>
       {meta && agent && (
-        <div className="agent-cwd-picker">
-          <Tooltip label={`${agent.label} · ${meta.cwd}`}>
-            <button
-              type="button"
-              className="chip muted agent-cwd"
-              aria-label={`Folder: ${meta.cwd}`}
-              aria-haspopup="menu"
-              aria-expanded={folderOpen}
-              onClick={() => setFolderOpen((o) => !o)}
-            >
-              <span className="agent-cwd-name">{basename(meta.cwd)}</span>
-              <ChevronDown size={12} aria-hidden="true" className="agent-cwd-chevron" />
-            </button>
-          </Tooltip>
-          <Menu
-            open={folderOpen}
-            onClose={() => setFolderOpen(false)}
-            label="Folder"
-            heading="Folder · another one starts a new session there"
-            items={folderItems(folders, meta.cwd, askFolder, (cwd) => {
-              if (cwd === meta.cwd) return;
-              // A running agent cannot move: the new folder gets its own
-              // session, same agent and mode, and this one stays listed.
-              void agentChat
-                .createSession({
-                  name: defaultSessionName(),
-                  agent: meta.agent,
-                  cwd,
-                  ...(hasModes(agent) ? { permissionMode: meta.permissionMode } : {}),
-                })
-                .catch(fail);
-            })}
-            className="agent-cwd-menu"
-            containerSelector=".agent-cwd-picker"
-          />
-        </div>
-      )}
-      {meta && agent && (
         <span
           className="agent-dot"
           data-status={meta.status}
@@ -381,43 +338,6 @@ function AgentHeader({
             {meta.account.label}
           </span>
         </Tooltip>
-      )}
-      {/* An agent with no permission protocol (Pi runs its own tools): there
-          is no mode to offer, and the pane says as much. */}
-      {meta && agent && !hasModes(agent) && (
-        <Tooltip label={agent.capabilities.noPermissionsNote ?? `${agent.label} has no permission modes`}>
-          <span className="chip muted" tabIndex={0}>
-            No permission gate
-          </span>
-        </Tooltip>
-      )}
-      {meta && agent && hasModes(agent) && (
-        <div className="agent-mode-picker">
-          <button
-            type="button"
-            className="agent-mode"
-            aria-label={`Permission mode: ${MODE_LABEL[meta.permissionMode]}`}
-            title="Permission mode"
-            aria-haspopup="menu"
-            aria-expanded={modeOpen}
-            disabled={meta.status === "starting" || isFinalStatus(meta.status)}
-            onClick={() => setModeOpen((o) => !o)}
-          >
-            <span className="agent-mode-name">{MODE_LABEL[meta.permissionMode]}</span>
-            <ChevronDown size={12} aria-hidden="true" />
-          </button>
-          <Menu
-            open={modeOpen}
-            onClose={() => setModeOpen(false)}
-            label="Permission mode"
-            heading="Mode"
-            items={modeItems(agent, meta.permissionMode, (m) =>
-              void agentChat.setMode(meta.id, m).catch(fail),
-            )}
-            className="agent-mode-menu"
-            containerSelector=".agent-mode-picker"
-          />
-        </div>
       )}
       {meta && busy && agent?.capabilities.canInterrupt && (
         <Tooltip label="Stop this turn">
@@ -504,6 +424,292 @@ export function modeItems(
   }));
 }
 
+// --- The composer bar (specs/agents/agent-pane.feature.md "The composer bar
+// picks the folder, model, effort and mode") ----------------------------------
+
+/** What each effort level means, under its name in the menu. */
+export const EFFORT_DESCRIPTION: Record<EffortLevel, string> = {
+  low: "Quick answers, little thinking",
+  medium: "Balanced speed and thinking",
+  high: "Thinks things through",
+  xhigh: "Longer thinking for hard problems",
+  max: "The most thinking the model allows",
+};
+
+/** The menu row a model value stands for: by its value, or the id an alias resolves to. */
+export function modelRow(choices: AgentChoices | null, model: string | null | undefined): AgentModelOption | undefined {
+  if (!choices || !model) return undefined;
+  const exact = choices.models.find((m) => m.value === model);
+  if (exact) return exact;
+  // Several aliases can stand for one id (Claude's "default" and "opus"):
+  // the one new sessions start on wins, else the first.
+  const resolved = choices.models.filter((m) => m.resolvedModel === model);
+  return resolved.find((m) => m.value === choices.model) ?? resolved[0];
+}
+
+/** A model as the bar names it: its row's name, else the value, else "Default". */
+export function modelLabel(choices: AgentChoices | null, model: string | null | undefined): string {
+  return modelRow(choices, model)?.displayName ?? model ?? "Default model";
+}
+
+/**
+ * The model menu: the agent's own default first (while no model is set),
+ * then every model it offers, the current one checked and the one new
+ * sessions start on badged.
+ */
+export function modelItems(
+  choices: AgentChoices,
+  current: string | null | undefined,
+  agent: Pick<AgentDescriptor, "label">,
+  onSelect: (model: string | null) => void,
+): MenuItem[] {
+  const currentRow = modelRow(choices, current);
+  const defaultRow = modelRow(choices, choices.model);
+  const items: MenuItem[] = choices.models.map((m, i) => ({
+    id: `model:${m.value}`,
+    label:
+      m === defaultRow ? (
+        <>
+          {m.displayName} <span className="menu-badge">Default</span>
+        </>
+      ) : (
+        m.displayName
+      ),
+    ...(m.description ? { description: m.description } : {}),
+    ...(i < 9 ? { keys: String(i + 1) } : {}),
+    checked: m === currentRow,
+    onSelect: () => onSelect(m.value),
+  }));
+  // A model the agent reports that is not on its list still shows, checked.
+  if (current && !currentRow) {
+    items.unshift({ id: `model:${current}`, label: current, checked: true, onSelect: () => onSelect(current) });
+  }
+  if (choices.model === null) {
+    items.unshift({
+      id: "model:default",
+      label: "Default model",
+      description: `Whatever ${agent.label} picks on its own`,
+      checked: !current,
+      onSelect: () => onSelect(null),
+    });
+  }
+  return items;
+}
+
+/** The levels a model takes: its row's, else every level (the agent
+    lowers one its model does not take). */
+export function effortsFor(choices: AgentChoices | null, model: string | null | undefined): readonly EffortLevel[] {
+  return modelRow(choices, model ?? choices?.model)?.efforts ?? EFFORT_LEVELS;
+}
+
+/** The effort menu: the agent's own default, then each level the model takes. */
+export function effortItems(
+  efforts: readonly EffortLevel[],
+  current: EffortLevel | null | undefined,
+  agent: Pick<AgentDescriptor, "label">,
+  onSelect: (effort: EffortLevel | null) => void,
+): MenuItem[] {
+  return [
+    {
+      id: "effort:default",
+      label: "Default",
+      description: `${agent.label} decides for the model`,
+      checked: !current,
+      onSelect: () => onSelect(null),
+    },
+    ...efforts.map((e, i) => ({
+      id: `effort:${e}`,
+      label: EFFORT_LABEL[e],
+      description: EFFORT_DESCRIPTION[e],
+      keys: String(i + 1),
+      checked: e === current,
+      onSelect: () => onSelect(e),
+    })),
+  ];
+}
+
+/** A session name from the first message: its first line, cut to fit the menu. */
+export function nameFromMessage(text: string): string {
+  const line = cleanLine(text.split("\n").find((l) => l.trim()) ?? "");
+  return line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line;
+}
+
+/** The agent's models and defaults, asked for once the bar shows it. */
+function useChoices(store: AgentChatStore, agent: AgentDescriptor | null): AgentChoices | null {
+  const id = agent?.id ?? null;
+  const known = id !== null && id in store.choices;
+  useEffect(() => {
+    if (id && !known) void agentChat.loadChoices(id);
+  }, [id, known]);
+  return id ? (store.choices[id] ?? null) : null;
+}
+
+/** One chip in the composer bar, with its menu opening above it. */
+function BarPicker({
+  name,
+  text,
+  icon,
+  ariaLabel,
+  tooltip,
+  heading,
+  items,
+  disabled,
+  align = "left",
+}: {
+  name: string;
+  text: ReactNode;
+  icon?: ReactNode;
+  ariaLabel: string;
+  tooltip: string;
+  heading: string;
+  items: MenuItem[];
+  disabled?: boolean;
+  align?: "left" | "right";
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="agent-bar-picker" data-picker={name}>
+      <Tooltip label={tooltip}>
+        <button
+          type="button"
+          className="agent-bar-chip"
+          aria-label={ariaLabel}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {icon}
+          <span className="agent-bar-chip-text">{text}</span>
+          <ChevronDown size={12} aria-hidden="true" className="agent-bar-chevron" />
+        </button>
+      </Tooltip>
+      <Menu
+        open={open}
+        onClose={() => setOpen(false)}
+        label={ariaLabel}
+        heading={heading}
+        items={items}
+        className={`agent-bar-menu agent-bar-menu-${align} agent-bar-menu-${name}`}
+        containerSelector={`.agent-bar-picker[data-picker="${name}"]`}
+      />
+    </div>
+  );
+}
+
+/** The folder chip: a folder's name, its path in the tooltip. */
+function FolderPicker({
+  folder,
+  folders,
+  askFolder,
+  heading,
+  disabled,
+  onSelect,
+}: {
+  folder: string;
+  folders: readonly string[];
+  askFolder?: (initial: string) => Promise<string | null>;
+  heading: string;
+  disabled?: boolean;
+  onSelect: (folder: string) => void;
+}) {
+  return (
+    <BarPicker
+      name="folder"
+      text={basename(folder)}
+      icon={<Folder size={13} aria-hidden="true" />}
+      ariaLabel={`Folder: ${folder}`}
+      tooltip={folder}
+      heading={heading}
+      items={folderItems(folders, folder, askFolder, onSelect)}
+      disabled={disabled}
+    />
+  );
+}
+
+/** The model, effort and mode chips, right of the folder. */
+function ModelEffortMode({
+  agent,
+  choices,
+  model,
+  effort,
+  mode,
+  canPickModel,
+  disabled,
+  onModel,
+  onEffort,
+  onMode,
+}: {
+  agent: AgentDescriptor;
+  choices: AgentChoices | null;
+  model: string | null | undefined;
+  effort: EffortLevel | null | undefined;
+  mode: PermissionMode;
+  canPickModel: boolean;
+  disabled: boolean;
+  onModel: (model: string | null) => void;
+  onEffort: (effort: EffortLevel | null) => void;
+  onMode: (mode: PermissionMode) => void;
+}) {
+  const efforts = effortsFor(choices, model);
+  return (
+    <>
+      {choices && canPickModel ? (
+        <BarPicker
+          name="model"
+          text={modelLabel(choices, model)}
+          ariaLabel={`Model: ${modelLabel(choices, model)}`}
+          tooltip="Model — new sessions start on the one you pick"
+          heading="Model"
+          items={modelItems(choices, model, agent, onModel)}
+          disabled={disabled}
+          align="right"
+        />
+      ) : (
+        model && (
+          <Tooltip label={`${agent.label} runs on ${model}`}>
+            <span className="agent-bar-fact" tabIndex={0}>
+              {modelLabel(choices, model)}
+            </span>
+          </Tooltip>
+        )
+      )}
+      {choices && agent.capabilities.effort && efforts.length > 0 && (
+        <BarPicker
+          name="effort"
+          text={effort ? EFFORT_LABEL[effort] : "Effort"}
+          ariaLabel={`Effort: ${effort ? EFFORT_LABEL[effort] : "default"}`}
+          tooltip="How hard the model thinks — new sessions start at the one you pick"
+          heading="Effort"
+          items={effortItems(efforts, effort, agent, onEffort)}
+          disabled={disabled}
+          align="right"
+        />
+      )}
+      {hasModes(agent) ? (
+        <BarPicker
+          name="mode"
+          text={MODE_LABEL[mode]}
+          ariaLabel={`Permission mode: ${MODE_LABEL[mode]}`}
+          tooltip="Permission mode"
+          heading="Mode"
+          items={modeItems(agent, mode, onMode)}
+          disabled={disabled}
+          align="right"
+        />
+      ) : (
+        // An agent with no permission protocol (Pi runs its own tools):
+        // there is no mode to offer, and the bar says as much.
+        <Tooltip label={agent.capabilities.noPermissionsNote ?? `${agent.label} has no permission modes`}>
+          <span className="agent-bar-fact" tabIndex={0}>
+            No permission gate
+          </span>
+        </Tooltip>
+      )}
+    </>
+  );
+}
+
 /**
  * What the pane shows when no agent can start (specs/agents/agent-plugins
  * .feature.md "The pane offers to install an agent plugin"): agents come as
@@ -588,6 +794,7 @@ function EmptyState({
   demo,
   codeRepo,
   dataRepo,
+  folders,
   askFolder,
   onOpenPlugins,
   agentSettings,
@@ -596,21 +803,21 @@ function EmptyState({
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
+  folders: readonly string[];
   askFolder?: (initial: string) => Promise<string | null>;
   onOpenPlugins?: (wanted?: string) => void;
   agentSettings?: AgentSettingsOpener;
 }) {
-  const [name, setName] = useState(() => defaultSessionName());
-  /** A folder picked here; null keeps the default (code repo, else data repo). */
-  const [folder, setFolder] = useState<string | null>(null);
   // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
   const agents = usableAgents(store.agents);
   const [agentId, setAgentId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const defaultDir = codeRepo ?? dataRepo;
-  const workDir = folder ?? defaultDir;
-  if (agents.length === 0) {
+  /** A folder picked here; null keeps the default (code repo, else data repo). */
+  const [folder, setFolder] = useState<string | null>(null);
+  /** A mode picked here; null is the agent's default. */
+  const [mode, setMode] = useState<PermissionMode | null>(null);
+  const picked = agents.find((a) => a.id === agentId) ?? agents[0] ?? null;
+  const choices = useChoices(store, picked);
+  if (!picked) {
     return (
       <AgentEmptyGuide
         agents={store.agents}
@@ -620,100 +827,104 @@ function EmptyState({
       />
     );
   }
-  const picked = agents.find((a) => a.id === agentId) ?? agents[0]!;
-  const start = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await agentChat.createSession({
-        name: cleanLine(name) || defaultSessionName(),
-        agent: picked.id,
-        ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
-      });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  const defaultDir = codeRepo ?? dataRepo;
+  const workDir = folder ?? defaultDir;
+  const startMode = mode ?? picked.defaultPermissionMode;
+  const fail = (e: Error) => toast.error(e.message);
+  // A model or effort picked before the session is what the agent's next
+  // sessions start on (the pick is the default, as it is mid-session).
+  const saveDefault = (patch: { model?: string | null; effort?: EffortLevel | null }) =>
+    void agentChat.saveDefaults(picked.id, patch).catch(fail);
+  const start = async (text: string) => {
+    await agentChat.createSession({
+      name: nameFromMessage(text) || defaultSessionName(),
+      agent: picked.id,
+      prompt: text,
+      ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
+      ...(hasModes(picked) ? { permissionMode: startMode } : {}),
+      ...(choices?.model ? { model: choices.model } : {}),
+      ...(choices?.effort && picked.capabilities.effort ? { effort: choices.effort } : {}),
+    });
   };
-  return (
-    <form
-      className="agent-empty"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void start();
-      }}
-    >
-      <h3>New coding agent session</h3>
-      {/* The demo runs the script in src/server/demoAgent.ts, not an agent —
-          say so here as well as on the watermark, since this is the screen a
-          visitor reads before starting anything. */}
-      {demo ? (
-        <p>
-          A simulated Claude Code session: the transcript, the tool rows and the
-          permission prompt are scripted, and nothing runs or is written to disk.
-        </p>
-      ) : (
-        <p>
-          A live {picked.label} session, run by SpecDriven.
-          {workDir && (
-            <>
-              {" "}
-              Works in <span className="agent-workdir">{workDir}</span>
-              {workDir === codeRepo
-                ? " — the code repo from project-settings.json."
-                : workDir === dataRepo
-                  ? " — the data repo."
-                  : "."}
-            </>
-          )}
-          {askFolder && workDir && (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="agent-folder-change"
-                onClick={() =>
-                  void askFolder(workDir).then((f) => {
-                    if (f) setFolder(f);
-                  })
-                }
-              >
-                Change folder…
-              </button>
-            </>
-          )}
-        </p>
-      )}
+  const left = (
+    <>
       {agents.length > 1 && (
-        <fieldset className="choice-group" role="radiogroup" aria-label="Agent">
-          <legend>Agent</legend>
-          {agents.map((a) => (
-            <label key={a.id} className="choice">
-              <input
-                type="radio"
-                name="agent-empty-agent"
-                value={a.id}
-                checked={picked.id === a.id}
-                onChange={() => setAgentId(a.id)}
-              />
-              <span className="choice-label">
-                <span>{a.label}</span>
-                <span className="agent-option-desc">{a.description}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        <BarPicker
+          name="agent"
+          text={picked.label}
+          icon={<Bot size={13} aria-hidden="true" />}
+          ariaLabel={`Agent: ${picked.label}`}
+          tooltip="The coding agent this session runs"
+          heading="Agent"
+          items={agents.map((a) => ({
+            id: `agent:${a.id}`,
+            label: a.label,
+            description: a.description,
+            checked: a.id === picked.id,
+            onSelect: () => {
+              setAgentId(a.id);
+              setMode(null);
+            },
+          }))}
+        />
       )}
-      <label>
-        Session name
-        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-      </label>
-      <button type="submit" className="primary-action" disabled={busy}>
-        {busy ? "Starting…" : "Start chat"}
-      </button>
-      {error && <p className="error">{error}</p>}
-    </form>
+      {workDir && (
+        <FolderPicker
+          folder={workDir}
+          folders={folders}
+          askFolder={askFolder}
+          heading="Folder · where the agent works"
+          onSelect={setFolder}
+        />
+      )}
+    </>
+  );
+  const right = (
+    <ModelEffortMode
+      agent={picked}
+      choices={choices}
+      model={choices?.model}
+      effort={choices?.effort}
+      mode={startMode}
+      canPickModel
+      disabled={false}
+      onModel={(model) => saveDefault({ model })}
+      onEffort={(effort) => saveDefault({ effort })}
+      onMode={setMode}
+    />
+  );
+  return (
+    <div className="agent-empty">
+      <div className="agent-empty-intro">
+        <h3>New {picked.label} session</h3>
+        {/* The demo runs the script in src/server/demoAgent.ts, not an agent —
+            say so here as well as on the watermark, since this is the screen a
+            visitor reads before starting anything. */}
+        {demo ? (
+          <p>
+            A simulated Claude Code session: the transcript, the tool rows and the
+            permission prompt are scripted, and nothing runs or is written to disk.
+          </p>
+        ) : (
+          <p>
+            Your first message starts a live {picked.label} session, run by SpecDriven
+            {workDir === codeRepo ? " in the code repo" : workDir === dataRepo ? " in the data repo" : ""}.
+          </p>
+        )}
+      </div>
+      <ComposerBox
+        listKey="new"
+        commands={[]}
+        placeholder={`Describe a task for ${picked.label}`}
+        disabled={false}
+        canSend
+        autoFocus
+        hint="Enter to start · Shift+Enter for a new line"
+        left={left}
+        right={right}
+        onSend={start}
+      />
+    </div>
   );
 }
 
@@ -1089,10 +1300,37 @@ function QuestionCard({
   );
 }
 
-function Composer({ session, agent }: { session: SessionState; agent: AgentDescriptor }) {
-  const id = session.meta.id;
-  const status = session.meta.status;
-  const who = agent.label;
+/**
+ * The message box both a session and the new-session screen use: the
+ * textarea with its "/" popup, and the bar under it (`bar`), with Send at
+ * its end. `onSend` gets the cleaned text; a rejection puts it back.
+ */
+function ComposerBox({
+  listKey,
+  commands,
+  placeholder,
+  disabled,
+  canSend,
+  hint,
+  left,
+  right,
+  autoFocus,
+  onSend,
+}: {
+  listKey: string;
+  commands: SessionState["commands"];
+  placeholder: string;
+  disabled: boolean;
+  /** Whether a message may go now (the agent is not mid-turn). */
+  canSend: boolean;
+  hint: string;
+  /** The bar's left side: the folder (and the agent, before a session). */
+  left: ReactNode;
+  /** The bar's right side, before Send: model, effort, mode. */
+  right: ReactNode;
+  autoFocus?: boolean;
+  onSend: (text: string) => Promise<void>;
+}) {
   const [draft, setDraft] = useState("");
   // Spell check (src/frontend/spellCheckPref.ts): a message is prose.
   const spellCheck = useSpellCheck();
@@ -1100,7 +1338,7 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
   const [slashIndex, setSlashIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const slash = filterCommands(session.commands, draft, caret);
+  const slash = filterCommands(commands, draft, caret);
   const popup = slash.active && !dismissed && slash.items.length > 0;
   useEffect(() => {
     setSlashIndex(0);
@@ -1115,17 +1353,16 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [draft]);
-  const final = isFinalStatus(status);
-  const canSend = status === "idle" && draft.trim().length > 0;
+  const ready = canSend && draft.trim().length > 0;
   const send = async () => {
     // Blank lines around the message go; an indented first line (a code
     // block) keeps its indentation (specs/ui/ui.feature.md "User-entered
     // text is cleaned up").
     const text = cleanText(draft);
-    if (!text.trim() || status !== "idle") return;
+    if (!text.trim() || !canSend) return;
     setDraft("");
     try {
-      await agentChat.send(id, text);
+      await onSend(text);
     } catch (e) {
       setDraft(text);
       toast.error((e as Error).message);
@@ -1171,17 +1408,7 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
       void send();
     }
   };
-  const hint =
-    status === "idle"
-      ? "Enter to send · Shift+Enter for a new line · / for commands"
-      : status === "starting"
-        ? `${who} is starting…`
-        : status === "running"
-          ? `${who} is working — Stop to send something else`
-          : status === "awaiting_input"
-            ? `Answer ${who}'s request above`
-            : "This session has ended — start a new one from the session menu";
-  const listId = `agent-slash-${id}`;
+  const listId = `agent-slash-${listKey}`;
   return (
     <div className="agent-composer">
       {popup && (
@@ -1204,32 +1431,128 @@ function Composer({ session, agent }: { session: SessionState; agent: AgentDescr
           ))}
         </div>
       )}
-      <textarea
-        ref={ref}
-        rows={1}
-        value={draft}
-        placeholder={final ? "Session ended" : `Message ${who}, or type / for a command`}
-        disabled={final}
-        aria-label="Message"
-        aria-autocomplete="list"
-        spellCheck={spellCheck}
-        aria-controls={popup ? listId : undefined}
-        aria-activedescendant={popup ? `${listId}-${slashIndex}` : undefined}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setCaret(e.target.selectionStart ?? e.target.value.length);
-        }}
-        onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-        onKeyDown={onKeyDown}
-      />
-      <div className="agent-composer-hint">
-        <span>{hint}</span>
-        {status === "idle" && (
-          <button type="button" className="chip" disabled={!canSend} onClick={() => void send()}>
-            Send
-          </button>
-        )}
+      <div className="agent-composer-box" data-disabled={disabled || undefined}>
+        <textarea
+          ref={ref}
+          rows={1}
+          value={draft}
+          placeholder={placeholder}
+          disabled={disabled}
+          autoFocus={autoFocus}
+          aria-label="Message"
+          aria-autocomplete="list"
+          spellCheck={spellCheck}
+          aria-controls={popup ? listId : undefined}
+          aria-activedescendant={popup ? `${listId}-${slashIndex}` : undefined}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setCaret(e.target.selectionStart ?? e.target.value.length);
+          }}
+          onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+          onKeyDown={onKeyDown}
+        />
+        <div className="agent-bar" role="toolbar" aria-label="Session options">
+          <div className="agent-bar-side">{left}</div>
+          <div className="agent-bar-side agent-bar-right">
+            {right}
+            <Tooltip label="Send" keys="Enter">
+              <button
+                type="button"
+                className="agent-send"
+                aria-label="Send"
+                disabled={!ready}
+                onClick={() => void send()}
+              >
+                <ArrowUp size={15} aria-hidden="true" />
+              </button>
+            </Tooltip>
+          </div>
+        </div>
       </div>
+      <div className="agent-composer-hint">{hint}</div>
     </div>
+  );
+}
+
+/** A running session's composer: its folder, model, effort and mode in the bar. */
+function Composer({
+  session,
+  agent,
+  store,
+  folders,
+  askFolder,
+}: {
+  session: SessionState;
+  agent: AgentDescriptor;
+  store: AgentChatStore;
+  folders: readonly string[];
+  askFolder?: (initial: string) => Promise<string | null>;
+}) {
+  const meta = session.meta;
+  const id = meta.id;
+  const status = meta.status;
+  const who = agent.label;
+  const final = isFinalStatus(status);
+  const choices = useChoices(store, final ? null : agent);
+  const fail = (e: Error) => toast.error(e.message);
+  const hint =
+    status === "idle"
+      ? "Enter to send · Shift+Enter for a new line · / for commands"
+      : status === "starting"
+        ? `${who} is starting…`
+        : status === "running"
+          ? `${who} is working — Stop to send something else`
+          : status === "awaiting_input"
+            ? `Answer ${who}'s request above`
+            : "This session has ended — start a new one from the session menu";
+  const left = (
+    <FolderPicker
+      folder={meta.cwd}
+      folders={folders}
+      askFolder={askFolder}
+      heading="Folder · another one starts a new session there"
+      onSelect={(cwd) => {
+        if (folderPath(cwd) === folderPath(meta.cwd)) return;
+        // A running agent cannot move: the new folder gets its own
+        // session, same agent, mode, model and effort, and this one stays listed.
+        void agentChat
+          .createSession({
+            name: defaultSessionName(),
+            agent: meta.agent,
+            cwd,
+            ...(hasModes(agent) ? { permissionMode: meta.permissionMode } : {}),
+            ...(meta.model ? { model: meta.model } : {}),
+            ...(meta.effort ? { effort: meta.effort } : {}),
+          })
+          .catch(fail);
+      }}
+    />
+  );
+  const right = (
+    <ModelEffortMode
+      agent={agent}
+      choices={choices}
+      model={meta.model}
+      effort={meta.effort}
+      mode={meta.permissionMode}
+      canPickModel={agent.capabilities.canChangeModelMidSession === true}
+      disabled={status === "starting" || final}
+      onModel={(m) => void agentChat.setModel(id, m).catch(fail)}
+      onEffort={(e) => void agentChat.setEffort(id, e).catch(fail)}
+      onMode={(m) => void agentChat.setMode(id, m).catch(fail)}
+    />
+  );
+  return (
+    <ComposerBox
+      listKey={id}
+      commands={session.commands}
+      placeholder={final ? "Session ended" : `Message ${who}, or type / for a command`}
+      disabled={final}
+      canSend={status === "idle"}
+      hint={hint}
+      left={left}
+      right={right}
+      onSend={(text) => agentChat.send(id, text)}
+    />
   );
 }

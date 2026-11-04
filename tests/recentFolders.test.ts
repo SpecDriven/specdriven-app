@@ -154,6 +154,17 @@ test("GET /api/state carries the recent folders, the current one first", async (
   expect(state.recentDataRepos).toEqual(["/specs/b", "/specs/a"]);
 });
 
+test("GET /api/state names the open folder's absolute path, though settings name it relative to the app", async () => {
+  const dir = await dataFolder("specs");
+  await writeState({ dataRepo: "specs", reloadFrequencySeconds: 0 }, root);
+  const state = await getState();
+  expect(state.dataRepo).toBe("specs");
+  expect(state.dataDir).toBe(dir);
+  // No folder open, no path.
+  await writeState({ reloadFrequencySeconds: 0 }, root);
+  expect((await getState()).dataDir).toBeNull();
+});
+
 test("GET /api/state says where each GitHub url on the list is cloned", async () => {
   const repos = await mkdtemp(join(tmpdir(), "specdriven-recent-repos-"));
   const realRepos = process.env.SPECDRIVEN_REPOS_DIR;

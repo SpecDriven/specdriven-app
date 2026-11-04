@@ -75,6 +75,9 @@ export interface ChatSessionMeta {
       once it says it. */
   agentSessionId?: string;
   model?: string;
+  /** The reasoning effort the session runs at, when its agent has one;
+      absent is the agent's own default. */
+  effort?: EffortLevel;
   /** The login and billing source, once a provider that has one says. */
   account?: ChatAccount;
   /** A provider with no permission gate sits on its default and refuses a
@@ -97,6 +100,7 @@ export type ChatEventBody =
       status: ChatStatus;
       agentSessionId?: string;
       model?: string;
+      effort?: EffortLevel;
       account?: ChatAccount;
       permissionMode?: PermissionMode;
       tools?: string[];
@@ -145,6 +149,10 @@ export type ChatEventBody =
       denials: number;
     }
   | { kind: "mode"; permissionMode: PermissionMode }
+  /** The pane switched the model (null: the agent's own default). */
+  | { kind: "model"; model: string | null }
+  /** The pane switched the effort (null: the agent's own default). */
+  | { kind: "effort"; effort: EffortLevel | null }
   | { kind: "note"; level: "info" | "error"; code: NoteCode; text: string };
 
 export type ChatEvent = ChatEventBody & { seq: number; at: string };
@@ -154,7 +162,7 @@ export type ChatEvent = ChatEventBody & { seq: number; at: string };
     engine's (src/plugins/host/agents.ts AgentHost). */
 export type AgentOutput = Exclude<
   ChatEventBody,
-  { kind: "status" | "user" | "permission_request" | "permission_resolved" | "mode" }
+  { kind: "status" | "user" | "permission_request" | "permission_resolved" | "mode" | "model" | "effort" }
 >;
 
 export interface PermissionAnswer {
@@ -184,6 +192,72 @@ export interface AgentCapabilities {
   rememberPermissions: "rule" | "session" | "none";
   /** Whether the provider answers one no-tools turn (src/server/estimate.ts). */
   oneShot: boolean;
+  /** Whether a running session switches model when the pane asks
+      (AgentSession.setModel); absent is no. */
+  canChangeModelMidSession?: boolean;
+  /** Whether the agent takes a reasoning effort (AgentStartOptions.effort,
+      AgentSession.setEffort); absent is no. */
+  effort?: boolean;
+}
+
+// --- Model and effort --------------------------------------------------------
+
+/** How hard the agent thinks, as Claude Code names the levels. */
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const EFFORT_LEVELS: readonly EffortLevel[] = ["low", "medium", "high", "xhigh", "max"];
+
+export const EFFORT_LABEL: Record<EffortLevel, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+/** An effort level, or null when the value is none. */
+export function normalizeEffort(value: unknown): EffortLevel | null {
+  return (EFFORT_LEVELS as readonly unknown[]).includes(value) ? (value as EffortLevel) : null;
+}
+
+/** Letters, digits and the punctuation model ids use — `opus`,
+    `claude-sonnet-4-5[1m]`, `us.anthropic.claude-…:0`, an inference
+    profile's arn — with no spaces. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,199}$/;
+
+/** A model alias or id, trimmed, or null when the value is none. */
+export function normalizeModel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const model = value.trim();
+  return MODEL_ID.test(model) ? model : null;
+}
+
+/** One entry of an agent's model menu. */
+export interface AgentModelOption {
+  /** What the agent takes as a model: an alias such as `opus`, or an id. */
+  value: string;
+  /** The model id the value stands for now (an alias's target), so a
+      session that reports the id still finds its entry. */
+  resolvedModel?: string;
+  displayName: string;
+  description?: string;
+  /** The effort levels this model takes; absent is "the agent decides"
+      (every level offered), [] is none. */
+  efforts?: EffortLevel[];
+}
+
+/** What the pane offers for an agent: its models, and what a new session
+    starts on (null: the agent's own default). */
+export interface AgentChoices {
+  models: AgentModelOption[];
+  model: string | null;
+  effort: EffortLevel | null;
+}
+
+/** A change to the defaults a new session starts on; null clears one. */
+export interface AgentDefaultsPatch {
+  model?: string | null;
+  effort?: EffortLevel | null;
 }
 
 export interface AgentDescriptor {

@@ -9,7 +9,7 @@ import type {
   AgentSession,
   AgentStartOptions,
 } from "../../src/plugins/host/agents";
-import type { AgentCapabilities, PermissionMode } from "../../src/server/agentTypes";
+import type { AgentCapabilities, EffortLevel, PermissionMode } from "../../src/server/agentTypes";
 
 export interface FakeSession extends AgentSession {
   host: AgentHost;
@@ -17,6 +17,9 @@ export interface FakeSession extends AgentSession {
   sent: string[];
   interrupts: number;
   modes: PermissionMode[];
+  /** The models and efforts the pane switched to (setModel / setEffort). */
+  models: (string | null)[];
+  efforts: (EffortLevel | null)[];
   closed: boolean;
   /** How often the engine handed it a changed sign-in (AgentSession.refresh). */
   refreshes: number;
@@ -60,6 +63,8 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
     defaultPermissionMode: options.defaultPermissionMode ?? "default",
     ...(options.loginHint ? { loginHint: options.loginHint } : {}),
     ...(options.oneShot ? { oneShot: options.oneShot } : {}),
+    ...(options.choices ? { choices: options.choices } : {}),
+    ...(options.setDefaults ? { setDefaults: options.setDefaults } : {}),
     async start(opts) {
       if (options.startError) throw options.startError;
       const session: FakeSession = {
@@ -68,6 +73,8 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         sent: [],
         interrupts: 0,
         modes: [],
+        models: [],
+        efforts: [],
         closed: false,
         refreshes: 0,
         async send(text) {
@@ -79,6 +86,12 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         },
         async setPermissionMode(mode) {
           session.modes.push(mode);
+        },
+        async setModel(model) {
+          session.models.push(model);
+        },
+        async setEffort(effort) {
+          session.efforts.push(effort);
         },
         close() {
           session.closed = true;

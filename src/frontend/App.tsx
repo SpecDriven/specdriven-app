@@ -1272,6 +1272,8 @@ export function App() {
    * reads them here.
    */
   const reposRef = useRef<{ open: string | null; recent: string[] }>({ open: null, recent: [] });
+  /** The open folder's absolute path, as the server resolved it. */
+  const [dataDir, setDataDir] = useState<string | null>(null);
   /**
    * Take the open folder and the recent list from an /api/state answer. The
    * open folder is also the one "Copy link" names (src/frontend/shareLink.ts).
@@ -1280,6 +1282,7 @@ export function App() {
     dataRepo?: string | null;
     recentDataRepos?: unknown;
     recentDataRepoDirs?: unknown;
+    dataDir?: unknown;
   }) => {
     const open = state.dataRepo ?? null;
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
@@ -1289,6 +1292,8 @@ export function App() {
     setDataRepo(open);
     setRecentRepos(recent);
     setRecentRepoDirs(dirs && typeof dirs === "object" ? (dirs as Record<string, string>) : {});
+    // An answer that does not say (the forget-a-folder reply) keeps it.
+    if (state.dataDir !== undefined) setDataDir(typeof state.dataDir === "string" ? state.dataDir : null);
   };
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
@@ -12203,7 +12208,9 @@ export function App() {
           codeRepo={codeRepo}
           // An agent works in a folder: a GitHub url's own clone, so the
           // folder menu offers it once, not as the url and again as its path.
-          dataRepo={dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo)}
+          // The server's absolute path for the open folder: settings may
+          // name it relative to the app, and an agent's folder must be absolute.
+          dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
           prompt={prompt}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}

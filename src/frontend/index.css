@@ -1723,8 +1723,7 @@ button.link:disabled {
 
 /* A prompt's radio group (specs/agents/claude.feature.md "Run in"): a few
    ways to act on the text, each with a one-line hint. */
-.modal-form .choice-group,
-.agent-empty .choice-group {
+.modal-form .choice-group {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -1734,8 +1733,7 @@ button.link:disabled {
   min-width: 0;
 }
 
-.modal-form .choice-group legend,
-.agent-empty .choice-group legend {
+.modal-form .choice-group legend {
   padding: 0;
   margin-bottom: 0.3rem;
   font-size: 0.86rem;
@@ -1744,8 +1742,7 @@ button.link:disabled {
 }
 
 /* Row, not the column `.dialog label` stacks a field under its caption. */
-.modal-form .choice,
-.agent-empty .choice {
+.modal-form .choice {
   display: flex;
   flex-direction: row;
   align-items: flex-start;
@@ -1753,15 +1750,13 @@ button.link:disabled {
   cursor: pointer;
 }
 
-.modal-form .choice input[type="radio"],
-.agent-empty .choice input[type="radio"] {
+.modal-form .choice input[type="radio"] {
   margin: 0.15rem 0 0;
   accent-color: var(--accent);
   flex-shrink: 0;
 }
 
-.modal-form .choice-label,
-.agent-empty .choice-label {
+.modal-form .choice-label {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -6840,61 +6835,6 @@ button.page-archive-head:hover {
   max-width: 24rem;
 }
 
-/* Static, so the folder menu hangs off the whole header: the chip sits
-   mid-header and a menu the width of a path would run past the pane. */
-.agent-cwd-picker {
-  display: inline-flex;
-  flex: 0 0.4 auto;
-  min-width: 0;
-}
-
-.agent-cwd {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex: 0 1 auto;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-weight: 400;
-  cursor: pointer;
-}
-
-/* Never squeezed to just the ▾: a few letters stay, and the session name
-   (which shrinks harder) gives way first. */
-.agent-cwd-name {
-  min-width: 4ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The same ▾ as the data folder's recent list: quiet until hovered or open. */
-.agent-cwd-chevron {
-  flex: none;
-  color: var(--text-3);
-}
-
-.agent-cwd:hover,
-.agent-cwd[aria-expanded="true"] {
-  color: var(--text-1);
-}
-
-.agent-cwd:hover .agent-cwd-chevron,
-.agent-cwd[aria-expanded="true"] .agent-cwd-chevron {
-  color: var(--text-1);
-}
-
-.agent-cwd-menu {
-  top: calc(100% - 0.25rem);
-  left: 0.5rem;
-  right: 0.5rem;
-  max-width: 28rem;
-}
-
-.agent-cwd-menu .menu-desc {
-  font-family: var(--font-mono);
-}
-
 .agent-dot {
   flex: none;
   width: 8px;
@@ -6918,53 +6858,6 @@ button.page-archive-head:hover {
 
 .agent-dot[data-status="error"] {
   background: var(--danger-fg);
-}
-
-.agent-mode-picker {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
-
-.agent-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  max-width: 9rem;
-  height: 1.6rem;
-  padding: 0 0.35rem 0 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font: inherit;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.agent-mode:disabled {
-  color: var(--text-3);
-  cursor: default;
-}
-
-.agent-mode-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-mode-menu {
-  top: calc(100% + 0.25rem);
-  right: 0;
-  left: auto;
-  min-width: 17rem;
-}
-
-.agent-mode:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .agent-transcript {
@@ -7292,13 +7185,34 @@ button.page-archive-head:hover {
   border-top: 1px solid var(--border);
 }
 
+/* The message box (specs/agents/agent-pane.feature.md "The composer bar
+   picks the folder, model, effort and mode"): one rounded box holding the
+   textarea and, under it, the bar of chips with Send at its end — the
+   frame takes the focus ring, the textarea inside it has none. */
+.agent-composer-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg, 10px);
+  background: var(--surface-2);
+}
+
+.agent-composer-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.agent-composer-box[data-disabled] {
+  background: var(--surface-1);
+}
+
 .agent-composer textarea {
   width: 100%;
   max-height: 40vh;
-  padding: 0.5rem 0.7rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
+  padding: 0.6rem 0.75rem 0.3rem;
+  border: none;
+  background: transparent;
   color: var(--text-1);
   font: inherit;
   font-size: 0.8125rem;
@@ -7308,20 +7222,160 @@ button.page-archive-head:hover {
 
 .agent-composer textarea:focus {
   outline: none;
+}
+
+.agent-composer textarea:disabled {
+  color: var(--text-2);
+}
+
+/* Folder (and the agent, before a session) on the left; model, effort and
+   mode on the right; Send last. A narrow pane wraps the right group under
+   the left rather than squeezing the names to nothing. */
+.agent-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.5rem;
+  min-width: 0;
+  padding: 0.2rem 0.3rem 0.3rem;
+}
+
+.agent-bar-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+/* Model, effort, mode and Send keep together at the right edge, on a line
+   of their own when the pane is too narrow for both sides. */
+.agent-bar-right {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+/* Static, so a chip's menu hangs off the whole composer, as the "/" popup
+   does: a chip sits anywhere in the bar, and a menu anchored to it would run
+   past the pane's edge. */
+.agent-bar-picker {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.agent-bar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: 14rem;
+  height: 1.65rem;
+  padding: 0 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-bar-chip:hover:not(:disabled),
+.agent-bar-chip[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.agent-bar-chip:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.agent-bar-chip:focus-visible {
+  outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-.agent-composer textarea:disabled {
-  background: var(--surface-1);
-  color: var(--text-2);
+.agent-bar-chip-text {
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-bar-picker[data-picker="folder"] .agent-bar-chip-text {
+  font-family: var(--font-mono);
+}
+
+.agent-bar-chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+/* A fact the bar cannot change: a model the agent reports, no gate. */
+.agent-bar-fact {
+  padding: 0 0.4rem;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* The bar sits at the bottom of the pane: its menus open upward, over the
+   transcript, as wide as the composer up to a readable measure, on the
+   side of the bar their chip is on. */
+.agent-bar-menu {
+  top: auto;
+  bottom: calc(100% - 0.3rem);
+  min-width: 0;
+  max-width: min(26rem, calc(100% - 1.2rem));
+  width: calc(100% - 1.2rem);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.agent-bar-menu-left {
+  left: 0.6rem;
+  right: auto;
+}
+
+.agent-bar-menu-right {
+  right: 0.6rem;
+  left: auto;
+}
+
+.agent-bar-menu-folder .menu-desc {
+  font-family: var(--font-mono);
+}
+
+.agent-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-left: 0.2rem;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+
+.agent-send:disabled {
+  background: var(--hover);
+  color: var(--text-3);
+  cursor: default;
+}
+
+.agent-send:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .agent-composer-hint {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
+  padding: 0 0.2rem;
   color: var(--text-3);
   font-size: 0.6875rem;
 }
@@ -7384,12 +7438,26 @@ button.page-archive-head:hover {
   font-size: 0.75rem;
 }
 
+/* The new-session screen: a few words, then the message box with its bar,
+   the pair sitting at the bottom of the pane like a session's composer. */
 .agent-empty {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 0.6rem;
-  padding: 1rem 0.9rem;
+  justify-content: flex-end;
+  min-height: 0;
   overflow-y: auto;
+}
+
+.agent-empty-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1rem 0.9rem 0.5rem;
+}
+
+.agent-empty .agent-composer {
+  border-top: none;
 }
 
 .agent-empty h3 {
@@ -7401,38 +7469,6 @@ button.page-archive-head:hover {
   margin: 0;
   color: var(--text-2);
   line-height: 1.5;
-}
-
-.agent-empty label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  color: var(--text-2);
-  font-size: 0.75rem;
-}
-
-.agent-empty input:not([type="radio"]) {
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font: inherit;
-  font-size: 0.8125rem;
-}
-
-.agent-empty input:not([type="radio"]):focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.agent-empty .primary-action {
-  align-self: flex-start;
-}
-
-.agent-empty .error {
-  color: var(--danger-fg);
 }
 
 .agent-workdir {

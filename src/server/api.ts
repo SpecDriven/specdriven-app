@@ -114,6 +114,7 @@ import {
 import type { SessionPlace, SpecInput } from "./agent";
 import {
   ChatError,
+  agentChoices,
   answerPermission,
   createChatSession,
   endChatSession,
@@ -124,11 +125,21 @@ import {
   listChatSessions,
   resolveProvider,
   sendChatMessage,
+  setAgentDefaults,
+  setChatEffort,
+  setChatModel,
   setChatPermissionMode,
   subscribeChat,
 } from "./agentChat";
-import type { ChatAgent, ChatEvent, PermissionAnswer } from "./agentTypes";
-import { isFinalStatus, normalizePermissionMode, PERMISSION_MODES } from "./agentTypes";
+import type { AgentDefaultsPatch, ChatAgent, ChatEvent, PermissionAnswer } from "./agentTypes";
+import {
+  EFFORT_LEVELS,
+  isFinalStatus,
+  normalizeEffort,
+  normalizeModel,
+  normalizePermissionMode,
+  PERMISSION_MODES,
+} from "./agentTypes";
 import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
@@ -660,6 +671,10 @@ async function stateFields(state: SpecDrivenState) {
     // which the Spec folders dialog shows under the url. The hosted server's
     // disk is not the user's, so it reports none.
     recentDataRepoDirs: isHostedMode() ? {} : cloneDirs(recent),
+    // The open folder as an absolute path on this computer: settings may
+    // name it relative to the app (".../specs"), and the coding agent pane
+    // offers it as a folder to work in, which must be absolute.
+    dataDir: isHostedMode() ? null : await currentDataDir(),
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
@@ -2941,6 +2956,8 @@ const postAgentChat = withDataDir(async (dir, req) => {
     permissionMode?: unknown;
     agent?: unknown;
     cwd?: unknown;
+    model?: unknown;
+    effort?: unknown;
   };
   // Which agent drives the chat; absent is the first one whose CLI is there.
   let agent: ChatAgent | undefined;
@@ -2967,6 +2984,17 @@ const postAgentChat = withDataDir(async (dir, req) => {
     permissionMode = normalizePermissionMode(body.permissionMode);
     if (permissionMode === null) return json({ error: MODE_ERROR }, 400);
   }
+  // The model and effort the pane picked; absent, the agent's defaults.
+  let model: string | null = null;
+  if (body.model !== undefined && body.model !== null && body.model !== "") {
+    model = normalizeModel(body.model);
+    if (model === null) return json({ error: MODEL_ERROR }, 400);
+  }
+  let effort: ReturnType<typeof normalizeEffort> = null;
+  if (body.effort !== undefined && body.effort !== null) {
+    effort = normalizeEffort(body.effort);
+    if (effort === null) return json({ error: EFFORT_ERROR }, 400);
+  }
   try {
     const meta = await createChatSession({
       place,
@@ -2974,6 +3002,8 @@ const postAgentChat = withDataDir(async (dir, req) => {
       ...(agent ? { agent } : {}),
       ...(prompt ? { prompt } : {}),
       ...(permissionMode ? { permissionMode } : {}),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
       sessionsDir: await sessionsDirectory(getAppRoot()),
     });
     return json(meta);
@@ -2983,6 +3013,22 @@ const postAgentChat = withDataDir(async (dir, req) => {
 });
 
 const MODE_ERROR = `permissionMode must be one of ${PERMISSION_MODES.join(", ")}`;
+const MODEL_ERROR = "model must be a model alias such as sonnet, or a model id, with no spaces";
+const EFFORT_ERROR = `effort must be one of ${EFFORT_LEVELS.join(", ")}`;
+
+/** A model in a body: a model id, null or "" for the agent's default, or the refusal. */
+function modelOf(value: unknown): { model: string | null } | Response {
+  if (value === null || value === "") return { model: null };
+  const model = normalizeModel(value);
+  return model === null ? json({ error: MODEL_ERROR }, 400) : { model };
+}
+
+/** An effort in a body: a level, null for the agent's default, or the refusal. */
+function effortOf(value: unknown): { effort: ReturnType<typeof normalizeEffort> } | Response {
+  if (value === null) return { effort: null };
+  const effort = normalizeEffort(value);
+  return effort === null ? json({ error: EFFORT_ERROR }, 400) : { effort };
+}
 
 // A hosted worker runs no agents; its pane lists none rather than refusing,
 // so the client's boot-time restore stays quiet (src/server/hostedMode.ts).
@@ -3117,6 +3163,63 @@ const putAgentChatMode: Handler = async (req, params) => {
   try {
     await setChatPermissionMode(params.id!, mode);
     return json({ meta: getChatSession(params.id!) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const putAgentChatModel: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { model?: unknown };
+  const parsed = modelOf(body.model);
+  if (parsed instanceof Response) return parsed;
+  try {
+    await setChatModel(params.id!, parsed.model);
+    return json({ meta: getChatSession(params.id!) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const putAgentChatEffort: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { effort?: unknown };
+  const parsed = effortOf(body.effort);
+  if (parsed instanceof Response) return parsed;
+  try {
+    await setChatEffort(params.id!, parsed.effort);
+    return json({ meta: getChatSession(params.id!) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+// The models an agent offers and what a new session starts on, for the
+// pane's model and effort pickers; null for an agent with none.
+const getAgentChoices: Handler = async (_req, params) => {
+  try {
+    return json({ choices: await agentChoices(params.agent!, await currentDataDir()) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+// A pick in the new-session bar: what the agent's next sessions start on.
+const putAgentDefaults: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => null)) as { model?: unknown; effort?: unknown } | null;
+  const patch: AgentDefaultsPatch = {};
+  if (body && body.model !== undefined) {
+    const parsed = modelOf(body.model);
+    if (parsed instanceof Response) return parsed;
+    patch.model = parsed.model;
+  }
+  if (body && body.effort !== undefined) {
+    const parsed = effortOf(body.effort);
+    if (parsed instanceof Response) return parsed;
+    patch.effort = parsed.effort;
+  }
+  if (Object.keys(patch).length === 0) return json({ error: "model or effort is required" }, 400);
+  try {
+    await setAgentDefaults(params.agent!, patch);
+    return json({ choices: await agentChoices(params.agent!, await currentDataDir()) });
   } catch (e) {
     return chatError(e);
   }
@@ -3428,6 +3531,10 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/agent/chat/:id/permission", unlessHosted(postAgentChatPermission)],
   ["POST", "/api/agent/chat/:id/interrupt", unlessHosted(postAgentChatInterrupt)],
   ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],
+  ["PUT", "/api/agent/chat/:id/model", unlessHosted(putAgentChatModel)],
+  ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
+  ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
+  ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
   // "/active" before "/:id": the table is first-match.
 ];

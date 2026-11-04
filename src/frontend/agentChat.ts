@@ -14,13 +14,17 @@
 
 import { useSyncExternalStore } from "react";
 import type {
+  AgentChoices,
+  AgentDefaultsPatch,
   AgentDescriptor,
+  AgentModelOption,
   AgentOffer,
   AssistantBlock,
   ChatAgent,
   ChatEvent,
   ChatSessionMeta,
   ChatStatus,
+  EffortLevel,
   PermissionMode,
   SlashCommandInfo,
 } from "../server/agentTypes";
@@ -28,12 +32,15 @@ import { byRank, fallbackDescriptor } from "../server/agentTypes";
 import { toast } from "./Toasts";
 
 export type {
+  AgentChoices,
   AgentDescriptor,
+  AgentModelOption,
   AgentOffer,
   ChatAgent,
   ChatEvent,
   ChatSessionMeta,
   ChatStatus,
+  EffortLevel,
   PermissionMode,
   SlashCommandInfo,
 };
@@ -490,6 +497,9 @@ export interface AgentChatStore {
   agents: AgentDescriptor[];
   /** Marketplace plugins that would supply an agent, not installed. */
   agentOffers: AgentOffer[];
+  /** Each agent's models and new-session defaults, once asked for
+      (loadChoices); null for an agent that offers none. */
+  choices: Record<ChatAgent, AgentChoices | null>;
 }
 
 let state: AgentChatStore = {
@@ -500,6 +510,7 @@ let state: AgentChatStore = {
   list: [],
   agents: [],
   agentOffers: [],
+  choices: {},
 };
 const listeners = new Set<() => void>();
 const streams = new Map<string, AbortController>();
@@ -557,6 +568,12 @@ function receive(id: string, ev: ChatEvent): void {
     if (isFinalStatus(ev.status)) meta.endedAt = ev.at;
   } else if (ev.kind === "mode") {
     meta.permissionMode = ev.permissionMode;
+  } else if (ev.kind === "model") {
+    if (ev.model) meta.model = ev.model;
+    else delete meta.model;
+  } else if (ev.kind === "effort") {
+    if (ev.effort) meta.effort = ev.effort;
+    else delete meta.effort;
   }
   setSession(id, { meta, commands, transcript: applyEvent(s.transcript, ev) });
   set({ list: state.list.map((m) => (m.id === id ? meta : m)) });
@@ -646,6 +663,13 @@ function forget(id: string): void {
   if (activeId && !sessions[activeId]) void agentChat.openSession(activeId).catch(() => undefined);
 }
 
+/** The kept choices follow a default the server just took. */
+function rememberDefault(agent: ChatAgent, patch: AgentDefaultsPatch): void {
+  const current = state.choices[agent];
+  if (!current) return;
+  set({ choices: { ...state.choices, [agent]: { ...current, ...patch } } });
+}
+
 export interface CreateSessionOptions {
   name: string;
   /** Which agent drives the chat; absent is the first one whose CLI is there. */
@@ -654,6 +678,10 @@ export interface CreateSessionOptions {
   permissionMode?: PermissionMode;
   /** The folder to work in; absent is the code repo, else the data repo. */
   cwd?: string;
+  /** The model to start on; absent is the agent's default. */
+  model?: string;
+  /** The effort to start at; absent is the agent's default. */
+  effort?: EffortLevel;
 }
 
 /** The pane is offered when an agent plugin is there, or one could be
@@ -676,7 +704,14 @@ export const agentChat = {
   setAgents(agents: AgentDescriptor[], agentOffers: AgentOffer[] = state.agentOffers): void {
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     if (same(agents, state.agents) && same(agentOffers, state.agentOffers)) return;
-    set({ agents: [...agents].sort(byRank), agentOffers });
+    // A descriptor that moved on (a sign-in, a plugin update) may offer
+    // other models: ask again the next time the pickers want them.
+    const choices = Object.fromEntries(
+      Object.entries(state.choices).filter(([id]) =>
+        same(agents.find((a) => a.id === id), state.agents.find((a) => a.id === id)),
+      ),
+    );
+    set({ agents: [...agents].sort(byRank), agentOffers, choices });
   },
   openPane(): void {
     if (!state.open) set({ open: true });
@@ -775,6 +810,36 @@ export const agentChat = {
       method: "PUT",
       body: JSON.stringify({ permissionMode }),
     });
+  },
+  /** The models an agent offers and what a new session starts on, asked of
+      the server once and kept until the agent's descriptor changes. */
+  async loadChoices(agent: ChatAgent, force = false): Promise<AgentChoices | null> {
+    if (!force && agent in state.choices) return state.choices[agent] ?? null;
+    const data = await call<{ choices: AgentChoices | null }>(
+      `/api/agent/agents/${encodeURIComponent(agent)}/choices`,
+    );
+    set({ choices: { ...state.choices, [agent]: data.choices } });
+    return data.choices;
+  },
+  /** A pick in the new-session bar: what the agent's sessions start on. */
+  async saveDefaults(agent: ChatAgent, patch: AgentDefaultsPatch): Promise<void> {
+    const data = await call<{ choices: AgentChoices | null }>(
+      `/api/agent/agents/${encodeURIComponent(agent)}/defaults`,
+      { method: "PUT", body: JSON.stringify(patch) },
+    );
+    set({ choices: { ...state.choices, [agent]: data.choices } });
+  },
+  /** Switch a running session's model; the server makes it the default too. */
+  async setModel(id: string, model: string | null): Promise<void> {
+    await call(`/api/agent/chat/${id}/model`, { method: "PUT", body: JSON.stringify({ model }) });
+    const agent = state.sessions[id]?.meta.agent;
+    if (agent) rememberDefault(agent, { model });
+  },
+  /** Switch a running session's effort; the server makes it the default too. */
+  async setEffort(id: string, effort: EffortLevel | null): Promise<void> {
+    await call(`/api/agent/chat/${id}/effort`, { method: "PUT", body: JSON.stringify({ effort }) });
+    const agent = state.sessions[id]?.meta.agent;
+    if (agent) rememberDefault(agent, { effort });
   },
   async end(id: string): Promise<void> {
     await call(`/api/agent/chat/${id}`, { method: "DELETE" }).catch((e: Error) => {

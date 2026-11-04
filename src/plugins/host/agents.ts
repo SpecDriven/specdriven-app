@@ -13,7 +13,10 @@
 import type { Disposer } from "../kernel";
 import type {
   AgentCapabilities,
+  AgentChoices,
+  AgentDefaultsPatch,
   AgentDescriptor,
+  EffortLevel,
   AgentOutput,
   ChatAccount,
   ChatStatus,
@@ -44,6 +47,11 @@ export interface AgentProvider {
   start(opts: AgentStartOptions): Promise<AgentSession>;
   /** One no-tools turn, no record, no permissions (src/server/estimate.ts). */
   oneShot?(req: OneShotRequest): Promise<OneShotResult>;
+  /** The models the pane offers, and the model and effort a new session
+      starts on; absent, the pane offers no model or effort. */
+  choices?(ctx: { dataRepo: string | null }): Promise<AgentChoices>;
+  /** Make a model or effort the pane picked what new sessions start on. */
+  setDefaults?(patch: AgentDefaultsPatch): Promise<void>;
 }
 
 export interface AgentStartOptions {
@@ -53,6 +61,10 @@ export interface AgentStartOptions {
   dataRepo: string;
   codeRepo?: string;
   permissionMode: PermissionMode;
+  /** The model the pane picked; absent, the agent's default (choices().model). */
+  model?: string;
+  /** The effort the pane picked; absent, the agent's default. */
+  effort?: EffortLevel;
   /** The first turn; the core has echoed it as the `user` event and counted turn 1. */
   prompt?: string;
   /** Fires on end and on shutdown. */
@@ -63,6 +75,7 @@ export interface AgentStartOptions {
 export interface AgentReadyInfo {
   agentSessionId?: string;
   model?: string;
+  effort?: EffortLevel;
   account?: ChatAccount;
   tools?: string[];
   commands?: SlashCommandInfo[];
@@ -121,6 +134,13 @@ export interface AgentSession {
   interrupt(): Promise<void>;
   /** Throw an AgentError(409, …) to refuse. */
   setPermissionMode(mode: PermissionMode): Promise<void>;
+  /** Switch the model from the next request on (null: the agent's own
+      default); capabilities.canChangeModelMidSession says it is there.
+      Throw an AgentError(409, …) to refuse. */
+  setModel?(model: string | null): Promise<void>;
+  /** Switch the effort from the next request on (null: the agent's own
+      default); capabilities.effort says it is there. */
+  setEffort?(effort: EffortLevel | null): Promise<void>;
   /** Kill the child; must be safe to call from an exit hook (no await). */
   close(): void;
   /** The agent's sign-in changed (AgentRegistry.changed): drop what the
