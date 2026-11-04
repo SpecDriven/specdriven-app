@@ -76,6 +76,9 @@ const CONTROL_LABELS: Record<UpdateControl, string> = {
   restart: "Restart now",
 };
 
+/** Replacing the app in Applications can need an administrator on a Mac. */
+export const MAC_ADMIN_NOTE = "You may need to request Admin privileges on Mac/OSX";
+
 /** The section's body for a store snapshot — rendered on its own by the tests. */
 export function UpdateStatus({
   store,
@@ -104,6 +107,9 @@ export function UpdateStatus({
           </a>
           {canInstall ? " — installing downloads the release, verifies it and builds the app here; it fetches Electron and takes a few minutes." : null}
         </p>
+      )}
+      {index?.platform === "darwin" && (stage.kind === "available" || stage.kind === "failed") && (
+        <p className="muted">{MAC_ADMIN_NOTE}</p>
       )}
       {stage.kind === "installing" && <p className="muted">This fetches Electron and takes a few minutes. The app keeps working meanwhile.</p>}
       {stage.kind === "ready" && <p className="muted">The app quits and starts again as the new version; the one running stays beside it to go back to.</p>}
