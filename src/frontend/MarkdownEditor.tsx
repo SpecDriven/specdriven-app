@@ -1,8 +1,10 @@
+import { createPortal } from "react-dom";
 import { Suspense, lazy, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ClipboardEvent, KeyboardEvent, MouseEvent, ReactElement, UIEvent } from "react";
+import type { CSSProperties, ClipboardEvent, KeyboardEvent, MouseEvent, ReactElement, ReactNode, UIEvent } from "react";
 import {
   AArrowDown,
   AArrowUp,
+  Baseline,
   Bold,
   Code,
   ExternalLink,
@@ -18,6 +20,7 @@ import {
   Table,
 } from "lucide-react";
 import { Tooltip } from "./Tooltip";
+import { Menu } from "./Menu";
 import {
   imageAtOffset,
   imageRefs,
@@ -25,7 +28,9 @@ import {
   insertLink,
   renderMarkdown,
   setImageSrc,
+  setColor,
   setImageWidth,
+  TEXT_COLORS,
   toggleHeading,
   toggleInline,
   toggleLinePrefix,
@@ -165,6 +170,23 @@ export function MarkdownEditor({
   // whether it is over a diagram's link. Only followed while the switch is
   // on: nothing else in the toolbar cares where the caret is.
   const [caret, setCaret] = useState(0);
+  // The font color menu, opened from its toolbar button. The editor clips
+  // what overflows it, so the menu floats over the page from where the
+  // button is: under it, or over it where the window has no room below.
+  const colorRef = useRef<HTMLSpanElement>(null);
+  const [colorMenu, setColorMenu] = useState<{ top: number; right: number; above: boolean } | null>(
+    null,
+  );
+  const toggleColorMenu = () => {
+    if (colorMenu) {
+      setColorMenu(null);
+      return;
+    }
+    const r = colorRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const above = r.bottom + 280 > window.innerHeight && r.top > 280;
+    setColorMenu({ top: above ? r.top - 4 : r.bottom + 4, right: window.innerWidth - r.right, above });
+  };
   // The table dialog (specs/editor/table-editor.feature.md): opened on the
   // table the caret is in, or on one in the preview, to rewrite it — or,
   // with the caret in ordinary text, on a blank grid to insert at the caret.
@@ -191,7 +213,10 @@ export function MarkdownEditor({
   const popup = active !== null && items.length > 0;
   const listId = useId();
   useEffect(() => setCompleteIndex(0), [active?.query]);
-  useEffect(() => setComplete(null), [tab]);
+  useEffect(() => {
+    setComplete(null);
+    setColorMenu(null);
+  }, [tab]);
 
   // The list opens next to the `@` it is completing, not in a corner: the
   // `@` is measured in the textarea (src/frontend/caretPosition.ts) and the
@@ -601,7 +626,16 @@ export function MarkdownEditor({
   // The toolbar (specs/ui/ui.feature.md "Design system"): icon buttons, each
   // with a tooltip naming the action and, where there is one, its shortcut.
   const size = 14;
-  type Tool = { id?: string; icon: ReactElement; title: string; keys?: string; disabled?: boolean; run: () => void };
+  type Tool = {
+    id?: string;
+    icon: ReactElement;
+    title: string;
+    keys?: string;
+    disabled?: boolean;
+    run: () => void;
+    /** A menu the button opens, rendered beside it while open. */
+    menu?: ReactNode;
+  };
   // Font size (specs/editor/common-editor.feature.md "Increase and decrease
   // font size"), next to the Heading button. It changes how the text reads,
   // not the text, so it is there on every tab — Preview and a read-only
@@ -629,6 +663,46 @@ export function MarkdownEditor({
   const tools: Tool[] = [
     { icon: <Heading size={size} />, title: "Heading", run: () => apply((t, s, e) => toggleHeading(t, s, e)) },
     { icon: <Bold size={size} />, title: "Bold", keys: "⌘B", run: () => apply((t, s, e) => toggleInline(t, s, e, "**")) },
+    // Font color (specs/editor/common-editor.feature.md "Font color"), next
+    // to Bold: a menu of colors readable on the light and the dark theme,
+    // and one to take the color off.
+    {
+      id: "color",
+      icon: <Baseline size={size} />,
+      title: "Font color",
+      run: toggleColorMenu,
+      menu:
+        colorMenu &&
+        createPortal(
+          <div
+            className={`md-color-pop${colorMenu.above ? " above" : ""}`}
+            style={{ top: colorMenu.top, right: colorMenu.right }}
+          >
+            <Menu
+              open
+              onClose={() => setColorMenu(null)}
+              label="Font color"
+              className="md-color-menu"
+              containerSelector=".md-color-tool"
+              items={[
+                ...TEXT_COLORS.map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  icon: <span className="md-color-swatch" style={{ background: c.value }} />,
+                  onSelect: () => apply((t, s, e) => setColor(t, s, e, c.value)),
+                })),
+                {
+                  id: "default",
+                  label: "Default color",
+                  icon: <span className="md-color-swatch none" />,
+                  onSelect: () => apply((t, s, e) => setColor(t, s, e, null)),
+                },
+              ]}
+            />
+          </div>,
+          document.body,
+        ),
+    },
     { icon: <Italic size={size} />, title: "Italic", keys: "⌘I", run: () => apply((t, s, e) => toggleInline(t, s, e, "*")) },
     { icon: <Code size={size} />, title: "Inline code", run: () => apply((t, s, e) => toggleInline(t, s, e, "`")) },
     { icon: <Quote size={size} />, title: "Quote", run: () => apply((t, s, e) => toggleLinePrefix(t, s, e, () => "> ", /^> /)) },
@@ -747,13 +821,29 @@ export function MarkdownEditor({
         <div className="md-tools">
           {uploadError && <span className="md-upload-error">{uploadError}</span>}
           {uploading > 0 && <span className="md-upload-status">Uploading…</span>}
-          {[...fontTools, ...(!readOnly && editing ? tools : [])].map((t) => (
-            <Tooltip key={t.id ?? t.title} label={t.title} keys={t.keys}>
-              <button type="button" aria-label={t.title} disabled={t.disabled} onClick={t.run}>
-                {t.icon}
-              </button>
-            </Tooltip>
-          ))}
+          {[...fontTools, ...(!readOnly && editing ? tools : [])].map((t) => {
+            const button = (
+              <Tooltip key={t.id ?? t.title} label={t.title} keys={t.keys}>
+                <button
+                  type="button"
+                  aria-label={t.title}
+                  aria-haspopup={t.menu !== undefined ? "menu" : undefined}
+                  disabled={t.disabled}
+                  onClick={t.run}
+                >
+                  {t.icon}
+                </button>
+              </Tooltip>
+            );
+            return t.menu !== undefined ? (
+              <span key={t.id ?? t.title} ref={t.id === "color" ? colorRef : undefined} className={`md-${t.id}-tool`}>
+                {button}
+                {t.menu}
+              </span>
+            ) : (
+              button
+            );
+          })}
         </div>
       </div>
       {!readOnly && (

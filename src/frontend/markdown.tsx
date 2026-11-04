@@ -11,6 +11,7 @@ import {
   UL_ITEM,
   encodeAttr,
   imageTagAttrs,
+  safeColor,
   safeUrl,
   type ImageAttrs,
 } from "./markdownSyntax";
@@ -161,6 +162,14 @@ function parseInline(
       out.push(<em key={key}>{parseInline(g.under, key, start + 1, ctx, links)}</em>);
     } else if (g.strike !== undefined) {
       out.push(<del key={key}>{parseInline(g.strike, key, start + 2, ctx, links)}</del>);
+    } else if (g.colored !== undefined) {
+      const color = safeColor(g.color!);
+      const inner = parseInline(g.colored, key, start + m[0].indexOf(">") + 1, ctx, links);
+      out.push(
+        <span key={key} className="md-color" style={color ? { color } : undefined}>
+          {inner}
+        </span>,
+      );
     } else if (g.src !== undefined) {
       out.push(image(ctx, key, m[0], start, { src: g.src, alt: g.alt ?? "" }));
     } else if (g.tag !== undefined) {
@@ -535,6 +544,73 @@ export function insertImage(text: string, start: number, end: number, alt: strin
     text: text.slice(0, start) + md + text.slice(end),
     start: start + md.length,
     end: start + md.length,
+  };
+}
+
+/**
+ * The font colors the toolbar offers: mid-tone hues that read on the light
+ * theme and the dark one alike, so colored text never disappears when the
+ * theme flips.
+ */
+export const TEXT_COLORS: { id: string; label: string; value: string }[] = [
+  { id: "red", label: "Red", value: "#e5484d" },
+  { id: "orange", label: "Orange", value: "#f76b15" },
+  { id: "green", label: "Green", value: "#30a46c" },
+  { id: "teal", label: "Teal", value: "#12a594" },
+  { id: "blue", label: "Blue", value: "#0090ff" },
+  { id: "purple", label: "Purple", value: "#8e4ec6" },
+  { id: "pink", label: "Pink", value: "#d6409f" },
+  { id: "gray", label: "Gray", value: "#8b8d98" },
+];
+
+/** The colored span (`<span style="color: …">…</span>`) around a range, if any. */
+const COLOR_SPAN = /<span\s+style\s*=\s*(["'])\s*color\s*:\s*[^"'<>;]+?\s*;?\s*\1\s*>([\s\S]*?)<\/span>/g;
+
+function colorSpanAround(
+  text: string,
+  start: number,
+  end: number,
+): { start: number; end: number; inner: number; innerEnd: number } | null {
+  for (const m of text.matchAll(COLOR_SPAN)) {
+    const s = m.index!;
+    const e = s + m[0].length;
+    const inner = s + m[0].indexOf(">") + 1;
+    const innerEnd = e - "</span>".length;
+    // The selection is the whole span, its text, or lies inside its text.
+    if ((start === s && end === e) || (start >= inner && end <= innerEnd)) {
+      return { start: s, end: e, inner, innerEnd };
+    }
+  }
+  return null;
+}
+
+/**
+ * Color the selection (specs/editor/common-editor.feature.md "Font color"):
+ * wrap it in `<span style="color: …">`, leaving the text selected. A
+ * selection already in a colored span recolors that span instead of nesting
+ * another; `null` takes the color off, leaving the text as it was.
+ */
+export function setColor(text: string, start: number, end: number, color: string | null): Edit {
+  const around = colorSpanAround(text, start, end);
+  if (around) {
+    const inner = text.slice(around.inner, around.innerEnd);
+    const open = color === null ? "" : `<span style="color: ${color}">`;
+    const close = color === null ? "" : "</span>";
+    const next = text.slice(0, around.start) + open + inner + close + text.slice(around.end);
+    // Keep the same characters selected, wherever the opening tag moved them.
+    const shift = around.start + open.length - around.inner;
+    const whole = start === around.start && end === around.end;
+    return whole
+      ? { text: next, start: around.start + open.length, end: around.start + open.length + inner.length }
+      : { text: next, start: start + shift, end: end + shift };
+  }
+  if (color === null) return { text, start, end };
+  const open = `<span style="color: ${color}">`;
+  const sel = text.slice(start, end);
+  return {
+    text: text.slice(0, start) + open + sel + "</span>" + text.slice(end),
+    start: start + open.length,
+    end: start + open.length + sel.length,
   };
 }
 

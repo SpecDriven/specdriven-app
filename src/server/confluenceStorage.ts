@@ -26,6 +26,7 @@ import {
   TASK_ITEM,
   UL_ITEM,
   imageTagAttrs,
+  safeColor,
   safeUrl,
 } from "../frontend/markdownSyntax";
 import { renderTestInEditor } from "../frontend/testref";
@@ -137,6 +138,11 @@ export function renderInlineStorage(input: string, links = true): string {
       out += `<em>${renderInlineStorage(g.under, links)}</em>`;
     } else if (g.strike !== undefined) {
       out += `<del>${renderInlineStorage(g.strike, links)}</del>`;
+    } else if (g.colored !== undefined) {
+      // Confluence keeps text color the same way: a span's style.
+      const color = safeColor(g.color!);
+      const inner = renderInlineStorage(g.colored, links);
+      out += color ? `<span style="color: ${color};">${inner}</span>` : inner;
     } else if (g.src !== undefined) {
       out += image(g.src, g.alt ?? "", m[0]);
     } else if (g.tag !== undefined) {

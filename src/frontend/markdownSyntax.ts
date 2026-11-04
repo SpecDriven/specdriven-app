@@ -21,12 +21,26 @@ export const INLINE = new RegExp(
     "\\*(?<star>[^*]+?)\\*",
     "(?<!\\w)_(?<under>[^_]+?)_(?!\\w)",
     "~~(?<strike>.+?)~~",
+    // Colored text (specs/editor/common-editor.feature.md "Font color"):
+    // the HTML every markdown tool reads, since markdown has no color of
+    // its own. Only `color` is read off the style; see safeColor.
+    `<span\\s+style\\s*=\\s*(?<cq>["'])\\s*color\\s*:\\s*(?<color>[^"'<>;]+?)\\s*;?\\s*\\k<cq>\\s*>(?<colored>.*?)</span>`,
     "!\\[(?<alt>[^\\]]*)\\]\\((?<src>[^)]+)\\)",
     "<img\\s+(?<tag>[^<>]*)>",
     TEST_REF_RE.source.replace("(?<url>", "(?<test>").replace("(?<name>", "(?<testname>"),
     "\\[(?<text>[^\\]]+)\\]\\((?<href>[^)]+)\\)",
   ].join("|"),
 );
+
+/**
+ * A text color as a style may carry it: a hex color, a named one, or an
+ * rgb()/hsl() call — never anything that could close the attribute or the
+ * declaration. Null for anything else, which then renders uncolored.
+ */
+export function safeColor(color: string): string | null {
+  const c = color.trim();
+  return /^(#[0-9a-f]{3,8}|[a-z]{3,24}|(rgb|hsl)a?\([\d\s.,%/]+\))$/i.test(c) ? c : null;
+}
 
 // ---- Block syntax ----
 
