@@ -78,6 +78,8 @@ let seen: { method: string; path: string; auth: string | null; body: unknown }[]
 let revoked: boolean;
 /** What the stub answers for the project's test case fields, when not the fields. */
 let fieldsStatus: number | null;
+/** What the stub answers a test case delete with, when it does not delete. */
+let deleteStatus: number | null;
 
 const problem = (status: number, message: string) => Response.json({ message }, { status });
 
@@ -202,6 +204,14 @@ function stubQtest(): string {
           return Response.json(rawModule(m));
         }
       }
+      // The test cases directly under a module, a page at a time (20 unless asked).
+      if (rest === "/test-cases" && req.method === "GET") {
+        const parent = Number(url.searchParams.get("parentId"));
+        const size = Number(url.searchParams.get("size") ?? 20);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        const all = [...cases.values()].filter((c) => c.parent_id === parent).map(rawCase);
+        return Response.json(all.slice((page - 1) * size, page * size));
+      }
       if (rest === "/test-cases" && req.method === "POST") {
         const b = body as Partial<StubCase> & { properties?: unknown[] };
         if (!b.name) return problem(400, "Name is required");
@@ -227,6 +237,12 @@ function stubQtest(): string {
         const c = cases.get(Number(tc[1]));
         if (!c) return problem(404, "Test case not found");
         if (req.method === "GET") return Response.json(rawCase(c));
+        if (req.method === "DELETE") {
+          if (deleteStatus) return problem(deleteStatus, "No permission to delete");
+          cases.delete(c.id);
+          // Like qTest, a deleted test case answers with an empty body.
+          return new Response(null, { status: 200 });
+        }
         if (req.method === "PUT") {
           const b = body as Partial<StubCase>;
           Object.assign(c, {
@@ -273,6 +289,7 @@ beforeEach(async () => {
   seen = [];
   revoked = false;
   fieldsStatus = null;
+  deleteStatus = null;
   searchStatus = null;
   linkStatus = null;
   site = stubQtest();
@@ -499,6 +516,116 @@ describe("creating a feature's test cases", () => {
     expect(again.body).toMatchObject({ created: 1, updated: 1 });
     expect(posts("/api/v3/projects/12/test-cases")).toHaveLength(1);
     expect((await readFeature(data, FILE))!).toContain("[qTest:TC-1003]");
+  });
+
+  /** The sample with two drafts after it, so deleting the first draft (S3) renumbers the second to S3. */
+  const FOUR = `${SAMPLE}
+## Expired Quote @v1 [proposed]
+
+- **Given** a quote older than 30 days
+- **Then** it is expired
+
+## Renewed Quote @v1 [proposed]
+
+- **Given** an expired quote
+- **When** the customer asks again
+- **Then** a new quote is provided
+`;
+  const dropExpired = (text: string) => text.replace(/## S3: Expired Quote[\s\S]*?(?=## S4)/, "");
+  const namesInModule = (id: number) =>
+    [...cases.values()].filter((c) => c.parent_id === id).map((c) => c.name).sort();
+
+  test("a scenario deleted from the feature has its test case deleted, so no two test cases share a number", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, FOUR);
+    await publish(moduleUrl(1));
+    expect(namesInModule(1000)).toEqual([
+      "S1: Basic Quote",
+      "S2: Declined Quote",
+      "S3: Expired Quote",
+      "S4: Renewed Quote",
+    ]);
+    // A tester's own test case in the feature's module goes too: the module is the feature's scenarios.
+    cases.set(5000, { id: 5000, name: "S9: Made by hand", parent_id: 1000, properties: [], test_steps: [], version: 1 });
+    await saveFeature(data, FILE, dropExpired((await readFeature(data, FILE))!));
+    seen = [];
+    const again = await publish(moduleUrl(1));
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ created: 0, updated: 3, deleted: 2 });
+    expect(again.body.deletedCases).toEqual([
+      { id: "1003", pid: "TC-1003", name: "S3: Expired Quote" },
+      { id: "5000", pid: "TC-5000", name: "S9: Made by hand" },
+    ]);
+    expect(seen.filter((r) => r.method === "DELETE").map((r) => r.path)).toEqual([
+      "/api/v3/projects/12/test-cases/1003",
+      "/api/v3/projects/12/test-cases/5000",
+    ]);
+    // The scenario that took S3 updated its own test case; nothing else is left under the number.
+    expect(namesInModule(1000)).toEqual(["S1: Basic Quote", "S2: Declined Quote", "S3: Renewed Quote"]);
+    expect(cases.get(1004)!.name).toBe("S3: Renewed Quote");
+    expect(again.body.warning).toBe(NO_JIRA);
+  });
+
+  test("published only after all deletes the left-out scenario's test case, and its link goes", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    const again = await publish(moduleUrl(1), "published");
+    expect(again.body).toMatchObject({ created: 0, updated: 1, deleted: 1 });
+    expect(cases.has(1001)).toBe(false);
+    const file = (await readFeature(data, FILE))!;
+    expect(file).not.toContain("TC-1001");
+    expect(file).toContain("[qTest:TC-1002]");
+    const view = (await readFeatureView(data, FILE))!.parsed;
+    expect(view.scenarios[0]!.qtest).toBeUndefined();
+  });
+
+  test("every page of the module's test cases is read, so a module of many is emptied of leftovers", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    for (let i = 0; i < 130; i++) {
+      cases.set(6000 + i, { id: 6000 + i, name: `old ${i}`, parent_id: 1000, properties: [], test_steps: [], version: 1 });
+    }
+    seen = [];
+    const again = await publish(moduleUrl(1));
+    expect(again.body).toMatchObject({ updated: 2, deleted: 130 });
+    expect(namesInModule(1000)).toEqual(["S1: Basic Quote", "S2: Declined Quote"]);
+    expect(seen.filter((r) => r.method === "GET" && r.path.includes("/test-cases?")).map((r) => r.path)).toEqual([
+      "/api/v3/projects/12/test-cases?parentId=1000&page=1&size=100&expandProps=false",
+      "/api/v3/projects/12/test-cases?parentId=1000&page=2&size=100&expandProps=false",
+    ]);
+  });
+
+  test("a delete qTest refuses is a warning; the test cases are still written and linked back", async () => {
+    await saveToken();
+    await saveFeature(data, FILE, FOUR);
+    await publish(moduleUrl(1));
+    await saveFeature(data, FILE, dropExpired((await readFeature(data, FILE))!));
+    deleteStatus = 403;
+    const again = await publish(moduleUrl(1));
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ updated: 3, deleted: 0 });
+    expect(again.body.warning).toContain(
+      "The test case TC-1003, no longer a scenario of the feature, could not be deleted from the module: qTest refused the request",
+    );
+    expect(cases.has(1003)).toBe(true);
+    expect((await readFeature(data, FILE))!).toContain("[qTest:TC-1004]");
+  });
+
+  test("a run that stops at a refused test case deletes nothing from the module", async () => {
+    await saveToken();
+    await publish(moduleUrl(1));
+    cases.set(5000, { id: 5000, name: "S9: Left over", parent_id: 1000, properties: [], test_steps: [], version: 1 });
+    await saveFeature(data, FILE, `${(await readFeature(data, FILE))!}
+## REFUSED Quote @v1 [proposed]
+
+- Then: nothing
+`);
+    seen = [];
+    const again = await publish(moduleUrl(1));
+    expect(again.body.failure).toBeDefined();
+    expect(again.body).toMatchObject({ deleted: 0 });
+    expect(seen.some((r) => r.method === "DELETE")).toBe(false);
+    expect(cases.has(5000)).toBe(true);
   });
 
   test("published only leaves the proposed scenarios out, keeping the numbers the app shows", async () => {

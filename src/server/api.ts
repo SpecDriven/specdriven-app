@@ -1897,6 +1897,9 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
     cases: result.cases.map(({ scenarioName, id, pid, url, created }) => ({ scenarioName, id, pid, url, created })),
     created: result.cases.filter((c) => c.created).length,
     updated: result.cases.filter((c) => !c.created).length,
+    // The test cases left in the module for no scenario — deleted, so the module is the feature's scenarios.
+    deleted: result.deleted.length,
+    deletedCases: result.deleted.map(({ id, pid, name }) => ({ id, pid, name })),
     // The requirements of the feature's Jira issues the test cases cover, those that were found.
     ...(result.requirements.length > 0 ? { requirements: result.requirements } : {}),
     title,
@@ -1915,9 +1918,13 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
   const warned = () => (warnings.length > 0 ? { warning: warnings.join(" ") } : {});
   // The links back: the module on the feature, each test case on its scenario.
   const moduleLink = { program: QTEST_PROGRAM, ticket: result.module.pid, url: result.module.url };
+  // A scenario left out of scope whose test case was deleted from the module loses its link.
   const scenarios = feature.scenarios.map((s, index) => {
     const written = result.cases.find((c) => c.index === index);
-    return written ? { ...s, qtest: { program: QTEST_PROGRAM, ticket: written.pid, url: written.url } } : s;
+    if (written) return { ...s, qtest: { program: QTEST_PROGRAM, ticket: written.pid, url: written.url } };
+    if (!result.unlinked.includes(index)) return s;
+    const { qtest: _gone, ...rest } = s;
+    return rest;
   });
   const next: Feature = { ...feature, qtest: moduleLink, scenarios };
   // The module and the parent it went under, kept in the document so the

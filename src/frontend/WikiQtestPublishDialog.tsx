@@ -166,7 +166,11 @@ export function WikiQtestPublishDialog({
   const casesState: StepState = cases
     ? {
         kind: cases.failure ? "failed" : "done",
-        text: [cases.created > 0 ? `${cases.created} created` : "", cases.updated > 0 ? `${cases.updated} updated` : ""]
+        text: [
+          cases.created > 0 ? `${cases.created} created` : "",
+          cases.updated > 0 ? `${cases.updated} updated` : "",
+          (cases.deleted ?? 0) > 0 ? `${cases.deleted} deleted` : "",
+        ]
           .filter(Boolean)
           .join(", "),
       }

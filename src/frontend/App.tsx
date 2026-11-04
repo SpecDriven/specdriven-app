@@ -3783,6 +3783,8 @@ export function App() {
     const what = [
       data.created > 0 ? `created ${data.created}` : "",
       data.updated > 0 ? `updated ${data.updated}` : "",
+      // Test cases of scenarios no longer in the feature (or out of scope), removed from the module.
+      (data.deleted ?? 0) > 0 ? `deleted ${data.deleted}` : "",
       // The requirements of the feature's Jira issues they cover, those found and linked.
       (() => {
         const pids = (data.requirements ?? []).filter((r) => r.linked + r.alreadyLinked > 0).map((r) => r.pid);

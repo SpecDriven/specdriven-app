@@ -424,6 +424,51 @@ export async function updateTestCase(
   return testCaseInfo(base, projectId, raw);
 }
 
+/** A test case sitting in a module, with the name qTest shows for it. */
+export interface ModuleTestCase extends TestCaseInfo {
+  name: string;
+}
+
+// The test cases of a module come 20 to a page unless asked for more; a
+// feature's module holding more than this many pages is not one the app made.
+const CASE_PAGE = 100;
+const CASE_PAGES = 50;
+
+/** The test cases directly in a module (not in its sub-modules), every page of them. */
+export async function listModuleTestCases(
+  base: string,
+  token: string,
+  projectId: string,
+  moduleId: string,
+): Promise<ModuleTestCase[]> {
+  const out: ModuleTestCase[] = [];
+  for (let page = 1; page <= CASE_PAGES; page++) {
+    const raw = await qtest<(RawTestCase & { name?: string })[]>(
+      base,
+      `${project(projectId)}/test-cases?parentId=${encodeURIComponent(moduleId)}&page=${page}&size=${CASE_PAGE}&expandProps=false`,
+      token,
+    );
+    const items = Array.isArray(raw) ? raw : [];
+    for (const c of items) {
+      // qTest answers with the module's own cases; one naming another parent is passed over.
+      if (c.parent_id !== undefined && String(c.parent_id) !== moduleId) continue;
+      out.push({ ...testCaseInfo(base, projectId, c), name: c.name ?? "" });
+    }
+    if (items.length < CASE_PAGE) break;
+  }
+  return out;
+}
+
+/** Delete a test case; one qTest no longer has counts as deleted. */
+export async function deleteTestCase(base: string, token: string, projectId: string, id: string): Promise<void> {
+  try {
+    await qtestRequest(base, `${project(projectId)}/test-cases/${encodeURIComponent(id)}`, token, { method: "DELETE" });
+  } catch (e) {
+    if (e instanceof QtestError && e.status === 404) return;
+    throw e;
+  }
+}
+
 // --- Requirements --------------------------------------------------------------------
 
 /** What a search for a Jira key's requirement found. */
@@ -564,6 +609,15 @@ export interface PublishResult {
    * as warnings, never as a failure: the test cases are written either way.
    */
   notices: string[];
+  /**
+   * The test cases that were in the feature's module but stood for no
+   * scenario this run wrote — a scenario deleted or renumbered since the last
+   * publish, one left out of scope — and were deleted, so the module holds
+   * the feature's scenarios and nothing else.
+   */
+  deleted: ModuleTestCase[];
+  /** The scenarios, by index, whose link named a test case that was deleted: their links go. */
+  unlinked: number[];
   /** The scenario whose test case could not be written, when one could not. */
   failed?: { index: number; scenarioName: string; error: string; details?: QtestFailureDetails };
 }
@@ -717,12 +771,60 @@ function linkedTestCaseId(scenario: Scenario, base: string): string | null {
 }
 
 /**
+ * Delete the test cases in the feature's module that this run did not write,
+ * so the module holds exactly the scenarios published — no "S3" left over
+ * from a scenario deleted since, beside the scenario now numbered S3. The
+ * test cases are written by then, so nothing here fails the run: a listing
+ * or a delete qTest refuses is a notice, and the rest are still tried.
+ */
+async function deleteLeftovers(p: {
+  base: string;
+  token: string;
+  projectId: string;
+  moduleId: string;
+  written: Set<string>;
+  notices: string[];
+}): Promise<ModuleTestCase[]> {
+  let inModule: ModuleTestCase[];
+  try {
+    inModule = await listModuleTestCases(p.base, p.token, p.projectId, p.moduleId);
+  } catch (e) {
+    const text = `The test cases were written, but the module's other test cases could not be listed to remove those of deleted scenarios: ${(e as Error).message}`;
+    p.notices.push(text);
+    log.warn(text, { project_id: p.projectId, module_id: p.moduleId });
+    return [];
+  }
+  const deleted: ModuleTestCase[] = [];
+  const refused: string[] = [];
+  let reason = "";
+  for (const c of inModule) {
+    if (p.written.has(c.id)) continue;
+    try {
+      await deleteTestCase(p.base, p.token, p.projectId, c.id);
+      deleted.push(c);
+    } catch (e) {
+      refused.push(c.pid);
+      reason ||= (e as Error).message;
+    }
+  }
+  if (refused.length > 0) {
+    const which = refused.length === 1 ? `test case ${refused[0]}` : `test cases ${refused.join(", ")}`;
+    const text = `The ${which}, no longer a scenario of the feature, could not be deleted from the module: ${reason}`;
+    p.notices.push(text);
+    log.warn(text, { project_id: p.projectId, module_id: p.moduleId });
+  }
+  return deleted;
+}
+
+/**
  * Publish a feature's scenarios as test cases: one module named after the
  * feature under the parent, one test case per scenario in scope. A scenario
  * whose link names a test case still in qTest is updated there (and moved
- * into the module when it sat elsewhere); any other gets a new one. Stops
- * at the first test case qTest refuses, reporting it with what was done —
- * the route links those back so a second run carries on from there.
+ * into the module when it sat elsewhere); any other gets a new one. The
+ * module is rewritten as a whole: once every scenario is written, the test
+ * cases left in it that stand for none are deleted. Stops at the first test
+ * case qTest refuses, reporting it with what was done — the route links
+ * those back so a second run carries on from there, and deletes nothing.
  */
 export async function publishFeatureTestCases(p: {
   base: string;
@@ -797,5 +899,24 @@ export async function publishFeatureTestCases(p: {
     cases.length > 0
       ? await linkToRequirements({ base: p.base, token: p.token, projectId: p.projectId, requirements, cases, notices })
       : requirements.map((r) => ({ ...r, linked: 0, alreadyLinked: 0 }));
-  return { module, cases, requirements: linked, notices, ...(failed ? { failed } : {}) };
+  // A run that stopped short leaves the module as it is: the scenarios after
+  // the refused one were not written, so what stands for them is not known.
+  // A module made by this run holds only what it wrote.
+  const deleted =
+    failed || module.created
+      ? []
+      : await deleteLeftovers({
+          base: p.base,
+          token: p.token,
+          projectId: p.projectId,
+          moduleId: module.id,
+          written: new Set(cases.map((c) => c.id)),
+          notices,
+        });
+  const gone = new Set(deleted.map((c) => c.id));
+  const unlinked = p.feature.scenarios.flatMap((s, index) => {
+    const id = linkedTestCaseId(s, p.base);
+    return id && gone.has(id) && !cases.some((c) => c.index === index) ? [index] : [];
+  });
+  return { module, cases, requirements: linked, notices, deleted, unlinked, ...(failed ? { failed } : {}) };
 }
