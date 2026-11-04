@@ -126,6 +126,7 @@ import { useModalPrompts } from "./ModalPrompts";
 import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
+import { ProjectSettingsPage } from "./ProjectSettingsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
 import { DataPage } from "./DataPage";
 import { ImagesPage } from "./ImagesPage";
@@ -997,6 +998,8 @@ interface Listing {
   featureOrders: Record<string, string[]>;
   members: ProjectMember[];
   codeRepo: string | null;
+  /** Every code repo the project names, the default first (specs/app/project-settings.feature.md). */
+  codeRepos: string[];
   /** Whether the repo writes authorship into its feature files
       (specs/app/specs-authorship.feature.md, `authors-in-markdown`). */
   authorsInMarkdown: boolean;
@@ -1111,6 +1114,9 @@ export async function fetchListing(
               : {},
           members: Array.isArray(data.members) ? (data.members as ProjectMember[]) : [],
           codeRepo: typeof data.codeRepo === "string" ? data.codeRepo : null,
+          codeRepos: Array.isArray(data.codeRepos)
+            ? (data.codeRepos as unknown[]).filter((d): d is string => typeof d === "string")
+            : [],
           authorsInMarkdown: data.authorsInMarkdown === true,
           issuesRepo:
             data.issuesRepo &&
@@ -1351,6 +1357,9 @@ export function App() {
   // Code repo (src/server/members.ts `code-repo`): where a code gen session
   // runs, from the same file; null means the data repo.
   const [codeRepo, setCodeRepo] = useState<string | null>(null);
+  // Every code repo the project names, the default first — the folders the
+  // agent pane offers.
+  const [codeRepos, setCodeRepos] = useState<string[]>([]);
   // Authorship in the feature files (specs/app/specs-authorship.feature.md):
   // the data repo's `authors-in-markdown`, from the same file; null until a
   // listing has been read, so Settings offers the switch only for a folder.
@@ -1962,6 +1971,7 @@ export function App() {
     setFeatureOrders(listing.featureOrders);
     setMembers(listing.members);
     setCodeRepo(listing.codeRepo);
+    setCodeRepos(listing.codeRepos ?? []);
     setAuthorsInMarkdown(listing.authorsInMarkdown);
     setIssuesRepo(listing.issuesRepo);
     setCustomAttributesText(listing.customAttributes);
@@ -2367,7 +2377,7 @@ export function App() {
     // the way a feature does, so a shared link previews as that page
     // (specs/app/tasks.feature.md).
     const base = appPage
-      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : appPage === "whats-new" ? "What's new" : appPage === "updates" ? "Updates" : "Observability"}`
+      ? `SpecDriven — ${appPage === "settings" ? "Settings" : appPage === "project-settings" ? "Project settings" : appPage === "plugins" ? "Plugins" : appPage === "data" ? "Data" : appPage === "images" ? "Images" : appPage === "whats-new" ? "What's new" : appPage === "updates" ? "Updates" : "Observability"}`
       : pluginView && activeTab
       ? `SpecDriven — ${activeTab.route.title(pluginView.view)}`
       : !selected || !feature
@@ -2776,6 +2786,8 @@ export function App() {
     setAppPage(page);
   };
   const openSettings = () => openAppPage("settings");
+  /** Project settings (src/frontend/ProjectSettingsPage.tsx): the data repo's project-settings.json. */
+  const openProjectSettings = () => openAppPage("project-settings");
   /** Settings, scrolled to one section (`settings-<id>`) once the page has drawn it. */
   const openSettingsAt = (sectionId: string) => {
     openAppPage("settings");
@@ -10009,6 +10021,18 @@ export function App() {
                   openSettings();
                 },
               },
+              // The data repo's own settings (specs/app/project-settings
+              // .feature.md): the code repos and their specs symlinks, the
+              // members, the authorship switch.
+              {
+                id: "project-settings",
+                label: "Project settings",
+                icon: <FolderInput size={13} />,
+                onSelect: () => {
+                  setDrawerOpen(false);
+                  openProjectSettings();
+                },
+              },
               // The hosted gateway's admin page (src/gateway/admin.ts): the
               // allowed emails and the users' roles, for admins only.
               ...(hosted && hostedAdmin
@@ -10220,6 +10244,17 @@ export function App() {
         >
         {appPageShown === "settings" ? (
           renderSettingsPage()
+        ) : appPageShown === "project-settings" ? (
+          /* Project settings (specs/app/project-settings.feature.md): the
+             data repo's project-settings.json — code repos with their specs
+             symlinks, the default, the members, the authorship switch. */
+          <ProjectSettingsPage
+            prompt={prompt}
+            confirm={confirm}
+            browseFolder={canChooseFolder ? () => chooseFolderNative("code-repo") : undefined}
+            onChanged={() => void loadFeatures()}
+            onClose={closeAppPage}
+          />
         ) : appPageShown === "plugins" ? (
           /* Plugins (specs/app/plugins.feature.md): its own page, opened
              from the user menu — the plugins on in tab order, the ones off,
@@ -12205,6 +12240,7 @@ export function App() {
       )}
       {paneShown && (
         <AgentPane
+          codeRepos={codeRepos}
           compact={compact}
           demo={demo}
           codeRepo={codeRepo}

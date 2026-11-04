@@ -459,7 +459,7 @@ describe("the GitHub API", () => {
       expect(((await listing!.json()) as { issuesRepo: unknown }).issuesRepo).toBeNull();
       const res = await handleApi(new Request("http://localhost/api/issues"));
       expect(res!.status).toBe(404);
-      expect(((await res!.json()) as { error: string }).error).toContain("code-repo");
+      expect(((await res!.json()) as { error: string }).error).toContain("Project settings");
       expect(seen).toHaveLength(0);
     });
   });

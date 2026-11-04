@@ -3569,6 +3569,63 @@ button.table-add:hover {
   white-space: nowrap;
 }
 
+/* The Project settings page (specs/app/project-settings.feature.md): a row
+   per code repo — its path with the default and not-found badges, the
+   resolved folder, the state of its specs symlink with the link to make or
+   remove it — and the Default radio + Remove at the right. */
+.code-repo-path {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.code-repo-path code {
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-repo-badge {
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.2;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.code-repo-badge.missing {
+  color: var(--danger, #c0392b);
+  border-color: currentColor;
+}
+
+.code-repo-link {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  max-width: none;
+}
+
+.code-repo-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-shrink: 0;
+}
+
+.code-repo-default {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
 /* The project management tool: the list of the usual ones, plus the name
    field that appears for a tool the list doesn't offer. */
 .settings-tool {

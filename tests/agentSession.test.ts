@@ -163,7 +163,7 @@ test("a code repo that is not there refuses the session before anything runs", a
   const error = (await res.json()).error as string;
   expect(error).toContain("Code repo not found");
   expect(error).toContain(join(root, "missing"));
-  expect(error).toContain(PROJECT_SETTINGS_FILE);
+  expect(error).toContain("Project settings");
   expect(calls).toHaveLength(0);
 });
 

@@ -15,6 +15,7 @@ import { commitAndPush, pull, syncSavedChanges } from "./git";
 import { resolveDataRepo } from "./repo";
 import { NOTEBOOK, importPageDrift } from "./pages";
 import { ensureSpecsFolder } from "./features";
+import { ensureProjectSettings } from "./members";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
 import { readState, needsDataRepo } from "./state";
 import { checkDataFormat, stampDataFormat } from "./dataFormat";
@@ -76,6 +77,12 @@ export async function syncDataDir(dir: string): Promise<string> {
       // The spec tree's folder, before anything reads it. Unlike the folders
       // below it is not opt-in: `specs/` is where features live.
       await ensureSpecsFolder(dir);
+      // The project's settings file (specs/app/project-settings.feature.md
+      // "The settings file is created for every data folder"): made empty
+      // here when the folder has none, so the Project settings page always
+      // has a file to edit; committed and pushed below like any saved
+      // change. Not in the demo, whose dataset ships its own.
+      if (!isDemoMode() && (await ensureProjectSettings(dir))) parts.push("created project-settings.json");
       // A repo written before the spec tree had its own folder is moved into
       // it once, here — features and their documents, with the plugins told
       // where each went (an Event Model's slice links name them) — so the

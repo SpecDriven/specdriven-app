@@ -345,6 +345,12 @@ describe("TranscriptRow", () => {
     ]);
     expect(folders).toEqual(["/w/code", "/w/data", "/w/new", "/w/old"]);
     expect(knownFolders(null, "/w/data", [])).toEqual(["/w/data"]);
+    // Every code repo the project names comes after the default, before the data repo.
+    expect(knownFolders("/w/code", "/w/data", [], ["/w/code", "/w/mobile"])).toEqual([
+      "/w/code",
+      "/w/mobile",
+      "/w/data",
+    ]);
 
     const picked: string[] = [];
     const items = folderItems(folders, "/w/data", async () => "/w/typed", (f) => picked.push(f));

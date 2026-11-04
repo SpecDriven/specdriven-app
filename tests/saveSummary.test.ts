@@ -144,6 +144,23 @@ describe("pages and folders", () => {
     ).toBe("Describe folder: specs/app");
   });
 
+  // specs/app/project-settings.feature.md: the settings file the tick makes
+  // for a folder that had none is housekeeping — named alone, out of the
+  // title beside anything else, in the body either way. Editing it is a
+  // change of its own.
+  test("project-settings.json is named alone and stays out of a shared title", () => {
+    const made = { path: "project-settings.json", before: null, after: '{ "members": [] }' };
+    expect(summarizeSavedChanges([made]).title).toBe("Add project settings");
+    const both = summarizeSavedChanges([
+      made,
+      { path: "specs/seed.feature.md", before: "# Seed\n", after: "# Seed\n\n## One @v1 [proposed]\n\nbody\n" },
+    ]);
+    expect(both.title).toBe("Add scenario to Seed: One");
+    expect(both.body).toContain("- Add project settings: project-settings.json");
+    const edited = summarizeSavedChanges([{ path: "project-settings.json", before: "{}", after: '{ "members": [] }' }]);
+    expect(edited.title).toBe("Edit project settings");
+  });
+
   test("a markdown file outside the special folders is saved by path", () => {
     expect(summarizeSavedChanges([{ path: "README.md", before: "a", after: "b" }]).title).toBe("Edit file: README.md");
   });

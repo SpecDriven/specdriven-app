@@ -152,7 +152,15 @@ import {
   storeScenarioFile,
 } from "./scenarioFiles";
 import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
-import { PROJECT_SETTINGS_FILE, readProjectSettings, writeAuthorsInMarkdown } from "./members";
+import {
+  PROJECT_SETTINGS_FILE,
+  readProjectSettings,
+  writeAuthorsInMarkdown,
+  writeCodeRepos,
+  writeMembers,
+} from "./members";
+import type { ProjectSettings } from "./members";
+import { createSpecsLink, removeSpecsLink, SpecsLinkError, specsLinkStatus } from "./specsLink";
 import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
 import type { ExternalLink, Feature } from "./parser";
 import {
@@ -2026,6 +2034,9 @@ const getFeatures = withDataDir(async (dir) => {
     featureOrders: await listFeatureOrders(dir),
     members: settings.members,
     codeRepo: settings.codeRepo,
+    // Every code repo (specs/app/project-settings.feature.md), the default
+    // first — the folders the agent pane offers a session.
+    codeRepos: [...settings.codeRepos].sort((a, b) => Number(b.isDefault) - Number(a.isDefault)).map((r) => r.dir),
     // Authorship in the feature files (specs/app/specs-authorship.feature.md)
     // — a setting of the data repo, so it comes with the repo's listing.
     authorsInMarkdown: settings.authorsInMarkdown,
@@ -2041,29 +2052,110 @@ const getFeatures = withDataDir(async (dir) => {
   });
 });
 
-// The data repo's own settings that Settings can change
-// (specs/app/specs-authorship.feature.md): `authors-in-markdown` in its
-// project-settings.json. Written into the repo — every teammate's app then
-// writes the feature files the same way — and every `.feature.md` is
-// reprojected on the spot, as the "Publish external links" switch does; the
-// reload cron commits and pushes the lot like any saved change.
+// The data repo's own settings (specs/app/project-settings.feature.md): its
+// project-settings.json as the Project settings page shows it — the members,
+// each code repo with whether its folder is there and the state of its
+// `specs` symlink, which one is the default, and the authorship switch.
+async function projectSettingsPayload(dir: string, settings?: ProjectSettings) {
+  const current = settings ?? (await readProjectSettings(dir));
+  const codeRepos = await Promise.all(
+    current.codeRepos.map(async (repo) => ({
+      path: repo.path,
+      dir: repo.dir,
+      isDefault: repo.isDefault,
+      exists: await directoryExists(repo.dir),
+      specsLink: await specsLinkStatus(repo.dir, dir),
+    })),
+  );
+  return {
+    file: `${dir}/${PROJECT_SETTINGS_FILE}`,
+    members: current.members,
+    codeRepos,
+    defaultCodeRepo: current.defaultCodeRepo,
+    authorsInMarkdown: current.authorsInMarkdown,
+    // The demo's dataset and the read-only site's snapshot are nobody's to
+    // edit; a hosted worker has no code checkout to link.
+    canEdit: !isDemoMode() && !isReadOnlyMode(),
+    canLink: !isDemoMode() && !isReadOnlyMode() && !isHostedMode(),
+    canChooseFolder: canChooseFolder() && !isHostedMode(),
+  };
+}
+
+const getProjectSettings = withDataDir(async (dir) => json(await projectSettingsPayload(dir)));
+
+// Change the data repo's settings: any of `authorsInMarkdown`
+// (specs/app/specs-authorship.feature.md — every `.feature.md` is
+// reprojected on the spot, as the "Publish external links" switch does),
+// `members`, `codeRepos` with `defaultCodeRepo`. Written into the repo, so
+// every teammate's app sees the same; the reload cron commits and pushes it
+// like any saved change. The demo keeps its authorship switch alone.
 const putProjectSettings = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => null)) as { authorsInMarkdown?: unknown } | null;
-  if (typeof body?.authorsInMarkdown !== "boolean") {
+  const body = (await req.json().catch(() => null)) as {
+    authorsInMarkdown?: unknown;
+    members?: unknown;
+    codeRepos?: unknown;
+    defaultCodeRepo?: unknown;
+  } | null;
+  if (!body || typeof body !== "object") return json({ error: "a JSON object is required" }, 400);
+  const hasAuthors = body.authorsInMarkdown !== undefined;
+  const hasMembers = body.members !== undefined;
+  const hasRepos = body.codeRepos !== undefined || body.defaultCodeRepo !== undefined;
+  if (!hasAuthors && !hasMembers && !hasRepos) {
+    return json({ error: "nothing to change: authorsInMarkdown, members or codeRepos" }, 400);
+  }
+  if (hasAuthors && typeof body.authorsInMarkdown !== "boolean") {
     return json({ error: "authorsInMarkdown must be a boolean" }, 400);
   }
+  if (hasMembers && !Array.isArray(body.members)) return json({ error: "members must be a list" }, 400);
+  if (body.codeRepos !== undefined && !(Array.isArray(body.codeRepos) && body.codeRepos.every((p) => typeof p === "string"))) {
+    return json({ error: "codeRepos must be a list of paths" }, 400);
+  }
+  if (body.defaultCodeRepo !== undefined && body.defaultCodeRepo !== null && typeof body.defaultCodeRepo !== "string") {
+    return json({ error: "defaultCodeRepo must be a path or null" }, 400);
+  }
+  if ((hasMembers || hasRepos) && (isDemoMode() || isReadOnlyMode())) {
+    return json({ error: "The demo's project settings cannot be changed" }, 403);
+  }
   try {
-    if (await writeAuthorsInMarkdown(dir, body.authorsInMarkdown)) {
+    if (hasAuthors && (await writeAuthorsInMarkdown(dir, body.authorsInMarkdown as boolean))) {
       const changed = await reprojectFeatures(dir);
       reloadLog.info(
         `authors ${body.authorsInMarkdown ? "written into" : "withheld from"} ${changed} feature file(s)`,
       );
     }
+    if (hasMembers) await writeMembers(dir, body.members as unknown[]);
+    if (hasRepos) {
+      const current = await readProjectSettings(dir);
+      const paths = (body.codeRepos as string[] | undefined) ?? current.codeRepos.map((r) => r.path);
+      const main =
+        body.defaultCodeRepo === undefined ? current.defaultCodeRepo : (body.defaultCodeRepo as string | null);
+      await writeCodeRepos(dir, paths, main);
+    }
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }
+  return json(await projectSettingsPayload(dir));
+});
+
+// A code repo's `specs` symlink (src/server/specsLink.ts): `create` or
+// `remove` it for the repo `codeRepo` names, as the settings hold the path.
+const postSpecsLink = withDataDir(async (dir, req) => {
+  if (isDemoMode() || isReadOnlyMode()) return json({ error: "Symlinks cannot be changed in demo mode" }, 403);
+  const body = (await req.json().catch(() => null)) as { codeRepo?: unknown; action?: unknown } | null;
+  if (typeof body?.codeRepo !== "string" || (body.action !== "create" && body.action !== "remove")) {
+    return json({ error: "codeRepo and action (create or remove) are required" }, 400);
+  }
   const settings = await readProjectSettings(dir);
-  return json({ authorsInMarkdown: settings.authorsInMarkdown });
+  const repo = settings.codeRepos.find((r) => r.path === body.codeRepo || r.dir === body.codeRepo);
+  if (!repo) return json({ error: `Not one of the project's code repos: ${body.codeRepo}` }, 404);
+  try {
+    if (body.action === "create") await createSpecsLink(repo.dir, dir);
+    else await removeSpecsLink(repo.dir, dir);
+  } catch (e) {
+    if (e instanceof SpecsLinkError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 500);
+  }
+  return json(await projectSettingsPayload(dir, settings));
 });
 
 // Full-text search (specs/search.feature.md): ranked hits over feature
@@ -2828,7 +2920,7 @@ async function resolveSessionRequest(
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
     return json(
-      { error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` },
+      { error: `Code repo not found: ${codeRepo} (the default code repo in Project settings)` },
       400,
     );
   }
@@ -2943,7 +3035,7 @@ async function agentPanePlace(
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo !== null && !(await directoryExists(codeRepo))) {
     return json(
-      { error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` },
+      { error: `Code repo not found: ${codeRepo} (the default code repo in Project settings)` },
       400,
     );
   }
@@ -3407,10 +3499,10 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
   }
   const { codeRepo } = await readProjectSettings(dir);
   if (codeRepo === null) {
-    return json({ error: `No code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` }, 400);
+    return json({ error: "No code repo: add one in Project settings (the user menu)" }, 400);
   }
   if (!(await directoryExists(codeRepo))) {
-    return json({ error: `Code repo not found: ${codeRepo} (code-repo in ${PROJECT_SETTINGS_FILE})` }, 400);
+    return json({ error: `Code repo not found: ${codeRepo} (the default code repo in Project settings)` }, 400);
   }
   const test = await localTestFile(codeRepo, url);
   if (!test) return json({ error: `Not in the code repo ${codeRepo}: ${url}` }, 404);
@@ -3492,7 +3584,9 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/images/:name", getImage],
   ["GET", "/api/scenario-files/:name", getScenarioFile],
   ["GET", "/api/search", getSearch],
+  ["GET", "/api/project-settings", getProjectSettings],
   ["PUT", "/api/project-settings", putProjectSettings],
+  ["POST", "/api/project-settings/specs-link", unlessHosted(postSpecsLink)],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
   ["PUT", "/api/custom-attributes", putCustomAttributes],
