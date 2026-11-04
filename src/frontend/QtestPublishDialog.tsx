@@ -25,6 +25,9 @@ export interface QtestPublishResult {
   cases: { scenarioName: string; id: string; pid: string; url: string; created: boolean }[];
   created: number;
   updated: number;
+  /** The test cases deleted from the module because no scenario stands for them any more. */
+  deleted?: number;
+  deletedCases?: { id: string; pid: string; name: string }[];
   /** The requirements of the feature's Jira issues the test cases were linked to, one per key found. */
   requirements?: { key: string; id: string; pid: string; name: string; url: string; linked: number; alreadyLinked: number }[];
   title: string;
