@@ -96,6 +96,12 @@ function decode(blob: Blob): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Scene units around the shapes' bounds the exported layer keeps, room for
+ * the widest stroke and an arrowhead (Excalidraw's bounds hold neither).
+ */
+const EXPORT_MARGIN = 32;
+
 function size(img: HTMLImageElement): { width: number; height: number } {
   return { width: img.naturalWidth || 300, height: img.naturalHeight || 150 };
 }
@@ -201,6 +207,12 @@ export function MarkupPane({ src, alt, onSave, onCancel }: MarkupPaneProps) {
   // off the edge is cut there. No shapes left, and the image goes back to
   // the original. Too big to upload, and the pane stays open with the
   // markup still in it.
+  //
+  // The shapes are exported with a margin around their bounds, which are
+  // geometric: a straight line is 0 tall, a pen dot 0 by 0, and an arrowhead
+  // or a stroke's outer half sits outside them. Exported at exactly those
+  // bounds, the layer would be an empty canvas (which drawImage refuses) or
+  // one that clips the strokes.
   const save = async () => {
     const bg = background.current;
     if (!api || !bg) return;
@@ -227,9 +239,14 @@ export function MarkupPane({ src, alt, onSave, onCancel }: MarkupPaneProps) {
           exportWithDarkMode: false,
         },
         files: api.getFiles(),
-        exportPadding: 0,
-        getDimensions: (w: number, h: number) => ({ width: w * scale, height: h * scale, scale }),
+        exportPadding: EXPORT_MARGIN,
+        getDimensions: (w: number, h: number) => ({
+          width: Math.max(1, Math.ceil(w * scale)),
+          height: Math.max(1, Math.ceil(h * scale)),
+          scale,
+        }),
       });
+      // The layer's origin is the shapes' top-left corner, less the margin.
       const [minX, minY] = getCommonBounds(shapes);
       const out = document.createElement("canvas");
       out.width = width;
@@ -237,7 +254,11 @@ export function MarkupPane({ src, alt, onSave, onCancel }: MarkupPaneProps) {
       const ctx = out.getContext("2d");
       if (!ctx) throw new Error("export failed");
       ctx.drawImage(bg.image, 0, 0, width, height);
-      ctx.drawImage(layer, (minX - image.x) * scale, (minY - image.y) * scale);
+      ctx.drawImage(
+        layer,
+        (minX - EXPORT_MARGIN - image.x) * scale,
+        (minY - EXPORT_MARGIN - image.y) * scale,
+      );
       const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, "image/png"));
       if (!blob) throw new Error("export failed");
       const png = withMarkup(new Uint8Array(await blob.arrayBuffer()), {
