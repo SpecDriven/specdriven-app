@@ -13,6 +13,7 @@ import { parseFeature, parsePage, titleFromFileName } from "../parser";
 import type { Feature, Scenario } from "../parser";
 import { PAGE_FOLDERS, isPageFile } from "../pageFolders";
 import { isFeatureFile, isFeatureOrderFile, isFolderDisplayNameFile, isFolderOrderFile } from "../walk";
+import { PROJECT_SETTINGS_FILE } from "../members";
 
 /** One file the working tree holds differently from HEAD. */
 export interface ChangedFile {
@@ -75,10 +76,19 @@ export function summarizeSavedChanges(files: ChangedFile[]): SaveSummary {
   if (entries.length === 0) {
     return { title: files.length ? DOCUMENTS_TITLE : FALLBACK_TITLE, body: AUTO_SAVE_TRAILER };
   }
-  const title = fit(entries.length === 1 ? singleTitle(entries[0]!) : batchTitle(entries));
+  // The project settings file the tick makes for a folder that had none
+  // (specs/app/project-settings.feature.md) rides along with whatever else
+  // the tick commits: housekeeping, so it stays out of the title when there
+  // is something else to name, and keeps its body line.
+  const named = entries.filter((e) => !(e.noun === PROJECT_SETTINGS_NOUN && e.verb === "Add")) ;
+  const titled = named.length > 0 ? named : entries;
+  const title = fit(titled.length === 1 ? singleTitle(titled[0]!) : batchTitle(titled));
   const body = [...entries.map(bodyLine), "", AUTO_SAVE_TRAILER].join("\n");
   return { title, body };
 }
+
+/** The noun for the data repo's project-settings.json. */
+const PROJECT_SETTINGS_NOUN = "project settings";
 
 function entryFor(file: ChangedFile): Entry {
   const { path, before, after } = file;
@@ -86,6 +96,7 @@ function entryFor(file: ChangedFile): Entry {
   const blank: Entry = { verb: "Save", noun: "file", name: path, scenarios: [], descriptionChanged: false };
   if (before === undefined || after === undefined) return blank;
   const verb: Verb = before === null ? "Add" : after === null ? "Delete" : "Edit";
+  if (path === PROJECT_SETTINGS_FILE) return { ...blank, verb, noun: PROJECT_SETTINGS_NOUN, name: path };
   if (isFeatureFile(base)) {
     try {
       return featureEntry(path, verb, before, after);
@@ -186,6 +197,7 @@ function singleTitle(e: Entry): string {
   if (e.verb === "Describe") return `Describe folder: ${e.name}`;
   if (e.verb === "Reorder") return `${reorderLine(e)}: ${e.name}`;
   if (e.verb === "Save") return `Save ${e.name}`;
+  if (e.noun === PROJECT_SETTINGS_NOUN) return `${e.verb} ${e.noun}`;
   return `${e.verb} ${e.noun}: ${e.name}`;
 }
 

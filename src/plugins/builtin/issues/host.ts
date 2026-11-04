@@ -14,7 +14,6 @@ import type { Context, Plugin } from "../../kernel";
 import type { DataAccess } from "../../host/services";
 import { bodyOf, json, type Handler, type Params } from "../../../server/http";
 import { isDemoMode } from "../../../server/demoMode";
-import { PROJECT_SETTINGS_FILE } from "../../../server/members";
 import {
   GitHubError,
   addComment,
@@ -45,7 +44,7 @@ const guarded =
       const repo = await readIssuesRepo(dir);
       if (repo === null) {
         return json(
-          { error: `No GitHub code repo: ${PROJECT_SETTINGS_FILE} must name one in code-repo` },
+          { error: "No GitHub code repo: the default code repo in Project settings must push to GitHub" },
           404,
         );
       }

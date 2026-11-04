@@ -141,6 +141,7 @@ export function AgentPane({
   compact,
   demo,
   codeRepo,
+  codeRepos = [],
   dataRepo,
   prompt,
   browseFolder,
@@ -152,6 +153,8 @@ export function AgentPane({
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
   demo: boolean;
   codeRepo: string | null;
+  /** Every code repo the project names (specs/app/project-settings.feature.md), the default first. */
+  codeRepos?: readonly string[];
   dataRepo: string | null;
   /** The app's path prompt, for "Other folder…"; absent hides that item. */
   prompt?: (opts: PromptOptions) => Promise<string | null>;
@@ -179,7 +182,7 @@ export function AgentPane({
           })
         )?.trim() || null
     : undefined;
-  const folders = knownFolders(codeRepo, dataRepo, store.list);
+  const folders = knownFolders(codeRepo, dataRepo, store.list, codeRepos);
   return (
     <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
       <AgentHeader store={store} session={session} demo={demo} onClose={onClose} />
@@ -232,9 +235,10 @@ export function knownFolders(
   codeRepo: string | null,
   dataRepo: string | null,
   sessions: readonly ChatSessionMeta[],
+  codeRepos: readonly string[] = [],
 ): string[] {
   const used = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((m) => m.cwd);
-  const all = [codeRepo, dataRepo, ...used].filter((f): f is string => Boolean(f));
+  const all = [codeRepo, ...codeRepos, dataRepo, ...used].filter((f): f is string => Boolean(f));
   return [...new Set(all.map(folderPath))];
 }
 

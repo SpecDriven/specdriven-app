@@ -20,11 +20,15 @@ describe("matchApi", () => {
     expect(matchApi("POST", "/api/search")).toBeNull();
   });
 
-  // The data repo's own settings (specs/app/specs-authorship.feature.md):
-  // `authors-in-markdown` is written with a PUT, read with the listing.
-  test("project settings route matches PUT only", () => {
+  // The data repo's own settings (specs/app/project-settings.feature.md):
+  // read with a GET, changed with a PUT; a code repo's specs symlink is made
+  // or removed with a POST to its own route.
+  test("project settings routes match GET and PUT, and the specs link its POST", () => {
     expect(matchApi("PUT", "/api/project-settings")).not.toBeNull();
-    expect(matchApi("GET", "/api/project-settings")).toBeNull();
+    expect(matchApi("GET", "/api/project-settings")).not.toBeNull();
+    expect(matchApi("DELETE", "/api/project-settings")).toBeNull();
+    expect(matchApi("POST", "/api/project-settings/specs-link")).not.toBeNull();
+    expect(matchApi("GET", "/api/project-settings/specs-link")).toBeNull();
   });
 
   // GitHub sign-in routes (git-operations.md): device-flow

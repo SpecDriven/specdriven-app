@@ -142,6 +142,8 @@ describe("project-settings.json", () => {
     );
     expect(await readProjectSettings(root)).toEqual({
       members: [{ name: DANA }],
+      codeRepos: [{ path: "../acme-app", dir: join(root, "..", "acme-app"), isDefault: true }],
+      defaultCodeRepo: "../acme-app",
       codeRepo: join(root, "..", "acme-app"),
       authorsInMarkdown: false,
     });

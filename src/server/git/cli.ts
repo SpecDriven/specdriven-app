@@ -27,6 +27,7 @@ import type { RunResult } from "../run";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { isRepoRoot } from "./repoRoot";
 import { FALLBACK_TITLE, pathsInStatus, summarizeSavedChanges } from "./saveSummary";
+import { PROJECT_SETTINGS_FILE } from "../members";
 import type { ChangedFile } from "./saveSummary";
 
 export function cliGitAvailable(): boolean {
@@ -60,9 +61,13 @@ export type GitRun = (repoDir: string | null, ...args: string[]) => Promise<RunR
 /** How many changed files a save reads to describe; the rest are counted. */
 const SUMMARY_READ_LIMIT = 40;
 
-/** The files the auto-save summary reads: markdown specs and pages, folder descriptions. */
+/**
+ * The files the auto-save summary reads: markdown specs and pages, folder
+ * descriptions, and the project settings file the tick makes
+ * (specs/app/project-settings.feature.md).
+ */
 function isSpecText(path: string): boolean {
-  return path.endsWith(".md") || path.endsWith(".txt");
+  return path.endsWith(".md") || path.endsWith(".txt") || path === PROJECT_SETTINGS_FILE;
 }
 
 /** Commit-author overrides for a known GitHub identity. */
