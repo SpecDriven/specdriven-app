@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.232 — 2026-11-05
+
+- Sidebar consistency, phase 3: one row for every plugin list, progress rings, a tab bar that never wraps ([#381](https://github.com/SpecDriven/specdriven-app/pull/381))
+- Sidebar consistency, phase 2: one section head for every tab, tree keyboard model and reveal in plugin lists ([#380](https://github.com/SpecDriven/specdriven-app/pull/380))
+
 ## v0.1.231 — 2026-11-05
 
 - Sidebar consistency, phase 1: one ⋯ menu order, Copy link on tree rows, chord fixes, rail parity, grouped user menu ([#379](https://github.com/SpecDriven/specdriven-app/pull/379))
