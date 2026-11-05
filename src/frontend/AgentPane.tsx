@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -25,6 +26,7 @@ import {
   Square,
   Terminal,
   Wrench,
+  X,
 } from "lucide-react";
 import { Menu, type MenuItem } from "./Menu";
 import type { PromptOptions } from "./ModalPrompts";
@@ -59,7 +61,9 @@ import {
   type SessionState,
   type TranscriptItem,
 } from "./agentChat";
-import { EFFORT_LABEL, EFFORT_LEVELS } from "../server/agentTypes";
+import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE } from "../server/agentTypes";
+import type { ChatImage, ImageUpload } from "../server/agentTypes";
+import { pastedImageFiles, prepareImage, toUpload, type PendingImage } from "./pastedImages";
 
 /**
  * The coding agent pane (specs/agents/agent-pane.feature.md): a live
@@ -839,11 +843,12 @@ function EmptyState({
   // sessions start on (the pick is the default, as it is mid-session).
   const saveDefault = (patch: { model?: string | null; effort?: EffortLevel | null }) =>
     void agentChat.saveDefaults(picked.id, patch).catch(fail);
-  const start = async (text: string) => {
+  const start = async (text: string, images: ImageUpload[]) => {
     await agentChat.createSession({
       name: nameFromMessage(text) || defaultSessionName(),
       agent: picked.id,
       prompt: text,
+      ...(images.length ? { images } : {}),
       ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
       ...(hasModes(picked) ? { permissionMode: startMode } : {}),
       ...(choices?.model ? { model: choices.model } : {}),
@@ -926,6 +931,7 @@ function EmptyState({
         hint="Enter to start · Shift+Enter for a new line"
         left={left}
         right={right}
+        imagesFrom={{ label: picked.label, canRead: picked.capabilities.images === true }}
         onSend={start}
       />
     </div>
@@ -1017,7 +1023,12 @@ export function TranscriptRow({
 }) {
   switch (item.kind) {
     case "user":
-      return <div className="agent-msg user">{item.text}</div>;
+      return (
+        <div className="agent-msg user">
+          {item.images && item.images.length > 0 && <MessageImages images={item.images} />}
+          {item.text}
+        </div>
+      );
     case "assistant":
       return (
         <div className="agent-msg assistant">
@@ -1077,6 +1088,45 @@ export function TranscriptRow({
         </p>
       );
   }
+}
+
+/** The images a message carried; one opens full size over the pane, and a
+    click or Escape closes it. */
+function MessageImages({ images }: { images: ChatImage[] }) {
+  const [open, setOpen] = useState<ChatImage | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(null);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open]);
+  return (
+    <>
+      <div className="agent-msg-images">
+        {images.map((image, i) => (
+          <button
+            type="button"
+            key={image.id}
+            className="agent-msg-image"
+            aria-label={`Open ${image.name ?? `image ${i + 1}`}`}
+            onClick={() => setOpen(image)}
+          >
+            <img src={image.url} alt={image.name ?? `Pasted image ${i + 1}`} loading="lazy" />
+          </button>
+        ))}
+      </div>
+      {open && (
+        <div className="agent-image-zoom" role="dialog" aria-label={open.name ?? "Pasted image"} onClick={() => setOpen(null)}>
+          <img src={open.url} alt={open.name ?? "Pasted image"} />
+        </div>
+      )}
+    </>
+  );
 }
 
 function toolIcon(name: string): ReactNode {
@@ -1321,6 +1371,7 @@ function ComposerBox({
   left,
   right,
   autoFocus,
+  imagesFrom,
   onSend,
 }: {
   listKey: string;
@@ -1335,9 +1386,16 @@ function ComposerBox({
   /** The bar's right side, before Send: model, effort, mode. */
   right: ReactNode;
   autoFocus?: boolean;
-  onSend: (text: string) => Promise<void>;
+  /** The agent that would read pasted images; null when it reads none, so
+      a pasted image is refused with its name. */
+  imagesFrom: { label: string; canRead: boolean };
+  onSend: (text: string, images: ImageUpload[]) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
+  // Pasted images (specs/agents/agent-pane.feature.md "Paste an image into
+  // the message"), and how many are still being read.
+  const [images, setImages] = useState<PendingImage[]>([]);
+  const [reading, setReading] = useState(0);
   // Spell check (src/frontend/spellCheckPref.ts): a message is prose.
   const spellCheck = useSpellCheck();
   const [caret, setCaret] = useState(0);
@@ -1359,19 +1417,44 @@ function ComposerBox({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [draft]);
-  const ready = canSend && draft.trim().length > 0;
+  const ready = canSend && reading === 0 && (draft.trim().length > 0 || images.length > 0);
   const send = async () => {
     // Blank lines around the message go; an indented first line (a code
     // block) keeps its indentation (specs/ui/ui.feature.md "User-entered
     // text is cleaned up").
     const text = cleanText(draft);
-    if (!text.trim() || !canSend) return;
+    if ((!text.trim() && images.length === 0) || !canSend || reading > 0) return;
+    const sent = images;
     setDraft("");
+    setImages([]);
     try {
-      await onSend(text);
+      await onSend(text, sent.map(toUpload));
     } catch (e) {
       setDraft(text);
+      setImages(sent);
       toast.error((e as Error).message);
+    }
+  };
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = pastedImageFiles(e.clipboardData);
+    if (files.length === 0) return;
+    e.preventDefault();
+    if (!imagesFrom.canRead) {
+      toast.error(`${imagesFrom.label} cannot read images — paste text instead`);
+      return;
+    }
+    const room = MAX_IMAGES_PER_MESSAGE - images.length;
+    if (room <= 0) {
+      toast.error(`At most ${MAX_IMAGES_PER_MESSAGE} images go with one message`);
+      return;
+    }
+    if (files.length > room) toast.error(`Only ${room} more image${room === 1 ? "" : "s"} fit this message`);
+    for (const file of files.slice(0, room)) {
+      setReading((n) => n + 1);
+      prepareImage(file)
+        .then((image) => setImages((list) => [...list, image].slice(0, MAX_IMAGES_PER_MESSAGE)))
+        .catch((err: Error) => toast.error(err.message))
+        .finally(() => setReading((n) => n - 1));
     }
   };
   const pick = (c: (typeof slash.items)[number]) => {
@@ -1438,6 +1521,24 @@ function ComposerBox({
         </div>
       )}
       <div className="agent-composer-box" data-disabled={disabled || undefined}>
+        {(images.length > 0 || reading > 0) && (
+          <ul className="agent-attachments" aria-label="Pasted images">
+            {images.map((image, i) => (
+              <li key={image.key} className="agent-attachment">
+                <img src={image.previewUrl} alt={image.name ?? `Pasted image ${i + 1}`} />
+                <button
+                  type="button"
+                  className="agent-attachment-remove"
+                  aria-label={`Remove ${image.name ?? `pasted image ${i + 1}`}`}
+                  onClick={() => setImages((list) => list.filter((x) => x.key !== image.key))}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+            {reading > 0 && <li className="agent-attachment" data-reading aria-label="Reading an image" />}
+          </ul>
+        )}
         <textarea
           ref={ref}
           rows={1}
@@ -1456,6 +1557,7 @@ function ComposerBox({
           }}
           onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
         <div className="agent-bar" role="toolbar" aria-label="Session options">
           <div className="agent-bar-side">{left}</div>
@@ -1558,7 +1660,8 @@ function Composer({
       hint={hint}
       left={left}
       right={right}
-      onSend={(text) => agentChat.send(id, text)}
+      imagesFrom={{ label: who, canRead: agent.capabilities.images === true }}
+      onSend={(text, images) => agentChat.send(id, text, images)}
     />
   );
 }

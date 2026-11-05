@@ -14,7 +14,8 @@
 // Node APIs only (src/server/run.ts): this module also runs inside Electron.
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { sessionWorkDir } from "./agent";
 import type { SessionPlace } from "./agent";
 import type {
@@ -29,6 +30,10 @@ import type {
 import { AgentError, agents } from "../plugins/host/agents";
 import type {
   AgentChoices,
+  AgentImage,
+  ChatImage,
+  ImageMediaType,
+  ImageUpload,
   AgentDefaultsPatch,
   ChatAgent,
   ChatEvent,
@@ -41,7 +46,14 @@ import type {
   PermissionSuggestion,
   SlashCommandInfo,
 } from "./agentTypes";
-import { isFinalStatus, normalizePermissionMode, PERMISSION_MODES } from "./agentTypes";
+import {
+  isFinalStatus,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES_PER_MESSAGE,
+  normalizeImageMediaType,
+  normalizePermissionMode,
+  PERMISSION_MODES,
+} from "./agentTypes";
 import { writeTextFile } from "./fsx";
 
 /** An HTTP-shaped failure: the route turns `status` into the response code. */
@@ -79,6 +91,8 @@ interface ChatSession {
   turn: number;
   commands: SlashCommandInfo[];
   recordPath: string;
+  /** Images pasted into the session, by id: where the bytes are kept. */
+  images: Map<string, { path: string; mediaType: ImageMediaType }>;
   /** Record writes queue up here — two in flight would tear the file. */
   saving: Promise<void>;
 }
@@ -312,6 +326,87 @@ function finish(
   return saveRecord(session);
 }
 
+// --- Pasted images ------------------------------------------------------------
+
+const IMAGE_EXT: Record<ImageMediaType, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+};
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** The images a request carries, checked; the refusal is a 400 (413 for
+    one too big). Nothing is written yet. */
+export function checkImages(value: unknown): { mediaType: ImageMediaType; data: string; bytes: Buffer; name?: string }[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new ChatError(400, "images must be a list");
+  if (value.length > MAX_IMAGES_PER_MESSAGE) {
+    throw new ChatError(400, `At most ${MAX_IMAGES_PER_MESSAGE} images go with one message`);
+  }
+  return value.map((raw: unknown, i) => {
+    const upload = (raw ?? {}) as Partial<ImageUpload>;
+    const mediaType = normalizeImageMediaType(upload.mediaType);
+    if (!mediaType) throw new ChatError(400, `Image ${i + 1} must be a PNG, JPEG, GIF or WebP image`);
+    const data = typeof upload.data === "string" ? upload.data.replace(/\s+/g, "") : "";
+    if (!data || data.length % 4 !== 0 || !BASE64.test(data)) {
+      throw new ChatError(400, `Image ${i + 1} must be base64 data`);
+    }
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.length > MAX_IMAGE_BYTES) {
+      throw new ChatError(
+        413,
+        `Image ${i + 1} is ${(bytes.length / 1e6).toFixed(1)} MB; one image may be at most ${(MAX_IMAGE_BYTES / 1e6).toFixed(2)} MB`,
+      );
+    }
+    const name = typeof upload.name === "string" && upload.name.trim() ? upload.name.trim().slice(0, 200) : undefined;
+    return { mediaType, data, bytes, ...(name ? { name } : {}) };
+  });
+}
+
+/** Keep the images in the session's folder (<sessions>/<id>/images): the
+    pane fetches them back from there, and an agent that reads images from
+    disk gets the path. */
+async function saveImages(
+  sessionId: string,
+  sessionDir: string,
+  images: ReturnType<typeof checkImages>,
+): Promise<{ shown: ChatImage[]; given: AgentImage[]; kept: [string, { path: string; mediaType: ImageMediaType }][] }> {
+  const shown: ChatImage[] = [];
+  const given: AgentImage[] = [];
+  const kept: [string, { path: string; mediaType: ImageMediaType }][] = [];
+  if (images.length === 0) return { shown, given, kept };
+  const dir = join(sessionDir, "images");
+  await mkdir(dir, { recursive: true });
+  for (const image of images) {
+    const id = randomUUID();
+    const path = join(dir, id + IMAGE_EXT[image.mediaType]);
+    await writeFile(path, image.bytes);
+    shown.push({
+      id,
+      mediaType: image.mediaType,
+      url: `/api/agent/chat/${encodeURIComponent(sessionId)}/images/${id}`,
+      ...(image.name ? { name: image.name } : {}),
+    });
+    given.push({ mediaType: image.mediaType, data: image.data, path });
+    kept.push([id, { path, mediaType: image.mediaType }]);
+  }
+  return { shown, given, kept };
+}
+
+/** Refuse images an agent cannot read. */
+function refuseImages(provider: AgentProvider, count: number): void {
+  if (count > 0 && !provider.capabilities.images) {
+    throw new ChatError(409, `${provider.label} cannot read images — send text only`);
+  }
+}
+
+/** A pasted image's file and type, for the route that serves it. */
+export function getChatImage(id: string, imageId: string): { path: string; mediaType: ImageMediaType } | null {
+  return get(id).images.get(imageId) ?? null;
+}
+
 // --- Starting one -----------------------------------------------------------
 
 export interface CreateChatOptions {
@@ -321,6 +416,8 @@ export interface CreateChatOptions {
   agent?: ChatAgent;
   /** Sent as the first user message, before the pane says anything. */
   prompt?: string;
+  /** Pasted with the first message (checkImages has looked at them). */
+  images?: ImageUpload[];
   permissionMode?: PermissionMode;
   /** The model to start on; absent, the agent's default. */
   model?: string;
@@ -357,6 +454,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     throw new ChatError(409, `At most ${MAX_LIVE_SESSIONS} coding agent sessions can run at once — end one first`);
   }
   const provider = resolveProvider(opts.agent);
+  const uploads = checkImages(opts.images);
+  refuseImages(provider, uploads.length);
   const id = opts.id ?? randomUUID();
   const now = opts.now ?? new Date();
   const cwd = sessionWorkDir(opts.place);
@@ -369,6 +468,14 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       : provider.defaultPermissionMode;
   // Effort only where the agent takes one; a model any agent may be handed.
   const effort = provider.capabilities.effort ? opts.effort : undefined;
+  const sessionDir = join(opts.sessionsDir, id);
+  let pasted: Awaited<ReturnType<typeof saveImages>>;
+  try {
+    pasted = await saveImages(id, sessionDir, uploads);
+  } catch (e) {
+    throw new ChatError(500, `Could not keep the pasted images: ${(e as Error).message}`);
+  }
+  const firstTurn = Boolean(opts.prompt) || pasted.given.length > 0;
   const session: ChatSession = {
     meta: {
       id,
@@ -393,16 +500,21 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     busy: false,
     turn: 0,
     commands: [],
-    recordPath: join(opts.sessionsDir, id, "session.json"),
+    recordPath: join(sessionDir, "session.json"),
+    images: new Map(pasted.kept),
     saving: Promise.resolve(),
   };
   registry().set(id, session);
   installShutdownHook();
   emit(session, { kind: "status", status: "starting", permissionMode }, now);
-  if (opts.prompt) {
+  if (firstTurn) {
     session.turn = 1;
     session.busy = true;
-    emit(session, { kind: "user", id: randomUUID(), text: opts.prompt }, now);
+    emit(
+      session,
+      { kind: "user", id: randomUUID(), text: opts.prompt ?? "", ...(pasted.shown.length ? { images: pasted.shown } : {}) },
+      now,
+    );
   }
   try {
     session.session = await provider.start({
@@ -414,7 +526,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       permissionMode,
       ...(opts.model ? { model: opts.model } : {}),
       ...(effort ? { effort } : {}),
-      ...(opts.prompt ? { prompt: opts.prompt } : {}),
+      ...(firstTurn ? { prompt: opts.prompt ?? "" } : {}),
+      ...(pasted.given.length ? { images: pasted.given } : {}),
       signal: session.abort.signal,
       host: hostFor(session),
     });
@@ -459,19 +572,45 @@ export function subscribeChat(id: string, fn: (event: ChatEvent) => void): () =>
   };
 }
 
-/** One user turn: text (a plain message or a `/command`) to the agent. */
-export function sendChatMessage(id: string, text: string): ChatEvent {
-  const session = get(id);
-  const trimmed = text.trim();
-  if (!trimmed) throw new ChatError(400, "text is required");
+/** Whether a session would take a message now; the refusal otherwise. */
+function checkSendable(session: ChatSession): asserts session is ChatSession & { session: AgentSession } {
   if (isFinalStatus(session.meta.status)) throw new ChatError(409, "The session has ended");
   if (session.busy) throw new ChatError(409, "A turn is in progress — Stop it first");
   if (!session.session) throw new ChatError(409, `${session.provider.label} is still starting`);
+}
+
+/**
+ * One user turn: text (a plain message or a `/command`) to the agent, with
+ * the images pasted into it (specs/agents/agent-pane.feature.md "Paste an
+ * image into the message"). Text may be empty when images came.
+ */
+export async function sendChatMessage(id: string, text: string, images?: unknown): Promise<ChatEvent> {
+  const session = get(id);
+  const trimmed = text.trim();
+  const uploads = checkImages(images);
+  if (!trimmed && uploads.length === 0) throw new ChatError(400, "text is required");
+  checkSendable(session);
+  refuseImages(session.provider, uploads.length);
+  let pasted: Awaited<ReturnType<typeof saveImages>>;
+  try {
+    pasted = await saveImages(id, dirname(session.recordPath), uploads);
+  } catch (e) {
+    throw new ChatError(500, `Could not keep the pasted images: ${(e as Error).message}`);
+  }
+  // The files took a moment: the session may have moved on meanwhile.
+  checkSendable(session);
+  for (const [imageId, kept] of pasted.kept) session.images.set(imageId, kept);
   session.turn += 1;
   session.busy = true;
-  const event = emit(session, { kind: "user", id: randomUUID(), text: trimmed });
+  const event = emit(session, {
+    kind: "user",
+    id: randomUUID(),
+    text: trimmed,
+    ...(pasted.shown.length ? { images: pasted.shown } : {}),
+  });
   if (session.meta.status === "idle") setStatus(session, "running");
-  session.session.send(trimmed).catch((e: Error) => {
+  const sent = pasted.given.length ? session.session.send(trimmed, pasted.given) : session.session.send(trimmed);
+  sent.catch((e: Error) => {
     // The turn never started: say so, and give the composer back.
     if (isFinalStatus(session.meta.status)) return;
     session.busy = false;

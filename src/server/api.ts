@@ -116,10 +116,12 @@ import {
   ChatError,
   agentChoices,
   answerPermission,
+  checkImages,
   createChatSession,
   endChatSession,
   getChatCommands,
   getChatEvents,
+  getChatImage,
   getChatSession,
   interruptChat,
   listChatSessions,
@@ -142,6 +144,7 @@ import {
 } from "./agentTypes";
 import { agents } from "../plugins/host/agents";
 import { directoryExists } from "./fsx";
+import { readFile } from "node:fs/promises";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { StillReferenced, deleteImages, listImages } from "./imageCleanup";
 import {
@@ -3091,6 +3094,7 @@ const postAgentChat = withDataDir(async (dir, req) => {
     cwd?: unknown;
     model?: unknown;
     effort?: unknown;
+    images?: unknown;
   };
   // Which agent drives the chat; absent is the first one whose CLI is there.
   let agent: ChatAgent | undefined;
@@ -3129,11 +3133,14 @@ const postAgentChat = withDataDir(async (dir, req) => {
     if (effort === null) return json({ error: EFFORT_ERROR }, 400);
   }
   try {
+    // Pasted with the first message; checked (and refused) by the engine.
+    const images = checkImages(body.images);
     const meta = await createChatSession({
       place,
       name,
       ...(agent ? { agent } : {}),
       ...(prompt ? { prompt } : {}),
+      ...(images.length ? { images: images.map(({ mediaType, data, name }) => ({ mediaType, data, ...(name ? { name } : {}) })) } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
@@ -3245,13 +3252,37 @@ const getAgentChatEvents: Handler = (req, params) => {
 };
 
 const postAgentChatMessage: Handler = async (req, params) => {
-  const body = (await req.json().catch(() => ({}))) as { text?: unknown };
-  if (typeof body.text !== "string") return json({ error: "text is required" }, 400);
+  const body = (await req.json().catch(() => ({}))) as { text?: unknown; images?: unknown };
+  // Images may come without text (specs/agents/agent-pane.feature.md "Paste
+  // an image into the message").
+  if (typeof body.text !== "string" && body.images === undefined) return json({ error: "text is required" }, 400);
+  if (body.text !== undefined && typeof body.text !== "string") return json({ error: "text must be a string" }, 400);
   try {
-    return json({ event: sendChatMessage(params.id!, body.text) });
+    return json({ event: await sendChatMessage(params.id!, (body.text as string | undefined) ?? "", body.images) });
   } catch (e) {
     return chatError(e);
   }
+};
+
+// An image pasted into a session's message: the user bubble shows it. The
+// id is the engine's; the file never changes once written.
+const getAgentChatImage: Handler = async (_req, params) => {
+  let image: ReturnType<typeof getChatImage>;
+  try {
+    image = getChatImage(params.id!, params.imageId!);
+  } catch (e) {
+    return chatError(e);
+  }
+  if (!image) return json({ error: "image not found" }, 404);
+  const bytes = await readFile(image.path).catch(() => null);
+  if (bytes === null) return json({ error: "image not found" }, 404);
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      "content-type": image.mediaType,
+      "cache-control": "private, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+    },
+  });
 };
 
 const postAgentChatPermission: Handler = async (req, params) => {
@@ -3664,6 +3695,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/agent/chat/:id", unlessHosted(getAgentChat)],
   ["GET", "/api/agent/chat/:id/events", unlessHosted(getAgentChatEvents)],
   ["POST", "/api/agent/chat/:id/message", unlessHosted(postAgentChatMessage)],
+  ["GET", "/api/agent/chat/:id/images/:imageId", unlessHosted(getAgentChatImage)],
   ["POST", "/api/agent/chat/:id/permission", unlessHosted(postAgentChatPermission)],
   ["POST", "/api/agent/chat/:id/interrupt", unlessHosted(postAgentChatInterrupt)],
   ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],

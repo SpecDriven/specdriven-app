@@ -7280,6 +7280,113 @@ button.page-archive-head:hover {
   background: var(--surface-1);
 }
 
+/* Images pasted into the message (specs/agents/agent-pane.feature.md
+   "Paste an image into the message"): thumbnails above the text, each with
+   its own remove button; a dashed box while one is still being read. */
+.agent-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.55rem 0.6rem 0;
+  list-style: none;
+}
+
+.agent-attachment {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.agent-attachment img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.agent-attachment[data-reading] {
+  border-style: dashed;
+  animation: agent-attachment-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes agent-attachment-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.agent-attachment-remove {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.agent-attachment-remove:hover {
+  color: var(--text-1);
+}
+
+/* The images a sent message carried, in its bubble above the text. */
+.agent-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.3rem;
+}
+
+.agent-msg-images:last-child {
+  margin-bottom: 0;
+}
+
+.agent-msg-image {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: none;
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.agent-msg-image img {
+  display: block;
+  max-width: 10rem;
+  max-height: 7.5rem;
+  object-fit: contain;
+}
+
+.agent-image-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: rgb(0 0 0 / 0.7);
+  cursor: zoom-out;
+}
+
+.agent-image-zoom img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 40px rgb(0 0 0 / 0.5);
+}
+
 .agent-composer textarea {
   width: 100%;
   max-height: 40vh;

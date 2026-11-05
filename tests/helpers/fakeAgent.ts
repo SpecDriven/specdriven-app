@@ -9,12 +9,14 @@ import type {
   AgentSession,
   AgentStartOptions,
 } from "../../src/plugins/host/agents";
-import type { AgentCapabilities, EffortLevel, PermissionMode } from "../../src/server/agentTypes";
+import type { AgentCapabilities, AgentImage, EffortLevel, PermissionMode } from "../../src/server/agentTypes";
 
 export interface FakeSession extends AgentSession {
   host: AgentHost;
   opts: AgentStartOptions;
   sent: string[];
+  /** The images each send() carried, in step with `sent` (undefined: none). */
+  sentImages: (AgentImage[] | undefined)[];
   interrupts: number;
   modes: PermissionMode[];
   /** The models and efforts the pane switched to (setModel / setEffort). */
@@ -71,15 +73,17 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         host: opts.host,
         opts,
         sent: [],
+        sentImages: [],
         interrupts: 0,
         modes: [],
         models: [],
         efforts: [],
         closed: false,
         refreshes: 0,
-        async send(text) {
+        async send(text, images) {
           if (options.sendError) throw options.sendError;
           session.sent.push(text);
+          session.sentImages.push(images);
         },
         async interrupt() {
           session.interrupts += 1;

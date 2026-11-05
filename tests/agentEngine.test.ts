@@ -423,3 +423,100 @@ test("switching a plugin off ends the sessions its provider was driving", async 
   });
   expect(getChatSession(kept.id)!.status).toBe("idle");
 });
+
+// A 1×1 PNG, and a byte-for-byte check of what came back.
+const PNG_1X1 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+test("images pasted into a message reach the provider, are kept in the session's folder and served back", async () => {
+  const fake = register({ id: "gemini", label: "Gemini", capabilities: { images: true } });
+  const { id, session } = await ready(fake);
+
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", {
+    text: "what is this?",
+    images: [{ mediaType: "image/png", data: PNG_1X1, name: "shot.png" }],
+  });
+  expect(sent.status).toBe(200);
+  expect(session.sent).toEqual(["what is this?"]);
+  const [given] = session.sentImages[0]!;
+  expect(given).toMatchObject({ mediaType: "image/png", data: PNG_1X1 });
+  // The copy lives in the session's folder, beside its record.
+  expect(given!.path.startsWith(join(root, ".specdriven", "sessions", id, "images"))).toBe(true);
+  expect(Buffer.from(await readFile(given!.path)).toString("base64")).toBe(PNG_1X1);
+
+  // The transcript shows where to fetch it, not its bytes.
+  const user = getChatEvents(id).find((e) => e.kind === "user") as Extract<ChatEvent, { kind: "user" }>;
+  expect(user.images).toHaveLength(1);
+  expect(user.images![0]).toMatchObject({ mediaType: "image/png", name: "shot.png" });
+  expect(JSON.stringify(user)).not.toContain(PNG_1X1);
+  const served = await api(user.images![0]!.url);
+  expect(served.status).toBe(200);
+  expect(served.headers.get("content-type")).toBe("image/png");
+  expect(Buffer.from(await served.arrayBuffer()).toString("base64")).toBe(PNG_1X1);
+  expect((await api(`/api/agent/chat/${id}/images/nope`)).status).toBe(404);
+
+  // Images alone are a message.
+  session.host.turnEnded();
+  const alone = await api(`/api/agent/chat/${id}/message`, "POST", { images: [{ mediaType: "image/png", data: PNG_1X1 }] });
+  expect(alone.status).toBe(200);
+  expect(session.sent[1]).toBe("");
+  expect(session.sentImages[1]).toHaveLength(1);
+
+  // A text-only message hands the provider no images at all.
+  session.host.turnEnded();
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "thanks" });
+  expect(session.sentImages[2]).toBeUndefined();
+});
+
+test("a session started with pasted images hands them to the provider with its first turn", async () => {
+  const fake = register({ id: "gemini", label: "Gemini", capabilities: { images: true } });
+  const res = await api("/api/agent/chat", "POST", { agent: "gemini", images: [{ mediaType: "image/png", data: PNG_1X1 }] });
+  expect(res.status).toBe(200);
+  const { id } = (await res.json()) as ChatSessionMeta;
+  // The first turn is under way: the session runs rather than idles.
+  await untilStatus(id, "running");
+  const session = fake.sessions.at(-1)!;
+  expect(session.opts.prompt).toBe("");
+  expect(session.opts.images).toHaveLength(1);
+  expect(session.opts.images![0]).toMatchObject({ mediaType: "image/png", data: PNG_1X1 });
+  const user = getChatEvents(id).find((e) => e.kind === "user") as Extract<ChatEvent, { kind: "user" }>;
+  expect(user).toMatchObject({ text: "" });
+  expect(user.images).toHaveLength(1);
+});
+
+test("pasted images are refused for an agent that reads none, and when they are not images, too many or too big", async () => {
+  const blind = register({ id: "pi", label: "Pi" });
+  const { id: piId, session: piSession } = await ready(blind);
+  const refused = await api(`/api/agent/chat/${piId}/message`, "POST", {
+    text: "look",
+    images: [{ mediaType: "image/png", data: PNG_1X1 }],
+  });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toBe("Pi cannot read images — send text only");
+  expect(piSession.sent).toEqual([]);
+  // Nor can a session on it start with one.
+  const start = await api("/api/agent/chat", "POST", { agent: "pi", images: [{ mediaType: "image/png", data: PNG_1X1 }] });
+  expect(start.status).toBe(409);
+
+  const fake = register({ id: "gemini", label: "Gemini", capabilities: { images: true } });
+  const { id } = await ready(fake);
+  const post = (images: unknown) => api(`/api/agent/chat/${id}/message`, "POST", { text: "x", images });
+  const error = async (res: Response) => [res.status, ((await res.json()) as { error: string }).error];
+  expect(await error(await post([{ mediaType: "image/tiff", data: PNG_1X1 }]))).toEqual([
+    400,
+    "Image 1 must be a PNG, JPEG, GIF or WebP image",
+  ]);
+  expect(await error(await post([{ mediaType: "image/png", data: "not base64!" }]))).toEqual([400, "Image 1 must be base64 data"]);
+  expect(await error(await post(Array.from({ length: 11 }, () => ({ mediaType: "image/png", data: PNG_1X1 }))))).toEqual([
+    400,
+    "At most 10 images go with one message",
+  ]);
+  const big = Buffer.alloc(3_750_001).toString("base64");
+  expect(await error(await post([{ mediaType: "image/jpeg", data: big }]))).toEqual([
+    413,
+    "Image 1 is 3.8 MB; one image may be at most 3.75 MB",
+  ]);
+  expect(await error(await post("a picture"))).toEqual([400, "images must be a list"]);
+  // None of it started a turn.
+  expect(getChatSession(id)!.status).toBe("idle");
+});
