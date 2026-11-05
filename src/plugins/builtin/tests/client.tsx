@@ -25,8 +25,10 @@ const tab: TabPlugin<TestsRoute> = {
     title: (view) => testsTitle(view, testingState()),
     home: { kind: "plans" },
   },
+  // `c` on the tab makes a case (specs/app/plugins.feature.md).
+  create: { label: "New case", run: (app, navigate) => void newCaseFlow(app.prompt, navigate) },
   Sidebar: ({ view, app, navigate }) => (
-    <TestsSidebar view={view} prompt={app.prompt} confirm={app.confirm} onNavigate={navigate} />
+    <TestsSidebar view={view} prompt={app.prompt} confirm={app.confirm} onNavigate={navigate} readOnly={app.readOnly} />
   ),
   Pane: ({ view, app, navigate }) => (
     <TestsPane

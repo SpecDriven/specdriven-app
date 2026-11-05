@@ -1399,7 +1399,7 @@ export function ResultRow({
 
 // --- The sidebar panel ----------------------------------------------------------------------
 
-export function TestsSidebar({ view, prompt, confirm, onNavigate }: { view: TestsRoute | null; prompt: Prompt; confirm: Confirm; onNavigate: Navigate }) {
+export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = false }: { view: TestsRoute | null; prompt: Prompt; confirm: Confirm; onNavigate: Navigate; readOnly?: boolean }) {
   const store = useTesting();
   const [menu, setMenu] = useState<string | null>(null);
   const activeId = view && "id" in view ? view.id : null;
@@ -1422,6 +1422,7 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate }: { view: Test
         {label}
         {extra}
       </a>
+      {!readOnly && (
       <span className="tree-row-menu">
         <Tooltip label="More actions">
           <button
@@ -1437,15 +1438,19 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate }: { view: Test
         </Tooltip>
         <Menu open={menu === key} onClose={() => setMenu(null)} label={`Menu for ${title}`} className="tree-menu" containerSelector=".tree-row-menu" items={items} />
       </span>
+      )}
     </div>
   );
   const open = view ?? { kind: "plans" as const };
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-tests" aria-labelledby="side-tab-tests">
-      <div className="sidebar-actions">
-        <button onClick={() => void newPlanFlow(prompt, onNavigate)}>+ New plan</button>
-        <button onClick={() => void newCaseFlow(prompt, onNavigate)}>+ New case</button>
-      </div>
+      {/* The read-only site (src/server/readOnlyMode.ts) creates nothing. */}
+      {!readOnly && (
+        <div className="sidebar-actions">
+          <button type="button" onClick={() => void newPlanFlow(prompt, onNavigate)}>+ New plan</button>
+          <button type="button" onClick={() => void newCaseFlow(prompt, onNavigate)}>+ New case</button>
+        </div>
+      )}
       <div className="page-rows">
         <a
           href="/tests"

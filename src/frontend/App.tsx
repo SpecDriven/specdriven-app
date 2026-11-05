@@ -6626,20 +6626,14 @@ export function App() {
           className="tree-menu"
           containerSelector=".tree-row-menu"
           items={[
+            // Plain "Rename" on the menu itself (ui.feature.md "Feature entry
+            // menu"): the name belongs to the row, and a long one would widen
+            // the menu past the sidebar's left edge.
             {
-              id: "file",
-              label: "File",
-              items: [
-                {
-                  id: "rename",
-                  // Plain "Rename" (ui.feature.md "Feature entry menu"): the
-                  // name belongs to the row, and a long one would widen the
-                  // menu past the sidebar's left edge.
-                  label: "Rename",
-                  icon: <Pencil size={13} />,
-                  onSelect: () => void renameFile(f.fileName),
-                },
-              ],
+              id: "rename",
+              label: "Rename",
+              icon: <Pencil size={13} />,
+              onSelect: () => void renameFile(f.fileName),
             },
             // Move up / Move down (specs/ui/folders.feature.md "order
             // features"): the order among its siblings is the user's, kept
@@ -6663,6 +6657,14 @@ export function App() {
               label: "Move to folder…",
               icon: <FolderInput size={13} />,
               onSelect: () => void moveFeaturePrompt(f.fileName),
+            },
+            // Copy link (specs/ui/navigation.feature.md "share a link"): the
+            // feature's url, as the page's ⋯ offers it.
+            {
+              id: "copy",
+              label: "Copy link",
+              icon: <Link size={13} />,
+              onSelect: () => void copyLink(featurePath(f.fileName)),
             },
             {
               id: "delete",
@@ -6753,6 +6755,8 @@ export function App() {
                     className={`tree-scenario${here ? " active" : ""}`}
                     role="treeitem"
                     aria-level={depth + 2}
+                    /* Shift+F10 on the row opens its ⋯ (onTreeKeyDown). */
+                    data-scenario={menuKey}
                     aria-current={here ? "page" : undefined}
                     /* Line up just past the feature's twisty: the codegen
                        checkbox, when on, already carries the depth indent for
@@ -6796,12 +6800,6 @@ export function App() {
                       className="tree-menu"
                       containerSelector=".tree-row-menu"
                       items={[
-                        {
-                          id: "clone",
-                          label: "Clone",
-                          icon: <CopyPlus size={13} />,
-                          onSelect: () => void cloneTreeScenario(f.fileName, s),
-                        },
                         ...(deletable
                           ? [
                               {
@@ -6810,6 +6808,24 @@ export function App() {
                                 icon: <ArrowRightLeft size={13} />,
                                 onSelect: () => void moveTreeScenario(f.fileName, s),
                               },
+                            ]
+                          : []),
+                        // Copy link (specs/ui/navigation.feature.md "share a
+                        // link"): the versioned permalink the card copies.
+                        {
+                          id: "copy",
+                          label: "Copy link",
+                          icon: <Link size={13} />,
+                          onSelect: () => void copyLink(scenarioPath(f.fileName, s)),
+                        },
+                        {
+                          id: "clone",
+                          label: "Clone",
+                          icon: <CopyPlus size={13} />,
+                          onSelect: () => void cloneTreeScenario(f.fileName, s),
+                        },
+                        ...(deletable
+                          ? [
                               {
                                 id: "delete",
                                 label: "Delete",
@@ -7066,12 +7082,6 @@ export function App() {
                     icon: <Tag size={13} />,
                     onSelect: () => void editFolderDisplayName(child.path),
                   },
-                  {
-                    id: "move",
-                    label: "Move to folder…",
-                    icon: <FolderInput size={13} />,
-                    onSelect: () => void moveFolderPrompt(child.path),
-                  },
                   // Move up / Move down (specs/ui/folders.feature.md "order
                   // folders"): the order among its siblings is the user's,
                   // kept in the parent's folder-order.txt.
@@ -7088,6 +7098,12 @@ export function App() {
                     icon: <ArrowDown size={13} />,
                     disabled: i === node.folders.length - 1,
                     onSelect: () => void moveFolderTo(node.path, i, i + 1),
+                  },
+                  {
+                    id: "move",
+                    label: "Move to folder…",
+                    icon: <FolderInput size={13} />,
+                    onSelect: () => void moveFolderPrompt(child.path),
                   },
                   // Publish to Confluence (specs/external-links/confluence
                   // -wiki.feature.md "Publish a folder's features to
@@ -7316,10 +7332,17 @@ export function App() {
     if (!to) return false;
     openScenarioRow(to.file, to.scenario);
   };
+  // The shown plugin tab's own "new" (specs/app/plugins.feature.md): what `c`
+  // creates while that tab is the sidebar — a task, a case, an issue.
+  const tabCreate = readOnly || shownTab === "specs"
+    ? undefined
+    : pluginTabs.find((tab) => tab.id === shownTab)?.create;
   const allShortcuts: Shortcut[] = [
+    // mod+k and `/` open the palette; the browser's own Find (mod+f) is
+    // left alone, since the in-sidebar field it used to focus is gone.
     {
       id: "search",
-      keys: ["mod+k", "/", "mod+f"],
+      keys: ["mod+k", "/"],
       label: "Search specs and commands",
       group: "Navigate",
       when: () => !quiet,
@@ -7369,6 +7392,26 @@ export function App() {
         void loadReadme();
       },
     },
+    // The Specs tab (specs/app/roadmap.feature.md "The roadmap is a sidebar
+    // tab"): `g s` turns the sidebar to the tree, leaving a plugin's view
+    // for home, so the tree has a chord like every plugin's tab.
+    {
+      id: "go-specs",
+      keys: "g s",
+      label: "Go to the specs",
+      group: "Navigate",
+      when: () => !quiet,
+      palette: () => !quietBehindPalette,
+      run: () => {
+        selectSidebarTab("specs");
+        // A plugin's view or an app page (Settings, Images) leaves for the
+        // README; a feature page stays, it is the tree's own.
+        if (pluginView || appPage) {
+          goHome();
+          void loadReadme();
+        }
+      },
+    },
     // Each plugin's tab has its own `g` chord (specs/app/plugins.feature.md) —
     // `g r`, `g t` and `g n` open the special folders on their first page. A
     // tab with nothing to open (an empty folder) has no chord.
@@ -7387,7 +7430,7 @@ export function App() {
       ),
     {
       id: "settings",
-      keys: ["mod+,", "g s"],
+      keys: "mod+,",
       label: "Settings",
       group: "Navigate",
       when: () => !quiet,
@@ -7429,7 +7472,7 @@ export function App() {
       // Images (src/frontend/ImagesPage.tsx): every stored image with where
       // it is used, and the unreferenced ones to delete.
       id: "images",
-      keys: "g i",
+      keys: "g m",
       label: "Images",
       group: "Navigate",
       when: () => !quiet,
@@ -7483,13 +7526,18 @@ export function App() {
         ? "New scenario after this one"
         : onFeaturePage
           ? "New scenario"
-          : "New feature",
+          : tabCreate
+            ? tabCreate.label
+            : "New feature",
       group: "Create",
       when: () => !quiet && (editing === null || canAddAfter),
       palette: () => !quietBehindPalette && (editing === null || canAddAfter),
       run: () => {
         if (editing) void newScenarioAfterCurrent();
         else if (onFeaturePage) void newScenario();
+        // The shown tab's own "new": a task from the Tasks tab, a case from
+        // Tests — never a feature from there.
+        else if (tabCreate) tabCreate.run(tabApp, navigateIn(shownTab));
         else void createFeature();
       },
     },
@@ -7998,6 +8046,7 @@ export function App() {
     copyLink: (path) => void copyLink(path),
     copied,
     goHome,
+    readOnly,
   };
   const folderCrumbs = (fileName: string): Crumb[] => {
     const parts = fileName.split("/").slice(0, -1);
@@ -8074,9 +8123,12 @@ export function App() {
         // subtree (specs/ui/navigation.feature.md "Scenario navigation").
         if (folderPath === undefined) {
           const file = t.dataset.file;
-          if (file === undefined || outlined.has(file)) return;
+          if (file === undefined) return;
           e.preventDefault();
-          toggleOutline(file);
+          // Already outlined: step into it, as ArrowRight on an open folder
+          // moves to its first child.
+          if (outlined.has(file)) move(i + 1);
+          else toggleOutline(file);
           return;
         }
         e.preventDefault();
@@ -8101,13 +8153,15 @@ export function App() {
       }
       case "F10":
         if (!e.shiftKey) return;
-        if (t.dataset.file) setTreeMenu(t.dataset.file);
+        if (t.dataset.scenario) setTreeMenu(t.dataset.scenario);
+        else if (t.dataset.file) setTreeMenu(t.dataset.file);
         else if (folderPath !== undefined) setTreeMenu(folderMenuKey(folderPath));
         else return;
         e.preventDefault();
         return;
       case "ContextMenu":
-        if (t.dataset.file) setTreeMenu(t.dataset.file);
+        if (t.dataset.scenario) setTreeMenu(t.dataset.scenario);
+        else if (t.dataset.file) setTreeMenu(t.dataset.file);
         else if (folderPath !== undefined) setTreeMenu(folderMenuKey(folderPath));
         else return;
         e.preventDefault();
@@ -9328,6 +9382,208 @@ export function App() {
     </AppPageLayout>
   );
 
+  // The user menu (specs/user-info-settings.feature.md), behind the avatar
+  // in the sidebar's corner and on the rail alike. Three inline sections —
+  // the account, this project, the app — so a dozen unlike rows read as
+  // three short lists. The read-only site's visitor has no settings,
+  // plugins or logs: the release notes and the app's source alone.
+  const userMenuItems: MenuItem[] = readOnly
+    ? [whatsNewMenuItem(notesUnseen, openWhatsNew), ...sourceCodeMenuItems(sourceUrl)]
+    : [
+        {
+          id: "account",
+          label: "Account",
+          inline: true,
+          items: [
+            {
+              id: "user-info",
+              label: "User info",
+              icon: <UserRound size={13} />,
+              onSelect: () => {
+                setDrawerOpen(false);
+                setUserInfoOpen(true);
+              },
+            },
+            // The desktop and local app's own GitHub sign-in: paste a
+            // token, switch to another account's, or sign out.
+            ...(hosted || demo
+              ? []
+              : auth?.signedIn
+                ? [
+                    {
+                      id: "switch-account",
+                      label: "Switch account…",
+                      icon: <KeyRound size={13} />,
+                      onSelect: () => {
+                        setDrawerOpen(false);
+                        setTokenSignInOpen(true);
+                      },
+                    },
+                    {
+                      id: "sign-out",
+                      label: "Sign out",
+                      icon: <LogOut size={13} />,
+                      onSelect: () => void signOutGitHub(),
+                    },
+                  ]
+                : [
+                    {
+                      id: "sign-in",
+                      label: "Sign in with token…",
+                      icon: <KeyRound size={13} />,
+                      onSelect: () => {
+                        setDrawerOpen(false);
+                        setTokenSignInOpen(true);
+                      },
+                    },
+                    // The GitHub CLI's account stands in for a missing
+                    // sign-in: signing out stops the app using it.
+                    ...(gh?.inUse
+                      ? [
+                          {
+                            id: "sign-out",
+                            label: "Sign out",
+                            icon: <LogOut size={13} />,
+                            onSelect: () => void signOutGitHub(),
+                          },
+                        ]
+                      : []),
+                  ]),
+            // The hosted gateway's own pages (src/gateway): the account with
+            // its tokens and password, and signing out.
+            ...(hosted
+              ? [
+                  {
+                    id: "account-tokens",
+                    label: "Account & tokens",
+                    icon: <KeyRound size={13} />,
+                    onSelect: () => window.location.assign("/account"),
+                  },
+                  {
+                    id: "sign-out",
+                    label: "Sign out",
+                    icon: <LogOut size={13} />,
+                    onSelect: signOutHosted,
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          id: "project",
+          label: "Project",
+          inline: true,
+          items: [
+            // The data repo's own settings (specs/app/project-settings
+            // .feature.md): the code repos and their specs symlinks, the
+            // members, the authorship switch.
+            {
+              id: "project-settings",
+              label: "Project settings",
+              icon: <FolderInput size={13} />,
+              onSelect: () => {
+                setDrawerOpen(false);
+                openProjectSettings();
+              },
+            },
+            {
+              id: "plugins",
+              label: "Plugins",
+              icon: <Puzzle size={13} />,
+              keys: "g p",
+              onSelect: () => {
+                setDrawerOpen(false);
+                openPlugins();
+              },
+            },
+            // The hosted gateway's admin page (src/gateway/admin.ts): the
+            // allowed emails and the users' roles, for admins only.
+            ...(hosted && hostedAdmin
+              ? [
+                  {
+                    id: "admin",
+                    label: "Admin",
+                    icon: <ShieldCheck size={13} />,
+                    onSelect: () => window.location.assign("/admin"),
+                  },
+                ]
+              : []),
+          ],
+        },
+        {
+          id: "app",
+          label: "App",
+          inline: true,
+          items: [
+            {
+              id: "settings",
+              label: "Settings",
+              icon: <Settings size={13} />,
+              keys: "mod+,",
+              onSelect: () => {
+                setDrawerOpen(false);
+                openSettings();
+              },
+            },
+            // Check for Updates… (specs/app/app-updates.feature.md): the
+            // desktop app alone can replace itself; the demo and a hosted
+            // copy never change.
+            ...(canCheckForUpdates && !demo && !hosted
+              ? [
+                  checkForUpdatesMenuItem(updateAvailable, () => {
+                    setDrawerOpen(false);
+                    openUpdates();
+                  }),
+                ]
+              : []),
+            // The app's own logs and their verbosity; the hosted demo's
+            // server logs are not a visitor's to read.
+            ...(demo
+              ? []
+              : [
+                  {
+                    id: "observability",
+                    label: "Observability",
+                    icon: <Activity size={13} />,
+                    keys: "g o",
+                    onSelect: () => {
+                      setDrawerOpen(false);
+                      openObservability();
+                    },
+                  },
+                ]),
+            // The Automerge store, browsed read-only (src/frontend/DataPage.tsx).
+            {
+              id: "data",
+              label: "Data",
+              icon: <Database size={13} />,
+              keys: "g d",
+              onSelect: () => {
+                setDrawerOpen(false);
+                openData();
+              },
+            },
+            // The stored images, the unreferenced ones first (src/frontend/ImagesPage.tsx).
+            {
+              id: "images",
+              label: "Images",
+              icon: <Images size={13} />,
+              keys: "g m",
+              onSelect: () => {
+                setDrawerOpen(false);
+                openImages();
+              },
+            },
+            // The release notes and the running build's source, which every copy offers.
+            whatsNewMenuItem(notesUnseen, () => {
+              setDrawerOpen(false);
+              openWhatsNew();
+            }),
+            ...sourceCodeMenuItems(sourceUrl),
+          ],
+        },
+      ];
+
   return (
     <main
       className={`layout${resizingSidebar || resizingAgent ? " resizing" : ""}${sidebarCollapsed && !compact ? " collapsed" : ""}${compact ? " compact" : ""}${paneShown && !compact ? " agent-open" : ""}${editorOff ? " editor-hidden" : ""}${readOnly ? " read-only" : ""}`}
@@ -9396,10 +9652,24 @@ export function App() {
            folded to its icons — search, Home, the page tabs, and the way
            back out. */
         <aside className="rail">
-          <Tooltip label="Expand the sidebar" keys="[">
-            <button type="button" className="rail-btn" aria-label="Expand the sidebar" onClick={toggleSidebar}>
+          {/* The logo is the home link, as the folder name is in the expanded
+              sidebar (app-startup.md "The data folder name links to the
+              README"); the one Expand sits at the foot, where the sidebar's
+              Collapse icon has its mirror. */}
+          <Tooltip label="Home (README)" keys="g h">
+            <a
+              href="/"
+              className="rail-btn rail-logo"
+              aria-label="Home"
+              onClick={(e) =>
+                spaClick(e, () => {
+                  goHome();
+                  void loadReadme();
+                })
+              }
+            >
               <Logo size={24} />
-            </button>
+            </a>
           </Tooltip>
           <Tooltip label="Search or run a command" keys="mod+k">
             <button
@@ -9411,19 +9681,25 @@ export function App() {
               <Search size={16} aria-hidden="true" />
             </button>
           </Tooltip>
-          <Tooltip label="Home" keys="g h">
+          {/* The rail mirrors the sidebar's tab bar: Specs first, then the
+              plugins' tabs, lit the way the bar's tabs are (shownTab) — so
+              collapsing the sidebar never loses the tree. */}
+          <Tooltip label="Specs" keys="g s">
             <a
               href="/"
-              className={`rail-link${!selected && !pluginView ? " active" : ""}`}
-              aria-label="Home"
+              className={`rail-link${!pluginView && shownTab === "specs" ? " active" : ""}`}
+              aria-label="Specs"
               onClick={(e) =>
                 spaClick(e, () => {
-                  goHome();
-                  void loadReadme();
+                  selectSidebarTab("specs");
+                  if (pluginView || appPage) {
+                    goHome();
+                    void loadReadme();
+                  }
                 })
               }
             >
-              <Home size={16} aria-hidden="true" />
+              <FileText size={16} aria-hidden="true" />
             </a>
           </Tooltip>
           {/* The plugins' tabs — the special folders first. A tab with nothing
@@ -9432,7 +9708,9 @@ export function App() {
             <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
               <a
                 href={tab.route.path(tab.route.home)}
-                className={`rail-link${pluginView?.tab === tab.id ? " active" : ""}`}
+                className={`rail-link${
+                  pluginView?.tab === tab.id || (!pluginView && shownTab === tab.id) ? " active" : ""
+                }`}
                 aria-label={tab.title}
                 onClick={(e) =>
                   spaClick(e, () => void openPluginView(tab.id, tab.route.home, { push: true }))
@@ -9480,13 +9758,33 @@ export function App() {
                 <PanelLeftOpen size={16} aria-hidden="true" />
               </button>
             </Tooltip>
-            <Tooltip label="Settings" keys="mod+,">
-              <button type="button" className="rail-btn" aria-label="Settings" onClick={() => openSettings()}>
-                <span className="avatar" aria-hidden="true">
-                  {initials}
-                </span>
-              </button>
-            </Tooltip>
+            {/* The same user menu the sidebar's corner opens
+                (specs/user-info-settings.feature.md), not a shortcut to
+                Settings alone. */}
+            <span className="rail-user">
+              <Menu
+                open={userMenuOpen}
+                onClose={() => setUserMenuOpen(false)}
+                label="User menu"
+                className="user-menu"
+                containerSelector=".rail-user"
+                items={userMenuItems}
+              />
+              <Tooltip label={user ? (user.login ?? user.username) : "User menu"}>
+                <button
+                  type="button"
+                  className="rail-btn"
+                  aria-label="User menu"
+                  aria-haspopup="menu"
+                  aria-expanded={userMenuOpen}
+                  onClick={() => setUserMenuOpen((o) => !o)}
+                >
+                  <span className="avatar" aria-hidden="true">
+                    {initials}
+                  </span>
+                </button>
+              </Tooltip>
+            </span>
           </div>
         </aside>
       ) : (
@@ -9533,7 +9831,7 @@ export function App() {
               <div className="repo-recent">
                 <button
                   type="button"
-                  className="repo-recent-toggle"
+                  className="ibtn repo-recent-toggle"
                   title="Recent data folders"
                   aria-label="Recent data folders"
                   aria-haspopup="menu"
@@ -9595,7 +9893,7 @@ export function App() {
               <Tooltip label="Change data directory">
                 <button
                   type="button"
-                  className="repo-edit"
+                  className="ibtn repo-edit"
                   aria-label="Change data directory"
                   disabled={settingRepo}
                   onClick={() => void changeRepo()}
@@ -9610,20 +9908,21 @@ export function App() {
                 bottom of the page. Up here it works from the home view too, not
                 only with a feature open. */}
             {!demo && !readOnly && (
-              <button
-                type="button"
-                className="repo-sync"
-                title="Sync — pull the data folder and push saved changes"
-                disabled={syncing}
-                onClick={() => void syncNow()}
-              >
-                <RefreshCw
-                  size={14}
-                  className={syncing ? "sync-icon spinning" : "sync-icon"}
-                  aria-hidden="true"
-                />
-                {syncing ? "Syncing…" : "Sync"}
-              </button>
+              <Tooltip label={syncing ? "Syncing…" : "Sync — pull the data folder and push saved changes"}>
+                <button
+                  type="button"
+                  className="ibtn repo-sync"
+                  aria-label={syncing ? "Syncing…" : "Sync"}
+                  disabled={syncing}
+                  onClick={() => void syncNow()}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={syncing ? "sync-icon spinning" : "sync-icon"}
+                    aria-hidden="true"
+                  />
+                </button>
+              </Tooltip>
             )}
           </div>
           {/* The Pomodoro (specs/app/pomodoro.feature.md): its icon lives here,
@@ -9683,7 +9982,7 @@ export function App() {
           <button
             type="button"
             className="sidebar-search-btn"
-            aria-label="Search specs or run a command"
+            aria-label="Search or run a command"
             onClick={() => setPalette({ query: "" })}
           >
             <Search size={14} className="search-icon" aria-hidden="true" />
@@ -9703,40 +10002,45 @@ export function App() {
             switch to — one tab is no tab bar. */}
         {pluginTabs.length > 0 && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
-            <button
-              type="button"
-              role="tab"
-              id="side-tab-specs"
-              aria-selected={shownTab === "specs"}
-              aria-controls="side-panel-specs"
-              className={shownTab === "specs" ? "active" : ""}
-              onClick={() => selectSidebarTab("specs")}
-            >
-              <FileText size={14} aria-hidden="true" /> Specs
-            </button>
+            {/* Each tab's tooltip carries its `g` chord, as the rail's icons
+                do. */}
+            <Tooltip label="Specs" keys="g s">
+              <button
+                type="button"
+                role="tab"
+                id="side-tab-specs"
+                aria-selected={shownTab === "specs"}
+                aria-controls="side-panel-specs"
+                className={shownTab === "specs" ? "active" : ""}
+                onClick={() => selectSidebarTab("specs")}
+              >
+                <FileText size={14} aria-hidden="true" /> Specs
+              </button>
+            </Tooltip>
             {/* The plugins' tabs (specs/app/plugins.feature.md), in their
                 order, after the core's. */}
             {pluginTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`side-tab-${tab.id}`}
-                aria-selected={shownTab === tab.id}
-                aria-controls={`side-panel-${tab.id}`}
-                className={shownTab === tab.id ? "active" : ""}
-                onClick={() => {
-                  selectSidebarTab(tab.id);
-                  // The tab is the module's door: with none of its views
-                  // open yet, it opens the tab's home view — unless the tab
-                  // is a list to pick from (a special folder's pages).
-                  if (tab.opensOnSelect !== false && pluginViewRef.current?.tab !== tab.id) {
-                    openPluginView(tab.id, tab.route.home, { push: true });
-                  }
-                }}
-              >
-                <tab.icon size={14} aria-hidden="true" /> {tab.title}
-              </button>
+              <Tooltip key={tab.id} label={tab.title} keys={tab.shortcut}>
+                <button
+                  type="button"
+                  role="tab"
+                  id={`side-tab-${tab.id}`}
+                  aria-selected={shownTab === tab.id}
+                  aria-controls={`side-panel-${tab.id}`}
+                  className={shownTab === tab.id ? "active" : ""}
+                  onClick={() => {
+                    selectSidebarTab(tab.id);
+                    // The tab is the module's door: with none of its views
+                    // open yet, it opens the tab's home view — unless the tab
+                    // is a list to pick from (a special folder's pages).
+                    if (tab.opensOnSelect !== false && pluginViewRef.current?.tab !== tab.id) {
+                      openPluginView(tab.id, tab.route.home, { push: true });
+                    }
+                  }}
+                >
+                  <tab.icon size={14} aria-hidden="true" /> {tab.title}
+                </button>
+              </Tooltip>
             ))}
           </div>
         )}
@@ -10040,182 +10344,10 @@ export function App() {
             containerSelector=".user-corner"
             // The read-only site's visitor has no settings, plugins or logs:
             // the menu offers the release notes and the app's source alone.
-            items={readOnly ? [whatsNewMenuItem(notesUnseen, openWhatsNew), ...sourceCodeMenuItems(sourceUrl)] : [
-              {
-                id: "user-info",
-                label: "User info",
-                icon: <UserRound size={13} />,
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  setUserInfoOpen(true);
-                },
-              },
-              {
-                id: "settings",
-                label: "Settings",
-                icon: <Settings size={13} />,
-                keys: "mod+,",
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  openSettings();
-                },
-              },
-              // The data repo's own settings (specs/app/project-settings
-              // .feature.md): the code repos and their specs symlinks, the
-              // members, the authorship switch.
-              {
-                id: "project-settings",
-                label: "Project settings",
-                icon: <FolderInput size={13} />,
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  openProjectSettings();
-                },
-              },
-              // The hosted gateway's admin page (src/gateway/admin.ts): the
-              // allowed emails and the users' roles, for admins only.
-              ...(hosted && hostedAdmin
-                ? [
-                    {
-                      id: "admin",
-                      label: "Admin",
-                      icon: <ShieldCheck size={13} />,
-                      onSelect: () => window.location.assign("/admin"),
-                    },
-                  ]
-                : []),
-              {
-                id: "plugins",
-                label: "Plugins",
-                icon: <Puzzle size={13} />,
-                keys: "g p",
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  openPlugins();
-                },
-              },
-              // Check for Updates… (specs/app/app-updates.feature.md): the
-              // desktop app alone can replace itself; the demo and a hosted
-              // copy never change.
-              ...(canCheckForUpdates && !demo && !hosted
-                ? [
-                    checkForUpdatesMenuItem(updateAvailable, () => {
-                      setDrawerOpen(false);
-                      openUpdates();
-                    }),
-                  ]
-                : []),
-              // The app's own logs and their verbosity; the hosted demo's
-              // server logs are not a visitor's to read.
-              ...(demo
-                ? []
-                : [
-                    {
-                      id: "observability",
-                      label: "Observability",
-                      icon: <Activity size={13} />,
-                      keys: "g o",
-                      onSelect: () => {
-                        setDrawerOpen(false);
-                        openObservability();
-                      },
-                    },
-                  ]),
-              // The Automerge store, browsed read-only (src/frontend/DataPage.tsx).
-              {
-                id: "data",
-                label: "Data",
-                icon: <Database size={13} />,
-                keys: "g d",
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  openData();
-                },
-              },
-              // The stored images, the unreferenced ones first (src/frontend/ImagesPage.tsx).
-              {
-                id: "images",
-                label: "Images",
-                icon: <Images size={13} />,
-                keys: "g i",
-                onSelect: () => {
-                  setDrawerOpen(false);
-                  openImages();
-                },
-              },
-              // The desktop and local app's own GitHub sign-in
-              // (specs/user-info-settings.feature.md): paste a token, switch
-              // to another account's, or sign out.
-              ...(hosted || demo
-                ? []
-                : auth?.signedIn
-                  ? [
-                      {
-                        id: "switch-account",
-                        label: "Switch account…",
-                        icon: <KeyRound size={13} />,
-                        onSelect: () => {
-                          setDrawerOpen(false);
-                          setTokenSignInOpen(true);
-                        },
-                      },
-                      {
-                        id: "sign-out",
-                        label: "Sign out",
-                        icon: <LogOut size={13} />,
-                        onSelect: () => void signOutGitHub(),
-                      },
-                    ]
-                  : [
-                      {
-                        id: "sign-in",
-                        label: "Sign in with token…",
-                        icon: <KeyRound size={13} />,
-                        onSelect: () => {
-                          setDrawerOpen(false);
-                          setTokenSignInOpen(true);
-                        },
-                      },
-                      // The GitHub CLI's account stands in for a missing
-                      // sign-in: signing out stops the app using it.
-                      ...(gh?.inUse
-                        ? [
-                            {
-                              id: "sign-out",
-                              label: "Sign out",
-                              icon: <LogOut size={13} />,
-                              onSelect: () => void signOutGitHub(),
-                            },
-                          ]
-                        : []),
-                    ]),
-              // The hosted gateway's own pages (src/gateway): the account
-              // with its tokens and password, and signing out.
-              ...(hosted
-                ? [
-                    {
-                      id: "account",
-                      label: "Account & tokens",
-                      icon: <KeyRound size={13} />,
-                      onSelect: () => window.location.assign("/account"),
-                    },
-                    {
-                      id: "sign-out",
-                      label: "Sign out",
-                      icon: <LogOut size={13} />,
-                      onSelect: signOutHosted,
-                    },
-                  ]
-                : []),
-              // The release notes and the running build's source, which every copy offers.
-              whatsNewMenuItem(notesUnseen, () => {
-                setDrawerOpen(false);
-                openWhatsNew();
-              }),
-              ...sourceCodeMenuItems(sourceUrl),
-            ]}
+            items={userMenuItems}
           />
           <button
+            type="button"
             className="user-chip"
             aria-haspopup="menu"
             aria-expanded={userMenuOpen}
@@ -10241,6 +10373,7 @@ export function App() {
         aria-orientation="vertical"
         aria-label="Resize sidebar"
         aria-valuemin={SIDEBAR_MIN}
+        aria-valuemax={Math.max(SIDEBAR_MIN, Math.round(window.innerWidth * 0.6))}
         aria-valuenow={sidebarWidth}
         tabIndex={0}
         onPointerDown={(e) => {

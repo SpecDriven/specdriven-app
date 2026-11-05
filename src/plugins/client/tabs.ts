@@ -48,6 +48,8 @@ export interface TabApp {
   copied: string | null;
   /** Leave the pane for home — the open view's thing is gone. */
   goHome: () => void;
+  /** The read-only site (src/server/readOnlyMode.ts): nothing is created, renamed or deleted. */
+  readOnly: boolean;
 }
 
 /** Open one of the tab's views; `push` adds a history entry. */
@@ -99,6 +101,12 @@ export interface TabPlugin<V = unknown> {
    * open for a row to be picked.
    */
   opensOnSelect?: boolean;
+  /**
+   * The tab's own "new" — a task, a case, an issue: what `c` creates while
+   * the tab is the sidebar, so the key never makes a feature from there.
+   * Absent, `c` is quiet on the tab.
+   */
+  create?: { label: string; run(app: TabApp, navigate: Navigate<V>): void };
   Sidebar: ComponentType<{ view: V | null; app: TabApp; navigate: Navigate<V> }>;
   Pane: ComponentType<{ view: V; app: TabApp; navigate: Navigate<V> }>;
   palette?: {

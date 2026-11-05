@@ -9,7 +9,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:te
 import { Window } from "happy-dom";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useShortcuts, type Shortcut } from "../src/frontend/shortcuts";
+import { sharedKeys, useShortcuts, type Shortcut } from "../src/frontend/shortcuts";
 
 const DOM_GLOBALS = [
   "window",
@@ -137,4 +137,15 @@ test("single letters stand down in a contenteditable body and behind a false `wh
   expect(fired).toEqual([]);
   press({ key: "c" });
   expect(fired).toEqual(["create"]);
+});
+
+// One chord, one owner (src/frontend/shortcuts.tsx sharedKeys): dispatch is
+// first-match, so a second claim on `g i` — the Issues tab's and Images' —
+// left Images' key dead while its menu row still showed it.
+test("sharedKeys names a combo two shortcuts claim, and nothing a display-only one shares", () => {
+  const issues: Shortcut = shortcut("go-issues", "g i");
+  const images: Shortcut = shortcut("images", "g m");
+  expect(sharedKeys([issues, images])).toEqual([]);
+  expect(sharedKeys([issues, { ...images, keys: ["mod+i", "g i"] }])).toEqual(["g i"]);
+  expect(sharedKeys([issues, { ...images, keys: "g i", displayOnly: true }])).toEqual([]);
 });

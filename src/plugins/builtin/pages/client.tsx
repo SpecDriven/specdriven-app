@@ -92,6 +92,11 @@ export function pagesClient(folder: PageTab): Plugin<Context, ClientConfig | und
     // .feature.md "The roadmap is a sidebar tab"); a page opens from a row,
     // the rail, the chord or a link.
     opensOnSelect: false,
+    // `c` on the tab makes one of its pages (specs/app/plugins.feature.md).
+    create: {
+      label: `New ${folder.noun}`,
+      run: (app, navigate) => void newPageFlow(folder, store, app.promptWithChoice, navigate),
+    },
     route: {
       match: (pathname) => parsePageRoute(folder.folder, pathname),
       path: (view) => pagesPath(folder.folder, view),
