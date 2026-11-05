@@ -109,6 +109,22 @@ describe("applyEvent", () => {
     expect(t.items[1]).toMatchObject({ kind: "result", costUsd: 0.02, durationMs: 900 });
   });
 
+  test("a failed turn keeps why it failed even when the reply already said it", () => {
+    // Claude Code's sign-in failure is both the reply and the result: the
+    // footer does not repeat it, but the sign-in hint still reads it
+    // (specs/agents/claude.feature.md "Sign in to Claude without Claude Code installed").
+    const why = "Not logged in · Please run /login";
+    const t = reduce([
+      ev({ kind: "text_delta", messageId: "m4", index: 0, text: why }),
+      ev({ kind: "result", turn: 1, subtype: "success", isError: true, costUsd: 0, durationMs: 50, numTurns: 1, denials: 0, text: why }),
+    ]);
+    expect(t.items[1]).toMatchObject({ kind: "result", isError: true, failure: why });
+    expect((t.items[1] as { text?: string }).text).toBeUndefined();
+    // A turn that went fine records no failure.
+    const fine = reduce([ev({ kind: "result", turn: 1, subtype: "success", isError: false, costUsd: 0, durationMs: 50, numTurns: 1, denials: 0, text: "ok" })]);
+    expect((fine.items[0] as { failure?: string }).failure).toBeUndefined();
+  });
+
   test("permission requests become cards that resolve in place", () => {
     const t = reduce([
       ev({
@@ -308,6 +324,10 @@ describe("TranscriptRow", () => {
     });
     expect(html).toContain("Turn failed");
     expect(html).toContain("claude auth login");
+    // The reply already said why, so the footer carries only `failure`.
+    const repeated = row({ kind: "result", id: "r:3", subtype: "success", isError: true, costUsd: 0, durationMs: 50, numTurns: 1, failure: "Not logged in · Please run /login", at });
+    expect(repeated).toContain("claude auth login");
+    expect(repeated).not.toContain("Please run /login");
     const fine = row({ kind: "result", id: "r:2", subtype: "success", isError: false, costUsd: 0.5, durationMs: 2000, numTurns: 3, at });
     expect(fine).toContain("Turn done");
     expect(fine).toContain("$0.50");

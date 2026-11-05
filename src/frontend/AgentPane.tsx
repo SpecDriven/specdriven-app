@@ -1043,8 +1043,10 @@ export function TranscriptRow({
     case "question":
       return <QuestionCard item={item} agent={agent} onAnswer={onAnswer} />;
     case "result": {
+      // Why it failed is read from the result even when the reply already
+      // said it and the footer repeats nothing (agentChat.ts `failure`).
       const loginHint =
-        item.isError && /not logged in|no api key|unauthorized/i.test(item.text ?? "");
+        item.isError && /not logged in|no api key|unauthorized/i.test(item.failure ?? item.text ?? "");
       return (
         <div className={`agent-turn-footer${item.isError ? " err" : ""}`}>
           <span>

@@ -3569,25 +3569,46 @@ button.table-add:hover {
   white-space: nowrap;
 }
 
-/* The Project settings page (specs/app/project-settings.feature.md): a row
-   per code repo — its path with the default and not-found badges, the
-   resolved folder, the state of its specs symlink with the link to make or
-   remove it — and the Default radio + Remove at the right. */
+/* The Project settings page (specs/app/project-settings.feature.md): a
+   code repo row stacks — its path with the default and not-found badges and,
+   on the same line at the right, the Default radio + Remove; then the
+   resolved folder; then the state of its specs symlink with the link that
+   makes or removes it at the line's end. Long paths (Windows ones above
+   all) cut to an ellipsis on one line, the full text in the tooltip, so no
+   control is ever squeezed into another. */
+.settings-row.code-repo-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.code-repo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+}
+
 .code-repo-path {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
   min-width: 0;
 }
 
 .code-repo-path code {
+  min-width: 0;
   font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .code-repo-badge {
+  flex-shrink: 0;
   font-size: 0.625rem;
   font-weight: 500;
   line-height: 1.2;
@@ -3603,21 +3624,43 @@ button.table-add:hover {
   border-color: currentColor;
 }
 
-.code-repo-clone-error {
-  color: var(--danger, #c0392b);
+.code-repo-dir,
+.code-repo-link-text {
+  min-width: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .code-repo-link {
   display: flex;
   align-items: baseline;
-  gap: 0.6rem;
-  max-width: none;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.code-repo-link-text {
+  flex: 1;
+}
+
+.code-repo-link button.link {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.code-repo-clone-error {
+  color: var(--danger, #c0392b);
+  font-family: inherit;
 }
 
 .code-repo-actions {
   display: flex;
   align-items: center;
-  gap: 0.9rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
@@ -3627,7 +3670,31 @@ button.table-add:hover {
   gap: 0.35rem;
   font-size: 0.75rem;
   color: var(--text-2);
+  white-space: nowrap;
   cursor: pointer;
+}
+
+.code-repo-default input {
+  margin: 0;
+}
+
+/* Remove is quiet until hovered, red when it is. */
+.btn.code-repo-remove {
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+
+.btn.code-repo-remove:hover:not(:disabled) {
+  color: var(--danger-fg, var(--danger, #c0392b));
+}
+
+/* Add repository… / Add member… are .btn-secondary, not the generic
+   bordered settings-row button. */
+.project-settings .settings-row > .btn {
+  height: 1.75rem;
+  padding: 0 0.7rem;
+  flex-shrink: 0;
 }
 
 /* The project management tool: the list of the usual ones, plus the name

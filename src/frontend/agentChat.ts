@@ -147,6 +147,9 @@ export type TranscriptItem =
       durationMs: number;
       numTurns: number;
       text?: string;
+      /** Why the turn failed, as the agent said — kept even when the
+          transcript already ends on it, for the hints that read it. */
+      failure?: string;
       at: string;
     }
   | { kind: "note"; id: string; level: "info" | "error"; code: string; text: string; at: string };
@@ -315,6 +318,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
           durationMs: ev.durationMs,
           numTurns: ev.numTurns,
           ...(text ? { text } : {}),
+          ...(ev.isError && ev.text ? { failure: ev.text } : {}),
           at: ev.at,
         },
       );
