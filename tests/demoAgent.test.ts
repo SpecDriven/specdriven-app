@@ -294,6 +294,19 @@ test("a chat started with no specs gets the short reply, not the spec script", a
   expect(JSON.stringify(events)).toContain("simulated session");
 });
 
+test("a pasted image gets a reply that says the simulation cannot look at it", async () => {
+  const res = await api("/api/agent/chat", "POST", { name: "ad hoc" });
+  const { id } = (await res.json()) as { id: string };
+  await until(id, () => getChatSession(id)!.status === "idle");
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", { images: [{ mediaType: "image/png", data: png }] });
+  expect(sent.status).toBe(200);
+  const events = await until(id, (e) => e.some((x) => x.kind === "result"));
+  const reply = events.filter((e) => e.kind === "assistant").at(-1)!;
+  expect(JSON.stringify(reply)).toContain("can't really look at the image you pasted");
+});
+
 test("Stop mid-turn returns the session to idle without ending it", async () => {
   const id = await startSession();
   await until(id, (e) => e.some((x) => x.kind === "permission_request"));

@@ -22,9 +22,11 @@ import type {
   AssistantBlock,
   ChatAgent,
   ChatEvent,
+  ChatImage,
   ChatSessionMeta,
   ChatStatus,
   EffortLevel,
+  ImageUpload,
   PermissionMode,
   SlashCommandInfo,
 } from "../server/agentTypes";
@@ -95,7 +97,7 @@ export interface Question {
 }
 
 export type TranscriptItem =
-  | { kind: "user"; id: string; text: string; at: string }
+  | { kind: "user"; id: string; text: string; at: string; images?: ChatImage[] }
   | {
       kind: "assistant";
       id: string;
@@ -195,7 +197,13 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
   const next = { ...t, lastSeq: ev.seq };
   switch (ev.kind) {
     case "user":
-      return withItem(next, { kind: "user", id: `u:${ev.id}`, text: ev.text, at: ev.at });
+      return withItem(next, {
+        kind: "user",
+        id: `u:${ev.id}`,
+        text: ev.text,
+        at: ev.at,
+        ...(ev.images?.length ? { images: ev.images } : {}),
+      });
     case "text_delta": {
       const id = `a:${ev.messageId}`;
       const current = itemOf(next, id, "assistant");
@@ -677,6 +685,8 @@ export interface CreateSessionOptions {
   /** Which agent drives the chat; absent is the first one whose CLI is there. */
   agent?: ChatAgent;
   prompt?: string;
+  /** Images pasted with the first message. */
+  images?: ImageUpload[];
   permissionMode?: PermissionMode;
   /** The folder to work in; absent is the code repo, else the data repo. */
   cwd?: string;
@@ -789,8 +799,11 @@ export const agentChat = {
     const pick = state.list.find((m) => m.id === remembered) ?? state.list[0];
     if (pick) await agentChat.openSession(pick.id).catch(() => undefined);
   },
-  async send(id: string, text: string): Promise<void> {
-    await call(`/api/agent/chat/${id}/message`, { method: "POST", body: JSON.stringify({ text }) });
+  async send(id: string, text: string, images: ImageUpload[] = []): Promise<void> {
+    await call(`/api/agent/chat/${id}/message`, {
+      method: "POST",
+      body: JSON.stringify(images.length ? { text, images } : { text }),
+    });
   },
   async answer(
     id: string,

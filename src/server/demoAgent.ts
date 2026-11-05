@@ -19,7 +19,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "../plugins/host/agents";
 import { fromPlugin } from "../plugins/host/agents";
-import type { PermissionMode, SlashCommandInfo } from "./agentTypes";
+import type { AgentImage, PermissionMode, SlashCommandInfo } from "./agentTypes";
 
 /** The model the header shows: obviously not a real one. */
 export const SIMULATED_MODEL = "claude-simulated";
@@ -170,11 +170,11 @@ class SimulatedSession implements AgentSession {
       commands: [...SIMULATED_COMMANDS],
       permissionMode: this.mode,
     });
-    if (this.opts.prompt) void this.play(this.opts.prompt);
+    if (this.opts.prompt || this.opts.images?.length) void this.play(this.opts.prompt ?? "", this.opts.images?.length ?? 0);
   }
 
-  send(text: string): Promise<void> {
-    void this.play(text);
+  send(text: string, images?: AgentImage[]): Promise<void> {
+    void this.play(text, images?.length ?? 0);
     return Promise.resolve();
   }
 
@@ -244,7 +244,7 @@ class SimulatedSession implements AgentSession {
   }
 
   /** One scripted turn, always closed by a result so the pane goes idle. */
-  private async play(prompt: string): Promise<void> {
+  private async play(prompt: string, images = 0): Promise<void> {
     this.turn += 1;
     this.stop = new AbortController();
     this.host.turnStarted();
@@ -258,7 +258,7 @@ class SimulatedSession implements AgentSession {
     if (this.turn === 1 && brief.specs.length > 0) {
       denials = await this.opening(brief);
     } else if (!this.cancelled) {
-      await this.followUp(prompt);
+      await this.followUp(prompt, images);
     }
     if (this.opts.signal.aborted) return;
     const durationMs = Date.now() - startedAt;
@@ -319,10 +319,12 @@ class SimulatedSession implements AgentSession {
   }
 
   /** Everything else: short, so the composer stays useful in a demo. */
-  private async followUp(prompt: string): Promise<void> {
+  private async followUp(prompt: string, images = 0): Promise<void> {
     const asked = prompt.trim().replace(/\s+/g, " ").slice(0, 80);
+    const pasted = images === 1 ? "the image you pasted" : `the ${images} images you pasted`;
+    const what = [asked ? `act on “${asked}”` : "", images > 0 ? `look at ${pasted}` : ""].filter(Boolean).join(" or ");
     await this.say(
-      `This is a simulated session, so I can't really act on “${asked}” — but a live Claude Code session here would work in ${this.opts.cwd}, with the same transcript, tool rows and permission prompts you see above.`,
+      `This is a simulated session, so I can't really ${what} — but a live Claude Code session here would work in ${this.opts.cwd}, with the same transcript, tool rows and permission prompts you see above.`,
     );
   }
 }
@@ -349,6 +351,7 @@ export const simulatedProvider: AgentProvider = fromPlugin(
       hasAccount: false,
       rememberPermissions: "rule",
       oneShot: false,
+      images: true,
     },
     defaultPermissionMode: "auto",
     start(opts) {

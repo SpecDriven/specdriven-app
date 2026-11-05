@@ -16,6 +16,7 @@ import type {
   AgentChoices,
   AgentDefaultsPatch,
   AgentDescriptor,
+  AgentImage,
   EffortLevel,
   AgentOutput,
   ChatAccount,
@@ -67,6 +68,9 @@ export interface AgentStartOptions {
   effort?: EffortLevel;
   /** The first turn; the core has echoed it as the `user` event and counted turn 1. */
   prompt?: string;
+  /** Images pasted with the first turn; only for a provider whose
+      capabilities.images is true. */
+  images?: AgentImage[];
   /** Fires on end and on shutdown. */
   signal: AbortSignal;
   host: AgentHost;
@@ -129,8 +133,9 @@ export interface AgentHost {
 
 export interface AgentSession {
   /** One user turn. A rejection means the turn never started: the core
-      notes the words and frees the composer. */
-  send(text: string): Promise<void>;
+      notes the words and frees the composer. `text` may be empty when
+      images came; images come only where capabilities.images is true. */
+  send(text: string, images?: AgentImage[]): Promise<void>;
   interrupt(): Promise<void>;
   /** Throw an AgentError(409, …) to refuse. */
   setPermissionMode(mode: PermissionMode): Promise<void>;

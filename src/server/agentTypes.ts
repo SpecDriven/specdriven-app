@@ -87,6 +87,51 @@ export interface ChatSessionMeta {
   lastSeq: number;
 }
 
+// --- Pasted images ------------------------------------------------------------
+
+/** The image types every agent reads (the Claude API's list). */
+export const IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+export type ImageMediaType = (typeof IMAGE_MEDIA_TYPES)[number];
+
+export function normalizeImageMediaType(value: unknown): ImageMediaType | null {
+  return (IMAGE_MEDIA_TYPES as readonly unknown[]).includes(value) ? (value as ImageMediaType) : null;
+}
+
+/** The largest image a message carries, in bytes: the Claude API refuses
+    one whose base64 is over 5 MB, and base64 is 4/3 of the bytes. The pane
+    scales a bigger paste down before it gets here. */
+export const MAX_IMAGE_BYTES = 3_750_000;
+
+/** Images in one message at most. */
+export const MAX_IMAGES_PER_MESSAGE = 10;
+
+/** An image as the pane sends it: the bytes, base64. */
+export interface ImageUpload {
+  mediaType: ImageMediaType;
+  data: string;
+  /** The pasted file's name, when it had one. */
+  name?: string;
+}
+
+/** An image as a `user` event shows it: where to fetch it, not its bytes. */
+export interface ChatImage {
+  id: string;
+  mediaType: ImageMediaType;
+  /** GET this for the bytes (src/server/api.ts). */
+  url: string;
+  name?: string;
+}
+
+/** An image as a provider gets it: the bytes, and the file the engine kept
+    them in (an agent that reads images from disk takes the path). */
+export interface AgentImage {
+  mediaType: ImageMediaType;
+  /** Base64, no data: prefix. */
+  data: string;
+  /** Absolute path of the saved copy. */
+  path: string;
+}
+
 /** One block of an assistant turn the pane renders. */
 export type AssistantBlock =
   | { type: "text"; text: string }
@@ -107,7 +152,7 @@ export type ChatEventBody =
       commands?: SlashCommandInfo[];
     }
   /** What the pane sent — echoed from the request, never from a replay. */
-  | { kind: "user"; id: string; text: string }
+  | { kind: "user"; id: string; text: string; images?: ChatImage[] }
   | { kind: "text_delta"; messageId: string; index: number; text: string }
   | {
       kind: "assistant";
@@ -198,6 +243,9 @@ export interface AgentCapabilities {
   /** Whether the agent takes a reasoning effort (AgentStartOptions.effort,
       AgentSession.setEffort); absent is no. */
   effort?: boolean;
+  /** Whether a message may carry images (AgentSession.send's images,
+      AgentStartOptions.images); absent is no. */
+  images?: boolean;
 }
 
 // --- Model and effort --------------------------------------------------------
