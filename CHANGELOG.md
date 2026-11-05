@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.229 — 2026-11-04
+
+- A code repo that is not on this computer is offered for cloning when its data folder opens ([#375](https://github.com/SpecDriven/specdriven-app/pull/375))
+
 ## v0.1.228 — 2026-11-04
 
 - Project settings are created for every data folder, name several code repos with their specs symlinks, and have a page in the user menu ([#374](https://github.com/SpecDriven/specdriven-app/pull/374))
