@@ -126,7 +126,7 @@ import { useModalPrompts } from "./ModalPrompts";
 import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
-import { ProjectSettingsPage } from "./ProjectSettingsPage";
+import { askToCloneCodeRepo, codeReposToOffer, ProjectSettingsPage } from "./ProjectSettingsPage";
 import { ObservabilityPage } from "./ObservabilityPage";
 import { DataPage } from "./DataPage";
 import { ImagesPage } from "./ImagesPage";
@@ -2788,6 +2788,45 @@ export function App() {
   const openSettings = () => openAppPage("settings");
   /** Project settings (src/frontend/ProjectSettingsPage.tsx): the data repo's project-settings.json. */
   const openProjectSettings = () => openAppPage("project-settings");
+  // Bumped to make an open Project settings page read the file afresh — a
+  // clone started from outside it shows on its row.
+  const [projectSettingsKey, setProjectSettingsKey] = useState(0);
+
+  // A code repo that is not on this computer is offered for cloning when its
+  // data folder opens (specs/app/project-settings.feature.md): once per
+  // folder per run, one prompt per missing repo, the default first, with
+  // the url the server suggests filled in. A clone that starts opens
+  // Project settings, whose row shows it running until the folder is there.
+  const cloneOffered = useRef(new Set<string>());
+  const offerClonesRef = useRef<() => Promise<void>>(async () => {});
+  offerClonesRef.current = async () => {
+    const res = await fetch("/api/project-settings").catch(() => null);
+    if (!res?.ok) return;
+    const data = (await res.json().catch(() => null)) as Parameters<typeof codeReposToOffer>[0] | null;
+    if (!data?.codeRepos) return;
+    let show = false;
+    for (const repo of codeReposToOffer(data)) {
+      const result = await askToCloneCodeRepo(prompt, repo, {
+        intro: `The project's ${repo.isDefault ? "default " : ""}code repository is not on this computer.`,
+      });
+      if (!result) continue;
+      if ("data" in result) show = true;
+      else if (
+        await confirm({ title: "Could not clone", body: result.error, confirmLabel: "Open Project settings", danger: false })
+      ) {
+        show = true;
+      }
+    }
+    if (!show) return;
+    setProjectSettingsKey((k) => k + 1);
+    openAppPage("project-settings");
+  };
+  useEffect(() => {
+    if (!dataDir || loading || needsRepo || outdated || demo || readOnly || hosted || modalOpen) return;
+    if (cloneOffered.current.has(dataDir)) return;
+    cloneOffered.current.add(dataDir);
+    void offerClonesRef.current();
+  }, [dataDir, loading, needsRepo, outdated, demo, readOnly, hosted, modalOpen]);
   /** Settings, scrolled to one section (`settings-<id>`) once the page has drawn it. */
   const openSettingsAt = (sectionId: string) => {
     openAppPage("settings");
@@ -10249,6 +10288,7 @@ export function App() {
              data repo's project-settings.json — code repos with their specs
              symlinks, the default, the members, the authorship switch. */
           <ProjectSettingsPage
+            key={projectSettingsKey}
             prompt={prompt}
             confirm={confirm}
             browseFolder={canChooseFolder ? () => chooseFolderNative("code-repo") : undefined}

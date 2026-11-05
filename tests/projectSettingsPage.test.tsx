@@ -50,6 +50,7 @@ import { createRoot } from "react-dom/client";
 import {
   ProjectSettingsPage,
   codeRepoPathTyped,
+  codeReposToOffer,
   memberTyped,
   specsLinkLabel,
   type ProjectSettingsData,
@@ -255,6 +256,109 @@ describe("the page", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("not valid JSON");
     expect(container.querySelectorAll('[data-testid="code-repo-row"]')[0]!.textContent).toContain("no specs symlink");
     await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("a missing repo is cloned from the suggested url, shows the clone running, then is found", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const base = initial();
+    const gone = { ...base.codeRepos[2]!, cloneUrl: "https://github.com/acme/gone" };
+    let data: ProjectSettingsData = { ...base, canClone: true, codeRepos: [base.codeRepos[0]!, gone] };
+    let polls = 0;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ url, body });
+      if (url === "/api/project-settings/clone") {
+        data = { ...data, codeRepos: [data.codeRepos[0]!, { ...gone, clone: { url: body.url, state: "running" } }] };
+      } else if (url === "/api/project-settings" && !init?.method) {
+        // The second poll finds the folder there.
+        if (++polls >= 2) data = { ...data, codeRepos: [data.codeRepos[0]!, { ...gone, exists: true, cloneUrl: undefined }] };
+      }
+      return new Response(JSON.stringify(data), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let changed = 0;
+    const asked: { title: string; initial?: string; hint?: string }[] = [];
+    await act(async () =>
+      root.render(
+        <ProjectSettingsPage
+          initial={data}
+          prompt={async (opts) => {
+            asked.push(opts);
+            return "https://github.com/acme/gone-app";
+          }}
+          confirm={async () => true}
+          onChanged={() => changed++}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    const row = () => container.querySelectorAll('[data-testid="code-repo-row"]')[1]!;
+    expect(row().textContent).toContain("Not on this computer");
+    // A repo that is there offers no clone.
+    expect(container.querySelector('button[aria-label="Clone ../acme-app"]')).toBeNull();
+
+    await act(async () => click(container.querySelector('button[aria-label="Clone ../gone"]')!));
+    await flush();
+    expect(asked).toEqual([
+      expect.objectContaining({ title: "Clone ../gone", initial: "https://github.com/acme/gone", hint: "It is cloned into /w/gone." }),
+    ]);
+    expect(calls.at(-1)).toEqual({
+      url: "/api/project-settings/clone",
+      body: { codeRepo: "../gone", url: "https://github.com/acme/gone-app" },
+    });
+    expect(row().textContent).toContain("Cloning from https://github.com/acme/gone-app…");
+    expect(container.querySelector('button[aria-label="Clone ../gone"]')).toBeNull();
+
+    // The page polls until the folder is there, then the app re-reads its listing.
+    await act(async () => void (await new Promise((r) => setTimeout(r, 3300))));
+    expect(row().textContent).not.toContain("not found");
+    expect(row().textContent).toContain("no specs symlink");
+    expect(changed).toBe(1);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  test("a failed clone shows its error with a way to try again; nothing is offered where cloning is off", async () => {
+    const base = initial();
+    const failed = {
+      ...base.codeRepos[2]!,
+      cloneUrl: "https://github.com/acme/gone",
+      clone: { url: "https://github.com/acme/gone", state: "failed" as const, error: "Repository not found" },
+    };
+    const data: ProjectSettingsData = { ...base, canClone: true, codeRepos: [base.codeRepos[0]!, failed] };
+    expect(codeReposToOffer(data).map((r) => r.path)).toEqual(["../gone"]);
+    expect(codeReposToOffer({ ...data, canClone: false })).toEqual([]);
+    expect(
+      codeReposToOffer({ ...data, codeRepos: [{ ...failed, clone: { url: "x", state: "running" } }] }),
+    ).toEqual([]);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(<ProjectSettingsPage initial={data} prompt={async () => null} confirm={async () => true} onClose={() => {}} />),
+    );
+    expect(container.textContent).toContain("Repository not found");
+    expect(container.querySelector('button[aria-label="Clone ../gone"]')?.textContent).toBe("Try again…");
+    await act(async () => root.unmount());
+    const other = createRoot(container);
+    await act(async () =>
+      other.render(
+        <ProjectSettingsPage
+          initial={{ ...data, canClone: false }}
+          prompt={async () => null}
+          confirm={async () => true}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    expect(container.querySelector('button[aria-label="Clone ../gone"]')).toBeNull();
+    await act(async () => other.unmount());
     container.remove();
   });
 

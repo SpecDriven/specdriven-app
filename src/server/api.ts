@@ -161,6 +161,7 @@ import {
 } from "./members";
 import type { ProjectSettings } from "./members";
 import { createSpecsLink, removeSpecsLink, SpecsLinkError, specsLinkStatus } from "./specsLink";
+import { codeRepoCloneJob, CodeRepoCloneError, startCodeRepoClone, suggestedCloneUrl } from "./codeRepoClone";
 import { CONFLUENCE_PROGRAM, extractScenarios, QTEST_PROGRAM, serializeFeature, titleFromFileName } from "./parser";
 import type { ExternalLink, Feature } from "./parser";
 import {
@@ -2063,14 +2064,25 @@ async function projectSettingsPayload(dir: string, settings?: ProjectSettings) {
       path: repo.path,
       dir: repo.dir,
       isDefault: repo.isDefault,
-      exists: await directoryExists(repo.dir),
+      // A folder a clone is still making is not there yet: git makes it
+      // first and fills it in after.
+      exists: (await directoryExists(repo.dir)) && codeRepoCloneJob(repo.dir)?.state !== "running",
       specsLink: await specsLinkStatus(repo.dir, dir),
     })),
+  );
+  // A folder that is not there can be cloned (codeRepoClone.ts): the url
+  // the app suggests, and the clone running or failed, if any.
+  const cloneRows = await Promise.all(
+    codeRepos.map(async (repo) => {
+      if (repo.exists) return repo;
+      const job = codeRepoCloneJob(repo.dir);
+      return { ...repo, cloneUrl: job?.url ?? (await suggestedCloneUrl(dir, repo.dir)), clone: job };
+    }),
   );
   return {
     file: `${dir}/${PROJECT_SETTINGS_FILE}`,
     members: current.members,
-    codeRepos,
+    codeRepos: cloneRows,
     defaultCodeRepo: current.defaultCodeRepo,
     authorsInMarkdown: current.authorsInMarkdown,
     // The demo's dataset and the read-only site's snapshot are nobody's to
@@ -2078,6 +2090,7 @@ async function projectSettingsPayload(dir: string, settings?: ProjectSettings) {
     canEdit: !isDemoMode() && !isReadOnlyMode(),
     canLink: !isDemoMode() && !isReadOnlyMode() && !isHostedMode(),
     canChooseFolder: canChooseFolder() && !isHostedMode(),
+    canClone: !isDemoMode() && !isReadOnlyMode() && !isHostedMode(),
   };
 }
 
@@ -2153,6 +2166,27 @@ const postSpecsLink = withDataDir(async (dir, req) => {
     else await removeSpecsLink(repo.dir, dir);
   } catch (e) {
     if (e instanceof SpecsLinkError) return json({ error: e.message }, e.status);
+    return json({ error: (e as Error).message }, 500);
+  }
+  return json(await projectSettingsPayload(dir, settings));
+});
+
+// Clone a code repo that is not on this computer (src/server/codeRepoClone.ts)
+// into the folder its path resolves to, from `url`. Answers at once with the
+// clone running; the page polls GET until the folder is there or it failed.
+const postCodeRepoClone = withDataDir(async (dir, req) => {
+  if (isDemoMode() || isReadOnlyMode()) return json({ error: "Code repos cannot be cloned in demo mode" }, 403);
+  const body = (await req.json().catch(() => null)) as { codeRepo?: unknown; url?: unknown } | null;
+  if (typeof body?.codeRepo !== "string" || typeof body.url !== "string") {
+    return json({ error: "codeRepo and url are required" }, 400);
+  }
+  const settings = await readProjectSettings(dir);
+  const repo = settings.codeRepos.find((r) => r.path === body.codeRepo || r.dir === body.codeRepo);
+  if (!repo) return json({ error: `Not one of the project's code repos: ${body.codeRepo}` }, 404);
+  try {
+    await startCodeRepoClone(repo.dir, body.url);
+  } catch (e) {
+    if (e instanceof CodeRepoCloneError) return json({ error: e.message }, e.status);
     return json({ error: (e as Error).message }, 500);
   }
   return json(await projectSettingsPayload(dir, settings));
@@ -3587,6 +3621,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/project-settings", getProjectSettings],
   ["PUT", "/api/project-settings", putProjectSettings],
   ["POST", "/api/project-settings/specs-link", unlessHosted(postSpecsLink)],
+  ["POST", "/api/project-settings/clone", unlessHosted(postCodeRepoClone)],
   ["GET", "/api/readme", getReadme],
   ["PUT", "/api/readme", putReadme],
   ["PUT", "/api/custom-attributes", putCustomAttributes],
