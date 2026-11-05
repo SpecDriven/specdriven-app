@@ -718,14 +718,6 @@ aside header h1 {
   }
 }
 
-.sidebar-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.sidebar-actions > button {
-  flex: 1;
-}
 
 /* Code gen session (specs/agents/claude.spec.md): per-spec and per-scenario
    checkboxes in the tree, and the outcome line under the Features head that
@@ -739,9 +731,9 @@ aside header h1 {
 .session-notice {
   color: var(--text-2);
   font-size: 0.75rem;
-  /* Tucked under the Features head, whose Start session it describes, and
-     lined up with the head's label. */
-  margin: -0.5rem 0 0;
+  /* Under the Features head, whose Start session it describes, in the
+     section's own stack, lined up with the head's label. */
+  margin: 0;
   padding: 0 0.6rem;
 }
 
@@ -974,7 +966,7 @@ a.page-entry.done {
   color: var(--text-3);
 }
 
-.page-list .empty {
+.side-panel .empty {
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
 }
@@ -1228,23 +1220,6 @@ button {
   background: var(--danger-solid-hover);
 }
 
-/* Sidebar actions stay quiet — the loud button on a screen is Publish. */
-.sidebar-actions > button {
-  padding: 0.4rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-2);
-  font-size: 0.75rem;
-  font-weight: 500;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.sidebar-actions > button:hover {
-  background: var(--hover);
-  border-color: var(--border-strong);
-  color: var(--text-1);
-}
 
 .editor {
   display: flex;
@@ -5896,7 +5871,25 @@ aside header .collapse-btn {
   min-height: 0;
 }
 
-/* ---- Section header with the filter ---- */
+/* ---- Section header with the filter (src/frontend/SidebarSection.tsx):
+   one chassis for the Specs tree and every plugin tab's list ---- */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* A head whose label is a link — the Tests overview, all issues. */
+.section-head a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.section-head a:hover,
+.section-head a.active {
+  color: var(--text-1);
+}
+
 .section-head {
   position: relative;
   display: flex;
@@ -5941,7 +5934,6 @@ aside header .collapse-btn {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin-top: -0.5rem;
   padding: 0 0.35rem 0 0.6rem;
 }
 
@@ -8243,11 +8235,6 @@ a.tests-title {
   color: var(--text-3);
 }
 
-.page-entry.tests-root {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
 
 .page-group a {
   color: inherit;

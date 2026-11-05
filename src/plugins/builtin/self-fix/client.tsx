@@ -21,6 +21,10 @@ const tab: TabPlugin<SelfFixRoute> = {
   icon: Wrench,
   order: 90,
   shortcut: "g x",
+  // The tab bar only turns the sidebar to the list; the head's action and
+  // the rows open the pane's views. `c` on the tab starts a fix.
+  opensOnSelect: false,
+  create: { label: "Fix this app", run: (_app, navigate) => navigate({ kind: "new" }, { push: true }) },
   route: {
     match: parseSelfFixRoute,
     path: selfFixPath,
