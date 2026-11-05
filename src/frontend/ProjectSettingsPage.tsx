@@ -313,92 +313,97 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
         ) : (
           repos.map((repo) => (
             <div className="settings-row code-repo-row" key={repo.path} data-testid="code-repo-row">
-              <span className="settings-row-label">
+              <div className="code-repo-head">
                 <span className="code-repo-path">
                   <code title={repo.dir}>{repo.path}</code>
                   {repo.isDefault && <span className="code-repo-badge">default</span>}
                   {!repo.exists && <span className="code-repo-badge missing">not found</span>}
                 </span>
-                <span className="settings-row-hint" title={repo.dir}>
-                  {repo.dir}
-                </span>
-                {!repo.exists && (
-                  <span className="settings-row-hint code-repo-link" data-testid="code-repo-clone">
-                    {repo.clone?.state === "running" ? (
-                      <span>Cloning from {repo.clone.url}…</span>
-                    ) : (
-                      <>
-                        <span className={repo.clone?.state === "failed" ? "code-repo-clone-error" : undefined}>
-                          {repo.clone?.state === "failed"
-                            ? repo.clone.error ?? "The clone failed"
-                            : "Not on this computer"}
-                        </span>
-                        {data?.canClone && (
-                          <button
-                            type="button"
-                            className="link"
-                            disabled={busy}
-                            aria-label={`Clone ${repo.path}`}
-                            onClick={() => void cloneRepo(repo)}
-                          >
-                            {repo.clone?.state === "failed" ? "Try again…" : "Clone…"}
-                          </button>
-                        )}
-                      </>
+                {canEdit && (
+                  <span className="code-repo-actions">
+                    {/* With one repo it is the default; the badge says so. */}
+                    {repos.length > 1 && (
+                      <label className="code-repo-default">
+                        <input
+                          type="radio"
+                          name="default-code-repo"
+                          checked={repo.isDefault}
+                          disabled={busy}
+                          aria-label={`Make ${repo.path} the default code repo`}
+                          onChange={() => void save({ defaultCodeRepo: repo.path })}
+                        />
+                        Default
+                      </label>
                     )}
-                  </span>
-                )}
-                {repo.exists && (
-                  <span className="settings-row-hint code-repo-link">
-                    <span>{specsLinkLabel(repo.specsLink, repo.exists)}</span>
-                    {canLink && repo.specsLink.state === "missing" && (
-                      <button
-                        type="button"
-                        className="link"
-                        disabled={busy}
-                        aria-label={`Create the specs symlink in ${repo.path}`}
-                        onClick={() => void link(repo, "create")}
-                      >
-                        Create symlink
-                      </button>
-                    )}
-                    {canLink && (repo.specsLink.state === "linked" || repo.specsLink.state === "elsewhere") && (
-                      <button
-                        type="button"
-                        className="link"
-                        disabled={busy}
-                        aria-label={`Remove the specs symlink from ${repo.path}`}
-                        onClick={() => void link(repo, "remove")}
-                      >
-                        Remove symlink
-                      </button>
-                    )}
-                  </span>
-                )}
-              </span>
-              {canEdit && (
-                <span className="code-repo-actions">
-                  <label className="code-repo-default">
-                    <input
-                      type="radio"
-                      name="default-code-repo"
-                      checked={repo.isDefault}
+                    <button
+                      type="button"
+                      className="btn btn-ghost code-repo-remove"
                       disabled={busy}
-                      aria-label={`Make ${repo.path} the default code repo`}
-                      onChange={() => void save({ defaultCodeRepo: repo.path })}
-                    />
-                    Default
-                  </label>
-                  <button
-                    type="button"
-                    className="link"
-                    disabled={busy}
-                    aria-label={`Remove ${repo.path}`}
-                    onClick={() => void removeRepo(repo)}
-                  >
-                    Remove
-                  </button>
-                </span>
+                      aria-label={`Remove ${repo.path}`}
+                      onClick={() => void removeRepo(repo)}
+                    >
+                      Remove
+                    </button>
+                  </span>
+                )}
+              </div>
+              <span className="code-repo-dir" title={repo.dir}>
+                {repo.dir}
+              </span>
+              {!repo.exists && (
+                <div className="code-repo-link" data-testid="code-repo-clone">
+                  {repo.clone?.state === "running" ? (
+                    <span className="code-repo-link-text">Cloning from {repo.clone.url}…</span>
+                  ) : (
+                    <>
+                      <span
+                        className={`code-repo-link-text${repo.clone?.state === "failed" ? " code-repo-clone-error" : ""}`}
+                      >
+                        {repo.clone?.state === "failed" ? repo.clone.error ?? "The clone failed" : "Not on this computer"}
+                      </span>
+                      {data?.canClone && (
+                        <button
+                          type="button"
+                          className="link"
+                          disabled={busy}
+                          aria-label={`Clone ${repo.path}`}
+                          onClick={() => void cloneRepo(repo)}
+                        >
+                          {repo.clone?.state === "failed" ? "Try again…" : "Clone…"}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {repo.exists && (
+                <div className="code-repo-link">
+                  <span className="code-repo-link-text" title={repo.specsLink.target}>
+                    {specsLinkLabel(repo.specsLink, repo.exists)}
+                  </span>
+                  {canLink && repo.specsLink.state === "missing" && (
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy}
+                      aria-label={`Create the specs symlink in ${repo.path}`}
+                      onClick={() => void link(repo, "create")}
+                    >
+                      Create symlink
+                    </button>
+                  )}
+                  {canLink && (repo.specsLink.state === "linked" || repo.specsLink.state === "elsewhere") && (
+                    <button
+                      type="button"
+                      className="link"
+                      disabled={busy}
+                      aria-label={`Remove the specs symlink from ${repo.path}`}
+                      onClick={() => void link(repo, "remove")}
+                    >
+                      Remove symlink
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))
@@ -408,7 +413,7 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
             <span className="settings-row-label">
               <span className="settings-row-hint">A checkout beside the data folder is the layout the app assumes.</span>
             </span>
-            <button type="button" className="link" disabled={busy} onClick={() => void addRepo()}>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void addRepo()}>
               Add repository…
             </button>
           </div>
@@ -436,7 +441,7 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
                 <span className="code-repo-actions">
                   <button
                     type="button"
-                    className="link"
+                    className="btn btn-ghost code-repo-remove"
                     disabled={busy}
                     aria-label={`Remove ${member.name}`}
                     onClick={() =>
@@ -453,7 +458,7 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
         {canEdit && (
           <div className="settings-row">
             <span className="settings-row-label" />
-            <button type="button" className="link" disabled={busy} onClick={() => void addMember()}>
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void addMember()}>
               Add member…
             </button>
           </div>
