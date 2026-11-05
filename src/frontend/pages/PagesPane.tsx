@@ -54,7 +54,8 @@ import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
 import { SectionAction, SidebarSection } from "../SidebarSection";
 import { listKeyDown, useRevealActive } from "../sidebarList";
-import { EntryKindChip, dayOf, entryGroups, entryKindOf } from "../notebook";
+import { EntryKindGlyph, dayOf, entryGroups, entryKindOf } from "../notebook";
+import { SidebarRow } from "../SidebarRow";
 import { createPromiseQueue } from "../promiseQueue";
 import { shareUrl } from "../shareLink";
 import { cleanLine } from "../../server/text";
@@ -1466,11 +1467,21 @@ export function PagesSidebar({
                     : " drop-before"
                   : "";
               return (
-                <div
-                  key={page.fileName}
-                  className={`page-row${dir && !tab.dated ? " nested" : ""}${tab.dated ? " entry-row" : ""}${replaced ? " superseded" : ""}${edge}${dragging === page.fileName ? " dragging" : ""}`}
-                  onDragOver={
-                    ordered
+                <SidebarRow
+                  href={pageLink(page.fileName)}
+                  active={here}
+                  level={dir ? 2 : 1}
+                  menuKey={page.fileName}
+                  title={
+                    replaced
+                      ? `${pageRowTitle(page)} — superseded by ${replaced.name}`
+                      : pageRowTitle(page)
+                  }
+                  className={`${dir && !tab.dated ? "nested" : ""}${replaced ? " superseded" : ""}${
+                    page.done ? " done" : ""
+                  }${edge}${dragging === page.fileName ? " dragging" : ""}`}
+                  rowProps={{
+                    onDragOver: ordered
                       ? (e) => {
                           if (dragging === null) return;
                           e.preventDefault();
@@ -1481,81 +1492,71 @@ export function PagesSidebar({
                             setDropAt({ row: page.fileName, after });
                           }
                         }
-                      : undefined
-                  }
-                  onDrop={
-                    ordered
+                      : undefined,
+                    onDrop: ordered
                       ? (e) => {
                           if (dragging === null) return;
                           e.preventDefault();
                           const box = e.currentTarget.getBoundingClientRect();
                           dropOn({ row: page.fileName, after: e.clientY > box.top + box.height / 2 });
                         }
-                      : undefined
+                      : undefined,
+                  }}
+                  linkProps={{
+                    draggable: ordered || undefined,
+                    onDragStart: ordered
+                      ? (e) => {
+                          e.dataTransfer.setData("text/plain", pageLink(page.fileName));
+                          e.dataTransfer.effectAllowed = "move";
+                          setDragging(page.fileName);
+                        }
+                      : undefined,
+                    onDragEnd: ordered ? endDrag : undefined,
+                  }}
+                  onOpen={(e) => spaClick(e, () => navigate({ fileName: page.fileName }, { push: true }))}
+                  /* The slots (src/frontend/SidebarRow.tsx): a task's done mark
+                     or an entry's kind leads; a page's assignee trails as the
+                     avatar the cards use; an entry's author and day make its
+                     second line. */
+                  leading={
+                    tab.done ? (
+                      page.done ? (
+                        <CheckCircle2 size={13} />
+                      ) : (
+                        <Circle size={13} />
+                      )
+                    ) : tab.dated ? (
+                      <EntryKindGlyph kind={entryKindOf(page)} />
+                    ) : undefined
                   }
-                >
-                  <a
-                    href={pageLink(page.fileName)}
-                    className={`page-entry${here ? " active" : ""}${page.done ? " done" : ""}`}
-                    role="treeitem"
-                    aria-level={dir ? 2 : 1}
-                    data-menu={page.fileName}
-                    title={
-                      replaced
-                        ? `${pageRowTitle(page)} — superseded by ${replaced.name}`
-                        : pageRowTitle(page)
-                    }
-                    aria-current={here ? "page" : undefined}
-                    draggable={ordered || undefined}
-                    onDragStart={
-                      ordered
-                        ? (e) => {
-                            e.dataTransfer.setData("text/plain", pageLink(page.fileName));
-                            e.dataTransfer.effectAllowed = "move";
-                            setDragging(page.fileName);
-                          }
-                        : undefined
-                    }
-                    onDragEnd={ordered ? endDrag : undefined}
-                    onClick={(e) =>
-                      spaClick(e, () => navigate({ fileName: page.fileName }, { push: true }))
-                    }
-                  >
-                    {page.name}
-                    {/* An entry's row carries what makes it an entry: its
-                        kind, who signed it and the day. */}
-                    {tab.dated && (
-                      <span className="entry-meta">
-                        <EntryKindChip kind={entryKindOf(page)} />
+                  label={page.name}
+                  trailing={
+                    !tab.dated && page.assigned ? (
+                      <span className="avatar chip-avatar" title={`Assigned to ${page.assigned}`}>
+                        {initialsOf(page.assigned)}
+                      </span>
+                    ) : undefined
+                  }
+                  meta={
+                    tab.dated ? (
+                      <>
                         {page.author && <span className="entry-author">{page.author}</span>}
                         {page.date && <span className="entry-day">{dayOf(page.date)}</span>}
-                      </span>
-                    )}
-                  </a>
-                  {!readOnly && (
-                  <span className="tree-row-menu">
-                    <Tooltip label="More actions">
-                      <button
-                        type="button"
-                        className="tree-menu-btn"
-                        aria-label={`Menu for ${page.name}`}
-                        aria-haspopup="menu"
-                        aria-expanded={menu === page.fileName}
-                        onClick={() => setMenu((m) => (m === page.fileName ? null : page.fileName))}
-                      >
-                        <Ellipsis size={14} aria-hidden="true" />
-                      </button>
-                    </Tooltip>
-                    <Menu
-                      open={menu === page.fileName}
-                      onClose={() => setMenu(null)}
-                      label={`Menu for ${page.name}`}
-                      className="tree-menu"
-                      containerSelector=".tree-row-menu"
-                      // One order for every sidebar ⋯ (specs/ui/ui.feature.md
-                      // "Feature entry menu"): name, place, share, derive,
-                      // delete.
-                      items={[
+                      </>
+                    ) : undefined
+                  }
+                  menu={
+                    readOnly
+                      ? undefined
+                      : {
+                          label: `Menu for ${page.name}`,
+                          open: menu === page.fileName,
+                          onToggle: () => setMenu((m) => (m === page.fileName ? null : page.fileName)),
+                          onClose: () => setMenu(null),
+                          // One order for every sidebar ⋯ (specs/ui/ui.feature.md
+                          // "Feature entry menu"): name, place, share, derive,
+                          // delete.
+                          items: [
                         {
                           id: "rename",
                           label: "Rename",
@@ -1609,11 +1610,10 @@ export function PagesSidebar({
                           danger: true,
                           onSelect: () => void removePage(page),
                         },
-                      ]}
-                    />
-                  </span>
-                  )}
-                </div>
+                          ],
+                        }
+                  }
+                />
               );
             })}
           </div>

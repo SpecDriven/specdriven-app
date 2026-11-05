@@ -21,6 +21,12 @@ export function entryKindOf(page: PageListing): EntryKind {
 }
 
 /** The chip beside an entry's title, in the list and in its header. */
+/** The kind as a glyph alone — a sidebar row's leading slot. */
+export function EntryKindGlyph({ kind, size = 13 }: { kind: EntryKind; size?: number }) {
+  const Icon = kind === "Decision" ? Gavel : Eye;
+  return <Icon size={size} className={`entry-glyph entry-glyph-${kind.toLowerCase()}`} role="img" aria-label={kind} />;
+}
+
 export function EntryKindChip({ kind, size = 11 }: { kind: EntryKind; size?: number }) {
   const Icon = kind === "Decision" ? Gavel : Eye;
   return (

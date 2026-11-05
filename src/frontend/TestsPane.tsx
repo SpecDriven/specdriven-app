@@ -38,6 +38,8 @@ import { SaveIndicator, toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
 import { ClipboardPlus, ListPlus } from "lucide-react";
 import { SectionAction, SidebarSection } from "./SidebarSection";
+import { SidebarRow } from "./SidebarRow";
+import { ProgressRing } from "./StatusIcon";
 import { listKeyDown, useRevealActive } from "./sidebarList";
 import { isTypingTarget } from "./shortcuts";
 import { testsPath, type TestsRoute } from "../plugins/builtin/tests/route";
@@ -1409,6 +1411,8 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
   /** The list: the open row is revealed in it, and keys walk its rows. */
   const listRef = useRef<HTMLDivElement>(null);
   useRevealActive(listRef, activeId);
+  // One row shape for plans and cases (src/frontend/SidebarRow.tsx); a
+  // plan's progress trails as the ring a feature's publish rollup is.
   const row = (
     key: string,
     to: TestsRoute,
@@ -1417,38 +1421,27 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
     items: MenuItem[],
     extra?: ReactNode,
   ) => (
-    <div key={key} className="page-row">
-      <a
-        href={testsPath(to)}
-        className={`page-entry${activeId === key ? " active" : ""}`}
-        title={title}
-        role="treeitem"
-        aria-level={1}
-        data-menu={key}
-        aria-current={activeId === key ? "page" : undefined}
-        onClick={(e) => spaClick(e, () => onNavigate(to, { push: true }))}
-      >
-        {label}
-        {extra}
-      </a>
-      {!readOnly && (
-      <span className="tree-row-menu">
-        <Tooltip label="More actions">
-          <button
-            type="button"
-            className="tree-menu-btn"
-            aria-label={`Menu for ${title}`}
-            aria-haspopup="menu"
-            aria-expanded={menu === key}
-            onClick={() => setMenu((m) => (m === key ? null : key))}
-          >
-            <Ellipsis size={14} aria-hidden="true" />
-          </button>
-        </Tooltip>
-        <Menu open={menu === key} onClose={() => setMenu(null)} label={`Menu for ${title}`} className="tree-menu" containerSelector=".tree-row-menu" items={items} />
-      </span>
-      )}
-    </div>
+    <SidebarRow
+      key={key}
+      href={testsPath(to)}
+      active={activeId === key}
+      menuKey={key}
+      title={title}
+      label={label}
+      trailing={extra}
+      onOpen={(e) => spaClick(e, () => onNavigate(to, { push: true }))}
+      menu={
+        readOnly
+          ? undefined
+          : {
+              label: `Menu for ${title}`,
+              open: menu === key,
+              onToggle: () => setMenu((m) => (m === key ? null : key)),
+              onClose: () => setMenu(null),
+              items,
+            }
+      }
+    />
   );
   const open = view ?? { kind: "plans" as const };
   return (
@@ -1489,11 +1482,7 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
               { id: "copy", label: "Copy link", icon: <Link size={13} />, onSelect: () => void copyTestsLink({ kind: "plan", id: plan.id }) },
               { id: "delete", label: "Delete", icon: <Trash2 size={13} />, danger: true, onSelect: () => void deletePlanFlow(plan, confirm, onNavigate, open) },
             ],
-            progress ? (
-              <span className="page-entry-meta" aria-label={progressSummary(progress)}>
-                {progress.done}/{progress.total}
-              </span>
-            ) : undefined,
+            progress ? <ProgressRing done={progress.done} total={progress.total} label={progressSummary(progress)} /> : undefined,
           );
         })}
         {store.plans.length === 0 && <p className="empty">No test plans yet</p>}
