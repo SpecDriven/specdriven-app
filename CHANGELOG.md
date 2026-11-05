@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.231 — 2026-11-05
+
+- Sidebar consistency, phase 1: one ⋯ menu order, Copy link on tree rows, chord fixes, rail parity, grouped user menu ([#379](https://github.com/SpecDriven/specdriven-app/pull/379))
+
 ## v0.1.230 — 2026-11-04
 
 - Paste an image into the coding agent pane's message ([#378](https://github.com/SpecDriven/specdriven-app/pull/378))
