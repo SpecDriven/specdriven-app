@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.230 — 2026-11-04
+
+- Paste an image into the coding agent pane's message ([#378](https://github.com/SpecDriven/specdriven-app/pull/378))
+- A turn that failed to sign in offers Open Settings even when the reply already said why ([#377](https://github.com/SpecDriven/specdriven-app/pull/377))
+- Project settings: code repo rows stack path, folder and symlink lines so long paths no longer crowd the controls ([#376](https://github.com/SpecDriven/specdriven-app/pull/376))
+
 ## v0.1.229 — 2026-11-04
 
 - A code repo that is not on this computer is offered for cloning when its data folder opens ([#375](https://github.com/SpecDriven/specdriven-app/pull/375))
