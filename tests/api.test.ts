@@ -29,6 +29,7 @@ describe("matchApi", () => {
     expect(matchApi("DELETE", "/api/project-settings")).toBeNull();
     expect(matchApi("POST", "/api/project-settings/specs-link")).not.toBeNull();
     expect(matchApi("GET", "/api/project-settings/specs-link")).toBeNull();
+    expect(matchApi("POST", "/api/project-settings/clone")).not.toBeNull();
   });
 
   // GitHub sign-in routes (git-operations.md): device-flow

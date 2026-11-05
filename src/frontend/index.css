@@ -3603,6 +3603,10 @@ button.table-add:hover {
   border-color: currentColor;
 }
 
+.code-repo-clone-error {
+  color: var(--danger, #c0392b);
+}
+
 .code-repo-link {
   display: flex;
   align-items: baseline;

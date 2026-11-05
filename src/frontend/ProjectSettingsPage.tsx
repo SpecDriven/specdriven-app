@@ -20,6 +20,10 @@ export interface CodeRepoRow {
   isDefault: boolean;
   exists: boolean;
   specsLink: { state: SpecsLinkState; target?: string };
+  /** A folder that is not there: the url the app suggests cloning it from, or null with nothing to go on. */
+  cloneUrl?: string | null;
+  /** A clone into the folder running, or failed with its error. */
+  clone?: { url: string; state: "running" | "failed"; error?: string };
 }
 
 export interface ProjectMemberRow {
@@ -36,6 +40,47 @@ export interface ProjectSettingsData {
   canEdit: boolean;
   canLink: boolean;
   canChooseFolder: boolean;
+  /** Missing code repos can be cloned here (not in the demo, the read-only site or a hosted worker). */
+  canClone?: boolean;
+}
+
+/**
+ * Ask for the url to clone a missing code repo from — the app's suggestion
+ * filled in — and start the clone (specs/app/project-settings.feature.md "A
+ * code repo that is not on this computer is offered for cloning"). Answers
+ * the page's data with the clone running, null when the user said no, or
+ * the server's refusal.
+ */
+export async function askToCloneCodeRepo(
+  prompt: (opts: PromptOptions) => Promise<string | null>,
+  repo: Pick<CodeRepoRow, "path" | "dir" | "cloneUrl" | "clone">,
+  opts: { intro?: string } = {},
+): Promise<{ data: ProjectSettingsData } | { error: string } | null> {
+  const url = await prompt({
+    title: `Clone ${repo.path}`,
+    hint: `${opts.intro ? `${opts.intro} ` : ""}It is cloned into ${repo.dir}.`,
+    initial: repo.clone?.url ?? repo.cloneUrl ?? "",
+    placeholder: "https://github.com/acme/acme-app",
+    confirmLabel: "Clone",
+  });
+  if (!url?.trim()) return null;
+  const res = await fetch("/api/project-settings/clone", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ codeRepo: repo.path, url: url.trim() }),
+  }).catch(() => null);
+  if (!res) return { error: "Could not start the clone" };
+  const body = (await res.json().catch(() => ({}))) as Partial<ProjectSettingsData> & { error?: string };
+  if (!res.ok) return { error: body.error ?? "Could not start the clone" };
+  return { data: body as ProjectSettingsData };
+}
+
+/** The code repos a freshly opened data folder should offer to clone: missing, not already cloning. */
+export function codeReposToOffer(data: ProjectSettingsData): CodeRepoRow[] {
+  if (!data.canClone) return [];
+  return data.codeRepos
+    .filter((r) => !r.exists && r.clone?.state !== "running")
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 }
 
 export interface ProjectSettingsPageProps {
@@ -164,6 +209,39 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
     }
   };
 
+  // A clone runs in the background: poll until no row is cloning, then let
+  // the app re-read its listing so the agent pane and Issues tab follow.
+  const cloning = (data?.codeRepos ?? []).some((r) => r.clone?.state === "running");
+  useEffect(() => {
+    if (!cloning) return;
+    const id = setInterval(() => {
+      void (async () => {
+        const res = await fetch("/api/project-settings").catch(() => null);
+        if (!res?.ok) return;
+        const body = (await res.json().catch(() => null)) as ProjectSettingsData | null;
+        if (!body) return;
+        setData(body);
+        if (!body.codeRepos.some((r) => r.clone?.state === "running")) props.onChanged?.();
+      })();
+    }, 1500);
+    return () => clearInterval(id);
+  }, [cloning, props.onChanged]);
+
+  const cloneRepo = async (repo: CodeRepoRow) => {
+    setBusy(true);
+    try {
+      const result = await askToCloneCodeRepo(props.prompt, repo);
+      if (!result) return;
+      if ("error" in result) setError(result.error);
+      else {
+        setData(result.data);
+        setError(null);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const repos = data?.codeRepos ?? [];
   const paths = repos.map((r) => r.path);
   const canEdit = data?.canEdit ?? false;
@@ -244,6 +322,32 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
                 <span className="settings-row-hint" title={repo.dir}>
                   {repo.dir}
                 </span>
+                {!repo.exists && (
+                  <span className="settings-row-hint code-repo-link" data-testid="code-repo-clone">
+                    {repo.clone?.state === "running" ? (
+                      <span>Cloning from {repo.clone.url}…</span>
+                    ) : (
+                      <>
+                        <span className={repo.clone?.state === "failed" ? "code-repo-clone-error" : undefined}>
+                          {repo.clone?.state === "failed"
+                            ? repo.clone.error ?? "The clone failed"
+                            : "Not on this computer"}
+                        </span>
+                        {data?.canClone && (
+                          <button
+                            type="button"
+                            className="link"
+                            disabled={busy}
+                            aria-label={`Clone ${repo.path}`}
+                            onClick={() => void cloneRepo(repo)}
+                          >
+                            {repo.clone?.state === "failed" ? "Try again…" : "Clone…"}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </span>
+                )}
                 {repo.exists && (
                   <span className="settings-row-hint code-repo-link">
                     <span>{specsLinkLabel(repo.specsLink, repo.exists)}</span>
