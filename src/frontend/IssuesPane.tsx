@@ -32,6 +32,10 @@ import { renderMarkdown } from "./markdown";
 import { shareUrl } from "./shareLink";
 import { toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
+import { useRef } from "react";
+import { CirclePlus, ListFilter } from "lucide-react";
+import { SectionAction, SidebarSection } from "./SidebarSection";
+import { listKeyDown, useRevealActive } from "./sidebarList";
 import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 import { formatWhen } from "./testing";
 import { cleanLine, cleanText } from "../server/text";
@@ -663,30 +667,77 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
   const store = useIssues();
   const [menu, setMenu] = useState<number | null>(null);
   const activeNumber = view?.kind === "issue" ? view.number : null;
+  const [filterOpen, setFilterOpen] = useState(false);
+  /** The list: the open row is revealed in it, and keys walk its rows. */
+  const listRef = useRef<HTMLDivElement>(null);
+  useRevealActive(listRef, activeNumber);
+  const stateLabel = store.filter === "open" ? "Open" : store.filter === "closed" ? "Closed" : "All";
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-issues" aria-labelledby="side-tab-issues">
-      {!store.readOnly && (
-        <div className="sidebar-actions">
-          <button type="button" onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ New issue</button>
-        </div>
-      )}
-      <div className="page-rows">
-        <a
-          href="/issues"
-          className={`page-entry tests-root${view?.kind === "list" ? " active" : ""}`}
-          onClick={(e) => spaClick(e, () => onNavigate({ kind: "list" }, { push: true }))}
-        >
-          <Bug size={13} aria-hidden="true" /> All issues
-        </a>
-        <div className="page-group issue-group">
-          <StateFilter filter={store.filter} onChange={(s) => void issues.load(s)} compact />
-        </div>
+      {/* The tab's head (src/frontend/SidebarSection.tsx): its name is the
+          list's link, the state filter is the head's chip as the Specs
+          tree's is, and "new" is an icon — none while GitHub is read-only. */}
+      <SidebarSection
+        label={
+          <a
+            href="/issues"
+            className={view?.kind === "list" ? "active" : undefined}
+            onClick={(e) => spaClick(e, () => onNavigate({ kind: "list" }, { push: true }))}
+          >
+            Issues
+          </a>
+        }
+        filter={
+          <>
+            <Tooltip label="Show open, closed or all issues">
+              <button
+                type="button"
+                className={`chip${store.filter !== "open" ? " on" : ""}`}
+                aria-label="Filter issues"
+                aria-haspopup="menu"
+                aria-expanded={filterOpen}
+                onClick={() => setFilterOpen((o) => !o)}
+              >
+                <ListFilter size={12} aria-hidden="true" /> {stateLabel}
+              </button>
+            </Tooltip>
+            <Menu
+              open={filterOpen}
+              onClose={() => setFilterOpen(false)}
+              label="Filter issues"
+              className="filter-menu"
+              containerSelector=".filter-anchor"
+              items={(["open", "closed", "all"] as const).map((s) => ({
+                id: s,
+                label: s === "open" ? "Open" : s === "closed" ? "Closed" : "All",
+                checked: store.filter === s,
+                onSelect: () => void issues.load(s),
+              }))}
+            />
+          </>
+        }
+        actions={
+          !store.readOnly && (
+            <SectionAction label="New issue" keys="c" icon={<CirclePlus size={15} />} onClick={() => onNavigate({ kind: "new" }, { push: true })} />
+          )
+        }
+      />
+      <div
+        className="page-rows"
+        role="tree"
+        aria-label="Issues"
+        ref={listRef}
+        onKeyDown={(e) => listKeyDown(e, (key) => setMenu(Number(key)))}
+      >
         {store.issues.map((issue) => (
           <div key={issue.number} className="page-row">
             <a
               href={issuesPath({ kind: "issue", number: issue.number })}
               className={`page-entry${activeNumber === issue.number ? " active" : ""}`}
               title={`#${issue.number} ${issue.title}`}
+              role="treeitem"
+              aria-level={1}
+              data-menu={String(issue.number)}
               aria-current={activeNumber === issue.number ? "page" : undefined}
               onClick={(e) => spaClick(e, () => onNavigate({ kind: "issue", number: issue.number }, { push: true }))}
             >
@@ -716,7 +767,7 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
             </span>
           </div>
         ))}
-        {store.error && !store.loading && <p className="empty">{store.error}</p>}
+        {store.error && !store.loading && <p className="error empty">{store.error}</p>}
         {store.loaded && !store.error && store.issues.length === 0 && (
           <p className="empty">No {store.filter === "all" ? "" : store.filter + " "}issues</p>
         )}

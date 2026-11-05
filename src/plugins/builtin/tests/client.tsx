@@ -18,6 +18,9 @@ const tab: TabPlugin<TestsRoute> = {
   icon: FlaskConical,
   order: 60,
   shortcut: "g e",
+  // The tab bar only turns the sidebar to the list; the head's link and
+  // the rows open the pane's views.
+  opensOnSelect: false,
   route: {
     match: parseTestsRoute,
     path: testsPath,

@@ -36,6 +36,9 @@ import { shareUrl } from "./shareLink";
 import { cleanLine, cleanText } from "../server/text";
 import { SaveIndicator, toast } from "./Toasts";
 import { Tooltip } from "./Tooltip";
+import { ClipboardPlus, ListPlus } from "lucide-react";
+import { SectionAction, SidebarSection } from "./SidebarSection";
+import { listKeyDown, useRevealActive } from "./sidebarList";
 import { isTypingTarget } from "./shortcuts";
 import { testsPath, type TestsRoute } from "../plugins/builtin/tests/route";
 import {
@@ -1403,6 +1406,9 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
   const store = useTesting();
   const [menu, setMenu] = useState<string | null>(null);
   const activeId = view && "id" in view ? view.id : null;
+  /** The list: the open row is revealed in it, and keys walk its rows. */
+  const listRef = useRef<HTMLDivElement>(null);
+  useRevealActive(listRef, activeId);
   const row = (
     key: string,
     to: TestsRoute,
@@ -1416,6 +1422,9 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
         href={testsPath(to)}
         className={`page-entry${activeId === key ? " active" : ""}`}
         title={title}
+        role="treeitem"
+        aria-level={1}
+        data-menu={key}
         aria-current={activeId === key ? "page" : undefined}
         onClick={(e) => spaClick(e, () => onNavigate(to, { push: true }))}
       >
@@ -1444,21 +1453,29 @@ export function TestsSidebar({ view, prompt, confirm, onNavigate, readOnly = fal
   const open = view ?? { kind: "plans" as const };
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-tests" aria-labelledby="side-tab-tests">
-      {/* The read-only site (src/server/readOnlyMode.ts) creates nothing. */}
-      {!readOnly && (
-        <div className="sidebar-actions">
-          <button type="button" onClick={() => void newPlanFlow(prompt, onNavigate)}>+ New plan</button>
-          <button type="button" onClick={() => void newCaseFlow(prompt, onNavigate)}>+ New case</button>
-        </div>
-      )}
-      <div className="page-rows">
-        <a
-          href="/tests"
-          className={`page-entry tests-root${view?.kind === "plans" ? " active" : ""}`}
-          onClick={(e) => spaClick(e, () => onNavigate({ kind: "plans" }, { push: true }))}
-        >
-          <FlaskConical size={13} aria-hidden="true" /> Overview
-        </a>
+      {/* The tab's head (src/frontend/SidebarSection.tsx): its name is the
+          overview link, and the "new" actions are icons — none on the
+          read-only site (src/server/readOnlyMode.ts). */}
+      <SidebarSection
+        label={
+          <a
+            href="/tests"
+            className={view?.kind === "plans" ? "active" : undefined}
+            onClick={(e) => spaClick(e, () => onNavigate({ kind: "plans" }, { push: true }))}
+          >
+            Tests
+          </a>
+        }
+        actions={
+          !readOnly && (
+            <>
+              <SectionAction label="New plan" icon={<ClipboardPlus size={15} />} onClick={() => void newPlanFlow(prompt, onNavigate)} />
+              <SectionAction label="New case" keys="c" icon={<ListPlus size={15} />} onClick={() => void newCaseFlow(prompt, onNavigate)} />
+            </>
+          )
+        }
+      />
+      <div className="page-rows" role="tree" aria-label="Tests" ref={listRef} onKeyDown={(e) => listKeyDown(e, setMenu)}>
         <div className="page-group">Plans</div>
         {store.plans.map((plan) => {
           const { progress } = planRollup(plan, store.executions);

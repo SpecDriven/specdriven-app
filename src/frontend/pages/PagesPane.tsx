@@ -20,9 +20,11 @@ import {
   Circle,
   Ellipsis,
   Eye,
+  FilePlus,
   FolderInput,
   Gavel,
   Link,
+  ListFilter,
   ListPlus,
   Pencil,
   Trash2,
@@ -50,6 +52,8 @@ import { Popover } from "../Popover";
 import { PageSkeleton } from "../Skeleton";
 import { SaveIndicator, toast } from "../Toasts";
 import { Tooltip } from "../Tooltip";
+import { SectionAction, SidebarSection } from "../SidebarSection";
+import { listKeyDown, useRevealActive } from "../sidebarList";
 import { EntryKindChip, dayOf, entryGroups, entryKindOf } from "../notebook";
 import { createPromiseQueue } from "../promiseQueue";
 import { shareUrl } from "../shareLink";
@@ -942,6 +946,12 @@ export function PagesSidebar({
   const [menu, setMenu] = useState<string | null>(null);
   /** The page being dragged, if any — an ordered tab's only. */
   const [dragging, setDragging] = useState<string | null>(null);
+  /** The list: the open row is revealed in it, and keys walk its rows. */
+  const listRef = useRef<HTMLDivElement>(null);
+  useRevealActive(listRef, active);
+  /** Tasks (specs/app/tasks.feature.md): all of them, the open ones, or the done. */
+  const [taskFilter, setTaskFilter] = useState<"all" | "open" | "done">("all");
+  const [filterOpen, setFilterOpen] = useState(false);
   /** Where it would land: on the edge of a row, or into a folder's top. */
   const [dropAt, setDropAt] = useState<
     { row: string; after: boolean } | { folder: string } | null
@@ -1289,24 +1299,75 @@ export function PagesSidebar({
       id={`side-panel-${tab.folder}`}
       aria-labelledby={`side-tab-${tab.folder}`}
     >
-      {/* The read-only site (src/server/readOnlyMode.ts) creates nothing. */}
-      {!readOnly && (
-      <div className="sidebar-actions">
-        {/* A project holds tasks, so it comes first; a plain folder follows
-            the page it would hold. */}
-        {ordered && tab.projects && (
-          <button type="button" onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
-        )}
-        <button type="button" onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}>
-          + New {tab.noun}
-        </button>
-        {ordered && !tab.projects && (
-          <button type="button" onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
-        )}
-      </div>
-      )}
-      <div className="page-rows">
-        {groups.map(({ dir, pages: group }) => (
+      {/* The tab's head (src/frontend/SidebarSection.tsx): its name, the
+          Tasks filter, and the "new" actions as icons — the read-only site
+          (src/server/readOnlyMode.ts) creates nothing. A project holds
+          tasks, so its icon comes first; a plain folder follows the page it
+          would hold. */}
+      <SidebarSection
+        label={tab.title}
+        filter={
+          tab.done && (
+            <>
+              <Tooltip label="Filter tasks">
+                <button
+                  type="button"
+                  className={`chip${taskFilter !== "all" ? " on" : ""}`}
+                  aria-label="Filter tasks"
+                  aria-haspopup="menu"
+                  aria-expanded={filterOpen}
+                  onClick={() => setFilterOpen((o) => !o)}
+                >
+                  <ListFilter size={12} aria-hidden="true" />{" "}
+                  {taskFilter === "all" ? "Filter" : taskFilter === "open" ? "Open" : "Done"}
+                </button>
+              </Tooltip>
+              <Menu
+                open={filterOpen}
+                onClose={() => setFilterOpen(false)}
+                label="Filter tasks"
+                className="filter-menu"
+                containerSelector=".filter-anchor"
+                items={(["all", "open", "done"] as const).map((f) => ({
+                  id: f,
+                  label: f === "all" ? "All tasks" : f === "open" ? "Open" : "Done",
+                  checked: taskFilter === f,
+                  onSelect: () => setTaskFilter(f),
+                }))}
+              />
+            </>
+          )
+        }
+        actions={
+          !readOnly && (
+            <>
+              {ordered && tab.projects && (
+                <SectionAction label={`New ${folderWord}`} icon={<NewFolderIcon size={15} />} onClick={() => void createFolderIn("")} />
+              )}
+              <SectionAction
+                label={`New ${tab.noun}`}
+                keys="c"
+                icon={tab.done ? <ListPlus size={15} /> : <FilePlus size={15} />}
+                onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}
+              />
+              {ordered && !tab.projects && (
+                <SectionAction label={`New ${folderWord}`} icon={<NewFolderIcon size={15} />} onClick={() => void createFolderIn("")} />
+              )}
+            </>
+          )
+        }
+      />
+      <div
+        className="page-rows"
+        role="tree"
+        aria-label={tab.title}
+        ref={listRef}
+        onKeyDown={(e) => listKeyDown(e, (key) => setMenu(() => key))}
+      >
+        {groups.map(({ dir, pages: group }) => {
+          const visible =
+            tab.done && taskFilter !== "all" ? group.filter((p) => (taskFilter === "done") === Boolean(p.done)) : group;
+          return (
           <div key={dir || "."}>
             {dir && !ordered && <div className="page-group">{dir}</div>}
             {dir && ordered && (
@@ -1395,7 +1456,7 @@ export function PagesSidebar({
                 )}
               </div>
             )}
-            {group.map((page, i) => {
+            {visible.map((page, i) => {
               const replaced = tab.dated ? supersededBy[page.fileName] : undefined;
               const here = page.fileName === active;
               const edge =
@@ -1436,6 +1497,9 @@ export function PagesSidebar({
                   <a
                     href={pageLink(page.fileName)}
                     className={`page-entry${here ? " active" : ""}${page.done ? " done" : ""}`}
+                    role="treeitem"
+                    aria-level={dir ? 2 : 1}
+                    data-menu={page.fileName}
                     title={
                       replaced
                         ? `${pageRowTitle(page)} — superseded by ${replaced.name}`
@@ -1511,7 +1575,7 @@ export function PagesSidebar({
                                 id: "move-down",
                                 label: "Move down",
                                 icon: <ArrowDown size={13} />,
-                                disabled: i === group.length - 1,
+                                disabled: i === visible.length - 1,
                                 onSelect: () => stepPage(page, 1),
                               },
                               {
@@ -1553,7 +1617,8 @@ export function PagesSidebar({
               );
             })}
           </div>
-        ))}
+          );
+        })}
         {pages.length === 0 && <p className="empty">{tab.empty}</p>}
         {tab.archivable && !readOnly && archived.length > 0 && (
           <ArchivedPages

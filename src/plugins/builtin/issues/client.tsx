@@ -33,6 +33,9 @@ const tabOf = (config: IssuesConfig): TabPlugin<IssuesRoute> => ({
   icon: Bug,
   order: 50,
   shortcut: "g i",
+  // The tab bar only turns the sidebar to the list; the head's link and
+  // the rows open the pane's views.
+  opensOnSelect: false,
   route: {
     match: parseIssuesRoute,
     path: issuesPath,

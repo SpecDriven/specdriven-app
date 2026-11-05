@@ -42,6 +42,7 @@ import {
   type CodeGenTarget,
 } from "./codeGenTarget";
 import { Logo } from "./Logo";
+import { SidebarSection } from "./SidebarSection";
 import {
   Activity,
   Check,
@@ -10065,9 +10066,9 @@ export function App() {
         {/* The Features section head carries the filter: by status, by
             assignee. Active filters show as chips that clear on click, on a
             row of their own under the head so they never crowd its icons. */}
-        <div className="section-head">
-          Features
-          <span className="filter-anchor">
+        <SidebarSection
+          label="Features"
+          filter={<>
             <Tooltip label="Filter features">
               <button
                 type="button"
@@ -10152,8 +10153,8 @@ export function App() {
                 })),
               ]}
             />
-          </span>
-          {/* The tree's actions (src/frontend/ActionIcons.tsx) sit on its
+          </>}
+          /* The tree's actions (src/frontend/ActionIcons.tsx) sit on its
               head rather than in rows of their own. New folder and New
               feature create inside the clicked folder, and their tooltips
               name it. Code gen session (specs/agents/claude.feature.md): check
@@ -10161,9 +10162,8 @@ export function App() {
               then Start session asks for a name and where to run; the
               count of checked specs rides on its button. Timing your own
               work is the Pomodoro at the foot of the sidebar
-              (specs/app/pomodoro.feature.md), not a kind of session. */}
-          {!readOnly && (
-          <span className="head-actions">
+              (specs/app/pomodoro.feature.md), not a kind of session. */
+          actions={!readOnly && (<>
             <Tooltip label={selectedFolder ? `New folder in "${selectedFolder}"` : "New folder"}>
               <button type="button" className="ibtn" aria-label="New folder" onClick={createFolder}>
                 <NewFolderIcon size={15} />
@@ -10219,9 +10219,8 @@ export function App() {
                 )}
               </button>
             </Tooltip>
-          </span>
-          )}
-        </div>
+          </>)}
+        >
         {filtering && (
           <div className="filter-chips">
             {filter.status && (
@@ -10266,6 +10265,7 @@ export function App() {
           <p className="session-notice">Selected: {selectionLabel}</p>
         )}
         {sessionNotice && <p className="session-notice">{sessionNotice}</p>}
+        </SidebarSection>
         {/* Folder tree (specs/ui/folders.feature.md): folders are drop targets
             for drag-moving features; the tree background is the top level. */}
         {(

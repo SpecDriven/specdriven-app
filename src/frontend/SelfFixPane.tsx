@@ -24,6 +24,9 @@ import {
   type SelfFixIndex,
 } from "./selfFix";
 import { toast } from "./Toasts";
+import { CirclePlus } from "lucide-react";
+import { SectionAction, SidebarSection } from "./SidebarSection";
+import { listKeyDown, useRevealActive } from "./sidebarList";
 
 type Navigate = TabNavigate<SelfFixRoute>;
 
@@ -384,19 +387,29 @@ export function SelfFixSidebar({ view, onNavigate }: { view: SelfFixRoute | null
   const store = useSelfFix();
   const fixes = store.index?.fixes ?? [];
   const active = view?.kind === "fix" ? view.id : null;
+  /** The list: the open row is revealed in it, and keys walk its rows. */
+  const listRef = useRef<HTMLDivElement>(null);
+  useRevealActive(listRef, active);
   return (
     <div className="side-panel page-list" role="tabpanel" id="side-panel-self-fix" aria-labelledby="side-tab-self-fix">
-      <div className="sidebar-actions">
-        <button onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ Fix this app</button>
-      </div>
-      <div className="page-rows">
-        {fixes.length === 0 && <p className="hint">No fixes yet.</p>}
+      {/* The tab's head (src/frontend/SidebarSection.tsx), its one action
+          the new fix. */}
+      <SidebarSection
+        label="Fixes"
+        actions={
+          <SectionAction label="Fix this app" keys="c" icon={<CirclePlus size={15} />} onClick={() => onNavigate({ kind: "new" }, { push: true })} />
+        }
+      />
+      <div className="page-rows" role="tree" aria-label="Fixes" ref={listRef} onKeyDown={listKeyDown}>
+        {fixes.length === 0 && <p className="empty">No fixes yet</p>}
         {fixes.map((fix) => (
           <div key={fix.id} className="page-row">
             <a
               href={selfFixPath({ kind: "fix", id: fix.id })}
               className={`page-entry${active === fix.id ? " active" : ""}`}
               title={fixLabel(fix)}
+              role="treeitem"
+              aria-level={1}
               aria-current={active === fix.id ? "page" : undefined}
               onClick={(e) => spaClick(e, () => onNavigate({ kind: "fix", id: fix.id }, { push: true }))}
             >
