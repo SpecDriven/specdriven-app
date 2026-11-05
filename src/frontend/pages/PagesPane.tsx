@@ -1289,19 +1289,22 @@ export function PagesSidebar({
       id={`side-panel-${tab.folder}`}
       aria-labelledby={`side-tab-${tab.folder}`}
     >
+      {/* The read-only site (src/server/readOnlyMode.ts) creates nothing. */}
+      {!readOnly && (
       <div className="sidebar-actions">
         {/* A project holds tasks, so it comes first; a plain folder follows
             the page it would hold. */}
         {ordered && tab.projects && (
-          <button onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
+          <button type="button" onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
         )}
-        <button onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}>
+        <button type="button" onClick={() => void newPageFlow(tab, store, app.promptWithChoice, navigate)}>
           + New {tab.noun}
         </button>
         {ordered && !tab.projects && (
-          <button onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
+          <button type="button" onClick={() => void createFolderIn("")}>+ New {folderWord}</button>
         )}
       </div>
+      )}
       <div className="page-rows">
         {groups.map(({ dir, pages: group }) => (
           <div key={dir || "."}>
@@ -1337,6 +1340,7 @@ export function PagesSidebar({
                 ) : (
                   <span className="page-folder-name">{dir}</span>
                 )}
+                {!readOnly && (
                 <span className="tree-row-menu">
                   <Tooltip label="More actions">
                     <button
@@ -1388,6 +1392,7 @@ export function PagesSidebar({
                     ]}
                   />
                 </span>
+                )}
               </div>
             )}
             {group.map((page, i) => {
@@ -1463,6 +1468,7 @@ export function PagesSidebar({
                       </span>
                     )}
                   </a>
+                  {!readOnly && (
                   <span className="tree-row-menu">
                     <Tooltip label="More actions">
                       <button
@@ -1482,7 +1488,16 @@ export function PagesSidebar({
                       label={`Menu for ${page.name}`}
                       className="tree-menu"
                       containerSelector=".tree-row-menu"
+                      // One order for every sidebar ⋯ (specs/ui/ui.feature.md
+                      // "Feature entry menu"): name, place, share, derive,
+                      // delete.
                       items={[
+                        {
+                          id: "rename",
+                          label: "Rename",
+                          icon: <Pencil size={13} />,
+                          onSelect: () => void renamePage(page),
+                        },
                         ...(ordered
                           ? [
                               {
@@ -1507,12 +1522,6 @@ export function PagesSidebar({
                               },
                             ]
                           : []),
-                        {
-                          id: "rename",
-                          label: "Rename",
-                          icon: <Pencil size={13} />,
-                          onSelect: () => void renamePage(page),
-                        },
                         {
                           id: "copy",
                           label: "Copy link",
@@ -1539,6 +1548,7 @@ export function PagesSidebar({
                       ]}
                     />
                   </span>
+                  )}
                 </div>
               );
             })}

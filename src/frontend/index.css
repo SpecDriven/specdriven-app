@@ -653,18 +653,18 @@ aside header h1 {
   -webkit-app-region: no-drag;
 }
 
-.repo-recent-toggle {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  background: transparent;
+/* The header's folder controls — the recent ▾, the ✎ and Sync — are the
+   same quiet `.ibtn` as the pane toggles beside them, a size down so the
+   folder name keeps its room. */
+.repo-row .ibtn {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
   color: var(--text-3);
-  padding: 0.25rem 0.2rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
+  /* Stays clickable inside the macOS drag-region header (desktop app). */
+  -webkit-app-region: no-drag;
 }
 
-.repo-recent-toggle:hover:not(:disabled),
 .repo-recent-toggle[aria-expanded="true"] {
   color: var(--text-1);
   background: var(--hover);
@@ -682,47 +682,9 @@ aside header h1 {
   right: 0;
 }
 
-.repo-edit {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  padding: 0.1rem 0.35rem;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-  /* Stays clickable inside the macOS drag-region header (desktop app). */
-  -webkit-app-region: no-drag;
-}
-
-.repo-edit:hover {
-  color: var(--text-1);
-  background: var(--hover);
-}
-
-/* Sync button (specs/ui.spec.md "Main page"), right of the ✎ so it sits by
-   the data folder it reloads: the header's quiet icon-button styling with a
-   label, pushed to the header's right edge. */
-.repo-sync {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin-left: auto;
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  padding: 0.1rem 0.4rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.75rem;
-  flex-shrink: 0;
-  white-space: nowrap;
-  /* Stays clickable inside the macOS drag-region header (desktop app). */
-  -webkit-app-region: no-drag;
-}
-
-.repo-sync:hover:not(:disabled) {
-  color: var(--text-1);
-  background: var(--hover);
-}
-
+/* Sync (specs/ui/ui.feature.md "Main page"), right of the ✎ so it sits by
+   the data folder it reloads: an icon button whose tooltip says what it
+   does, the icon turning while it runs. */
 .repo-sync:disabled {
   opacity: 0.6;
   cursor: progress;
@@ -1122,7 +1084,8 @@ a.page-entry.done {
   background: var(--hover);
 }
 
-/* The drop down: File (submenu with Rename) and Delete. */
+/* The drop down: Rename, Move…, Copy link, Delete — one order for every
+   sidebar row (specs/ui/ui.feature.md "Feature entry menu"). */
 .tree-menu {
   top: calc(100% + 0.2rem);
   right: 0.25rem;
@@ -5060,6 +5023,28 @@ kbd {
   box-shadow: var(--shadow-md);
 }
 
+/* An inline section (Menu `inline`): its label over its rows, a rule
+   between sections — the user menu's Account, Project and App. */
+.menu-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-section + .menu-section {
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.menu-section-label {
+  padding: 0.25rem 0.5rem 0.15rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
 .menu-entry {
   display: flex;
   flex-direction: column;
@@ -5805,6 +5790,27 @@ aside.rail {
   align-items: center;
   padding: 0.75rem 0.35rem;
   gap: 0.35rem;
+  /* The rail never scrolls, so its user menu may hang out beside it. */
+  overflow: visible;
+}
+
+/* The rail's avatar opens the same user menu the sidebar's does
+   (specs/user-info-settings.feature.md), hung from the rail's edge. */
+.rail-user {
+  position: relative;
+  display: inline-flex;
+}
+
+.rail-user .user-menu {
+  left: 0;
+  right: auto;
+  min-width: 13rem;
+}
+
+/* The logo is the home link — the README — as the folder name is in the
+   expanded sidebar. */
+aside.rail .rail-logo {
+  text-decoration: none;
 }
 
 aside.rail .rail-btn,

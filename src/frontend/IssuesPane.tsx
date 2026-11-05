@@ -667,7 +667,7 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
     <div className="side-panel page-list" role="tabpanel" id="side-panel-issues" aria-labelledby="side-tab-issues">
       {!store.readOnly && (
         <div className="sidebar-actions">
-          <button onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ New issue</button>
+          <button type="button" onClick={() => onNavigate({ kind: "new" }, { push: true })}>+ New issue</button>
         </div>
       )}
       <div className="page-rows">

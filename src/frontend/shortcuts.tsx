@@ -95,6 +95,25 @@ export function isTypingTarget(t: EventTarget | null): boolean {
 const keysOf = (s: Shortcut) => (Array.isArray(s.keys) ? s.keys : [s.keys]);
 
 /**
+ * The combos two shortcuts both claim. Dispatch takes the first registered,
+ * so the other's key is dead while its tooltip and the cheat sheet still
+ * advertise it — the `g i` the Issues tab and Images once shared.
+ */
+export function sharedKeys(shortcuts: Shortcut[]): string[] {
+  const owner = new Map<string, string>();
+  const shared = new Set<string>();
+  for (const s of shortcuts) {
+    if (s.displayOnly) continue;
+    for (const k of keysOf(s)) {
+      const by = owner.get(k);
+      if (by !== undefined && by !== s.id) shared.add(k);
+      else owner.set(k, s.id);
+    }
+  }
+  return [...shared];
+}
+
+/**
  * Register the app's shortcuts. Called once, with the list rebuilt every
  * render so the actions close over current state; the listener reads the
  * latest list through a ref.
@@ -103,6 +122,13 @@ export function useShortcuts(shortcuts: Shortcut[]) {
   const ref = useRef(shortcuts);
   ref.current = shortcuts;
   const pending = useRef<{ prefix: string; at: number } | null>(null);
+  // A key bound twice is a bug in the registry, said once per distinct set.
+  const warned = useRef("");
+  const shared = sharedKeys(shortcuts).join(", ");
+  if (shared && shared !== warned.current) {
+    warned.current = shared;
+    console.warn(`Keyboard shortcuts bound twice: ${shared}`);
+  }
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

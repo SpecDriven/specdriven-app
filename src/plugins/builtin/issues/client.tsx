@@ -40,6 +40,8 @@ const tabOf = (config: IssuesConfig): TabPlugin<IssuesRoute> => ({
     title: (view) => issuesTitle(view, issuesState()),
     home: { kind: "list" },
   },
+  // `c` on the tab starts an issue (specs/app/plugins.feature.md).
+  create: { label: "New issue", run: (_app, navigate) => navigate({ kind: "new" }, { push: true }) },
   Sidebar: ({ view, app, navigate }) => (
     <IssuesSidebar view={view} prompt={app.prompt} confirm={app.confirm} onNavigate={navigate} />
   ),

@@ -29,6 +29,12 @@ export interface MenuItem {
   onSelect?: () => void;
   /** A submenu, unfolded inline under the item. */
   items?: MenuItem[];
+  /**
+   * With `items`: a labelled section laid out inline — the label over its
+   * items, a rule between sections — rather than a submenu. For a long menu
+   * of unlike things (the user menu's account, project and app rows).
+   */
+  inline?: boolean;
 }
 
 export function Menu({
@@ -174,6 +180,16 @@ export function Menu({
   };
 
   const renderItem = (item: MenuItem) => {
+    if (item.items !== undefined && item.inline) {
+      return (
+        <div key={item.id} className="menu-section" role="group" aria-label={String(item.label)}>
+          <div className="menu-section-label" aria-hidden="true">
+            {item.label}
+          </div>
+          {item.items.map(renderItem)}
+        </div>
+      );
+    }
     const radio = item.checked !== undefined;
     const sub = item.items !== undefined;
     const isOpen = sub && expanded === item.id;
