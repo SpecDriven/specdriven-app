@@ -939,8 +939,13 @@ aside header h1 {
   overflow-y: auto;
 }
 
+/* The row's link (src/frontend/SidebarRow.tsx): the slots in a line —
+   leading glyph, label, trailing meta — on the feature row's padding. The
+   fill and the hover are the row's (.page-row), so the ⋯ sits inside. */
 a.page-entry {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   text-align: left;
   text-decoration: none;
   padding: 0.38rem 0.6rem;
@@ -950,20 +955,66 @@ a.page-entry {
   font-size: 0.8125rem;
 }
 
-a.page-entry:hover {
-  background: var(--hover);
-}
-
-a.page-entry.active {
-  background: var(--accent-soft);
-  font-weight: 500;
-}
-
-/* A finished task (specs/app/tasks.feature.md) is struck through in the list,
-   so the ones still to do are the ones that read as live. */
-a.page-entry.done {
-  text-decoration: line-through;
+.row-leading {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-3);
+}
+
+.row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-trailing {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A page's assignee trails as a small, quiet avatar. */
+.row-trailing .avatar {
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.55rem;
+  font-weight: 600;
+}
+
+/* The second line — an entry's author and day — under the label. */
+.row-meta {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* A finished task (specs/app/tasks.feature.md) reads muted, its done mark
+   leading, so the ones still to do are the ones that read as live. */
+.page-row.done .row-label {
+  color: var(--text-3);
+}
+
+/* An entry's kind as a glyph: a decision carries the accent, an
+   observation stays quiet (specs/app/engineering-notebook.feature.md). */
+.entry-glyph-decision {
+  color: var(--accent-strong);
 }
 
 .side-panel .empty {
@@ -5829,11 +5880,21 @@ aside header .collapse-btn {
 /* ---- Sidebar tabs under the search field ---- */
 .side-tabs {
   display: flex;
-  /* Four or five tabs (Specs, Roadmap, Tasks, Issues, Tests) outgrow the
-     sidebar's width; a second row beats a clipped last tab. */
-  flex-wrap: wrap;
+  /* One row, however many tabs: the open tab alone carries its label, the
+     others their icon with a tooltip, as the rail shows them. */
   gap: 0 0.1rem;
   border-bottom: 1px solid var(--border);
+}
+
+.side-tabs button:not(.active) .side-tab-label {
+  display: none;
+}
+
+/* The drawer is the screen's width, so every tab keeps its label there. */
+@media (max-width: 47.99rem) {
+  .side-tabs button:not(.active) .side-tab-label {
+    display: inline;
+  }
 }
 
 .side-tabs button {
@@ -6066,12 +6127,18 @@ aside header .collapse-btn {
   background: var(--hover);
 }
 
+/* The open row: the same accent fill the open feature's row gets. */
+.page-row.active {
+  background: var(--accent-soft);
+}
+
+.page-row.active .row-label {
+  font-weight: 500;
+}
+
 .page-row > a.page-entry {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .page-row.nested > a.page-entry {
@@ -6151,22 +6218,21 @@ button.page-archive-head:hover {
   align-items: flex-start;
 }
 
+/* An entry's row wraps: the kind glyph and the title on the first line,
+   the author and the day on the second, where the glyph's column is kept. */
 .page-row.entry-row > a.page-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  white-space: normal;
+  flex-wrap: wrap;
+  row-gap: 0.15rem;
   padding-top: 0.35rem;
   padding-bottom: 0.35rem;
 }
 
-.entry-meta {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.6875rem;
-  color: var(--text-3);
-  font-weight: 400;
+.page-row.entry-row .row-label {
+  white-space: normal;
+}
+
+.page-row.entry-row .row-meta {
+  padding-left: 1.15rem;
 }
 
 .entry-author {
@@ -8229,11 +8295,6 @@ a.tests-title {
   color: var(--text-2);
 }
 
-.page-entry-meta {
-  float: right;
-  font-size: 0.6875rem;
-  color: var(--text-3);
-}
 
 
 .page-group a {
@@ -9838,10 +9899,6 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   font-size: 0.875rem;
 }
 
-.self-fix-chip {
-  margin-left: 0.5rem;
-  font-size: 0.6875rem;
-}
 
 /* The scenario's number — its place in the file (specs/ui/ui.feature.md
    "number scenarios") — ahead of its status glyph on the card, in the tree

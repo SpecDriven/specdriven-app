@@ -10015,7 +10015,7 @@ export function App() {
                 className={shownTab === "specs" ? "active" : ""}
                 onClick={() => selectSidebarTab("specs")}
               >
-                <FileText size={14} aria-hidden="true" /> Specs
+                <FileText size={14} aria-hidden="true" /> <span className="side-tab-label">Specs</span>
               </button>
             </Tooltip>
             {/* The plugins' tabs (specs/app/plugins.feature.md), in their
@@ -10039,7 +10039,7 @@ export function App() {
                     }
                   }}
                 >
-                  <tab.icon size={14} aria-hidden="true" /> {tab.title}
+                  <tab.icon size={14} aria-hidden="true" /> <span className="side-tab-label">{tab.title}</span>
                 </button>
               </Tooltip>
             ))}

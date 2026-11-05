@@ -70,11 +70,20 @@ export function StatusIcon({
  * nothing.
  */
 export function PublishRing({ published, total }: { published: number; total: number }) {
+  return <ProgressRing done={published} total={total} label={`${published} of ${total} published`} />;
+}
+
+/**
+ * The same ring for any "n of m" rollup a sidebar row carries — a test
+ * plan's cases run, say — so progress reads the same way on every tab
+ * (specs/ui/ui.feature.md "Design system": glyphs, not text badges).
+ */
+export function ProgressRing({ done, total, label }: { done: number; total: number; label: string }) {
   if (total === 0) return null;
   const r = 5.5;
   const circ = 2 * Math.PI * r;
-  const filled = (published / total) * circ;
-  const label = `${published} of ${total} published`;
+  const filled = (done / total) * circ;
+  const published = done;
   return (
     <svg
       className="publish-ring"

@@ -35,6 +35,7 @@ import { Tooltip } from "./Tooltip";
 import { useRef } from "react";
 import { CirclePlus, ListFilter } from "lucide-react";
 import { SectionAction, SidebarSection } from "./SidebarSection";
+import { SidebarRow } from "./SidebarRow";
 import { listKeyDown, useRevealActive } from "./sidebarList";
 import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 import { formatWhen } from "./testing";
@@ -729,43 +730,25 @@ export function IssuesSidebar({ view, prompt, confirm, onNavigate }: { view: Iss
         ref={listRef}
         onKeyDown={(e) => listKeyDown(e, (key) => setMenu(Number(key)))}
       >
+        {/* One row shape (src/frontend/SidebarRow.tsx): the number leads. */}
         {store.issues.map((issue) => (
-          <div key={issue.number} className="page-row">
-            <a
-              href={issuesPath({ kind: "issue", number: issue.number })}
-              className={`page-entry${activeNumber === issue.number ? " active" : ""}`}
-              title={`#${issue.number} ${issue.title}`}
-              role="treeitem"
-              aria-level={1}
-              data-menu={String(issue.number)}
-              aria-current={activeNumber === issue.number ? "page" : undefined}
-              onClick={(e) => spaClick(e, () => onNavigate({ kind: "issue", number: issue.number }, { push: true }))}
-            >
-              <span className="issue-number">#{issue.number}</span> {issue.title}
-            </a>
-            <span className="tree-row-menu">
-              <Tooltip label="More actions">
-                <button
-                  type="button"
-                  className="tree-menu-btn"
-                  aria-label={`Menu for #${issue.number}`}
-                  aria-haspopup="menu"
-                  aria-expanded={menu === issue.number}
-                  onClick={() => setMenu((m) => (m === issue.number ? null : issue.number))}
-                >
-                  <Ellipsis size={14} aria-hidden="true" />
-                </button>
-              </Tooltip>
-              <Menu
-                open={menu === issue.number}
-                onClose={() => setMenu(null)}
-                label={`Menu for #${issue.number}`}
-                className="tree-menu"
-                containerSelector=".tree-row-menu"
-                items={issueMenuItems(issue, prompt, confirm, store.readOnly)}
-              />
-            </span>
-          </div>
+          <SidebarRow
+            key={issue.number}
+            href={issuesPath({ kind: "issue", number: issue.number })}
+            active={activeNumber === issue.number}
+            menuKey={String(issue.number)}
+            title={`#${issue.number} ${issue.title}`}
+            leading={<span className="issue-number">#{issue.number}</span>}
+            label={issue.title}
+            onOpen={(e) => spaClick(e, () => onNavigate({ kind: "issue", number: issue.number }, { push: true }))}
+            menu={{
+              label: `Menu for #${issue.number}`,
+              open: menu === issue.number,
+              onToggle: () => setMenu((m) => (m === issue.number ? null : issue.number)),
+              onClose: () => setMenu(null),
+              items: issueMenuItems(issue, prompt, confirm, store.readOnly),
+            }}
+          />
         ))}
         {store.error && !store.loading && <p className="error empty">{store.error}</p>}
         {store.loaded && !store.error && store.issues.length === 0 && (

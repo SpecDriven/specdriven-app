@@ -4,7 +4,7 @@
 // Restart and Revert controls. The agent's own transcript is the agent
 // pane's (src/frontend/AgentPane.tsx); this pane only opens it.
 
-import { Bot, FileDiff, Hammer, Image as ImageIcon, RotateCcw, Undo2, Wrench } from "lucide-react";
+import { Bot, CircleCheck, FileDiff, Hammer, Image as ImageIcon, RotateCcw, Undo2, Wrench } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent, type ReactNode } from "react";
 import { useSpellCheck } from "./spellCheckPref";
 import type { Confirm, Navigate as TabNavigate } from "../plugins/client/tabs";
@@ -26,6 +26,7 @@ import {
 import { toast } from "./Toasts";
 import { CirclePlus } from "lucide-react";
 import { SectionAction, SidebarSection } from "./SidebarSection";
+import { SidebarRow } from "./SidebarRow";
 import { listKeyDown, useRevealActive } from "./sidebarList";
 
 type Navigate = TabNavigate<SelfFixRoute>;
@@ -96,6 +97,13 @@ const STATUS_LABEL: Record<FixView["fix"]["status"], string> = {
   applied: "Applied",
   reverted: "Reverted",
 };
+
+/** The status as a glyph: the sidebar row's leading slot. */
+function FixStatusGlyph({ status }: { status: FixView["fix"]["status"] }) {
+  const Icon =
+    status === "running" ? Bot : status === "built" ? Hammer : status === "applied" ? CircleCheck : status === "reverted" ? Undo2 : Wrench;
+  return <Icon size={13} className={`fix-glyph fix-glyph-${status}`} role="img" aria-label={STATUS_LABEL[status]} />;
+}
 
 /** One fix's status line, with the session's state while it runs. */
 export function FixStatus({ view }: { view: FixView }) {
@@ -402,21 +410,18 @@ export function SelfFixSidebar({ view, onNavigate }: { view: SelfFixRoute | null
       />
       <div className="page-rows" role="tree" aria-label="Fixes" ref={listRef} onKeyDown={listKeyDown}>
         {fixes.length === 0 && <p className="empty">No fixes yet</p>}
+        {/* One row shape (src/frontend/SidebarRow.tsx): the status leads as
+            a glyph, named by the row's title. */}
         {fixes.map((fix) => (
-          <div key={fix.id} className="page-row">
-            <a
-              href={selfFixPath({ kind: "fix", id: fix.id })}
-              className={`page-entry${active === fix.id ? " active" : ""}`}
-              title={fixLabel(fix)}
-              role="treeitem"
-              aria-level={1}
-              aria-current={active === fix.id ? "page" : undefined}
-              onClick={(e) => spaClick(e, () => onNavigate({ kind: "fix", id: fix.id }, { push: true }))}
-            >
-              <Wrench size={13} aria-hidden="true" /> {fixLabel(fix)}
-              <span className={`chip muted self-fix-chip ${fix.status}`}>{STATUS_LABEL[fix.status]}</span>
-            </a>
-          </div>
+          <SidebarRow
+            key={fix.id}
+            href={selfFixPath({ kind: "fix", id: fix.id })}
+            active={active === fix.id}
+            title={`${fixLabel(fix)} — ${STATUS_LABEL[fix.status]}`}
+            leading={<FixStatusGlyph status={fix.status} />}
+            label={fixLabel(fix)}
+            onOpen={(e) => spaClick(e, () => onNavigate({ kind: "fix", id: fix.id }, { push: true }))}
+          />
         ))}
       </div>
     </div>
