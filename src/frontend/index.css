@@ -8483,6 +8483,42 @@ a.tests-title {
   gap: 0.75rem;
 }
 
+/* An issue started here but never created (src/frontend/issueDraft.ts):
+   one line above the list with a way back to it. */
+.issue-draft-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+}
+
+.issue-draft-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue-draft-text strong {
+  color: var(--text-1);
+  margin-right: 0.25rem;
+}
+
+.issue-draft-title {
+  color: var(--text-1);
+}
+
+.issue-draft-saved {
+  align-self: center;
+}
+
 /* The description and comment editors sit in a scrolling page, so they
    have no height to fill — give them room for a paragraph or two. */
 .issue-view .md-editor {

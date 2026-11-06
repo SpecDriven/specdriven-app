@@ -100,12 +100,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return data;
 }
 
-/** Run a mutation; a failure is a toast, and the caller gets null. */
-async function attempt<T>(work: () => Promise<T>, failure: string): Promise<T | null> {
+/** Run a mutation; a failure is a toast (with `after` as its last sentence), and the caller gets null. */
+async function attempt<T>(work: () => Promise<T>, failure: string, after = ""): Promise<T | null> {
   try {
     return await work();
   } catch (e) {
-    toast.error(`${failure}: ${(e as Error).message}`);
+    const reason = (e as Error).message.replace(/[.\s]+$/, "");
+    toast.error(after ? `${failure}: ${reason}. ${after}` : `${failure}: ${reason}`);
     return null;
   }
 }
@@ -183,6 +184,7 @@ export const issues = {
     }
   },
 
+  /** POST a new issue. A failure leaves the form's draft (src/frontend/issueDraft.ts) in place, and says so. */
   create(input: { title: string; body?: string }) {
     return attempt(async () => {
       const { issue } = await call<{ issue: Issue }>("/api/issues", {
@@ -191,7 +193,7 @@ export const issues = {
       });
       set(applyIssue({ ...state, details: { ...state.details, [issue.number]: { issue, comments: [] } } }, issue));
       return issue;
-    }, "Could not create the issue");
+    }, "Could not create the issue", "The draft is saved — try again.");
   },
 
   update(number: number, input: { title?: string; body?: string; state?: "open" | "closed"; stateReason?: string }) {
