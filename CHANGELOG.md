@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.236 — 2026-11-06
+
+- Pick several scenarios in the sidebar tree and delete them in one go ([#386](https://github.com/SpecDriven/specdriven-app/pull/386))
+
 ## v0.1.235 — 2026-11-05
 
 - Model menus show each model's display name, in the agent pane and Import from Jira/Wiki alike ([#385](https://github.com/SpecDriven/specdriven-app/pull/385))
