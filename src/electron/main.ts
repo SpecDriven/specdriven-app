@@ -15,7 +15,7 @@ import {
   session,
   shell,
 } from "electron";
-import { constants, existsSync } from "node:fs";
+import { constants, existsSync, rmSync } from "node:fs";
 import { access, readFile, realpath, rename } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
@@ -29,7 +29,8 @@ import { setActivator, setRelauncher, type ActivationResult } from "../server/re
 import { run } from "../server/run";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
-import { setConfluenceTokenBackend } from "../server/confluenceTokens";
+import { setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../server/agentMcp";
+import { exportConfluenceTokens, onConfluenceTokensChanged, setConfluenceTokenBackend } from "../server/confluenceTokens";
 import { setJiraTokenBackend } from "../server/jiraTokens";
 import { setQtestTokenBackend } from "../server/qtestTokens";
 import { setAhaTokenBackend } from "../server/ahaTokens";
@@ -83,6 +84,10 @@ app.setName("SpecDriven");
 const userData = app.getPath("userData");
 process.env.SPECDRIVEN_ROOT = userData;
 process.env.SPECDRIVEN_REPOS_DIR ||= join(userData, "repos");
+// The tokens as the Confluence MCP server reads them (src/server/agentMcp
+// .ts), written on a session's start and gone with the app: safeStorage
+// decrypts in this process only.
+const mcpTokensFile = join(userData, "confluence-tokens.mcp.json");
 
 // OpenTelemetry (opt-in via the standard OTEL_* environment variables) must
 // be up before the first sync or app:// API call so nothing escapes the
@@ -94,6 +99,7 @@ app.on("will-quit", (event) => {
   // Coding agent sessions (src/server/agentChat.ts) are Claude subprocesses;
   // none may outlive the window that showed them.
   void endAllChatSessions();
+  rmSync(mcpTokensFile, { force: true });
   if (telemetryFlushed || !telemetryActive()) return;
   telemetryFlushed = true;
   event.preventDefault();
@@ -504,6 +510,18 @@ if (!app.requestSingleInstanceLock()) {
         return createSecretSafeStorageBackend(file);
       });
     }
+    // The Confluence MCP server for agent sessions (src/server/agentMcp.ts):
+    // this bundle's copy run as node, reading the tokens from the file the
+    // app writes while it runs — kept current as tokens come and go.
+    setConfluenceMcpLauncher(() => ({
+      command: process.execPath,
+      args: [fileURLToPath(new URL("./mcp/confluence.js", import.meta.url))],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    }));
+    setConfluenceMcpTokensFile(() => exportConfluenceTokens(mcpTokensFile));
+    onConfluenceTokensChanged(() => {
+      if (existsSync(mcpTokensFile)) void exportConfluenceTokens(mcpTokensFile).catch(() => {});
+    });
     // Data-directory picker (specs/ui/app-start.feature.md): replace the
     // server's osascript fallback with the native dialog, parented to the
     // window.

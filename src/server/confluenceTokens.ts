@@ -73,6 +73,12 @@ export function createConfluenceFileBackend(fixedPath?: string): ConfluenceToken
 
 let backend: ConfluenceTokenBackend = createConfluenceFileBackend();
 let cached: ConfluenceTokenRecord[] | undefined;
+let listener: ((records: ConfluenceTokenRecord[]) => void) | null = null;
+
+/** Hear every change to the saved records (the desktop app refreshes its export, below). */
+export function onConfluenceTokensChanged(fn: ((records: ConfluenceTokenRecord[]) => void) | null): void {
+  listener = fn;
+}
 
 /** Swap the storage backend (Electron safeStorage, tests); resets the cache. */
 export function setConfluenceTokenBackend(next: ConfluenceTokenBackend): void {
@@ -100,6 +106,7 @@ export async function saveConfluenceToken(record: ConfluenceTokenRecord): Promis
   const next = [...(await records()).filter((r) => !sameBase(r.base, record.base)), record];
   await backend.save(next);
   cached = next;
+  listener?.(next);
 }
 
 /** Forget a wiki's token. */
@@ -108,4 +115,16 @@ export async function clearConfluenceToken(base: string): Promise<void> {
   if (next.length === 0) await backend.clear();
   else await backend.save(next);
   cached = next;
+  listener?.(next);
+}
+
+/**
+ * The records, tokens included, as a 0600 file at `path` — what the
+ * Confluence MCP server (src/mcp) reads where the app itself keeps them
+ * encrypted (src/electron/main.ts). Returns the path.
+ */
+export async function exportConfluenceTokens(path: string): Promise<string> {
+  await writeTextFile(path, JSON.stringify(await records(), null, 2) + "\n");
+  await chmod(path, 0o600);
+  return path;
 }

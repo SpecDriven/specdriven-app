@@ -290,6 +290,8 @@ export interface PageBody {
   url: string;
   /** The body as Confluence renders it for export — macros expanded, HTML. */
   html: string;
+  spaceKey?: string;
+  version?: number;
 }
 
 /**
@@ -304,7 +306,14 @@ export async function getPageBody(base: string, token: string, id: string): Prom
     token,
   );
   const html = raw.body?.export_view?.value ?? raw.body?.view?.value ?? "";
-  return { id: String(raw.id), title: raw.title, url: pageUrl(base, raw), html };
+  return {
+    id: String(raw.id),
+    title: raw.title,
+    url: pageUrl(base, raw),
+    html,
+    ...(raw.space?.key ? { spaceKey: raw.space.key } : {}),
+    ...(raw.version?.number ? { version: raw.version.number } : {}),
+  };
 }
 
 /** The current page titled `title` in a space, or null. */
@@ -318,6 +327,75 @@ export async function findPageByTitle(
   const found = await confluence<{ results?: RawPage[] }>(base, `/rest/api/content?${query}`, token);
   const raw = found.results?.[0];
   return raw ? pageInfo(base, raw, spaceKey) : null;
+}
+
+/** A page a search or a child listing names: enough to open it or read it. */
+export interface PageHit {
+  id: string;
+  title: string;
+  spaceKey: string;
+  url: string;
+  /** Who made the current version, and when (ISO 8601), when Confluence says. */
+  by?: string;
+  when?: string;
+}
+
+function pageHit(base: string, raw: RawPage): PageHit {
+  const { id, title, spaceKey, url, by, when } = pageInfo(base, raw);
+  return { id, title, spaceKey, url, ...(by ? { by } : {}), ...(when ? { when } : {}) };
+}
+
+/** A CQL string literal: quoted, with its quotes and backslashes escaped. */
+function cqlString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * The current pages whose text matches `query` — CQL `text ~`, so words
+ * or a phrase, in Confluence's own ranking — up to `limit` (default 10,
+ * at most 50), within one space when `spaceKey` names it.
+ */
+export async function searchPages(
+  base: string,
+  token: string,
+  query: string,
+  opts: { spaceKey?: string; limit?: number } = {},
+): Promise<PageHit[]> {
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 10)), 50);
+  const cql = [
+    "type=page",
+    `text ~ ${cqlString(query)}`,
+    ...(opts.spaceKey ? [`space=${cqlString(opts.spaceKey)}`] : []),
+  ].join(" AND ");
+  const found = await confluence<{ results?: RawPage[] }>(
+    base,
+    `/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=space,version`,
+    token,
+  );
+  return (found.results ?? []).map((raw) => pageHit(base, raw));
+}
+
+/** The pages directly under a page, in Confluence's order, up to `limit` (default 50, at most 200). */
+export async function listChildren(
+  base: string,
+  token: string,
+  id: string,
+  opts: { limit?: number } = {},
+): Promise<PageHit[]> {
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? 50)), 200);
+  const hits: PageHit[] = [];
+  const path = `/rest/api/content/${encodeURIComponent(id)}/child/page`;
+  for (let start = 0; hits.length < limit; ) {
+    const page = await confluence<{ results?: RawPage[]; _links?: { next?: string } }>(
+      base,
+      `${path}?limit=${Math.min(100, limit - hits.length)}&start=${start}&expand=space,version`,
+      token,
+    );
+    for (const raw of page.results ?? []) hits.push(pageHit(base, raw));
+    if (!page._links?.next || !page.results?.length) break;
+    start += page.results.length;
+  }
+  return hits.slice(0, limit);
 }
 
 /** The parent page a url names, with its space. */

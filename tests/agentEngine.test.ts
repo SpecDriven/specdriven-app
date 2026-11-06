@@ -14,6 +14,7 @@ import type { ChatEvent, ChatSessionMeta } from "../src/server/agentTypes";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
+import { createConfluenceFileBackend, saveConfluenceToken, setConfluenceTokenBackend } from "../src/server/confluenceTokens";
 import { fakeProvider, type FakeProviderOptions, type FakeSession } from "./helpers/fakeAgent";
 
 let root: string;
@@ -519,4 +520,26 @@ test("pasted images are refused for an agent that reads none, and when they are 
   expect(await error(await post("a picture"))).toEqual([400, "images must be a list"]);
   // None of it started a turn.
   expect(getChatSession(id)!.status).toBe("idle");
+});
+
+test("a saved wiki token hands the provider the Confluence MCP server; none, nothing", async () => {
+  // The token store is read through the home this test owns (specs/external-links/confluence-wiki.feature.md
+  // "An agent session can read the wiki").
+  setConfluenceTokenBackend(createConfluenceFileBackend(join(root, "home", "confluence-tokens.json")));
+  try {
+    const fake = register();
+    const bare = await ready(fake);
+    expect(bare.session.opts.mcpServers).toBeUndefined();
+
+    await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat", user: "me" });
+    const withWiki = await ready(fake);
+    expect(withWiki.session.opts.mcpServers).toHaveLength(1);
+    expect(withWiki.session.opts.mcpServers![0]).toMatchObject({
+      name: "specdriven-confluence",
+      command: process.execPath,
+      env: { SPECDRIVEN_CONFLUENCE_TOKENS_FILE: join(root, "home", "confluence-tokens.json") },
+    });
+  } finally {
+    setConfluenceTokenBackend(createConfluenceFileBackend());
+  }
 });

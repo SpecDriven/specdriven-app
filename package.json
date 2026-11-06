@@ -182,6 +182,7 @@
     "@opentelemetry/exporter-logs-otlp-http": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
     "@opentelemetry/resources": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@opentelemetry/sdk-logs": "^3.0.0",
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "@replit/codemirror-vim": "^6.4.0",
@@ -189,7 +190,8 @@
     "lucide-react": "^1.61.0",
     "minisearch": "^7.2.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
   },
   "overrides": {
     "nanoid": "^3.3.19",
