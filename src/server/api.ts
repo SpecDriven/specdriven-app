@@ -85,6 +85,8 @@ import {
   deleteDraftScenario,
   deleteFeature,
   deletePublishedScenario,
+  deleteScenarios,
+  PublishedLockedError,
   unpublishScenario,
   moveScenario,
   cloneScenario,
@@ -2484,6 +2486,36 @@ const postDeletePublished = withDataDir(async (dir, req, params) => {
   }
 });
 
+// specs/ui/navigation.feature.md "delete several scenarios at once": the
+// scenarios picked in the sidebar tree, all of one feature, removed in one
+// go — each by what it is, as its own Delete would. Published ones only
+// while the Settings switch is on, the same gate delete-published keeps.
+const postDeleteScenarios = withDataDir(async (dir, req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { scenarios?: unknown };
+  const rows = body.scenarios;
+  const wellFormed =
+    Array.isArray(rows) &&
+    rows.length > 0 &&
+    rows.every(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        typeof (r as { name?: unknown }).name === "string" &&
+        typeof (r as { version?: unknown }).version === "number",
+    );
+  if (!wellFormed) return json({ error: "scenarios must be a list of { name, version }" }, 400);
+  const targets = (rows as { name: string; version: number }[]).map((r) => ({
+    name: r.name.trim(),
+    version: r.version,
+  }));
+  const allowPublished = normalizeDeletePublished((await readState(getAppRoot())).deletePublished);
+  try {
+    return json(await deleteScenarios(dir, params.file!, targets, allowPublished));
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof PublishedLockedError ? 403 : 400);
+  }
+});
+
 // specs/editor/spec-editor.feature.md "Unpublish a Spec": moving a published
 // scenario back to [proposed] is allowed on the same terms as deleting one —
 // only while the Settings switch is on, enforced here as delete-published
@@ -3693,6 +3725,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/features/:file/scenario-files", postScenarioFile],
   ["PUT", "/api/features/:file/scenario-files", putScenarioFiles],
   ["POST", "/api/features/:file/delete-published", postDeletePublished],
+  ["POST", "/api/features/:file/delete-scenarios", postDeleteScenarios],
   ["POST", "/api/features/:file/unpublish", postUnpublish],
   ["POST", "/api/features/:file/move-scenario", postMoveScenario],
   ["POST", "/api/features/:file/clone-scenario", postCloneScenario],

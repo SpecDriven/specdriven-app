@@ -231,6 +231,16 @@ export interface ScenarioRow {
 }
 
 /**
+ * A scenario row's key in the sidebar tree: its feature, name and version —
+ * what its ⋯ menu, Shift+F10 and the tree's multi-select
+ * (specs/ui/navigation.feature.md "delete several scenarios at once") know
+ * it by. NUL can be in none of them, so no two rows share a key.
+ */
+export function treeScenarioKey(file: string, s: { name: string; version: number }): string {
+  return `${file}\u0000${s.name}\u0000${s.version}`;
+}
+
+/**
  * The scenarios a feature's tree row expands to (specs/ui/navigation.feature.md
  * "Scenario navigation").
  *
