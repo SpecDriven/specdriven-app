@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.233 — 2026-11-05
+
+- Agent model lists: one file per agent, checked against the models the agent's API reports ([#383](https://github.com/SpecDriven/specdriven-app/pull/383))
+- Import dialog and Settings → Jira offer the models the agent lists, narrowed by Settings → AI agents ([#382](https://github.com/SpecDriven/specdriven-app/pull/382))
+
 ## v0.1.232 — 2026-11-05
 
 - Sidebar consistency, phase 3: one row for every plugin list, progress rings, a tab bar that never wraps ([#381](https://github.com/SpecDriven/specdriven-app/pull/381))
