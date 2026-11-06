@@ -3,7 +3,7 @@
 // lists everything its sign-in offers (AgentProvider.choices — the account's
 // models, a proxy's GET /v1/models, its CLI's aliases), Settings → AI agents
 // keeps one list of names per agent in the data repo's
-// .specdriven/agent-models.json (src/server/agentModels.ts) that narrows it,
+// .specdriven/<agent>-models.json (src/server/agentModels.ts) that narrows it,
 // and every model field is a dropdown of what is left, the agent's default
 // chosen until another is.
 

@@ -750,6 +750,14 @@ export async function agentChoices(agent: ChatAgent, dataRepo: string | null): P
   }
 }
 
+/** The models an agent's API reports; null for no such agent, no hook, or no answer. */
+export async function agentReportedModels(agent: ChatAgent): Promise<string[] | null> {
+  const provider = agents.get(agent);
+  if (!provider?.reportedModels) return null;
+  const models = await provider.reportedModels();
+  return Array.isArray(models) ? models.filter((m) => typeof m === "string") : null;
+}
+
 /** Make a model or effort what an agent's new sessions start on. */
 export async function setAgentDefaults(agent: ChatAgent, patch: AgentDefaultsPatch): Promise<void> {
   const provider = agents.get(agent);
