@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.238 — 2026-11-06
+
+- Keep a new GitHub issue as a draft until it is created ([#391](https://github.com/SpecDriven/specdriven-app/pull/391))
+
 ## v0.1.237 — 2026-11-06
 
 - Hand every agent session a Confluence MCP server so agents can read the wiki ([#387](https://github.com/SpecDriven/specdriven-app/pull/387))
