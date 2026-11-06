@@ -38,7 +38,7 @@ describe("settings sections", () => {
     expect(sectionsBeforeAll(all).map((s) => s.id)).toEqual(["early"]);
     expect(sectionsAfter(all, "specs").map((s) => s.id)).toEqual(["also-mid", "mid"]);
     expect(sectionsAfter(all, "workflow").map((s) => s.id)).toEqual(["late"]);
-    // An agent plugin's section (Claude, at 950) follows AI agents.
+    // An agent plugin's section (Claude, at 950) sits between Workflow and Git.
     expect(sectionsAfter(all, "agents").map((s) => s.id)).toEqual(["on-agents"]);
     // One ordered exactly on a core section comes right after it.
     expect(sectionsAfter(all, "git").map((s) => s.id)).toEqual(["on-git", "after-git"]);

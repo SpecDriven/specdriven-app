@@ -1,8 +1,8 @@
 // The models each coding agent offers (specs/agents/agent-plugins.feature.md
 // "Each agent offers the models the data repo lists"): the agent plugin
 // lists everything its sign-in offers (AgentProvider.choices — the account's
-// models, a proxy's GET /v1/models, its CLI's aliases), Settings → AI agents
-// keeps one list of names per agent in the data repo's
+// models, a proxy's GET /v1/models, its CLI's aliases), the agent's Settings
+// section (Settings → Claude) keeps one list of names per agent in the data repo's
 // .specdriven/<agent>-models.json (src/server/agentModels.ts) that narrows it,
 // and every model field is a dropdown of what is left, the agent's default
 // chosen until another is.
@@ -102,34 +102,23 @@ export function ModelSelect({
 }
 
 /**
- * Settings → AI agents: one list per installed agent, a model per line,
- * saved when the field loses focus. Agents name their models differently,
- * so each keeps its own.
+ * The agents whose plugin adds no Settings section of its own (Codex, so
+ * far): each gets a section of the app's, titled after it, holding its
+ * model list. The others' lists sit in their own section (Settings → Claude).
  */
-export function AgentModelsSettings({
-  agents,
-  agentModels,
-  onSaved,
-}: {
-  agents: AgentDescriptor[];
-  agentModels: AgentModels;
-  onSaved: (next: AgentModels) => void;
-}) {
-  return (
-    <>
-      {agents.map((a) => (
-        <AgentModelList
-          key={a.id}
-          agent={a}
-          models={agentModels[a.id] ?? []}
-          onSaved={onSaved}
-        />
-      ))}
-    </>
-  );
+export function agentsWithoutSection<A extends Pick<AgentDescriptor, "id">>(
+  agents: readonly A[],
+  sectionIds: readonly string[],
+): A[] {
+  return agents.filter((a) => !sectionIds.includes(a.id));
 }
 
-function AgentModelList({
+/**
+ * An agent's model list, in its Settings section: a model per line, saved
+ * when the field loses focus. Agents name their models differently, so each
+ * keeps its own, in the data repo's `.specdriven/<agent>-models.json`.
+ */
+export function AgentModelList({
   agent,
   models,
   onSaved,
@@ -178,7 +167,8 @@ function AgentModelList({
       <span className="settings-row-label">
         {agent.label} models
         <span className="settings-row-hint">
-          {error ?? `One per line, as ${agent.label} names them; its model menus offer only these, in this order. Empty, they offer every model ${agent.label} lists.`}
+          {error ??
+            `One per line, as ${agent.label} names them; every ${agent.label} model menu — the coding agent pane's, "Import from Jira/Wiki", its default model — offers only these, in this order. Empty, they offer every model ${agent.label} lists. Kept in the data repo's .specdriven/${agent.id}-models.json, shared with the team; a listed model ${agent.label}'s API does not report is still offered, with a warning in the log.`}
         </span>
       </span>
       <textarea

@@ -47,7 +47,7 @@ export const CORE_SETTINGS_ORDER = {
   qtest: 700,
   confluence: 800,
   workflow: 900,
-  /** AI agents: the models each agent offers; the agent plugins' sections sit on it. */
+  /** No core section of its own: the agent plugins' sections (Settings → Claude) sit on it. */
   agents: 950,
   git: 1000,
 } as const;

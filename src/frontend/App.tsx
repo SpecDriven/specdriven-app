@@ -266,8 +266,8 @@ import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFo
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
-import { ImportFromJiraWikiDialog, ImportModelSettings } from "./ImportFromJiraWikiDialog";
-import { AgentModelsSettings, agentModelsOf, type AgentModels } from "./AgentModels";
+import { ImportFromJiraWikiDialog } from "./ImportFromJiraWikiDialog";
+import { AgentModelList, agentModelsOf, agentsWithoutSection, type AgentModels } from "./AgentModels";
 import { ConfluencePublishDialog, type ConfluencePublishResult } from "./ConfluencePublishDialog";
 import { ConfluenceFolderPublishDialog, type FolderFeature } from "./ConfluenceFolderPublishDialog";
 import { QtestTokens, fetchQtestTokens, type QtestSite } from "./QtestToken";
@@ -1770,7 +1770,7 @@ export function App() {
   // order puts it among the core sections.
   const pluginSettingsSections = visibleSettingsSections(useRegistry(settingsSections), { demo, hosted });
   const [settingsPayload, setSettingsPayload] = useState<Record<string, unknown>>({});
-  // The models each agent offers (Settings → AI agents), from the data
+  // The models each agent offers (its Settings section), from the data
   // repo's .specdriven/<agent>-models.json files — what every model dropdown lists.
   const agentModels = useMemo(() => agentModelsOf(settingsPayload), [settingsPayload]);
   const saveAgentModels = (next: AgentModels) => setSettingsPayload((p) => ({ ...p, agentModels: next }));
@@ -8363,13 +8363,29 @@ export function App() {
     (after === null ? sectionsBeforeAll(pluginSettingsSections) : sectionsAfter(pluginSettingsSections, after)).map(
       (s) => ({ id: `settings-${s.id}`, title: s.title }),
     );
+  // An agent's model list (specs/agents/agent-plugins.feature.md "Each
+  // agent offers the models the data repo lists") sits in its plugin's own
+  // section — Settings → Claude — after what the plugin renders; an agent
+  // whose plugin adds none gets a section of its own, titled after it. A
+  // local agent only, so not in the demo or hosted app.
+  const modelListsShown = !demo && !hosted;
+  const agentModelList = (agent: (typeof agents)[number]) => (
+    <AgentModelList key={agent.id} agent={agent} models={agentModels[agent.id] ?? []} onSaved={saveAgentModels} />
+  );
+  const sectionlessAgents = modelListsShown
+    ? agentsWithoutSection(agents, pluginSettingsSections.map((s) => s.id))
+    : [];
   const renderPluginSettings = (after: Parameters<typeof sectionsAfter>[1] | null) =>
     (after === null ? sectionsBeforeAll(pluginSettingsSections) : sectionsAfter(pluginSettingsSections, after)).map(
-      (s: SettingsSection) => (
-        <PageSection key={s.id} id={`settings-${s.id}`} title={s.title} hint={s.hint}>
-          <s.Component settings={settingsPayload} patchSettings={patchSettings} demo={demo} hosted={hosted} />
-        </PageSection>
-      ),
+      (s: SettingsSection) => {
+        const agent = modelListsShown ? agents.find((a) => a.id === s.id) : undefined;
+        return (
+          <PageSection key={s.id} id={`settings-${s.id}`} title={s.title} hint={s.hint}>
+            <s.Component settings={settingsPayload} patchSettings={patchSettings} demo={demo} hosted={hosted} />
+            {agent && agentModelList(agent)}
+          </PageSection>
+        );
+      },
     );
   const renderSettingsPage = () => (
     <AppPageLayout
@@ -8398,8 +8414,8 @@ export function App() {
         ...pluginSettingsNav("confluence"),
         { id: "settings-workflow", title: "Workflow" },
         ...pluginSettingsNav("workflow"),
-        ...(demo || hosted || agents.length === 0 ? [] : [{ id: "settings-agents", title: "AI agents" }]),
         ...pluginSettingsNav("agents"),
+        ...sectionlessAgents.map((a) => ({ id: `settings-agent-${a.id}`, title: a.label })),
         ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
         ...pluginSettingsNav("git"),
       ]}
@@ -9044,7 +9060,6 @@ export function App() {
           hint="Read Jira issues into a new feature, with Confluence pages, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
         >
           <JiraTokens sites={jiraSites} onChange={setJiraSites} />
-          <ImportModelSettings agents={agents} agentModels={agentModels} />
         </PageSection>
       )}
       {/* specs/external-links/confluence-wiki.feature.md: a personal access
@@ -9187,29 +9202,17 @@ export function App() {
         </label>
       </PageSection>
       {renderPluginSettings("workflow")}
-      {/* specs/agents/agent-plugins.feature.md "Each agent offers the
-          models the data repo lists": a list per installed agent, kept in
-          the data repo for the team; the agent plugins' own sections
-          follow. A local agent only, so not in the demo or hosted app. */}
-      {!demo && !hosted && agents.length > 0 && (
-        <PageSection
-          id="settings-agents"
-          title="AI agents"
-          hint={
-            <>
-              Narrow the models each coding agent offers in its model menus — the pane&apos;s, the import dialog&apos;s,
-              Settings → Jira&apos;s, an agent&apos;s default model — to the ones named here; empty, a menu offers every
-              model the agent lists. Each agent&apos;s list is kept in a file of its own in the data repo&apos;s{" "}
-              <code>.specdriven/</code> folder — <code>claude-models.json</code>, <code>codex-models.json</code> — shared
-              with the team. A listed model the agent&apos;s API does not report is still offered, with a warning in the
-              log.
-            </>
-          }
-        >
-          <AgentModelsSettings agents={agents} agentModels={agentModels} onSaved={saveAgentModels} />
-        </PageSection>
-      )}
       {renderPluginSettings("agents")}
+      {sectionlessAgents.map((a) => (
+        <PageSection
+          key={a.id}
+          id={`settings-agent-${a.id}`}
+          title={a.label}
+          hint={`The models ${a.label} offers in its model menus.`}
+        >
+          {agentModelList(a)}
+        </PageSection>
+      ))}
       {/* Git engine (git-operations.md): which one carries
           the operations out and who supplies GitHub credentials.
           Hidden in demo mode along with the sign-in — the demo

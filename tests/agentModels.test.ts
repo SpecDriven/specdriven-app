@@ -1,7 +1,7 @@
 // The models each coding agent offers (specs/agents/agent-plugins.feature.md
 // "Each agent offers the models the data repo lists"): one file per agent in
 // the data repo's .specdriven/ (claude-models.json, codex-models.json), read
-// with /api/state, written one agent at a time by Settings → AI agents, and
+// with /api/state, written one agent at a time by its Settings section, and
 // checked against the models each agent's API reports.
 
 import { test, expect, beforeEach, afterEach, spyOn } from "bun:test";
