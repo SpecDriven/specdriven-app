@@ -48,6 +48,7 @@ import {
   shouldFollow,
   usableAgents,
   useAgentChat,
+  useAgentChoices,
   type AgentChatStore,
   type AgentChoices,
   type AgentDescriptor,
@@ -542,16 +543,6 @@ export function nameFromMessage(text: string): string {
   return line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line;
 }
 
-/** The agent's models and defaults, asked for once the bar shows it. */
-function useChoices(store: AgentChatStore, agent: AgentDescriptor | null): AgentChoices | null {
-  const id = agent?.id ?? null;
-  const known = id !== null && id in store.choices;
-  useEffect(() => {
-    if (id && !known) void agentChat.loadChoices(id);
-  }, [id, known]);
-  return id ? (store.choices[id] ?? null) : null;
-}
-
 /** One chip in the composer bar, with its menu opening above it. */
 function BarPicker({
   name,
@@ -824,7 +815,7 @@ function EmptyState({
   /** A mode picked here; null is the agent's default. */
   const [mode, setMode] = useState<PermissionMode | null>(null);
   const picked = agents.find((a) => a.id === agentId) ?? agents[0] ?? null;
-  const choices = useChoices(store, picked);
+  const choices = useAgentChoices(picked?.id ?? null);
   if (!picked) {
     return (
       <AgentEmptyGuide
@@ -1601,7 +1592,7 @@ function Composer({
   const status = meta.status;
   const who = agent.label;
   const final = isFinalStatus(status);
-  const choices = useChoices(store, final ? null : agent);
+  const choices = useAgentChoices(final ? null : (agent?.id ?? null));
   const fail = (e: Error) => toast.error(e.message);
   const hint =
     status === "idle"

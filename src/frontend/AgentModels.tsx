@@ -1,14 +1,29 @@
 // The models each coding agent offers (specs/agents/agent-plugins.feature.md
-// "Each agent offers the models the data repo lists"): Settings → AI agents
-// edits one list per agent, kept in the data repo's
-// .specdriven/agent-models.json (src/server/agentModels.ts), and every model
-// field is a dropdown of its agent's list, the first model chosen until
-// another is.
+// "Each agent offers the models the data repo lists"): the agent plugin
+// lists everything its sign-in offers (AgentProvider.choices — the account's
+// models, a proxy's GET /v1/models, its CLI's aliases), Settings → AI agents
+// keeps one list of names per agent in the data repo's
+// .specdriven/agent-models.json (src/server/agentModels.ts) that narrows it,
+// and every model field is a dropdown of what is left, the agent's default
+// chosen until another is.
 
 import { useEffect, useState } from "react";
-import type { AgentDescriptor } from "../server/agentTypes";
+import type { AgentDescriptor, AgentModelOption } from "../server/agentTypes";
 
 export type AgentModels = Record<string, string[]>;
+
+/** A menu row: a bare name, or an agent's option with the name it shows. */
+export type ModelRow = string | Pick<AgentModelOption, "value" | "displayName">;
+
+/** Rows as options: a bare name shows as itself. */
+export function modelRows(models: readonly ModelRow[]): Pick<AgentModelOption, "value" | "displayName">[] {
+  return models.map((m) => (typeof m === "string" ? { value: m, displayName: m } : m));
+}
+
+/** An option's text: its name, and the value when that differs. */
+export function modelOptionLabel(row: Pick<AgentModelOption, "value" | "displayName">): string {
+  return row.displayName && row.displayName !== row.value ? `${row.displayName} — ${row.value}` : row.value;
+}
 
 /** The `agentModels` of a state payload, `{}` when absent or malformed. */
 export function agentModelsOf(payload: Record<string, unknown>): AgentModels {
@@ -37,31 +52,36 @@ export function parseModelList(text: string): string[] {
 }
 
 /**
- * The model a field holds: the one chosen, else the first its agent's list
- * names — blank only when the list is empty.
+ * The model a field holds: the one chosen, else the agent's own default
+ * when it has one, else the first its menu names — blank only when the
+ * menu is empty.
  */
-export function chosenModel(models: readonly string[], value: string): string {
-  return value.trim() || models[0] || "";
+export function chosenModel(models: readonly ModelRow[], value: string, fallback: string | null = null): string {
+  return value.trim() || fallback || modelRows(models)[0]?.value || "";
 }
 
 /**
- * A model field: the models its agent's list names, the first chosen until
- * another is. A value the list no longer holds — chosen before the list
+ * A model field: the models its agent offers, the default chosen until
+ * another is. A value the menu no longer holds — chosen before the menu
  * changed — stays on offer, so opening the menu never changes it. An empty
- * list leaves nothing to choose.
+ * menu leaves nothing to choose.
  */
 export function ModelSelect({
   models,
   value,
+  fallback = null,
   onChange,
   ariaLabel,
 }: {
-  models: readonly string[];
+  models: readonly ModelRow[];
   value: string;
+  /** The agent's own default, chosen while `value` is blank. */
+  fallback?: string | null;
   onChange: (model: string) => void;
   ariaLabel: string;
 }) {
-  const chosen = chosenModel(models, value);
+  const rows = modelRows(models);
+  const chosen = chosenModel(rows, value, fallback);
   if (!chosen) {
     return (
       <select aria-label={ariaLabel} value="" disabled>
@@ -69,12 +89,12 @@ export function ModelSelect({
       </select>
     );
   }
-  const options = models.includes(chosen) ? models : [...models, chosen];
+  const options = rows.some((m) => m.value === chosen) ? rows : [...rows, { value: chosen, displayName: chosen }];
   return (
     <select aria-label={ariaLabel} value={chosen} onChange={(e) => onChange(e.target.value)}>
       {options.map((m) => (
-        <option key={m} value={m}>
-          {m}
+        <option key={m.value} value={m.value}>
+          {modelOptionLabel(m)}
         </option>
       ))}
     </select>
@@ -158,7 +178,7 @@ function AgentModelList({
       <span className="settings-row-label">
         {agent.label} models
         <span className="settings-row-hint">
-          {error ?? `One per line, as ${agent.label} names them; its model menus offer these, the first chosen until another is.`}
+          {error ?? `One per line, as ${agent.label} names them; its model menus offer only these, in this order. Empty, they offer every model ${agent.label} lists.`}
         </span>
       </span>
       <textarea
