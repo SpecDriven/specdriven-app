@@ -6,14 +6,16 @@ import { classifySource, MAX_JIRA_SOURCES, MAX_SCENARIOS, MAX_WIKI_SOURCES } fro
 import type { AgentDescriptor } from "../server/agentTypes";
 import type { ConfluenceWiki } from "./ConfluenceToken";
 import type { JiraSite } from "./JiraToken";
-import { ModelSelect, chosenModel, type AgentModels } from "./AgentModels";
+import { ModelSelect, chosenModel, type AgentModels, type ModelRow } from "./AgentModels";
+import { useAgentChoices } from "./agentChat";
 
 // "Import from Jira/Wiki here…" in a folder's ⋯ menu
 // (specs/external-links/jira-wiki-import.feature.md): the user collects up
 // to five Jira issue urls and five Confluence page urls, picks the agent
-// when more than one can answer, and the model it answers with (the
-// default set in Settings → Jira, else the first the agent's list names), and
-// Analyze has the server read them and
+// when more than one can answer, and the model it answers with — from the
+// models the agent offers (its choices: what its sign-in lists, narrowed by
+// Settings → AI agents), the default set in Settings → Jira chosen, else
+// the agent's own default, else the first — and Analyze has the server read them and
 // propose a feature title and up to fifteen scenarios. Those are reviewed
 // here — kept or dropped, renamed — before Create feature writes the file.
 // When the sources describe more than fifteen, the dialog says so and
@@ -203,8 +205,12 @@ export function ImportFromJiraWikiDialog({
   const [error, setError] = useState<string | null>(null);
   const problem = sourceProblem(url, rows, jiraSites, wikis);
   const chosen = choices.find((a) => a.id === agent) ?? choices[0];
-  // What the Model dropdown shows is what the agent answers with.
-  const sentModel = chosen ? chosenModel(agentModels[chosen.id] ?? [], model) : "";
+  // The Model dropdown: what the agent offers, asked of its plugin; the
+  // data repo's list for it from an agent that offers nothing. What the
+  // dropdown shows is what the agent answers with.
+  const offered = useAgentChoices(chosen?.id ?? null);
+  const menu: ModelRow[] = offered?.models ?? agentModels[chosen?.id ?? ""] ?? [];
+  const sentModel = chosen ? chosenModel(menu, model, offered?.model ?? null) : "";
   const badModel = modelProblem(sentModel);
 
   const chooseAgent = (next: string) => {
@@ -377,8 +383,9 @@ export function ImportFromJiraWikiDialog({
                 Model
                 <ModelSelect
                   ariaLabel="Model"
-                  models={agentModels[chosen.id] ?? []}
+                  models={menu}
                   value={model}
+                  fallback={offered?.model ?? null}
                   onChange={setModel}
                 />
               </label>
@@ -388,9 +395,9 @@ export function ImportFromJiraWikiDialog({
             ) : (
               chosen && (
                 <p className="hint">
-                  {(agentModels[chosen.id] ?? []).length > 0
+                  {menu.length > 0
                     ? "Set the default for imports in Settings → Jira."
-                    : `List ${chosen.label}'s models in Settings → AI agents to choose one here.`}
+                    : `${chosen.label} lists no models — set up its sign-in in Settings, or list some in Settings → AI agents.`}
                 </p>
               )
             )}
@@ -510,30 +517,56 @@ export function ImportModelSettings({
   if (choices.length === 0) return null;
   return (
     <>
-      {choices.map((a) => {
-        const value = models[a.id] ?? "";
-        const problem = modelProblem(value);
-        return (
-          <label key={a.id} className="settings-row">
-            <span className="settings-row-label">
-              {choices.length > 1 ? `Import model for ${a.label}` : "Import model"}
-              <span className="settings-row-hint">
-                {problem ??
-                  `The model ${a.label} uses for "Import from Jira/Wiki", unless the dialog names another — one of the models Settings → AI agents lists for ${a.label}. Remembered on this device.`}
-              </span>
-            </span>
-            <ModelSelect
-              ariaLabel={`Import model for ${a.label}`}
-              models={agentModels[a.id] ?? []}
-              value={value}
-              onChange={(next) => {
-                setModels((m) => ({ ...m, [a.id]: next }));
-                if (!modelProblem(next)) setImportModel(a.id, next);
-              }}
-            />
-          </label>
-        );
-      })}
+      {choices.map((a) => (
+        <ImportModelRow
+          key={a.id}
+          agent={a}
+          label={choices.length > 1 ? `Import model for ${a.label}` : "Import model"}
+          listed={agentModels[a.id] ?? []}
+          value={models[a.id] ?? ""}
+          onChange={(next) => {
+            setModels((m) => ({ ...m, [a.id]: next }));
+            if (!modelProblem(next)) setImportModel(a.id, next);
+          }}
+        />
+      ))}
     </>
+  );
+}
+
+/** One agent's import-model row: a dropdown of what the agent offers. */
+function ImportModelRow({
+  agent,
+  label,
+  listed,
+  value,
+  onChange,
+}: {
+  agent: AgentDescriptor;
+  label: string;
+  /** The data repo's list for the agent, for one that offers nothing. */
+  listed: string[];
+  value: string;
+  onChange: (model: string) => void;
+}) {
+  const offered = useAgentChoices(agent.id);
+  const problem = modelProblem(value);
+  return (
+    <label className="settings-row">
+      <span className="settings-row-label">
+        {label}
+        <span className="settings-row-hint">
+          {problem ??
+            `The model ${agent.label} uses for "Import from Jira/Wiki", unless the dialog names another — one of the models ${agent.label} offers. Remembered on this device.`}
+        </span>
+      </span>
+      <ModelSelect
+        ariaLabel={`Import model for ${agent.label}`}
+        models={offered?.models ?? listed}
+        value={value}
+        fallback={offered?.model ?? null}
+        onChange={onChange}
+      />
+    </label>
   );
 }

@@ -9197,9 +9197,10 @@ export function App() {
           title="AI agents"
           hint={
             <>
-              The models each coding agent offers in its model menus — the import dialog&apos;s, Settings → Jira&apos;s,
-              an agent&apos;s default model. Kept in the data repo&apos;s <code>.specdriven/agent-models.json</code>,
-              shared with the team.
+              Narrow the models each coding agent offers in its model menus — the pane&apos;s, the import dialog&apos;s,
+              Settings → Jira&apos;s, an agent&apos;s default model — to the ones named here; empty, a menu offers every
+              model the agent lists. Kept in the data repo&apos;s <code>.specdriven/agent-models.json</code>, shared with
+              the team.
             </>
           }
         >

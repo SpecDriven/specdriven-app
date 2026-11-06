@@ -12,7 +12,7 @@
 // event carries a sequence number; a stream that drops is reopened from
 // the last one seen, so nothing is lost or shown twice.
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import type {
   AgentChoices,
   AgentDefaultsPatch,
@@ -551,6 +551,18 @@ export function useAgentChat(): AgentChatStore {
   return useSyncExternalStore(subscribe, () => state, () => state);
 }
 
+/** An agent's models and new-session defaults, asked of the server once
+    (loadChoices) for every model menu — the pane's bar, the import
+    dialog's; null until they come, and for an agent that offers none. */
+export function useAgentChoices(agent: ChatAgent | null): AgentChoices | null {
+  const store = useAgentChat();
+  const known = agent !== null && agent in store.choices;
+  useEffect(() => {
+    if (agent && !known) void agentChat.loadChoices(agent);
+  }, [agent, known]);
+  return agent ? (store.choices[agent] ?? null) : null;
+}
+
 /** For tests and the odd imperative read. */
 export function agentChatState(): AgentChatStore {
   return state;
@@ -839,6 +851,14 @@ export const agentChat = {
     );
     set({ choices: { ...state.choices, [agent]: data.choices } });
     return data.choices;
+  },
+  /** What an agent offers, already known (tests; a reader that has them);
+      undefined forgets it, so the next menu asks the server again. */
+  setChoices(agent: ChatAgent, choices: AgentChoices | null | undefined): void {
+    const next = { ...state.choices };
+    if (choices === undefined) delete next[agent];
+    else next[agent] = choices;
+    set({ choices: next });
   },
   /** A pick in the new-session bar: what the agent's sessions start on. */
   async saveDefaults(agent: ChatAgent, patch: AgentDefaultsPatch): Promise<void> {

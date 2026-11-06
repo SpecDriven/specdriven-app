@@ -169,6 +169,18 @@ describe("the model dropdown", () => {
     expect(chosenModel(["opus", "sonnet"], "")).toBe("opus");
     expect(chosenModel(["opus"], "haiku")).toBe("haiku");
     expect(chosenModel([], "")).toBe("");
+    // An agent's rows show their names; its own default is chosen while
+    // nothing is, and one the menu lacks stays on offer.
+    const rows = [{ value: "opus", displayName: "Opus" }, { value: "claude-sonnet-4-6", displayName: "claude-sonnet-4-6" }];
+    expect(chosenModel(rows, "", "claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+    expect(chosenModel(rows, "", null)).toBe("opus");
+    expect(chosenModel(rows, "haiku", "opus")).toBe("haiku");
+    expect(renderToStaticMarkup(<ModelSelect ariaLabel="Model" models={rows} value="" fallback="claude-sonnet-4-6" onChange={() => {}} />)).toBe(
+      '<select aria-label="Model"><option value="opus">Opus — opus</option><option value="claude-sonnet-4-6" selected="">claude-sonnet-4-6</option></select>',
+    );
+    expect(renderToStaticMarkup(<ModelSelect ariaLabel="Model" models={rows} value="" fallback="haiku" onChange={() => {}} />)).toContain(
+      '<option value="haiku" selected="">haiku</option>',
+    );
   });
 
   test("the lists come from the state payload; anything else is none", () => {
