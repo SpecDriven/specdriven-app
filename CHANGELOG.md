@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.234 — 2026-11-05
+
+- Each agent's model list lives in its own Settings section; drop the AI agents section and Settings → Jira's Import model ([#384](https://github.com/SpecDriven/specdriven-app/pull/384))
+
 ## v0.1.233 — 2026-11-05
 
 - Agent model lists: one file per agent, checked against the models the agent's API reports ([#383](https://github.com/SpecDriven/specdriven-app/pull/383))
