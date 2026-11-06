@@ -511,7 +511,7 @@ export interface AgentChatStore {
   agents: AgentDescriptor[];
   /** Marketplace plugins that would supply an agent, not installed. */
   agentOffers: AgentOffer[];
-  /** Each agent's models and new-session defaults, once asked for
+  /** Each agent's models and new-session defaults, as last loaded
       (loadChoices); null for an agent that offers none. */
   choices: Record<ChatAgent, AgentChoices | null>;
 }
@@ -528,6 +528,18 @@ let state: AgentChatStore = {
 };
 const listeners = new Set<() => void>();
 const streams = new Map<string, AbortController>();
+
+/**
+ * How long a loaded list of models is used before the next reader loads it
+ * again. The list is what the agent's sign-in offers, which changes under
+ * the window — an account given a model, a proxy that lists another — so
+ * the pane holds it for a minute rather than for as long as it is open.
+ */
+export const CHOICES_TTL_MS = 60_000;
+
+/** When each agent's choices arrived, and the load in flight for it. */
+const choicesAt = new Map<ChatAgent, number>();
+const choicesLoading = new Map<ChatAgent, Promise<AgentChoices | null>>();
 
 function set(patch: Partial<AgentChatStore>): void {
   state = { ...state, ...patch };
@@ -551,15 +563,17 @@ export function useAgentChat(): AgentChatStore {
   return useSyncExternalStore(subscribe, () => state, () => state);
 }
 
-/** An agent's models and new-session defaults, asked of the server once
+/** An agent's models and new-session defaults, loaded from the server
     (loadChoices) for every model menu — the pane's bar, the import
-    dialog's; null until they come, and for an agent that offers none. */
+    dialog's; null until they come, and for an agent that offers none.
+    Every menu that mounts asks again, so a list that went stale while the
+    window stayed open is refreshed before it is read; a list loaded within
+    CHOICES_TTL_MS is served as it stands, without a request. */
 export function useAgentChoices(agent: ChatAgent | null): AgentChoices | null {
   const store = useAgentChat();
-  const known = agent !== null && agent in store.choices;
   useEffect(() => {
-    if (agent && !known) void agentChat.loadChoices(agent);
-  }, [agent, known]);
+    if (agent) void agentChat.loadChoices(agent).catch(() => undefined);
+  }, [agent]);
   return agent ? (store.choices[agent] ?? null) : null;
 }
 
@@ -689,6 +703,12 @@ function forget(id: string): void {
   if (activeId && !sessions[activeId]) void agentChat.openSession(activeId).catch(() => undefined);
 }
 
+/** Keep an agent's models and defaults, as freshly loaded. */
+function keepChoices(agent: ChatAgent, choices: AgentChoices | null): void {
+  choicesAt.set(agent, Date.now());
+  set({ choices: { ...state.choices, [agent]: choices } });
+}
+
 /** The kept choices follow a default the server just took. */
 function rememberDefault(agent: ChatAgent, patch: AgentDefaultsPatch): void {
   const current = state.choices[agent];
@@ -739,6 +759,7 @@ export const agentChat = {
         same(agents.find((a) => a.id === id), state.agents.find((a) => a.id === id)),
       ),
     );
+    for (const id of [...choicesAt.keys()]) if (!(id in choices)) choicesAt.delete(id);
     set({ agents: [...agents].sort(byRank), agentOffers, choices });
   },
   openPane(): void {
@@ -842,22 +863,42 @@ export const agentChat = {
       body: JSON.stringify({ permissionMode }),
     });
   },
-  /** The models an agent offers and what a new session starts on, asked of
-      the server once and kept until the agent's descriptor changes. */
-  async loadChoices(agent: ChatAgent, force = false): Promise<AgentChoices | null> {
-    if (!force && agent in state.choices) return state.choices[agent] ?? null;
-    const data = await call<{ choices: AgentChoices | null }>(
-      `/api/agent/agents/${encodeURIComponent(agent)}/choices`,
-    );
-    set({ choices: { ...state.choices, [agent]: data.choices } });
-    return data.choices;
+  /** The models an agent offers and what a new session starts on. An
+      answer serves for CHOICES_TTL_MS; after that the next reader loads it
+      again, because the sign-in behind the list can offer other models
+      while the window stays open — the pane used to show the list it first
+      loaded until the agent's plugin was switched off and on again. The
+      list already loaded stays in the store while the new one is on its
+      way, so no menu empties, and readers that ask at once share the one
+      request. `force` loads even a fresh list. */
+  async loadChoices(agent: ChatAgent, force = false, now = Date.now()): Promise<AgentChoices | null> {
+    const fresh = now - (choicesAt.get(agent) ?? -Infinity) < CHOICES_TTL_MS;
+    if (!force && fresh && agent in state.choices) return state.choices[agent] ?? null;
+    const loading = choicesLoading.get(agent);
+    if (loading) return loading;
+    const load = call<{ choices: AgentChoices | null }>(`/api/agent/agents/${encodeURIComponent(agent)}/choices`)
+      .then((data) => {
+        keepChoices(agent, data.choices);
+        return data.choices;
+      })
+      .finally(() => {
+        if (choicesLoading.get(agent) === load) choicesLoading.delete(agent);
+      });
+    choicesLoading.set(agent, load);
+    return load;
   },
-  /** What an agent offers, already known (tests; a reader that has them);
-      undefined forgets it, so the next menu asks the server again. */
+  /** What an agent offers, already known (tests; a reader that has them),
+      counting as freshly loaded; undefined forgets it, so the next menu
+      asks the server again. */
   setChoices(agent: ChatAgent, choices: AgentChoices | null | undefined): void {
     const next = { ...state.choices };
-    if (choices === undefined) delete next[agent];
-    else next[agent] = choices;
+    if (choices === undefined) {
+      delete next[agent];
+      choicesAt.delete(agent);
+    } else {
+      next[agent] = choices;
+      choicesAt.set(agent, Date.now());
+    }
     set({ choices: next });
   },
   /** A pick in the new-session bar: what the agent's sessions start on. */
@@ -866,7 +907,7 @@ export const agentChat = {
       `/api/agent/agents/${encodeURIComponent(agent)}/defaults`,
       { method: "PUT", body: JSON.stringify(patch) },
     );
-    set({ choices: { ...state.choices, [agent]: data.choices } });
+    keepChoices(agent, data.choices);
   },
   /** Switch a running session's model; the server makes it the default too. */
   async setModel(id: string, model: string | null): Promise<void> {
