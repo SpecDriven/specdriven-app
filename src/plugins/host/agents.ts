@@ -53,6 +53,11 @@ export interface AgentProvider {
   choices?(ctx: { dataRepo: string | null }): Promise<AgentChoices>;
   /** Make a model or effort the pane picked what new sessions start on. */
   setDefaults?(patch: AgentDefaultsPatch): Promise<void>;
+  /** The models the agent's API reports right now — every id and alias it
+      takes — or null when it cannot say (signed out, unreachable). The app
+      checks the data repo's list for the agent against it and logs a
+      warning for a listed model it lacks (src/server/agentModels.ts). */
+  reportedModels?(): Promise<string[] | null>;
 }
 
 export interface AgentStartOptions {

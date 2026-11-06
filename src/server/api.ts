@@ -115,6 +115,7 @@ import type { SessionPlace, SpecInput } from "./agent";
 import {
   ChatError,
   agentChoices,
+  agentReportedModels,
   answerPermission,
   checkImages,
   createChatSession,
@@ -209,7 +210,7 @@ import type { ScenarioPick } from "./parser";
 import { isSearchScope, searchPages, searchScope, searchSpecs } from "./search";
 import { readReadme, writeReadme } from "./readme";
 import { readCustomAttributes, writeCustomAttributes } from "./customAttributesFile";
-import { readAgentModels, writeAgentModels } from "./agentModels";
+import { readAgentModels, warnUnreportedModels, writeAgentModels, type AgentModels } from "./agentModels";
 import type { SessionSection } from "./agent";
 import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
@@ -555,7 +556,14 @@ async function currentDataDir(): Promise<string | null> {
 async function agentModelsField() {
   if (isHostedMode()) return {};
   const dir = await currentDataDir();
-  return dir ? readAgentModels(dir) : {};
+  return dir ? checkedAgentModels(await readAgentModels(dir)) : {};
+}
+
+/** The lists as read, after starting the check that logs a warning for a
+    listed model its agent's API does not report — off the request's path. */
+function checkedAgentModels(lists: AgentModels): AgentModels {
+  void warnUnreportedModels(lists, agentReportedModels).catch(() => {});
+  return lists;
 }
 
 /**
@@ -651,7 +659,7 @@ async function stateFields(state: SpecDrivenState) {
     // Whether some agent answers one no-tools turn (src/server/estimate.ts).
     canEstimate: !isHostedMode() && agents.oneShot() !== undefined,
     // The models each agent offers (src/server/agentModels.ts), keyed by
-    // agent id, from the data repo's .specdriven/agent-models.json — what
+    // agent id, from the data repo's .specdriven/<agent>-models.json files — what
     // the model dropdowns choose from. A hosted worker runs no agents.
     agentModels: await agentModelsField(),
     deletePublished: normalizeDeletePublished(state.deletePublished),
@@ -2241,7 +2249,7 @@ const putCustomAttributes = withDataDir(async (dir, req) => {
 const putAgentModels = withDataDir(async (dir, req, params) => {
   const body = (await req.json().catch(() => null)) as { models?: unknown } | null;
   try {
-    return json({ agentModels: await writeAgentModels(dir, params.agent ?? "", body?.models) });
+    return json({ agentModels: checkedAgentModels(await writeAgentModels(dir, params.agent ?? "", body?.models)) });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }

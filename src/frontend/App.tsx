@@ -1771,7 +1771,7 @@ export function App() {
   const pluginSettingsSections = visibleSettingsSections(useRegistry(settingsSections), { demo, hosted });
   const [settingsPayload, setSettingsPayload] = useState<Record<string, unknown>>({});
   // The models each agent offers (Settings → AI agents), from the data
-  // repo's .specdriven/agent-models.json — what every model dropdown lists.
+  // repo's .specdriven/<agent>-models.json files — what every model dropdown lists.
   const agentModels = useMemo(() => agentModelsOf(settingsPayload), [settingsPayload]);
   const saveAgentModels = (next: AgentModels) => setSettingsPayload((p) => ({ ...p, agentModels: next }));
   const [pluginView, setPluginView] = useState<PluginView | null>(null);
@@ -9199,8 +9199,10 @@ export function App() {
             <>
               Narrow the models each coding agent offers in its model menus — the pane&apos;s, the import dialog&apos;s,
               Settings → Jira&apos;s, an agent&apos;s default model — to the ones named here; empty, a menu offers every
-              model the agent lists. Kept in the data repo&apos;s <code>.specdriven/agent-models.json</code>, shared with
-              the team.
+              model the agent lists. Each agent&apos;s list is kept in a file of its own in the data repo&apos;s{" "}
+              <code>.specdriven/</code> folder — <code>claude-models.json</code>, <code>codex-models.json</code> — shared
+              with the team. A listed model the agent&apos;s API does not report is still offered, with a warning in the
+              log.
             </>
           }
         >
