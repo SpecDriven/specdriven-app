@@ -256,6 +256,7 @@ import {
   scenarioNeighbors,
   scenarioPlace,
   scenarioRows,
+  treeScenarioKey,
   scenarioSequence,
   withOpenScenarios,
 } from "./tree";
@@ -1418,6 +1419,11 @@ export function App() {
   // that runs the coding agent. Per file the selection is the whole spec
   // ("all") or a set of scenario keys.
   const [specSelection, setSpecSelection] = useState<Map<string, "all" | Set<string>>>(new Map());
+  // Scenarios picked in the sidebar tree (specs/ui/navigation.feature.md
+  // "delete several scenarios at once"): ⌘/Ctrl-click toggles a row,
+  // Shift-click picks the range from the anchor. Keyed by treeScenarioKey.
+  const [treePicks, setTreePicks] = useState<Set<string>>(() => new Set());
+  const treePickAnchor = useRef<string | null>(null);
   const [sessionRunning, setSessionRunning] = useState(false);
   /** The Start session dialog (src/frontend/StartSessionDialog.tsx), open or not. */
   const [startDialog, setStartDialog] = useState(false);
@@ -6213,6 +6219,152 @@ export function App() {
   };
 
   /**
+   * The rows picked in the sidebar tree (specs/ui/navigation.feature.md
+   * "delete several scenarios at once"), in tree order, each with its
+   * feature. Picks can outlive their rows — a scenario deleted or renamed
+   * elsewhere — so only rows still listed come back.
+   */
+  const pickedTreeScenarios = (): { file: string; row: ScenarioRow }[] => {
+    if (treePicks.size === 0) return [];
+    const out: { file: string; row: ScenarioRow }[] = [];
+    for (const f of features) {
+      for (const row of scenarioRows(f, selected, feature)) {
+        if (treePicks.has(treeScenarioKey(f.fileName, row))) out.push({ file: f.fileName, row });
+      }
+    }
+    return out;
+  };
+
+  /** The open scenario's tree key, when its page is open. */
+  const openTreeKey = (): string | null =>
+    selected && paneScenario ? treeScenarioKey(selected, paneScenario) : null;
+
+  /**
+   * ⌘/Ctrl-click (toggle) or Shift-click (range) on a scenario row of the
+   * tree. The first pick takes the open scenario along, as a desktop list's
+   * first ⌘-click keeps the row already highlighted; a range runs from the
+   * anchor — the last row toggled, else the open one — over the rows as the
+   * tree shows them, across features too. `add` keeps the picks a range
+   * would otherwise replace (⌘⇧-click).
+   */
+  const pickTreeScenario = (key: string, mode: "toggle" | "range", add = false) => {
+    const open = openTreeKey();
+    if (mode === "toggle") {
+      setTreePicks((prev) => {
+        const next = new Set(prev);
+        if (next.size === 0 && open !== null && open !== key) next.add(open);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      treePickAnchor.current = key;
+      return;
+    }
+    const keys = [...(treeRef.current?.querySelectorAll<HTMLElement>("[data-scenario]") ?? [])].map(
+      (el) => el.dataset.scenario!,
+    );
+    let from = keys.indexOf(treePickAnchor.current ?? open ?? key);
+    const to = keys.indexOf(key);
+    if (to === -1) return;
+    if (from === -1) from = to;
+    if (treePickAnchor.current === null) treePickAnchor.current = keys[from]!;
+    const span = keys.slice(Math.min(from, to), Math.max(from, to) + 1);
+    setTreePicks((prev) => new Set([...(add ? prev : []), ...span]));
+  };
+
+  const clearTreePicks = () => {
+    setTreePicks((prev) => (prev.size === 0 ? prev : new Set()));
+    treePickAnchor.current = null;
+  };
+
+  /**
+   * Delete every scenario picked in the tree (specs/ui/navigation.feature.md
+   * "delete several scenarios at once") after one confirmation — each the
+   * way its own Delete removes it, one request per feature. Published ones
+   * go only while Settings allows it; with the switch off they stay, and the
+   * confirmation says so. One pick is just that row's own Delete.
+   */
+  const deletePickedScenarios = async () => {
+    // A ⋯ menu left open on a row about to go would stay open with no row
+    // to close it from, holding every shortcut — Esc included — quiet.
+    setTreeMenu(null);
+    const picked = pickedTreeScenarios();
+    if (picked.length === 0) {
+      clearTreePicks();
+      return;
+    }
+    if (picked.length === 1) {
+      clearTreePicks();
+      await deleteTreeScenario(picked[0]!.file, picked[0]!.row);
+      return;
+    }
+    const going = picked.filter((p) => p.row.status !== "published" || deletePublished);
+    const kept = picked.length - going.length;
+    if (going.length === 0) {
+      toast.error("Published scenarios can't be deleted — deleting them is switched off in Settings.");
+      return;
+    }
+    const published = going.filter((p) => p.row.status === "published").length;
+    const files = new Map<string, ScenarioRow[]>();
+    for (const p of going) files.set(p.file, [...(files.get(p.file) ?? []), p.row]);
+    const n = going.length;
+    const what = `${n} scenario${n === 1 ? "" : "s"}`;
+    const from = files.size > 1 ? ` from ${files.size} features` : "";
+    const body = [
+      published > 0
+        ? `Confirm that you want to delete ${what}${from} — ${published} of them published.`
+        : `Delete ${what}${from}?`,
+      kept > 0
+        ? `${kept} published scenario${kept === 1 ? " stays" : "s stay"} — deleting published specs is switched off in Settings.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const ok = await confirm(
+      published > 0
+        ? { title: "Danger Zone!", body, confirmLabel: "Confirm" }
+        : { title: `Delete ${what}`, body, confirmLabel: `Delete ${what}` },
+    );
+    if (!ok) return;
+    // An editor pane open on one of these features is left first, autosaving
+    // like any navigation away: the removal re-indexes the feature under it.
+    if (selected !== null && files.has(selected) && editing) {
+      const ahead = autosaveInFlight.current;
+      await closeEditor();
+      await ahead;
+    }
+    await scenarioSaveQueue.current.idle();
+    let deleted = 0;
+    for (const [file, rows] of files) {
+      let res: Response;
+      try {
+        res = await fetch(`/api/features/${encodeURIComponent(file)}/delete-scenarios`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenarios: rows.map(({ name, version }) => ({ name, version })) }),
+        });
+      } catch {
+        toast.error("Delete failed — is the server running?");
+        break;
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Delete failed");
+        continue;
+      }
+      deleted += rows.length;
+      if (selectedRef.current === file) {
+        setFeature(featureFromResponse(data, file));
+        setSelectedScenario(null);
+        markSaved();
+      }
+    }
+    clearTreePicks();
+    await loadFeatures();
+    if (deleted > 0) toast.success(`Deleted ${deleted} scenario${deleted === 1 ? "" : "s"}.`);
+  };
+
+  /**
    * Move to… from a scenario's menu in the sidebar tree
    * (specs/ui/navigation.feature.md "move a scenario to another feature"):
    * pick another feature, and the server adds the scenario there and takes it
@@ -6696,8 +6848,13 @@ export function App() {
               // navigation"): Clone always; Move to… and Delete on the
               // same terms as the editor pane's Delete — a published scenario
               // only while Settings allows it.
-              const menuKey = `${f.fileName}\u0000${s.name}\u0000${s.version}`;
+              const menuKey = treeScenarioKey(f.fileName, s);
               const deletable = s.status !== "published" || deletePublished;
+              // Picked for a bulk action ("delete several scenarios at
+              // once"); with more than this one picked, its Delete deletes
+              // them all.
+              const picked = treePicks.has(menuKey);
+              const pickedCount = picked ? treePicksCount : 0;
               // Drag to reorder (specs/ui/navigation.feature.md "reorder
               // scenarios by dragging them in the tree"): landing before or
               // after the row it is over — in this feature, or moved here
@@ -6718,7 +6875,9 @@ export function App() {
               return (
                 <div
                   key={`${s.name}-v${s.version}`}
-                  className={`tree-scenario-row${dropEdge}${draggingHere && same(scenarioDrag) ? " dragging" : ""}`}
+                  className={`tree-scenario-row${dropEdge}${draggingHere && same(scenarioDrag) ? " dragging" : ""}${
+                    picked ? " picked" : ""
+                  }`}
                   onDragOver={(e) => {
                     if (!droppable) return;
                     e.preventDefault();
@@ -6759,6 +6918,7 @@ export function App() {
                     /* Shift+F10 on the row opens its ⋯ (onTreeKeyDown). */
                     data-scenario={menuKey}
                     aria-current={here ? "page" : undefined}
+                    aria-selected={readOnly ? undefined : picked}
                     /* Line up just past the feature's twisty: the codegen
                        checkbox, when on, already carries the depth indent for
                        the whole row, so it is not added twice. */
@@ -6772,7 +6932,28 @@ export function App() {
                       setScenarioDrag({ file: f.fileName, name: s.name, version: s.version, status: s.status });
                     }}
                     onDragEnd={endScenarioDrag}
-                    onClick={(e) => spaClick(e, () => openScenarioRow(f.fileName, s))}
+                    /* Shift-click would select the page's text from here to
+                       the last click before the click picks the range. */
+                    onMouseDown={(e) => {
+                      if (!readOnly && e.shiftKey) e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      // ⌘/Ctrl-click toggles the row, Shift-click picks the
+                      // range ("delete several scenarios at once") — in place
+                      // of the browser's new tab or window for this link;
+                      // right-click → Open in new tab still works.
+                      if (!readOnly && !e.altKey && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+                        e.preventDefault();
+                        if (e.shiftKey) pickTreeScenario(menuKey, "range", e.metaKey || e.ctrlKey);
+                        else pickTreeScenario(menuKey, "toggle");
+                        return;
+                      }
+                      spaClick(e, () => {
+                        clearTreePicks();
+                        treePickAnchor.current = menuKey;
+                        openScenarioRow(f.fileName, s);
+                      });
+                    }}
                   >
                     {scenarioNumbers(rows)[rows.indexOf(s)] !== null && (
                       <span className="scenario-number">S{scenarioNumbers(rows)[rows.indexOf(s)]}</span>
@@ -6825,17 +7006,27 @@ export function App() {
                           icon: <CopyPlus size={13} />,
                           onSelect: () => void cloneTreeScenario(f.fileName, s),
                         },
-                        ...(deletable
+                        ...(pickedCount > 1
                           ? [
                               {
                                 id: "delete",
-                                label: "Delete",
+                                label: `Delete ${pickedCount} scenarios`,
                                 icon: <Trash2 size={13} />,
                                 danger: true,
-                                onSelect: () => void deleteTreeScenario(f.fileName, s),
+                                onSelect: () => void deletePickedScenarios(),
                               },
                             ]
-                          : []),
+                          : deletable
+                            ? [
+                                {
+                                  id: "delete",
+                                  label: "Delete",
+                                  icon: <Trash2 size={13} />,
+                                  danger: true,
+                                  onSelect: () => void deleteTreeScenario(f.fileName, s),
+                                },
+                              ]
+                            : []),
                       ]}
                     />
                   </span>
@@ -7296,6 +7487,7 @@ export function App() {
     if (modalOpen || sheetOpen || menuOpen) return false;
     if (compact && drawerOpen) return setDrawerOpen(false);
     if (compact && pane.open) return agentChat.closePane();
+    if (treePicks.size > 0) return clearTreePicks();
     const fromSidebar = e.target instanceof Element && e.target.closest("aside") !== null;
     if (editing && !fromSidebar) {
       editorRef.current.back();
@@ -8091,6 +8283,8 @@ export function App() {
   const me = user?.name || user?.login || user?.username || null;
   const filtering = isFiltering(filter);
 
+  const treePicksCount = readOnly ? 0 : pickedTreeScenarios().length;
+
   // Tree keyboard: ↑/↓ walk the visible rows, → opens a folder (or steps
   // in), ← closes it or climbs to it from a feature, Home/End jump,
   // Shift+F10 or the menu key opens a feature's ⋯. Enter stays the row's own.
@@ -8102,15 +8296,52 @@ export function App() {
     if (i === -1) return;
     const move = (to: number) => rows[Math.max(0, Math.min(rows.length - 1, to))]?.focus();
     const folderPath = t.dataset.folder;
+    // Shift+↑/↓ from a scenario row grows the pick to the next scenario row
+    // ("delete several scenarios at once"), as Shift-click would.
+    const extend = (to: number) => {
+      const next = rows[Math.max(0, Math.min(rows.length - 1, to))];
+      const from = t.dataset.scenario;
+      if (!next?.dataset.scenario || from === undefined) return false;
+      if (treePickAnchor.current === null || !treePicks.has(treePickAnchor.current)) {
+        treePickAnchor.current = from;
+      }
+      pickTreeScenario(next.dataset.scenario, "range");
+      next.focus();
+      return true;
+    };
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();
+        if (e.shiftKey && !readOnly && extend(i + 1)) return;
         move(i + 1);
         return;
       case "ArrowUp":
         e.preventDefault();
+        if (e.shiftKey && !readOnly && extend(i - 1)) return;
         move(i - 1);
         return;
+      case "Delete":
+      case "Backspace": {
+        // Delete on a scenario row: the picks when there are any, else the
+        // row itself — each with its confirmation.
+        const key = t.dataset.scenario;
+        if (key === undefined || readOnly) return;
+        e.preventDefault();
+        if (treePicks.size > 0) {
+          void deletePickedScenarios();
+          return;
+        }
+        const [file, name, version] = key.split("\u0000");
+        const listing = features.find((f) => f.fileName === file);
+        const row = listing
+          ? scenarioRows(listing, selected, feature).find(
+              (r) => r.name === name && String(r.version) === version,
+            )
+          : undefined;
+        if (!row || (row.status === "published" && !deletePublished)) return;
+        void deleteTreeScenario(file!, row);
+        return;
+      }
       case "Home":
         e.preventDefault();
         move(0);
@@ -10280,6 +10511,7 @@ export function App() {
             ref={treeRef}
             role="tree"
             aria-label="Features"
+            aria-multiselectable={readOnly ? undefined : true}
             onKeyDown={onTreeKeyDown}
             onClick={(e) => {
               // A click on the bare background deselects the folder, so the
@@ -10322,6 +10554,34 @@ export function App() {
             {features.length === 0 && folders.length === 0 && (
               <p className="empty">No feature files yet</p>
             )}
+          </div>
+        )}
+        {/* The scenarios picked in the tree (specs/ui/navigation.feature.md
+            "delete several scenarios at once"): how many, Delete, and a way
+            out — Esc does the same. Under the tree, not over it, so the
+            rows stay put while the next one is clicked. */}
+        {treePicksCount > 0 && (
+          <div className="tree-picks-bar" role="toolbar" aria-label="Selected scenarios">
+            <span className="tree-picks-count">
+              {treePicksCount} selected
+            </span>
+            <button
+              type="button"
+              className="btn btn-danger tree-picks-delete"
+              onClick={() => void deletePickedScenarios()}
+            >
+              <Trash2 size={13} aria-hidden="true" /> Delete
+            </button>
+            <Tooltip label="Clear the selection" keys="Esc">
+              <button
+                type="button"
+                className="ibtn"
+                aria-label="Clear the selection"
+                onClick={clearTreePicks}
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
         )}
         </div>

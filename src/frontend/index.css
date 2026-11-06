@@ -881,6 +881,43 @@ aside header h1 {
   background: var(--accent-soft);
 }
 
+/* Picked for a bulk action (specs/ui/navigation.feature.md "delete several
+   scenarios at once"): the accent fill with a bar on its left edge, so a
+   pick reads apart from the open scenario's plain fill. */
+.tree-scenario-row.picked {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The picks' bar under the tree: how many, Delete, clear. */
+.tree-picks-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.2rem 0.4rem 0.3rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: 0.75rem;
+}
+
+.tree-picks-bar .tree-picks-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-picks-bar .btn {
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+
 /* The row carries the fill, so the link inside it does not add its own. */
 .tree .tree-scenario-row > a.tree-scenario:hover,
 .tree .tree-scenario-row > a.tree-scenario.active {

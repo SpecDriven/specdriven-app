@@ -1333,6 +1333,90 @@ export async function deletePublishedScenario(
 }
 
 /**
+ * Delete several scenarios of one feature at once (specs/ui/navigation
+ * .feature.md "delete several scenarios at once"), each the way its own
+ * Delete would remove it: drafts out of the Automerge document, [proposed]
+ * and [published] ones out of the file. Published ones go only while
+ * `allowPublished` (the Settings switch) is on, and with them in the batch
+ * the whole removal is one commit, pushed right away — not one per
+ * scenario. Without them it is a local save like any other edit. Every
+ * target is checked before anything is touched, so a stale pick fails the
+ * batch rather than deleting half of it.
+ */
+export async function deleteScenarios(
+  dataDir: string,
+  fileName: string,
+  targets: ScenarioTarget[],
+  allowPublished: boolean,
+): Promise<SaveResult> {
+  const name = safe(fileName);
+  const view = await readFeatureView(dataDir, name);
+  if (view === null) throw new Error(`Feature file not found: ${name}`);
+  const key = (s: { name: string; version: number }) => `${s.name}\u0000${s.version}`;
+  const wanted = new Set(targets.map(key));
+  if (wanted.size === 0) throw new Error("No scenarios to delete");
+  const found = view.parsed.scenarios.filter((s) => wanted.has(key(s)));
+  for (const t of targets) {
+    if (!found.some((s) => key(s) === key(t))) {
+      throw new Error(`Scenario "${t.name}" @v${t.version} not found`);
+    }
+  }
+  const published = found.filter((s) => s.status === "published");
+  if (published.length > 0 && !allowPublished) {
+    throw new PublishedLockedError("Deleting published scenarios is switched off in Settings");
+  }
+
+  // Drafts: one document change for all of them.
+  const drafts = found.filter((s) => s.status === "draft");
+  if (drafts.length > 0) {
+    const loaded = await loadFeatureDoc(dataDir, name);
+    if (loaded === null) throw new Error(`Feature document not found: ${name}`);
+    let doc = loaded.doc;
+    for (const d of drafts) {
+      const next = removeDraftScenario(doc, d);
+      if (next === null) throw new Error(`Draft scenario "${d.name}" @v${d.version} not found`);
+      doc = next;
+    }
+    await saveFeatureDoc(dataDir, name, doc, loaded.heads);
+  }
+
+  // The rest come out of the file.
+  const inFile = found.filter((s) => s.status !== "draft");
+  if (inFile.length === 0) {
+    const content = await readFeature(dataDir, name);
+    if (content === null) throw new Error(`Feature file not found: ${name}`);
+    return { status: "saved", ...(await featureView(dataDir, name, content)), message: "deleted locally" };
+  }
+  const gone = new Set(inFile.map(key));
+  if (published.length === 0) {
+    const current = await readFeature(dataDir, name);
+    if (current === null) throw new Error(`Feature file not found: ${name}`);
+    const parsed = parseFeature(current);
+    const next = { ...parsed, scenarios: parsed.scenarios.filter((s) => !gone.has(key(s))) };
+    const saved = await saveFeature(dataDir, name, serializeFeature(next));
+    return { ...saved, message: "deleted locally" };
+  }
+  const current = await readFeature(dataDir, name);
+  if (current === null) throw new Error(`Feature file not found: ${name}`);
+  const parsed = parseFeature(current);
+  const text = serializeFeature({ ...parsed, scenarios: parsed.scenarios.filter((s) => !gone.has(key(s))) });
+  assertFeatureText(name, text);
+  const projection = await absorbIntoDoc(dataDir, name, text, { force: true });
+  await writeTextFile(`${dataDir}/${name}`, projection);
+  const sync = await commitAndPush(
+    dataDir,
+    await featurePaths(dataDir, name),
+    published.length === 1 && found.length === 1
+      ? `Delete published scenario: ${published[0]!.name} v${published[0]!.version} (${name})`
+      : `Delete ${found.length} scenarios, ${published.length} published (${name})`,
+  );
+  return { status: "saved", ...(await featureView(dataDir, name, projection)), message: sync.message };
+}
+
+/** A refused delete of published content — the route answers 403. */
+export class PublishedLockedError extends Error {}
+
+/**
  * Take a published scenario out of a feature, locally — the doc absorbing
  * the removal with `force` — and return the projection now on disk. The
  * caller commits and pushes.
