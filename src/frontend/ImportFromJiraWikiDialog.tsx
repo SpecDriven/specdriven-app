@@ -14,8 +14,7 @@ import { useAgentChoices } from "./agentChat";
 // to five Jira issue urls and five Confluence page urls, picks the agent
 // when more than one can answer, and the model it answers with — from the
 // models the agent offers (its choices: what its sign-in lists, narrowed by
-// Settings → AI agents), the default set in Settings → Jira chosen, else
-// the agent's own default, else the first — and Analyze has the server read them and
+// the agent's Settings section), the agent's own default chosen, else the first — and Analyze has the server read them and
 // propose a feature title and up to fifteen scenarios. Those are reviewed
 // here — kept or dropped, renamed — before Create feature writes the file.
 // When the sources describe more than fifteen, the dialog says so and
@@ -65,32 +64,6 @@ export interface Proposal {
 }
 
 const AGENT_KEY = "specdriven.importAgent";
-const MODELS_KEY = "specdriven.importModels";
-
-/** The default model per agent id, as set in Settings → Jira, kept on this device. */
-export function importModels(): Record<string, string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(MODELS_KEY) ?? "{}") as unknown;
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-    return Object.fromEntries(
-      Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"),
-    );
-  } catch {
-    return {};
-  }
-}
-
-/** Set (or, blank, clear) an agent's default model for imports. */
-export function setImportModel(agent: string, model: string): void {
-  const models = importModels();
-  if (model.trim()) models[agent] = model.trim();
-  else delete models[agent];
-  try {
-    localStorage.setItem(MODELS_KEY, JSON.stringify(models));
-  } catch {
-    // no storage: nothing to remember
-  }
-}
 
 /** What a model field holds that the server would refuse, or null. */
 export function modelProblem(model: string): string | null {
@@ -187,7 +160,7 @@ export function ImportFromJiraWikiDialog({
   jiraSites: JiraSite[];
   wikis: ConfluenceWiki[];
   agents: AgentDescriptor[];
-  /** The models each agent offers (Settings → AI agents), by agent id. */
+  /** The models each agent's Settings section lists, by agent id. */
   agentModels?: AgentModels;
   trapRef?: Ref<HTMLDivElement>;
   /** Start at the review step with this proposal (tests). */
@@ -199,7 +172,7 @@ export function ImportFromJiraWikiDialog({
   const [url, setUrl] = useState("");
   const [rows, setRows] = useState<ImportSource[]>([]);
   const [agent, setAgent] = useState(() => lastAgent(choices));
-  const [model, setModel] = useState(() => importModels()[lastAgent(choices)] ?? "");
+  const [model, setModel] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(initialProposal ?? null);
   const [busy, setBusy] = useState<"analyze" | "more" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -215,8 +188,8 @@ export function ImportFromJiraWikiDialog({
 
   const chooseAgent = (next: string) => {
     setAgent(next);
-    // Another agent names its models differently: its import default.
-    setModel(importModels()[next] ?? "");
+    // Another agent names its models differently: back to its own default.
+    setModel("");
     try {
       localStorage.setItem(AGENT_KEY, next);
     } catch {
@@ -393,11 +366,10 @@ export function ImportFromJiraWikiDialog({
             {badModel ? (
               <p className="hint">{badModel}</p>
             ) : (
-              chosen && (
+              chosen &&
+              menu.length === 0 && (
                 <p className="hint">
-                  {menu.length > 0
-                    ? "Set the default for imports in Settings → Jira."
-                    : `${chosen.label} lists no models — set up its sign-in in Settings, or list some in Settings → AI agents.`}
+                  {chosen.label} lists no models — set up its sign-in, or list some, in Settings → {chosen.label}.
                 </p>
               )
             )}
@@ -496,77 +468,5 @@ export function ImportFromJiraWikiDialog({
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * Settings → Jira: the model each agent that can analyze the sources answers
- * an import with, unless the dialog names another. Blank leaves the agent's
- * own default. Kept on this device: which models answer depends on its
- * account or proxy.
- */
-export function ImportModelSettings({
-  agents,
-  agentModels = {},
-}: {
-  agents: AgentDescriptor[];
-  agentModels?: AgentModels;
-}) {
-  const choices = oneShotAgents(agents);
-  const [models, setModels] = useState(importModels);
-  if (choices.length === 0) return null;
-  return (
-    <>
-      {choices.map((a) => (
-        <ImportModelRow
-          key={a.id}
-          agent={a}
-          label={choices.length > 1 ? `Import model for ${a.label}` : "Import model"}
-          listed={agentModels[a.id] ?? []}
-          value={models[a.id] ?? ""}
-          onChange={(next) => {
-            setModels((m) => ({ ...m, [a.id]: next }));
-            if (!modelProblem(next)) setImportModel(a.id, next);
-          }}
-        />
-      ))}
-    </>
-  );
-}
-
-/** One agent's import-model row: a dropdown of what the agent offers. */
-function ImportModelRow({
-  agent,
-  label,
-  listed,
-  value,
-  onChange,
-}: {
-  agent: AgentDescriptor;
-  label: string;
-  /** The data repo's list for the agent, for one that offers nothing. */
-  listed: string[];
-  value: string;
-  onChange: (model: string) => void;
-}) {
-  const offered = useAgentChoices(agent.id);
-  const problem = modelProblem(value);
-  return (
-    <label className="settings-row">
-      <span className="settings-row-label">
-        {label}
-        <span className="settings-row-hint">
-          {problem ??
-            `The model ${agent.label} uses for "Import from Jira/Wiki", unless the dialog names another — one of the models ${agent.label} offers. Remembered on this device.`}
-        </span>
-      </span>
-      <ModelSelect
-        ariaLabel={`Import model for ${agent.label}`}
-        models={offered?.models ?? listed}
-        value={value}
-        fallback={offered?.model ?? null}
-        onChange={onChange}
-      />
-    </label>
   );
 }

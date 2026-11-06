@@ -1,4 +1,4 @@
-// Settings → AI agents (specs/agents/agent-plugins.feature.md "Each agent
+// An agent's model list, in its Settings section (specs/agents/agent-plugins.feature.md "Each agent
 // offers the models the data repo lists"): a list per installed agent, a
 // model per line, saved on blur to /api/agent-models/<agent>; and the model
 // dropdown every agent model field uses. React needs a DOM to handle the
@@ -51,7 +51,8 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  AgentModelsSettings,
+  AgentModelList,
+  agentsWithoutSection,
   ModelSelect,
   chosenModel,
   agentModelsOf,
@@ -101,7 +102,7 @@ const type = (el: HTMLTextAreaElement, value: string) =>
     el.dispatchEvent(new window.KeyboardEvent("keyup", { key: "a", bubbles: true }) as unknown as Event);
   });
 
-describe("Settings → AI agents", () => {
+describe("an agent's model list, in its Settings section", () => {
   test("a list per agent, a model per line, saved on blur to that agent's key", async () => {
     const calls: { url: string; body: unknown }[] = [];
     globalThis.fetch = (async (url: string, init: RequestInit) => {
@@ -111,16 +112,16 @@ describe("Settings → AI agents", () => {
     }) as unknown as typeof fetch;
     const savedLists: AgentModels[] = [];
     const { host, unmount } = mount(
-      <AgentModelsSettings
-        agents={[agent("claude"), agent("codex")]}
-        agentModels={{ codex: ["gpt-5-codex"] }}
-        onSaved={(next) => savedLists.push(next)}
-      />,
+      <>
+        <AgentModelList agent={agent("claude")} models={[]} onSaved={(next) => savedLists.push(next)} />
+        <AgentModelList agent={agent("codex")} models={["gpt-5-codex"]} onSaved={(next) => savedLists.push(next)} />
+      </>,
     );
     const list = (label: string) => host.querySelector(`textarea[aria-label="${label}"]`) as HTMLTextAreaElement;
     expect(list("Claude models").value).toBe("");
     expect(list("Codex models").value).toBe("gpt-5-codex");
     expect(host.textContent).toContain("One per line, as Claude names them");
+    expect(host.textContent).toContain("Kept in the data repo's .specdriven/claude-models.json, shared with the team");
 
     type(list("Claude models"), "opus\n  sonnet \n\nopus\n");
     await act(async () => list("Claude models").blur());
@@ -142,7 +143,7 @@ describe("Settings → AI agents", () => {
       Response.json({ error: "Not a model name: claude sonnet" }, { status: 400 })) as unknown as typeof fetch;
     const savedLists: AgentModels[] = [];
     const { host, unmount } = mount(
-      <AgentModelsSettings agents={[agent("claude")]} agentModels={{}} onSaved={(next) => savedLists.push(next)} />,
+      <AgentModelList agent={agent("claude")} models={[]} onSaved={(next) => savedLists.push(next)} />,
     );
     const list = host.querySelector('textarea[aria-label="Claude models"]') as HTMLTextAreaElement;
     type(list, "claude sonnet");
@@ -152,6 +153,14 @@ describe("Settings → AI agents", () => {
     expect(savedLists).toEqual([]);
     unmount();
   });
+});
+
+test("an agent whose plugin adds no Settings section gets one of its own for its list", () => {
+  // Claude's plugin has Settings → Claude; Codex's has none.
+  expect(agentsWithoutSection([agent("claude"), agent("codex")], ["claude", "qtest-extra"]).map((a) => a.id)).toEqual([
+    "codex",
+  ]);
+  expect(agentsWithoutSection([agent("claude")], ["claude"])).toEqual([]);
 });
 
 describe("the model dropdown", () => {

@@ -10140,7 +10140,7 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   display: none;
 }
 
-/* Settings → AI agents (specs/agents/agent-plugins.feature.md "Each agent
+/* An agent's model list, in its Settings section (specs/agents/agent-plugins.feature.md "Each agent
    offers the models the data repo lists"): a model per line, beside the
    row's label like any settings field. */
 .agent-models-row {

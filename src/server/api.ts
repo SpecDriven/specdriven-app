@@ -2243,7 +2243,7 @@ const putCustomAttributes = withDataDir(async (dir, req) => {
   }
 });
 
-// Settings → AI agents (specs/agents/agent-plugins.feature.md "Each agent
+// An agent's model list in Settings (specs/agents/agent-plugins.feature.md "Each agent
 // offers the models the data repo lists"): one agent's list, replaced whole.
 // A local write the reload cron commits and pushes, like custom attributes.
 const putAgentModels = withDataDir(async (dir, req, params) => {

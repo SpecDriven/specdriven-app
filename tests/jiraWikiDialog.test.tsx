@@ -1,18 +1,15 @@
 // specs/external-links/jira-wiki-import.feature.md as static markup: the
 // import dialog's sources step (the urls collected, the agent to ask,
 // Analyze), its review step (the title, each scenario kept or dropped, the
-// rest the sources describe), and the Settings → Jira form. App.tsx owns
+// rest the sources describe), and the Settings → Jira tokens. App.tsx owns
 // the open state and the menu entry.
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentDescriptor } from "../src/server/agentTypes";
 import {
   ImportFromJiraWikiDialog,
-  ImportModelSettings,
-  importModels,
   modelProblem,
   oneShotAgents,
-  setImportModel,
   sourceProblem,
   sourceRow,
   type ImportSource,
@@ -61,24 +58,12 @@ const dialog = (over: Partial<Parameters<typeof ImportFromJiraWikiDialog>[0]> = 
   />
 );
 
-/** Run with a localStorage of its own, gone afterwards. */
-function withStorage(fn: () => void): void {
-  const items = new Map<string, string>();
-  (globalThis as { localStorage?: unknown }).localStorage = {
-    getItem: (k: string) => items.get(k) ?? null,
-    setItem: (k: string, v: string) => void items.set(k, v),
-    removeItem: (k: string) => void items.delete(k),
-  };
-  fn();
-}
-
 afterEach(() => {
-  delete (globalThis as { localStorage?: unknown }).localStorage;
   agentChat.setChoices("claude", undefined);
   agentChat.setChoices("codex", undefined);
 });
 
-/** What the Claude plugin offers: the sign-in's models, narrowed by Settings → AI agents, and its default. */
+/** What the Claude plugin offers: the sign-in's models, narrowed by its list in Settings → Claude, and its default. */
 const CLAUDE_CHOICES: AgentChoices = {
   models: [
     { value: "opus", resolvedModel: "claude-opus-4-8", displayName: "Opus", description: "Claude Code's latest Opus" },
@@ -114,7 +99,7 @@ describe("the sources step", () => {
     expect(none).not.toContain('aria-label="Analyze with"');
   });
 
-  test("a Model field of the models the agent offers, its default chosen unless Settings set one for imports", () => {
+  test("a Model field of the models the agent offers, its default chosen", () => {
     // An agent whose plugin offers no choices: the data repo's list for it
     // alone, and nothing to choose until that lists some.
     agentChat.setChoices("claude", null);
@@ -122,7 +107,7 @@ describe("the sources step", () => {
     expect(unlisted).toContain(
       '<select aria-label="Model" disabled=""><option value="" selected="">No models listed</option></select>',
     );
-    expect(unlisted).toContain("Claude lists no models — set up its sign-in in Settings, or list some in Settings → AI agents.");
+    expect(unlisted).toContain("Claude lists no models — set up its sign-in, or list some, in Settings → Claude.");
     const listed = html(dialog({ agentModels: { claude: ["opus", "sonnet"], codex: ["gpt-5-codex"] } }));
     expect(listed).toContain(
       '<select aria-label="Model"><option value="opus" selected="">opus</option><option value="sonnet">sonnet</option></select>',
@@ -137,24 +122,12 @@ describe("the sources step", () => {
       '<select aria-label="Model"><option value="opus">Opus — opus</option>' +
         '<option value="claude-sonnet-4-6" selected="">Claude Sonnet 4.6 — claude-sonnet-4-6</option></select>',
     );
-    expect(offered).toContain("Set the default for imports in Settings → Jira.");
+    expect(offered).not.toContain("Settings → Jira");
     // No default of its own: the first offered.
     agentChat.setChoices("claude", { ...CLAUDE_CHOICES, model: null });
     expect(html(dialog())).toContain('<option value="opus" selected="">Opus — opus</option>');
-    withStorage(() => {
-      // Settings → Jira's default for imports wins over the agent's.
-      agentChat.setChoices("claude", CLAUDE_CHOICES);
-      setImportModel("claude", "opus");
-      expect(html(dialog())).toContain('<option value="opus" selected="">Opus — opus</option>');
-      // A default the menu no longer holds stays chosen, on offer after it.
-      setImportModel("claude", "claude-haiku-4-5");
-      expect(html(dialog())).toContain(
-        '<option value="claude-sonnet-4-6">Claude Sonnet 4.6 — claude-sonnet-4-6</option>' +
-          '<option value="claude-haiku-4-5" selected="">claude-haiku-4-5</option>',
-      );
-      const none = html(dialog({ agents: [agent("pi", { available: false })] }));
-      expect(none).not.toContain('aria-label="Model"');
-    });
+    const none = html(dialog({ agents: [agent("pi", { available: false })] }));
+    expect(none).not.toContain('aria-label="Model"');
   });
 
   test("a model name is a CLI's name for one; anything else is said", () => {
@@ -264,40 +237,5 @@ describe("Settings → Jira", () => {
     expect(markup).toContain('aria-label="Jira personal access token" type="password"');
     expect(markup).toMatch(/<button class="secondary" disabled="">Save token<\/button>/);
     expect(markup).toContain("nothing is ever written to Jira");
-  });
-});
-
-describe("Settings → Jira, the import model", () => {
-  test("one row per agent that can analyze, filled with its default or the agent's; none without one", () => {
-    withStorage(() => {
-      setImportModel("codex", "gpt-5.1-codex");
-      // Claude's plugin offers its choices, with its own default; Codex's
-      // offers none, so the data repo's list for it stands in.
-      agentChat.setChoices("claude", CLAUDE_CHOICES);
-      const two = html(
-        <ImportModelSettings
-          agents={[agent("claude"), agent("codex")]}
-          agentModels={{ claude: ["never-shown"], codex: ["gpt-5.1-codex", "gpt-5-codex"] }}
-        />,
-      );
-      expect(two).toContain(
-        '<select aria-label="Import model for Claude"><option value="opus">Opus — opus</option>' +
-          '<option value="claude-sonnet-4-6" selected="">Claude Sonnet 4.6 — claude-sonnet-4-6</option></select>',
-      );
-      expect(two).toContain(
-        '<select aria-label="Import model for Codex"><option value="gpt-5.1-codex" selected="">gpt-5.1-codex</option><option value="gpt-5-codex">gpt-5-codex</option></select>',
-      );
-      expect(two).toContain("one of the models Claude offers. Remembered on this device.");
-      expect(html(<ImportModelSettings agents={[agent("codex", { oneShot: false })]} />)).toBe("");
-    });
-  });
-
-  test("a blank model clears the agent's default", () => {
-    withStorage(() => {
-      setImportModel("claude", "claude-sonnet-4-6");
-      expect(importModels()).toEqual({ claude: "claude-sonnet-4-6" });
-      setImportModel("claude", "  ");
-      expect(importModels()).toEqual({});
-    });
   });
 });

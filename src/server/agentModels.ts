@@ -5,8 +5,8 @@
 //   .specdriven/claude-models.json   ["opus", "sonnet"]
 //   .specdriven/codex-models.json    ["gpt-5-codex"]
 //
-// which Settings → AI agents edits and every model dropdown chooses from —
-// the import dialog's, Settings → Jira's, an agent plugin's default. Agents
+// which the agent's Settings section edits and every model dropdown chooses from —
+// the pane's, the import dialog's, an agent plugin's default. Agents
 // name their models differently, so the lists never mix. Saves land in the
 // working tree only, like custom-attributes.txt; the reload cron's sync
 // stages, commits and pushes the files, so the team shares one set of lists.
