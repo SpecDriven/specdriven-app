@@ -119,13 +119,13 @@ describe("the sources step", () => {
     agentChat.setChoices("claude", CLAUDE_CHOICES);
     const offered = html(dialog());
     expect(offered).toContain(
-      '<select aria-label="Model"><option value="opus">Opus — opus</option>' +
-        '<option value="claude-sonnet-4-6" selected="">Claude Sonnet 4.6 — claude-sonnet-4-6</option></select>',
+      '<select aria-label="Model"><option value="opus">Opus</option>' +
+        '<option value="claude-sonnet-4-6" selected="">Claude Sonnet 4.6</option></select>',
     );
     expect(offered).not.toContain("Settings → Jira");
     // No default of its own: the first offered.
     agentChat.setChoices("claude", { ...CLAUDE_CHOICES, model: null });
-    expect(html(dialog())).toContain('<option value="opus" selected="">Opus — opus</option>');
+    expect(html(dialog())).toContain('<option value="opus" selected="">Opus</option>');
     const none = html(dialog({ agents: [agent("pi", { available: false })] }));
     expect(none).not.toContain('aria-label="Model"');
   });
