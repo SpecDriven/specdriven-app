@@ -185,7 +185,7 @@ describe("the model dropdown", () => {
     expect(chosenModel(rows, "", null)).toBe("opus");
     expect(chosenModel(rows, "haiku", "opus")).toBe("haiku");
     expect(renderToStaticMarkup(<ModelSelect ariaLabel="Model" models={rows} value="" fallback="claude-sonnet-4-6" onChange={() => {}} />)).toBe(
-      '<select aria-label="Model"><option value="opus">Opus — opus</option><option value="claude-sonnet-4-6" selected="">claude-sonnet-4-6</option></select>',
+      '<select aria-label="Model"><option value="opus">Opus</option><option value="claude-sonnet-4-6" selected="">claude-sonnet-4-6</option></select>',
     );
     expect(renderToStaticMarkup(<ModelSelect ariaLabel="Model" models={rows} value="" fallback="haiku" onChange={() => {}} />)).toContain(
       '<option value="haiku" selected="">haiku</option>',

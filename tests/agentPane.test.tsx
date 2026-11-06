@@ -472,6 +472,17 @@ describe("composer bar", () => {
     expect(fresh.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:default"]);
   });
 
+  test("a model's description that only repeats its name is left off, as a proxy's rows carry it", () => {
+    const proxy: AgentChoices = {
+      models: [{ value: "claude-opus-4-8", displayName: "Opus 4.8 (latest)", description: "Opus 4.8 (latest)" }],
+      model: "claude-opus-4-8",
+      effort: null,
+    };
+    const [row] = modelItems(proxy, null, CLAUDE_AGENT, () => {});
+    expect(row!.description).toBeUndefined();
+    expect(renderToStaticMarkup(<>{row!.label}</>)).toContain("Opus 4.8 (latest)");
+  });
+
   test("the effort menu offers the levels the model takes, after the agent's own default", () => {
     expect(effortsFor(choices, "claude-sonnet-5-5")).toEqual(["low", "medium", "high"]);
     expect(effortsFor(choices, "haiku")).toEqual([]);

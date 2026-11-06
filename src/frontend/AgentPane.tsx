@@ -484,7 +484,8 @@ export function modelItems(
       ) : (
         m.displayName
       ),
-    ...(m.description ? { description: m.description } : {}),
+    // A description that only repeats the name (a proxy's rows) is left off.
+    ...(m.description && m.description !== m.displayName ? { description: m.description } : {}),
     ...(i < 9 ? { keys: String(i + 1) } : {}),
     checked: m === currentRow,
     onSelect: () => onSelect(m.value),

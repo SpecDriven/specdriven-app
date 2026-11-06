@@ -20,9 +20,10 @@ export function modelRows(models: readonly ModelRow[]): Pick<AgentModelOption, "
   return models.map((m) => (typeof m === "string" ? { value: m, displayName: m } : m));
 }
 
-/** An option's text: its name, and the value when that differs. */
+/** An option's text: its display name, as the coding agent pane's menu shows
+    it, else the value. */
 export function modelOptionLabel(row: Pick<AgentModelOption, "value" | "displayName">): string {
-  return row.displayName && row.displayName !== row.value ? `${row.displayName} — ${row.value}` : row.value;
+  return row.displayName?.trim() || row.value;
 }
 
 /** The `agentModels` of a state payload, `{}` when absent or malformed. */
