@@ -325,6 +325,9 @@ export async function bundleElectron(outdir: string, opts: { production: boolean
   // The shim is its own file: it imports main.js by a computed path, so the
   // bundler leaves the two apart (src/electron/boot.ts).
   await bundle("src/electron/boot.ts", outdir, opts.production, []);
+  // The Confluence MCP server (src/mcp/confluence.ts), which main.js runs
+  // as node beside an agent session (src/server/agentMcp.ts).
+  await bundle("src/mcp/confluence.ts", join(outdir, "mcp"), opts.production, []);
   await copyBundleAssets(outdir, sources);
 
   const baked = bakedPaths(await Bun.file(join(outdir, "main.js")).text());

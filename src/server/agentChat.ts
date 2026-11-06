@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { sessionWorkDir } from "./agent";
+import { agentMcpServers } from "./agentMcp";
 import type { SessionPlace } from "./agent";
 import type {
   AgentHost,
@@ -516,6 +517,8 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       now,
     );
   }
+  // The MCP servers the session should have (src/server/agentMcp.ts).
+  const mcpServers = await agentMcpServers();
   try {
     session.session = await provider.start({
       sessionId: id,
@@ -528,6 +531,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       ...(effort ? { effort } : {}),
       ...(firstTurn ? { prompt: opts.prompt ?? "" } : {}),
       ...(pasted.given.length ? { images: pasted.given } : {}),
+      ...(mcpServers.length ? { mcpServers } : {}),
       signal: session.abort.signal,
       host: hostFor(session),
     });

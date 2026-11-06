@@ -367,3 +367,19 @@ export function fallbackDescriptor(id: string): AgentDescriptor {
 /** Sort: rank, then id — the order the pane lists agents in. */
 export const byRank = (a: AgentDescriptor, b: AgentDescriptor): number =>
   a.rank - b.rank || a.id.localeCompare(b.id);
+
+// --- MCP servers -------------------------------------------------------------
+
+/**
+ * An MCP server the core asks a provider to start beside the agent
+ * (src/server/agentMcp.ts): a command to run over stdio, with the
+ * environment it needs. The provider hands it to its agent the way that
+ * agent takes MCP servers; a provider that cannot ignores it.
+ */
+export interface AgentMcpServer {
+  /** The server's name as the agent lists its tools (`mcp__<name>__<tool>`). */
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+}

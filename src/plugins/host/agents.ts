@@ -17,6 +17,7 @@ import type {
   AgentDefaultsPatch,
   AgentDescriptor,
   AgentImage,
+  AgentMcpServer,
   EffortLevel,
   AgentOutput,
   ChatAccount,
@@ -76,6 +77,10 @@ export interface AgentStartOptions {
   /** Images pasted with the first turn; only for a provider whose
       capabilities.images is true. */
   images?: AgentImage[];
+  /** MCP servers to start beside the agent (src/server/agentMcp.ts): the
+      Confluence server while a wiki token is saved. A provider whose agent
+      takes no MCP servers may ignore them. */
+  mcpServers?: AgentMcpServer[];
   /** Fires on end and on shutdown. */
   signal: AbortSignal;
   host: AgentHost;

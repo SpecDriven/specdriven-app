@@ -56,6 +56,7 @@ export type {
   AgentDefaultsPatch,
   AgentDescriptor,
   AgentImage,
+  AgentMcpServer,
   AgentModelOption,
   EffortLevel,
   AgentOffer,
