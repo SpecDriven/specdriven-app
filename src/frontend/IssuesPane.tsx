@@ -40,6 +40,7 @@ import { listKeyDown, useRevealActive } from "./sidebarList";
 import { issuesPath, type IssuesRoute } from "../plugins/builtin/issues/route";
 import { formatWhen } from "./testing";
 import { cleanLine, cleanText } from "../server/text";
+import { clearIssueDraft, draftKey, readIssueDraft, saveIssueDraft, useIssueDraft, type IssueDraft } from "./issueDraft";
 import {
   issues,
   labelStyle,
@@ -276,6 +277,16 @@ function RepoLink({ store, tail = "" }: { store: IssuesStore; tail?: string }) {
 // --- Issue list ---------------------------------------------------------------------------
 
 function ListView({ store, repoCrumb, prompt, confirm, onNavigate, onOpenSettings }: ViewProps) {
+  const draft = useIssueDraft(store.readOnly ? null : store.repo);
+  const discardDraft = async () => {
+    const ok = await confirm({
+      title: "Discard the draft?",
+      body: "The unsent issue's title and description are deleted. This cannot be undone.",
+      confirmLabel: "Discard draft",
+      danger: true,
+    });
+    if (ok) clearIssueDraft(store.repo);
+  };
   const filterLabel = store.filter === "open" ? "Open issues" : store.filter === "closed" ? "Closed issues" : "All issues";
   return (
     <>
@@ -295,6 +306,13 @@ function ListView({ store, repoCrumb, prompt, confirm, onNavigate, onOpenSetting
         }
       />
       <div className="tests-body">
+        {draft && (
+          <DraftNotice
+            draft={draft}
+            onResume={() => onNavigate({ kind: "new" }, { push: true })}
+            onDiscard={() => void discardDraft()}
+          />
+        )}
         {store.error && !store.loading ? (
           <IssuesError error={store.error} onOpenSettings={onOpenSettings} onRetry={() => void issues.load()} />
         ) : !store.loaded ? (
@@ -378,13 +396,41 @@ export function IssueRow({ issue, go, menu }: { issue: Issue; go: Navigate; menu
   );
 }
 
+/** The list's note that an issue was started here but never created — a failed create, or a Cancel. */
+export function DraftNotice({ draft, onResume, onDiscard }: { draft: IssueDraft; onResume: () => void; onDiscard: () => void }) {
+  return (
+    <div className="issue-draft-notice" role="status">
+      <Pencil size={13} aria-hidden="true" />
+      <span className="issue-draft-text">
+        <strong>Draft</strong> {draft.title.trim() ? <span className="issue-draft-title">{draft.title.trim()}</span> : <em className="muted">Untitled</em>}
+        {draft.savedAt && (
+          <span className="muted small" title={draft.savedAt}>
+            {" "}· saved {formatWhen(draft.savedAt)}
+          </span>
+        )}
+      </span>
+      <button type="button" className="btn btn-secondary" onClick={onResume}>
+        Resume
+      </button>
+      <button type="button" className="btn btn-ghost" onClick={onDiscard}>
+        Discard
+      </button>
+    </div>
+  );
+}
+
 // --- New issue ----------------------------------------------------------------------------
 
-function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
-  const [title, setTitle] = useState("");
+function NewView({ repoCrumb, onNavigate, store, confirm }: ViewProps) {
+  // The form starts from the repository's saved draft, if any, and saves
+  // every keystroke back to it (src/frontend/issueDraft.ts), so a create
+  // GitHub refuses — or a slip off the form — loses nothing.
+  const repo = store.repo;
+  const [title, setTitle] = useState(() => readIssueDraft(repo)?.title ?? "");
   const spellCheck = useSpellCheck();
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(() => readIssueDraft(repo)?.body ?? "");
   const [busy, setBusy] = useState(false);
+  const draft = useIssueDraft(repo);
   const dirty = title.trim() !== "" || body.trim() !== "";
   // Read-only (the demo) takes the New issue buttons off the screen, but the
   // url stays typeable — say why rather than offer a form the server refuses.
@@ -393,6 +439,18 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
     issues.setDirty("new", dirty);
     return () => issues.setDirty("new", false);
   }, [dirty]);
+  // Opened before the list named the repository (a typed /issues/new): the
+  // draft comes back once it does, unless the user has started typing.
+  // Only a change of repository restores; typing never does.
+  const repoKey = repo ? draftKey(repo) : null;
+  useEffect(() => {
+    if (!repoKey || title || body) return;
+    const saved = readIssueDraft(repo);
+    if (!saved) return;
+    setTitle(saved.title);
+    setBody(saved.body);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoKey]);
   if (readOnly) {
     return (
       <div className="view-error">
@@ -405,12 +463,35 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
       </div>
     );
   }
+  const editTitle = (next: string) => {
+    setTitle(next);
+    saveIssueDraft(repo, { title: next, body });
+  };
+  const editBody = (next: string) => {
+    setBody(next);
+    saveIssueDraft(repo, { title, body: next });
+  };
+  const discard = async () => {
+    const ok = await confirm({
+      title: "Discard the draft?",
+      body: "The title and description typed here are deleted. This cannot be undone.",
+      confirmLabel: "Discard draft",
+      danger: true,
+    });
+    if (!ok) return;
+    clearIssueDraft(repo);
+    setTitle("");
+    setBody("");
+  };
   const submit = async () => {
     if (!title.trim() || busy) return;
     setBusy(true);
+    // Saved once more as sent, so the draft holds exactly what failed.
+    saveIssueDraft(repo, { title, body });
     const issue = await issues.create({ title: cleanLine(title), body: cleanText(body) });
     setBusy(false);
     if (issue) {
+      clearIssueDraft(repo);
       toast.success(`Created #${issue.number}.`);
       setTitle("");
       setBody("");
@@ -425,7 +506,22 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
         actions={
           <>
             <RepoLink store={store} tail="/new" />
-            <button type="button" className="secondary" onClick={() => onNavigate({ kind: "list" }, { push: true })}>
+            {draft && (
+              <>
+                <span className="muted small issue-draft-saved" title={draft.savedAt} aria-live="polite">
+                  Draft saved
+                </span>
+                <button type="button" className="btn btn-ghost" onClick={() => void discard()}>
+                  Discard draft
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="secondary"
+              title={draft ? "Leave the form; the draft stays for later" : undefined}
+              onClick={() => onNavigate({ kind: "list" }, { push: true })}
+            >
               Cancel
             </button>
             <button type="button" className="primary-action" disabled={!title.trim() || busy} onClick={() => void submit()}>
@@ -443,7 +539,7 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
           aria-label="Issue title"
           autoFocus
           spellCheck={spellCheck}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => editTitle(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -451,7 +547,7 @@ function NewView({ repoCrumb, onNavigate, store }: ViewProps) {
             }
           }}
         />
-        <MarkdownEditor value={body} onChange={setBody} placeholder="Describe the bug: what happened, what you expected, how to reproduce it…" />
+        <MarkdownEditor value={body} onChange={editBody} placeholder="Describe the bug: what happened, what you expected, how to reproduce it…" />
       </div>
     </>
   );
