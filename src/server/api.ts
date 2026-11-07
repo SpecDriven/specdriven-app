@@ -33,6 +33,7 @@ import {
   rememberDataRepo,
   MIN_AUTOSAVE_SECONDS,
   normalizeQtestParentUrl,
+  settingsDirectory,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { onePerRepo, sameRepoAs } from "./sameRepo";
@@ -114,6 +115,7 @@ import {
   sessionsDirectory,
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
+import { folderGitInfo, WORKTREES_SUBDIR } from "./agentWorktree";
 import {
   ChatError,
   agentChoices,
@@ -246,7 +248,7 @@ import {
   incompatibility,
 } from "./dataFormat";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
 import {
   pluginStates,
@@ -3135,7 +3137,11 @@ const postAgentChat = withDataDir(async (dir, req) => {
     model?: unknown;
     effort?: unknown;
     images?: unknown;
+    worktree?: unknown;
   };
+  if (body.worktree !== undefined && typeof body.worktree !== "boolean") {
+    return json({ error: "worktree must be true or false" }, 400);
+  }
   // Which agent drives the chat; absent is the first one whose CLI is there.
   let agent: ChatAgent | undefined;
   if (body.agent !== undefined) {
@@ -3185,6 +3191,9 @@ const postAgentChat = withDataDir(async (dir, req) => {
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       sessionsDir: await sessionsDirectory(getAppRoot()),
+      // A worktree of its own (src/server/agentWorktree.ts), beside the
+      // session records and outside every repo.
+      ...(body.worktree === true ? { worktreesDir: join(await settingsDirectory(getAppRoot()), WORKTREES_SUBDIR) } : {}),
     });
     return json(meta);
   } catch (e) {
@@ -3429,10 +3438,19 @@ const putAgentDefaults: Handler = async (req, params) => {
   }
 };
 
+// What the new-session bar needs to offer a worktree for a folder: whether
+// it is in a git repo with a commit, and the branch checked out there.
+const getAgentFolder: Handler = async (req) => {
+  const raw = new URL(req.url).searchParams.get("path") ?? "";
+  if (!isAbsolute(raw)) return json({ error: "path must be an absolute path" }, 400);
+  if (!(await directoryExists(raw))) return json({ error: `Folder not found: ${raw}` }, 404);
+  return json(await folderGitInfo(resolve(raw)));
+};
+
 const deleteAgentChat: Handler = async (_req, params) => {
   try {
-    await endChatSession(params.id!);
-    return json({ ok: true });
+    // With a worktree, whether it was removed or kept for its changes.
+    return json({ ok: true, ...(await endChatSession(params.id!)) });
   } catch (e) {
     return chatError(e);
   }
@@ -3745,6 +3763,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
+  ["GET", "/api/agent/folder", unlessHosted(getAgentFolder)],
   // "/active" before "/:id": the table is first-match.
 ];
 for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);

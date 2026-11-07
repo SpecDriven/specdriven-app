@@ -18,6 +18,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { sessionWorkDir } from "./agent";
 import { agentMcpServers } from "./agentMcp";
+import { cleanUpWorktree, createWorktree, discardWorktree, WorktreeError } from "./agentWorktree";
+import type { WorktreeCleanup } from "./agentWorktree";
 import type { SessionPlace } from "./agent";
 import type {
   AgentHost,
@@ -41,6 +43,7 @@ import type {
   ChatEventBody,
   ChatSessionMeta,
   ChatStatus,
+  ChatWorktree,
   PermissionAnswer,
   PermissionMode,
   EffortLevel,
@@ -160,6 +163,7 @@ function recordOf(session: ChatSession) {
     dataRepo: m.dataRepo,
     ...(m.codeRepo ? { codeRepo: m.codeRepo } : {}),
     cwd: m.cwd,
+    ...(m.worktree ? { worktree: m.worktree } : {}),
     ...(m.agentSessionId ? { agentSessionId: m.agentSessionId } : {}),
     ...(m.model ? { model: m.model } : {}),
     ...(m.effort ? { effort: m.effort } : {}),
@@ -426,6 +430,9 @@ export interface CreateChatOptions {
   effort?: EffortLevel;
   /** <settings dir>/sessions — see sessionsDirectory in agent.ts. */
   sessionsDir: string;
+  /** Present: the session gets its own git worktree of the place's folder,
+      made under this folder (<settings dir>/worktrees, agentWorktree.ts). */
+  worktreesDir?: string;
   id?: string;
   now?: Date;
 }
@@ -459,7 +466,21 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   refuseImages(provider, uploads.length);
   const id = opts.id ?? randomUUID();
   const now = opts.now ?? new Date();
-  const cwd = sessionWorkDir(opts.place);
+  // A worktree of its own, when asked: made before anything else is kept,
+  // so a folder that is no repo is refused with nothing to undo.
+  let worktree: ChatWorktree | undefined;
+  if (opts.worktreesDir) {
+    try {
+      worktree = await createWorktree({ folder: sessionWorkDir(opts.place), name: opts.name, worktreesDir: opts.worktreesDir });
+    } catch (e) {
+      if (e instanceof WorktreeError) throw new ChatError(e.status, e.message);
+      throw new ChatError(500, `Could not make a worktree: ${(e as Error).message}`);
+    }
+  }
+  const cwd = worktree?.cwd ?? sessionWorkDir(opts.place);
+  // The worktree stands where the code repo stood; a worktree of the data
+  // repo is the session's data repo copy, with no second folder beside it.
+  const codeRepo = opts.place.codeRepo ? cwd : undefined;
   // A provider with no gate sits on its default; any other mode would
   // promise a prompt that never comes.
   const modes = provider.capabilities.permissionModes;
@@ -474,6 +495,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   try {
     pasted = await saveImages(id, sessionDir, uploads);
   } catch (e) {
+    if (worktree) await discardWorktree(worktree);
     throw new ChatError(500, `Could not keep the pasted images: ${(e as Error).message}`);
   }
   const firstTurn = Boolean(opts.prompt) || pasted.given.length > 0;
@@ -483,8 +505,9 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       name: opts.name,
       agent: provider.id,
       cwd,
+      ...(worktree ? { worktree } : {}),
       dataRepo: opts.place.dataRepo,
-      ...(opts.place.codeRepo ? { codeRepo: opts.place.codeRepo } : {}),
+      ...(codeRepo ? { codeRepo } : {}),
       startedAt: now.toISOString(),
       status: "starting",
       ...(opts.model ? { model: opts.model } : {}),
@@ -525,7 +548,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       name: opts.name,
       cwd,
       dataRepo: opts.place.dataRepo,
-      ...(opts.place.codeRepo ? { codeRepo: opts.place.codeRepo } : {}),
+      ...(codeRepo ? { codeRepo } : {}),
       permissionMode,
       ...(opts.model ? { model: opts.model } : {}),
       ...(effort ? { effort } : {}),
@@ -537,6 +560,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     });
   } catch (e) {
     registry().delete(id);
+    if (worktree) await discardWorktree(worktree);
     if (e instanceof AgentError) throw new ChatError(e.status, e.message);
     throw new ChatError(502, `Could not start ${provider.label}: ${(e as Error).message}`);
   }
@@ -778,8 +802,12 @@ export async function setAgentDefaults(agent: ChatAgent, patch: AgentDefaultsPat
   }
 }
 
-/** End the chat and forget it: the subprocess is aborted, the record kept. */
-export async function endChatSession(id: string): Promise<void> {
+/**
+ * End the chat and forget it: the subprocess is aborted, the record kept.
+ * A worktree of its own is removed when nothing in it is uncommitted (its
+ * branch stays), else kept; the answer says which.
+ */
+export async function endChatSession(id: string): Promise<{ worktree?: WorktreeCleanup }> {
   const session = get(id);
   if (!isFinalStatus(session.meta.status)) {
     const saved = finish(session, "ended", "Session ended.");
@@ -787,6 +815,9 @@ export async function endChatSession(id: string): Promise<void> {
     await saved;
   }
   registry().delete(id);
+  const wt = session.meta.worktree;
+  if (!wt) return {};
+  return { worktree: await cleanUpWorktree(wt).catch((): WorktreeCleanup => "kept") };
 }
 
 /** Server shutdown: every live subprocess goes. */

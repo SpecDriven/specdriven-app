@@ -17,6 +17,7 @@ import {
   ArrowUp,
   Folder,
   FolderOpen,
+  GitBranch,
   Globe,
   PanelRightClose,
   Plus,
@@ -45,10 +46,14 @@ import {
   formatDuration,
   hasModes,
   isFinalStatus,
+  loadFolderInfo,
+  readAgentWorktree,
   shouldFollow,
   usableAgents,
   useAgentChat,
   useAgentChoices,
+  useFolderInfo,
+  writeAgentWorktree,
   type AgentChatStore,
   type AgentChoices,
   type AgentDescriptor,
@@ -232,6 +237,12 @@ export function SimulationWatermark() {
   );
 }
 
+/** The folder a session works in, as the pane shows it: the folder picked
+    for a worktree session, not the worktree. */
+export function sessionFolder(m: Pick<ChatSessionMeta, "cwd" | "worktree">): string {
+  return m.worktree?.folder ?? m.cwd;
+}
+
 /**
  * The folders the pane offers an agent: the code repo, the data repo, then
  * every other folder a session here has worked in, newest first.
@@ -242,7 +253,7 @@ export function knownFolders(
   sessions: readonly ChatSessionMeta[],
   codeRepos: readonly string[] = [],
 ): string[] {
-  const used = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((m) => m.cwd);
+  const used = [...sessions].sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map(sessionFolder);
   const all = [codeRepo, ...codeRepos, dataRepo, ...used].filter((f): f is string => Boolean(f));
   return [...new Set(all.map(folderPath))];
 }
@@ -269,7 +280,7 @@ function AgentHeader({
         id: m.id,
         label: m.name,
         checked: m.id === store.activeId,
-        title: `${a.label} · ${statusLabel(m.status, a)} · ${m.cwd}`,
+        title: `${a.label} · ${statusLabel(m.status, a)} · ${sessionFolder(m)}${m.worktree ? ` · worktree on ${m.worktree.branch}` : ""}`,
         onSelect: () => agentChat.setActive(m.id),
       };
     }),
@@ -633,6 +644,58 @@ function FolderPicker({
   );
 }
 
+/**
+ * The Worktree checkbox beside the folder on the new-session screen, as in
+ * Claude Desktop: checked, the session gets a git worktree of its own on a
+ * new branch. Greyed out, with the reason, where the folder cannot have one.
+ */
+function WorktreeToggle({
+  checked,
+  info,
+  onChange,
+}: {
+  checked: boolean;
+  /** The folder's git facts; null while they load. */
+  info: { canWorktree: boolean; reason?: string; branch?: string } | null;
+  onChange: (on: boolean) => void;
+}) {
+  const can = info?.canWorktree === true;
+  // Named first: a tight bar shows the box with an icon, not the word.
+  const tooltip = !info
+    ? "Worktree · checking the folder…"
+    : !can
+      ? `Worktree · ${info.reason ?? "this folder cannot have one"}`
+      : `Worktree · the session gets a git worktree of its own, on a new branch off ${info.branch && info.branch !== "HEAD" ? info.branch : "the current commit"}`;
+  return (
+    <Tooltip label={tooltip}>
+      <label className={`agent-bar-check${can ? "" : " is-disabled"}`}>
+        <input
+          type="checkbox"
+          checked={checked && can}
+          disabled={!can}
+          aria-label="Worktree"
+          onChange={(e) => onChange(e.currentTarget.checked)}
+        />
+        <GitBranch size={12} aria-hidden="true" className="agent-bar-check-icon" />
+        <span className="agent-bar-check-text">Worktree</span>
+      </label>
+    </Tooltip>
+  );
+}
+
+/** A worktree session's branch, beside its folder: a fact, not a menu. */
+function WorktreeBranch({ worktree }: { worktree: NonNullable<ChatSessionMeta["worktree"]> }) {
+  const from = worktree.base ? ` off ${worktree.base}` : "";
+  return (
+    <Tooltip label={`Worktree at ${worktree.path} · branch ${worktree.branch}${from}`}>
+      <span className="agent-bar-fact agent-bar-branch" aria-label={`Worktree branch: ${worktree.branch}`}>
+        <GitBranch size={12} aria-hidden="true" />
+        <span className="agent-bar-chip-text">{worktree.branch}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
 /** The model, effort and mode chips, right of the folder. */
 function ModelEffortMode({
   agent,
@@ -822,8 +885,14 @@ function EmptyState({
   const [folder, setFolder] = useState<string | null>(null);
   /** A mode picked here; null is the agent's default. */
   const [mode, setMode] = useState<PermissionMode | null>(null);
+  /** Whether the session gets a worktree: the last pick, kept on this device. */
+  const [worktree, setWorktree] = useState(readAgentWorktree);
   const picked = agents.find((a) => a.id === agentId) ?? agents[0] ?? null;
   const choices = useAgentChoices(picked?.id ?? null);
+  const defaultDir = codeRepo ?? dataRepo;
+  const workDir = folder ?? defaultDir;
+  const folderInfo = useFolderInfo(picked ? workDir : null);
+  const inWorktree = worktree && folderInfo?.canWorktree === true;
   if (!picked) {
     return (
       <AgentEmptyGuide
@@ -834,8 +903,6 @@ function EmptyState({
       />
     );
   }
-  const defaultDir = codeRepo ?? dataRepo;
-  const workDir = folder ?? defaultDir;
   const startMode = mode ?? picked.defaultPermissionMode;
   const fail = (e: Error) => toast.error(e.message);
   // A model or effort picked before the session is what the agent's next
@@ -849,6 +916,7 @@ function EmptyState({
       prompt: text,
       ...(images.length ? { images } : {}),
       ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
+      ...(inWorktree ? { worktree: true } : {}),
       ...(hasModes(picked) ? { permissionMode: startMode } : {}),
       ...(choices?.model ? { model: choices.model } : {}),
       ...(choices?.effort && picked.capabilities.effort ? { effort: choices.effort } : {}),
@@ -885,6 +953,16 @@ function EmptyState({
           onSelect={setFolder}
         />
       )}
+      {workDir && (
+        <WorktreeToggle
+          checked={worktree}
+          info={folderInfo}
+          onChange={(on) => {
+            setWorktree(on);
+            writeAgentWorktree(on);
+          }}
+        />
+      )}
     </>
   );
   const right = (
@@ -916,7 +994,8 @@ function EmptyState({
         ) : (
           <p>
             Your first message starts a live {picked.label} session, run by SpecDriven
-            {workDir === codeRepo ? " in the code repo" : workDir === dataRepo ? " in the data repo" : ""}.
+            {workDir === codeRepo ? " in the code repo" : workDir === dataRepo ? " in the data repo" : ""}
+            {inWorktree ? ", in a git worktree of its own on a new branch" : ""}.
           </p>
         )}
       </div>
@@ -1612,28 +1691,37 @@ function Composer({
           : status === "awaiting_input"
             ? `Answer ${who}'s request above`
             : "This session has ended — start a new one from the session menu";
+  const shown = sessionFolder(meta);
   const left = (
-    <FolderPicker
-      folder={meta.cwd}
-      folders={folders}
-      askFolder={askFolder}
-      heading="Folder · another one starts a new session there"
-      onSelect={(cwd) => {
-        if (folderPath(cwd) === folderPath(meta.cwd)) return;
-        // A running agent cannot move: the new folder gets its own
-        // session, same agent, mode, model and effort, and this one stays listed.
-        void agentChat
-          .createSession({
-            name: defaultSessionName(),
-            agent: meta.agent,
-            cwd,
-            ...(hasModes(agent) ? { permissionMode: meta.permissionMode } : {}),
-            ...(meta.model ? { model: meta.model } : {}),
-            ...(meta.effort ? { effort: meta.effort } : {}),
-          })
-          .catch(fail);
-      }}
-    />
+    <>
+      <FolderPicker
+        folder={shown}
+        folders={folders}
+        askFolder={askFolder}
+        heading="Folder · another one starts a new session there"
+        onSelect={(cwd) => {
+          if (folderPath(cwd) === folderPath(shown)) return;
+          // A running agent cannot move: the new folder gets its own
+          // session, same agent, mode, model, effort and worktree choice,
+          // and this one stays listed.
+          // A worktree only where the new folder can have one.
+          void (meta.worktree ? loadFolderInfo(cwd) : Promise.resolve(null))
+            .then((info) =>
+              agentChat.createSession({
+                name: defaultSessionName(),
+                agent: meta.agent,
+                cwd,
+                ...(info?.canWorktree ? { worktree: true } : {}),
+                ...(hasModes(agent) ? { permissionMode: meta.permissionMode } : {}),
+                ...(meta.model ? { model: meta.model } : {}),
+                ...(meta.effort ? { effort: meta.effort } : {}),
+              }),
+            )
+            .catch(fail);
+        }}
+      />
+      {meta.worktree && <WorktreeBranch worktree={meta.worktree} />}
+    </>
   );
   const right = (
     <ModelEffortMode

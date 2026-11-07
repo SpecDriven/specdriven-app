@@ -58,13 +58,33 @@ export interface ChatAccount {
     the pane may send back with "Allow always"; its shape is the provider's. */
 export type PermissionSuggestion = Record<string, unknown>;
 
+/** A session's own git worktree (src/server/agentWorktree.ts): a checkout
+    of the picked folder's repo on a new branch, where the agent works. */
+export interface ChatWorktree {
+  /** The folder the pane picked; the session is shown as working there. */
+  folder: string;
+  /** The top of that folder's repo, which owns the worktree. */
+  repo: string;
+  /** The worktree's top folder. */
+  path: string;
+  /** Where the agent works: the picked folder's place inside the worktree. */
+  cwd: string;
+  /** The branch made for the session. */
+  branch: string;
+  /** The branch it was made from, when one was checked out. */
+  base?: string;
+}
+
 export interface ChatSessionMeta {
   id: string;
   name: string;
   /** Which provider drives the chat. */
   agent: ChatAgent;
-  /** The folder the agent works in: the code repo, else the data repo. */
+  /** The folder the agent works in: the code repo, else the data repo —
+      or, with a worktree, the folder's place inside it. */
   cwd: string;
+  /** The session's own worktree, when it was started with one. */
+  worktree?: ChatWorktree;
   dataRepo: string;
   codeRepo?: string;
   /** ISO 8601. */
