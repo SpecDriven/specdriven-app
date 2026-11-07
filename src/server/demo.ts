@@ -55,11 +55,13 @@ function demoSource(): string {
  * Event Model of the water damage claim (demo-data/models/claims/
  * home-claims/) for the Models plugin, which is not built in any more: the
  * demo installs it from the marketplace at start (installDemoPlugins) and
- * lists it here, so its tab shows as soon as it has loaded. The one
- * exception is "Open test links in IntelliJ IDEA" (openTestsInIdea): it runs
- * `idea` on the visitor's own machine, which a hosted demo has no business
- * doing and no server-side `idea` to do it with — so test links keep going
- * to GitHub, and that switch stays off (specs/traceability.feature.md).
+ * lists it here, so its tab shows as soon as it has loaded. The
+ * exceptions are "Open test links in IntelliJ IDEA" (openTestsInIdea) and
+ * "Open worktrees in Ghostty" (ghostty): each starts an app on the visitor's
+ * own machine, which a hosted demo has no business doing and no server-side
+ * app to do it with — so test links keep going to GitHub, the worktree
+ * branch stays a plain label, and both switches stay off
+ * (specs/traceability.feature.md, specs/agents/agent-pane.feature.md).
  */
 /**
  * The marketplace plugins the demo installs at start, by the index row's
@@ -98,6 +100,7 @@ const DEMO_SETTINGS: Partial<SpecDrivenState> = {
   figmaLinks: true,
   qtestLinks: true,
   openTestsInIdea: false,
+  ghostty: false,
 };
 
 /** How long in-flight requests may keep using a replaced generation dir. */
