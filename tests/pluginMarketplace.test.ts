@@ -37,6 +37,7 @@ const saved = {
   SPECDRIVEN_ROOT: process.env.SPECDRIVEN_ROOT,
   SPECDRIVEN_HOME: process.env.SPECDRIVEN_HOME,
   DEMO_MODE: process.env.DEMO_MODE,
+  SPECDRIVEN_HOSTED: process.env.SPECDRIVEN_HOSTED,
 };
 
 beforeEach(async () => {
@@ -46,6 +47,7 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_ROOT = root;
   process.env.SPECDRIVEN_HOME = home;
   delete process.env.DEMO_MODE;
+  delete process.env.SPECDRIVEN_HOSTED;
   // Marketplace plugins ship dist/: the loader in node mode, as the desktop app runs it.
   setBuildDisabled(true);
   setGitEngine("cli");
@@ -265,38 +267,41 @@ test("each marketplace is cloned through the git engine and its index listed; a 
   expect(refreshed.body.marketplaces.find((m: any) => m.name === "good").index.plugins.map((p: any) => p.name)).toEqual(["hello", "later"]);
 });
 
-test("a marketplace whose history was rewritten upstream is re-cloned, and one that cannot be reached keeps its copy", async () => {
+test("Refresh clones a marketplace afresh when its history was rewritten upstream, and one that cannot be reached keeps its copy", async () => {
   const market = join(work, "market");
   await marketplaceRepo(market, [{ name: "hello", source: "./plugins/hello", version: "1.0.0" }], { hello: { version: "1.0.0" } });
   await boot([{ name: "local", source: market }]);
   expect((await json(await api("GET", "/api/plugins/marketplaces"))).body.marketplaces[0].index.plugins).toHaveLength(1);
 
-  // The upstream history is rewritten: the cache can no longer be pulled.
+  // The upstream history is rewritten: the cache can no longer be pulled,
+  // so Refresh clones it afresh.
   await rm(join(market, ".git"), { recursive: true, force: true });
   await marketplaceRepo(market, [
     { name: "hello", source: "./plugins/hello", version: "1.0.0" },
     { name: "later", source: "./plugins/later", version: "0.1.0" },
   ], { hello: { version: "1.0.0" }, later: { version: "0.1.0" } });
-  const stuck = (await json(await api("GET", "/api/plugins/marketplaces?refresh=1"))).body.marketplaces[0];
-  expect(stuck.error).toMatch(/Could not refresh local/);
-
-  const recloned = await json(await api("POST", "/api/plugins/marketplaces/local/reclone"));
-  expect(recloned.status).toBe(200);
-  expect(recloned.body.marketplace.index.plugins.map((p: any) => p.name)).toEqual(["hello", "later"]);
+  // A hosted worker pulls but never clones afresh: it reports the failure
+  // and keeps its copy.
+  process.env.SPECDRIVEN_HOSTED = "1";
+  const hosted = (await json(await api("GET", "/api/plugins/marketplaces?refresh=1"))).body.marketplaces[0];
+  expect(hosted.error).toMatch(/Could not refresh local/);
+  expect(hosted.error).not.toMatch(/afresh/);
+  expect(await readdir(marketplacesHome())).toEqual(["local"]);
+  delete process.env.SPECDRIVEN_HOSTED;
+  const recloned = (await json(await api("GET", "/api/plugins/marketplaces?refresh=1"))).body.marketplaces[0];
+  expect(recloned.error).toBeUndefined();
+  expect(recloned.index.plugins.map((p: any) => p.name)).toEqual(["hello", "later"]);
   // Refresh pulls again, and nothing is left beside the cache.
   const refreshed = (await json(await api("GET", "/api/plugins/marketplaces?refresh=1"))).body.marketplaces[0];
   expect(refreshed.error).toBeUndefined();
   expect(await readdir(marketplacesHome())).toEqual(["local"]);
 
-  // A remote that cannot be reached leaves the old copy in place.
+  // A remote that cannot be reached is reported and leaves the old copy in place.
   await rm(market, { recursive: true, force: true });
-  const failed = await json(await api("POST", "/api/plugins/marketplaces/local/reclone"));
-  expect(failed.status).toBe(400);
-  expect(failed.body.error).toMatch(/Could not clone/);
+  const failed = (await json(await api("GET", "/api/plugins/marketplaces?refresh=1"))).body.marketplaces[0];
+  expect(failed.error).toMatch(/Could not refresh local: .*cloning it afresh failed: Could not clone/s);
   expect(await readdir(marketplacesHome())).toEqual(["local"]);
   expect((await json(await api("GET", "/api/plugins/marketplaces"))).body.marketplaces[0].index.plugins).toHaveLength(2);
-
-  expect((await api("POST", "/api/plugins/marketplaces/nowhere/reclone"))!.status).toBe(404);
 });
 
 // ---- installing ----------------------------------------------------------------------
@@ -527,7 +532,6 @@ test("the hosted demo browses the marketplaces, never refreshed, and changes not
 
   for (const [method, path] of [
     ["POST", "/api/plugins/install"],
-    ["POST", "/api/plugins/marketplaces/local/reclone"],
     ["POST", "/api/plugins/x/update"],
     ["DELETE", "/api/plugins/x"],
   ] as const) {

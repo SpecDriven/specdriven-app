@@ -12,7 +12,7 @@
 // replaces and swaps a fresh copy in on confirmation. The hosted demo lists its
 // marketplaces, open from the start, and offers none of the actions.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PluginStatus } from "../plugins/client/loader";
 import type { MarketplaceIndex, MarketplaceRef } from "../plugins/marketplace";
 import { marketplaceNameFor } from "../plugins/marketplace";
@@ -100,11 +100,13 @@ export function PluginMarketplace({
   const [open, setOpen] = useState(readOnly);
   const [statuses, setStatuses] = useState<MarketplaceStatus[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (refresh: boolean) => {
     setLoading(true);
+    setRefreshing(refresh);
     setError(null);
     try {
       const data = await call(`/api/plugins/marketplaces${refresh ? "?refresh=1" : ""}`);
@@ -117,9 +119,22 @@ export function PluginMarketplace({
   }, []);
 
   const key = marketplaces.map((m) => `${m.name}=${m.source}`).join("\n");
+  // Refresh pressed before the list was opened: the opening read pulls.
+  const refreshOnOpen = useRef(false);
   useEffect(() => {
-    if (open) void load(false);
+    if (!open) return;
+    const refresh = refreshOnOpen.current;
+    refreshOnOpen.current = false;
+    void load(refresh);
   }, [open, key, load]);
+  const refresh = () => {
+    if (open) {
+      void load(true);
+    } else {
+      refreshOnOpen.current = true;
+      setOpen(true);
+    }
+  };
 
   // Asked for a plugin by name: browse, and bring its row into view once listed.
   useEffect(() => {
@@ -209,16 +224,6 @@ export function PluginMarketplace({
     for (let n = 2; marketplaces.some((m) => m.name === name); n++) name = `${marketplaceNameFor(source)}-${n}`;
     await patchSettings({ plugins: { marketplaces: [...marketplaces, { name, source }] } });
   };
-
-  // A cache that cannot be pulled any more (its upstream history rewritten)
-  // is thrown away and cloned again; the list shows it as cloned.
-  const recloneMarketplace = (name: string) =>
-    run(`marketplace:${name}`, async () => {
-      const data = await post(`/api/plugins/marketplaces/${encodeURIComponent(name)}/reclone`, {});
-      const fresh = data.marketplace as MarketplaceStatus;
-      setStatuses((prev) => [...(prev ?? []).filter((s) => s.name !== name), fresh]);
-      setOpen(true);
-    });
 
   const removeMarketplace = (name: string) =>
     patchSettings({ plugins: { marketplaces: marketplaces.filter((m) => m.name !== name) } });
@@ -313,13 +318,24 @@ export function PluginMarketplace({
         </span>
         {!readOnly && (
           <span className="plugin-market-row-actions">
+            {!open && (
+              <button
+                type="button"
+                className="link"
+                disabled={marketplaces.length === 0}
+                onClick={() => setOpen(true)}
+              >
+                Browse plugins
+              </button>
+            )}
             <button
               type="button"
               className="link"
+              title="Pull every marketplace again — one whose copy can no longer be pulled is cloned afresh"
               disabled={loading || marketplaces.length === 0}
-              onClick={() => (open ? void load(true) : setOpen(true))}
+              onClick={refresh}
             >
-              {open ? (loading ? "Refreshing…" : "Refresh") : "Browse plugins"}
+              {loading && refreshing ? "Refreshing…" : "Refresh"}
             </button>
             <button type="button" className="link" onClick={() => void addMarketplace()}>
               Add marketplace…
@@ -358,16 +374,6 @@ export function PluginMarketplace({
                   <button
                     type="button"
                     className="link"
-                    aria-label={`Re-clone marketplace ${m.name}`}
-                    title="Delete the local copy of this marketplace and clone it again — for a copy that can no longer be refreshed"
-                    disabled={busy === `marketplace:${m.name}`}
-                    onClick={() => void recloneMarketplace(m.name)}
-                  >
-                    {busy === `marketplace:${m.name}` ? "Re-cloning…" : "Re-clone"}
-                  </button>
-                  <button
-                    type="button"
-                    className="link"
                     aria-label={`Remove marketplace ${m.name}`}
                     onClick={() => void removeMarketplace(m.name)}
                   >
@@ -379,8 +385,6 @@ export function PluginMarketplace({
             {status?.error && (
               <span className="settings-row-hint plugin-row-error" role="alert">
                 {status.error}
-                {!readOnly && status.error.startsWith("Could not refresh") &&
-                  " — Re-clone throws the local copy away and clones it again."}
               </span>
             )}
             {index && index.plugins.length === 0 && (
