@@ -9,6 +9,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../src/server/api";
+import { currentImageName } from "../src/server/images";
 import { syncPlugins } from "../src/plugins/host/loader";
 import {
   GitHubError,
@@ -243,13 +244,13 @@ describe("the GitHub API", () => {
   test("creating an issue posts its title and body", async () => {
     await signIn();
     answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(10, { title: "Crash on save", body: "Steps…" }) };
-    const issue = await createIssue(REPO, { title: "  Crash   on save ", body: "\nSteps…\n\n" });
+    const issue = await createIssue(REPO, root, { title: "  Crash   on save ", body: "\nSteps…\n\n" });
     expect(issue.number).toBe(10);
     expect(seen[0]!.body).toEqual({ title: "Crash on save", body: "Steps…" });
     // A blank body is left out rather than sent as an empty description.
-    await createIssue(REPO, { title: "Bare", body: "  " });
+    await createIssue(REPO, root, { title: "Bare", body: "  " });
     expect(seen[1]!.body).toEqual({ title: "Bare" });
-    await expect(createIssue(REPO, { title: "  " })).rejects.toThrow("An issue needs a title");
+    await expect(createIssue(REPO, root, { title: "  " })).rejects.toThrow("An issue needs a title");
     expect(seen).toHaveLength(2);
   });
 
@@ -257,13 +258,13 @@ describe("the GitHub API", () => {
   test("updating an issue patches only what changed", async () => {
     await signIn();
     answers["PATCH /repos/acme/app/issues/5"] = { body: rawIssue(5, { title: "Renamed" }) };
-    expect((await updateIssue(REPO, 5, { title: "Renamed" })).title).toBe("Renamed");
+    expect((await updateIssue(REPO, root, 5, { title: "Renamed" })).title).toBe("Renamed");
     expect(seen[0]!.body).toEqual({ title: "Renamed" });
-    await updateIssue(REPO, 5, { body: "" });
+    await updateIssue(REPO, root, 5, { body: "" });
     expect(seen[1]!.body).toEqual({ body: "" });
-    await expect(updateIssue(REPO, 5, {})).rejects.toThrow("Nothing to change");
-    await expect(updateIssue(REPO, 5, { state: "done" })).rejects.toThrow("state must be open or closed");
-    await expect(updateIssue(REPO, 5, { body: 3 })).rejects.toThrow("body must be a string");
+    await expect(updateIssue(REPO, root, 5, {})).rejects.toThrow("Nothing to change");
+    await expect(updateIssue(REPO, root, 5, { state: "done" })).rejects.toThrow("state must be open or closed");
+    await expect(updateIssue(REPO, root, 5, { body: 3 })).rejects.toThrow("body must be a string");
     expect(seen).toHaveLength(2);
   });
 
@@ -271,13 +272,13 @@ describe("the GitHub API", () => {
   test("closing sends the state with a reason; reopening clears it", async () => {
     await signIn();
     answers["PATCH /repos/acme/app/issues/5"] = { body: rawIssue(5, { state: "closed", state_reason: "completed", closed_at: "2026-09-04T10:00:00Z" }) };
-    const closed = await updateIssue(REPO, 5, { state: "closed" });
+    const closed = await updateIssue(REPO, root, 5, { state: "closed" });
     expect(closed.state).toBe("closed");
     expect(closed.closedAt).toBe("2026-09-04T10:00:00Z");
     expect(seen[0]!.body).toEqual({ state: "closed", state_reason: "completed" });
-    await updateIssue(REPO, 5, { state: "closed", stateReason: "not_planned" });
+    await updateIssue(REPO, root, 5, { state: "closed", stateReason: "not_planned" });
     expect(seen[1]!.body).toEqual({ state: "closed", state_reason: "not_planned" });
-    await updateIssue(REPO, 5, { state: "open" });
+    await updateIssue(REPO, root, 5, { state: "open" });
     expect(seen[2]!.body).toEqual({ state: "open", state_reason: null });
   });
 
@@ -287,14 +288,86 @@ describe("the GitHub API", () => {
       status: 201,
       body: { id: 1, body: "Fixed in 1.2", html_url: "u", user: { login: "octo" }, created_at: "t", updated_at: "t" },
     };
-    expect((await addComment(REPO, 5, " Fixed in 1.2 ")).body).toBe("Fixed in 1.2");
+    expect((await addComment(REPO, root, 5, " Fixed in 1.2 ")).body).toBe("Fixed in 1.2");
     expect(seen[0]!.body).toEqual({ body: "Fixed in 1.2" });
-    await expect(addComment(REPO, 5, "")).rejects.toThrow("A comment needs some text");
+    await expect(addComment(REPO, root, 5, "")).rejects.toThrow("A comment needs some text");
+  });
+
+  // Scenario: a pasted image goes up to GitHub so the issue can show it.
+  describe("embedded images", () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    // The stored name images.ts storeImage would generate for these bytes.
+    const stored = currentImageName("shot.png", bytes); // shot-<hash>.png
+    const rawUrl = `https://raw.githubusercontent.com/acme/app/main/.specdriven/issue-images/${stored}`;
+    const contentsPath = `/repos/acme/app/contents/.specdriven/issue-images/${stored}`;
+
+    beforeEach(async () => {
+      await mkdir(join(root, ".images"), { recursive: true });
+      await writeFile(join(root, ".images", stored), bytes);
+    });
+
+    test("a stored image is committed to the code repo and its url rewritten", async () => {
+      await signIn();
+      // Not there yet (GET 404), so the PUT commits it.
+      answers[`PUT ${contentsPath}`] = { status: 201, body: { content: { download_url: rawUrl } } };
+      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(20) };
+      await createIssue(REPO, root, { title: "Bug", body: `See ![image](/api/images/${stored}) here.` });
+      const put = seen.find((s) => s.method === "PUT")!;
+      expect(put.path).toBe(contentsPath);
+      expect((put.body as { content: string }).content).toBe(Buffer.from(bytes).toString("base64"));
+      const post = seen.find((s) => s.path === "/repos/acme/app/issues")!;
+      expect((post.body as { body: string }).body).toBe(`See ![image](${rawUrl}) here.`);
+    });
+
+    test("an already-committed image reuses its url without a second commit", async () => {
+      await signIn();
+      // Already there: the GET returns the url, and no PUT is sent.
+      answers[`GET ${contentsPath}`] = { body: { content: { download_url: rawUrl } } };
+      answers["POST /repos/acme/app/issues/7/comments"] = {
+        status: 201,
+        body: { id: 2, body: "x", html_url: "u", user: null, created_at: "t", updated_at: "t" },
+      };
+      await addComment(REPO, root, 7, `look ![](/api/images/${stored})`);
+      expect(seen.some((s) => s.method === "PUT")).toBe(false);
+      const comment = seen.find((s) => s.path.endsWith("/comments"))!;
+      expect((comment.body as { body: string }).body).toBe(`look ![](${rawUrl})`);
+    });
+
+    test("an image with no bytes on disk is left as-is", async () => {
+      await signIn();
+      // A referenced name with nothing stored: no upload, link unchanged.
+      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(21) };
+      await createIssue(REPO, root, { title: "Bug", body: "gone ![](/api/images/missing-00000000.png)" });
+      expect(seen.some((s) => s.method === "PUT")).toBe(false);
+      expect((seen.find((s) => s.path === "/repos/acme/app/issues")!.body as { body: string }).body).toBe(
+        "gone ![](/api/images/missing-00000000.png)",
+      );
+    });
+
+    test("a refused upload keeps the local link rather than failing the issue", async () => {
+      await signIn();
+      // GET says not there, PUT is refused (no push access): the create still
+      // goes through, with the image left as a local link.
+      answers[`PUT ${contentsPath}`] = { status: 403, body: { message: "Resource not accessible" } };
+      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(23) };
+      const issue = await createIssue(REPO, root, { title: "Bug", body: `x ![](/api/images/${stored})` });
+      expect(issue.number).toBe(23);
+      expect((seen.find((s) => s.path === "/repos/acme/app/issues")!.body as { body: string }).body).toBe(
+        `x ![](/api/images/${stored})`,
+      );
+    });
+
+    test("a body with no app image is sent untouched, no contents call", async () => {
+      await signIn();
+      answers["POST /repos/acme/app/issues"] = { status: 201, body: rawIssue(22) };
+      await createIssue(REPO, root, { title: "Bug", body: "plain text with a [link](https://x)" });
+      expect(seen.some((s) => s.path.includes("/contents/"))).toBe(false);
+    });
   });
 
   test("GitHub's refusals are worded for the pane", async () => {
     answers["POST /repos/acme/app/issues"] = { status: 401, body: { message: "Requires authentication" } };
-    const signedOut = await createIssue(REPO, { title: "x" }).catch((e: GitHubError) => e);
+    const signedOut = await createIssue(REPO, root, { title: "x" }).catch((e: GitHubError) => e);
     expect(signedOut).toBeInstanceOf(GitHubError);
     expect((signedOut as GitHubError).status).toBe(401);
     expect((signedOut as GitHubError).message).toBe("Sign in to GitHub in Settings to work with issues.");
@@ -304,7 +377,7 @@ describe("the GitHub API", () => {
     expect((limited as GitHubError).message).toContain("anonymous rate limit");
 
     await signIn();
-    const badToken = await createIssue(REPO, { title: "x" }).catch((e: GitHubError) => e);
+    const badToken = await createIssue(REPO, root, { title: "x" }).catch((e: GitHubError) => e);
     expect((badToken as GitHubError).message).toContain("sign in again");
     const missing = await getIssue(REPO, 99).catch((e: GitHubError) => e);
     expect((missing as GitHubError).status).toBe(404);

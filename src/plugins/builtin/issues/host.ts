@@ -29,7 +29,12 @@ import {
 } from "../../../server/issues";
 import { manifest } from "./manifest";
 
-type RepoHandler = (repo: GitHubRepo, req: Request, params: Params) => Response | Promise<Response>;
+type RepoHandler = (
+  repo: GitHubRepo,
+  dir: string,
+  req: Request,
+  params: Params,
+) => Response | Promise<Response>;
 
 const ISSUE_STATES: IssueState[] = ["open", "closed", "all"];
 
@@ -49,7 +54,7 @@ const guarded =
         );
       }
       try {
-        return await handler(repo, req, params);
+        return await handler(repo, dir, req, params);
       } catch (e) {
         const status = e instanceof GitHubError ? e.status : 502;
         return json({ error: (e as Error).message }, status);
@@ -68,7 +73,7 @@ const plugin: Plugin<Context> = {
     add(
       "GET",
       "/api/issues",
-      on(async (repo, req) => {
+      on(async (repo, _dir, req) => {
         const wanted = new URL(req.url).searchParams.get("state");
         const state = ISSUE_STATES.find((s) => s === wanted) ?? "open";
         return json({ repo, state, issues: await listIssues(repo, state) });
@@ -77,14 +82,14 @@ const plugin: Plugin<Context> = {
     add(
       "POST",
       "/api/issues",
-      on(async (repo, req) => json({ issue: await createIssue(repo, await bodyOf(req)) }, 201), {
+      on(async (repo, dir, req) => json({ issue: await createIssue(repo, dir, await bodyOf(req)) }, 201), {
         readOnlyInDemo: true,
       }),
     );
     add(
       "GET",
       "/api/issues/:number",
-      on(async (repo, _req, params) => {
+      on(async (repo, _dir, _req, params) => {
         const number = parseIssueNumber(params.number);
         const [issue, comments] = await Promise.all([getIssue(repo, number), listComments(repo, number)]);
         return json({ issue, comments });
@@ -94,8 +99,8 @@ const plugin: Plugin<Context> = {
       "PUT",
       "/api/issues/:number",
       on(
-        async (repo, req, params) =>
-          json({ issue: await updateIssue(repo, parseIssueNumber(params.number), await bodyOf(req)) }),
+        async (repo, dir, req, params) =>
+          json({ issue: await updateIssue(repo, dir, parseIssueNumber(params.number), await bodyOf(req)) }),
         { readOnlyInDemo: true },
       ),
     );
@@ -103,9 +108,9 @@ const plugin: Plugin<Context> = {
       "POST",
       "/api/issues/:number/comments",
       on(
-        async (repo, req, params) =>
+        async (repo, dir, req, params) =>
           json(
-            { comment: await addComment(repo, parseIssueNumber(params.number), (await bodyOf(req)).body) },
+            { comment: await addComment(repo, dir, parseIssueNumber(params.number), (await bodyOf(req)).body) },
             201,
           ),
         { readOnlyInDemo: true },
