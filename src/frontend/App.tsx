@@ -96,7 +96,7 @@ import {
   Images,
   Sparkles,
 } from "lucide-react";
-import { PublishRing, StatusIcon } from "./StatusIcon";
+import { PublishRing, StatusCounts, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
@@ -1378,6 +1378,16 @@ export function App() {
     () => parseAttributeDefinitions(customAttributesText ?? ""),
     [customAttributesText],
   );
+  /**
+   * Project-wide status rollup for the Specs section head: how many scenarios
+   * are draft / proposed / published across every feature. Always the full
+   * totals — independent of any active filter.
+   */
+  const statusTotals = useMemo(() => {
+    const t = { draft: 0, proposed: 0, published: 0 };
+    for (const f of features) for (const s of f.scenarios) t[s.status]++;
+    return t;
+  }, [features]);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -10347,7 +10357,7 @@ export function App() {
             assignee. Active filters show as chips that clear on click, on a
             row of their own under the head so they never crowd its icons. */}
         <SidebarSection
-          label="Features"
+          label={<>Features <StatusCounts {...statusTotals} /></>}
           filter={<>
             <Tooltip label="Filter features">
               <button

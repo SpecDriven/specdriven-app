@@ -64,6 +64,43 @@ export function StatusIcon({
 }
 
 /**
+ * Aggregate status rollup for the Specs section head: how many scenarios are
+ * draft / proposed / published across the whole project. Reuses the StatusIcon
+ * glyphs so it reads the same as the filter menu and chips. The glyphs are
+ * decorative here; the wrapper's aria-label names the whole triplet.
+ */
+export function StatusCounts({
+  draft,
+  proposed,
+  published,
+}: {
+  draft: number;
+  proposed: number;
+  published: number;
+}) {
+  if (draft + proposed + published === 0) return null;
+  return (
+    <span
+      className="status-counts"
+      aria-label={`${draft} draft, ${proposed} proposed, ${published} published`}
+    >
+      {(
+        [
+          ["draft", draft],
+          ["proposed", proposed],
+          ["published", published],
+        ] as const
+      ).map(([status, n]) => (
+        <span className="status-count" key={status}>
+          <StatusIcon status={status} size={12} label="" />
+          {n}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
  * A feature's rollup in the sidebar: the share of its scenarios that are
  * published, as a small ring — like a project's progress circle. Reads the
  * feature listing's per-scenario status; a feature without scenarios shows

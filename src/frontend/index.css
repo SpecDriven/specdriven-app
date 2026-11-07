@@ -4997,6 +4997,23 @@ button.table-add:hover {
   margin-right: 0.45rem;
 }
 
+/* Aggregate draft/proposed/published counts in the Specs section head
+   (StatusCounts): quiet metadata beside the "Features" label. */
+.status-counts {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.status-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
 /* The editor pane's status chip beside the version (specs/editor/
    spec-editor.feature.md "Spec editor pane"): glyph plus word, a menu of the
    ways forward until published. */
