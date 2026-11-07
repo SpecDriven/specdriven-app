@@ -62,6 +62,14 @@ export interface SpecDrivenState {
    */
   openTestsInIdea?: boolean;
   /**
+   * Open a coding agent session's worktree in a Ghostty shell
+   * (specs/agents/agent-pane.feature.md "A worktree session opens in a
+   * Ghostty shell"); absent means OFF. On, a click on a worktree session's
+   * branch in the pane's bar opens Ghostty in the folder the agent works in
+   * (src/server/ghostty.ts).
+   */
+  ghostty?: boolean;
+  /**
    * Track tickets at all
    * (specs/external-links/project-management-jira-linear-etc.feature.md);
    * absent means ON. Off takes the ticket fields out of the feature and spec
@@ -317,6 +325,12 @@ export function normalizeShowTestLinks(value: unknown): boolean {
 /** Effective "open test links in IntelliJ IDEA" setting: OFF unless
     explicitly turned on (specs/traceability.feature.md "Open test in idea"). */
 export function normalizeOpenTestsInIdea(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective Ghostty setting: OFF unless explicitly turned on
+    (specs/agents/agent-pane.feature.md). */
+export function normalizeGhostty(value: unknown): boolean {
   return value === true;
 }
 

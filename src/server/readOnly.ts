@@ -39,6 +39,7 @@ function siteSettings(dir: string): Partial<SpecDrivenState> {
     reloadFrequencySeconds: 0,
     codeGen: false,
     openTestsInIdea: false,
+    ghostty: false,
     showTestLinks: true,
     plugins: { seen: [...READ_ONLY_PLUGINS], repos: { [dir]: { enabled: [...READ_ONLY_PLUGINS] } } },
   };

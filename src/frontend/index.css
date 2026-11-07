@@ -7703,6 +7703,12 @@ button.page-archive-head:hover {
   flex: none;
 }
 
+/* With "Open worktrees in Ghostty" on, the branch is a button that opens a
+   shell in the worktree: a chip's hover and focus, still uncapped. */
+.agent-bar-chip.agent-bar-branch {
+  max-width: none;
+}
+
 /* The bar sits at the bottom of the pane: its menus open upward, over the
    transcript, as wide as the composer up to a readable measure, on the
    side of the bar their chip is on. */
