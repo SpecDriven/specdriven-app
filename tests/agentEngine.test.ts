@@ -630,7 +630,11 @@ test("a saved wiki token hands the provider the Confluence MCP server; none, not
     const bare = await ready(fake);
     expect(bare.session.opts.mcpServers).toBeUndefined();
 
+    // A token alone is not enough: Confluence is off until switched on in Settings.
     await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat", user: "me" });
+    expect((await ready(fake)).session.opts.mcpServers).toBeUndefined();
+
+    await writeState({ dataRepo: data, confluenceEnabled: true }, root);
     const withWiki = await ready(fake);
     expect(withWiki.session.opts.mcpServers).toHaveLength(1);
     expect(withWiki.session.opts.mcpServers![0]).toMatchObject({

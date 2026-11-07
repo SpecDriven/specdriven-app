@@ -1,7 +1,8 @@
 // The MCP servers the core asks an agent to start beside itself
 // (specs/external-links/confluence-wiki.feature.md "An agent session can
 // read the wiki", specs/agents/agent-plugins.feature.md): today one, the
-// Confluence server (src/mcp), offered whenever a wiki token is saved. The
+// Confluence server (src/mcp), offered while Confluence is switched on in
+// Settings and a wiki token is saved. The
 // provider runs the command however its agent takes MCP servers; the core
 // only says what to run and where the tokens are.
 //
@@ -15,6 +16,8 @@ import type { AgentMcpServer } from "./agentTypes";
 import { confluenceTokenPath, listConfluenceTokens } from "./confluenceTokens";
 import { isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
+import { getAppRoot } from "./paths";
+import { normalizeConfluenceEnabled, readState } from "./state";
 import { CONFLUENCE_MCP_SERVER, CONFLUENCE_TOKENS_FILE_ENV } from "../mcp/confluenceTools";
 
 /** How to start the Confluence server on this install. */
@@ -42,9 +45,14 @@ export function setConfluenceMcpTokensFile(fn: (() => Promise<string>) | null): 
   tokensFile = fn ?? (async () => confluenceTokenPath());
 }
 
-/** The servers a session starting now should have: none without a wiki token, none in the demo or hosted app. */
+/**
+ * The servers a session starting now should have: none while Confluence is
+ * switched off in Settings (specs/external-links/confluence-wiki.feature.md),
+ * none without a wiki token, none in the demo or hosted app.
+ */
 export async function agentMcpServers(): Promise<AgentMcpServer[]> {
   if (isDemoMode() || isHostedMode()) return [];
+  if (!normalizeConfluenceEnabled((await readState(getAppRoot())).confluenceEnabled)) return [];
   if ((await listConfluenceTokens()).length === 0) return [];
   const launch = launcher();
   return [

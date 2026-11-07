@@ -179,6 +179,45 @@ describe("the sources step", () => {
   });
 });
 
+describe("the mode splits the dialog by which integration is on", () => {
+  test("both on shows the combined heading, field and placeholder (the default)", () => {
+    const markup = html(dialog());
+    expect(markup).toContain('aria-label="Import from Jira/Wiki"');
+    expect(markup).toContain("<h3>Import from Jira/Wiki</h3>");
+    expect(markup).toContain('aria-label="Jira issue or Confluence page url"');
+    expect(markup).toContain("The issues and pages are");
+  });
+
+  test("Jira only shows the Jira heading and field, and a Confluence url is refused", () => {
+    const markup = html(dialog({ mode: "jira" }));
+    expect(markup).toContain('aria-label="Import from Jira"');
+    expect(markup).toContain("<h3>Import from Jira</h3>");
+    expect(markup).toContain('aria-label="Jira issue url"');
+    expect(markup).toContain("The issues are");
+    // A Confluence page url, well-formed and with a token, is still refused.
+    expect(sourceProblem("https://wiki.acme.com/spaces/ABC/pages/5/Quote+Policy", [], [JIRA], [WIKI], "jira")).toMatch(
+      /only Jira issues/,
+    );
+    // A Jira issue url is accepted.
+    expect(sourceProblem("https://jira.acme.com/browse/ABC-1", [], [JIRA], [WIKI], "jira")).toBeNull();
+    // Even a plain non-url now names the Jira side.
+    expect(sourceProblem("not a url", [], [JIRA], [WIKI], "jira")).toMatch(/Jira issue url/);
+  });
+
+  test("Confluence only shows the Confluence heading and field, and a Jira url is refused", () => {
+    const markup = html(dialog({ mode: "wiki" }));
+    expect(markup).toContain('aria-label="Import from Confluence"');
+    expect(markup).toContain("<h3>Import from Confluence</h3>");
+    expect(markup).toContain('aria-label="Confluence page url"');
+    expect(markup).toContain("The pages are");
+    expect(sourceProblem("https://jira.acme.com/browse/ABC-1", [], [JIRA], [WIKI], "wiki")).toMatch(
+      /only Confluence pages/,
+    );
+    expect(sourceProblem("https://wiki.acme.com/spaces/ABC/pages/5/Quote+Policy", [], [JIRA], [WIKI], "wiki")).toBeNull();
+    expect(sourceProblem("not a url", [], [JIRA], [WIKI], "wiki")).toMatch(/Confluence page url/);
+  });
+});
+
 describe("the review step", () => {
   const proposal: Proposal = {
     title: "Quote Policy",

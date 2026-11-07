@@ -1712,7 +1712,16 @@ export function App() {
       folder an open import lands in (null for the top level) — or null
       while the dialog is closed. Never in the demo or the hosted app. */
   const [jiraSites, setJiraSites] = useState<JiraSite[]>([]);
-  const [importOpen, setImportOpen] = useState<{ folder: string | null } | null>(null);
+  const [importOpen, setImportOpen] = useState<{ folder: string | null; mode: "both" | "jira" | "wiki" } | null>(null);
+  /** Whether Jira and Confluence are switched on at all — in Settings → Jira /
+      Confluence, each default OFF (specs/external-links/jira-wiki-import
+      .feature.md, confluence-wiki.feature.md). Jira off hides the Jira import;
+      Confluence off hides "Publish to Confluence…" and the Confluence import.
+      Never in the demo or the hosted app, which keep no tokens. */
+  const [jiraEnabledOn, setJiraEnabledOn] = useState(false);
+  const [confluenceEnabledOn, setConfluenceEnabledOn] = useState(false);
+  const jiraEnabled = jiraEnabledOn && !demo && !hosted;
+  const confluenceEnabled = confluenceEnabledOn && !demo && !hosted;
   /** Code gen sessions offered at all (specs/agents/claude.feature.md). */
   const [codeGen, setCodeGen] = useState(true);
   /** Whether Claude.app is installed, so a session can open in Claude Code
@@ -1829,6 +1838,8 @@ export function App() {
     useState<ResourceLinkSwitches>(NO_RESOURCE_LINKS);
   const [settingsQtestLinksDraft, setSettingsQtestLinksDraft] = useState(false);
   const [settingsAhaImportDraft, setSettingsAhaImportDraft] = useState(false);
+  const [settingsJiraEnabledDraft, setSettingsJiraEnabledDraft] = useState(false);
+  const [settingsConfluenceEnabledDraft, setSettingsConfluenceEnabledDraft] = useState(false);
   const [settingsCodeGenDraft, setSettingsCodeGenDraft] = useState(true);
   const [settingsDeletePublishedDraft, setSettingsDeletePublishedDraft] = useState(false);
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
@@ -2052,6 +2063,8 @@ export function App() {
         }
         setResourceLinksOn(resourceLinkSwitches(state));
         setAhaImportOn(state.ahaImport === true);
+        setJiraEnabledOn(state.jiraEnabled === true);
+        setConfluenceEnabledOn(state.confluenceEnabled === true);
         setQtestLinks(state.qtestLinks === true);
         setQtestParentUrl(typeof state.qtestParentUrl === "string" ? state.qtestParentUrl : "");
         if (typeof state.codeGen === "boolean") {
@@ -4634,6 +4647,8 @@ export function App() {
     setSettingsResourceLinksDraft(resourceLinksOn);
     setSettingsQtestLinksDraft(qtestLinks);
     setSettingsAhaImportDraft(ahaImportOn);
+    setSettingsJiraEnabledDraft(jiraEnabledOn);
+    setSettingsConfluenceEnabledDraft(confluenceEnabledOn);
     setSettingsCodeGenDraft(codeGen);
     setSettingsDeletePublishedDraft(deletePublished);
     setSettingsAssignmentsDraft(assignments);
@@ -4815,6 +4830,8 @@ export function App() {
     }
     setResourceLinksOn(resourceLinkSwitches(data));
     setAhaImportOn(data.ahaImport === true);
+    setJiraEnabledOn(data.jiraEnabled === true);
+    setConfluenceEnabledOn(data.confluenceEnabled === true);
     setQtestLinks(data.qtestLinks === true);
     setQtestParentUrl(typeof data.qtestParentUrl === "string" ? data.qtestParentUrl : "");
     // Switched off, a selection left over from before must not linger as a
@@ -5002,6 +5019,22 @@ export function App() {
   const toggleAhaImport = async (on: boolean) => {
     setSettingsAhaImportDraft(on);
     if (!(await patchSettings({ ahaImport: on }))) setSettingsAhaImportDraft(!on);
+  };
+
+  // Jira (specs/external-links/jira-wiki-import.feature.md "Jira and Confluence
+  // imports are switched on in Settings"): off takes the Jira import menu item
+  // away; the tokens stay.
+  const toggleJiraEnabled = async (on: boolean) => {
+    setSettingsJiraEnabledDraft(on);
+    if (!(await patchSettings({ jiraEnabled: on }))) setSettingsJiraEnabledDraft(!on);
+  };
+
+  // Confluence (specs/external-links/confluence-wiki.feature.md): off takes
+  // "Publish to Confluence…", the Confluence import and the agent's wiki MCP
+  // server away; the tokens stay.
+  const toggleConfluenceEnabled = async (on: boolean) => {
+    setSettingsConfluenceEnabledDraft(on);
+    if (!(await patchSettings({ confluenceEnabled: on }))) setSettingsConfluenceEnabledDraft(!on);
   };
 
   const toggleResourceLinks = async (kind: ResourceLinkKind, on: boolean) => {
@@ -7255,19 +7288,39 @@ export function App() {
                         },
                       ]),
                   // Import from Jira/Wiki (specs/external-links/jira-wiki
-                  // -import.feature.md): issues and pages read into a new
-                  // feature in this folder. Never in the demo or the hosted
-                  // app, which keep no token and no agent.
-                  ...(demo || hosted
-                    ? []
-                    : [
+                  // -import.feature.md "Jira and Confluence imports are
+                  // switched on in Settings"): which item shows depends on
+                  // which integrations are on — both the combined importer,
+                  // one that side only, neither no item. Never in the demo or
+                  // the hosted app, which keep no token and no agent.
+                  ...(jiraEnabled && confluenceEnabled
+                    ? [
                         {
                           id: "import-jira-wiki",
                           label: "Import from Jira/Wiki here…",
                           icon: <Import size={13} />,
-                          onSelect: () => setImportOpen({ folder: child.path }),
+                          onSelect: () => setImportOpen({ folder: child.path, mode: "both" as const }),
                         },
-                      ]),
+                      ]
+                    : jiraEnabled
+                      ? [
+                          {
+                            id: "import-jira",
+                            label: "Import from Jira here…",
+                            icon: <Import size={13} />,
+                            onSelect: () => setImportOpen({ folder: child.path, mode: "jira" as const }),
+                          },
+                        ]
+                      : confluenceEnabled
+                        ? [
+                            {
+                              id: "import-confluence",
+                              label: "Import from Confluence here…",
+                              icon: <Import size={13} />,
+                              onSelect: () => setImportOpen({ folder: child.path, mode: "wiki" as const }),
+                            },
+                          ]
+                        : []),
                   {
                     id: "new-folder",
                     label: "New folder here",
@@ -7312,18 +7365,18 @@ export function App() {
                   // Publish to Confluence (specs/external-links/confluence
                   // -wiki.feature.md "Publish a folder's features to
                   // Confluence"): each feature under the folder its own page
-                  // under one parent. Never in the demo or the hosted app,
-                  // which keep no token.
-                  ...(demo || hosted
-                    ? []
-                    : [
+                  // under one parent. Only while Confluence is switched on in
+                  // Settings; never in the demo or the hosted app.
+                  ...(confluenceEnabled
+                    ? [
                         {
                           id: "confluence",
                           label: "Publish to Confluence…",
                           icon: <BookOpen size={13} />,
                           onSelect: () => void openConfluenceFolder(child),
                         },
-                      ]),
+                      ]
+                    : []),
                   {
                     id: "delete",
                     label: "Delete",
@@ -9292,29 +9345,85 @@ export function App() {
         )}
       </PageSection>
       {renderPluginSettings("qtest")}
-      {/* Jira (specs/external-links/jira-wiki-import.feature.md): the sites
-          this device holds a personal access token for, read by "Import
-          from Jira/Wiki" in a folder's ⋯ menu. Not in the hosted app, which
-          keeps no device secrets. */}
+      {/* Jira (specs/external-links/jira-wiki-import.feature.md "Jira and
+          Confluence imports are switched on in Settings"): opt-in, like the
+          Aha! import. On, "Import from Jira…" reads issues into a new feature
+          and the token form shows. Not in the hosted app, which keeps no
+          device secrets. */}
       {!demo && !hosted && (
         <PageSection
           id="settings-jira"
           title="Jira"
-          hint="Read Jira issues into a new feature, with Confluence pages, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
+          hint="Read Jira issues into a new feature, from a folder's ⋯ menu. One personal access token per Jira site, kept on this device."
         >
-          <JiraTokens sites={jiraSites} onChange={setJiraSites} />
+          <label className="settings-row">
+            <span className="settings-row-label">
+              Import issues from Jira
+              <span className="settings-row-hint">
+                {settingsJiraEnabledDraft
+                  ? `With a token for the site, "Import from Jira…" in a folder's ⋯ menu reads Jira issues into a new feature. With Confluence on too, the combined "Import from Jira/Wiki…" reads both.`
+                  : "Jira is off: nothing in the app offers the Jira import. Tokens already saved are kept."}
+              </span>
+            </span>
+            <span className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Import issues from Jira"
+                checked={settingsJiraEnabledDraft}
+                onChange={(e) => void toggleJiraEnabled(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden="true" />
+            </span>
+          </label>
+          {settingsJiraEnabledDraft && (
+            <div className="settings-row">
+              <span className="settings-row-label">
+                Jira personal access tokens
+                <JiraTokens sites={jiraSites} onChange={setJiraSites} />
+              </span>
+            </div>
+          )}
         </PageSection>
       )}
-      {/* specs/external-links/confluence-wiki.feature.md: a personal access
-          token per wiki, kept on this device; features publish from their
-          ⋯ menu. Not in the hosted app, which keeps no device secrets. */}
+      {/* specs/external-links/confluence-wiki.feature.md: opt-in. On,
+          "Publish to Confluence…" shows, the Confluence import is offered,
+          the agent's wiki MCP server is handed to sessions, and the token
+          form shows. Not in the hosted app, which keeps no device secrets. */}
       {!demo && !hosted && (
         <PageSection
           id="settings-confluence"
           title="Confluence"
           hint="Publish features as pages of a Confluence wiki, from a feature's ⋯ menu. One personal access token per wiki, kept on this device."
         >
-          <ConfluenceTokens wikis={confluenceWikis} onChange={setConfluenceWikis} />
+          <label className="settings-row">
+            <span className="settings-row-label">
+              Publish pages to Confluence
+              <span className="settings-row-hint">
+                {settingsConfluenceEnabledDraft
+                  ? `With a token for the wiki, a feature's ⋯ menu offers "Publish to Confluence…", a folder's offers it for all its features, "Import from Confluence…" reads pages into a new feature, and a coding-agent session can read the wiki.`
+                  : "Confluence is off: nothing in the app offers publishing to or importing from Confluence, and agent sessions cannot read the wiki. Tokens already saved are kept."}
+              </span>
+            </span>
+            <span className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Publish pages to Confluence"
+                checked={settingsConfluenceEnabledDraft}
+                onChange={(e) => void toggleConfluenceEnabled(e.target.checked)}
+              />
+              <span className="switch-track" aria-hidden="true" />
+            </span>
+          </label>
+          {settingsConfluenceEnabledDraft && (
+            <div className="settings-row">
+              <span className="settings-row-label">
+                Confluence personal access tokens
+                <ConfluenceTokens wikis={confluenceWikis} onChange={setConfluenceWikis} />
+              </span>
+            </div>
+          )}
         </PageSection>
       )}
       {renderPluginSettings("confluence")}
@@ -11696,16 +11805,18 @@ export function App() {
                         disabled: publishing !== null,
                         onSelect: () => void publish(),
                       },
-                      ...(demo || hosted
-                        ? []
-                        : [
+                      // "Publish to Confluence…" only while Confluence is
+                      // switched on in Settings (confluence-wiki.feature.md).
+                      ...(confluenceEnabled
+                        ? [
                             {
                               id: "confluence",
                               label: "Publish to Confluence…",
                               icon: <BookOpen size={13} />,
                               onSelect: () => setConfluencePublishOpen(true),
                             },
-                          ]),
+                          ]
+                        : []),
                       ...(demo || hosted || !qtestLinks
                         ? []
                         : [
@@ -11717,13 +11828,18 @@ export function App() {
                             },
                             // Both at once ("Publish the page and the test
                             // cases from one dialog"): the page first, so the
-                            // test cases link their scenarios on it.
-                            {
-                              id: "wiki-qtest",
-                              label: "Publish to Wiki & qTest…",
-                              icon: <ClipboardCheck size={13} />,
-                              onSelect: () => setWikiQtestPublishOpen(true),
-                            },
+                            // test cases link their scenarios on it. The page
+                            // needs Confluence on, so this shows only then.
+                            ...(confluenceEnabled
+                              ? [
+                                  {
+                                    id: "wiki-qtest",
+                                    label: "Publish to Wiki & qTest…",
+                                    icon: <ClipboardCheck size={13} />,
+                                    onSelect: () => setWikiQtestPublishOpen(true),
+                                  },
+                                ]
+                              : []),
                           ]),
                       {
                         id: "delete",
@@ -12963,6 +13079,7 @@ export function App() {
       {importOpen !== null && (
         <ImportFromJiraWikiDialog
           folder={importOpen.folder}
+          mode={importOpen.mode}
           jiraSites={jiraSites}
           wikis={confluenceWikis}
           agents={agents}

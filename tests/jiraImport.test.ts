@@ -137,7 +137,8 @@ beforeEach(async () => {
   setConfluenceTokenBackend(createConfluenceFileBackend(join(home, "confluence-tokens.json")));
   data = join(root, "data");
   await createFeature(data, "Seed");
-  await writeState({ dataRepo: data }, root);
+  // Both integrations on; the off cases set their own state.
+  await writeState({ dataRepo: data, jiraEnabled: true, confluenceEnabled: true }, root);
   seen = [];
   asked = [];
   answer = success(proposal());
@@ -340,6 +341,117 @@ describe("proposing a feature", () => {
     expect(missing.body.error).toContain(issueUrl("ABC-404"));
     expect(missing.body.error).toMatch(/no such issue/);
     expect(asked).toEqual([]);
+  });
+});
+
+describe("the Settings switches gate the import", () => {
+  const setSwitches = (over: Record<string, unknown>) => writeState({ dataRepo: data, ...over }, root);
+
+  test("off by default, a fresh device refuses both sides", async () => {
+    await saveToken();
+    await saveWikiToken();
+    await setSwitches({}); // neither jiraEnabled nor confluenceEnabled
+    const jira = await propose([issueUrl("ABC-1")]);
+    expect(jira.status).toBe(403);
+    expect(jira.body.error).toMatch(/Jira is off/);
+    const wiki = await propose([pageUrl()]);
+    expect(wiki.status).toBe(403);
+    expect(wiki.body.error).toMatch(/Confluence is off/);
+    expect(asked).toEqual([]);
+  });
+
+  test("Jira off refuses a Jira url and a combined set; Confluence still works", async () => {
+    await saveToken();
+    await saveWikiToken();
+    await setSwitches({ jiraEnabled: false, confluenceEnabled: true });
+    expect((await propose([issueUrl("ABC-1")])).status).toBe(403);
+    expect((await propose([issueUrl("ABC-1"), pageUrl()])).status).toBe(403);
+    const wiki = await propose([pageUrl()]);
+    expect(wiki.status).toBe(200);
+  });
+
+  test("Confluence off refuses a page url and a combined set; Jira still works", async () => {
+    await saveToken();
+    await saveWikiToken();
+    await setSwitches({ jiraEnabled: true, confluenceEnabled: false });
+    expect((await propose([pageUrl()])).status).toBe(403);
+    expect((await propose([issueUrl("ABC-1"), pageUrl()])).status).toBe(403);
+    const jira = await propose([issueUrl("ABC-1")]);
+    expect(jira.status).toBe(200);
+  });
+
+  test("create refuses the off side", async () => {
+    await setSwitches({ jiraEnabled: false, confluenceEnabled: true });
+    const kept = {
+      folder: "",
+      title: "Quote Policy",
+      scenarios: proposal().scenarios,
+      sources: [{ kind: "jira", url: issueUrl("ABC-1"), title: "ABC-1" }],
+    };
+    const res = await call("POST", "/api/import/create", kept);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Jira is off/);
+  });
+});
+
+describe("the Settings switches round-trip through the settings file", () => {
+  const settings = (patch: Record<string, unknown>) => call("PUT", "/api/state", patch);
+
+  test("each is off until switched on, and off is stored as an absent key", async () => {
+    const { normalizeJiraEnabled, normalizeConfluenceEnabled, readState } = await import("../src/server/state");
+    expect(normalizeJiraEnabled(undefined)).toBe(false);
+    expect(normalizeJiraEnabled("yes")).toBe(false);
+    expect(normalizeJiraEnabled(true)).toBe(true);
+    expect(normalizeConfluenceEnabled(undefined)).toBe(false);
+    expect(normalizeConfluenceEnabled(true)).toBe(true);
+
+    // A fresh device: write state with neither key set.
+    await writeState({ dataRepo: data }, root);
+    const start = await readState(root);
+    expect(start.jiraEnabled).toBeUndefined();
+    expect(start.confluenceEnabled).toBeUndefined();
+
+    const on = await settings({ jiraEnabled: true, confluenceEnabled: true });
+    expect(on.status).toBe(200);
+    expect(on.body.jiraEnabled).toBe(true);
+    expect(on.body.confluenceEnabled).toBe(true);
+    expect((await readState(root)).jiraEnabled).toBe(true);
+    expect((await readState(root)).confluenceEnabled).toBe(true);
+
+    const off = await settings({ jiraEnabled: false, confluenceEnabled: false });
+    expect(off.body.jiraEnabled).toBe(false);
+    expect(off.body.confluenceEnabled).toBe(false);
+    expect((await readState(root)).jiraEnabled).toBeUndefined();
+    expect((await readState(root)).confluenceEnabled).toBeUndefined();
+
+    expect((await settings({ jiraEnabled: "yes" })).status).toBe(400);
+    expect((await settings({ confluenceEnabled: 1 })).status).toBe(400);
+  });
+});
+
+describe("a split import takes only one kind", () => {
+  test("a jira-only import rejects a Confluence url with 400 before any read", async () => {
+    await saveToken();
+    await saveWikiToken();
+    const res = await propose([pageUrl()], { only: "jira" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/only Jira issues/);
+    expect(asked).toEqual([]);
+  });
+
+  test("a wiki-only import rejects a Jira url with 400 before any read", async () => {
+    await saveToken();
+    await saveWikiToken();
+    const res = await propose([issueUrl("ABC-1")], { only: "wiki" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/only Confluence pages/);
+    expect(asked).toEqual([]);
+  });
+
+  test("a jira-only import proposes from Jira urls", async () => {
+    await saveToken();
+    const res = await propose([issueUrl("ABC-1")], { only: "jira" });
+    expect(res.status).toBe(200);
   });
 });
 
