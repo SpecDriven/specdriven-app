@@ -555,6 +555,7 @@ function BarPicker({
   items,
   disabled,
   align = "left",
+  onOpen,
 }: {
   name: string;
   text: ReactNode;
@@ -565,6 +566,8 @@ function BarPicker({
   items: MenuItem[];
   disabled?: boolean;
   align?: "left" | "right";
+  /** Called as the menu opens, to refresh what it lists. */
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -577,7 +580,10 @@ function BarPicker({
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={disabled}
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            if (!open) onOpen?.();
+            setOpen((o) => !o);
+          }}
         >
           {icon}
           <span className="agent-bar-chip-text">{text}</span>
@@ -664,6 +670,7 @@ function ModelEffortMode({
           items={modelItems(choices, model, agent, onModel)}
           disabled={disabled}
           align="right"
+          onOpen={() => void agentChat.loadChoices(agent.id).catch(() => undefined)}
         />
       ) : (
         model && (
