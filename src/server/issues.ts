@@ -24,6 +24,7 @@ import { getAuth } from "./auth";
 import { DEMO_ISSUES_REPO, isDemoMode } from "./demoMode";
 import { ghAccountInUse, ghToken } from "./git/gh";
 import { GITHUB_HOST, apiBase, sameHost, webBase } from "./github";
+import { IMAGES_ROUTE, currentImageName, readImage, referencedImageNames } from "./images";
 import { readProjectSettings } from "./members";
 import { parseGitHubUrl, type GitHubRepo } from "./repo";
 import type { PullRequestState } from "./pullRequests";
@@ -403,6 +404,73 @@ export async function listComments(repo: GitHubRepo, number: number): Promise<Is
   return raw.map(toComment);
 }
 
+// --- Embedded images -----------------------------------------------------------------
+
+/**
+ * The repository path an app image is committed to so GitHub can show it. One
+ * directory, out of the way; the name is content-addressed (images.ts), so the
+ * same screenshot in two issues is the one file.
+ */
+const ISSUE_IMAGES_DIR = ".specdriven/issue-images";
+
+/** GitHub's contents-API answer, the field that is a raw url to the bytes. */
+interface ContentsResponse {
+  content?: { download_url?: string | null } | null;
+}
+
+/**
+ * Commit an image's bytes to the code repo through the contents API and return
+ * the raw url GitHub serves them on. The name is content-addressed (images.ts
+ * currentImageName), so the same screenshot is one file no matter how many
+ * issues embed it: a GET first reuses the url of one already committed, and the
+ * PUT only runs for a name GitHub has not seen. Using the bytes' current hash
+ * means a screenshot edited in place since it was pasted is stored under the
+ * name its bytes now go by.
+ */
+async function uploadIssueImage(repo: GitHubRepo, name: string, bytes: Uint8Array): Promise<string | null> {
+  const stored = currentImageName(name, bytes);
+  const path = `${repoPath(repo)}/contents/${ISSUE_IMAGES_DIR}/${encodeURIComponent(stored)}`;
+  const existing = await github<ContentsResponse>(repo.host, path).catch(() => null);
+  if (existing?.content?.download_url) return existing.content.download_url;
+  const put = await github<ContentsResponse>(repo.host, path, {
+    method: "PUT",
+    json: {
+      message: `Add issue image: ${stored}`,
+      content: Buffer.from(bytes).toString("base64"),
+    },
+  });
+  return put.content?.download_url ?? null;
+}
+
+/**
+ * A body with its app-stored images (specs/images.feature.md) made reachable
+ * from GitHub: every `/api/images/<name>` is a file only this app serves, so
+ * each is committed to the code repo and its url rewritten to the raw one
+ * GitHub serves (uploadIssueImage). An image whose bytes are not on disk, or
+ * that GitHub will not host, is left as it was — better a dead local link than
+ * a lost issue. Unchanged, and untouched, when the body names no such image.
+ */
+export async function uploadBodyImages(repo: GitHubRepo, dataDir: string, body: string): Promise<string> {
+  const names = referencedImageNames(body);
+  if (names.size === 0) return body;
+  const uploaded = new Map<string, string>();
+  for (const name of names) {
+    const bytes = await readImage(dataDir, name);
+    if (!bytes) continue;
+    // A refused upload (no push access, a rate limit) leaves this one link
+    // local rather than failing the whole issue: a dead image beats a lost one.
+    const url = await uploadIssueImage(repo, name, bytes).catch(() => null);
+    if (url) uploaded.set(name, url);
+  }
+  let rewritten = body;
+  for (const [name, url] of uploaded) {
+    // A stored name is letters, digits, dashes and a dot (images.ts), so it
+    // needs no escaping to match literally and nothing else collides with it.
+    rewritten = rewritten.replaceAll(`${IMAGES_ROUTE}${name}`, url);
+  }
+  return rewritten;
+}
+
 /** A title is the one thing an issue must have. */
 function requireTitle(value: unknown): string {
   const title = typeof value === "string" ? cleanLine(value) : "";
@@ -412,10 +480,13 @@ function requireTitle(value: unknown): string {
 
 export async function createIssue(
   repo: GitHubRepo,
+  dataDir: string,
   input: { title?: unknown; body?: unknown },
 ): Promise<Issue> {
   const payload: { title: string; body?: string } = { title: requireTitle(input.title) };
-  if (typeof input.body === "string" && input.body.trim()) payload.body = cleanText(input.body);
+  if (typeof input.body === "string" && input.body.trim()) {
+    payload.body = await uploadBodyImages(repo, dataDir, cleanText(input.body));
+  }
   return toIssue(await github<RawIssue>(repo.host, `${repoPath(repo)}/issues`, { method: "POST", json: payload }));
 }
 
@@ -426,6 +497,7 @@ export async function createIssue(
  */
 export async function updateIssue(
   repo: GitHubRepo,
+  dataDir: string,
   number: number,
   input: { title?: unknown; body?: unknown; state?: unknown; stateReason?: unknown },
 ): Promise<Issue> {
@@ -433,7 +505,7 @@ export async function updateIssue(
   if (input.title !== undefined) payload.title = requireTitle(input.title);
   if (input.body !== undefined) {
     if (typeof input.body !== "string") throw new GitHubError("body must be a string", 400);
-    payload.body = cleanText(input.body);
+    payload.body = await uploadBodyImages(repo, dataDir, cleanText(input.body));
   }
   if (input.state !== undefined) {
     if (input.state !== "open" && input.state !== "closed") {
@@ -454,13 +526,18 @@ export async function updateIssue(
   );
 }
 
-export async function addComment(repo: GitHubRepo, number: number, body: unknown): Promise<IssueComment> {
+export async function addComment(
+  repo: GitHubRepo,
+  dataDir: string,
+  number: number,
+  body: unknown,
+): Promise<IssueComment> {
   const text = typeof body === "string" ? cleanText(body) : "";
   if (!text.trim()) throw new GitHubError("A comment needs some text", 400);
   return toComment(
     await github<RawComment>(repo.host, `${repoPath(repo)}/issues/${number}/comments`, {
       method: "POST",
-      json: { body: text },
+      json: { body: await uploadBodyImages(repo, dataDir, text) },
     }),
   );
 }
