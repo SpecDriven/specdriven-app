@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.243 — 2026-11-07
+
+- adding docs
+- Open a worktree session in a Ghostty shell from the agent pane ([#397](https://github.com/SpecDriven/specdriven-app/pull/397))
+
 ## v0.1.242 — 2026-11-06
 
 - Check a coding session's source is up to date before it starts ([#395](https://github.com/SpecDriven/specdriven-app/pull/395))
