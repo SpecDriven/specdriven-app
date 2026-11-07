@@ -7688,14 +7688,14 @@ button.page-archive-head:hover {
   }
 }
 
-/* A worktree session's branch: shortened first, like the folder. */
+/* A worktree session's branch: shortened first, like the folder, and only
+   as the bar runs out of room: no cap, so a wide pane shows all of it. */
 .agent-bar-branch {
   display: inline-flex;
   flex: 0 1 auto;
   align-items: center;
   gap: 0.3rem;
   min-width: 2.5rem;
-  max-width: 14rem;
   font-family: var(--font-mono);
 }
 
