@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why some tests are skipped on CI — SpecDriven</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfc;
+    --fg: #1b1b1f;
+    --muted: #6b6f76;
+    --line: #e4e4e8;
+    --card: #ffffff;
+    --accent: #5b5bd6;
+    --code-bg: #f3f3f5;
+    --warn-bg: #fff8e6;
+    --warn-line: #f0d98a;
+    --yes: #b4341f;
+    --cond: #8a6d00;
+    --no: #1f7a4d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0e11;
+      --fg: #ececf0;
+      --muted: #9a9ca3;
+      --line: #26262c;
+      --card: #16161a;
+      --accent: #a0a0f5;
+      --code-bg: #1d1d22;
+      --warn-bg: #2a2410;
+      --warn-line: #5c4e19;
+      --yes: #f2846b;
+      --cond: #e0c04a;
+      --no: #6cd49b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header { margin-bottom: 40px; }
+  h1 { font-size: 28px; font-weight: 650; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  h2 {
+    font-size: 19px; font-weight: 620; margin: 48px 0 14px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--line); letter-spacing: -0.02em;
+  }
+  h3 { font-size: 15.5px; font-weight: 620; margin: 28px 0 6px; }
+  p { margin: 10px 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.88em; background: var(--code-bg); padding: 1.5px 5px; border-radius: 5px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; font-size: 12.8px; line-height: 1.55; }
+  .lead {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px 20px; margin: 0 0 8px;
+  }
+  .lead p:first-child { margin-top: 0; }
+  .lead p:last-child { margin-bottom: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  tbody tr:hover { background: var(--code-bg); }
+  td code { font-size: 12px; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  .pill-yes { color: var(--yes); border: 1px solid var(--yes); }
+  .pill-cond { color: var(--cond); border: 1px solid var(--cond); }
+  .pill-no { color: var(--no); border: 1px solid var(--no); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 4px 22px 18px; margin: 18px 0;
+  }
+  .note {
+    background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px;
+    padding: 14px 18px; margin: 18px 0;
+  }
+  .note p:first-child { margin-top: 0; }
+  .note p:last-child { margin-bottom: 0; }
+  .ref { color: var(--muted); font-size: 12.5px; }
+  ul { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 600; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 6px; padding: 1px 7px; margin-right: 8px; vertical-align: 2px;
+  }
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Why some tests are skipped on CI</h1>
+  <p class="sub">SpecDriven · test suite audit · generated 2026-11-07 · verified against <code>main</code></p>
+</header>
+
+<div class="lead">
+  <p><strong>The short version.</strong> CI runs <code>bun test</code> on a single <code>ubuntu-latest</code> runner
+  (<code>.github/workflows/test.yml</code>). Nothing is skipped because &ldquo;it&rsquo;s CI&rdquo; — there is
+  <strong>no <code>process.env.CI</code> gate anywhere</strong> in the suite. Instead, individual tests use Bun&rsquo;s
+  <code>test.skipIf(&hellip;)</code> keyed on <em>capability</em>: is a given binary installed, is the process root, and which OS
+  is this. On the GitHub runner three of those conditions are what they are — Linux, non-root, no PowerShell in the main run —
+  so a handful of tests skip by design.</p>
+  <p>Separately, CI <em>adds</em> coverage the local default doesn&rsquo;t: it sets <code>SPECDRIVEN_ALL_ENGINES=1</code>,
+  fanning the git push/pull tests across all three engines (<code>cli</code>/<code>gh</code>/<code>js</code>). And the Electron
+  desktop crash test (<code>test:desktop</code>) is not wired into any workflow at all — it only runs locally.</p>
+</div>
+
+<h2>What runs where</h2>
+<table>
+  <thead>
+    <tr><th>Test(s)</th><th>Skip condition</th><th>On main CI?</th><th>Reason</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>installPs1.test.ts</code><br><span class="ref">20 tests, e.g. <code>:162</code></span></td>
+      <td><code>!PWSH</code> &mdash; <code>SPECDRIVEN_TEST_PWSH</code> unset</td>
+      <td><span class="pill pill-yes">Skipped</span><br><span class="ref">runs in <code>install-ps1.yml</code></span></td>
+      <td>A PowerShell starts per test — too slow for every PR</td>
+    </tr>
+    <tr>
+      <td><code>installPs1.test.ts:439</code></td>
+      <td><code>!PWSH || !PYTHON</code></td>
+      <td><span class="pill pill-yes">Skipped</span></td>
+      <td>Needs PowerShell <em>and</em> a python3-driven pseudo-terminal</td>
+    </tr>
+    <tr>
+      <td><code>pluginSources.test.ts:200</code></td>
+      <td><code>process.platform === "linux"</code></td>
+      <td><span class="pill pill-yes">Skipped</span></td>
+      <td>CI is Linux; the file-watch&rarr;rebuild timing test is unreliable there</td>
+    </tr>
+    <tr>
+      <td><code>gatewayWorkers.test.ts:128</code></td>
+      <td><code>!workerIsolation()</code> — not root / no <code>setpriv</code></td>
+      <td><span class="pill pill-yes">Skipped</span></td>
+      <td>Per-uid workers need root + <code>setpriv</code>; the runner is non-root</td>
+    </tr>
+    <tr>
+      <td><code>install.test.ts:601</code></td>
+      <td><code>!wget</code></td>
+      <td><span class="pill pill-cond">If absent</span></td>
+      <td>Alternate downloader path (no curl)</td>
+    </tr>
+    <tr>
+      <td><code>install.test.ts:617</code></td>
+      <td><code>!bsdtar</code></td>
+      <td><span class="pill pill-cond">If absent</span></td>
+      <td>Alternate unzip path</td>
+    </tr>
+    <tr>
+      <td><code>install.test.ts:711/730/743</code></td>
+      <td><code>!PYTHON</code></td>
+      <td><span class="pill pill-cond">If absent</span></td>
+      <td>Interactive-terminal install path (ubuntu usually has python3)</td>
+    </tr>
+    <tr>
+      <td><code>test:desktop</code><br><span class="ref">Electron crash test</span></td>
+      <td>not invoked by any workflow</td>
+      <td><span class="pill pill-no">Never runs</span></td>
+      <td>Local-only smoke test (<code>scripts/crash-test-desktop.ts</code>)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>How CI is wired</h2>
+<div class="card">
+<p><code>.github/workflows/test.yml</code> — three jobs, all <code>runs-on: ubuntu-latest</code>, Bun <code>1.3.14</code>, no OS matrix:</p>
+<ul>
+  <li><strong>test</strong> — <code>bun test</code> with <code>SPECDRIVEN_ALL_ENGINES: "1"</code>. No name filter, no path filter; the test scope comes entirely from <code>bunfig.toml</code>.</li>
+  <li><strong>typecheck</strong> — <code>bun run typecheck</code> (<code>tsc --noEmit -p .</code>).</li>
+  <li><strong>audit</strong> — <code>bun audit</code> with two advisories intentionally ignored (reasons documented inline in the workflow).</li>
+</ul>
+<p><code>bunfig.toml</code> pins <code>[test] root = "tests"</code>, so only the app&rsquo;s own tests under <code>tests/</code> are collected — <code>*.test.ts</code> files the desktop crash test leaves behind under <code>dist/</code> (from auto-installed plugins) are excluded. The release workflows (<code>release.yml</code>, <code>release-windows.yml</code>) only build; they do not run <code>bun test</code>.</p>
+</div>
+
+<h2>The five reasons in detail</h2>
+
+<h3><span class="tag">1</span>PowerShell installer tests — moved to their own workflow</h3>
+<p>Every test in <code>tests/installPs1.test.ts</code> is gated on PowerShell being named via an env var:</p>
+<pre><code>const PWSH = process.env.SPECDRIVEN_TEST_PWSH;   // installPs1.test.ts:35
+test.skipIf(!PWSH)("the latest release is downloaded, verified and unpacked ...", ...)</code></pre>
+<p>The main suite (<code>test.yml</code>) never sets <code>SPECDRIVEN_TEST_PWSH</code>, so all 20 skip. A dedicated workflow,
+<code>.github/workflows/install-ps1.yml</code>, sets it and runs just that file — but only when the installer, its test, or its
+helpers change (a <code>paths:</code> filter):</p>
+<pre><code>run: SPECDRIVEN_TEST_PWSH="$(command -v pwsh)" bun test tests/installPs1.test.ts</code></pre>
+<p class="ref">Stated reason (<code>installPs1.test.ts:8-14</code>, <code>install-ps1.yml:3-7</code>): the script runs under PowerShell 7 and spins one up on every run — too slow to pay on every pull request, so these are opt-in.</p>
+
+<h3><span class="tag">2</span>Plugin file-watch test — skipped because CI is Linux</h3>
+<pre><code>test.skipIf(process.platform === "linux")(
+  "the app watches a plugin under development and rebuilds it as it is edited",
+  ...)                                            // pluginSources.test.ts:200</code></pre>
+<p>CI runs on <code>ubuntu-latest</code>, so this one always skips there. The test writes a plugin file, then polls for the
+rebuilt route to answer within a deadline. That watch&rarr;rebuild race is timing-sensitive on Linux, where Bun&rsquo;s recursive
+<code>fs.watch</code> walks the directory tree differently than the macOS FSEvents path. The non-watch build/rebuild behaviour is
+still covered by the preceding, un-skipped test in the same file, so coverage of the loader itself isn&rsquo;t lost — only the
+live-edit watcher path goes unverified on CI.</p>
+
+<h3><span class="tag">3</span>Worker-isolation tests — need root + <code>setpriv</code></h3>
+<pre><code>const isolated = workerIsolation();             // gatewayWorkers.test.ts:126
+test.skipIf(!isolated)("each worker runs as its own uid, owning its folder alone", ...)</code></pre>
+<pre><code>export function workerIsolation(env = process.env): boolean {   // src/gateway/workers.ts:100
+  if (env.SPECDRIVEN_WORKER_ISOLATION === "off") return false;
+  return process.getuid?.() === 0 &amp;&amp; Bun.which("setpriv") !== null;
+}</code></pre>
+<p>It returns true only when the process is root and <code>setpriv</code> is installed. GitHub&rsquo;s default <code>ubuntu-latest</code>
+runner is non-root, so this skips. It would run in the hosted image or a root CI container.</p>
+<p class="ref">Stated reason (<code>gatewayWorkers.test.ts:124-125</code>): &ldquo;Separate uids need root and setpriv &hellip; elsewhere these tests have nothing to check.&rdquo;</p>
+
+<h3><span class="tag">4</span>Optional-binary installer tests — skip when the tool is missing</h3>
+<p><code>tests/install.test.ts</code> looks up tools with <code>findTool(name)</code>, which returns <code>null</code> if the binary
+isn&rsquo;t in a fixed set of directories, and skips the test that exercises it:</p>
+<pre><code>test.skipIf(!wget)("wget does the job when there is no curl", ...)       // :601
+test.skipIf(!bsdtar)("bsdtar unpacks the zip when unzip is missing", ...) // :617
+test.skipIf(!PYTHON)("a yes at the terminal installs Bun, ...", ...)      // :711, :730, :743</code></pre>
+<p>These are environment-dependent rather than always-off. On ubuntu runners <code>python3</code> is normally present (so those
+run); <code>wget</code>/<code>bsdtar</code> may be absent and skip. They cover alternative downloader / unzip / interactive paths.</p>
+
+<h3><span class="tag">5</span>Context: the git-engine matrix is the <em>opposite</em> of a skip</h3>
+<p>Don&rsquo;t confuse this one for a skip. Locally the push/pull tests run on a single engine (<code>cli</code>). CI sets
+<code>SPECDRIVEN_ALL_ENGINES=1</code>, so <code>tests/helpers/engines.ts</code> fans them across <code>cli</code>, <code>gh</code>
+and <code>js</code>. CI runs <em>more</em> here, not less — each engine costs a full fixture plus a real commit/push, which is too
+slow to triple locally.</p>
+
+<div class="note">
+<p><strong>Also worth knowing.</strong> There is no <code>test:ci</code> script and no <code>.only</code> anywhere — CI just calls
+<code>bun test</code> and injects the engine flag via workflow env. The desktop/Electron crash test (<code>package.json</code>
+&rarr; <code>"test:desktop": "bun scripts/crash-test-desktop.ts"</code>) is not run by <em>any</em> workflow, so it&rsquo;s
+effectively a local-only gate before releases.</p>
+</div>
+
+<h2>Running the skipped tests locally</h2>
+<div class="card">
+<ul>
+  <li><strong>PowerShell installer tests:</strong> <code>SPECDRIVEN_TEST_PWSH="$(command -v pwsh)" bun test tests/installPs1.test.ts</code> (needs PowerShell 7; the python-terminal case also needs <code>python3</code>).</li>
+  <li><strong>Plugin watch test:</strong> run on macOS (or any non-Linux host) — <code>bun test tests/pluginSources.test.ts</code>.</li>
+  <li><strong>Worker isolation:</strong> run as root on a box with <code>setpriv</code> installed, and don&rsquo;t set <code>SPECDRIVEN_WORKER_ISOLATION=off</code>.</li>
+  <li><strong>wget / bsdtar paths:</strong> install those binaries so <code>findTool</code> can locate them.</li>
+  <li><strong>Desktop crash test:</strong> <code>bun run test:desktop</code> (local only; see project limits on how many on-screen launches per verification).</li>
+</ul>
+</div>
+
+<footer>
+  Sources: <code>.github/workflows/test.yml</code>, <code>.github/workflows/install-ps1.yml</code>, <code>bunfig.toml</code>,
+  <code>package.json</code>, <code>tests/installPs1.test.ts</code>, <code>tests/install.test.ts</code>,
+  <code>tests/pluginSources.test.ts</code>, <code>tests/gatewayWorkers.test.ts</code>,
+  <code>tests/helpers/engines.ts</code>, <code>src/gateway/workers.ts</code>. Point-in-time snapshot; re-check line numbers against the tree if the suite has changed.
+</footer>
+</div>
+</body>
+</html>
