@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.240 — 2026-11-06
+
+- Upload pasted images to GitHub when creating or editing an issue ([#392](https://github.com/SpecDriven/specdriven-app/pull/392))
+
 ## v0.1.239 — 2026-11-06
 
 - The coding agent pane's model menu lists the models the sign-in offers now ([#390](https://github.com/SpecDriven/specdriven-app/pull/390))
