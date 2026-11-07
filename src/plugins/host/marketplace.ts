@@ -45,12 +45,13 @@ export interface MarketplaceStatus extends MarketplaceRef {
 
 /**
  * Every marketplace named, cloned when its cache is missing and pulled when
- * asked to refresh, with its index read. One that fails to clone, pull or
+ * asked to refresh — cloned afresh when the pull fails, unless `reclone` is
+ * false — with its index read. One that fails to clone, pull or
  * parse is reported on its own row and does not hide the others.
  */
 export async function loadMarketplaces(
   entries: readonly MarketplaceRef[],
-  opts: { refresh?: boolean } = {},
+  opts: { refresh?: boolean; reclone?: boolean } = {},
 ): Promise<MarketplaceStatus[]> {
   return Promise.all(
     entries.map(async (entry): Promise<MarketplaceStatus> => {
@@ -59,7 +60,7 @@ export async function loadMarketplaces(
         // A cache with no index yet — cloned before the index was pushed —
         // is pulled on Browse too, not only on Refresh.
         const stale = !(await exists(join(dir, "marketplace.json")));
-        await cacheMarketplace(entry, dir, opts.refresh === true || stale);
+        await cacheMarketplace(entry, dir, opts.refresh === true || stale, opts.reclone !== false);
         return { ...entry, dir, index: await readIndex(dir) };
       } catch (e) {
         return { ...entry, dir, error: (e as Error).message };
@@ -74,7 +75,12 @@ export async function marketplaceIndex(entry: MarketplaceRef, refresh = false): 
   return status!;
 }
 
-async function cacheMarketplace(entry: MarketplaceRef, dir: string, refresh: boolean): Promise<void> {
+async function cacheMarketplace(
+  entry: MarketplaceRef,
+  dir: string,
+  refresh: boolean,
+  reclone: boolean,
+): Promise<void> {
   const cached = await exists(join(dir, ".git"));
   if (!cached) {
     await rm(dir, { recursive: true, force: true });
@@ -82,22 +88,27 @@ async function cacheMarketplace(entry: MarketplaceRef, dir: string, refresh: boo
     await clone(entry.source, dir);
   } else if (refresh) {
     const res = await pull(dir);
-    if (!res.ok) throw new Error(`Could not refresh ${entry.name}: ${res.message}`);
+    if (res.ok) return;
+    if (!reclone) throw new Error(`Could not refresh ${entry.name}: ${res.message}`);
+    try {
+      await recloneMarketplace(entry, dir);
+    } catch (e) {
+      throw new Error(`Could not refresh ${entry.name}: ${res.message} — and cloning it afresh failed: ${(e as Error).message}`);
+    }
   }
 }
 
 /**
- * Throw a marketplace's cache away and clone it afresh: what a cache that
- * can no longer be pulled needs — its upstream history rewritten ("refusing
- * to merge unrelated histories"), a checkout left half-done. The clone goes
- * into a folder beside the cache and takes its place only once it is whole,
- * so a remote that cannot be reached leaves the old copy where it was.
- * Installed plugins are not touched: a subdirectory plugin was copied out
- * of the cache, not linked to it.
+ * Throw a marketplace's cache away and clone it afresh: what Refresh does
+ * when the cache can no longer be pulled — its upstream history rewritten
+ * ("refusing to merge unrelated histories"), a checkout left half-done.
+ * The clone goes into a folder beside the cache and takes its place only
+ * once it is whole, so a remote that cannot be reached leaves the old copy
+ * where it was. Installed plugins are not touched: a subdirectory plugin
+ * was copied out of the cache, not linked to it.
  */
-export async function recloneMarketplace(entry: MarketplaceRef): Promise<MarketplaceStatus> {
-  return exclusive(`marketplace ${entry.name}`, "re-cloned", async () => {
-    const dir = join(marketplacesHome(), entry.name);
+async function recloneMarketplace(entry: MarketplaceRef, dir: string): Promise<void> {
+  await exclusive(`marketplace ${entry.name}`, "re-cloned", async () => {
     const fresh = join(marketplacesHome(), `.${entry.name}.reclone`);
     await rm(fresh, { recursive: true, force: true });
     await mkdir(marketplacesHome(), { recursive: true });
@@ -109,11 +120,6 @@ export async function recloneMarketplace(entry: MarketplaceRef): Promise<Marketp
     }
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     await rename(fresh, dir);
-    try {
-      return { ...entry, dir, index: await readIndex(dir) };
-    } catch (e) {
-      return { ...entry, dir, error: (e as Error).message };
-    }
   });
 }
 
@@ -510,20 +516,23 @@ export interface MarketplaceRouteDeps {
    * refreshed, and change nothing (its host is shared).
    */
   demo(): boolean;
+  /**
+   * A hosted worker (its host shared too) pulls on Refresh but never
+   * throws a marketplace's copy away to clone it afresh.
+   */
+  hosted?(): boolean;
   readState(): Promise<Record<string, unknown>>;
   persist(state: Record<string, unknown>): Promise<void>;
 }
 
 /**
  * The marketplace routes, for api.ts to register among the core rows:
- * `GET /api/plugins/marketplaces[?refresh=1]`,
- * `POST /api/plugins/marketplaces/:name/reclone`, `POST /api/plugins/install`
+ * `GET /api/plugins/marketplaces[?refresh=1]`, `POST /api/plugins/install`
  * with `{ marketplace, name, step: "stage" | "confirm" | "cancel" }`,
  * `POST /api/plugins/:id/update` and `DELETE /api/plugins/:id`.
  */
 export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   getMarketplaces: Handler;
-  postReclone: Handler;
   postInstall: Handler;
   postUpdate: Handler;
   deletePlugin: Handler;
@@ -544,15 +553,9 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   return {
     getMarketplaces: guard(async (req) => {
       const refresh = !deps.demo() && new URL(req.url).searchParams.get("refresh") === "1";
-      const marketplaces = await loadMarketplaces(await entries(), { refresh });
+      const marketplaces = await loadMarketplaces(await entries(), { refresh, reclone: !deps.hosted?.() });
       return json({ marketplaces });
     }, true),
-    postReclone: guard(async (_req, params) => {
-      const name = params.name ?? "";
-      const entry = (await entries()).find((m) => m.name === name);
-      if (!entry) return json({ error: `No marketplace named "${name}" is configured` }, 404);
-      return json({ marketplace: await recloneMarketplace(entry) });
-    }),
     postInstall: guard(async (req) => {
       const body = await bodyOf(req);
       const { marketplace, name, step } = body;

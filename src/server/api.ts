@@ -3784,6 +3784,7 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
 // consent step, update and remove — in the demo, browsing alone.
 const market = marketplaceRoutes({
   demo: isDemoMode,
+  hosted: isHostedMode,
   readState: async () => (await readState(getAppRoot())) as Record<string, unknown>,
   persist: (s) => writeState(s as SpecDrivenState, getAppRoot()),
 });
@@ -3798,7 +3799,6 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/app-update/install", unlessHosted(unlessDemoUpdate(appUpdate.install!))],
   ["POST", "/api/app-update/restart", unlessHosted(unlessDemoUpdate(appUpdate.restart!))],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
-  ["POST", "/api/plugins/marketplaces/:name/reclone", unlessHosted(market.postReclone)],
   ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],

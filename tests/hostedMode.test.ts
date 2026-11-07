@@ -62,7 +62,6 @@ test.each([
   ["POST", "/api/choose-folder"],
   ["POST", "/api/tests/open-in-idea"],
   ["POST", "/api/plugins/install"],
-  ["POST", "/api/plugins/marketplaces/local/reclone"],
   ["POST", "/api/plugins/x/update"],
   ["DELETE", "/api/plugins/x"],
   ["POST", "/api/auth/github/start"],
