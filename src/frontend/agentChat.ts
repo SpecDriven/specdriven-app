@@ -12,7 +12,7 @@
 // event carries a sequence number; a stream that drops is reopened from
 // the last one seen, so nothing is lost or shown twice.
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type {
   AgentChoices,
   AgentDefaultsPatch,
@@ -25,6 +25,7 @@ import type {
   ChatImage,
   ChatSessionMeta,
   ChatStatus,
+  ChatWorktree,
   EffortLevel,
   ImageUpload,
   PermissionMode,
@@ -42,6 +43,7 @@ export type {
   ChatEvent,
   ChatSessionMeta,
   ChatStatus,
+  ChatWorktree,
   EffortLevel,
   PermissionMode,
   SlashCommandInfo,
@@ -461,6 +463,7 @@ export function isFinalStatus(status: ChatStatus): boolean {
 const WIDTH_KEY = "sd-agent-width";
 const OPEN_KEY = "sd-agent-open";
 const ACTIVE_KEY = "sd-agent-session";
+const WORKTREE_KEY = "sd-agent-worktree";
 
 function readLocal(key: string): string | null {
   try {
@@ -487,6 +490,69 @@ export function readAgentWidth(): number {
 
 export function readAgentOpen(): boolean {
   return readLocal(OPEN_KEY) === "1";
+}
+
+/** Whether new sessions get a worktree of their own: the last pick, as in Claude Desktop. */
+export function readAgentWorktree(): boolean {
+  return readLocal(WORKTREE_KEY) === "1";
+}
+
+export function writeAgentWorktree(on: boolean): void {
+  writeLocal(WORKTREE_KEY, on ? "1" : null);
+}
+
+// --- Worktrees (specs/agents/agent-pane.feature.md "A session can run in
+// its own git worktree") -----------------------------------------------------
+
+/** What the server says of a folder (src/server/agentWorktree.ts folderGitInfo). */
+export interface FolderGitInfo {
+  canWorktree: boolean;
+  reason?: string;
+  repo?: string;
+  branch?: string;
+}
+
+// A folder's answer is kept for a while: the bar asks on every render of
+// the new-session screen, and a repo seldom stops being one.
+const FOLDER_TTL_MS = 30_000;
+const folderInfos = new Map<string, { at: number; info: Promise<FolderGitInfo> }>();
+
+/** Whether a folder can have worktrees, and why not; a failed ask is "cannot". */
+export function loadFolderInfo(path: string): Promise<FolderGitInfo> {
+  const kept = folderInfos.get(path);
+  if (kept && Date.now() - kept.at < FOLDER_TTL_MS) return kept.info;
+  const info = call<FolderGitInfo>(`/api/agent/folder?path=${encodeURIComponent(path)}`).catch(
+    (e: Error): FolderGitInfo => ({ canWorktree: false, reason: e.message }),
+  );
+  folderInfos.set(path, { at: Date.now(), info });
+  return info;
+}
+
+/** Tests: forget every folder's answer. */
+export function forgetFolderInfos(): void {
+  folderInfos.clear();
+}
+
+/** A folder's git facts for the bar; null while they load. */
+export function useFolderInfo(path: string | null): FolderGitInfo | null {
+  const [info, setInfo] = useState<{ path: string; info: FolderGitInfo } | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let live = true;
+    void loadFolderInfo(path).then((i) => {
+      if (live) setInfo({ path, info: i });
+    });
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  return info && info.path === path ? info.info : null;
+}
+
+/** What closing a session said about its worktree, for a toast; null says nothing. */
+export function worktreeClosedNote(meta: Pick<ChatSessionMeta, "worktree">, outcome: unknown): string | null {
+  if (!meta.worktree || outcome !== "kept") return null;
+  return `Kept the worktree at ${meta.worktree.path} — it has uncommitted changes (branch ${meta.worktree.branch})`;
 }
 
 // --- The store -------------------------------------------------------------
@@ -730,6 +796,8 @@ export interface CreateSessionOptions {
   model?: string;
   /** The effort to start at; absent is the agent's default. */
   effort?: EffortLevel;
+  /** Run in a git worktree of its own, on a new branch off the folder's. */
+  worktree?: boolean;
 }
 
 /** The pane is offered when an agent plugin is there, or one could be
@@ -922,9 +990,14 @@ export const agentChat = {
     if (agent) rememberDefault(agent, { effort });
   },
   async end(id: string): Promise<void> {
-    await call(`/api/agent/chat/${id}`, { method: "DELETE" }).catch((e: Error) => {
+    const meta = state.sessions[id]?.meta ?? state.list.find((m) => m.id === id);
+    const res = await call<{ worktree?: string }>(`/api/agent/chat/${id}`, { method: "DELETE" }).catch((e: Error) => {
       if (!/not found/.test(e.message)) throw e;
+      return {} as { worktree?: string };
     });
     forget(id);
+    // A worktree with changes in it stays: say where.
+    const note = meta ? worktreeClosedNote(meta, res.worktree) : null;
+    if (note) toast.info(note);
   },
 };
