@@ -14,6 +14,7 @@ import { signOut } from "../src/server/auth";
 import {
   declaredTest,
   fetchTestSource,
+  jsTestAliases,
   languageOf,
   parseTestUrl,
   resolveTestName,
@@ -164,6 +165,148 @@ describe("the declaration a line anchor names", () => {
     ].join("\n");
     expect(testNameAt(ts, 5, "javascript")).toBe("prices a homeowners policy");
     expect(testNameAt(ts, 3, "javascript")).toBe("prices a homeowners policy");
+  });
+
+  test("a title a formatter wrapped under `test(` is named from the call, the title or the body", () => {
+    const ts = [
+      'test("prices a homeowners policy", () => {', //                            1
+      "  expect(quote(house)).toBe(120);",
+      "});",
+      "",
+      "// the token stays out of every answer", //                                5
+      "test(",
+      '  "a pasted token never comes back in Check proxy\'s words or the model list\'s error, whatever it holds",',
+      "  async () => {",
+      "    expect(check.detail).not.toContain(token);",
+      "  },", //                                                                  10
+      "  SLOW,",
+      ");",
+    ].join("\n");
+    const title = "a pasted token never comes back in Check proxy's words or the model list's error, whatever it holds";
+    expect(testNameAt(ts, 6, "javascript")).toBe(title);
+    expect(testNameAt(ts, 7, "javascript")).toBe(title);
+    expect(testNameAt(ts, 9, "javascript")).toBe(title);
+    expect(testNameAt(ts, 11, "javascript")).toBe(title);
+    // The comment and blank line above it lead down to it; the test above keeps its own lines.
+    expect(testNameAt(ts, 5, "javascript")).toBe(title);
+    expect(testNameAt(ts, 4, "javascript")).toBe(title);
+    expect(testNameAt(ts, 2, "javascript")).toBe("prices a homeowners policy");
+    // One line on its own has no title to give; testNameAt reads on.
+    expect(declaredTest("test(", "javascript")).toBeNull();
+  });
+
+  test("a wrapped title under a chained `test.if(…)(` is named, however nested the condition", () => {
+    const ts = [
+      "test(\"a Claude Code that does not list its models in time is an error\", async () => {",
+      "  await expect(models()).rejects.toThrow();",
+      "});",
+      "",
+      "// An app from before the registry's `changed` hears nothing.", //         5
+      'test.if(typeof (agents as { changed?: unknown }).changed === "function")(',
+      "  \"a sign-in, a sign-out and another mode, proxy or token each tell the app Claude's sign-in changed\",",
+      "  async () => {",
+      "  await fakeClaudeOnPath();",
+      "  const changes: string[] = [];", //                                       10
+      "});",
+    ].join("\n");
+    const title = "a sign-in, a sign-out and another mode, proxy or token each tell the app Claude's sign-in changed";
+    expect(testNameAt(ts, 6, "javascript")).toBe(title);
+    expect(testNameAt(ts, 7, "javascript")).toBe(title);
+    expect(testNameAt(ts, 10, "javascript")).toBe(title);
+    expect(testNameAt(ts, 5, "javascript")).toBe(title);
+    expect(testNameAt(ts, 2, "javascript")).toBe("a Claude Code that does not list its models in time is an error");
+    // The same call on one line, the condition's parentheses nested.
+    expect(declaredTest('test.if(typeof (a as { b?: unknown }).b === "function")("on one line", () => {', "javascript")).toBe(
+      "on one line",
+    );
+  });
+
+  test("modifier arguments over several lines, and a title in pieces, are read through", () => {
+    const ts = [
+      "test.each([", //                                                           1
+      "  [1, 2],",
+      "  [3, 4],",
+      '])("adds %i and %i", (a, b) => {',
+      "  expect(a + b).toBeGreaterThan(a);", //                                  5
+      "});",
+      "",
+      "test(",
+      '  "a title too long for one string " +',
+      '    "is joined from its pieces",', //                                      10
+      "  () => {},",
+      ");",
+    ].join("\n");
+    expect(testNameAt(ts, 1, "javascript")).toBe("adds %i and %i");
+    expect(testNameAt(ts, 5, "javascript")).toBe("adds %i and %i");
+    expect(testNameAt(ts, 8, "javascript")).toBe("a title too long for one string is joined from its pieces");
+    expect(testNameAt(ts, 9, "javascript")).toBe("a title too long for one string is joined from its pieces");
+    // A piece that is no literal leaves the literal part, as before.
+    expect(declaredTest('test("adds " + n, () => {', "javascript")).toBe("adds");
+    // A first argument that is an expression is no title.
+    expect(declaredTest('test.if("getChatImage" in engine);', "javascript")).toBeNull();
+  });
+
+  test("a test declared through an alias the file binds is named by its title", () => {
+    const ts = [
+      'const withImages = test.if("getChatImage" in engine);', //                 1
+      "",
+      'test("a session without images still runs", async () => {',
+      "  await run();",
+      "});", //                                                                   5
+      "",
+      'withImages("a pasted image reaches the agent", async () => {',
+      "  await paste(png);",
+      "});",
+      "", //                                                                      10
+      "const withChanged = test.if(",
+      '  typeof registry.changed === "function",',
+      ");",
+      "withChanged(",
+      '  "a sign-out tells the app the sign-in changed",', //                    15
+      "  async () => {",
+      "    await signOut();",
+      "  },",
+      ");",
+    ].join("\n");
+    expect(testNameAt(ts, 7, "javascript")).toBe("a pasted image reaches the agent");
+    expect(testNameAt(ts, 8, "javascript")).toBe("a pasted image reaches the agent");
+    expect(testNameAt(ts, 14, "javascript")).toBe("a sign-out tells the app the sign-in changed");
+    expect(testNameAt(ts, 15, "javascript")).toBe("a sign-out tells the app the sign-in changed");
+    expect(testNameAt(ts, 17, "javascript")).toBe("a sign-out tells the app the sign-in changed");
+    expect(testNameAt(ts, 4, "javascript")).toBe("a session without images still runs");
+    // A line on its own knows the file's aliases only when it is told them.
+    expect(declaredTest('withImages("pastes", () => {', "javascript")).toBeNull();
+    expect(declaredTest('withImages("pastes", () => {', "javascript", new Set(["withImages"]))).toBe("pastes");
+  });
+
+  test("an alias is a test function with modifiers and no title, bound by const, let or var", () => {
+    const aliases = jsTestAliases(
+      [
+        'const withImages = test.if("getChatImage" in engine);',
+        "let onlyThis = it.only",
+        "export const each = test.each(rows);",
+        "var concurrent = it.concurrent.skipIf(offline);",
+        "const slowImages = withImages.skip;", // an alias of an alias
+        "const maybe = HAS_PYTHON ? test : test.skip;",
+        "const typed: typeof test = test.todo;",
+        "const withChanged = test.if(",
+        '  typeof registry.changed === "function",',
+        ");",
+        // Not aliases: a test, a group, a call, a string, a comparison.
+        'const run = test("runs", () => {});',
+        "const group = describe.skip;",
+        "const result = compute(test);",
+        'const name = "test";',
+        "const same = test == other;",
+        "const pick = HAS_PYTHON ? test : describe;",
+      ].join("\n"),
+    );
+    expect([...aliases].sort()).toEqual(
+      ["concurrent", "each", "maybe", "onlyThis", "slowImages", "typed", "withChanged", "withImages"].sort(),
+    );
+    // A choice's condition is its own statement's: `a`'s call, read on over
+    // its lines, ends at `;` and does not take in the choice after it.
+    expect([...jsTestAliases("const a = compute(\n  1,\n); const b = c ? test : test.skip;")]).toEqual([]);
   });
 
   test("a Python decorator and a Go comment lead to the declaration under them", () => {
