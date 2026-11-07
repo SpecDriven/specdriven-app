@@ -32,6 +32,7 @@ import {
 import { Menu, type MenuItem } from "./Menu";
 import type { PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
+import { SessionRailButton } from "./SessionRail";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { useSpellCheck } from "./spellCheckPref";
@@ -164,6 +165,8 @@ export function AgentPane({
   onClose,
   onOpenPlugins,
   agentSettings,
+  homeDir = null,
+  ghostty = false,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -181,6 +184,11 @@ export function AgentPane({
   onOpenPlugins?: (wanted?: string) => void;
   /** Opens an agent's own Settings section, for one that has it. */
   agentSettings?: AgentSettingsOpener;
+  /** The user's home folder, so the session popover writes paths as ~/…. */
+  homeDir?: string | null;
+  /** "Open worktrees in Ghostty" is on: a worktree session's branch opens
+      a Ghostty shell in the worktree (src/server/ghostty.ts). */
+  ghostty?: boolean;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
@@ -201,11 +209,18 @@ export function AgentPane({
   const folders = knownFolders(codeRepo, dataRepo, store.list, codeRepos);
   return (
     <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
-      <AgentHeader store={store} session={session} demo={demo} onClose={onClose} />
+      <AgentHeader store={store} session={session} demo={demo} homeDir={homeDir} onClose={onClose} />
       {session && agent ? (
         <>
           <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
-          <Composer session={session} agent={agent} store={store} folders={folders} askFolder={askFolder} />
+          <Composer
+            session={session}
+            agent={agent}
+            store={store}
+            folders={folders}
+            askFolder={askFolder}
+            ghostty={ghostty}
+          />
         </>
       ) : (
         <EmptyState
@@ -268,11 +283,13 @@ function AgentHeader({
   store,
   session,
   demo,
+  homeDir,
   onClose,
 }: {
   store: AgentChatStore;
   session: SessionState | null;
   demo: boolean;
+  homeDir: string | null;
   onClose: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -351,6 +368,9 @@ function AgentHeader({
           </span>
         </Tooltip>
       )}
+      {/* The session popover (specs/agents/agent-pane.feature.md S10): how
+          full the context window is, the folder and the branch. */}
+      {meta && agent && <SessionRailButton key={meta.id} meta={meta} agent={agent} homeDir={homeDir} />}
       {/* An agent with an account: whether this session spends a plan or is
           billed per token, from the agent's own account answer. */}
       {meta?.account && agent?.capabilities.hasAccount && (
@@ -689,15 +709,48 @@ function WorktreeToggle({
   );
 }
 
-/** A worktree session's branch, beside its folder: a fact, not a menu. */
-function WorktreeBranch({ worktree }: { worktree: NonNullable<ChatSessionMeta["worktree"]> }) {
+/**
+ * A worktree session's branch, beside its folder: a fact, not a menu. With
+ * "Open worktrees in Ghostty" on (specs/agents/agent-pane.feature.md "A
+ * worktree session opens in a Ghostty shell") it is a button: a click opens
+ * a Ghostty shell in the folder the agent works in, and what stops that —
+ * Ghostty missing, the worktree gone — is toasted.
+ */
+function WorktreeBranch({
+  worktree,
+  onOpenShell,
+}: {
+  worktree: NonNullable<ChatSessionMeta["worktree"]>;
+  /** Opens the worktree in Ghostty; absent leaves the branch a label. */
+  onOpenShell?: () => void;
+}) {
   const from = worktree.base ? ` off ${worktree.base}` : "";
+  const facts = `branch ${worktree.branch}${from}`;
+  const content = (
+    <>
+      <GitBranch size={12} aria-hidden="true" />
+      <span className="agent-bar-chip-text">{worktree.branch}</span>
+    </>
+  );
+  if (!onOpenShell) {
+    return (
+      <Tooltip label={`Worktree at ${worktree.path} · ${facts}`}>
+        <span className="agent-bar-fact agent-bar-branch" aria-label={`Worktree branch: ${worktree.branch}`}>
+          {content}
+        </span>
+      </Tooltip>
+    );
+  }
   return (
-    <Tooltip label={`Worktree at ${worktree.path} · branch ${worktree.branch}${from}`}>
-      <span className="agent-bar-fact agent-bar-branch" aria-label={`Worktree branch: ${worktree.branch}`}>
-        <GitBranch size={12} aria-hidden="true" />
-        <span className="agent-bar-chip-text">{worktree.branch}</span>
-      </span>
+    <Tooltip label={`Open a Ghostty shell in the worktree · ${worktree.cwd} · ${facts}`}>
+      <button
+        type="button"
+        className="agent-bar-chip agent-bar-branch"
+        aria-label={`Worktree branch: ${worktree.branch} — open in Ghostty`}
+        onClick={onOpenShell}
+      >
+        {content}
+      </button>
     </Tooltip>
   );
 }
@@ -1720,12 +1773,15 @@ function Composer({
   store,
   folders,
   askFolder,
+  ghostty = false,
 }: {
   session: SessionState;
   agent: AgentDescriptor;
   store: AgentChatStore;
   folders: readonly string[];
   askFolder?: (initial: string) => Promise<string | null>;
+  /** A worktree session's branch opens a Ghostty shell in the worktree. */
+  ghostty?: boolean;
 }) {
   const meta = session.meta;
   const id = meta.id;
@@ -1773,7 +1829,12 @@ function Composer({
             .catch(fail);
         }}
       />
-      {meta.worktree && <WorktreeBranch worktree={meta.worktree} />}
+      {meta.worktree && (
+        <WorktreeBranch
+          worktree={meta.worktree}
+          onOpenShell={ghostty ? () => void agentChat.openInGhostty(id).catch(fail) : undefined}
+        />
+      )}
     </>
   );
   const right = (

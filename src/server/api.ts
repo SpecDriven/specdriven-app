@@ -26,6 +26,7 @@ import {
   normalizeGoogleCalendar,
   normalizeScenarioPreviewLines,
   normalizeOpenTestsInIdea,
+  normalizeGhostty,
   normalizeShowTestLinks,
   normalizeUseGhAccount,
   normalizeSyncServerUrl,
@@ -133,6 +134,7 @@ import {
   getChatSession,
   interruptChat,
   listChatSessions,
+  refreshChatContext,
   resolveProvider,
   sendChatMessage,
   setAgentDefaults,
@@ -145,6 +147,7 @@ import type { AgentDefaultsPatch, ChatAgent, ChatEvent, PermissionAnswer } from 
 import {
   EFFORT_LEVELS,
   isFinalStatus,
+  normalizeContextDetail,
   normalizeEffort,
   normalizeModel,
   normalizePermissionMode,
@@ -227,6 +230,7 @@ import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import { RESOURCE_LINK_KINDS, isResourceLinkKind } from "./resourceLinks";
 import type { PullRequestLookup } from "./pullRequests";
 import { IDEA_SYMLINK_HINT, ideaAvailable, localTestFile, openInIdea } from "./idea";
+import { GHOSTTY_MISSING, ghostty, openInGhostty } from "./ghostty";
 import { fieldChoices, scanEntities } from "./entities";
 import { cleanLine } from "./text";
 import {
@@ -632,6 +636,11 @@ async function stateFields(state: SpecDrivenState) {
     // test in idea"), and whether `idea` is on PATH so that can work.
     openTestsInIdea: normalizeOpenTestsInIdea(state.openTestsInIdea),
     canOpenInIdea: !isHostedMode() && ideaAvailable(),
+    // Open a worktree session in a Ghostty shell (specs/agents/agent-pane
+    // .feature.md "A worktree session opens in a Ghostty shell"), and
+    // whether Ghostty is installed so that can work.
+    ghostty: normalizeGhostty(state.ghostty),
+    canOpenGhostty: !isHostedMode() && !isDemoMode() && ghostty() !== null,
     projectManagement: normalizeProjectManagement(state.projectManagement),
     projectManagementTool: normalizeProjectManagementTool(state.projectManagementTool),
     publishExternalLinks: normalizePublishExternalLinks(state.publishExternalLinks),
@@ -707,6 +716,9 @@ async function stateFields(state: SpecDrivenState) {
     // name it relative to the app (".../specs"), and the coding agent pane
     // offers it as a folder to work in, which must be absolute.
     dataDir: isHostedMode() ? null : await currentDataDir(),
+    // The user's home folder, so the session popover can write a path as
+    // ~/… — never the demo's or a shared server's.
+    homeDir: isHostedMode() || isDemoMode() || isReadOnlyMode() ? null : homedir(),
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
@@ -779,6 +791,8 @@ function readOnlyFields() {
     recentDataRepoDirs: {},
     reloadFrequencySeconds: site?.refreshSeconds ?? 0,
     canOpenInIdea: false,
+    ghostty: false,
+    canOpenGhostty: false,
     canOpenClaudeDesktop: false,
     canChooseFolder: false,
     canEstimate: false,
@@ -841,6 +855,7 @@ const putState: Handler = async (req) => {
     useGhAccount?: boolean;
     showTestLinks?: boolean;
     openTestsInIdea?: boolean;
+    ghostty?: boolean;
     projectManagement?: boolean;
     projectManagementTool?: string;
     publishExternalLinks?: boolean;
@@ -883,6 +898,7 @@ const putState: Handler = async (req) => {
     body.useGhAccount === undefined &&
     body.showTestLinks === undefined &&
     body.openTestsInIdea === undefined &&
+    body.ghostty === undefined &&
     body.projectManagement === undefined &&
     body.projectManagementTool === undefined &&
     body.publishExternalLinks === undefined &&
@@ -912,7 +928,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1075,6 +1091,20 @@ const putState: Handler = async (req) => {
     }
     if (body.openTestsInIdea) state.openTestsInIdea = true;
     else delete state.openTestsInIdea;
+  }
+  // Open a worktree session in a Ghostty shell (specs/agents/agent-pane
+  // .feature.md "A worktree session opens in a Ghostty shell"): default
+  // OFF, stored as an absent key. The demo and the hosted app run on a
+  // server, not the visitor's machine: there is no Ghostty to open there.
+  if (body.ghostty !== undefined) {
+    if (typeof body.ghostty !== "boolean") {
+      return json({ error: "ghostty must be a boolean" }, 400);
+    }
+    if (body.ghostty && (isDemoMode() || isHostedMode())) {
+      return json({ error: "Ghostty runs on your own machine — not in the demo or the hosted app" }, 403);
+    }
+    if (body.ghostty) state.ghostty = true;
+    else delete state.ghostty;
   }
   // Project management (specs/external-links/project-management-jira-linear-
   // etc.feature.md): whether tickets are tracked at all, and which tool they
@@ -3456,6 +3486,17 @@ const putAgentChatEffort: Handler = async (req, params) => {
   }
 };
 
+// The session popover's Refresh (specs/agents/agent-pane.feature.md S10):
+// the agent counts its context window now, and every stream shows the count.
+const postAgentChatContext: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { detail?: unknown };
+  try {
+    return json({ context: await refreshChatContext(params.id!, normalizeContextDetail(body.detail)) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
 // The models an agent offers and what a new session starts on, for the
 // pane's model and effort pickers; null for an agent with none.
 const getAgentChoices: Handler = async (_req, params) => {
@@ -3517,6 +3558,33 @@ const postAgentSourceRefresh: Handler = async (req) => {
   if (!(await directoryExists(raw))) return json({ error: `Folder not found: ${raw}` }, 404);
   const mode = body?.mode === "rebase" ? "rebase" : "merge";
   return json(await refreshSource(resolve(raw), mode));
+};
+
+/**
+ * Open a session's folder in a Ghostty shell (specs/agents/agent-pane
+ * .feature.md "A worktree session opens in a Ghostty shell"): the folder the
+ * agent works in — for a worktree session, its place inside the worktree.
+ * The folder comes from the session's own record, never from the request,
+ * so the pane cannot have the server open anything else. Each way that
+ * can't work is its own answer, worded for the toast the pane shows.
+ */
+const postAgentChatGhostty: Handler = async (_req, params) => {
+  if (isDemoMode()) return json({ error: "Ghostty runs on your own machine — not in the demo" }, 403);
+  const meta = getChatSession(params.id!);
+  if (!meta) return json({ error: "coding agent session not found" }, 404);
+  if (!normalizeGhostty((await readState(getAppRoot())).ghostty)) {
+    return json({ error: '"Open worktrees in Ghostty" is off in Settings → Workflow' }, 409);
+  }
+  const launcher = ghostty();
+  if (!launcher) return json({ error: GHOSTTY_MISSING }, 502);
+  const folder = meta.cwd;
+  if (!(await directoryExists(folder))) return json({ error: `Folder not found: ${folder}` }, 404);
+  try {
+    await openInGhostty(launcher, folder);
+  } catch (e) {
+    return json({ error: `Could not open Ghostty: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
+  return json({ folder });
 };
 
 const deleteAgentChat: Handler = async (_req, params) => {
@@ -3832,9 +3900,11 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],
   ["PUT", "/api/agent/chat/:id/model", unlessHosted(putAgentChatModel)],
   ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
+  ["POST", "/api/agent/chat/:id/context", unlessHosted(postAgentChatContext)],
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
+  ["POST", "/api/agent/chat/:id/ghostty", unlessHosted(postAgentChatGhostty)],
   ["GET", "/api/agent/folder", unlessHosted(getAgentFolder)],
   ["GET", "/api/agent/source", unlessHosted(getAgentSource)],
   ["POST", "/api/agent/source/refresh", unlessHosted(postAgentSourceRefresh)],

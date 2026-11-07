@@ -75,6 +75,66 @@ export interface ChatWorktree {
   base?: string;
 }
 
+// --- Context usage -------------------------------------------------------------
+
+/** One thing a context slice is made of: an MCP tool, a memory file, a skill. */
+export interface ContextItem {
+  name: string;
+  /** Where it comes from: the MCP server, "Project", a skill's source. */
+  detail?: string;
+  tokens: number;
+}
+
+/**
+ * One row of an agent's context breakdown, as the session popover's meter
+ * and legend show it. `used` rows fill the window; `buffer` is the reserve
+ * the agent keeps for compaction; `free` is what is left; `deferred` rows
+ * (tool schemas loaded on demand) are listed but not counted.
+ */
+export interface ContextSlice {
+  /** A stable key the pane colours by, Claude Code's own where it has one:
+      "system_prompt", "system_tools", "mcp_tools", "memory_files",
+      "skills", "messages", "autocompact_buffer", "free_space", or whatever
+      an agent adds. */
+  id: string;
+  /** The row's words, as the agent names it ("MCP tools"). */
+  label: string;
+  tokens: number;
+  kind: "used" | "buffer" | "free" | "deferred";
+  /** What a `used` row is made of; the popover lists them under the row. */
+  items?: ContextItem[];
+}
+
+/**
+ * How full a session's context window is (specs/agents/agent-pane.feature.md
+ * S10): the agent's own count, refreshed after every turn. The percentage is
+ * the pane's to work out — `maxTokens` is null when the agent does not say
+ * how big its window is.
+ */
+export interface ChatContextUsage {
+  /** ISO 8601: when the agent counted. */
+  at: string;
+  /** The model the count is for. */
+  model?: string;
+  /** Tokens in the window now. */
+  totalTokens: number;
+  /** The window's size, or null when the agent does not say. */
+  maxTokens: number | null;
+  /** The count at which the agent compacts the conversation on its own. */
+  autoCompactAt?: number;
+  /** The breakdown, for an agent that gives one. */
+  slices?: ContextSlice[];
+  /** "estimate": from the last response and local counts; "measured": every
+      category counted by the API. */
+  detail: "estimate" | "measured";
+}
+
+export type ContextDetail = "summary" | "full";
+
+export function normalizeContextDetail(value: unknown): ContextDetail {
+  return value === "full" ? "full" : "summary";
+}
+
 export interface ChatSessionMeta {
   id: string;
   name: string;
@@ -103,6 +163,9 @@ export interface ChatSessionMeta {
   /** A provider with no permission gate sits on its default and refuses a
       change (see setChatPermissionMode). */
   permissionMode: PermissionMode;
+  /** How full the context window is, once the agent has said. The session
+      list leaves it out (listChatSessions); one session's answer has it. */
+  context?: ChatContextUsage;
   /** Sequence number of the last event in the log. */
   lastSeq: number;
 }
@@ -218,6 +281,9 @@ export type ChatEventBody =
   | { kind: "model"; model: string | null }
   /** The pane switched the effort (null: the agent's own default). */
   | { kind: "effort"; effort: EffortLevel | null }
+  /** The agent counted its context window (AgentHost.context). The log keeps
+      only the newest one. */
+  | { kind: "context"; context: ChatContextUsage }
   | { kind: "note"; level: "info" | "error"; code: NoteCode; text: string };
 
 export type ChatEvent = ChatEventBody & { seq: number; at: string };
@@ -227,7 +293,17 @@ export type ChatEvent = ChatEventBody & { seq: number; at: string };
     engine's (src/plugins/host/agents.ts AgentHost). */
 export type AgentOutput = Exclude<
   ChatEventBody,
-  { kind: "status" | "user" | "permission_request" | "permission_resolved" | "mode" | "model" | "effort" }
+  {
+    kind:
+      | "status"
+      | "user"
+      | "permission_request"
+      | "permission_resolved"
+      | "mode"
+      | "model"
+      | "effort"
+      | "context";
+  }
 >;
 
 export interface PermissionAnswer {
@@ -266,6 +342,11 @@ export interface AgentCapabilities {
   /** Whether a message may carry images (AgentSession.send's images,
       AgentStartOptions.images); absent is no. */
   images?: boolean;
+  /** What the agent says of its context window (AgentHost.context):
+      "breakdown" — the count by category, and a fresh one on request
+      (AgentSession.contextUsage); "totals" — the count and the window's
+      size alone; absent — nothing. */
+  contextUsage?: "breakdown" | "totals";
 }
 
 // --- Model and effort --------------------------------------------------------

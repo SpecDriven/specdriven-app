@@ -346,6 +346,105 @@ test("the provider's facts reach the pane through ready and update, and quiet ke
   expect(session.host.permissionMode()).toBe("default");
 });
 
+// The session popover's context meter (specs/agents/agent-pane.feature.md
+// S10): a provider counts its window through host.context, any time before
+// the end, and the pane's Refresh asks it again.
+test("a provider's context count reaches the pane, the log keeps the newest, and the record its totals", async () => {
+  const fake = register({ id: "gemini", readyAtStart: false, capabilities: { contextUsage: "breakdown" } });
+  const res = await api("/api/agent/chat", "POST", { name: "chat", agent: "gemini" });
+  const { id } = (await res.json()) as ChatSessionMeta;
+  const session = fake.sessions.at(-1)!;
+  const slices = [
+    { id: "mcp_tools", label: "MCP tools", tokens: 900, kind: "used" as const, items: [{ name: "search", detail: "wiki", tokens: 900 }] },
+    { id: "messages", label: "Messages", tokens: 100, kind: "used" as const },
+  ];
+  // A count while starting is shown, and does not make the session ready.
+  session.host.context({ totalTokens: 1_000, maxTokens: 200_000, slices, detail: "estimate" });
+  expect(getChatSession(id)!.status).toBe("starting");
+  const first = getChatSession(id)!.context!;
+  expect(first).toMatchObject({ totalTokens: 1_000, maxTokens: 200_000, detail: "estimate" });
+  expect(Number.isNaN(Date.parse(first.at))).toBe(false);
+  expect(getChatEvents(id).at(-1)).toMatchObject({ kind: "context", context: { totalTokens: 1_000 } });
+
+  session.host.ready({ model: "gemini-2" });
+  session.host.context({ at: "2026-11-07T10:00:00.000Z", model: "gemini-2", totalTokens: 5_000, maxTokens: 200_000, slices, detail: "estimate" });
+  // One count in the log: the newest.
+  expect(getChatEvents(id).filter((e) => e.kind === "context")).toEqual([
+    expect.objectContaining({ context: expect.objectContaining({ totalTokens: 5_000, at: "2026-11-07T10:00:00.000Z" }) }),
+  ]);
+  // The list leaves the count out; the session's own answer has it.
+  const list = (await (await api("/api/agent/chat")).json()) as { sessions: ChatSessionMeta[] };
+  expect(list.sessions.find((m) => m.id === id)).not.toHaveProperty("context");
+  const one = (await (await api(`/api/agent/chat/${id}`)).json()) as { meta: ChatSessionMeta };
+  expect(one.meta.context).toMatchObject({ totalTokens: 5_000, slices });
+  // The record keeps the totals, not the breakdown.
+  const recordPath = join(root, ".specdriven", "sessions", id, "session.json");
+  let record: { context?: Record<string, unknown> } = {};
+  for (const end = Date.now() + 3000; record.context?.totalTokens !== 5_000 && Date.now() < end; await Bun.sleep(5)) {
+    record = JSON.parse(await readFile(recordPath, "utf8").catch(() => "{}"));
+  }
+  expect(record.context).toEqual({
+    at: "2026-11-07T10:00:00.000Z",
+    model: "gemini-2",
+    totalTokens: 5_000,
+    maxTokens: 200_000,
+    detail: "estimate",
+  });
+
+  // Nothing after the end.
+  session.host.ended("Gemini exited.");
+  session.host.context({ totalTokens: 9_000, maxTokens: 200_000, detail: "estimate" });
+  expect(getChatSession(id)!.context!.totalTokens).toBe(5_000);
+});
+
+test("the pane's Refresh asks the provider to count again, and is refused where it cannot", async () => {
+  const asked: string[] = [];
+  let answer: (() => Promise<unknown>) | null = null;
+  const counting = register({
+    id: "gemini",
+    capabilities: { contextUsage: "breakdown" },
+    contextUsage: async (detail) => {
+      asked.push(detail);
+      return (await answer!()) as never;
+    },
+  });
+  const { id } = await ready(counting);
+  answer = async () => ({ at: "2026-11-07T10:00:00.000Z", totalTokens: 7_400, maxTokens: 1_000_000, detail: "measured" });
+  const res = await api(`/api/agent/chat/${id}/context`, "POST", { detail: "full" });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ context: { at: "2026-11-07T10:00:00.000Z", totalTokens: 7_400, maxTokens: 1_000_000, detail: "measured" } });
+  expect(asked).toEqual(["full"]);
+  expect(getChatSession(id)!.context).toMatchObject({ totalTokens: 7_400, detail: "measured" });
+  expect(getChatEvents(id).at(-1)).toMatchObject({ kind: "context" });
+  // Anything but "full" is the cheap count.
+  await api(`/api/agent/chat/${id}/context`, "POST", { detail: "everything" });
+  expect(asked).toEqual(["full", "summary"]);
+
+  // An agent that cannot say leaves the last count as it was.
+  answer = async () => null;
+  expect(await (await api(`/api/agent/chat/${id}/context`, "POST", {})).json()).toEqual({ context: null });
+  expect(getChatSession(id)!.context).toMatchObject({ totalTokens: 7_400 });
+  // An agent that fails says so.
+  answer = async () => {
+    throw new Error("control request timed out");
+  };
+  const failed = await api(`/api/agent/chat/${id}/context`, "POST", {});
+  expect(failed.status).toBe(502);
+  expect(((await failed.json()) as { error: string }).error).toContain("control request timed out");
+
+  // An agent with only totals, or none, has nothing to count on request.
+  const totals = register({ id: "codexish", capabilities: { contextUsage: "totals" } });
+  const other = await ready(totals);
+  expect((await api(`/api/agent/chat/${other.id}/context`, "POST", {})).status).toBe(409);
+  // Nor has a session still starting.
+  const slow = register({ id: "slow", readyAtStart: false, capabilities: { contextUsage: "breakdown" }, contextUsage: async () => null });
+  const started = (await (await api("/api/agent/chat", "POST", { name: "chat", agent: "slow" })).json()) as ChatSessionMeta;
+  expect(getChatSession(started.id)!.status).toBe("starting");
+  expect((await api(`/api/agent/chat/${started.id}/context`, "POST", {})).status).toBe(409);
+  expect(slow.sessions).toHaveLength(1);
+  expect((await api("/api/agent/chat/nope/context", "POST", {})).status).toBe(404);
+});
+
 test("no plugin, the wrong plugin, or a missing CLI is a clear refusal, and the default is the first by rank", async () => {
   const none = await api("/api/agent/chat", "POST", { name: "chat" });
   expect(none.status).toBe(502);

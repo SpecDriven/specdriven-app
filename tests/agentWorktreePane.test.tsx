@@ -64,6 +64,7 @@ import { createRoot } from "react-dom/client";
 import { AgentPane, knownFolders, sessionFolder } from "../src/frontend/AgentPane";
 import { agentChat, forgetFolderInfos, worktreeClosedNote } from "../src/frontend/agentChat";
 import type { ChatSessionMeta, ChatWorktree } from "../src/frontend/agentChat";
+import { toast } from "../src/frontend/Toasts";
 import { CLAUDE_AGENT } from "./fixtures/agents";
 
 const WORKTREE: ChatWorktree = {
@@ -128,8 +129,15 @@ function mount(el: React.ReactElement) {
   };
 }
 
-const pane = (codeRepo: string | null = "/w/code") => (
-  <AgentPane compact={false} demo={false} codeRepo={codeRepo} dataRepo="/w/data" onClose={() => {}} />
+const pane = (codeRepo: string | null = "/w/code", ghostty = false) => (
+  <AgentPane
+    compact={false}
+    demo={false}
+    codeRepo={codeRepo}
+    dataRepo="/w/data"
+    onClose={() => {}}
+    ghostty={ghostty}
+  />
 );
 
 /** Type into a controlled textarea the way React hears it under happy-dom. */
@@ -207,4 +215,54 @@ test("a worktree session shows the folder it was started in and its branch, and 
   expect(worktreeClosedNote(META, "removed")).toBeNull();
   expect(worktreeClosedNote({}, "kept")).toBeNull();
   await agentChat.end("s1");
+});
+
+// specs/agents/agent-pane.feature.md "A worktree session opens in a Ghostty shell".
+test("with Ghostty on, a click on the worktree's branch asks the server to open a shell there, and a refusal is toasted", async () => {
+  server([]);
+  const asked: string[] = [];
+  let answer: Response = Response.json({ folder: WORKTREE.cwd });
+  const serve = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
+    if (String(input) === "/api/agent/chat/s1/ghostty" && init.method === "POST") {
+      asked.push(String(input));
+      return answer;
+    }
+    return serve(input, init);
+  }) as unknown as typeof fetch;
+  const errors: string[] = [];
+  const realError = toast.error;
+  toast.error = (message: string) => {
+    errors.push(message);
+    return 0;
+  };
+  try {
+    agentChat.setAgents([CLAUDE_AGENT]);
+    await agentChat.openSession("s1");
+
+    // Off, the branch is a label: nothing to click.
+    const off = mount(pane());
+    expect(off.host.querySelector('[aria-label="Worktree branch: specdriven/fix-login-1a2b3c"]')!.tagName).toBe("SPAN");
+    expect(off.host.querySelector("button.agent-bar-branch")).toBeNull();
+    off.unmount();
+
+    const { host, unmount } = mount(pane("/w/code", true));
+    const chip = host.querySelector<HTMLButtonElement>("button.agent-bar-branch")!;
+    expect(chip.getAttribute("aria-label")).toBe("Worktree branch: specdriven/fix-login-1a2b3c — open in Ghostty");
+    expect(chip.textContent).toBe("specdriven/fix-login-1a2b3c");
+    act(() => chip.click());
+    await settle();
+    expect(asked).toEqual(["/api/agent/chat/s1/ghostty"]);
+    expect(errors).toEqual([]);
+
+    answer = Response.json({ error: "Ghostty not found" }, { status: 502 });
+    act(() => chip.click());
+    await settle();
+    expect(asked).toHaveLength(2);
+    expect(errors).toEqual(["Ghostty not found"]);
+    unmount();
+  } finally {
+    toast.error = realError;
+    await agentChat.end("s1");
+  }
 });

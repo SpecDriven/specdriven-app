@@ -39,11 +39,13 @@ import type {
   ImageUpload,
   AgentDefaultsPatch,
   ChatAgent,
+  ChatContextUsage,
   ChatEvent,
   ChatEventBody,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
+  ContextDetail,
   PermissionAnswer,
   PermissionMode,
   EffortLevel,
@@ -130,6 +132,9 @@ function emit(session: ChatSession, body: ChatEventBody, now: Date = new Date())
       (e) => !(e.kind === "text_delta" && e.messageId === body.messageId),
     );
   }
+  // A context count stands for the window now: the one before is history no
+  // replay needs, and with every MCP tool listed it is not small.
+  if (body.kind === "context") session.log = session.log.filter((e) => e.kind !== "context");
   session.log.push(event);
   for (const listener of session.listeners) {
     try {
@@ -168,6 +173,18 @@ function recordOf(session: ChatSession) {
     ...(m.model ? { model: m.model } : {}),
     ...(m.effort ? { effort: m.effort } : {}),
     permissionMode: m.permissionMode,
+    // The totals only: nobody reads the breakdown back from the record.
+    ...(m.context
+      ? {
+          context: {
+            at: m.context.at,
+            ...(m.context.model ? { model: m.context.model } : {}),
+            totalTokens: m.context.totalTokens,
+            maxTokens: m.context.maxTokens,
+            detail: m.context.detail,
+          },
+        }
+      : {}),
     status: m.status,
     specs: [],
   };
@@ -207,6 +224,17 @@ function applyInfo(session: ChatSession, info: Partial<AgentReadyInfo>): Omit<Ex
     ...(info.tools ? { tools: info.tools } : {}),
     ...(info.commands ? { commands: info.commands } : {}),
   };
+}
+
+/** Show a context count: the meta holds it, the stream carries it, the
+    record keeps its totals. Never a status change — a count may come while
+    the session is still starting. */
+function showContext(session: ChatSession, usage: Omit<ChatContextUsage, "at"> & { at?: string }): ChatContextUsage {
+  const context: ChatContextUsage = { ...usage, at: usage.at ?? new Date().toISOString() };
+  session.meta.context = context;
+  emit(session, { kind: "context", context });
+  void saveRecord(session);
+  return context;
 }
 
 function hostFor(session: ChatSession): AgentHost {
@@ -249,6 +277,10 @@ function hostFor(session: ChatSession): AgentHost {
       denyAllPending(session, "interrupt", "The turn ended");
       session.busy = false;
       if (session.meta.status !== "starting") setStatus(session, "idle");
+    },
+    context(usage) {
+      if (final()) return;
+      showContext(session, usage);
     },
     requestPermission: (req) => requestPermission(session, req),
     ended(text) {
@@ -572,9 +604,14 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
 
 // --- The API the routes call -------------------------------------------------
 
+/** Every session, newest first — without its context count, which only
+    the open session's popover shows (getChatSession has it). */
 export function listChatSessions(): ChatSessionMeta[] {
   return [...registry().values()]
-    .map((s) => ({ ...s.meta }))
+    .map((s) => {
+      const { context: _context, ...meta } = s.meta;
+      return meta;
+    })
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
 }
 
@@ -762,6 +799,28 @@ export async function setChatEffort(id: string, effort: EffortLevel | null): Pro
   emit(session, { kind: "effort", effort });
   void saveRecord(session);
   await keepAsDefault(provider, { effort });
+}
+
+/**
+ * Count a session's context window now (the popover's Refresh): the agent
+ * answers, and the answer is shown as its own count would be. Null when the
+ * agent could not say; the last count then stands.
+ */
+export async function refreshChatContext(id: string, detail: ContextDetail): Promise<ChatContextUsage | null> {
+  const session = switchable(id);
+  const { provider } = session;
+  if (provider.capabilities.contextUsage !== "breakdown" || !session.session.contextUsage) {
+    throw new ChatError(409, `${provider.label} does not count its context on request`);
+  }
+  let usage: ChatContextUsage | null;
+  try {
+    usage = await session.session.contextUsage(detail);
+  } catch (e) {
+    if (e instanceof AgentError) throw new ChatError(e.status, e.message);
+    throw new ChatError(502, `${provider.label} could not count its context: ${(e as Error).message}`);
+  }
+  if (!usage || isFinalStatus(session.meta.status)) return usage ?? null;
+  return showContext(session, usage);
 }
 
 /** The models an agent offers and what a new session starts on; null for

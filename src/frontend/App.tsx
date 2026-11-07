@@ -96,7 +96,7 @@ import {
   Images,
   Sparkles,
 } from "lucide-react";
-import { PublishRing, StatusIcon } from "./StatusIcon";
+import { PublishRing, StatusCounts, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
@@ -278,6 +278,7 @@ import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { AhaImportDialog } from "./AhaImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
+import { copyText } from "./clipboard";
 
 interface Conflict {
   ours: string;
@@ -849,27 +850,6 @@ function writeRecent(list: RecentEntry[]) {
  */
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
-/**
- * Text onto the clipboard, false when neither way works. navigator.clipboard
- * needs a secure context and permission — absent e.g. on a plain-http LAN
- * host — so a selection-based copy stands in for it there.
- */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  }
-}
 
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
 // session" runs in — a new session in Claude Code Desktop, or the app's own
@@ -1282,6 +1262,9 @@ export function App() {
   const reposRef = useRef<{ open: string | null; recent: string[] }>({ open: null, recent: [] });
   /** The open folder's absolute path, as the server resolved it. */
   const [dataDir, setDataDir] = useState<string | null>(null);
+  /** The user's home folder, for paths the session popover writes as ~/…;
+      null in the demo and on a shared server. */
+  const [homeDir, setHomeDir] = useState<string | null>(null);
   /**
    * Take the open folder and the recent list from an /api/state answer. The
    * open folder is also the one "Copy link" names (src/frontend/shareLink.ts).
@@ -1291,6 +1274,7 @@ export function App() {
     recentDataRepos?: unknown;
     recentDataRepoDirs?: unknown;
     dataDir?: unknown;
+    homeDir?: unknown;
   }) => {
     const open = state.dataRepo ?? null;
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
@@ -1302,6 +1286,7 @@ export function App() {
     setRecentRepoDirs(dirs && typeof dirs === "object" ? (dirs as Record<string, string>) : {});
     // An answer that does not say (the forget-a-folder reply) keeps it.
     if (state.dataDir !== undefined) setDataDir(typeof state.dataDir === "string" ? state.dataDir : null);
+    if (state.homeDir !== undefined) setHomeDir(typeof state.homeDir === "string" ? state.homeDir : null);
   };
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
@@ -1378,6 +1363,16 @@ export function App() {
     () => parseAttributeDefinitions(customAttributesText ?? ""),
     [customAttributesText],
   );
+  /**
+   * Project-wide status rollup for the Specs section head: how many scenarios
+   * are draft / proposed / published across every feature. Always the full
+   * totals — independent of any active filter.
+   */
+  const statusTotals = useMemo(() => {
+    const t = { draft: 0, proposed: 0, published: 0 };
+    for (const f of features) for (const s of f.scenarios) t[s.status]++;
+    return t;
+  }, [features]);
   /** Whether an assignment change is in flight — the dropdown waits for it. */
   const [assignedSaving, setAssignedSaving] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
@@ -1656,6 +1651,12 @@ export function App() {
   const [openTestsInIdea, setOpenTestsInIdea] = useState(false);
   /** Whether `idea` is on the server's PATH, so the setting can work. */
   const [canOpenInIdea, setCanOpenInIdea] = useState(false);
+  // Open worktrees in Ghostty (specs/agents/agent-pane.feature.md "A
+  // worktree session opens in a Ghostty shell"): a click on a worktree
+  // session's branch in the agent pane opens a shell there; default OFF.
+  const [ghosttyOn, setGhosttyOn] = useState(false);
+  /** Whether Ghostty is installed where the server runs. */
+  const [canOpenGhostty, setCanOpenGhostty] = useState(false);
   // External links (specs/external-links/project-management-jira-linear-etc.
   // feature.md): whether ticket links are written into the .feature.md files.
   const [publishExternalLinks, setPublishExternalLinks] = useState(true);
@@ -1828,6 +1829,7 @@ export function App() {
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsOpenInIdeaDraft, setSettingsOpenInIdeaDraft] = useState(false);
+  const [settingsGhosttyDraft, setSettingsGhosttyDraft] = useState(false);
   const [settingsProjectManagementDraft, setSettingsProjectManagementDraft] = useState(true);
   /** The tool name being typed/picked in Settings; saved when it is usable. */
   const [settingsToolDraft, setSettingsToolDraft] = useState(DEFAULT_PROJECT_MANAGEMENT_TOOL);
@@ -2048,6 +2050,8 @@ export function App() {
         }
         setOpenTestsInIdea(state.openTestsInIdea === true);
         setCanOpenInIdea(Boolean(state.canOpenInIdea));
+        setGhosttyOn(state.ghostty === true);
+        setCanOpenGhostty(Boolean(state.canOpenGhostty));
         if (typeof state.publishExternalLinks === "boolean") {
           setPublishExternalLinks(state.publishExternalLinks);
         }
@@ -4636,6 +4640,7 @@ export function App() {
     );
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsOpenInIdeaDraft(openTestsInIdea);
+    setSettingsGhosttyDraft(ghosttyOn);
     setSettingsProjectManagementDraft(projectManagement);
     setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
@@ -4816,6 +4821,8 @@ export function App() {
     setShowTestLinks(data.showTestLinks !== false);
     setOpenTestsInIdea(data.openTestsInIdea === true);
     setCanOpenInIdea(Boolean(data.canOpenInIdea));
+    setGhosttyOn(data.ghostty === true);
+    setCanOpenGhostty(Boolean(data.canOpenGhostty));
     setPublishExternalLinks(data.publishExternalLinks !== false);
     setProjectManagement(data.projectManagement !== false);
     if (typeof data.projectManagementTool === "string") {
@@ -4932,6 +4939,11 @@ export function App() {
   const toggleOpenInIdea = async (on: boolean) => {
     setSettingsOpenInIdeaDraft(on);
     if (!(await patchSettings({ openTestsInIdea: on }))) setSettingsOpenInIdeaDraft(!on);
+  };
+
+  const toggleGhostty = async (on: boolean) => {
+    setSettingsGhosttyDraft(on);
+    if (!(await patchSettings({ ghostty: on }))) setSettingsGhosttyDraft(!on);
   };
 
   // With the setting on, a click on any test link — the card's table, the
@@ -9446,6 +9458,32 @@ export function App() {
           </span>
         </label>
         )}
+        {/* Ghostty (specs/agents/agent-pane.feature.md "A worktree session
+            opens in a Ghostty shell"): a click on a worktree session's
+            branch in the coding agent pane opens a Ghostty shell in the
+            worktree; default OFF. Hidden in the demo and the hosted app,
+            which run on a server with no Ghostty to open. */}
+        {!demo && !hosted && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Open worktrees in Ghostty
+            <span className="settings-row-hint">
+              {canOpenGhostty
+                ? "A click on a worktree session's branch in the coding agent pane opens a Ghostty shell in the folder the agent works in."
+                : "Needs Ghostty, from ghostty.org — on a Mac in Applications, elsewhere as ghostty on PATH. Then a click on a worktree session's branch in the coding agent pane opens a shell there."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsGhosttyDraft}
+              onChange={(e) => void toggleGhostty(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
         {/* Authorship (specs/app/specs-authorship.feature.md): a setting
             of the open data folder, kept in its project-settings.json —
             the app records who created and last updated every feature and
@@ -10413,7 +10451,7 @@ export function App() {
             assignee. Active filters show as chips that clear on click, on a
             row of their own under the head so they never crowd its icons. */}
         <SidebarSection
-          label="Features"
+          label={<>Features <StatusCounts {...statusTotals} /></>}
           filter={<>
             <Tooltip label="Filter features">
               <button
@@ -12804,7 +12842,9 @@ export function App() {
           // The server's absolute path for the open folder: settings may
           // name it relative to the app, and an agent's folder must be absolute.
           dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
+          homeDir={homeDir}
           prompt={prompt}
+          ghostty={ghosttyOn && !demo && !hosted}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}
           onOpenPlugins={(wanted) => {
