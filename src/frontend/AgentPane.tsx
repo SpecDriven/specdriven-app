@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { Menu, type MenuItem } from "./Menu";
 import type { PromptOptions } from "./ModalPrompts";
+import { SourceCheckDialog } from "./SourceCheckDialog";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { useSpellCheck } from "./spellCheckPref";
@@ -47,8 +48,11 @@ import {
   hasModes,
   isFinalStatus,
   loadFolderInfo,
+  loadSourceStatus,
   readAgentWorktree,
+  refreshSource,
   shouldFollow,
+  sourceNeedsAttention,
   usableAgents,
   useAgentChat,
   useAgentChoices,
@@ -64,7 +68,9 @@ import {
   type EffortLevel,
   type PermissionMode,
   type Question,
+  type RefreshMode,
   type SessionState,
+  type SourceStatus,
   type TranscriptItem,
 } from "./agentChat";
 import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE } from "../server/agentTypes";
@@ -887,6 +893,8 @@ function EmptyState({
   const [mode, setMode] = useState<PermissionMode | null>(null);
   /** Whether the session gets a worktree: the last pick, kept on this device. */
   const [worktree, setWorktree] = useState(readAgentWorktree);
+  /** A start held while the source-check dialog is open; null when none is. */
+  const [pending, setPending] = useState<{ status: SourceStatus; text: string; images: ImageUpload[] } | null>(null);
   const picked = agents.find((a) => a.id === agentId) ?? agents[0] ?? null;
   const choices = useAgentChoices(picked?.id ?? null);
   const defaultDir = codeRepo ?? dataRepo;
@@ -909,8 +917,8 @@ function EmptyState({
   // sessions start on (the pick is the default, as it is mid-session).
   const saveDefault = (patch: { model?: string | null; effort?: EffortLevel | null }) =>
     void agentChat.saveDefaults(picked.id, patch).catch(fail);
-  const start = async (text: string, images: ImageUpload[]) => {
-    await agentChat.createSession({
+  const doStart = (text: string, images: ImageUpload[]) =>
+    agentChat.createSession({
       name: nameFromMessage(text) || defaultSessionName(),
       agent: picked.id,
       prompt: text,
@@ -921,6 +929,24 @@ function EmptyState({
       ...(choices?.model ? { model: choices.model } : {}),
       ...(choices?.effort && picked.capabilities.effort ? { effort: choices.effort } : {}),
     });
+  // Before a session on the code repo (the app under development), check how its
+  // branch stands against the remote of record so new work branches from the
+  // right place (specs/agents/agent-plugins.feature.md "A coding session should
+  // check that source is up to date"). A worktree branches off HEAD itself, so
+  // the check is about the HEAD the worktree would use either way. The data repo
+  // syncs on its own, so it is not checked here.
+  const start = async (text: string, images: ImageUpload[]) => {
+    if (workDir !== codeRepo || !codeRepo) {
+      await doStart(text, images);
+      return;
+    }
+    const status = await loadSourceStatus(codeRepo);
+    if (!sourceNeedsAttention(status)) {
+      await doStart(text, images);
+      return;
+    }
+    // Hold the message until the user answers the dialog.
+    setPending({ status, text, images });
   };
   const left = (
     <>
@@ -1012,6 +1038,33 @@ function EmptyState({
         imagesFrom={{ label: picked.label, canRead: picked.capabilities.images === true }}
         onSend={start}
       />
+      {pending && codeRepo && (
+        <SourceCheckDialog
+          status={pending.status}
+          onClose={() => setPending(null)}
+          onStartAnyway={() => {
+            const held = pending;
+            setPending(null);
+            void doStart(held.text, held.images).catch(fail);
+          }}
+          onRefresh={async (mode: RefreshMode) => {
+            try {
+              const result = await refreshSource(codeRepo, mode);
+              if (!result.ok) {
+                toast.error(result.message);
+                return false;
+              }
+            } catch (e) {
+              fail(e as Error);
+              return false;
+            }
+            const held = pending;
+            setPending(null);
+            void doStart(held.text, held.images).catch(fail);
+            return true;
+          }}
+        />
+      )}
     </div>
   );
 }
