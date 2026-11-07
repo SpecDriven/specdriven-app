@@ -1,7 +1,8 @@
 // The MCP servers the core asks an agent to start beside itself
 // (specs/external-links/confluence-wiki.feature.md "An agent session can
 // read the wiki", specs/agents/agent-plugins.feature.md): today one, the
-// Confluence server (src/mcp), offered whenever a wiki token is saved. The
+// Confluence server (src/mcp), offered while Confluence is switched on in
+// Settings and a wiki token is saved. The
 // provider runs the command however its agent takes MCP servers; the core
 // only says what to run and where the tokens are.
 //
