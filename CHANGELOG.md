@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.245 — 2026-11-07
+
+- Marketplace Refresh clones a copy afresh when it cannot pull; drop Re-clone ([#401](https://github.com/SpecDriven/specdriven-app/pull/401))
+
 ## v0.1.244 — 2026-11-07
 
 - Name JS tests whose title is wrapped under the call, or declared through an alias ([#400](https://github.com/SpecDriven/specdriven-app/pull/400))
