@@ -38,6 +38,10 @@ async function cloned(): Promise<void> {
   await git(dir, "clone", "-q", "--bare", seed, "origin");
   await git(dir, "clone", "-q", "origin", "work");
   await git(dir, "clone", "-q", "origin", "upstream");
+  // refreshSource runs its own `git pull` with no `-c user.*`, so a merge or
+  // rebase commit needs a repo-local identity. CI git has no global one.
+  await git(work, "config", "user.name", "T");
+  await git(work, "config", "user.email", "t@example.com");
 }
 
 /** Add a commit to origin (via the `upstream` clone) so `work` falls behind. */
