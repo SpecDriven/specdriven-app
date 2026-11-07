@@ -15,6 +15,8 @@ import type { AgentMcpServer } from "./agentTypes";
 import { confluenceTokenPath, listConfluenceTokens } from "./confluenceTokens";
 import { isDemoMode } from "./demoMode";
 import { isHostedMode } from "./hostedMode";
+import { getAppRoot } from "./paths";
+import { normalizeConfluenceEnabled, readState } from "./state";
 import { CONFLUENCE_MCP_SERVER, CONFLUENCE_TOKENS_FILE_ENV } from "../mcp/confluenceTools";
 
 /** How to start the Confluence server on this install. */
@@ -42,9 +44,14 @@ export function setConfluenceMcpTokensFile(fn: (() => Promise<string>) | null): 
   tokensFile = fn ?? (async () => confluenceTokenPath());
 }
 
-/** The servers a session starting now should have: none without a wiki token, none in the demo or hosted app. */
+/**
+ * The servers a session starting now should have: none while Confluence is
+ * switched off in Settings (specs/external-links/confluence-wiki.feature.md),
+ * none without a wiki token, none in the demo or hosted app.
+ */
 export async function agentMcpServers(): Promise<AgentMcpServer[]> {
   if (isDemoMode() || isHostedMode()) return [];
+  if (!normalizeConfluenceEnabled((await readState(getAppRoot())).confluenceEnabled)) return [];
   if ((await listConfluenceTokens()).length === 0) return [];
   const launch = launcher();
   return [

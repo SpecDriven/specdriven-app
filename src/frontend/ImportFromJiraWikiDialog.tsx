@@ -106,14 +106,33 @@ export function sourceRow(url: string): ImportSource | null {
   return { url: ref.url, kind: ref.kind, label: ref.kind === "jira" ? ref.key : pageLabel(ref.url) };
 }
 
+/** Which integrations this import takes, set by the toggles in Settings. */
+export type ImportMode = "both" | "jira" | "wiki";
+
 /**
  * What stands between the url typed and adding it: nothing (null), or the
- * one sentence the dialog shows under the field.
+ * one sentence the dialog shows under the field. `mode` narrows the kinds the
+ * dialog takes (specs/external-links/jira-wiki-import.feature.md "Jira and
+ * Confluence imports are switched on in Settings").
  */
-export function sourceProblem(url: string, rows: ImportSource[], jiraSites: JiraSite[], wikis: ConfluenceWiki[]): string | null {
+export function sourceProblem(
+  url: string,
+  rows: ImportSource[],
+  jiraSites: JiraSite[],
+  wikis: ConfluenceWiki[],
+  mode: ImportMode = "both",
+): string | null {
   if (!url.trim()) return null;
   const ref = classifySource(url);
-  if (!ref) return "Not a Jira issue or Confluence page url — open it in the browser and copy the address.";
+  if (!ref) {
+    return mode === "jira"
+      ? "Not a Jira issue url — open the issue in the browser and copy the address."
+      : mode === "wiki"
+        ? "Not a Confluence page url — open the page in the browser and copy the address."
+        : "Not a Jira issue or Confluence page url — open it in the browser and copy the address.";
+  }
+  if (mode === "jira" && ref.kind !== "jira") return "This import takes only Jira issues.";
+  if (mode === "wiki" && ref.kind !== "wiki") return "This import takes only Confluence pages.";
   if (rows.some((r) => r.url.toLowerCase() === ref.url.toLowerCase())) return "That one is already in the list.";
   if (ref.kind === "jira") {
     if (rows.filter((r) => r.kind === "jira").length >= MAX_JIRA_SOURCES) {
@@ -146,6 +165,7 @@ function review(result: ProposeResult, earlier?: Proposal): Proposal {
 
 export function ImportFromJiraWikiDialog({
   folder,
+  mode = "both",
   jiraSites,
   wikis,
   agents,
@@ -157,6 +177,11 @@ export function ImportFromJiraWikiDialog({
 }: {
   /** The folder the feature lands in, or null for the top level. */
   folder: string | null;
+  /**
+   * Which integrations are switched on: both (the combined importer), only
+   * Jira, or only Confluence (specs/external-links/jira-wiki-import.feature.md).
+   */
+  mode?: ImportMode;
   jiraSites: JiraSite[];
   wikis: ConfluenceWiki[];
   agents: AgentDescriptor[];
@@ -176,7 +201,13 @@ export function ImportFromJiraWikiDialog({
   const [proposal, setProposal] = useState<Proposal | null>(initialProposal ?? null);
   const [busy, setBusy] = useState<"analyze" | "more" | "create" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const problem = sourceProblem(url, rows, jiraSites, wikis);
+  const problem = sourceProblem(url, rows, jiraSites, wikis, mode);
+  // What the heading, the url field and its placeholder say, by mode.
+  const title = mode === "jira" ? "Import from Jira" : mode === "wiki" ? "Import from Confluence" : "Import from Jira/Wiki";
+  const fieldLabel = mode === "jira" ? "Jira issue url" : mode === "wiki" ? "Confluence page url" : "Jira issue or Confluence page url";
+  const urlPlaceholder =
+    mode === "wiki" ? "https://wiki.acme.com/spaces/ABC/pages/99999/Page" : "https://jira.acme.com/browse/ABC-123";
+  const sourcesWord = mode === "jira" ? "The issues are" : mode === "wiki" ? "The pages are" : "The issues and pages are";
   const chosen = choices.find((a) => a.id === agent) ?? choices[0];
   // The Model dropdown: what the agent offers, asked of its plugin; the
   // data repo's list for it from an agent that offers nothing. What the
@@ -215,6 +246,7 @@ export function ImportFromJiraWikiDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sources: rows.map((r) => r.url),
+          ...(mode !== "both" ? { only: mode } : {}),
           ...(chosen ? { agent: chosen.id } : {}),
           ...(sentModel ? { model: sentModel } : {}),
           ...(earlier ? { exclude: earlier.scenarios.map((s) => s.name) } : {}),
@@ -281,7 +313,7 @@ export function ImportFromJiraWikiDialog({
         className="dialog modal-dialog confluence-dialog import-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Import from Jira/Wiki"
+        aria-label={title}
         ref={trapRef}
         onClick={(e) => e.stopPropagation()}
       >
@@ -294,9 +326,9 @@ export function ImportFromJiraWikiDialog({
               else void propose();
             }}
           >
-            <h3>Import from Jira/Wiki</h3>
+            <h3>{title}</h3>
             <p>
-              The issues and pages are read with this device's tokens, and an agent proposes a feature {where}: a title
+              {sourcesWord} read with this device's tokens, and an agent proposes a feature {where}: a title
               and up to {MAX_SCENARIOS} scenarios, which you review before anything is written.
             </p>
             {rows.length > 0 && (
@@ -320,14 +352,14 @@ export function ImportFromJiraWikiDialog({
               </ul>
             )}
             <label>
-              Jira issue or Confluence page url
+              {fieldLabel}
               <div className="import-add">
                 <input
-                  aria-label="Jira issue or Confluence page url"
+                  aria-label={fieldLabel}
                   autoFocus
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://jira.acme.com/browse/ABC-123"
+                  placeholder={urlPlaceholder}
                 />
                 <button type="button" className="btn btn-secondary" disabled={!url.trim() || problem !== null} onClick={add}>
                   Add

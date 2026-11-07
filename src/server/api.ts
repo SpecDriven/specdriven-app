@@ -11,6 +11,8 @@ import {
   normalizeScenarioPolarity,
   normalizeQtestLinks,
   normalizeAhaImport,
+  normalizeJiraEnabled,
+  normalizeConfluenceEnabled,
   normalizeResourceLinks,
   normalizeAutosaveSeconds,
   normalizeCodeGen,
@@ -643,6 +645,11 @@ async function stateFields(state: SpecDrivenState) {
     // qTest test case links (specs/external-links/qtest-test-cases.feature.md):
     // offered only once switched on.
     qtestLinks: normalizeQtestLinks(state.qtestLinks),
+    // Jira import and Confluence (specs/external-links/jira-wiki-import
+    // .feature.md, confluence-wiki.feature.md): each offered only once switched
+    // on.
+    jiraEnabled: normalizeJiraEnabled(state.jiraEnabled),
+    confluenceEnabled: normalizeConfluenceEnabled(state.confluenceEnabled),
     // The qTest dialog's last parent module
     // (specs/external-links/qtest-test-cases.feature.md).
     qtestParentUrl: normalizeQtestParentUrl(state.qtestParentUrl),
@@ -841,6 +848,8 @@ const putState: Handler = async (req) => {
     ahaImport?: boolean;
     figmaLinks?: boolean;
     qtestLinks?: boolean;
+    jiraEnabled?: boolean;
+    confluenceEnabled?: boolean;
     codeGen?: boolean;
     codeGenTarget?: string;
     deletePublished?: boolean;
@@ -881,6 +890,8 @@ const putState: Handler = async (req) => {
     body.ahaImport === undefined &&
     body.figmaLinks === undefined &&
     body.qtestLinks === undefined &&
+    body.jiraEnabled === undefined &&
+    body.confluenceEnabled === undefined &&
     body.codeGen === undefined &&
     body.codeGenTarget === undefined &&
     body.deletePublished === undefined &&
@@ -901,7 +912,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1118,7 +1129,9 @@ const putState: Handler = async (req) => {
   // qTest test case links (specs/external-links/qtest-test-cases.feature.md)
   // and Import from Aha! (specs/external-links/aha-import.feature.md) switch
   // the same way.
-  for (const key of ["ahaLinks", "ahaImport", "figmaLinks", "qtestLinks"] as const) {
+  // Jira import and Confluence (specs/external-links/jira-wiki-import.feature.md,
+  // confluence-wiki.feature.md) switch the same opt-in way: off is an absent key.
+  for (const key of ["ahaLinks", "ahaImport", "figmaLinks", "qtestLinks", "jiraEnabled", "confluenceEnabled"] as const) {
     const value = body[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") return json({ error: `${key} must be a boolean` }, 400);
@@ -1640,7 +1653,13 @@ const postImportPropose = withDataDir(async (dir, req) => {
     agent?: unknown;
     model?: unknown;
     exclude?: unknown;
+    only?: unknown;
   };
+  // Which import this is (specs/external-links/jira-wiki-import.feature.md
+  // "Jira and Confluence imports are switched on in Settings"): the Jira-only
+  // dialog sends only:"jira" and takes only Jira issues, the Confluence-only
+  // one only:"wiki" and only pages; the combined dialog sends neither.
+  const only = body.only === "jira" || body.only === "wiki" ? body.only : undefined;
   const urls = Array.isArray(body.sources) ? body.sources.filter((u): u is string => typeof u === "string") : [];
   if (urls.length === 0) return json({ error: "Add at least one Jira issue or Confluence page url" }, 400);
   if (urls.length > MAX_JIRA_SOURCES + MAX_WIKI_SOURCES) {
@@ -1650,7 +1669,24 @@ const postImportPropose = withDataDir(async (dir, req) => {
   for (const url of urls) {
     const ref = classifySource(url);
     if (!ref) return json({ error: `Not a Jira issue or Confluence page url: ${url}` }, 400);
+    if (only && ref.kind !== only) {
+      return json(
+        { error: only === "jira" ? `This import takes only Jira issues: ${url}` : `This import takes only Confluence pages: ${url}` },
+        400,
+      );
+    }
     refs.push(ref);
+  }
+  // Each integration must be switched on for its sources to be read
+  // (defense-in-depth beside the hidden menu item, like the Aha! 403 above).
+  const state = await readState(getAppRoot());
+  const needsJira = only === "jira" || refs.some((r) => r.kind === "jira");
+  const needsWiki = only === "wiki" || refs.some((r) => r.kind === "wiki");
+  if (needsJira && !normalizeJiraEnabled(state.jiraEnabled)) {
+    return json({ error: "Jira is off; switch it on in Settings → Jira." }, 403);
+  }
+  if (needsWiki && !normalizeConfluenceEnabled(state.confluenceEnabled)) {
+    return json({ error: "Confluence is off; switch it on in Settings → Confluence." }, 403);
   }
   const exclude = Array.isArray(body.exclude) ? body.exclude.filter((n): n is string => typeof n === "string") : [];
   const agent = typeof body.agent === "string" && body.agent ? body.agent : undefined;
@@ -1703,6 +1739,14 @@ const postImportCreate = withDataDir(async (dir, req) => {
           : [],
       )
     : [];
+  // The same switches guard the create step (a side turned off mid-review).
+  const state = await readState(getAppRoot());
+  if (sources.some((s) => s.kind === "jira") && !normalizeJiraEnabled(state.jiraEnabled)) {
+    return json({ error: "Jira is off; switch it on in Settings → Jira." }, 403);
+  }
+  if (sources.some((s) => s.kind === "wiki") && !normalizeConfluenceEnabled(state.confluenceEnabled)) {
+    return json({ error: "Confluence is off; switch it on in Settings → Confluence." }, 403);
+  }
   const folder = typeof body.folder === "string" ? body.folder.trim().replace(/^\/+|\/+$/g, "") : "";
   const plan = planImportedFeature(title, scenarios, sources);
   try {
@@ -1732,6 +1776,9 @@ const postImportCreate = withDataDir(async (dir, req) => {
 // unless `force` says the user chose to: the conflict is answered as a 409
 // the dialog turns into a question.
 const postPublishConfluence = withDataDir(async (dir, req, params) => {
+  if (!normalizeConfluenceEnabled((await readState(getAppRoot())).confluenceEnabled)) {
+    return json({ error: "Confluence is off; switch it on in Settings → Confluence." }, 403);
+  }
   const body = (await req.json().catch(() => ({}))) as { parentUrl?: unknown; scope?: unknown; force?: unknown };
   const scope = body.scope ?? "all";
   const force = body.force === true;
@@ -1843,6 +1890,9 @@ const postPublishConfluence = withDataDir(async (dir, req, params) => {
 // under. The dialog then publishes them one by one through the feature's
 // own route.
 const getFolderConfluence = withDataDir(async (dir, _req, params) => {
+  if (!normalizeConfluenceEnabled((await readState(getAppRoot())).confluenceEnabled)) {
+    return json({ error: "Confluence is off; switch it on in Settings → Confluence." }, 403);
+  }
   const prefix = `${params.path!.replace(/\/+$/, "")}/`;
   const listed = (await listFeatures(dir)).filter((f) => f.fileName.startsWith(prefix));
   const features = await Promise.all(

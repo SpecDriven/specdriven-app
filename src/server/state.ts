@@ -107,6 +107,22 @@ export interface SpecDrivenState {
    */
   qtestLinks?: boolean;
   /**
+   * Turn the Jira import on (specs/external-links/jira-wiki-import.feature.md
+   * "Jira and Confluence imports are switched on in Settings"); absent means
+   * OFF. Off hides the Jira import from the folder menu — and, with Confluence
+   * off too, the whole import — and the import route refuses a Jira source.
+   * The Jira tokens already saved stay.
+   */
+  jiraEnabled?: boolean;
+  /**
+   * Turn Confluence on (specs/external-links/confluence-wiki.feature.md,
+   * jira-wiki-import.feature.md); absent means OFF. Off hides "Publish to
+   * Confluence…" and the Confluence import, the publish and import routes
+   * refuse, and the Confluence MCP server is not handed to agent sessions.
+   * The Confluence tokens already saved stay.
+   */
+  confluenceEnabled?: boolean;
+  /**
    * The last parent module a feature's test cases were created under in
    * qTest (specs/external-links/qtest-test-cases.feature.md), offered again
    * by the dialog. Per device, like the qTest tokens it goes with.
@@ -421,6 +437,19 @@ export function normalizeQtestParentUrl(value: unknown): string | null {
     (specs/external-links/qtest-test-cases.feature.md): OFF unless explicitly
     turned on, like the Aha! and Figma ones. */
 export function normalizeQtestLinks(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective Jira import setting (specs/external-links/jira-wiki-import
+    .feature.md): OFF unless explicitly turned on, like the Aha! import. */
+export function normalizeJiraEnabled(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective Confluence setting (specs/external-links/confluence-wiki
+    .feature.md, jira-wiki-import.feature.md): OFF unless explicitly turned on,
+    like the Aha! import. */
+export function normalizeConfluenceEnabled(value: unknown): boolean {
   return value === true;
 }
 

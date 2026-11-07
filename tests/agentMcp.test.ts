@@ -5,7 +5,7 @@
 // hosted app — and how the desktop app points it at its own bundle and file.
 
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentMcpServers, setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../src/server/agentMcp";
@@ -20,14 +20,24 @@ import {
 
 let home: string;
 const realHome = process.env.SPECDRIVEN_HOME;
+const realRoot = process.env.SPECDRIVEN_ROOT;
 const ENV = ["DEMO_MODE", "SPECDRIVEN_HOSTED"] as const;
 const realEnv = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
+
+/** Write the settings file SPECDRIVEN_ROOT points agentMcpServers() at. */
+async function writeSettings(state: Record<string, unknown>): Promise<void> {
+  await mkdir(join(home, ".specdriven"), { recursive: true });
+  await writeFile(join(home, ".specdriven", "settings.json"), JSON.stringify(state));
+}
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "specdriven-agent-mcp-"));
   process.env.SPECDRIVEN_HOME = home;
+  process.env.SPECDRIVEN_ROOT = home;
   for (const k of ENV) delete process.env[k];
   setConfluenceTokenBackend(createConfluenceFileBackend(join(home, "confluence-tokens.json")));
+  // Confluence on by default for these tests; the off case is its own test.
+  await writeSettings({ confluenceEnabled: true });
 });
 
 afterEach(async () => {
@@ -37,6 +47,8 @@ afterEach(async () => {
   setConfluenceTokenBackend(createConfluenceFileBackend());
   if (realHome === undefined) delete process.env.SPECDRIVEN_HOME;
   else process.env.SPECDRIVEN_HOME = realHome;
+  if (realRoot === undefined) delete process.env.SPECDRIVEN_ROOT;
+  else process.env.SPECDRIVEN_ROOT = realRoot;
   for (const k of ENV) {
     if (realEnv[k] === undefined) delete process.env[k];
     else process.env[k] = realEnv[k]!;
@@ -45,6 +57,18 @@ afterEach(async () => {
 });
 
 test("no wiki token, no server", async () => {
+  expect(await agentMcpServers()).toEqual([]);
+});
+
+test("Confluence switched off in Settings hands out none, even with a saved token", async () => {
+  await writeSettings({ confluenceEnabled: false });
+  await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat", user: "me" });
+  expect(await agentMcpServers()).toEqual([]);
+});
+
+test("Confluence absent from Settings (the default) hands out none, even with a saved token", async () => {
+  await writeSettings({});
+  await saveConfluenceToken({ base: "https://wiki.acme.com", token: "pat", user: "me" });
   expect(await agentMcpServers()).toEqual([]);
 });
 

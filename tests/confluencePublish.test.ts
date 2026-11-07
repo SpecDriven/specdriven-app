@@ -205,7 +205,8 @@ beforeEach(async () => {
   data = join(root, "data");
   await createFeature(data, "Quote Policy");
   await saveFeature(data, FILE, SAMPLE);
-  await writeState({ dataRepo: data }, root);
+  // Confluence on; the off case is its own test.
+  await writeState({ dataRepo: data, confluenceEnabled: true }, root);
   pages = new Map();
   attachments = new Map();
   nextId = 100;
@@ -600,6 +601,29 @@ describe("publishing a feature", () => {
     expect(pages.get("100")!.body).toContain("ri:attachment");
     expect(res.body.warning).toContain("images were not attached");
     expect(res.body.warning).toContain("disk full");
+  });
+});
+
+// The Settings switch: off by default, and off refuses the publish and the
+// folder routes, even with a saved token.
+describe("the Confluence switch", () => {
+  const folder = (f = "specs") => call("GET", `/api/folders/${encodeURIComponent(f)}/confluence`);
+
+  test("off by default, a fresh device refuses publish and the folder route", async () => {
+    await writeState({ dataRepo: data }, root); // no confluenceEnabled
+    await saveToken();
+    const res = await publish(parentUrl());
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/Confluence is off/);
+    expect((await folder()).status).toBe(403);
+    expect(seen.some((r) => r.method === "POST" && r.path === "/rest/api/content")).toBe(false);
+  });
+
+  test("switched off refuses both routes, even with a saved token", async () => {
+    await saveToken();
+    await writeState({ dataRepo: data, confluenceEnabled: false }, root);
+    expect((await publish(parentUrl())).status).toBe(403);
+    expect((await folder()).status).toBe(403);
   });
 });
 
