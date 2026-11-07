@@ -43,6 +43,20 @@
   --status-proposed: light-dark(#e0a03c, #f2b64a);
   --status-published: light-dark(#3fa56b, #4cc283);
 
+  /* The session popover's context meter (specs/agents/agent-pane.feature.md
+     S10): a fixed categorical order — blue, orange, aqua, yellow, magenta,
+     violet — validated for colour-vision separation on both surfaces, each
+     part named in a legend beside its numbers. Never reused for status. */
+  --meter-1: light-dark(#2a78d6, #3987e5);
+  --meter-2: light-dark(#eb6834, #d95926);
+  --meter-3: light-dark(#1baf7a, #199e70);
+  --meter-4: light-dark(#eda100, #c98500);
+  --meter-5: light-dark(#e87ba4, #d55181);
+  --meter-6: light-dark(#6250d6, #9085e9);
+  --meter-other: light-dark(#8a8f98, #7c8088);
+  --meter-buffer: light-dark(#c9ccd1, #4a4d53);
+  --meter-free: light-dark(#ebecee, #2e3034);
+
   /* Elevation: none on panes and cards; popovers medium, dialogs large. */
   --shadow-c1: light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.4));
   --shadow-c2: light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.3));
@@ -7012,6 +7026,339 @@ button.page-archive-head:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- The session popover (specs/agents/agent-pane.feature.md S10) ---------
+   A ring in the header for how full the context window is; it opens on the
+   folder, the branch and the window by category, as in Claude Desktop. */
+.agent-rail-anchor {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.agent-rail-btn {
+  width: auto;
+  min-width: 1.75rem;
+  gap: 0.3rem;
+  padding: 0 0.4rem;
+}
+
+.agent-rail-pct {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-rail-btn:hover .agent-rail-pct {
+  color: var(--text-1);
+}
+
+/* A meter: the track is a lighter step of the fill's own hue, so the state
+   reads across the whole ring; the fill turns amber, then red, as it fills. */
+.agent-rail-ring {
+  flex: none;
+  --ring-fill: var(--accent);
+}
+
+.agent-rail-ring[data-level="warn"] {
+  --ring-fill: var(--status-proposed);
+}
+
+.agent-rail-ring[data-level="high"] {
+  --ring-fill: var(--danger-solid);
+}
+
+.agent-rail-ring-track {
+  stroke: color-mix(in srgb, var(--ring-fill) 22%, transparent);
+}
+
+.agent-rail-ring-fill {
+  stroke: var(--ring-fill);
+}
+
+.popover.agent-rail-popover {
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: auto;
+  width: min(22rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-height: min(34rem, calc(100vh - 6rem));
+  overflow-y: auto;
+  padding: 0.35rem 0.85rem 0.6rem;
+  font-size: 0.8125rem;
+}
+
+.agent-rail:focus {
+  outline: none;
+}
+
+.agent-rail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 0;
+}
+
+.agent-rail-row + .agent-rail-row {
+  border-top: 1px solid var(--border);
+}
+
+.agent-rail-icon {
+  flex: none;
+  color: var(--text-2);
+}
+
+.agent-rail-value {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-rail-row[data-row="folder"] .agent-rail-value {
+  display: block;
+}
+
+.agent-rail-value:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.agent-rail-name {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.agent-rail-mono {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+}
+
+.agent-rail-path,
+.agent-rail-sub,
+.agent-rail-quiet {
+  color: var(--text-3);
+}
+
+.agent-rail-sub {
+  overflow: hidden;
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+}
+
+.agent-rail-tag {
+  flex: none;
+}
+
+.agent-rail-copy {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--text-3);
+}
+
+.agent-rail-context {
+  margin-top: 0.15rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.agent-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 1.5rem;
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.agent-rail-refresh {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.agent-rail-refresh[data-busy] svg {
+  animation: agent-rail-spin 0.9s linear infinite;
+}
+
+@keyframes agent-rail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.agent-meter-headline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0.4rem;
+  color: var(--text-1);
+  font-size: 0.875rem;
+}
+
+.agent-meter-of {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  align-self: flex-end;
+}
+
+/* A thin segmented bar: one whole split into parts, fully rounded ends, a
+   2px surface gap between parts instead of borders. */
+.agent-meter {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+}
+
+.agent-meter-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.agent-meter-seg:first-child {
+  border-radius: 999px 0 0 999px;
+}
+
+.agent-meter-seg:last-child {
+  border-radius: 0 999px 999px 0;
+}
+
+.agent-meter-seg:only-child {
+  border-radius: 999px;
+}
+
+.agent-meter-legend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 0.15rem 0.55rem;
+  align-items: center;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-meter-legend li {
+  display: contents;
+}
+
+.agent-meter-swatch {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 2px;
+}
+
+.agent-meter-legend li[data-kind="deferred"] .agent-meter-swatch {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.agent-meter-label {
+  overflow: hidden;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-meter-num {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.agent-meter-pct {
+  min-width: 3.2rem;
+}
+
+.agent-rail-lists {
+  margin-top: 0.55rem;
+  border-top: 1px solid var(--border);
+}
+
+.agent-rail-items > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  color: var(--text-1);
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-rail-items > summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-rail-items > summary:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.agent-rail-items-label {
+  flex: 1;
+}
+
+.agent-rail-items-count {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-rail-items-chevron {
+  color: var(--text-3);
+  transition: transform 0.12s ease;
+}
+
+.agent-rail-items[open] .agent-rail-items-chevron {
+  transform: rotate(90deg);
+}
+
+.agent-rail-items ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.1rem 0.55rem;
+  margin: 0 0 0.4rem;
+  padding: 0 0 0 0.6rem;
+  list-style: none;
+  font-size: 0.75rem;
+}
+
+.agent-rail-items li {
+  display: contents;
+}
+
+.agent-rail-item-name {
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-rail-item-detail {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.agent-rail-items li:not(:has(.agent-rail-item-detail)) .agent-rail-item-name {
+  grid-column: span 2;
+}
+
+.agent-rail-note {
+  margin: 0.5rem 0 0;
+  color: var(--text-3);
+  font-size: 0.6875rem;
 }
 
 .agent-session-menu {

@@ -19,7 +19,15 @@
 import { randomUUID } from "node:crypto";
 import type { AgentHost, AgentProvider, AgentSession, AgentStartOptions } from "../plugins/host/agents";
 import { fromPlugin } from "../plugins/host/agents";
-import type { AgentImage, PermissionMode, SlashCommandInfo } from "./agentTypes";
+import type {
+  AgentImage,
+  ChatContextUsage,
+  ContextDetail,
+  ContextItem,
+  ContextSlice,
+  PermissionMode,
+  SlashCommandInfo,
+} from "./agentTypes";
 
 /** The model the header shows: obviously not a real one. */
 export const SIMULATED_MODEL = "claude-simulated";
@@ -37,6 +45,80 @@ export const SIMULATED_COMMANDS: readonly SlashCommandInfo[] = [
 const SIMULATED_TOOLS = ["Read", "Grep", "Write", "Edit", "Bash"];
 
 const ALL_MODES: readonly PermissionMode[] = ["auto", "default", "acceptEdits", "plan", "bypassPermissions"];
+
+// --- The context window -------------------------------------------------------
+//
+// The session popover's meter (specs/agents/agent-pane.feature.md S10) needs
+// a count to show. These are the shapes a real Claude session reports, at a
+// plausible size, with the conversation growing a turn at a time.
+
+/** The simulated model's window, and where it would compact on its own. */
+export const SIMULATED_WINDOW = 200_000;
+const SIMULATED_AUTOCOMPACT = 167_000;
+
+const SYSTEM_TOOL_ITEMS: readonly ContextItem[] = [
+  { name: "Bash", tokens: 3_420 },
+  { name: "Edit", tokens: 2_150 },
+  { name: "Grep", tokens: 2_310 },
+  { name: "Read", tokens: 1_980 },
+  { name: "Write", tokens: 1_240 },
+  { name: "Glob", tokens: 1_120 },
+  { name: "WebFetch", tokens: 1_310 },
+  { name: "TodoWrite", tokens: 1_070 },
+];
+
+const MCP_TOOL_ITEMS: readonly ContextItem[] = [
+  { name: "confluence_search", detail: "confluence", tokens: 820 },
+  { name: "confluence_get_page", detail: "confluence", tokens: 760 },
+  { name: "confluence_list_spaces", detail: "confluence", tokens: 540 },
+  { name: "specs_find_scenario", detail: "specdriven", tokens: 910 },
+  { name: "specs_read_feature", detail: "specdriven", tokens: 1_040 },
+  { name: "specs_list_features", detail: "specdriven", tokens: 830 },
+];
+
+const MEMORY_ITEMS: readonly ContextItem[] = [
+  { name: "CLAUDE.md", detail: "Project", tokens: 860 },
+  { name: "~/.claude/CLAUDE.md", detail: "User", tokens: 340 },
+];
+
+const SKILL_ITEMS: readonly ContextItem[] = [
+  { name: "code-review", detail: "plugin", tokens: 310 },
+  { name: "run", detail: "plugin", tokens: 280 },
+  { name: "simplify", detail: "plugin", tokens: 290 },
+];
+
+const sum = (items: readonly ContextItem[]) => items.reduce((n, i) => n + i.tokens, 0);
+
+/**
+ * What the simulated agent reports after `turns` turns: the fixed parts of
+ * a Claude session's context, the conversation, the compaction reserve and
+ * what is left. "full" is the same count, marked measured.
+ */
+export function simulatedContext(turns: number, detail: ContextDetail = "summary"): Omit<ChatContextUsage, "at"> {
+  const messages = turns === 0 ? 0 : 1_850 + turns * 5_400;
+  const used: ContextSlice[] = [
+    { id: "system_prompt", label: "System prompt", tokens: 3_100, kind: "used" },
+    { id: "system_tools", label: "System tools", tokens: sum(SYSTEM_TOOL_ITEMS), kind: "used", items: [...SYSTEM_TOOL_ITEMS] },
+    { id: "mcp_tools", label: "MCP tools", tokens: sum(MCP_TOOL_ITEMS), kind: "used", items: [...MCP_TOOL_ITEMS] },
+    { id: "memory_files", label: "Memory files", tokens: sum(MEMORY_ITEMS), kind: "used", items: [...MEMORY_ITEMS] },
+    { id: "skills", label: "Skills", tokens: sum(SKILL_ITEMS), kind: "used", items: [...SKILL_ITEMS] },
+    { id: "messages", label: "Messages", tokens: messages, kind: "used" },
+  ];
+  const total = used.reduce((n, s) => n + s.tokens, 0);
+  const buffer = SIMULATED_WINDOW - SIMULATED_AUTOCOMPACT;
+  return {
+    model: SIMULATED_MODEL,
+    totalTokens: total,
+    maxTokens: SIMULATED_WINDOW,
+    autoCompactAt: SIMULATED_AUTOCOMPACT,
+    slices: [
+      ...used,
+      { id: "autocompact_buffer", label: "Autocompact buffer", tokens: buffer, kind: "buffer" },
+      { id: "free_space", label: "Free space", tokens: Math.max(0, SIMULATED_WINDOW - total - buffer), kind: "free" },
+    ],
+    detail: detail === "full" ? "measured" : "estimate",
+  };
+}
 
 // --- Pacing -----------------------------------------------------------------
 //
@@ -170,6 +252,7 @@ class SimulatedSession implements AgentSession {
       commands: [...SIMULATED_COMMANDS],
       permissionMode: this.mode,
     });
+    this.host.context(simulatedContext(0));
     if (this.opts.prompt || this.opts.images?.length) void this.play(this.opts.prompt ?? "", this.opts.images?.length ?? 0);
   }
 
@@ -186,6 +269,10 @@ class SimulatedSession implements AgentSession {
   setPermissionMode(mode: PermissionMode): Promise<void> {
     this.mode = mode;
     return Promise.resolve();
+  }
+
+  contextUsage(detail: ContextDetail): Promise<ChatContextUsage> {
+    return Promise.resolve({ ...simulatedContext(this.turn, detail), at: new Date().toISOString() });
   }
 
   close(): void {
@@ -275,6 +362,8 @@ class SimulatedSession implements AgentSession {
       denials,
     });
     this.host.turnEnded();
+    // Counted once the turn is over, as Claude's plugin does.
+    this.host.context(simulatedContext(this.turn));
   }
 
   /** The first turn: the prompt the app built from the selected specs. */
@@ -352,6 +441,7 @@ export const simulatedProvider: AgentProvider = fromPlugin(
       rememberPermissions: "rule",
       oneShot: false,
       images: true,
+      contextUsage: "breakdown",
     },
     defaultPermissionMode: "auto",
     start(opts) {

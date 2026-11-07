@@ -21,7 +21,9 @@ import type {
   EffortLevel,
   AgentOutput,
   ChatAccount,
+  ChatContextUsage,
   ChatStatus,
+  ContextDetail,
   NoteCode,
   PermissionMode,
   PermissionSuggestion,
@@ -129,6 +131,10 @@ export interface AgentHost {
   turnStarted(): void;
   /** The turn is over: open cards close, the composer frees. */
   turnEnded(): void;
+  /** The agent counted its context window: the session popover shows it
+      (specs/agents/agent-pane.feature.md S10). Any time before the end,
+      even while starting; `at` defaults to now. The log keeps the newest. */
+  context(usage: Omit<ChatContextUsage, "at"> & { at?: string }): void;
   /** Raise a permission card and wait for its answer. */
   requestPermission(req: PermissionRequest): Promise<PermissionOutcome>;
   /** The process is gone, normally. */
@@ -156,6 +162,11 @@ export interface AgentSession {
   /** Switch the effort from the next request on (null: the agent's own
       default); capabilities.effort says it is there. */
   setEffort?(effort: EffortLevel | null): Promise<void>;
+  /** Count the context window now, for the popover's Refresh: "summary"
+      is the cheap count, "full" asks the API for every category. Null when
+      the agent cannot say; capabilities.contextUsage "breakdown" says it is
+      there. The core shows the answer as a host.context would. */
+  contextUsage?(detail: ContextDetail): Promise<ChatContextUsage | null>;
   /** Kill the child; must be safe to call from an exit hook (no await). */
   close(): void;
   /** The agent's sign-in changed (AgentRegistry.changed): drop what the
