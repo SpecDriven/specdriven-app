@@ -9,7 +9,14 @@ import type {
   AgentSession,
   AgentStartOptions,
 } from "../../src/plugins/host/agents";
-import type { AgentCapabilities, AgentImage, EffortLevel, PermissionMode } from "../../src/server/agentTypes";
+import type {
+  AgentCapabilities,
+  AgentImage,
+  ChatContextUsage,
+  ContextDetail,
+  EffortLevel,
+  PermissionMode,
+} from "../../src/server/agentTypes";
 
 export interface FakeSession extends AgentSession {
   host: AgentHost;
@@ -39,6 +46,8 @@ export interface FakeProviderOptions extends Partial<Omit<AgentProvider, "start"
   noRefresh?: boolean;
   /** refresh() rejects with this. */
   refreshError?: Error;
+  /** The sessions' contextUsage(): absent, they have none. */
+  contextUsage?: (detail: ContextDetail) => Promise<ChatContextUsage | null>;
 }
 
 export function fakeProvider(options: FakeProviderOptions = {}): { provider: AgentProvider; sessions: FakeSession[] } {
@@ -100,6 +109,7 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
         close() {
           session.closed = true;
         },
+        ...(options.contextUsage ? { contextUsage: options.contextUsage } : {}),
         ...(options.noRefresh
           ? {}
           : {

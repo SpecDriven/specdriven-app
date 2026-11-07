@@ -21,7 +21,13 @@ import type { AgentHost, AgentStartOptions, PermissionOutcome } from "../src/plu
 import type { ChatEventBody } from "../src/server/agentTypes";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setupDemo, teardownDemoAgent } from "../src/server/demo";
-import { SIMULATED_MODEL, readBrief, setSimulationPace, simulatedProvider } from "../src/server/demoAgent";
+import {
+  SIMULATED_MODEL,
+  SIMULATED_WINDOW,
+  readBrief,
+  setSimulationPace,
+  simulatedProvider,
+} from "../src/server/demoAgent";
 import { setFolderChooser } from "../src/server/folderChooser";
 import { setGitEngine } from "../src/server/git";
 import { readState } from "../src/server/state";
@@ -168,6 +174,7 @@ test("the script streams its text before settling it", async () => {
     update: () => {},
     turnStarted: () => {},
     turnEnded: () => {},
+    context: () => seen.push("context"),
     requestPermission: async (): Promise<PermissionOutcome> => ({ decision: { behavior: "deny", message: "no" }, via: "user" }),
     ended: () => {},
     failed: () => {},
@@ -190,10 +197,14 @@ test("the script streams its text before settling it", async () => {
   await finished;
   expect(seen[0]).toBe("note:init");
   expect(seen[1]).toBe("ready");
-  expect(seen[2]).toBe("text_delta");
+  // The context window is counted once the session is ready and again once
+  // the turn is over (specs/agents/agent-pane.feature.md S10).
+  expect(seen[2]).toBe("context");
+  expect(seen[3]).toBe("text_delta");
   expect(seen.filter((s) => s === "text_delta").length).toBeGreaterThan(3);
   expect(seen.indexOf("assistant")).toBeGreaterThan(seen.indexOf("text_delta"));
-  expect(seen.at(-1)).toBe("result");
+  expect(seen.at(-2)).toBe("result");
+  expect(seen.at(-1)).toBe("context");
 });
 
 test("a demo session starts and plays a scripted Claude Code turn", async () => {
@@ -274,6 +285,41 @@ test("a follow-up message gets a scripted reply, and the session stays up", asyn
   const reply = after.filter((e) => e.kind === "assistant").at(-1)!;
   expect(JSON.stringify(reply)).toContain("simulated session");
   expect(getChatSession(id)!.status).toBe("idle");
+});
+
+// The session popover's context meter (specs/agents/agent-pane.feature.md
+// S10) has something to show in the demo too: a count once the session is
+// ready, a bigger one after each turn, and a measured one on Refresh.
+test("a demo session counts its context window, and counts it again on request", async () => {
+  const res = await api("/api/agent/chat", "POST", { name: "ad hoc" });
+  const { id } = (await res.json()) as { id: string };
+  await until(id, () => getChatSession(id)!.status === "idle");
+  const first = getChatSession(id)!.context!;
+  expect(first).toMatchObject({ model: SIMULATED_MODEL, maxTokens: SIMULATED_WINDOW, detail: "estimate" });
+  expect(first.slices!.map((s) => s.id)).toEqual([
+    "system_prompt",
+    "system_tools",
+    "mcp_tools",
+    "memory_files",
+    "skills",
+    "messages",
+    "autocompact_buffer",
+    "free_space",
+  ]);
+  // The window adds up: what is used, the reserve, and what is left.
+  expect(first.slices!.reduce((n, s) => n + s.tokens, 0)).toBe(SIMULATED_WINDOW);
+
+  await api(`/api/agent/chat/${id}/message`, "POST", { text: "what is this?" });
+  await until(id, (e) => e.some((x) => x.kind === "result"));
+  await until(id, () => getChatSession(id)!.context!.totalTokens > first.totalTokens);
+  // The log keeps only the newest count.
+  expect(getChatEvents(id).filter((e) => e.kind === "context")).toHaveLength(1);
+
+  const refreshed = await api(`/api/agent/chat/${id}/context`, "POST", { detail: "full" });
+  expect(refreshed.status).toBe(200);
+  const { context } = (await refreshed.json()) as { context: { detail: string } };
+  expect(context.detail).toBe("measured");
+  expect(getChatSession(id)!.context!.detail).toBe("measured");
 });
 
 // A chat opened from the pane's own empty state carries no prompt and no

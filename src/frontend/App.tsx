@@ -278,6 +278,7 @@ import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { AhaImportDialog } from "./AhaImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
+import { copyText } from "./clipboard";
 
 interface Conflict {
   ours: string;
@@ -849,27 +850,6 @@ function writeRecent(list: RecentEntry[]) {
  */
 export const COMPACT_QUERY = "(max-width: 47.99rem)";
 
-/**
- * Text onto the clipboard, false when neither way works. navigator.clipboard
- * needs a secure context and permission — absent e.g. on a plain-http LAN
- * host — so a selection-based copy stands in for it there.
- */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  }
-}
 
 // Code gen sessions (specs/agents/claude.feature.md): which agent "Start
 // session" runs in — a new session in Claude Code Desktop, or the app's own
@@ -1282,6 +1262,9 @@ export function App() {
   const reposRef = useRef<{ open: string | null; recent: string[] }>({ open: null, recent: [] });
   /** The open folder's absolute path, as the server resolved it. */
   const [dataDir, setDataDir] = useState<string | null>(null);
+  /** The user's home folder, for paths the session popover writes as ~/…;
+      null in the demo and on a shared server. */
+  const [homeDir, setHomeDir] = useState<string | null>(null);
   /**
    * Take the open folder and the recent list from an /api/state answer. The
    * open folder is also the one "Copy link" names (src/frontend/shareLink.ts).
@@ -1291,6 +1274,7 @@ export function App() {
     recentDataRepos?: unknown;
     recentDataRepoDirs?: unknown;
     dataDir?: unknown;
+    homeDir?: unknown;
   }) => {
     const open = state.dataRepo ?? null;
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
@@ -1302,6 +1286,7 @@ export function App() {
     setRecentRepoDirs(dirs && typeof dirs === "object" ? (dirs as Record<string, string>) : {});
     // An answer that does not say (the forget-a-folder reply) keeps it.
     if (state.dataDir !== undefined) setDataDir(typeof state.dataDir === "string" ? state.dataDir : null);
+    if (state.homeDir !== undefined) setHomeDir(typeof state.homeDir === "string" ? state.homeDir : null);
   };
   const [recentMenuOpen, setRecentMenuOpen] = useState(false);
   const [needsRepo, setNeedsRepo] = useState(false);
@@ -12688,6 +12673,7 @@ export function App() {
           // The server's absolute path for the open folder: settings may
           // name it relative to the app, and an agent's folder must be absolute.
           dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
+          homeDir={homeDir}
           prompt={prompt}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}

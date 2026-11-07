@@ -131,6 +131,7 @@ import {
   getChatSession,
   interruptChat,
   listChatSessions,
+  refreshChatContext,
   resolveProvider,
   sendChatMessage,
   setAgentDefaults,
@@ -143,6 +144,7 @@ import type { AgentDefaultsPatch, ChatAgent, ChatEvent, PermissionAnswer } from 
 import {
   EFFORT_LEVELS,
   isFinalStatus,
+  normalizeContextDetail,
   normalizeEffort,
   normalizeModel,
   normalizePermissionMode,
@@ -700,6 +702,9 @@ async function stateFields(state: SpecDrivenState) {
     // name it relative to the app (".../specs"), and the coding agent pane
     // offers it as a folder to work in, which must be absolute.
     dataDir: isHostedMode() ? null : await currentDataDir(),
+    // The user's home folder, so the session popover can write a path as
+    // ~/… — never the demo's or a shared server's.
+    homeDir: isHostedMode() || isDemoMode() || isReadOnlyMode() ? null : homedir(),
     // Whether the runtime can open a native folder chooser
     // (specs/ui/app-start.feature.md) — gates the Browse… buttons.
     canChooseFolder: !isHostedMode() && canChooseFolder(),
@@ -3406,6 +3411,17 @@ const putAgentChatEffort: Handler = async (req, params) => {
   }
 };
 
+// The session popover's Refresh (specs/agents/agent-pane.feature.md S10):
+// the agent counts its context window now, and every stream shows the count.
+const postAgentChatContext: Handler = async (req, params) => {
+  const body = (await req.json().catch(() => ({}))) as { detail?: unknown };
+  try {
+    return json({ context: await refreshChatContext(params.id!, normalizeContextDetail(body.detail)) });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
 // The models an agent offers and what a new session starts on, for the
 // pane's model and effort pickers; null for an agent with none.
 const getAgentChoices: Handler = async (_req, params) => {
@@ -3782,6 +3798,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],
   ["PUT", "/api/agent/chat/:id/model", unlessHosted(putAgentChatModel)],
   ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
+  ["POST", "/api/agent/chat/:id/context", unlessHosted(postAgentChatContext)],
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],

@@ -21,11 +21,14 @@ import type {
   AgentOffer,
   AssistantBlock,
   ChatAgent,
+  ChatContextUsage,
   ChatEvent,
   ChatImage,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
+  ContextDetail,
+  ContextSlice,
   EffortLevel,
   ImageUpload,
   PermissionMode,
@@ -40,10 +43,13 @@ export type {
   AgentModelOption,
   AgentOffer,
   ChatAgent,
+  ChatContextUsage,
   ChatEvent,
   ChatSessionMeta,
   ChatStatus,
   ChatWorktree,
+  ContextDetail,
+  ContextSlice,
   EffortLevel,
   PermissionMode,
   SlashCommandInfo,
@@ -454,6 +460,32 @@ export function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/** One decimal at most, none when it is .0: 7.4, 33, 1. */
+function oneDecimal(n: number): string {
+  const fixed = n.toFixed(1);
+  return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
+}
+
+/**
+ * A token count the way Claude Desktop writes it: 733, 7.4k, 151.5k, 1M.
+ * A count that would round up to the next unit is written in it (999.96k
+ * is 1M, not 1000k).
+ */
+export function formatTokens(n: number): string {
+  const v = Math.max(0, Math.round(n));
+  if (v < 1_000) return String(v);
+  if (v < 999_950) return `${oneDecimal(v / 1_000)}k`;
+  return `${oneDecimal(v / 1_000_000)}M`;
+}
+
+/** A share of the window: 15%, 6.3%, 0.1%; "<0.1%" for a sliver that is not none. */
+export function formatPercent(part: number, whole: number): string {
+  if (whole <= 0 || part <= 0) return "0%";
+  const pct = (100 * part) / whole;
+  if (pct < 0.05) return "<0.1%";
+  return `${oneDecimal(pct)}%`;
+}
+
 export function isFinalStatus(status: ChatStatus): boolean {
   return status === "ended" || status === "error";
 }
@@ -745,6 +777,8 @@ function receive(id: string, ev: ChatEvent): void {
   } else if (ev.kind === "effort") {
     if (ev.effort) meta.effort = ev.effort;
     else delete meta.effort;
+  } else if (ev.kind === "context") {
+    meta.context = ev.context;
   }
   setSession(id, { meta, commands, transcript: applyEvent(s.transcript, ev) });
   set({ list: state.list.map((m) => (m.id === id ? meta : m)) });
@@ -1047,6 +1081,18 @@ export const agentChat = {
     await call(`/api/agent/chat/${id}/model`, { method: "PUT", body: JSON.stringify({ model }) });
     const agent = state.sessions[id]?.meta.agent;
     if (agent) rememberDefault(agent, { model });
+  },
+  /** The session popover's Refresh: the agent counts its context window now
+      ("full" asks the API for every category). The count also comes down
+      the stream; it is shown here at once so the button has its answer. */
+  async refreshContext(id: string, detail: ContextDetail = "full"): Promise<ChatContextUsage | null> {
+    const data = await call<{ context: ChatContextUsage | null }>(`/api/agent/chat/${id}/context`, {
+      method: "POST",
+      body: JSON.stringify({ detail }),
+    });
+    const s = state.sessions[id];
+    if (data.context && s) setSession(id, { meta: { ...s.meta, context: data.context } });
+    return data.context;
   },
   /** Switch a running session's effort; the server makes it the default too. */
   async setEffort(id: string, effort: EffortLevel | null): Promise<void> {
