@@ -555,6 +555,71 @@ export function worktreeClosedNote(meta: Pick<ChatSessionMeta, "worktree">, outc
   return `Kept the worktree at ${meta.worktree.path} — it has uncommitted changes (branch ${meta.worktree.branch})`;
 }
 
+// --- Checking the source is up to date before a session ----------------------
+// (specs/agents/agent-plugins.feature.md "A coding session should check that
+// source is up to date"): before a session starts in a code repo, the pane
+// reads how its branch stands against the remote of record so new work branches
+// from the right place, and can refresh it first.
+
+/** How a code repo stands (src/server/agentSource.ts SourceStatus). */
+export interface SourceStatus {
+  repo?: string;
+  branch?: string;
+  upstream?: string;
+  online: boolean;
+  hasRemote: boolean;
+  detached: boolean;
+  behind: number;
+  ahead: number;
+  dirty: boolean;
+  reason?: string;
+}
+
+/** What a refresh did (src/server/agentSource.ts RefreshResult). */
+export interface RefreshResult {
+  ok: boolean;
+  message: string;
+  conflicted: boolean;
+}
+
+/** How to bring the branch up to date. */
+export type RefreshMode = "merge" | "rebase";
+
+/** Read a folder's source state; a fetch per call so it reflects the remote now. */
+export function loadSourceStatus(path: string): Promise<SourceStatus> {
+  return call<SourceStatus>(`/api/agent/source?path=${encodeURIComponent(path)}`).catch(
+    (e: Error): SourceStatus => ({
+      online: false,
+      hasRemote: false,
+      detached: false,
+      behind: 0,
+      ahead: 0,
+      dirty: false,
+      reason: e.message,
+    }),
+  );
+}
+
+/** Run the refresh the user picked before the session starts. */
+export function refreshSource(path: string, mode: RefreshMode): Promise<RefreshResult> {
+  return call<RefreshResult>("/api/agent/source/refresh", {
+    method: "POST",
+    body: JSON.stringify({ path, mode }),
+  });
+}
+
+/** Whether the source is worth stopping to look at before starting a session. */
+export function sourceNeedsAttention(s: SourceStatus): boolean {
+  // Detached or no-commit states cannot be refreshed; show them so the user
+  // knows where new work would branch from. A local-only branch with nothing
+  // to compare against is fine to start on without a dialog.
+  if (s.detached) return true;
+  if (!s.hasRemote) return false;
+  // Behind the remote is the case the dialog exists for; ahead or offline are
+  // worth a look so the user confirms the starting point.
+  return s.behind > 0 || s.ahead > 0 || !s.online;
+}
+
 // --- The store -------------------------------------------------------------
 
 export type Connection = "idle" | "connecting" | "live" | "reconnecting" | "closed";

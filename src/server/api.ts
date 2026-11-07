@@ -116,6 +116,7 @@ import {
 } from "./agent";
 import type { SessionPlace, SpecInput } from "./agent";
 import { folderGitInfo, WORKTREES_SUBDIR } from "./agentWorktree";
+import { refreshSource, sourceStatus } from "./agentSource";
 import {
   ChatError,
   agentChoices,
@@ -3447,6 +3448,27 @@ const getAgentFolder: Handler = async (req) => {
   return json(await folderGitInfo(resolve(raw)));
 };
 
+// How a code repo stands against its remote of record before a session starts
+// (specs/agents/agent-plugins.feature.md "A coding session should check that
+// source is up to date"): branch, ahead/behind, dirty, online.
+const getAgentSource: Handler = async (req) => {
+  const raw = new URL(req.url).searchParams.get("path") ?? "";
+  if (!isAbsolute(raw)) return json({ error: "path must be an absolute path" }, 400);
+  if (!(await directoryExists(raw))) return json({ error: `Folder not found: ${raw}` }, 404);
+  return json(await sourceStatus(resolve(raw)));
+};
+
+// Bring the code repo up to date before the session: a merge or a rebase the
+// user asked for in the source-check dialog.
+const postAgentSourceRefresh: Handler = async (req) => {
+  const body = (await req.json().catch(() => null)) as { path?: unknown; mode?: unknown } | null;
+  const raw = typeof body?.path === "string" ? body.path : "";
+  if (!isAbsolute(raw)) return json({ error: "path must be an absolute path" }, 400);
+  if (!(await directoryExists(raw))) return json({ error: `Folder not found: ${raw}` }, 404);
+  const mode = body?.mode === "rebase" ? "rebase" : "merge";
+  return json(await refreshSource(resolve(raw), mode));
+};
+
 const deleteAgentChat: Handler = async (_req, params) => {
   try {
     // With a worktree, whether it was removed or kept for its changes.
@@ -3764,6 +3786,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
   ["GET", "/api/agent/folder", unlessHosted(getAgentFolder)],
+  ["GET", "/api/agent/source", unlessHosted(getAgentSource)],
+  ["POST", "/api/agent/source/refresh", unlessHosted(postAgentSourceRefresh)],
   // "/active" before "/:id": the table is first-match.
 ];
 for (const [method, pattern, handler] of coreRoutes) routeRegistry.add(method, pattern, handler);
