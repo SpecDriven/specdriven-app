@@ -1656,6 +1656,12 @@ export function App() {
   const [openTestsInIdea, setOpenTestsInIdea] = useState(false);
   /** Whether `idea` is on the server's PATH, so the setting can work. */
   const [canOpenInIdea, setCanOpenInIdea] = useState(false);
+  // Open worktrees in Ghostty (specs/agents/agent-pane.feature.md "A
+  // worktree session opens in a Ghostty shell"): a click on a worktree
+  // session's branch in the agent pane opens a shell there; default OFF.
+  const [ghosttyOn, setGhosttyOn] = useState(false);
+  /** Whether Ghostty is installed where the server runs. */
+  const [canOpenGhostty, setCanOpenGhostty] = useState(false);
   // External links (specs/external-links/project-management-jira-linear-etc.
   // feature.md): whether ticket links are written into the .feature.md files.
   const [publishExternalLinks, setPublishExternalLinks] = useState(true);
@@ -1819,6 +1825,7 @@ export function App() {
   );
   const [settingsTestLinksDraft, setSettingsTestLinksDraft] = useState(true);
   const [settingsOpenInIdeaDraft, setSettingsOpenInIdeaDraft] = useState(false);
+  const [settingsGhosttyDraft, setSettingsGhosttyDraft] = useState(false);
   const [settingsProjectManagementDraft, setSettingsProjectManagementDraft] = useState(true);
   /** The tool name being typed/picked in Settings; saved when it is usable. */
   const [settingsToolDraft, setSettingsToolDraft] = useState(DEFAULT_PROJECT_MANAGEMENT_TOOL);
@@ -2037,6 +2044,8 @@ export function App() {
         }
         setOpenTestsInIdea(state.openTestsInIdea === true);
         setCanOpenInIdea(Boolean(state.canOpenInIdea));
+        setGhosttyOn(state.ghostty === true);
+        setCanOpenGhostty(Boolean(state.canOpenGhostty));
         if (typeof state.publishExternalLinks === "boolean") {
           setPublishExternalLinks(state.publishExternalLinks);
         }
@@ -4623,6 +4632,7 @@ export function App() {
     );
     setSettingsTestLinksDraft(showTestLinks);
     setSettingsOpenInIdeaDraft(openTestsInIdea);
+    setSettingsGhosttyDraft(ghosttyOn);
     setSettingsProjectManagementDraft(projectManagement);
     setSettingsToolDraft(projectManagementTool);
     setSettingsPublishLinksDraft(publishExternalLinks);
@@ -4801,6 +4811,8 @@ export function App() {
     setShowTestLinks(data.showTestLinks !== false);
     setOpenTestsInIdea(data.openTestsInIdea === true);
     setCanOpenInIdea(Boolean(data.canOpenInIdea));
+    setGhosttyOn(data.ghostty === true);
+    setCanOpenGhostty(Boolean(data.canOpenGhostty));
     setPublishExternalLinks(data.publishExternalLinks !== false);
     setProjectManagement(data.projectManagement !== false);
     if (typeof data.projectManagementTool === "string") {
@@ -4915,6 +4927,11 @@ export function App() {
   const toggleOpenInIdea = async (on: boolean) => {
     setSettingsOpenInIdeaDraft(on);
     if (!(await patchSettings({ openTestsInIdea: on }))) setSettingsOpenInIdeaDraft(!on);
+  };
+
+  const toggleGhostty = async (on: boolean) => {
+    setSettingsGhosttyDraft(on);
+    if (!(await patchSettings({ ghostty: on }))) setSettingsGhosttyDraft(!on);
   };
 
   // With the setting on, a click on any test link — the card's table, the
@@ -9337,6 +9354,32 @@ export function App() {
           </span>
         </label>
         )}
+        {/* Ghostty (specs/agents/agent-pane.feature.md "A worktree session
+            opens in a Ghostty shell"): a click on a worktree session's
+            branch in the coding agent pane opens a Ghostty shell in the
+            worktree; default OFF. Hidden in the demo and the hosted app,
+            which run on a server with no Ghostty to open. */}
+        {!demo && !hosted && (
+        <label className="settings-row">
+          <span className="settings-row-label">
+            Open worktrees in Ghostty
+            <span className="settings-row-hint">
+              {canOpenGhostty
+                ? "A click on a worktree session's branch in the coding agent pane opens a Ghostty shell in the folder the agent works in."
+                : "Needs Ghostty, from ghostty.org — on a Mac in Applications, elsewhere as ghostty on PATH. Then a click on a worktree session's branch in the coding agent pane opens a shell there."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={settingsGhosttyDraft}
+              onChange={(e) => void toggleGhostty(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+        )}
         {/* Authorship (specs/app/specs-authorship.feature.md): a setting
             of the open data folder, kept in its project-settings.json —
             the app records who created and last updated every feature and
@@ -12689,6 +12732,7 @@ export function App() {
           // name it relative to the app, and an agent's folder must be absolute.
           dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
           prompt={prompt}
+          ghostty={ghosttyOn && !demo && !hosted}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}
           onOpenPlugins={(wanted) => {

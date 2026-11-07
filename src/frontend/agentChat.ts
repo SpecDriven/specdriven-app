@@ -1054,6 +1054,13 @@ export const agentChat = {
     const agent = state.sessions[id]?.meta.agent;
     if (agent) rememberDefault(agent, { effort });
   },
+  /** Open the session's folder in a Ghostty shell (specs/agents/agent-pane
+      .feature.md "A worktree session opens in a Ghostty shell"); the server
+      picks the folder from the session's record. Rejects with the server's
+      reason, worded for a toast. */
+  async openInGhostty(id: string): Promise<void> {
+    await call(`/api/agent/chat/${id}/ghostty`, { method: "POST" });
+  },
   async end(id: string): Promise<void> {
     const meta = state.sessions[id]?.meta ?? state.list.find((m) => m.id === id);
     const res = await call<{ worktree?: string }>(`/api/agent/chat/${id}`, { method: "DELETE" }).catch((e: Error) => {
