@@ -1,9 +1,9 @@
 // specs/app/app-updates.feature.md "checks once a day" on the client: the
-// version chip and the Check for Updates… menu item mark a newer release
-// with a dot that names it on hover. Pure markup — no DOM.
+// version chip marks a newer release with a dot that names it on hover, and
+// on the desktop app it is the button to the Updates page. Pure markup — no DOM.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { checkForUpdatesMenuItem, UpdateDot, updateTitle, VersionChip } from "../src/frontend/updateHint";
+import { UpdateDot, updateTitle, VersionChip } from "../src/frontend/updateHint";
 
 describe("the version chip", () => {
   test("a newer release puts a dot on the version, saying which version is out", () => {
@@ -26,20 +26,31 @@ describe("the version chip", () => {
   });
 });
 
-describe("Check for Updates… on the user menu", () => {
-  test("carries the same dot and hint, and opens the Updates page", () => {
+describe("Check for Updates… from the version", () => {
+  test("on the desktop app the version is a button to the Updates page, carrying the same dot and hint", () => {
     let opened = 0;
-    const item = checkForUpdatesMenuItem("0.1.221", () => void opened++);
-    expect(item.id).toBe("updates");
-    expect(item.title).toBe("SpecDriven 0.1.221 is available");
-    const label = renderToStaticMarkup(<>{item.label}</>);
-    expect(label).toContain("Check for Updates…");
-    expect(label).toContain('class="update-dot"');
-    item.onSelect?.();
-    expect(opened).toBe(1);
+    const open = () => void opened++;
+    const marked = renderToStaticMarkup(
+      <VersionChip version="0.1.220" notesUnseen={false} updateAvailable="0.1.221" onOpen={open} />,
+    );
+    expect(marked).toStartWith('<button type="button" class="app-version" title="SpecDriven 0.1.221 is available">');
+    expect(marked).toContain("v0.1.220");
+    expect(marked).toContain('class="update-dot"');
 
-    const quiet = checkForUpdatesMenuItem(null, () => {});
-    expect(quiet.title).toBeUndefined();
-    expect(renderToStaticMarkup(<>{quiet.label}</>)).not.toContain("update-dot");
+    const quiet = renderToStaticMarkup(<VersionChip version="0.1.220" notesUnseen={false} updateAvailable={null} onOpen={open} />);
+    expect(quiet).toContain('title="Check for Updates…"');
+    expect(quiet).not.toContain("update-dot");
+
+    const chip = VersionChip({ version: "0.1.220", notesUnseen: false, updateAvailable: null, onOpen: open }) as {
+      props: { onClick: () => void };
+    };
+    chip.props.onClick();
+    expect(opened).toBe(1);
+  });
+
+  test("elsewhere the version is plain text, no way to the Updates page", () => {
+    const html = renderToStaticMarkup(<VersionChip version="0.1.220" notesUnseen={false} updateAvailable={null} />);
+    expect(html).toStartWith('<span class="app-version">');
+    expect(html).not.toContain("<button");
   });
 });

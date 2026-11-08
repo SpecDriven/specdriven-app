@@ -100,7 +100,7 @@ import { PublishRing, StatusCounts, StatusIcon } from "./StatusIcon";
 import { NewFeatureIcon, NewFolderIcon, StartSessionIcon } from "./ActionIcons";
 import { Tooltip } from "./Tooltip";
 import { Menu, type MenuItem } from "./Menu";
-import { checkForUpdatesMenuItem, VersionChip } from "./updateHint";
+import { VersionChip } from "./updateHint";
 import { Popover } from "./Popover";
 import { HeightResizer } from "./HeightResizer";
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
@@ -1314,7 +1314,7 @@ export function App() {
   // agents — and opens editors as previews.
   const [readOnly, setReadOnly] = useState(false);
   // Check for Updates… belongs to the desktop app (src/frontend/main.tsx marks
-  // it): the web server cannot replace itself, so its menu does not offer it.
+  // it): the web server cannot replace itself, so its version is not a way in.
   const canCheckForUpdates = typeof document !== "undefined" && Boolean(document.documentElement.dataset.desktop);
   // Hosted mode (src/server/hostedMode.ts): the app runs behind the hosted
   // gateway, whose account page holds the GitHub token and agent keys.
@@ -2890,6 +2890,9 @@ export function App() {
   }, [appPage, appVersion]);
   /** Updates (src/frontend/UpdatesPage.tsx): Check for Updates…, and the desktop app updating itself. */
   const openUpdates = () => openAppPage("updates");
+  // The version chip opens it where the app can replace itself: the desktop
+  // app, not the demo or a hosted copy, which never change.
+  const canUpdate = canCheckForUpdates && !demo && !hosted;
   // The server starts its daily check on the boot-time state fetch and
   // answers without waiting for it, so the desktop app reads the state again
   // a moment later: the dot shows within a second of boot, not at the next
@@ -9910,17 +9913,6 @@ export function App() {
                 openSettings();
               },
             },
-            // Check for Updates… (specs/app/app-updates.feature.md): the
-            // desktop app alone can replace itself; the demo and a hosted
-            // copy never change.
-            ...(canCheckForUpdates && !demo && !hosted
-              ? [
-                  checkForUpdatesMenuItem(updateAvailable, () => {
-                    setDrawerOpen(false);
-                    openUpdates();
-                  }),
-                ]
-              : []),
             // The app's own logs and their verbosity; the hosted demo's
             // server logs are not a visitor's to read.
             ...(demo
@@ -10759,20 +10751,39 @@ export function App() {
             // the menu offers the release notes and the app's source alone.
             items={userMenuItems}
           />
-          <button
-            type="button"
-            className="user-chip"
-            aria-haspopup="menu"
-            aria-expanded={userMenuOpen}
-            onClick={() => setUserMenuOpen((o) => !o)}
-          >
-            <span className="avatar" aria-hidden="true">
-              {initials}
-            </span>
-            <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
-            {/* The build on screen, right of the user name. */}
-            {appVersion && <VersionChip version={appVersion} notesUnseen={notesUnseen} updateAvailable={updateAvailable} />}
-          </button>
+          <div className="user-row">
+            <button
+              type="button"
+              className="user-chip"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((o) => !o)}
+            >
+              <span className="avatar" aria-hidden="true">
+                {initials}
+              </span>
+              <span className="user-name">{user ? (user.login ?? user.username) : "…"}</span>
+              {/* The build on screen, right of the user name. */}
+              {appVersion && !canUpdate && (
+                <VersionChip version={appVersion} notesUnseen={notesUnseen} updateAvailable={updateAvailable} />
+              )}
+            </button>
+            {/* Check for Updates… (specs/app/app-updates.feature.md): on the
+                desktop app the version is its own button, opening the Updates
+                page — beside the user chip, since a button cannot hold one. */}
+            {appVersion && canUpdate && (
+              <VersionChip
+                version={appVersion}
+                notesUnseen={notesUnseen}
+                updateAvailable={updateAvailable}
+                onOpen={() => {
+                  setUserMenuOpen(false);
+                  setDrawerOpen(false);
+                  openUpdates();
+                }}
+              />
+            )}
+          </div>
         </div>
       </aside>
       )}
