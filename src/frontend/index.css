@@ -2696,25 +2696,35 @@ aside > .user-corner {
   position: relative;
 }
 
+/* The user chip and, on the desktop app, the version button beside it read
+   as one strip: the row carries the border and the hover. */
+.user-row {
+  display: flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.user-row:hover,
+.user-row:has(> .user-chip[aria-expanded="true"]) {
+  background: var(--hover);
+  border-color: var(--border);
+}
+
 .user-chip {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.55rem;
   background: none;
-  border: 1px solid transparent;
+  border: none;
   border-radius: var(--radius-md);
   padding: 0.38rem 0.5rem;
   color: var(--text-1);
   font-size: 0.8125rem;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-
-.user-chip:hover,
-.user-chip[aria-expanded="true"] {
-  background: var(--hover);
-  border-color: var(--border);
 }
 
 .user-chip .avatar {
@@ -2739,7 +2749,8 @@ aside > .user-corner {
 
 /* The app version sits right of the user name — muted, and it keeps its
    full width while the name ellipses. */
-.user-chip .app-version {
+.user-chip .app-version,
+.user-row > .app-version {
   flex: none;
   margin-left: auto;
   color: var(--text-3);
@@ -2747,8 +2758,26 @@ aside > .user-corner {
   white-space: nowrap;
 }
 
+/* On the desktop app the version opens the Updates page (Check for Updates…). */
+button.app-version {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0 0.5rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button.app-version:hover,
+button.app-version:focus-visible {
+  color: var(--text-1);
+}
+
 /* A release whose notes are not read yet (What's new), and a newer release
-   the daily check found (the version chip, Check for Updates…). */
+   the daily check found (the version chip). */
 .unseen-dot,
 .update-dot {
   display: inline-block;
