@@ -7019,39 +7019,12 @@ button.page-archive-head:hover {
   flex: 1 0 0.25rem;
 }
 
-.agent-session-picker {
-  position: relative;
-  display: inline-flex;
+.agent-session-name {
   min-width: 0;
-  flex: 0 1 auto;
-}
-
-.agent-session-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-width: 0;
-  max-width: 100%;
   padding: 0.25rem 0.35rem;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-1);
   font-size: 0.8125rem;
   font-weight: 600;
-}
-
-.agent-session-btn:hover {
-  background: var(--hover);
-}
-
-.agent-session-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--ring);
-}
-
-.agent-session-name {
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7390,12 +7363,122 @@ button.page-archive-head:hover {
   font-size: 0.6875rem;
 }
 
-.agent-session-menu {
-  top: 100%;
-  left: 0;
-  right: auto;
-  min-width: 16rem;
-  max-width: 24rem;
+/* --- Session tabs (specs/agents/agent-pane.feature.md "Each session has
+   its own tab, at most five") ------------------------------------------- */
+
+/* The tab row sits between the header and the transcript. */
+.agent-pane.has-tabs {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.agent-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Five tabs share the row at the pane's narrowest; + keeps its size. */
+.agent-tablist {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.agent-tab {
+  display: flex;
+  flex: 0 1 10rem;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 2.75rem;
+  height: 1.75rem;
+  padding: 0 0.15rem 0 0.4rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-tab:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+/* The tab in front gives way least: its name stays readable beside its ×. */
+.agent-tab[aria-selected="true"] {
+  flex-shrink: 0.6;
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.agent-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.agent-tab.draft {
+  padding-right: 0.4rem;
+  cursor: default;
+}
+
+.agent-tab-icon {
+  flex: none;
+  color: var(--text-2);
+}
+
+.agent-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The close × shows on the selected tab, and on any tab under the pointer. */
+.agent-tab-close {
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  display: none;
+}
+
+/* Not just hidden: an unselected tab gives the ×'s room to its name. */
+.agent-tab[aria-selected="true"] .agent-tab-close,
+.agent-tab:hover .agent-tab-close {
+  display: inline-flex;
+}
+
+.agent-tab-close:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.agent-tab-new {
+  flex: none;
+}
+
+.agent-tab-new[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-empty-full {
+  color: var(--text-1);
+  font-weight: 500;
 }
 
 .agent-dot {

@@ -2,6 +2,7 @@ import {
   cloneElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -14,7 +15,8 @@ import { createPortal } from "react-dom";
  * label, optionally with the keyboard shortcut, shown 350 ms after the
  * pointer settles on the control or as soon as it takes keyboard focus.
  * Rendered in a portal under `body` so it escapes clipped panes, positioned
- * under the control (above it when there is no room below). The control
+ * under the control (above it when there is no room below), and kept inside
+ * the window when the control sits near its edge. The control
  * gets `aria-describedby`, so the label reaches assistive tech even while
  * the tooltip is hidden; pass an `aria-label` on the control as well when
  * the icon is its only content.
@@ -33,6 +35,9 @@ export function Tooltip({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; above: boolean } | null>(null);
   const anchor = useRef<HTMLElement | null>(null);
+  const tip = useRef<HTMLDivElement | null>(null);
+  /** How far the tooltip moves off the control's centre to stay on screen. */
+  const [nudge, setNudge] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const show = (delay: number) => {
@@ -60,6 +65,17 @@ export function Tooltip({
       window.removeEventListener("keydown", onScroll);
     };
   }, [open]);
+
+  // A control by the window's edge (the pane's last button) would push a
+  // centred tooltip off screen: move it in, keeping a small margin.
+  useLayoutEffect(() => {
+    if (!open || !pos || !tip.current) return;
+    const half = tip.current.offsetWidth / 2;
+    const margin = 8;
+    const min = margin + half;
+    const max = Math.max(min, window.innerWidth - margin - half);
+    setNudge(Math.min(Math.max(pos.left, min), max) - pos.left);
+  }, [open, pos]);
 
   const child = children;
   const props = child.props;
@@ -101,9 +117,10 @@ export function Tooltip({
         createPortal(
           <div
             id={id}
+            ref={tip}
             role="tooltip"
             className={`tooltip${pos.above ? " above" : ""}`}
-            style={{ top: pos.top, left: pos.left }}
+            style={{ top: pos.top, left: pos.left + nudge }}
           >
             {label}
             {keys && <kbd>{keys}</kbd>}

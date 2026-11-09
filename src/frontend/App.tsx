@@ -12855,6 +12855,7 @@ export function App() {
           dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
           homeDir={homeDir}
           prompt={prompt}
+          confirm={confirm}
           ghostty={ghosttyOn && !demo && !hosted}
           browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
           onClose={() => agentChat.closePane()}
