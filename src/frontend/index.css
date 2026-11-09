@@ -10344,8 +10344,11 @@ aside.rail .rail-btn.pomodoro-chip.flash {
 .agent-account {
   flex: none;
   white-space: nowrap;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
-.agent-account[data-billing="api"] {
+.agent-account[data-billing="api"],
+.agent-account[data-billing="provider"] {
   border-color: transparent;
   background: var(--accent-soft);
   color: var(--accent-strong);

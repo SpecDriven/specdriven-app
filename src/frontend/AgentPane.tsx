@@ -33,6 +33,7 @@ import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
 import { SessionRailButton } from "./SessionRail";
+import { accountChipDetail, accountChipText } from "./agentAccount";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { useSpellCheck } from "./spellCheckPref";
@@ -346,17 +347,18 @@ function AgentHeader({
       {/* The session popover (specs/agents/agent-pane.feature.md S10): how
           full the context window is, the folder and the branch. */}
       {meta && agent && <SessionRailButton key={meta.id} meta={meta} agent={agent} homeDir={homeDir} />}
-      {/* An agent with an account: whether this session spends a plan or is
-          billed per token, from the agent's own account answer. */}
+      {/* An agent with an account: API or ACNT, always one of the two —
+          whether this session goes through the API or spends an account,
+          from the agent's own account answer, which the tooltip spells out. */}
       {meta?.account && agent?.capabilities.hasAccount && (
-        <Tooltip label={meta.account.detail}>
+        <Tooltip label={accountChipDetail(meta.account)}>
           <span
             className="chip muted agent-account"
             data-billing={meta.account.billing}
             tabIndex={0}
-            aria-label={`Billing: ${meta.account.label}`}
+            aria-label={`${accountChipText(meta.account) === "API" ? "API" : "Account"}: ${meta.account.label}`}
           >
-            {meta.account.label}
+            {accountChipText(meta.account)}
           </span>
         </Tooltip>
       )}
