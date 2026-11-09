@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.248 — 2026-11-08
+
+- Settings: the desktop app and the app's own checkout use ~/.specdriven/settings.json only ([#407](https://github.com/SpecDriven/specdriven-app/pull/407))
+
 ## v0.1.247 — 2026-11-08
 
 - Open a code repository directly, with a file tree, a plain editor and Open in IntelliJ ([#405](https://github.com/SpecDriven/specdriven-app/pull/405))
