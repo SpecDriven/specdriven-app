@@ -2921,7 +2921,6 @@ button.app-version:focus-visible {
   background: var(--surface-3, var(--surface-1));
 }
 
-/* Code repo submodule (specs/app/code-repo-submodule.feature.md): no system git, nothing to run. */
 .settings-row > button:disabled {
   opacity: 0.55;
   cursor: not-allowed;

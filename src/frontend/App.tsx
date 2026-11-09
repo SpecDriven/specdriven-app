@@ -5302,41 +5302,6 @@ export function App() {
     setAuthorsInMarkdown(data.authorsInMarkdown === true);
   };
 
-  // Add the spec repo to a code repo as a git submodule
-  // (specs/app/code-repo-submodule.feature.md): the code repo is
-  // asked for, pre-filled with project-settings.json's `code-repo`; the
-  // server adds and commits the submodule there, and leaves the push to the
-  // user.
-  const addSubmoduleToCodeRepo = async () => {
-    setSettingsError(null);
-    const input = await prompt({
-      title: "Add to a code repo",
-      hint: "Folder of the code repo's git checkout. The specs are added there as a submodule and committed; push the code repo to share it.",
-      initial: codeRepo ?? "",
-      confirmLabel: "Add submodule",
-      browse: canChooseFolder ? () => chooseFolderNative("code-repo") : undefined,
-    });
-    const picked = input?.trim();
-    if (!picked) return;
-    const res = await fetch("/api/code-repo/submodule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ codeRepo: picked }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      codeRepo?: string;
-      path?: string;
-      error?: string;
-    };
-    if (!res.ok) {
-      setSettingsError(data.error ?? "Could not add the submodule");
-      return;
-    }
-    toast.success(
-      `Added the specs to ${data.codeRepo} as ${data.path} and committed — push the code repo to share it.`,
-    );
-  };
-
   const toggleAssignments = async (on: boolean) => {
     setSettingsAssignmentsDraft(on);
     if (!(await patchSettings({ assignments: on }))) setSettingsAssignmentsDraft(!on);
@@ -9925,25 +9890,6 @@ export function App() {
             <option value="js">Built-in (no git needed)</option>
           </select>
         </label>
-        {/* specs/app/code-repo-submodule.feature.md:
-            system git only — just-git has no `submodule`. */}
-        <div className="settings-row">
-          <span className="settings-row-label">
-            Code repo submodule
-            <span className="settings-row-hint">
-              {cliGitAvailable
-                ? "Add this spec repo to your code repo as a git submodule, so cloning the code with --recurse-submodules brings the specs along."
-                : "Needs git installed: the built-in engine cannot add submodules."}
-            </span>
-          </span>
-          <button
-            className="secondary"
-            disabled={!cliGitAvailable}
-            onClick={() => void addSubmoduleToCodeRepo()}
-          >
-            Add to a code repo…
-          </button>
-        </div>
         {/* GitHub sign-in (git-operations.md): the gh account
             when that engine is in effect, else the device flow. */}
         <div className="settings-row auth-section">
