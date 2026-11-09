@@ -16,6 +16,7 @@ import {
   mergeRecentFolders,
   normalizeAssignments,
   normalizeFeatureFlags,
+  normalizeGithubAccount,
   normalizeScenarioPolarity,
   normalizeQtestLinks,
   normalizeAhaImport,
@@ -760,6 +761,7 @@ async function stateFields(state: SpecDrivenState) {
     assignments: normalizeAssignments(state.assignments),
     featureFlags: normalizeFeatureFlags(state.featureFlags),
     scenarioPolarity: normalizeScenarioPolarity(state.scenarioPolarity),
+    githubAccount: normalizeGithubAccount(state.githubAccount),
     // The plugins (specs/app/plugins.feature.md): the profile's entries in
     // tab order, then the built-ins it leaves off — what Settings → Plugins
     // lists — with the per-module switches they replaced (`roadmap`,
@@ -963,6 +965,7 @@ const putState: Handler = async (req) => {
     assignments?: boolean;
     featureFlags?: boolean;
     scenarioPolarity?: boolean;
+    githubAccount?: boolean;
     /**
      * The profile: the enabled plugins, in tab order; the explicit plugin
      * folders; a data-repo plugin folder to trust from now on.
@@ -1008,6 +1011,7 @@ const putState: Handler = async (req) => {
     body.assignments === undefined &&
     body.featureFlags === undefined &&
     body.scenarioPolarity === undefined &&
+    body.githubAccount === undefined &&
     body.plugins === undefined &&
     body.pluginSettings === undefined &&
     body.roadmap === undefined &&
@@ -1022,7 +1026,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, githubAccount, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1359,6 +1363,13 @@ const putState: Handler = async (req) => {
     }
     if (body.scenarioPolarity) state.scenarioPolarity = true;
     else delete state.scenarioPolarity;
+  }
+  if (body.githubAccount !== undefined) {
+    if (typeof body.githubAccount !== "boolean") {
+      return json({ error: "githubAccount must be a boolean" }, 400);
+    }
+    if (body.githubAccount) state.githubAccount = true;
+    else delete state.githubAccount;
   }
   // The profile (specs/app/plugins.feature.md "The profile lists enabled
   // plugins in tab order"): the open data folder's ordered list of enabled

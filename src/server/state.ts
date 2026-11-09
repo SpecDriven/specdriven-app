@@ -187,6 +187,13 @@ export interface SpecDrivenState {
    * pill: a `[negative]` line already in a `.feature.md` is kept as written.
    */
   scenarioPolarity?: boolean;
+  /**
+   * Show the GitHub account (specs/app/user-info-settings.feature.md "GitHub
+   * account behind a switch"): the Settings sign-in block and the user
+   * menu's sign-in entries. Not ready yet, so absent means OFF; off only
+   * hides them — a sign-in already made keeps working.
+   */
+  githubAccount?: boolean;
   /** Allow deleting or moving published scenarios (specs/editor/spec-editor.feature.md
       "Delete Published Spec"); absent means OFF — published scenarios are
       immutable unless this is explicitly turned on. */
@@ -465,6 +472,12 @@ export function normalizeFeatureFlags(value: unknown): boolean {
 /** Effective scenario-polarity setting: OFF unless explicitly turned on
     (specs/ui/scenario-polarity.feature.md). */
 export function normalizeScenarioPolarity(value: unknown): boolean {
+  return value === true;
+}
+
+/** Effective GitHub-account setting: OFF unless explicitly turned on
+    (specs/app/user-info-settings.feature.md). */
+export function normalizeGithubAccount(value: unknown): boolean {
   return value === true;
 }
 
