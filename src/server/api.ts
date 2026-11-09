@@ -12,6 +12,8 @@ import {
   recentCodeRepos,
   rememberCodeRepo,
   forgetCodeRepo,
+  mergeRecentFolders,
+  openFolder,
   normalizeAssignments,
   normalizeFeatureFlags,
   normalizeScenarioPolarity,
@@ -640,6 +642,7 @@ async function stateFields(state: SpecDrivenState) {
   // One entry per repository (specs/app/spec-folders.feature.md): a list
   // saved before that rule may still name a repo by its url and by a folder.
   const recent = await onePerRepo(recentDataRepos(state), getAppRoot());
+  const codeRecent = isHostedMode() || isDemoMode() ? [] : recentCodeRepos(state);
   return {
     dataRepo: state.dataRepo ?? null,
     needsDataRepo: needsDataRepo(state),
@@ -648,7 +651,7 @@ async function stateFields(state: SpecDrivenState) {
     // absolute path, and the ones opened before for the folder dialog.
     codeRepoMode: codeRepoMode(state),
     codeRepoDir: codeRepoMode(state) ? state.openCodeRepo! : null,
-    recentCodeRepos: isHostedMode() || isDemoMode() ? [] : recentCodeRepos(state),
+    recentCodeRepos: codeRecent,
     // The first-run screen's question: no folder of either kind is open.
     needsFolder: needsFolder(state),
     // Whether a code repository may be opened here: on the developer's own
@@ -733,6 +736,11 @@ async function stateFields(state: SpecDrivenState) {
     // Recent folder list (specs/ui/ui.feature.md "Recent folder list"):
     // most recent first, the current folder included, at most 10.
     recentDataRepos: recent,
+    // Both lists as one (specs/app/spec-folders.feature.md "Manage
+    // specification folders"): every folder the app knows, each with its
+    // kind, the open one first, then newest first — what the folder dialog
+    // and the recent ▾ menu list.
+    recentFolders: mergeRecentFolders(recent, codeRecent, state.recentFolderOpenedAt, openFolder(state)),
     // Where each GitHub url on that list is cloned on this computer
     // (specs/app/spec-folders.feature.md "Manage specification folders"),
     // which the Spec folders dialog shows under the url. The hosted server's
@@ -815,6 +823,7 @@ function readOnlyFields() {
     dataRepo: repo,
     recentDataRepos: repo ? [repo] : [],
     recentCodeRepos: [],
+    recentFolders: repo ? [{ path: repo, kind: "spec" }] : [],
     canOpenCodeRepo: false,
     recentDataRepoDirs: {},
     reloadFrequencySeconds: site?.refreshSeconds ?? 0,
