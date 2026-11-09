@@ -1099,6 +1099,12 @@ export const agentChat = {
     choicesLoading.set(agent, load);
     return load;
   },
+  /** Ask again for every list already loaded: an agent's sign-in changed
+      (the plugin events stream), so its models and the header's API / ACNT
+      chip may have moved on though its descriptor did not. */
+  reloadChoices(): Promise<unknown> {
+    return Promise.all(Object.keys(state.choices).map((agent) => agentChat.loadChoices(agent, true).catch(() => null)));
+  },
   /** What an agent offers, already known (tests; a reader that has them),
       counting as freshly loaded; undefined forgets it, so the next menu
       asks the server again. */

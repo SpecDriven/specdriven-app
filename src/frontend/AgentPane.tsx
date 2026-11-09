@@ -79,7 +79,7 @@ import {
   type TranscriptItem,
 } from "./agentChat";
 import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
-import type { ChatImage, ImageUpload } from "../server/agentTypes";
+import type { ChatAccount, ChatImage, ImageUpload } from "../server/agentTypes";
 import { pastedImageFiles, prepareImage, toUpload, type PendingImage } from "./pastedImages";
 
 /**
@@ -206,6 +206,9 @@ export function AgentPane({
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
   const agent = session ? describeAgent(session.meta.agent, store.agents) : null;
+  /** The agent picked on the new-session screen; null is the first usable. */
+  const [draftAgentId, setDraftAgentId] = useState<string | null>(null);
+  const draftAgent = pickedAgent(store.agents, draftAgentId);
   // Asks for any folder; null when canceled or there is no prompt.
   const askFolder = prompt
     ? async (initial: string): Promise<string | null> =>
@@ -228,6 +231,7 @@ export function AgentPane({
       <AgentHeader
         store={store}
         session={session}
+        draftAgent={draftAgent}
         demo={demo}
         homeDir={homeDir}
         onClose={onClose}
@@ -248,6 +252,8 @@ export function AgentPane({
       ) : (
         <EmptyState
           store={store}
+          agentId={draftAgentId}
+          onPickAgent={setDraftAgentId}
           demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
@@ -303,9 +309,44 @@ export function knownFolders(
   return [...new Set(all.map(folderPath))];
 }
 
+/** The agent a new session starts on: the one picked, while it is usable,
+    else the first usable agent. */
+export function pickedAgent(all: readonly AgentDescriptor[], id: string | null): AgentDescriptor | null {
+  const agents = usableAgents(all);
+  return agents.find((a) => a.id === id) ?? agents[0] ?? null;
+}
+
+/**
+ * The header's API / ACNT chip (specs/agents/agent-pane.feature.md S13):
+ * what the session's agent reported of its sign-in, else — no session yet,
+ * or one still starting — what the agent says a new session would start
+ * under (AgentChoices.account), which the pane loads for its model menus
+ * anyway. An agent that can say neither yet shows nothing rather than a
+ * guess.
+ */
+function AccountChip({ agent, account }: { agent: string; account?: ChatAccount }) {
+  const choices = useAgentChoices(agent);
+  const shown = account ?? choices?.account;
+  if (!shown) return null;
+  const text = accountChipText(shown);
+  return (
+    <Tooltip label={accountChipDetail(shown)}>
+      <span
+        className="chip muted agent-account"
+        data-billing={shown.billing}
+        tabIndex={0}
+        aria-label={`${text === "API" ? "API" : "Account"}: ${shown.label}`}
+      >
+        {text}
+      </span>
+    </Tooltip>
+  );
+}
+
 function AgentHeader({
   store,
   session,
+  draftAgent,
   demo,
   homeDir,
   onClose,
@@ -313,6 +354,8 @@ function AgentHeader({
 }: {
   store: AgentChatStore;
   session: SessionState | null;
+  /** The agent the new-session screen has picked, while no session is open. */
+  draftAgent: AgentDescriptor | null;
   demo: boolean;
   homeDir: string | null;
   onClose: () => void;
@@ -320,6 +363,9 @@ function AgentHeader({
 }) {
   const meta = session?.meta ?? null;
   const agent = meta ? describeAgent(meta.agent, store.agents) : null;
+  // The chip speaks for the open session's agent, else the one a new
+  // session would start on.
+  const chipAgent = meta ? agent : draftAgent;
   const fail = (e: Error) => toast.error(e.message);
   const busy = meta !== null && isBusy(meta.status);
   return (
@@ -348,20 +394,8 @@ function AgentHeader({
           full the context window is, the folder and the branch. */}
       {meta && agent && <SessionRailButton key={meta.id} meta={meta} agent={agent} homeDir={homeDir} />}
       {/* An agent with an account: API or ACNT, always one of the two —
-          whether this session goes through the API or spends an account,
-          from the agent's own account answer, which the tooltip spells out. */}
-      {meta?.account && agent?.capabilities.hasAccount && (
-        <Tooltip label={accountChipDetail(meta.account)}>
-          <span
-            className="chip muted agent-account"
-            data-billing={meta.account.billing}
-            tabIndex={0}
-            aria-label={`${accountChipText(meta.account) === "API" ? "API" : "Account"}: ${meta.account.label}`}
-          >
-            {accountChipText(meta.account)}
-          </span>
-        </Tooltip>
-      )}
+          with or without a session (specs/agents/agent-pane.feature.md S13). */}
+      {chipAgent?.capabilities.hasAccount && <AccountChip agent={chipAgent.id} account={meta?.account} />}
       {meta && busy && agent?.capabilities.canInterrupt && (
         <Tooltip label="Stop this turn">
           <button
@@ -1022,6 +1056,8 @@ export function AgentEmptyGuide({
 
 function EmptyState({
   store,
+  agentId,
+  onPickAgent,
   demo,
   codeRepo,
   dataRepo,
@@ -1032,6 +1068,9 @@ function EmptyState({
   agentSettings,
 }: {
   store: AgentChatStore;
+  /** The agent picked here (kept by the pane, so its header can name it); null is the first. */
+  agentId: string | null;
+  onPickAgent: (id: string) => void;
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
@@ -1043,7 +1082,6 @@ function EmptyState({
 }) {
   // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
   const agents = usableAgents(store.agents);
-  const [agentId, setAgentId] = useState<string | null>(null);
   /** A folder picked here; null keeps the default (code repo, else data repo). */
   const [folder, setFolder] = useState<string | null>(null);
   /** A mode picked here; null is the agent's default. */
@@ -1052,7 +1090,7 @@ function EmptyState({
   const [worktree, setWorktree] = useState(readAgentWorktree);
   /** A start held while the source-check dialog is open; null when none is. */
   const [pending, setPending] = useState<{ status: SourceStatus; text: string; images: ImageUpload[] } | null>(null);
-  const picked = agents.find((a) => a.id === agentId) ?? agents[0] ?? null;
+  const picked = pickedAgent(store.agents, agentId);
   const choices = useAgentChoices(picked?.id ?? null);
   const defaultDir = codeRepo ?? dataRepo;
   const workDir = folder ?? defaultDir;
@@ -1123,7 +1161,7 @@ function EmptyState({
             description: a.description,
             checked: a.id === picked.id,
             onSelect: () => {
-              setAgentId(a.id);
+              onPickAgent(a.id);
               setMode(null);
             },
           }))}

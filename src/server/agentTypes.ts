@@ -408,6 +408,11 @@ export interface AgentChoices {
   models: AgentModelOption[];
   model: string | null;
   effort: EffortLevel | null;
+  /** The sign-in a new session would start under, for an agent with an
+      account (capabilities.hasAccount): the pane header's API / ACNT chip
+      before any session has said which (specs/agents/agent-pane.feature.md
+      S13). Absent from an agent that cannot say without a session. */
+  account?: ChatAccount;
 }
 
 /** A change to the defaults a new session starts on; null clears one. */
