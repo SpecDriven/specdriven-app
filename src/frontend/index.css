@@ -7014,7 +7014,8 @@ button.page-archive-head:hover {
   color: var(--text-2);
 }
 
-/* The name gives way first: everything right of it keeps its size. */
+/* The tabs (or the title) give way first: everything right of the spacer
+   keeps its size. */
 .agent-head .spacer {
   flex: 1 0 0.25rem;
 }
@@ -7366,34 +7367,25 @@ button.page-archive-head:hover {
 /* --- Session tabs (specs/agents/agent-pane.feature.md "Each session has
    its own tab, at most five") ------------------------------------------- */
 
-/* The tab row sits between the header and the transcript. */
-.agent-pane.has-tabs {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-}
-
-.agent-tabs {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-width: 0;
-  padding: 0.3rem 0.5rem 0.3rem 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-
-/* Five tabs share the row at the pane's narrowest; + keeps its size. */
+/* The tabs share the header line with the icon, the chips and the buttons
+   right of them (one line, as in Claude Code): five of them squeeze down
+   together at the pane's narrowest, and everything else keeps its size. */
 .agent-tablist {
   display: flex;
-  flex: 1 1 auto;
+  /* Grows ahead of the header's spacer, so the tabs keep their natural
+     width and + stays right after them; shrinks before anything else. */
+  flex: 100 1 auto;
   gap: 0.2rem;
   min-width: 0;
 }
 
 .agent-tab {
   display: flex;
-  flex: 0 1 10rem;
+  flex: 0 1 auto;
   align-items: center;
   gap: 0.3rem;
   min-width: 2.75rem;
+  max-width: 10rem;
   height: 1.75rem;
   padding: 0 0.15rem 0 0.4rem;
   border-radius: var(--radius-sm);
@@ -7469,6 +7461,7 @@ button.page-archive-head:hover {
 
 .agent-tab-new {
   flex: none;
+  margin-left: 0.1rem;
 }
 
 .agent-tab-new[aria-disabled="true"] {

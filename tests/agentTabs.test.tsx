@@ -205,7 +205,11 @@ test("each open session has a tab in start order, every one followed, and a clic
   expect(seen.loaded.sort()).toEqual(["a", "b", "c"]);
   // …and the remembered one is the one shown.
   expect(selected(host)).toBe("Task b");
-  expect(host.querySelector(".agent-tablist")!.getAttribute("aria-label")).toBe("Sessions");
+  // One header line, as in Claude Code: the tabs and + sit in it, not on a row of their own.
+  const tablist = host.querySelector(".agent-head .agent-tablist")!;
+  expect(tablist.getAttribute("aria-label")).toBe("Sessions");
+  expect(host.querySelector(".agent-head button[aria-label=\"New session\"]")).not.toBeNull();
+  expect(host.querySelector(".agent-session-name")).toBeNull();
   expect(tabs(host)[1]!.querySelector(".agent-dot")!.getAttribute("data-status")).toBe("running");
   expect(host.textContent).toContain("hello from b");
 
@@ -309,8 +313,9 @@ test("closing the last tab leaves the new-session screen", async () => {
   await act(async () => tabs(host)[0]!.querySelector<HTMLButtonElement>(".agent-tab-close")!.click());
   await settle();
   expect(agentChatState().activeId).toBeNull();
-  // No sessions left: no tab row at all, just the message box.
-  expect(host.querySelector(".agent-tabs")).toBeNull();
+  // No sessions left: no tabs at all, the pane's title back in the header, just the message box.
+  expect(host.querySelector(".agent-tablist")).toBeNull();
+  expect(host.querySelector(".agent-head")!.textContent).toContain("Coding agent");
   expect(host.querySelector('textarea[aria-label="Message"]')).not.toBeNull();
   unmount();
 });
