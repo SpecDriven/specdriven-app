@@ -209,8 +209,8 @@ export function PasteToken({
   return (
     <div className="paste-token">
       <span className="settings-row-hint">
-        {replacing ? "Replace it with a personal access token" : "Or paste a personal access token"} — the
-        way in for GitHub Enterprise:
+        {replacing ? "Replace it with a personal access token" : "Paste a personal access token"}{" "}
+        — the way in for GitHub Enterprise:
       </span>
       <div className="auth-row">
         <input
