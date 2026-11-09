@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.250 — 2026-11-09
+
+- Agent pane: a folder switch tries the agent's API again, and the pane warns when it does not answer ([#412](https://github.com/SpecDriven/specdriven-app/pull/412))
+- Agent pane header: show API or ACNT with no session open too ([#411](https://github.com/SpecDriven/specdriven-app/pull/411))
+
 ## v0.1.249 — 2026-11-09
 
 - One folder list: spec folders and code repositories together, each marked by kind ([#410](https://github.com/SpecDriven/specdriven-app/pull/410))
