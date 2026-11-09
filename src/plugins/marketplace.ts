@@ -210,3 +210,94 @@ export function parseInstallRecord(raw: unknown): InstallRecord | null {
     installedAt: str(r.installedAt) ?? "",
   };
 }
+
+// ---- updates ------------------------------------------------------------------
+
+/** A git url without its scheme case, trailing slashes or `.git`, for comparing. */
+function normalizedSource(source: string): string {
+  return source.trim().replace(/[\\/]+$/, "").replace(/\.git$/, "").toLowerCase();
+}
+
+/**
+ * Whether a marketplace is the SpecDriven index the app reads by default —
+ * by its git url, whatever name the profile gave it (specs/app/plugins
+ * .feature.md "The marketplaces are refreshed on start…").
+ */
+export function isDefaultMarketplace(entry: MarketplaceRef): boolean {
+  const source = normalizedSource(entry.source);
+  return DEFAULT_MARKETPLACES.some((m) => normalizedSource(m.source) === source);
+}
+
+/**
+ * Compare two dotted versions numerically, part by part — `1.10.0` is newer
+ * than `1.9.2`; a pre-release (`1.2.0-beta`) sorts before its release; a
+ * leading `v` is ignored. Negative when a < b, positive when a > b.
+ */
+export function compareVersions(a: string, b: string): number {
+  const split = (v: string) => {
+    const [core = "", pre] = v.trim().replace(/^v/i, "").split(/-(.*)/s, 2);
+    return { parts: core.split(".").map((p) => Number.parseInt(p, 10) || 0), pre };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < Math.max(x.parts.length, y.parts.length); i++) {
+    const d = (x.parts[i] ?? 0) - (y.parts[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  if (x.pre === y.pre) return 0;
+  if (x.pre === undefined) return 1;
+  if (y.pre === undefined) return -1;
+  return x.pre < y.pre ? -1 : 1;
+}
+
+/** An installed plugin as the update check reads it. */
+export interface InstalledForUpdate {
+  id: string;
+  displayName?: string;
+  /** The manifest's version. */
+  version?: string;
+  install?: InstallRecord;
+}
+
+/** A plugin the start offers to update (specs/app/plugins.feature.md S14). */
+export interface PluginUpdate {
+  id: string;
+  displayName: string;
+  marketplace: string;
+  /** The version installed, when it has one. */
+  from?: string;
+  /** The version — or, for a ref change alone, the ref — the index offers. */
+  to: string;
+}
+
+/**
+ * The installed marketplace plugins whose index row has moved on: a newer
+ * version than the one installed, or a pin to another ref. A plugin with no
+ * install record (linked, or the data folder's), whose marketplace has no
+ * index here, or whose row is gone or one the app refuses, is left out.
+ */
+export function pluginUpdates(
+  installed: readonly InstalledForUpdate[],
+  indexes: readonly { entry: MarketplaceRef; index: MarketplaceIndex }[],
+): PluginUpdate[] {
+  const out: PluginUpdate[] = [];
+  for (const plugin of installed) {
+    const record = plugin.install;
+    if (!record) continue;
+    const index = indexes.find((i) => i.entry.name === record.marketplace)?.index;
+    const row = index?.plugins.find((p) => p.name === record.name);
+    if (!row || indexRowRefusal(row)) continue;
+    const from = plugin.version || record.version || undefined;
+    const newer = row.version !== undefined && (from === undefined || compareVersions(row.version, from) > 0);
+    const repinned = row.ref !== undefined && row.ref !== record.ref;
+    if (!newer && !repinned) continue;
+    out.push({
+      id: plugin.id,
+      displayName: plugin.displayName || plugin.id,
+      marketplace: record.marketplace,
+      ...(from ? { from } : {}),
+      to: (newer ? row.version : undefined) ?? row.ref!,
+    });
+  }
+  return out;
+}

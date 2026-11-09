@@ -200,9 +200,10 @@ test("a start installs the agent plugin for a command it finds, mounts it, and r
 
 // The start's marketplace refresh (refreshMarketplacesOnStart, specs/app/
 // plugins.feature.md "The marketplaces are refreshed on start when
-// external plugins are installed"): every marketplace is pulled when a
-// folder plugin is known, none with the built-ins alone.
-test("the start's refresh pulls every marketplace only when an external plugin is installed, and logs one it cannot reach", async () => {
+// external plugins are installed"): the default SpecDriven index — known by
+// its url, whatever its name — is pulled on every start; every other
+// marketplace only when a folder plugin is known.
+test("the start's refresh pulls the default marketplace always and the others only when an external plugin is installed, and logs one it cannot reach", async () => {
   const pulled: string[][] = [];
   const lines: string[] = [];
   const other: MarketplaceRef = { name: "other", source: "https://example.test/other" };
@@ -215,8 +216,17 @@ test("the start's refresh pulls every marketplace only when an external plugin i
     log: (line: string) => lines.push(line),
   };
 
+  // Built-ins alone and no default index named: nothing is pulled.
   expect(await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => [] })).toBeNull();
   expect(pulled).toEqual([]);
+
+  // Built-ins alone: the default index, under the name the profile gave it, and nothing else.
+  const defaultIndex: MarketplaceRef = { name: "plugins", source: "https://github.com/SpecDriven/plugins.git" };
+  expect(
+    await refreshMarketplacesOnStart({}, { ...deps, marketplaces: [defaultIndex, other], externalPlugins: () => [] }),
+  ).toEqual({ refreshed: ["plugins"], errors: [] });
+  expect(pulled).toEqual([["plugins"]]);
+  pulled.length = 0;
 
   const result = await refreshMarketplacesOnStart({}, { ...deps, externalPlugins: () => ["models"] });
   expect(result).toEqual({ refreshed: ["specdriven"], errors: ["other: offline"] });

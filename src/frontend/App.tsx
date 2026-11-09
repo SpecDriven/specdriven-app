@@ -125,6 +125,7 @@ import { markText } from "./highlight";
 import { PageSkeleton } from "./Skeleton";
 import { AppOutdated, watchDataTooNew } from "./AppOutdated";
 import { useModalPrompts } from "./ModalPrompts";
+import { PluginUpdatesDialog, dismissPluginUpdates, usePluginUpdatesOffer } from "./PluginUpdatesDialog";
 import { cleanLine, cleanSegments } from "../server/text";
 import { AppPageLayout, PageSection } from "./AppPage";
 import { PluginsPage } from "./PluginsPage";
@@ -2016,6 +2017,11 @@ export function App() {
   // desktop runtime has no window.prompt (specs/app/desktop-app.feature.md
   // "Dialogs").
   const { modal, modalOpen, prompt, promptWithChoice, confirm, pick } = useModalPrompts();
+  // Plugin updates at start (specs/app/plugins.feature.md "Plugins with an
+  // update are offered in a dialog at start"): asked once the server's
+  // start has pulled the marketplaces; the server answers [] wherever it
+  // offers none — the demo, the hosted app, a run already asked.
+  const [pluginUpdates, clearPluginUpdates] = usePluginUpdatesOffer(true);
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
@@ -13459,6 +13465,16 @@ export function App() {
           actions={paletteActions}
           recent={recentItems}
           resolve={resolvePalette}
+        />
+      )}
+      {/* Below the prompts: an offer waits while another dialog asks. */}
+      {pluginUpdates && !modalOpen && (
+        <PluginUpdatesDialog
+          updates={pluginUpdates}
+          onClose={() => {
+            clearPluginUpdates();
+            void dismissPluginUpdates();
+          }}
         />
       )}
       {/* Last, so a stacked prompt/confirm renders above any open dialog. */}

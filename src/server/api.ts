@@ -288,6 +288,7 @@ import {
   autoInstalled,
   ensureCommandPlugins,
   refreshMarketplacesOnStart,
+  startupUpdates,
 } from "../plugins/host/autoInstall";
 import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
@@ -438,10 +439,42 @@ export async function applyStartupState(): Promise<void> {
   // (specs/app/plugins.feature.md "The marketplaces are refreshed on start
   // when external plugins are installed"), so the install reads the index as
   // it is now and never runs git in a marketplace folder beside the pull.
+  // What the start pulled is what the update dialog reads (specs/app/
+  // plugins.feature.md "Plugins with an update are offered in a dialog at
+  // start"): offered once per run of the app.
+  startupRefreshed = [];
+  pluginUpdatesAnswered = false;
   startupInstall = refreshStartupMarketplaces(state).then(() => installAgentPlugins(state));
 }
 
 let startupInstall: Promise<void> = Promise.resolve();
+/** The marketplaces the start pulled without an error. */
+let startupRefreshed: string[] = [];
+/** The start's update dialog was answered — Update or Not now — in this run. */
+let pluginUpdatesAnswered = false;
+
+/**
+ * GET /api/plugins/updates (specs/app/plugins.feature.md "Plugins with an
+ * update are offered in a dialog at start"): once the start's refresh is
+ * over, the installed marketplace plugins whose index row moved on — read
+ * from the marketplaces the start reached, so an offline start offers
+ * nothing. Empty once the dialog was answered in this run, and wherever the
+ * start does not reach the marketplaces.
+ */
+async function getPluginUpdates(): Promise<Response> {
+  if (!startupReachesMarketplaces() || pluginUpdatesAnswered) return json({ updates: [] });
+  await startupInstall;
+  if (pluginUpdatesAnswered || startupRefreshed.length === 0) return json({ updates: [] });
+  const state = (await readState(getAppRoot())) as Record<string, unknown>;
+  const marketplaces = marketplaceEntries(profileSection(state)).filter((m) => startupRefreshed.includes(m.name));
+  return json({ updates: await startupUpdates(state, { marketplaces }) });
+}
+
+/** POST /api/plugins/updates/dismiss: the dialog was answered; not offered again in this run. */
+async function dismissPluginUpdates(): Promise<Response> {
+  pluginUpdatesAnswered = true;
+  return json({ ok: true });
+}
 
 /** Settled once the start's marketplace refresh and agent plugin install are over — for the tests. */
 export function autoInstalledOnStart(): Promise<void> {
@@ -460,7 +493,8 @@ function startupReachesMarketplaces(): boolean {
 async function refreshStartupMarketplaces(state: SpecDrivenState): Promise<void> {
   if (!startupReachesMarketplaces()) return;
   try {
-    await refreshMarketplacesOnStart(state as Record<string, unknown>, autoInstallDeps());
+    const result = await refreshMarketplacesOnStart(state as Record<string, unknown>, autoInstallDeps());
+    startupRefreshed = result?.refreshed ?? [];
   } catch (e) {
     console.error(`[plugins] refreshing the marketplaces: ${(e as Error).message}`);
   }
@@ -4055,6 +4089,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/app-update/install", unlessHosted(unlessDemoUpdate(appUpdate.install!))],
   ["POST", "/api/app-update/restart", unlessHosted(unlessDemoUpdate(appUpdate.restart!))],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
+  ["GET", "/api/plugins/updates", getPluginUpdates],
+  ["POST", "/api/plugins/updates/dismiss", dismissPluginUpdates],
   ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
