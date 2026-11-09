@@ -237,7 +237,6 @@ import { readAgentModels, warnUnreportedModels, writeAgentModels, type AgentMode
 import type { SessionSection } from "./agent";
 import { ROADMAP, TASKS, ensurePageFolder, pageFolderNamed, type PageFolder } from "./pages";
 import { getPullRequest, readIssuesRepo } from "./issues";
-import { addSpecsSubmodule, SubmoduleError } from "./submodule";
 import { parseTestUrl, resolveTestName } from "./testName";
 import { parsePullRequestUrl, validPullRequests } from "./pullRequests";
 import { RESOURCE_LINK_KINDS, isResourceLinkKind } from "./resourceLinks";
@@ -3824,35 +3823,6 @@ const postChooseFolder: Handler = async (req) => {
   return json({ path: await chooseFolder(purpose) });
 };
 
-// Add the spec repo to a code repo as a git submodule
-// (specs/app/code-repo-submodule.feature.md; src/server/submodule.ts).
-// The code repo is the one picked in Settings, else project-settings.json's
-// `code-repo`; a relative path resolves against the data repo, as that
-// setting's does. System git only — the bundled engine has no `submodule`.
-const addCodeRepoSubmodule = withDataDir(async (dir, req) => {
-  const body = (await req.json().catch(() => ({}))) as { codeRepo?: unknown; name?: unknown };
-  const picked = typeof body.codeRepo === "string" ? body.codeRepo.trim() : "";
-  const codeRepo = picked || (await readProjectSettings(dir)).codeRepo;
-  if (!codeRepo) return json({ error: "Choose the code repo to add the specs to" }, 400);
-  const name = typeof body.name === "string" ? body.name : undefined;
-  try {
-    return json(await addSpecsSubmodule(dir, codeRepo, name));
-  } catch (e) {
-    if (e instanceof SubmoduleError) return json({ error: e.message }, e.status);
-    throw e;
-  }
-});
-// Refused before the data repo is resolved: the demo's dataset has no git
-// remote to point a submodule at, and without a git binary there is nothing
-// to run it with.
-const postCodeRepoSubmodule: Handler = (req, params) => {
-  if (isDemoMode()) return json({ error: "Submodules cannot be added in demo mode" }, 403);
-  if (!cliGitAvailable()) {
-    return json({ error: "Adding a submodule needs git installed — the bundled engine cannot" }, 501);
-  }
-  return addCodeRepoSubmodule(req, params);
-};
-
 /**
  * 403 in a hosted worker (src/server/hostedMode.ts) — routes that run code
  * on the host, open something on its desktop, or sign in to GitHub, which
@@ -4163,7 +4133,6 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/files/file", unlessHosted(getFilesFile)],
   ["PUT", "/api/files/file", unlessHosted(putFilesFile)],
   ["POST", "/api/files/open-in-idea", unlessHosted(postFilesOpenInIdea)],
-  ["POST", "/api/code-repo/submodule", unlessHosted(postCodeRepoSubmodule)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["POST", "/api/features/:file/confluence", unlessHosted(postPublishConfluence)],

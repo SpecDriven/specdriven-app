@@ -153,9 +153,8 @@ test("folder chooser route matches POST only", () => {
   expect(matchApi("PUT", "/api/choose-folder")).toBeNull();
 });
 
-// Picking the code repo to add the specs to as a submodule
-// (specs/app/code-repo-submodule.feature.md "Choosing the code repo and the submodule's folder")
-// titles the dialog for that. The request names a purpose, never the title
+// Picking a code repo (Project settings, the folder switcher) titles the
+// dialog for that. The request names a purpose, never the title
 // itself — the title is spliced into the osascript and PowerShell.
 test("the dialog title follows the purpose, never free text from the request", async () => {
   const titles: (string | undefined)[] = [];
