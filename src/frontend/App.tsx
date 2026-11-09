@@ -1804,6 +1804,10 @@ export function App() {
   // Scenario polarity (specs/ui/scenario-polarity.feature.md): opt-in — the
   // Positive / Negative pill shows only once the Settings switch turns it on.
   const [scenarioPolarity, setScenarioPolarity] = useState(false);
+  // The GitHub account (specs/app/user-info-settings.feature.md "GitHub
+  // account behind a switch"): not ready, so the Settings sign-in block and
+  // the user menu's sign-in entries show only once the switch is on.
+  const [githubAccount, setGithubAccount] = useState(false);
   // The plugins (specs/app/plugins.feature.md) as `GET /api/state` lists
   // them: the profile's entries in tab order, then the built-ins it leaves
   // off — what Settings → Plugins renders, each with its switch. Every
@@ -1892,6 +1896,7 @@ export function App() {
   const [settingsAssignmentsDraft, setSettingsAssignmentsDraft] = useState(false);
   const [settingsFeatureFlagsDraft, setSettingsFeatureFlagsDraft] = useState(false);
   const [settingsScenarioPolarityDraft, setSettingsScenarioPolarityDraft] = useState(false);
+  const [settingsGithubAccountDraft, setSettingsGithubAccountDraft] = useState(false);
   const [settingsGoogleCalendarDraft, setSettingsGoogleCalendarDraft] = useState(false);
   const [settingsSyncDraft, setSettingsSyncDraft] = useState(DEFAULT_SYNC_SERVER_URL);
   /** The Settings switch: off saves an empty url, which turns live sync off. */
@@ -2142,6 +2147,9 @@ export function App() {
         }
         if (typeof state.scenarioPolarity === "boolean") {
           setScenarioPolarity(state.scenarioPolarity);
+        }
+        if (typeof state.githubAccount === "boolean") {
+          setGithubAccount(state.githubAccount);
         }
         setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
         setPluginSources(Array.isArray(state.pluginSources) ? state.pluginSources : []);
@@ -4878,6 +4886,7 @@ export function App() {
     setSettingsAssignmentsDraft(assignments);
     setSettingsFeatureFlagsDraft(featureFlags);
     setSettingsScenarioPolarityDraft(scenarioPolarity);
+    setSettingsGithubAccountDraft(githubAccount);
     setSettingsGoogleCalendarDraft(googleCalendarOn);
     setSettingsSyncDraft(syncServerUrl ?? DEFAULT_SYNC_SERVER_URL);
     setSettingsSyncOnDraft(syncServerUrl !== null);
@@ -5068,6 +5077,7 @@ export function App() {
     setAssignments(data.assignments === true);
     setFeatureFlags(data.featureFlags === true);
     setScenarioPolarity(data.scenarioPolarity === true);
+    setGithubAccount(data.githubAccount === true);
     // The profile's plugins mount and unmount to match, in its order — a
     // tab appears, goes or moves before this returns (src/plugins/client/
     // loader.ts).
@@ -5315,6 +5325,11 @@ export function App() {
   const toggleScenarioPolarity = async (on: boolean) => {
     setSettingsScenarioPolarityDraft(on);
     if (!(await patchSettings({ scenarioPolarity: on }))) setSettingsScenarioPolarityDraft(!on);
+  };
+
+  const toggleGithubAccount = async (on: boolean) => {
+    setSettingsGithubAccountDraft(on);
+    if (!(await patchSettings({ githubAccount: on }))) setSettingsGithubAccountDraft(!on);
   };
 
   // The profile (specs/app/plugins.feature.md "Turning a plugin off unwinds
@@ -9890,8 +9905,33 @@ export function App() {
             <option value="js">Built-in (no git needed)</option>
           </select>
         </label>
+        {/* specs/app/user-info-settings.feature.md "GitHub account behind
+            a switch": not ready yet, so the sign-in block below shows only
+            once this is on. Off hides it; a sign-in already made keeps
+            working. */}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            GitHub account
+            <span className="settings-row-hint">
+              {settingsGithubAccountDraft
+                ? "Preview: sign in to GitHub from here and the user menu. Not finished yet."
+                : "Hidden while it is not ready. Turn on to sign in to GitHub from here and the user menu."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="GitHub account"
+              checked={settingsGithubAccountDraft}
+              onChange={(e) => void toggleGithubAccount(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
         {/* GitHub sign-in (git-operations.md): the gh account
             when that engine is in effect, else the device flow. */}
+        {settingsGithubAccountDraft && (
         <div className="settings-row auth-section">
           <span className="auth-title">GitHub account</span>
           {gh?.available && (
@@ -9977,6 +10017,7 @@ export function App() {
             folders work without either.
           </p>
         </div>
+        )}
       </PageSection>
       )}
       {settingsError && <p className="error settings-error">{settingsError}</p>}
@@ -10006,8 +10047,9 @@ export function App() {
               },
             },
             // The desktop and local app's own GitHub sign-in: paste a
-            // token, switch to another account's, or sign out.
-            ...(hosted || demo
+            // token, switch to another account's, or sign out — behind the
+            // GitHub account switch while it is not ready.
+            ...(hosted || demo || !githubAccount
               ? []
               : auth?.signedIn
                 ? [
