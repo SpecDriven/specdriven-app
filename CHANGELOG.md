@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.246 — 2026-11-08
+
+- Coding agent pane: session tabs on the header line, not a row of their own ([#404](https://github.com/SpecDriven/specdriven-app/pull/404))
+- Coding agent pane: a tab per session, at most five open ([#403](https://github.com/SpecDriven/specdriven-app/pull/403))
+- Clicking the version opens Check for Updates; drop it from the user menu ([#402](https://github.com/SpecDriven/specdriven-app/pull/402))
+
 ## v0.1.245 — 2026-11-07
 
 - Marketplace Refresh clones a copy afresh when it cannot pull; drop Re-clone ([#401](https://github.com/SpecDriven/specdriven-app/pull/401))
