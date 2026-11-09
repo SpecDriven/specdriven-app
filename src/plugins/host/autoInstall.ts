@@ -16,8 +16,18 @@
 import { which } from "../../server/run";
 import type { AgentOffer } from "../../server/agentTypes";
 import { PROFILE_KEY } from "../profile";
-import { DEFAULT_MARKETPLACES, marketplaceEntries, type MarketplacePlugin, type MarketplaceRef } from "../marketplace";
-import { externalPluginIds } from "./loader";
+import {
+  DEFAULT_MARKETPLACES,
+  isDefaultMarketplace,
+  marketplaceEntries,
+  pluginUpdates,
+  type InstalledForUpdate,
+  type MarketplaceIndex,
+  type MarketplacePlugin,
+  type MarketplaceRef,
+  type PluginUpdate,
+} from "../marketplace";
+import { externalPlugin, externalPluginIds, pluginStates } from "./loader";
 import { cachedMarketplaceIndexes, confirmInstall, loadMarketplaces } from "./marketplace";
 import { discoverPlugins } from "./sources";
 import { version as appVersion } from "../../../package.json";
@@ -92,12 +102,14 @@ export interface StartupRefreshResult {
 }
 
 /**
- * Pull every marketplace once at start when any plugin comes from outside
- * the app (specs/app/plugins.feature.md "The marketplaces are refreshed on
- * start when external plugins are installed"), so Settings → Plugins offers
- * Update for what changed since, and the agent install that follows reads
- * the index as it is now. With only built-ins nothing is pulled: null. A
- * marketplace that cannot be reached keeps its cache and is logged.
+ * Pull the marketplaces at start (specs/app/plugins.feature.md "The
+ * marketplaces are refreshed on start when external plugins are
+ * installed"): the default SpecDriven index always, so the agent install
+ * and the update check (S14) read it as it is now; every other one only
+ * when a plugin comes from outside the app, so Settings → Plugins offers
+ * Update for what changed since. With only built-ins and no default
+ * marketplace named nothing is pulled: null. A marketplace that cannot be
+ * reached keeps its cache and is logged.
  */
 export async function refreshMarketplacesOnStart(
   state: State,
@@ -105,8 +117,9 @@ export async function refreshMarketplacesOnStart(
 ): Promise<StartupRefreshResult | null> {
   const log = deps.log ?? ((line) => console.log(`[plugins] ${line}`));
   const externals = (deps.externalPlugins ?? externalPluginIds)();
-  if (externals.length === 0) return null;
-  const marketplaces = deps.marketplaces ?? marketplaceEntries(profileSection(state));
+  const named = deps.marketplaces ?? marketplaceEntries(profileSection(state));
+  const marketplaces = externals.length > 0 ? named : named.filter(isDefaultMarketplace);
+  if (marketplaces.length === 0) return null;
   const refresh =
     deps.refresh ??
     (async (entries: readonly MarketplaceRef[]) =>
@@ -121,9 +134,37 @@ export async function refreshMarketplacesOnStart(
     }
   }
   if (result.refreshed.length > 0) {
-    log(`refreshed ${result.refreshed.join(", ")} on start for ${externals.length} external plugin(s)`);
+    log(
+      `refreshed ${result.refreshed.join(", ")} on start` +
+        (externals.length > 0 ? ` for ${externals.length} external plugin(s)` : ""),
+    );
   }
   return result;
+}
+
+/**
+ * The installed marketplace plugins whose index row moved on since they
+ * were installed (specs/app/plugins.feature.md "Plugins with an update are
+ * offered in a dialog at start"), from the indexes on disk — what the start
+ * just pulled. Reads no git.
+ */
+export async function startupUpdates(
+  state: State,
+  deps: {
+    marketplaces?: readonly MarketplaceRef[];
+    installed?: () => InstalledForUpdate[];
+    indexes?: (entries: readonly MarketplaceRef[]) => Promise<{ entry: MarketplaceRef; index: MarketplaceIndex }[]>;
+  } = {},
+): Promise<PluginUpdate[]> {
+  const marketplaces = deps.marketplaces ?? marketplaceEntries(profileSection(state));
+  const installed =
+    deps.installed ??
+    (() =>
+      pluginStates()
+        .filter((p) => p.installed && !p.builtin && p.source === "home")
+        .map((p) => ({ id: p.id, displayName: p.displayName, version: p.version, install: externalPlugin(p.id)?.install })));
+  const indexes = deps.indexes ?? cachedMarketplaceIndexes;
+  return pluginUpdates(installed(), await indexes(marketplaces));
 }
 
 /**

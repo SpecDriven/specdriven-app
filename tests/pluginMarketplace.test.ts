@@ -598,6 +598,21 @@ async function startAfterUpstreamMoved(withExternal: boolean) {
     await applyStartupState();
     await autoInstalledOnStart();
     expect(await cached()).toBe(withExternal ? "1.1.0" : "1.0.0");
+    // The update dialog's question (specs/app/plugins.feature.md "Plugins
+    // with an update are offered in a dialog at start").
+    const offered = await json(await api("GET", "/api/plugins/updates"));
+    expect(offered.status).toBe(200);
+    expect(offered.body.updates).toEqual(
+      withExternal ? [{ id: "hello", displayName: "The hello plugin", marketplace: "local", from: "1.0.0", to: "1.1.0" }] : [],
+    );
+    if (withExternal) {
+      // Update as the dialog does it, and nothing is offered any more.
+      expect((await json(await api("POST", "/api/plugins/hello/update", {}))).status).toBe(200);
+      expect((await json(await api("GET", "/api/plugins/updates"))).body.updates).toEqual([]);
+    }
+    // Answered once, not asked again in this run.
+    expect((await json(await api("POST", "/api/plugins/updates/dismiss", {}))).status).toBe(200);
+    expect((await json(await api("GET", "/api/plugins/updates"))).body.updates).toEqual([]);
   } finally {
     await syncedOnStart();
     reloader.stop();
