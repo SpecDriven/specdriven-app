@@ -291,10 +291,18 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     const res = await git(repoDir, "push");
     if (res.exitCode === 0) return { pushed: true, message: "pushed" };
     const output = (res.stderr + res.stdout).trim();
-    return {
-      pushed: false,
-      message: `push failed: ${isAuthFailure(output) ? signInHint() : output}`,
-    };
+    const failure = isAuthFailure(output) ? signInHint() : output;
+    return { pushed: false, failure, message: `push failed: ${failure}` };
+  }
+
+  /**
+   * A push's result under the wording of the operation it ended: what the
+   * operation says when everything reached the remote, and what it got done
+   * on this computer when the push did not — with the push's own reason kept,
+   * in the message and as `failure`.
+   */
+  function pushOutcome(res: SyncResult, pushed: string, kept: string): SyncResult {
+    return res.pushed ? { pushed: true, message: pushed } : { ...res, message: `${kept}; ${res.message}` };
   }
 
   /**
@@ -318,11 +326,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
       };
     }
     await commit(repoDir, "--no-edit");
-    const res = await push(repoDir);
-    return {
-      pushed: res.pushed,
-      message: res.pushed ? "conflict resolved; committed and pushed" : `conflict resolved; committed; ${res.message}`,
-    };
+    return pushOutcome(await push(repoDir), "conflict resolved; committed and pushed", "conflict resolved; committed");
   }
 
   /**
@@ -330,6 +334,14 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
    * pushed to GitHub"): after the cron git pull, commit and push any locally
    * saved scenarios so no data is lost. Skipped while a merge conflict is being
    * resolved so conflict markers are never auto-committed.
+   *
+   * A clean working tree is not the end of it: commits an earlier push left
+   * on this computer — the user was signed out, or offline — are pushed
+   * here, so they go up on the first tick that can reach the remote rather
+   * than waiting for the next edit to carry them (git-operations.md "a push
+   * that fails is shown, and tried again"). `status -b` says how far ahead
+   * of its upstream the branch is on all three engines; the revision-walking
+   * commands that would count it are not in the bundled engine's vocabulary.
    */
   async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
     if (!(await isRepoRoot(repoDir))) {
@@ -338,20 +350,21 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     if ((await conflictedFiles(repoDir)).length > 0) {
       return { pushed: false, message: "merge conflict in progress; skipped sync" };
     }
-    const status = await git(repoDir, "status", "--porcelain");
-    if (status.exitCode !== 0 || status.stdout.trim() === "") {
-      return { pushed: false, message: "no saved changes" };
+    const status = await git(repoDir, "status", "--porcelain", "-b");
+    if (status.exitCode !== 0) return { pushed: false, message: "no saved changes" };
+    // The branch line (`## main...origin/main [ahead 2]`) leads; no file's
+    // status line can start with it.
+    const lines = status.stdout.split("\n");
+    const branch = lines.find((line) => line.startsWith("## ")) ?? "";
+    const changes = lines.filter((line) => !line.startsWith("## ")).join("\n");
+    if (changes.trim() === "") {
+      if (!/\[ahead \d+/.test(branch)) return { pushed: false, message: "no saved changes" };
+      return pushOutcome(await push(repoDir), "earlier saved changes pushed", "earlier saved changes not pushed yet");
     }
-    const message = await saveMessage(repoDir, status.stdout);
+    const message = await saveMessage(repoDir, changes);
     await git(repoDir, "add", "-A");
     await commit(repoDir, "-m", message);
-    const res = await push(repoDir);
-    return {
-      pushed: res.pushed,
-      message: res.pushed
-        ? "saved scenarios committed and pushed"
-        : `saved scenarios committed; ${res.message}`,
-    };
+    return pushOutcome(await push(repoDir), "saved scenarios committed and pushed", "saved scenarios committed");
   }
 
   /**
@@ -429,11 +442,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
       }
     }
     await commit(repoDir, "-m", message, "--", ...moves.flatMap((m) => [m.from, m.to]));
-    const res = await push(repoDir);
-    return {
-      pushed: res.pushed,
-      message: res.pushed ? "renamed, committed and pushed" : `renamed, committed; ${res.message}`,
-    };
+    return pushOutcome(await push(repoDir), "renamed, committed and pushed", "renamed, committed");
   }
 
   /**
@@ -462,11 +471,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     // round (specs/app/roadmap.feature.md "Archive a roadmap page").
     if (alsoAdd.length > 0) await git(repoDir, "add", ...alsoAdd);
     await commit(repoDir, "-m", message, "--", ...all, ...alsoAdd);
-    const res = await push(repoDir);
-    return {
-      pushed: res.pushed,
-      message: res.pushed ? "deleted, committed and pushed" : `deleted, committed; ${res.message}`,
-    };
+    return pushOutcome(await push(repoDir), "deleted, committed and pushed", "deleted, committed");
   }
 
   /**
@@ -483,11 +488,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     }
     await git(repoDir, "add", ...all);
     await commit(repoDir, "-m", message, "--", ...all);
-    const res = await push(repoDir);
-    return {
-      pushed: res.pushed,
-      message: res.pushed ? "committed and pushed" : `committed; ${res.message}`,
-    };
+    return pushOutcome(await push(repoDir), "committed and pushed", "committed");
   }
 
   async function headCommit(repoDir: string): Promise<string> {

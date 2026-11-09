@@ -63,6 +63,7 @@ import {
   ghSignedIn,
   jsGitAvailable,
   normalizeGitEngine,
+  pushProblem,
   setGhAccountEnabled,
   setGitEngine,
 } from "./git";
@@ -2292,6 +2293,11 @@ const getFeatures = withDataDir(async (dir) => {
     // the data repo's custom-attributes.txt as written, so a teammate's
     // definitions arriving with a pull reach the editors on the next tick.
     customAttributes: await readCustomAttributes(dir),
+    // Why the folder's saved changes are not reaching its remote, while they
+    // are not (git-operations.md "a push that fails is shown, and tried
+    // again") — with the listing because the page reads it on every tick,
+    // which is how often the answer can change.
+    syncProblem: pushProblem(dir),
   });
 });
 

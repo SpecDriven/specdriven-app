@@ -123,6 +123,38 @@ const syncOutcome = (result: SyncResult): Attributes => ({
   "git.message": result.message,
 });
 
+// Why each data folder's saved changes are not reaching its remote, while
+// they are not (git-operations.md "a push that fails is shown, and tried
+// again"). A failed push leaves its commits on this computer, where nothing
+// used to say so: the tick's result went to the log and nowhere else. Held
+// in memory only — the first tick after a start finds the stranded commits
+// and tries them again, which sets it afresh.
+const pushProblems = new Map<string, string>();
+
+/** Why a folder's saved changes are not reaching the remote; null while they are. */
+export function pushProblem(repoDir: string): string | null {
+  return pushProblems.get(repoDir) ?? null;
+}
+
+/**
+ * Keep a folder's push problem in step with one operation's result: a push
+ * that went through clears it, one that failed sets it — once, as a warning
+ * in the log, rather than on every tick that finds the same thing — and a
+ * result that tried no push leaves it be, unless `settles` says the
+ * operation looked at everything there was to push (the tick's own sync).
+ */
+function notePush(repoDir: string, result: SyncResult, settles = false): SyncResult {
+  if (result.failure) {
+    if (pushProblems.get(repoDir) !== result.failure) {
+      log.warn(`push failed: ${result.failure}`, { "specdriven.dir": repoDir });
+    }
+    pushProblems.set(repoDir, result.failure);
+  } else if (result.pushed || settles) {
+    if (pushProblems.delete(repoDir)) log.info("saved changes reach the remote again", { "specdriven.dir": repoDir });
+  }
+  return result;
+}
+
 export async function pull(repoDir: string): Promise<PullResult> {
   return traced("pull", repoDir, () => backend().pull(repoDir), (result) => ({
     "git.pull.ok": result.ok,
@@ -132,7 +164,7 @@ export async function pull(repoDir: string): Promise<PullResult> {
 }
 
 export async function push(repoDir: string): Promise<SyncResult> {
-  return traced("push", repoDir, () => backend().push(repoDir), syncOutcome);
+  return notePush(repoDir, await traced("push", repoDir, () => backend().push(repoDir), syncOutcome));
 }
 
 export async function theirsVersion(repoDir: string, relPath: string): Promise<string | null> {
@@ -174,7 +206,7 @@ export async function resolveConflict(
     "git.resolve_conflict",
     { ...gitAttrs(repoDir), "specdriven.file": relPath },
     async (span) => {
-      const result = await backend().resolveConflict(repoDir, relPath, content, alsoAdd);
+      const result = notePush(repoDir, await backend().resolveConflict(repoDir, relPath, content, alsoAdd));
       span.setAttributes(syncOutcome(result));
       log.info(`resolved conflict on ${relPath}`, { "git.pushed": result.pushed });
       return result;
@@ -183,7 +215,10 @@ export async function resolveConflict(
 }
 
 export async function syncSavedChanges(repoDir: string): Promise<SyncResult> {
-  return traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
+  // A conflict being resolved pushes nothing and says nothing about what is
+  // waiting; any other answer has looked at everything there was to push.
+  const result = await traced("sync_saved_changes", repoDir, () => backend().syncSavedChanges(repoDir), syncOutcome);
+  return notePush(repoDir, result, !result.message.startsWith("merge conflict in progress"));
 }
 
 export async function moveAndPush(
@@ -193,12 +228,13 @@ export async function moveAndPush(
   message: string,
   extraMoves?: PathMove[],
 ): Promise<SyncResult> {
-  return traced(
+  const result = await traced(
     "move_and_push",
     repoDir,
     () => backend().moveAndPush(repoDir, fromPath, toPath, message, extraMoves),
     (result) => ({ ...syncOutcome(result), "git.from": fromPath, "git.to": toPath }),
   );
+  return notePush(repoDir, result);
 }
 
 export async function removeAndPush(
@@ -207,12 +243,13 @@ export async function removeAndPush(
   message: string,
   alsoAdd?: string[],
 ): Promise<SyncResult> {
-  return traced(
+  const result = await traced(
     "remove_and_push",
     repoDir,
     () => backend().removeAndPush(repoDir, paths, message, alsoAdd),
     syncOutcome,
   );
+  return notePush(repoDir, result);
 }
 
 export async function commitAndPush(
@@ -220,7 +257,10 @@ export async function commitAndPush(
   paths: string | string[],
   message: string,
 ): Promise<SyncResult> {
-  return traced("commit_and_push", repoDir, () => backend().commitAndPush(repoDir, paths, message), syncOutcome);
+  return notePush(
+    repoDir,
+    await traced("commit_and_push", repoDir, () => backend().commitAndPush(repoDir, paths, message), syncOutcome),
+  );
 }
 
 export async function hasUpstream(repoDir: string): Promise<boolean> {

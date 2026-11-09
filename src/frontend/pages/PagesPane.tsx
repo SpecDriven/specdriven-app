@@ -51,6 +51,7 @@ import { NewFolderIcon } from "../ActionIcons";
 import { Popover } from "../Popover";
 import { PageSkeleton } from "../Skeleton";
 import { SaveIndicator, toast } from "../Toasts";
+import { pushHint, useSyncProblem } from "../syncProblem";
 import { Tooltip } from "../Tooltip";
 import { SectionAction, SidebarSection } from "../SidebarSection";
 import { listKeyDown, useRevealActive } from "../sidebarList";
@@ -137,6 +138,7 @@ export function PagePane({
 }) {
   const { pages: folderPages, supersededBy } = usePages(store);
   const { googleCalendar, canEstimate, readOnly } = usePageSettings();
+  const syncProblem = useSyncProblem();
   const link = pageLink(fileName);
   /** The page's listing (name, assignment, …) and what its editor holds. */
   const [page, setPage] = useState<PageListing | null>(null);
@@ -600,8 +602,8 @@ export function PagePane({
             </button>
           </Tooltip>
           {!readOnly && (
-            <span className="readme-hint">
-              {`Autosaves every ${app.autosaveSeconds}s; the next sync pushes it.`}
+            <span className={syncProblem !== null ? "readme-hint sync-failing" : "readme-hint"}>
+              {`Autosaves every ${app.autosaveSeconds}s; ${pushHint(syncProblem)}`}
             </span>
           )}
         </div>
