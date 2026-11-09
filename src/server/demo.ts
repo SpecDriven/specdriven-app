@@ -124,7 +124,7 @@ export function reseedDemo(): Promise<void> {
     await cp(demoSource(), dir, { recursive: true });
     const state = await readState(getAppRoot());
     await writeState(
-      { ...state, ...DEMO_SETTINGS, dataRepo: dir, recentDataRepos: [dir] },
+      { ...state, ...DEMO_SETTINGS, dataRepo: dir, recentFolders: [{ path: dir, kind: "spec" }] },
       getAppRoot(),
     );
     const old = currentDir;

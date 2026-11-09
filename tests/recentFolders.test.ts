@@ -17,8 +17,15 @@ import {
   recentDataRepos,
   rememberDataRepo,
   writeState,
+  type SpecDrivenState,
 } from "../src/server/state";
 import { stopServers } from "./helpers/fixtures";
+
+/** Specification folder entries for the stored folder list. */
+const specs = (...paths: string[]) => paths.map((path) => ({ path, kind: "spec" as const }));
+/** The specification folders a stored state lists, in its order. */
+const specPaths = (state: SpecDrivenState) =>
+  (state.recentFolders ?? []).filter((e) => e.kind === "spec").map((e) => e.path);
 
 let root: string;
 let home: string;
@@ -83,7 +90,7 @@ test("a settings file from before the list still offers the one folder it names"
 });
 
 test("the current folder heads the list, without a duplicate", () => {
-  expect(recentDataRepos({ dataRepo: "/b", recentDataRepos: ["/a", "/b", "/c"] })).toEqual([
+  expect(recentDataRepos({ dataRepo: "/b", recentFolders: specs("/a", "/b", "/c") })).toEqual([
     "/b",
     "/a",
     "/c",
@@ -91,21 +98,21 @@ test("the current folder heads the list, without a duplicate", () => {
 });
 
 test("remembering a folder moves it to the front", () => {
-  const state = { dataRepo: "/c", recentDataRepos: ["/a", "/b", "/c"] };
+  const state: SpecDrivenState = { dataRepo: "/c", recentFolders: specs("/a", "/b", "/c") };
   rememberDataRepo(state, "/b");
-  expect(state.recentDataRepos).toEqual(["/b", "/a", "/c"]);
+  expect(specPaths(state)).toEqual(["/b", "/a", "/c"]);
   rememberDataRepo(state, "/new");
-  expect(state.recentDataRepos).toEqual(["/new", "/b", "/a", "/c"]);
+  expect(specPaths(state)).toEqual(["/new", "/b", "/a", "/c"]);
 });
 
 test("the list holds at most 10 folders — the oldest falls off", () => {
-  const state: { recentDataRepos?: string[] } = {};
+  const state: SpecDrivenState = {};
   for (let i = 1; i <= 12; i++) rememberDataRepo(state, `/specs/${i}`);
   expect(MAX_RECENT_DATA_REPOS).toBe(10);
-  expect(state.recentDataRepos).toHaveLength(10);
-  expect(state.recentDataRepos![0]).toBe("/specs/12");
-  expect(state.recentDataRepos).not.toContain("/specs/1");
-  expect(state.recentDataRepos).not.toContain("/specs/2");
+  expect(specPaths(state)).toHaveLength(10);
+  expect(specPaths(state)[0]).toBe("/specs/12");
+  expect(specPaths(state)).not.toContain("/specs/1");
+  expect(specPaths(state)).not.toContain("/specs/2");
 });
 
 test("a hand-edited list is cleaned: blanks, non-strings and repeats are dropped", () => {
@@ -121,7 +128,7 @@ test("a folder typed with a trailing slash is the same folder without it", () =>
   expect(normalizeDataRepo("/")).toBe("/");
   expect(normalizeDataRepo("C:\\")).toBe("C:\\");
   expect(normalizeRecentDataRepos(["/specs/a/", "/specs/a", "/specs/b//"])).toEqual(["/specs/a", "/specs/b"]);
-  expect(recentDataRepos({ dataRepo: "/specs/a/", recentDataRepos: ["/specs/a"] })).toEqual(["/specs/a"]);
+  expect(recentDataRepos({ dataRepo: "/specs/a/", recentFolders: specs("/specs/a") })).toEqual(["/specs/a"]);
 });
 
 test("picking a folder with a trailing slash saves it without one", async () => {
@@ -132,7 +139,7 @@ test("picking a folder with a trailing slash saves it without one", async () => 
   expect(state.recentDataRepos).toEqual([a]);
   const saved = await readState(root);
   expect(saved.dataRepo).toBe(a);
-  expect(saved.recentDataRepos).toEqual([a]);
+  expect(specPaths(saved)).toEqual([a]);
 });
 
 test("a settings file saved with a trailing slash reads back without one", async () => {
@@ -142,12 +149,12 @@ test("a settings file saved with a trailing slash reads back without one", async
   );
   const saved = await readState(root);
   expect(saved.dataRepo).toBe("/specs/a");
-  expect(saved.recentDataRepos).toEqual(["/specs/a", "/specs/b"]);
+  expect(specPaths(saved)).toEqual(["/specs/a", "/specs/b"]);
 });
 
 test("GET /api/state carries the recent folders, the current one first", async () => {
   await writeState(
-    { dataRepo: "/specs/b", recentDataRepos: ["/specs/a", "/specs/b"], reloadFrequencySeconds: 0 },
+    { dataRepo: "/specs/b", recentFolders: specs("/specs/a", "/specs/b"), reloadFrequencySeconds: 0 },
     root,
   );
   const state = await getState();
@@ -173,7 +180,7 @@ test("GET /api/state says where each GitHub url on the list is cloned", async ()
     await writeState(
       {
         dataRepo: "/specs/b",
-        recentDataRepos: ["https://github.com/acme/specs-insurance", "/specs/b"],
+        recentFolders: specs("https://github.com/acme/specs-insurance", "/specs/b"),
         reloadFrequencySeconds: 0,
       },
       root,
@@ -201,7 +208,7 @@ test("picking folders builds the list, most recent first, and persists it", asyn
 
   const saved = await readState(root);
   expect(saved.dataRepo).toBe(a);
-  expect(saved.recentDataRepos).toEqual([a, b]);
+  expect(specPaths(saved)).toEqual([a, b]);
   expect((await getState()).recentDataRepos).toEqual([a, b]);
 });
 
@@ -243,13 +250,13 @@ test("other settings changes leave the list alone", async () => {
 
 test("forgetting a folder takes it off the list and says whether it was there", async () => {
   const { forgetDataRepo } = await import("../src/server/state");
-  const state = { dataRepo: "/c", recentDataRepos: ["/a", "/b", "/c"] };
+  const state: SpecDrivenState = { dataRepo: "/c", recentFolders: specs("/a", "/b", "/c") };
   expect(forgetDataRepo(state, "/b")).toBe(true);
-  expect(state.recentDataRepos).toEqual(["/a", "/c"]);
+  expect(specPaths(state)).toEqual(["/a", "/c"]);
   expect(forgetDataRepo(state, " /a ")).toBe(true);
-  expect(state.recentDataRepos).toEqual(["/c"]);
+  expect(specPaths(state)).toEqual(["/c"]);
   expect(forgetDataRepo(state, "/never")).toBe(false);
-  expect(state.recentDataRepos).toEqual(["/c"]);
+  expect(specPaths(state)).toEqual(["/c"]);
 });
 
 test("PUT /api/state forgetDataRepo removes a folder from the list and persists it, the folder itself untouched", async () => {
@@ -268,7 +275,7 @@ test("PUT /api/state forgetDataRepo removes a folder from the list and persists 
   ))!;
   expect(res.status).toBe(200);
   expect((await res.json()).recentDataRepos).toEqual([a]);
-  expect((await readState(root)).recentDataRepos).toEqual([a]);
+  expect(specPaths(await readState(root))).toEqual([a]);
   expect((await getState()).recentDataRepos).toEqual([a]);
   // The folder is still on disk, with its feature in it (moved under specs/
   // when the folder was opened, as every data folder's features are).
@@ -392,9 +399,9 @@ test("a url and its own clone opened by path are one entry, the open one kept", 
     // Cloned already, so opening the url clones nothing.
     const clone = join(repos, "specs-insurance");
     await Bun.$`git init -q ${clone}`;
-    await writeState({ dataRepo: clone, recentDataRepos: [URL, "/specs/b", clone], reloadFrequencySeconds: 0 }, root);
+    await writeState({ dataRepo: clone, recentFolders: specs(URL, "/specs/b", clone), reloadFrequencySeconds: 0 }, root);
     expect((await getState()).recentDataRepos).toEqual([clone, "/specs/b"]);
-    await writeState({ dataRepo: URL, recentDataRepos: [clone, "/specs/b", URL], reloadFrequencySeconds: 0 }, root);
+    await writeState({ dataRepo: URL, recentFolders: specs(clone, "/specs/b", URL), reloadFrequencySeconds: 0 }, root);
     const state = await getState();
     expect(state.recentDataRepos).toEqual([URL, "/specs/b"]);
     expect(state.recentDataRepoDirs).toEqual({ [URL]: clone });
@@ -428,23 +435,23 @@ test("picking the clone folder by path replaces the url on the list", async () =
     const clone = join(repos, "specs-insurance");
     await Bun.write(join(clone, "a.feature.md"), "# a\n");
     const b = await dataFolder("b");
-    await writeState({ dataRepo: b, recentDataRepos: [b, URL], reloadFrequencySeconds: 0 }, root);
+    await writeState({ dataRepo: b, recentFolders: specs(b, URL), reloadFrequencySeconds: 0 }, root);
     await applyStartupState();
 
     expect((await pickFolder(clone)).recentDataRepos).toEqual([clone, b]);
-    expect((await readState(root)).recentDataRepos).toEqual([clone, b]);
+    expect(specPaths(await readState(root))).toEqual([clone, b]);
   });
 });
 
 test("removing a repository from the list takes its other names with it", async () => {
   await withReposDir(async (repos) => {
     const clone = join(repos, "specs-insurance");
-    await writeState({ dataRepo: "/specs/b", recentDataRepos: ["/specs/b", URL, clone], reloadFrequencySeconds: 0 }, root);
+    await writeState({ dataRepo: "/specs/b", recentFolders: specs("/specs/b", URL, clone), reloadFrequencySeconds: 0 }, root);
     expect((await getState()).recentDataRepos).toEqual(["/specs/b", URL]);
 
     const res = await putState({ forgetDataRepo: URL });
     expect(res.status).toBe(200);
     expect((await res.json()).recentDataRepos).toEqual(["/specs/b"]);
-    expect((await readState(root)).recentDataRepos).toEqual(["/specs/b"]);
+    expect(specPaths(await readState(root))).toEqual(["/specs/b"]);
   });
 });

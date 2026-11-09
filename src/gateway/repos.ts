@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { PROFILE_KEY } from "../plugins/profile";
 import { GITHUB_HOST } from "../server/github";
 import { parseGitHubUrl } from "../server/repo";
-import { MAX_RECENT_DATA_REPOS, STATE_DIR, STATE_FILE } from "../server/state";
+import { MAX_RECENT_DATA_REPOS, SETTINGS_VERSION, STATE_DIR, STATE_FILE } from "../server/state";
 
 /** Larger than any settings file the app writes; anything bigger is not read. */
 const MAX_SETTINGS_BYTES = 1024 * 1024;
@@ -94,8 +94,18 @@ export async function readWorkerRepos(root: string): Promise<string[] | null> {
     return null;
   }
   if (typeof state !== "object" || state === null) return [];
-  const { dataRepo, recentDataRepos } = state as { dataRepo?: unknown; recentDataRepos?: unknown };
-  return cleanRepos([dataRepo, ...(Array.isArray(recentDataRepos) ? recentDataRepos : [])]);
+  const { dataRepo, recentFolders, recentDataRepos } = state as {
+    dataRepo?: unknown;
+    recentFolders?: unknown;
+    recentDataRepos?: unknown;
+  };
+  // The specifications folders on the one folder list; a file the worker's
+  // app has not rewritten since may still keep them as `recentDataRepos`.
+  const listed = (Array.isArray(recentFolders) ? recentFolders : []).flatMap((e: unknown) => {
+    const { path, kind } = (e ?? {}) as { path?: unknown; kind?: unknown };
+    return kind === "spec" ? [path] : [];
+  });
+  return cleanRepos([dataRepo, ...listed, ...(Array.isArray(recentDataRepos) ? recentDataRepos : [])]);
 }
 
 /**
@@ -115,8 +125,9 @@ export async function seedWorkerRepos(root: string, repos: string[], uid: number
     return false;
   }
   const state = {
+    settingsVersion: SETTINGS_VERSION,
     dataRepo: clean[0],
-    recentDataRepos: clean,
+    recentFolders: clean.map((path) => ({ path, kind: "spec" })),
     // Per-folder plugin lists from the start, as when the app records a
     // folder itself (src/plugins/profile.ts startFolderLists), so the file is
     // not read as one from before them.

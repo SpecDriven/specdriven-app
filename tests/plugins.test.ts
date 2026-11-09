@@ -277,7 +277,12 @@ test("each data folder keeps its own profile; a new one shows Specs alone", () =
 test("an older device-wide list is copied to the folders the file knows", () => {
   const file: Record<string, unknown> = {
     dataRepo: "/a",
-    recentDataRepos: ["/a", "/b"],
+    // Code repositories on the folder list are not among them.
+    recentFolders: [
+      { path: "/a", kind: "spec" },
+      { path: "/code", kind: "code" },
+      { path: "/b", kind: "spec" },
+    ],
     plugins: { enabled: ["tests", "roadmap"], repos: { "/b": { enabled: ["issues"] } }, seen: [] },
   };
   expect(migrateProfile(file, builtinManifests)).toBe(true);

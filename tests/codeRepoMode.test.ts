@@ -25,8 +25,8 @@ import {
   recentCodeRepos,
   rememberCodeRepo,
   rememberDataRepo,
-  normalizeOpenedAt,
-  openFolder,
+  migrateRecentFolders,
+  normalizeRecentFolders,
   recentDataRepos,
   specsOpen,
   writeState,
@@ -150,12 +150,12 @@ test("the code repositories list keeps the open one first, each once, and forget
 // folders"): spec folders and code repositories together, newest first.
 test("spec folders and code repositories make one list, the open one first, then newest first", () => {
   const state: SpecDrivenState = {};
-  rememberDataRepo(state, "/s/old", 1);
-  rememberCodeRepo(state, "/c/a", 2);
-  rememberDataRepo(state, "/s/new", 3);
-  rememberCodeRepo(state, "/c/b", 4);
+  rememberDataRepo(state, "/s/old");
+  rememberCodeRepo(state, "/c/a");
+  rememberDataRepo(state, "/s/new");
+  rememberCodeRepo(state, "/c/b");
   state.openCodeRepo = "/c/a";
-  const merged = mergeRecentFolders(recentDataRepos(state), recentCodeRepos(state), state.recentFolderOpenedAt, openFolder(state));
+  const merged = mergeRecentFolders(state, recentDataRepos(state), recentCodeRepos(state));
   expect(merged).toEqual([
     { path: "/c/a", kind: "code" },
     { path: "/c/b", kind: "code" },
@@ -163,43 +163,78 @@ test("spec folders and code repositories make one list, the open one first, then
     { path: "/s/old", kind: "spec" },
   ]);
   // Reopening moves an entry up; the same path may be on it once per kind.
-  rememberDataRepo(state, "/s/old", 5);
-  rememberDataRepo(state, "/c/b", 6);
+  rememberDataRepo(state, "/s/old");
+  rememberDataRepo(state, "/c/b");
   delete state.openCodeRepo;
   state.dataRepo = "/c/b";
-  expect(mergeRecentFolders(recentDataRepos(state), recentCodeRepos(state), state.recentFolderOpenedAt, openFolder(state))).toEqual([
+  expect(mergeRecentFolders(state, recentDataRepos(state), recentCodeRepos(state))).toEqual([
     { path: "/c/b", kind: "spec" },
     { path: "/s/old", kind: "spec" },
     { path: "/c/b", kind: "code" },
     { path: "/s/new", kind: "spec" },
     { path: "/c/a", kind: "code" },
   ]);
-});
-
-test("entries saved before open times keep their order, spec folders then code repositories", () => {
-  expect(mergeRecentFolders(["/s/a", "/s/b"], ["/c/a"], undefined, null)).toEqual([
-    { path: "/s/a", kind: "spec" },
-    { path: "/s/b", kind: "spec" },
-    { path: "/c/a", kind: "code" },
-  ]);
-  // A timed entry goes ahead of the untimed ones.
-  expect(mergeRecentFolders(["/s/a", "/s/b"], ["/c/a"], { code: { "/c/a": 1 } }, null)).toEqual([
-    { path: "/c/a", kind: "code" },
-    { path: "/s/a", kind: "spec" },
-    { path: "/s/b", kind: "spec" },
+  // Only the shown paths are listed: none of a kind the caller leaves out.
+  expect(mergeRecentFolders(state, recentDataRepos(state), [])).toEqual([
+    { path: "/c/b", kind: "spec" },
+    { path: "/s/old", kind: "spec" },
+    { path: "/s/new", kind: "spec" },
   ]);
 });
 
-test("forgetting a folder drops its open time, and a stored map keeps only times", () => {
-  const state: SpecDrivenState = {};
-  rememberDataRepo(state, "/s/a", 1);
-  rememberCodeRepo(state, "/c/a", 2);
-  forgetDataRepo(state, "/s/a");
-  forgetCodeRepo(state, "/c/a");
-  expect(state.recentFolderOpenedAt).toEqual({ spec: {}, code: {} });
-  expect(normalizeOpenedAt({ spec: { "/s/a/": 1, "/s/b": "x" }, code: null, other: { "/o": 1 } })).toEqual({
-    spec: { "/s/a": 1 },
+test("the stored list is cleaned, each path once per kind, at most 10 of each kind", () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ path: `/s/${i}`, kind: "spec" }));
+  const cleaned = normalizeRecentFolders([
+    { path: "/c/a/", kind: "code" },
+    { path: "/c/a", kind: "code" },
+    { path: "/c/a", kind: "spec" },
+    { path: "", kind: "spec" },
+    { path: "/x", kind: "other" },
+    "/y",
+    null,
+    ...many,
+  ]);
+  expect(cleaned.slice(0, 2)).toEqual([
+    { path: "/c/a", kind: "code" },
+    { path: "/c/a", kind: "spec" },
+  ]);
+  expect(cleaned.filter((e) => e.kind === "spec")).toHaveLength(10);
+  expect(normalizeRecentFolders("not a list")).toEqual([]);
+});
+
+// Settings from before the one list kept two lists and a map of open times.
+test("an older file's two lists and open times become the one list, in the order it showed", () => {
+  const state: Record<string, unknown> = {
+    recentDataRepos: ["/s/a", "/s/b/", "/s/c"],
+    recentCodeRepos: ["/c/a", "/c/b"],
+    recentFolderOpenedAt: { spec: { "/s/b": 3, "/s/c": "x" }, code: { "/c/b": 5, "/c/a": 1 } },
+  };
+  expect(migrateRecentFolders(state)).toBe(true);
+  expect(state).toEqual({
+    recentFolders: [
+      { path: "/c/b", kind: "code" },
+      { path: "/s/b", kind: "spec" },
+      { path: "/c/a", kind: "code" },
+      // No time: behind the timed ones, spec folders before code repositories.
+      { path: "/s/a", kind: "spec" },
+      { path: "/s/c", kind: "spec" },
+    ],
   });
+  // A file that already has the list keeps it and loses the old keys.
+  const both: Record<string, unknown> = { recentFolders: [{ path: "/n", kind: "spec" }], recentDataRepos: ["/o"] };
+  expect(migrateRecentFolders(both)).toBe(true);
+  expect(both).toEqual({ recentFolders: [{ path: "/n", kind: "spec" }] });
+  expect(migrateRecentFolders({ recentFolders: [] })).toBe(false);
+});
+
+test("forgetting a folder takes only that kind's entry off the list", () => {
+  const state: SpecDrivenState = {};
+  rememberDataRepo(state, "/a");
+  rememberCodeRepo(state, "/a");
+  expect(forgetDataRepo(state, "/a")).toBe(true);
+  expect(state.recentFolders).toEqual([{ path: "/a", kind: "code" }]);
+  expect(forgetCodeRepo(state, "/a/")).toBe(true);
+  expect(state.recentFolders).toEqual([]);
 });
 
 test("a code repository keeps a plugin list of its own", () => {
@@ -229,7 +264,7 @@ test("PUT /api/state openCodeRepo opens the folder and GET /api/state reports th
   expect(state.dataRepo).toBe(data);
   const stored = await readState(root);
   expect(stored.openCodeRepo).toBe(code);
-  expect(stored.recentCodeRepos).toEqual([code]);
+  expect(stored.recentFolders).toEqual([{ path: code, kind: "code" }]);
 });
 
 test("a code repository must be an existing folder named by its absolute path", async () => {
@@ -308,10 +343,10 @@ test("GET /api/state lists spec folders and code repositories together, newest f
     { path: data, kind: "spec" },
     { path: other, kind: "code" },
   ]);
-  // The times are kept in the settings file, so the order survives a restart.
+  // The settings file keeps the list in that order, so it survives a restart.
   const stored = await readState(root);
-  expect(Object.keys(stored.recentFolderOpenedAt?.code ?? {}).sort()).toEqual([code, other].sort());
-  expect(Object.keys(stored.recentFolderOpenedAt?.spec ?? {})).toEqual([data]);
+  expect(stored.recentFolders).toEqual(state.recentFolders as SpecDrivenState["recentFolders"]);
+  expect(Object.keys(stored)).not.toContain("recentDataRepos");
 });
 
 test("another code repository can be opened from the open one, and the old one forgotten", async () => {
