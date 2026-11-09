@@ -188,6 +188,13 @@ export const MAX_IMAGE_BYTES = 3_750_000;
 /** Images in one message at most. */
 export const MAX_IMAGES_PER_MESSAGE = 10;
 
+/**
+ * Coding agent sessions open at once — a tab each in the pane
+ * (specs/agents/agent-pane.feature.md "Each session has its own tab"). An
+ * ended session holds its tab, and its slot, until it is closed.
+ */
+export const MAX_OPEN_SESSIONS = 5;
+
 /** An image as the pane sends it: the bytes, base64. */
 export interface ImageUpload {
   mediaType: ImageMediaType;

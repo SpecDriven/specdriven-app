@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import { endAllChatSessions, getChatEvents, getChatSession } from "../src/server/agentChat";
-import type { ChatEvent, ChatSessionMeta } from "../src/server/agentTypes";
+import { MAX_OPEN_SESSIONS, type ChatEvent, type ChatSessionMeta } from "../src/server/agentTypes";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
 import { writeState } from "../src/server/state";
@@ -115,6 +115,30 @@ test("a plugin's provider drives a session from start to end", async () => {
   expect(getChatSession(id)!.status).toBe("ended");
   expect(session.closed).toBe(true);
   expect((await api(`/api/agent/chat/${id}/message`, "POST", { text: "x" })).status).toBe(409);
+});
+
+test("at most five sessions are open at once, an ended one holding its tab until it is closed", async () => {
+  const fake = register();
+  const ids: string[] = [];
+  for (let i = 0; i < MAX_OPEN_SESSIONS; i++) ids.push((await ready(fake, { name: `chat ${i}` })).id);
+  expect(MAX_OPEN_SESSIONS).toBe(5);
+
+  const refused = await api("/api/agent/chat", "POST", { name: "sixth", agent: fake.provider.id });
+  expect(refused.status).toBe(409);
+  expect(((await refused.json()) as { error: string }).error).toBe(
+    "At most 5 coding agent sessions can be open at once — close one first",
+  );
+
+  // An ended session still has its tab: no room yet.
+  fake.sessions[0]!.host.ended("Done.");
+  expect(getChatSession(ids[0]!)!.status).toBe("ended");
+  expect((await api("/api/agent/chat", "POST", { name: "sixth", agent: fake.provider.id })).status).toBe(409);
+
+  // Closing its tab frees the slot.
+  expect((await api(`/api/agent/chat/${ids[0]}`, "DELETE")).status).toBe(200);
+  const sixth = await api("/api/agent/chat", "POST", { name: "sixth", agent: fake.provider.id });
+  expect(sixth.status).toBe(200);
+  expect(((await (await api("/api/agent/chat")).json()) as { sessions: unknown[] }).sessions).toHaveLength(5);
 });
 
 test("the pane's permission card answers the provider, and a withdrawn or ended question is denied", async () => {
@@ -491,6 +515,8 @@ test("a provider's sign-in change refreshes its live sessions, and a failed refr
   expect(untouched.session.refreshes).toBe(0);
   expect(ended.session.refreshes).toBe(0);
   expect(getChatSession(first.id)!.status).toBe("idle");
+  // Close the ended one's tab: five open sessions is the most there can be.
+  expect((await api(`/api/agent/chat/${ended.id}`, "DELETE")).status).toBe(200);
 
   const failing = register({ id: "gemini", label: "Gemini", refreshError: new Error("keychain locked") });
   const broken = await ready(failing);

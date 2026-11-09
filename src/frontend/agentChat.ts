@@ -34,7 +34,7 @@ import type {
   PermissionMode,
   SlashCommandInfo,
 } from "../server/agentTypes";
-import { byRank, fallbackDescriptor } from "../server/agentTypes";
+import { byRank, fallbackDescriptor, MAX_OPEN_SESSIONS } from "../server/agentTypes";
 import { toast } from "./Toasts";
 
 export type {
@@ -490,6 +490,36 @@ export function isFinalStatus(status: ChatStatus): boolean {
   return status === "ended" || status === "error";
 }
 
+// --- Tabs (specs/agents/agent-pane.feature.md "Each session has its own
+// tab, at most five") ---------------------------------------------------------
+
+export { MAX_OPEN_SESSIONS };
+
+/** The sessions as the tab row shows them: in the order they started, so a
+    new one opens on the right. */
+export function tabOrder<T extends Pick<ChatSessionMeta, "startedAt">>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+}
+
+/** Whether another session can open: every open tab counts, ended ones too. */
+export function canOpenAnother(s: Pick<AgentChatStore, "list"> = state): boolean {
+  return s.list.length < MAX_OPEN_SESSIONS;
+}
+
+/** The tab that takes over when `id`'s closes: the one to its right, else
+    the one to its left, else none (the new-session screen). */
+export function neighborTab(list: readonly ChatSessionMeta[], id: string): string | null {
+  const tabs = tabOrder(list);
+  const at = tabs.findIndex((m) => m.id === id);
+  if (at < 0) return tabs[tabs.length - 1]?.id ?? null;
+  return tabs[at + 1]?.id ?? tabs[at - 1]?.id ?? null;
+}
+
+/** Whether the agent is at work in a session — closing its tab asks first. */
+export function isBusy(status: ChatStatus): boolean {
+  return status === "running" || status === "awaiting_input";
+}
+
 // --- Persistence (device-local, like the sidebar width) --------------------
 
 const WIDTH_KEY = "sd-agent-width";
@@ -859,9 +889,9 @@ function forget(id: string): void {
   streams.delete(id);
   const sessions = { ...state.sessions };
   delete sessions[id];
+  // The active tab closing hands over to its neighbor in the tab row.
+  const activeId = state.activeId === id ? neighborTab(state.list, id) : state.activeId;
   const list = state.list.filter((m) => m.id !== id);
-  const activeId =
-    state.activeId === id ? (list.find((m) => sessions[m.id])?.id ?? list[0]?.id ?? null) : state.activeId;
   set({ sessions, list, activeId });
   writeLocal(ACTIVE_KEY, activeId);
   // The next session may be known only from the list — load it so the pane shows it.
@@ -951,8 +981,10 @@ export const agentChat = {
     writeLocal(ACTIVE_KEY, id);
     if (id && !state.sessions[id]) void agentChat.openSession(id);
   },
-  /** Fetch the whole transcript, then follow the live stream. */
-  async openSession(id: string): Promise<void> {
+  /** Fetch the whole transcript, then follow the live stream. A session
+      opened with `activate: false` loads behind the others: its tab keeps
+      up while another is shown. */
+  async openSession(id: string, { activate = true }: { activate?: boolean } = {}): Promise<void> {
     const data = await call<{ meta: ChatSessionMeta; commands: SlashCommandInfo[]; events: ChatEvent[] }>(
       `/api/agent/chat/${id}`,
     );
@@ -968,9 +1000,9 @@ export const agentChat = {
     set({
       sessions: { ...state.sessions, [id]: session },
       list: known ? state.list.map((m) => (m.id === id ? data.meta : m)) : [data.meta, ...state.list],
-      activeId: id,
+      ...(activate ? { activeId: id } : {}),
     });
-    writeLocal(ACTIVE_KEY, id);
+    if (activate) writeLocal(ACTIVE_KEY, id);
     void stream(id);
   },
   /** Start a chat and show it. Throws with the server's words on failure. */
@@ -983,15 +1015,24 @@ export const agentChat = {
     agentChat.openPane();
     return meta.id;
   },
+  /** The server's sessions: each is a tab, and every tab is followed live
+      — one started elsewhere (a spec's Start session, a self-fix) included
+      — so a session at work behind another keeps its dot up to date and
+      can ask for approval. */
   async refreshList(): Promise<void> {
     const data = await call<{ sessions: ChatSessionMeta[] }>("/api/agent/chat");
     set({ list: data.sessions });
     for (const id of Object.keys(state.sessions)) {
       if (!data.sessions.some((m) => m.id === id)) forget(id);
     }
+    await Promise.all(
+      data.sessions
+        .filter((m) => !state.sessions[m.id])
+        .map((m) => agentChat.openSession(m.id, { activate: false }).catch(() => undefined)),
+    );
   },
-  /** On boot: the remembered pane state, and the remembered session if it is
-      still there. */
+  /** On boot: the remembered pane state, every open session, and the
+      remembered one shown if it is still there (else the newest). */
   async restore(): Promise<void> {
     set({ width: readAgentWidth(), open: readAgentOpen() });
     try {
@@ -1000,8 +1041,12 @@ export const agentChat = {
       return;
     }
     const remembered = readLocal(ACTIVE_KEY);
-    const pick = state.list.find((m) => m.id === remembered) ?? state.list[0];
-    if (pick) await agentChat.openSession(pick.id).catch(() => undefined);
+    const loaded = state.list.filter((m) => state.sessions[m.id]);
+    const pick = loaded.find((m) => m.id === remembered) ?? loaded[0];
+    if (pick) {
+      set({ activeId: pick.id });
+      writeLocal(ACTIVE_KEY, pick.id);
+    }
   },
   async send(id: string, text: string, images: ImageUpload[] = []): Promise<void> {
     await call(`/api/agent/chat/${id}/message`, {

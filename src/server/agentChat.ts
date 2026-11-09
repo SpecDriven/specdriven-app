@@ -56,6 +56,7 @@ import {
   isFinalStatus,
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
+  MAX_OPEN_SESSIONS,
   normalizeImageMediaType,
   normalizePermissionMode,
   PERMISSION_MODES,
@@ -71,9 +72,6 @@ export class ChatError extends Error {
     super(message);
   }
 }
-
-/** Live sessions at once — each is an agent subprocess. */
-export const MAX_LIVE_SESSIONS = 8;
 
 interface PendingPermission {
   toolName: string;
@@ -110,10 +108,6 @@ function registry(): Map<string, ChatSession> {
   const g = globalThis as Record<symbol, unknown>;
   if (!g[REGISTRY]) g[REGISTRY] = new Map<string, ChatSession>();
   return g[REGISTRY] as Map<string, ChatSession>;
-}
-
-function live(): ChatSession[] {
-  return [...registry().values()].filter((s) => !isFinalStatus(s.meta.status));
 }
 
 function get(id: string): ChatSession {
@@ -490,8 +484,10 @@ export function resolveProvider(agent?: ChatAgent): AgentProvider {
  * requested; the ready status follows on the stream.
  */
 export async function createChatSession(opts: CreateChatOptions): Promise<ChatSessionMeta> {
-  if (live().length >= MAX_LIVE_SESSIONS) {
-    throw new ChatError(409, `At most ${MAX_LIVE_SESSIONS} coding agent sessions can run at once — end one first`);
+  // Every open session counts, ended ones too: each is a tab in the pane
+  // until it is closed (DELETE), and the pane shows at most this many.
+  if (registry().size >= MAX_OPEN_SESSIONS) {
+    throw new ChatError(409, `At most ${MAX_OPEN_SESSIONS} coding agent sessions can be open at once — close one first`);
   }
   const provider = resolveProvider(opts.agent);
   const uploads = checkImages(opts.images);

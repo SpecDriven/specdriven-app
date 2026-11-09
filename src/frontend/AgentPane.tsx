@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { Menu, type MenuItem } from "./Menu";
-import type { PromptOptions } from "./ModalPrompts";
+import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
 import { SessionRailButton } from "./SessionRail";
 import { Tooltip } from "./Tooltip";
@@ -41,12 +41,14 @@ import { cleanLine, cleanText } from "../server/text";
 import {
   agentChat,
   applyCommand,
+  canOpenAnother,
   defaultSessionName,
   describeAgent,
   filterCommands,
   formatCost,
   formatDuration,
   hasModes,
+  isBusy,
   isFinalStatus,
   loadFolderInfo,
   loadSourceStatus,
@@ -54,6 +56,7 @@ import {
   refreshSource,
   shouldFollow,
   sourceNeedsAttention,
+  tabOrder,
   usableAgents,
   useAgentChat,
   useAgentChoices,
@@ -74,7 +77,7 @@ import {
   type SourceStatus,
   type TranscriptItem,
 } from "./agentChat";
-import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE } from "../server/agentTypes";
+import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
 import type { ChatImage, ImageUpload } from "../server/agentTypes";
 import { pastedImageFiles, prepareImage, toUpload, type PendingImage } from "./pastedImages";
 
@@ -85,6 +88,7 @@ import { pastedImageFiles, prepareImage, toUpload, type PendingImage } from "./p
  * (specs/agents/agent-plugins.feature.md): every branch in here reads the
  * agent's descriptor — its label, its modes, what it can do — and names
  * none. Header (session, work dir, status, permission mode, Stop, close), a
+ * row of tabs with one per open session (at most MAX_OPEN_SESSIONS), a
  * scrolling transcript that follows new output until the reader scrolls
  * up, and a composer with a "/" popup listing the commands the session
  * supports. State lives in src/frontend/agentChat.ts; this file only
@@ -167,6 +171,7 @@ export function AgentPane({
   agentSettings,
   homeDir = null,
   ghostty = false,
+  confirm,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -189,6 +194,9 @@ export function AgentPane({
   /** "Open worktrees in Ghostty" is on: a worktree session's branch opens
       a Ghostty shell in the worktree (src/server/ghostty.ts). */
   ghostty?: boolean;
+  /** The app's confirm dialog: closing the tab of a session at work asks
+      first. Absent closes at once. */
+  confirm?: (opts: ConfirmOptions) => Promise<boolean>;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
@@ -208,8 +216,12 @@ export function AgentPane({
     : undefined;
   const folders = knownFolders(codeRepo, dataRepo, store.list, codeRepos);
   return (
-    <aside className={`agent-pane${compact ? " overlay" : ""}`} aria-label="Coding agent">
+    <aside
+      className={`agent-pane${compact ? " overlay" : ""}${store.list.length > 0 ? " has-tabs" : ""}`}
+      aria-label="Coding agent"
+    >
       <AgentHeader store={store} session={session} demo={demo} homeDir={homeDir} onClose={onClose} />
+      {store.list.length > 0 && <SessionTabs store={store} confirm={confirm} />}
       {session && agent ? (
         <>
           <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
@@ -292,62 +304,17 @@ function AgentHeader({
   homeDir: string | null;
   onClose: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const meta = session?.meta ?? null;
   const agent = meta ? describeAgent(meta.agent, store.agents) : null;
   const fail = (e: Error) => toast.error(e.message);
-  const items: MenuItem[] = [
-    ...store.list.map((m) => {
-      const a = describeAgent(m.agent, store.agents);
-      return {
-        id: m.id,
-        label: m.name,
-        checked: m.id === store.activeId,
-        title: `${a.label} · ${statusLabel(m.status, a)} · ${sessionFolder(m)}${m.worktree ? ` · worktree on ${m.worktree.branch}` : ""}`,
-        onSelect: () => agentChat.setActive(m.id),
-      };
-    }),
-    {
-      id: "new",
-      label: "New session",
-      icon: <Plus size={14} aria-hidden="true" />,
-      onSelect: () => agentChat.setActive(null),
-    },
-    ...(meta
-      ? [
-          {
-            id: "end",
-            label: "End session",
-            danger: true,
-            onSelect: () => void agentChat.end(meta.id).catch(fail),
-          },
-        ]
-      : []),
-  ];
-  const busy = meta !== null && (meta.status === "running" || meta.status === "awaiting_input");
+  const busy = meta !== null && isBusy(meta.status);
   return (
     <div className="agent-head">
       <Bot size={16} aria-hidden="true" className="agent-head-icon" />
-      <div className="agent-session-picker">
-        <button
-          type="button"
-          className="agent-session-btn"
-          aria-label="Sessions"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((o) => !o)}
-        >
-          <span className="agent-session-name">{meta ? meta.name : "Coding agent"}</span>
-          <ChevronDown size={14} aria-hidden="true" />
-        </button>
-        <Menu
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          label="Sessions"
-          items={items}
-          className="agent-session-menu"
-        />
-      </div>
+      {/* The tabs below switch sessions; the name is here in full width. */}
+      <span className="agent-session-name" title={meta?.name}>
+        {meta ? meta.name : "Coding agent"}
+      </span>
       {meta && agent && (
         <span
           className="agent-dot"
@@ -405,6 +372,131 @@ function AgentHeader({
           onClick={onClose}
         >
           <PanelRightClose size={15} aria-hidden="true" />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** What a session's tab says on hover: the agent, its state, its folder. */
+export function sessionTabTitle(m: ChatSessionMeta, agents: readonly AgentDescriptor[]): string {
+  const a = describeAgent(m.agent, agents);
+  return `${m.name}\n${a.label} · ${statusLabel(m.status, a)} · ${sessionFolder(m)}${m.worktree ? ` · worktree on ${m.worktree.branch}` : ""}`;
+}
+
+/**
+ * One tab per open session (specs/agents/agent-pane.feature.md "Each session
+ * has its own tab, at most five"), in the order they started, then + for a
+ * new one. Every session in here runs on whether its tab is shown or not;
+ * its dot says how it is doing. While the new-session screen is up it has a
+ * tab of its own, with nothing to close. A tab whose agent is at work asks
+ * before it closes, since closing ends the session.
+ */
+export function SessionTabs({
+  store,
+  confirm,
+}: {
+  store: AgentChatStore;
+  confirm?: (opts: ConfirmOptions) => Promise<boolean>;
+}) {
+  const tabs = tabOrder(store.list);
+  const drafting = store.activeId === null;
+  const room = canOpenAnother(store);
+  const refs = useRef(new Map<string, HTMLDivElement>());
+  const close = async (m: ChatSessionMeta) => {
+    if (isBusy(m.status) && confirm) {
+      const a = describeAgent(m.agent, store.agents);
+      const ok = await confirm({
+        title: "End this session?",
+        body: `${a.label} is still working in “${m.name}”. Ending it stops the agent.`,
+        confirmLabel: "End session",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    await agentChat.end(m.id).catch((e: Error) => toast.error(e.message));
+  };
+  const focusTab = (id: string | undefined) => {
+    if (!id) return;
+    agentChat.setActive(id);
+    refs.current.get(id)?.focus();
+  };
+  const onKey = (e: KeyboardEvent<HTMLDivElement>, at: number) => {
+    const m = tabs[at];
+    if (!m) return;
+    if (e.key === "ArrowRight") focusTab(tabs[(at + 1) % tabs.length]?.id);
+    else if (e.key === "ArrowLeft") focusTab(tabs[(at - 1 + tabs.length) % tabs.length]?.id);
+    else if (e.key === "Home") focusTab(tabs[0]?.id);
+    else if (e.key === "End") focusTab(tabs[tabs.length - 1]?.id);
+    else if (e.key === "Delete") void close(m);
+    else if (e.key === "Enter" || e.key === " ") agentChat.setActive(m.id);
+    else return;
+    e.preventDefault();
+  };
+  const full = `At most ${MAX_OPEN_SESSIONS} sessions — close one to start another`;
+  return (
+    <div className="agent-tabs">
+      <div className="agent-tablist" role="tablist" aria-label="Sessions">
+        {tabs.map((m, at) => {
+          const selected = m.id === store.activeId;
+          return (
+            <div
+              key={m.id}
+              ref={(el) => {
+                if (el) refs.current.set(m.id, el);
+                else refs.current.delete(m.id);
+              }}
+              className="agent-tab"
+              role="tab"
+              aria-selected={selected}
+              tabIndex={selected ? 0 : -1}
+              title={sessionTabTitle(m, store.agents)}
+              data-status={m.status}
+              onClick={() => agentChat.setActive(m.id)}
+              onAuxClick={(e) => {
+                // Middle-click closes, as a browser tab does.
+                if (e.button === 1) {
+                  e.preventDefault();
+                  void close(m);
+                }
+              }}
+              onKeyDown={(e) => onKey(e, at)}
+            >
+              <span className="agent-dot" data-status={m.status} aria-hidden="true" />
+              <span className="agent-tab-name">{m.name}</span>
+              <button
+                type="button"
+                className="agent-tab-close"
+                aria-label={`Close ${m.name}`}
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void close(m);
+                }}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </div>
+          );
+        })}
+        {drafting && (
+          <div className="agent-tab draft" role="tab" aria-selected tabIndex={0}>
+            <Plus size={12} aria-hidden="true" className="agent-tab-icon" />
+            <span className="agent-tab-name">New session</span>
+          </div>
+        )}
+      </div>
+      <Tooltip label={room ? "New session" : full}>
+        <button
+          type="button"
+          className="ibtn agent-tab-new"
+          aria-label="New session"
+          aria-disabled={!room}
+          onClick={() => {
+            if (room) agentChat.setActive(null);
+          }}
+        >
+          <Plus size={14} aria-hidden="true" />
         </button>
       </Tooltip>
     </div>
@@ -954,6 +1046,8 @@ function EmptyState({
   const workDir = folder ?? defaultDir;
   const folderInfo = useFolderInfo(picked ? workDir : null);
   const inWorktree = worktree && folderInfo?.canWorktree === true;
+  // Every open tab holds a slot; at the cap a new session waits for one to close.
+  const room = canOpenAnother(store);
   if (!picked) {
     return (
       <AgentEmptyGuide
@@ -1077,13 +1171,18 @@ function EmptyState({
             {inWorktree ? ", in a git worktree of its own on a new branch" : ""}.
           </p>
         )}
+        {!room && (
+          <p className="agent-empty-full" role="status">
+            {MAX_OPEN_SESSIONS} sessions are open — close one to start another.
+          </p>
+        )}
       </div>
       <ComposerBox
         listKey="new"
         commands={[]}
         placeholder={`Describe a task for ${picked.label}`}
-        disabled={false}
-        canSend
+        disabled={!room}
+        canSend={room}
         autoFocus
         hint="Enter to start · Shift+Enter for a new line"
         left={left}
