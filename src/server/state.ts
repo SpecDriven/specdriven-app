@@ -280,6 +280,40 @@ export function homeStatePath(): string {
   return join(process.env.SPECDRIVEN_HOME || join(homedir(), STATE_DIR), STATE_FILE);
 }
 
+/**
+ * The root is a checkout of this app's own source — the specdriven-app repo or
+ * one of its worktrees, known by its package.json name. A dev server run from
+ * there always keeps its settings in the home file
+ * (specs/ui/app-start.feature.md "Settings file"), so every checkout and
+ * worktree shares the user's one settings file instead of growing its own.
+ */
+export async function isAppCheckout(rootDir: string): Promise<boolean> {
+  try {
+    const pkg = JSON.parse(await readFile(join(rootDir, "package.json"), "utf8"));
+    return typeof pkg === "object" && pkg !== null && pkg.name === APP_PACKAGE_NAME;
+  } catch {
+    return false;
+  }
+}
+
+/** package.json name of this app's own source tree. */
+export const APP_PACKAGE_NAME = "specdriven";
+
+/**
+ * Set to "1" by the desktop app's main process (src/electron/main.ts): its
+ * settings are the home file only, never one under its app-data root.
+ */
+export const HOME_SETTINGS_ENV = "SPECDRIVEN_HOME_SETTINGS";
+
+/**
+ * The home file is the only settings file for this root: in the desktop app,
+ * and in a run from the app's own source checkout
+ * (specs/ui/app-start.feature.md "Settings file").
+ */
+export async function homeSettingsOnly(rootDir: string): Promise<boolean> {
+  return process.env[HOME_SETTINGS_ENV] === "1" || (await isAppCheckout(rootDir));
+}
+
 function legacyPath(rootDir: string): string {
   return join(rootDir, LEGACY_STATE_FILE);
 }
@@ -402,6 +436,7 @@ export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string
 export async function settingsDirectory(rootDir: string = process.cwd()): Promise<string> {
   const local = statePath(rootDir);
   const home = homeStatePath();
+  if (await homeSettingsOnly(rootDir)) return dirname(home);
   const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
   return dirname(target);
 }
@@ -515,7 +550,13 @@ export function normalizeProjectManagementTool(value: unknown): string {
  * on the next write.
  */
 export async function readState(rootDir: string = process.cwd()): Promise<SpecDrivenState> {
-  for (const path of [statePath(rootDir), legacyPath(rootDir), homeStatePath()]) {
+  // The desktop app and the app's own checkout read the home file first; an
+  // old project file is read only while there is no home file yet, and the
+  // next save moves it home.
+  const order = (await homeSettingsOnly(rootDir))
+    ? [homeStatePath(), statePath(rootDir), legacyPath(rootDir)]
+    : [statePath(rootDir), legacyPath(rootDir), homeStatePath()];
+  for (const path of order) {
     const state = await readFrom(path);
     if (state) return state;
   }
@@ -531,6 +572,10 @@ export async function writeState(
   state: SpecDrivenState,
   rootDir: string = process.cwd(),
 ): Promise<void> {
+  if (await homeSettingsOnly(rootDir)) {
+    await replaceTextFile(homeStatePath(), serialize(state));
+    return;
+  }
   const local = statePath(rootDir);
   const legacy = legacyPath(rootDir);
   if (await isFile(legacy)) {
