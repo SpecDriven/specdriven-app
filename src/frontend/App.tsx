@@ -56,6 +56,7 @@ import {
   Timer,
   Plus,
   RefreshCw,
+  RefreshCwOff,
   Search,
   ExternalLink,
   FileText,
@@ -112,6 +113,7 @@ export { createPromiseQueue };
 
 import { setShareRepo, shareUrl } from "./shareLink";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
+import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { applyVimPref, setVimDemoMode, useVimMode } from "./vimPref";
@@ -1001,6 +1003,8 @@ interface Listing {
   issuesRepo: GitHubRepo | null;
   /** The data repo's custom-attributes.txt (specs/app/custom-attributes.feature.md); empty when it has none. */
   customAttributes: string;
+  /** Why saved changes are not reaching the remote (git-operations.md); null while they are. */
+  syncProblem: string | null;
 }
 
 /**
@@ -1119,6 +1123,7 @@ export async function fetchListing(
               ? (data.issuesRepo as GitHubRepo)
               : null,
           customAttributes: typeof data.customAttributes === "string" ? data.customAttributes : "",
+          syncProblem: typeof data.syncProblem === "string" && data.syncProblem ? data.syncProblem : null,
         },
       };
     }
@@ -2044,6 +2049,7 @@ export function App() {
     setAuthorsInMarkdown(listing.authorsInMarkdown);
     setIssuesRepo(listing.issuesRepo);
     setCustomAttributesText(listing.customAttributes);
+    setSyncProblem(listing.syncProblem);
     setLoadError(null);
     return listing;
   }, []);
@@ -3037,6 +3043,37 @@ export function App() {
     };
     setTimeout(scroll, 0);
   };
+  // A push that fails is shown (git-operations.md "a push that fails is
+  // shown, and tried again"): the server's ticks commit an edit and then
+  // cannot push it, which nothing on the page used to say — the edits piled
+  // up on this computer while every editor promised the next sync would
+  // push them. The toast appears once per reason, not once per tick, stays
+  // until dismissed, and leaves on its own when a push goes through; the
+  // Sync button keeps saying so for as long as it is true.
+  const syncProblem = useSyncProblem();
+  const syncProblemToast = useRef<number | null>(null);
+  const announceSyncProblem = (reason: string) => {
+    if (syncProblemToast.current !== null) toast.dismiss(syncProblemToast.current);
+    // A credential problem is fixed in Settings; the hosted app's token
+    // lives on the account page instead, which the message itself names.
+    const settingsFixIt = !hosted && /authentication required|sign in with GitHub/i.test(reason);
+    syncProblemToast.current = toast.error(
+      syncProblemMessage(reason),
+      settingsFixIt ? { action: { label: "Open Settings", run: () => openSettingsAt("settings-git") } } : undefined,
+    );
+  };
+  const announceSyncProblemRef = useRef(announceSyncProblem);
+  announceSyncProblemRef.current = announceSyncProblem;
+  useEffect(() => {
+    if (syncProblem !== null) {
+      announceSyncProblemRef.current(syncProblem);
+      return;
+    }
+    if (syncProblemToast.current === null) return;
+    toast.dismiss(syncProblemToast.current);
+    syncProblemToast.current = null;
+    toast.success("Saved changes pushed");
+  }, [syncProblem]);
   const openPlugins = () => openAppPage("plugins");
   /** A marketplace plugin the Plugins page opens scrolled to, when the agent pane sent the user there. */
   const [pluginsWanted, setPluginsWanted] = useState<string | null>(null);
@@ -4176,6 +4213,10 @@ export function App() {
         return;
       }
       await refreshViewRef.current();
+      // Asked for by hand, a sync that still cannot push says so again —
+      // the first toast may be long dismissed.
+      const stillFailing = currentSyncProblem();
+      if (stillFailing !== null) announceSyncProblemRef.current(stillFailing);
     } catch {
       toast.error("Sync failed — is the server running?");
     } finally {
@@ -10516,19 +10557,35 @@ export function App() {
                 bottom of the page. Up here it works from the home view too, not
                 only with a feature open. */}
             {!demo && !readOnly && codeRepoDir === null && (
-              <Tooltip label={syncing ? "Syncing…" : "Sync — pull the data folder and push saved changes"}>
+              <Tooltip
+                label={
+                  syncing
+                    ? "Syncing…"
+                    : syncProblem !== null
+                      ? `${syncProblemMessage(syncProblem)}. Click to try again.`
+                      : "Sync — pull the data folder and push saved changes"
+                }
+              >
                 <button
                   type="button"
-                  className="ibtn repo-sync"
-                  aria-label={syncing ? "Syncing…" : "Sync"}
+                  className={syncProblem !== null ? "ibtn repo-sync failing" : "ibtn repo-sync"}
+                  aria-label={
+                    syncing ? "Syncing…" : syncProblem !== null ? "Sync — saved changes are not being pushed" : "Sync"
+                  }
                   disabled={syncing}
                   onClick={() => void syncNow()}
                 >
-                  <RefreshCw
-                    size={14}
-                    className={syncing ? "sync-icon spinning" : "sync-icon"}
-                    aria-hidden="true"
-                  />
+                  {/* While pushes fail the icon itself says so, struck
+                      through — the tooltip gives the reason. */}
+                  {syncProblem !== null && !syncing ? (
+                    <RefreshCwOff size={14} className="sync-icon" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw
+                      size={14}
+                      className={syncing ? "sync-icon spinning" : "sync-icon"}
+                      aria-hidden="true"
+                    />
+                  )}
                 </button>
               </Tooltip>
             )}
@@ -12600,8 +12657,8 @@ export function App() {
                   // new feature's editor opens ready to type into instead.
                   initialTab={descSaved.current ? "preview" : "write"}
                 />
-                <span className="readme-hint">
-                  Saved automatically every {autosaveSeconds} seconds; the next sync pushes it.
+                <span className={syncProblem !== null ? "readme-hint sync-failing" : "readme-hint"}>
+                  Saved automatically every {autosaveSeconds} seconds; {pushHint(syncProblem)}{" "}
                   Done shows it rendered.
                 </span>
                 {/* The editor's lower boundary is a grab strip: drag it to give
@@ -13013,10 +13070,10 @@ export function App() {
                   savedAt={savedAt}
                   dirty={readme !== null && readme !== readmeSaved.current}
                 />
-                <span className="readme-hint">
+                <span className={syncProblem !== null ? "readme-hint sync-failing" : "readme-hint"}>
                   {readme === null
                     ? "Loading…"
-                    : `Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}
+                    : `Autosaves every ${autosaveSeconds}s; ${pushHint(syncProblem)}`}
                 </span>
               </div>
               )}

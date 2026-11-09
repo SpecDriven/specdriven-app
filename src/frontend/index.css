@@ -718,6 +718,17 @@ aside header h1 {
   animation: sync-spin 1s linear infinite;
 }
 
+/* While pushes fail (git-operations.md "a push that fails is shown, and
+   tried again"): the Sync button and each editor's autosave hint turn the
+   colour of an error, for as long as saved changes stay on this computer. */
+.repo-sync.failing,
+.readme-hint.sync-failing,
+.feature-title .readme-hint.sync-failing,
+.page-actions .readme-hint.sync-failing,
+.feature-desc-editor .readme-hint.sync-failing {
+  color: var(--danger-fg);
+}
+
 /* Demo mode: a quiet one-line note under the header, telling visitors the
    dataset is a sandbox that resets on refresh. */
 .demo-banner {

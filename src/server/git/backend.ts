@@ -14,6 +14,14 @@ export interface PullResult {
 export interface SyncResult {
   pushed: boolean;
   message: string;
+  /**
+   * Why a push that was tried did not go through — git's own words, or the
+   * sign-in hint for a credential problem. Absent when nothing was pushed
+   * because nothing needed to be (no changes, no upstream): the commits a
+   * failed push leaves on this computer are what the app warns about
+   * (git-operations.md "a push that fails is shown, and tried again").
+   */
+  failure?: string;
 }
 
 /** A path rename carried alongside a move (e.g. a feature's Automerge doc dir). */

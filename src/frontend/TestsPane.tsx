@@ -35,6 +35,7 @@ import { StatusIcon } from "./StatusIcon";
 import { shareUrl } from "./shareLink";
 import { cleanLine, cleanText } from "../server/text";
 import { SaveIndicator, toast } from "./Toasts";
+import { pushHint, useSyncProblem } from "./syncProblem";
 import { Tooltip } from "./Tooltip";
 import { ClipboardPlus, ListPlus } from "lucide-react";
 import { SectionAction, SidebarSection } from "./SidebarSection";
@@ -786,6 +787,7 @@ function CasesView({ store, features, repoCrumb, prompt, confirm, onNavigate }: 
 // --- One case --------------------------------------------------------------------------------
 
 function CaseView({ store, testCase: c, features, repoCrumb, autosaveSeconds, prompt, confirm, onNavigate }: ViewProps & { testCase: TestCase }) {
+  const syncProblem = useSyncProblem();
   const body = useAutosave(`case:${c.id}`, c.body, autosaveSeconds, (text) =>
     testing.updateCase(c.id, { body: text }),
   );
@@ -802,7 +804,9 @@ function CaseView({ store, testCase: c, features, repoCrumb, autosaveSeconds, pr
         actions={
           <>
             <SaveIndicator saving={body.saving} savedAt={body.savedAt} dirty={body.dirty} />
-            <span className="readme-hint">{`Autosaves every ${autosaveSeconds}s; the next sync pushes it.`}</span>
+            <span className={syncProblem !== null ? "readme-hint sync-failing" : "readme-hint"}>
+              {`Autosaves every ${autosaveSeconds}s; ${pushHint(syncProblem)}`}
+            </span>
             <MoreMenu
               label={`Menu for ${c.title}`}
               items={[
