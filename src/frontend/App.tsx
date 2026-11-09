@@ -3128,7 +3128,12 @@ export function App() {
   }, []);
   useEffect(() => {
     if (loading || demo) return;
-    return watchPluginChanges(() => void refreshPlugins());
+    // A change is also an agent's sign-in moving on: its models and the
+    // pane header's API / ACNT chip are asked for again.
+    return watchPluginChanges(() => {
+      void refreshPlugins();
+      void agentChat.reloadChoices();
+    });
   }, [loading, demo, refreshPlugins]);
 
   /**
