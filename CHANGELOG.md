@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.252 — 2026-11-09
+
+- Settings: hide the GitHub account behind an off-by-default switch ([#417](https://github.com/SpecDriven/specdriven-app/pull/417))
+- Settings: remove the Code repo submodule row, its route and server module ([#416](https://github.com/SpecDriven/specdriven-app/pull/416))
+
 ## v0.1.251 — 2026-11-09
 
 - Sync: a push that fails is shown, and the commits it left behind go up on the next sync ([#415](https://github.com/SpecDriven/specdriven-app/pull/415))
