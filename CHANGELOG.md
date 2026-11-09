@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.251 — 2026-11-09
+
+- Sync: a push that fails is shown, and the commits it left behind go up on the next sync ([#415](https://github.com/SpecDriven/specdriven-app/pull/415))
+- Plugins: pull the default marketplace on start and offer the plugins with an update in a dialog ([#414](https://github.com/SpecDriven/specdriven-app/pull/414))
+- settings.json: one recentFolders list, and a settingsVersion with upgrade steps ([#413](https://github.com/SpecDriven/specdriven-app/pull/413))
+
 ## v0.1.250 — 2026-11-09
 
 - Agent pane: a folder switch tries the agent's API again, and the pane warns when it does not answer ([#412](https://github.com/SpecDriven/specdriven-app/pull/412))
