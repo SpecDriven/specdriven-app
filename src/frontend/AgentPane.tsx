@@ -217,11 +217,17 @@ export function AgentPane({
   const folders = knownFolders(codeRepo, dataRepo, store.list, codeRepos);
   return (
     <aside
-      className={`agent-pane${compact ? " overlay" : ""}${store.list.length > 0 ? " has-tabs" : ""}`}
+      className={`agent-pane${compact ? " overlay" : ""}`}
       aria-label="Coding agent"
     >
-      <AgentHeader store={store} session={session} demo={demo} homeDir={homeDir} onClose={onClose} />
-      {store.list.length > 0 && <SessionTabs store={store} confirm={confirm} />}
+      <AgentHeader
+        store={store}
+        session={session}
+        demo={demo}
+        homeDir={homeDir}
+        onClose={onClose}
+        confirm={confirm}
+      />
       {session && agent ? (
         <>
           <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
@@ -297,12 +303,14 @@ function AgentHeader({
   demo,
   homeDir,
   onClose,
+  confirm,
 }: {
   store: AgentChatStore;
   session: SessionState | null;
   demo: boolean;
   homeDir: string | null;
   onClose: () => void;
+  confirm?: (opts: ConfirmOptions) => Promise<boolean>;
 }) {
   const meta = session?.meta ?? null;
   const agent = meta ? describeAgent(meta.agent, store.agents) : null;
@@ -311,18 +319,13 @@ function AgentHeader({
   return (
     <div className="agent-head">
       <Bot size={16} aria-hidden="true" className="agent-head-icon" />
-      {/* The tabs below switch sessions; the name is here in full width. */}
-      <span className="agent-session-name" title={meta?.name}>
-        {meta ? meta.name : "Coding agent"}
-      </span>
-      {meta && agent && (
-        <span
-          className="agent-dot"
-          data-status={meta.status}
-          role="img"
-          aria-label={statusLabel(meta.status, agent)}
-          title={statusLabel(meta.status, agent)}
-        />
+      {/* One header line, as in Claude Code: the session tabs sit here,
+          each with its own dot, in place of a title. With nothing open the
+          pane just says what it is. */}
+      {store.list.length > 0 ? (
+        <SessionTabs store={store} confirm={confirm} />
+      ) : (
+        <span className="agent-session-name">Coding agent</span>
       )}
       <span className="spacer" />
       {/* The watermark over the transcript is decorative; this is the same
@@ -386,8 +389,8 @@ export function sessionTabTitle(m: ChatSessionMeta, agents: readonly AgentDescri
 
 /**
  * One tab per open session (specs/agents/agent-pane.feature.md "Each session
- * has its own tab, at most five"), in the order they started, then + for a
- * new one. Every session in here runs on whether its tab is shown or not;
+ * has its own tab, at most five") on the pane's header line, in the order
+ * they started, then + for a new one. Every session in here runs on whether its tab is shown or not;
  * its dot says how it is doing. While the new-session screen is up it has a
  * tab of its own, with nothing to close. A tab whose agent is at work asks
  * before it closes, since closing ends the session.
@@ -435,7 +438,7 @@ export function SessionTabs({
   };
   const full = `At most ${MAX_OPEN_SESSIONS} sessions — close one to start another`;
   return (
-    <div className="agent-tabs">
+    <>
       <div className="agent-tablist" role="tablist" aria-label="Sessions">
         {tabs.map((m, at) => {
           const selected = m.id === store.activeId;
@@ -499,7 +502,7 @@ export function SessionTabs({
           <Plus size={14} aria-hidden="true" />
         </button>
       </Tooltip>
-    </div>
+    </>
   );
 }
 
