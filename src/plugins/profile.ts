@@ -34,10 +34,17 @@ export interface Profile {
 
 type State = Record<string, unknown>;
 
-/** The open data folder the profile is kept for, or null while none is. */
+/**
+ * The open folder the profile is kept for, or null while none is: a code
+ * repository opened directly (specs/app/code-repo-mode.feature.md) keeps a
+ * list of its own — where the coding agents switch themselves on — else the
+ * data folder.
+ */
 function profileRepo(state: State): string | null {
-  const repo = state.dataRepo;
-  return typeof repo === "string" && repo.trim() !== "" ? repo.trim() : null;
+  for (const repo of [state.openCodeRepo, state.dataRepo]) {
+    if (typeof repo === "string" && repo.trim() !== "") return repo.trim();
+  }
+  return null;
 }
 
 function section(state: State): Record<string, unknown> {

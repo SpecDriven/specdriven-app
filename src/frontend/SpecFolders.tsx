@@ -96,12 +96,89 @@ export function FolderSwitchDialog({
   );
 }
 
+/** One folder on a list: its name and path, the open one badged, and Open / Remove. */
+function FolderList({
+  label,
+  folders,
+  current,
+  dirs = {},
+  busy,
+  onOpen,
+  onRemove,
+}: {
+  label: string;
+  folders: string[];
+  current: string | null;
+  dirs?: Record<string, string>;
+  busy: boolean;
+  onOpen: (folder: string) => void;
+  onRemove: (folder: string) => void;
+}) {
+  return (
+    <ul className="spec-folders" aria-label={label}>
+      {folders.map((folder) => {
+        const name = repoDisplayName(folder);
+        const isCurrent = folder === current;
+        return (
+          <li key={folder} className={`spec-folder${isCurrent ? " current" : ""}`}>
+            <div className="spec-folder-text">
+              <span className="spec-folder-name">
+                {name}
+                {isCurrent && <span className="spec-folder-badge">open</span>}
+              </span>
+              <span className="spec-folder-path" title={folder}>
+                {folder}
+              </span>
+              {dirs[folder] && (
+                <span className="spec-folder-path spec-folder-clone" title={dirs[folder]}>
+                  Cloned to {dirs[folder]}
+                </span>
+              )}
+            </div>
+            <div className="spec-folder-actions">
+              {!isCurrent && (
+                <button
+                  type="button"
+                  className="link"
+                  disabled={busy}
+                  title={`Open ${folder}`}
+                  onClick={() => onOpen(folder)}
+                >
+                  Open
+                </button>
+              )}
+              <button
+                type="button"
+                className="icon-button spec-folder-remove"
+                disabled={busy || isCurrent}
+                aria-label={`Remove ${name} from the list`}
+                title={
+                  isCurrent
+                    ? "The open folder stays on the list — switch to another folder first"
+                    : "Remove from the list — the folder itself stays on disk"
+                }
+                onClick={() => onRemove(folder)}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+              </button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * "Manage specification folders": the folders the app knows, with the open
  * one marked. A folder can be opened from here, or taken off the list — the
  * list entry only; nothing on disk is deleted — and a new one picked from
  * the file system through the same prompt as the pencil beside the folder
  * name. The open folder stays: switch away from it before removing it.
+ *
+ * Where code repositories can be opened directly (specs/app/code-repo-mode
+ * .feature.md "Open a code repository"), a second list holds them, with
+ * "Open a code repository…": the open folder, spec or code, is the badged one.
  */
 export function SpecFoldersDialog({
   folders,
@@ -113,6 +190,11 @@ export function SpecFoldersDialog({
   onAdd,
   onClose,
   trapRef,
+  codeRepos,
+  currentCodeRepo = null,
+  onOpenCodeRepo,
+  onRemoveCodeRepo,
+  onAddCodeRepo,
 }: {
   /** Most recent first, the current folder included. */
   folders: string[];
@@ -127,7 +209,16 @@ export function SpecFoldersDialog({
   onAdd: () => void;
   onClose: () => void;
   trapRef?: RefObject<HTMLDivElement | null>;
+  /** The code repositories opened before, most recent first; absent where none can be opened. */
+  codeRepos?: string[];
+  /** The code repository open now, or null while a specifications folder is. */
+  currentCodeRepo?: string | null;
+  onOpenCodeRepo?: (folder: string) => void;
+  onRemoveCodeRepo?: (folder: string) => void;
+  /** Pick a code repository to open. */
+  onAddCodeRepo?: () => void;
 }) {
+  const withCode = codeRepos !== undefined && onAddCodeRepo !== undefined;
   return (
     <div className="dialog-backdrop" {...backdropDismiss(onClose)}>
       <div
@@ -153,62 +244,46 @@ export function SpecFoldersDialog({
         {folders.length === 0 ? (
           <p className="modal-body">No folders yet.</p>
         ) : (
-          <ul className="spec-folders" aria-label="Spec folders">
-            {folders.map((folder) => {
-              const name = repoDisplayName(folder);
-              const isCurrent = folder === current;
-              return (
-                <li key={folder} className={`spec-folder${isCurrent ? " current" : ""}`}>
-                  <div className="spec-folder-text">
-                    <span className="spec-folder-name">
-                      {name}
-                      {isCurrent && <span className="spec-folder-badge">open</span>}
-                    </span>
-                    <span className="spec-folder-path" title={folder}>
-                      {folder}
-                    </span>
-                    {dirs[folder] && (
-                      <span className="spec-folder-path spec-folder-clone" title={dirs[folder]}>
-                        Cloned to {dirs[folder]}
-                      </span>
-                    )}
-                  </div>
-                  <div className="spec-folder-actions">
-                    {!isCurrent && (
-                      <button
-                        type="button"
-                        className="link"
-                        disabled={busy}
-                        title={`Open ${folder}`}
-                        onClick={() => onOpen(folder)}
-                      >
-                        Open
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="icon-button spec-folder-remove"
-                      disabled={busy || isCurrent}
-                      aria-label={`Remove ${name} from the list`}
-                      title={
-                        isCurrent
-                          ? "The open folder stays on the list — switch to another folder first"
-                          : "Remove from the list — the folder itself stays on disk"
-                      }
-                      onClick={() => onRemove(folder)}
-                    >
-                      <Trash2 size={14} aria-hidden="true" />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <FolderList
+            label="Spec folders"
+            folders={folders}
+            current={current}
+            dirs={dirs}
+            busy={busy}
+            onOpen={onOpen}
+            onRemove={onRemove}
+          />
+        )}
+        {withCode && (
+          <>
+            <h4 className="spec-folders-subhead">Code repositories</h4>
+            <p className="hint">
+              Opened directly, without specifications: the app shows their files and runs the
+              coding agent there, and leaves git to you.
+            </p>
+            {codeRepos.length === 0 ? (
+              <p className="modal-body">None yet.</p>
+            ) : (
+              <FolderList
+                label="Code repositories"
+                folders={codeRepos}
+                current={currentCodeRepo}
+                busy={busy}
+                onOpen={(folder) => onOpenCodeRepo?.(folder)}
+                onRemove={(folder) => onRemoveCodeRepo?.(folder)}
+              />
+            )}
+          </>
         )}
         <div className="dialog-actions">
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAdd}>
             Open another folder…
           </button>
+          {withCode && (
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={onAddCodeRepo}>
+              Open a code repository…
+            </button>
+          )}
           <button type="button" className="btn btn-primary" autoFocus onClick={onClose}>
             Close
           </button>

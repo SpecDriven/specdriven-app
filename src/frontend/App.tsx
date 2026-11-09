@@ -60,6 +60,7 @@ import {
   ExternalLink,
   FileText,
   FolderInput,
+  FolderTree,
   GitPullRequest,
   Flag,
   Home,
@@ -264,6 +265,8 @@ import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
 import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
+import { FILES_TAB } from "./files/plugin";
+import { FILES_HOME } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
@@ -1260,6 +1263,14 @@ export function App() {
    * reads them here.
    */
   const reposRef = useRef<{ open: string | null; recent: string[] }>({ open: null, recent: [] });
+  // Code repository mode (specs/app/code-repo-mode.feature.md): a code
+  // repository open in place of a specifications folder — its absolute path,
+  // or null — the ones opened before, and whether one may be opened here.
+  // The ref is for callbacks that outlive a render (the loaders, goHome).
+  const [codeRepoDir, setCodeRepoDir] = useState<string | null>(null);
+  const codeRepoRef = useRef<string | null>(null);
+  const [recentCodeRepos, setRecentCodeRepos] = useState<string[]>([]);
+  const [canOpenCodeRepo, setCanOpenCodeRepo] = useState(false);
   /** The open folder's absolute path, as the server resolved it. */
   const [dataDir, setDataDir] = useState<string | null>(null);
   /** The user's home folder, for paths the session popover writes as ~/…;
@@ -1275,8 +1286,21 @@ export function App() {
     recentDataRepoDirs?: unknown;
     dataDir?: unknown;
     homeDir?: unknown;
+    codeRepoMode?: unknown;
+    codeRepoDir?: unknown;
+    recentCodeRepos?: unknown;
+    canOpenCodeRepo?: unknown;
   }) => {
-    const open = state.dataRepo ?? null;
+    // An answer that says (every /api/state one) sets the mode; a code
+    // repository open means no specifications folder is.
+    if (state.codeRepoMode !== undefined) {
+      const code = state.codeRepoMode === true && typeof state.codeRepoDir === "string" ? state.codeRepoDir : null;
+      codeRepoRef.current = code;
+      setCodeRepoDir(code);
+    }
+    if (Array.isArray(state.recentCodeRepos)) setRecentCodeRepos(state.recentCodeRepos as string[]);
+    if (typeof state.canOpenCodeRepo === "boolean") setCanOpenCodeRepo(state.canOpenCodeRepo);
+    const open = codeRepoRef.current ? null : (state.dataRepo ?? null);
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
     const dirs = state.recentDataRepoDirs;
     reposRef.current = { open, recent };
@@ -1294,7 +1318,8 @@ export function App() {
   const [settingRepo, setSettingRepo] = useState(false);
   // First-run screen (specs/ui/app-start.feature.md): open a folder on this
   // computer, or clone a GitHub repository with a personal access token.
-  const [startChoice, setStartChoice] = useState<"folder" | "clone">("folder");
+  // Or open a code repository directly (specs/app/code-repo-mode.feature.md).
+  const [startChoice, setStartChoice] = useState<"folder" | "clone" | "code">("folder");
   // Switch spec folder (specs/app/spec-folders.feature.md): while a switch
   // runs, a modal covers the app with the folder being opened and the step
   // it is on; null between switches.
@@ -1780,7 +1805,13 @@ export function App() {
   // The plugins' tabs (specs/app/plugins.feature.md), in their order, and
   // which plugin view has the pane — null when none. App knows only the tab
   // id and an opaque view; the tab parses, renders and titles it.
-  const pluginTabs = useRegistry(tabs);
+  const registeredTabs = useRegistry(tabs);
+  // With a code repository open (specs/app/code-repo-mode.feature.md) the
+  // Files tab is the only one; otherwise it is never shown.
+  const pluginTabs = useMemo(
+    () => registeredTabs.filter((tab) => (tab.id === FILES_TAB) === (codeRepoDir !== null)),
+    [registeredTabs, codeRepoDir],
+  );
   // The Settings sections the plugins register (src/plugins/client/
   // settings.ts), and the state payload they read; each sits where its
   // order puts it among the core sections.
@@ -1805,7 +1836,9 @@ export function App() {
   /** The tab on screen: a plugin's tab only while it is still mounted. */
   const shownTab: SidebarTab = pluginTabs.some((tab) => tab.id === sidebarTab)
     ? sidebarTab
-    : "specs";
+    : codeRepoDir !== null
+      ? FILES_TAB
+      : "specs";
   // Live sync (specs/datastore/automerge-store.feature.md): optional websocket
   // sync server; empty means off — git stays the only transport.
   const [syncServerUrl, setSyncServerUrl] = useState<string | null>(null);
@@ -1978,6 +2011,8 @@ export function App() {
 
   /** Returns the listing it loaded, so callers can act on it before state settles. */
   const loadFeatures = useCallback(async (): Promise<Listing | null> => {
+    // A code repository has no specifications to list.
+    if (codeRepoRef.current) return null;
     const result = await fetchListing();
     if ("error" in result) {
       setLoadError(result.error);
@@ -2001,6 +2036,8 @@ export function App() {
 
   /** Read the data repo's README into the home editor, dropping any unsaved edit. */
   const loadReadme = useCallback(async (): Promise<void> => {
+    // A code repository's README opens in the Files tab instead.
+    if (codeRepoRef.current) return;
     const res = await fetch("/api/readme");
     if (!res.ok) return;
     const data = (await res.json()) as { content: string };
@@ -2035,7 +2072,9 @@ export function App() {
       const { state } = result;
       try {
         applyRepos(state);
-        setNeedsRepo(state.needsDataRepo);
+        // No folder of either kind: the first-run screen (needsFolder is
+        // false while a code repository is open in place of the specs).
+        setNeedsRepo(state.needsFolder ?? state.needsDataRepo);
         if (typeof state.reloadFrequencySeconds === "number") {
           setReloadSeconds(state.reloadFrequencySeconds);
         }
@@ -2129,6 +2168,13 @@ export function App() {
           // Deep link (specs/ui/navigation.feature.md): the entry url picks the
           // view.
           await openFromLocation();
+        } else if (state.codeRepoMode === true) {
+          // A code repository (specs/app/code-repo-mode.feature.md): the
+          // Files tab — mounted for it by the loader — and whatever installed
+          // plugin still applies; the entry url opens a file or home.
+          await syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state });
+          setSettingsPayload(state);
+          await openFromLocation();
         }
       } catch (e) {
         // The server answered: a plugin or deep link that failed to open is
@@ -2206,11 +2252,13 @@ export function App() {
 
   // Mirror the server's cron reload: refresh on the same cadence so pulled
   // changes show up.
+  // Not for a code repository, which nothing syncs: its tree refreshes when
+  // the window comes back into focus instead.
   useEffect(() => {
-    if (loading || needsRepo || outdated || reloadSeconds <= 0) return;
+    if (loading || needsRepo || outdated || reloadSeconds <= 0 || codeRepoDir !== null) return;
     const id = setInterval(() => void refreshViewRef.current(), reloadSeconds * 1000);
     return () => clearInterval(id);
-  }, [loading, needsRepo, outdated, reloadSeconds]);
+  }, [loading, needsRepo, outdated, reloadSeconds, codeRepoDir]);
 
   // Keyboard: every shortcut — the scenario cards' ↑/↓/Enter, ESC's many
   // meanings, "/" for search and the rest — is declared in one registry
@@ -2391,6 +2439,15 @@ export function App() {
     else history.replaceState(null, "", url);
   }, [loading, needsRepo, selected, paneScenario, pluginView, appPage]);
 
+  // A code repository's pane is the Files tab's (specs/app/code-repo-mode
+  // .feature.md): leaving an app page, or a view that went away, lands on
+  // its home rather than on a README editor the repository has no data for.
+  useEffect(() => {
+    if (loading || needsRepo || codeRepoDir === null || pluginView || appPage) return;
+    openPluginView(FILES_TAB, FILES_HOME);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, needsRepo, codeRepoDir, pluginView, appPage, pluginTabs]);
+
   // Window title follows what is open (specs/ui/navigation.feature.md) — chat
   // and email link previews show it.
   const clock = titlePrefix(pom.timer, pom.now);
@@ -2505,8 +2562,8 @@ export function App() {
 
   // First-run form (specs/ui/app-start.feature.md): the picker fills the path
   // field; the user still confirms with the submit button.
-  const browseIntoRepoInput = async () => {
-    const picked = await chooseFolderNative();
+  const browseIntoRepoInput = async (purpose: "data-repo" | "code-repo" = "data-repo") => {
+    const picked = await chooseFolderNative(purpose);
     if (picked && repoInputRef.current) repoInputRef.current.value = picked;
   };
 
@@ -2524,17 +2581,11 @@ export function App() {
     await switchRepo(input?.trim() ?? "");
   };
 
-  // Switch to another data dir — typed into the prompt above or picked from
-  // the recent folder list (specs/ui/ui.feature.md "Recent folder list"), or
-  // named by a link (`specdriven://<folder>/...`), which then opens `entryPath`
-  // in it rather than its README.
-  const switchRepo = async (next: string, entryPath?: string) => {
-    if (!next || next === reposRef.current.open) return;
-    setSettingRepo(true);
-    // The switch is modal (specs/app/spec-folders.feature.md "Switch spec
-    // folder"): the dialog names the folder and the step, and everything
-    // else waits until it comes down in the finally below.
-    setSwitching({ folder: next, step: "saving" });
+  /**
+   * Land what every editor holds in the folder it was typed in, before the
+   * open folder changes — a spec folder's or a code repository's.
+   */
+  const landEditors = async () => {
     // A README edit belongs to the repo it was typed in: land it there before
     // the switch, and empty the editor so no tick writes it into the new one.
     // Await the queue after the tick — a boolean in-flight flag would make
@@ -2547,8 +2598,8 @@ export function App() {
     setReadme(null);
     await editorRef.current.close();
     await scenarioSaveQueue.current.idle();
-    // So does whatever a plugin's view holds — an open roadmap page or an
-    // Event Model's canvas, say:
+    // So does whatever a plugin's view holds — an open roadmap page, an
+    // Event Model's canvas, a code repository's file, say:
     // its last save goes out there, and the plugin seals the view on its way
     // out. The unmount below lands in a later React commit that nothing here
     // awaits, so the seal — not the ordering — is what keeps its parting save
@@ -2562,6 +2613,20 @@ export function App() {
     await descTick.current();
     await descSaveQueue.current.idle();
     setDescEdit(null);
+  };
+
+  // Switch to another data dir — typed into the prompt above or picked from
+  // the recent folder list (specs/ui/ui.feature.md "Recent folder list"), or
+  // named by a link (`specdriven://<folder>/...`), which then opens `entryPath`
+  // in it rather than its README.
+  const switchRepo = async (next: string, entryPath?: string) => {
+    if (!next || next === reposRef.current.open) return;
+    setSettingRepo(true);
+    // The switch is modal (specs/app/spec-folders.feature.md "Switch spec
+    // folder"): the dialog names the folder and the step, and everything
+    // else waits until it comes down in the finally below.
+    setSwitching({ folder: next, step: "saving" });
+    await landEditors();
     try {
       setSwitching({ folder: next, step: "opening" });
       const put = await putDataRepo(next, (asking) =>
@@ -2622,6 +2687,99 @@ export function App() {
     }
   };
 
+  /**
+   * Open a code repository directly (specs/app/code-repo-mode.feature.md
+   * "Open a code repository"): from the first-run screen, the folder dialog
+   * or the palette. What the editors hold lands first; then the Files tab
+   * takes the place of the specs, and the app opens on the repository's
+   * home. False when the server refused — the reason is shown.
+   */
+  const openCodeRepo = async (dir: string): Promise<boolean> => {
+    const next = dir.trim();
+    if (!next) return false;
+    if (next === codeRepoRef.current) {
+      goHome();
+      return true;
+    }
+    const first = needsRepo;
+    setSettingRepo(true);
+    setRepoError(null);
+    if (!first) setSwitching({ folder: next, step: "saving" });
+    try {
+      if (!first) {
+        await landEditors();
+        setSwitching({ folder: next, step: "opening" });
+      }
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ openCodeRepo: next }),
+      });
+      const state = await res.json();
+      if (!res.ok) {
+        const error = state.error ?? "Could not open this folder";
+        if (first) setRepoError(error);
+        else {
+          toast.error(error);
+          // The README was emptied to leave; the folder stays, so it comes back.
+          await loadReadme();
+        }
+        return false;
+      }
+      if (!first) setSwitching({ folder: next, step: "loading" });
+      applyRepos(state);
+      setNeedsRepo(false);
+      setSelected(null);
+      setFeature(null);
+      setSelectedScenario(null);
+      setPluginView(null);
+      setAppPage(null);
+      setFeatures([]);
+      setLoadError(null);
+      entityFields.reset();
+      if (location.pathname !== "/") history.replaceState(null, "", "/");
+      setPlugins(Array.isArray(state.plugins) ? state.plugins : []);
+      await syncClientPlugins(state.plugins, { demo: Boolean(state.demo), settings: state });
+      setSettingsPayload(state);
+      await client.serial("data/changed");
+      await openFromLocationRef.current("/", false);
+      return true;
+    } finally {
+      setSwitching(null);
+      setSettingRepo(false);
+    }
+  };
+
+  /** Ask for a code repository's folder (typed, or with Browse…), then open it. */
+  const openCodeRepoPrompt = async () => {
+    const input = await prompt({
+      title: "Open a code repository",
+      hint: "The folder of a code repository on this computer. The app shows its files and runs the coding agent there; git stays yours.",
+      initial: codeRepoDir ?? "",
+      placeholder: "/path/to/your/code",
+      confirmLabel: "Open",
+      browse: canChooseFolder ? () => chooseFolderNative("code-repo") : undefined,
+    });
+    if (input?.trim()) await openCodeRepo(input.trim());
+  };
+
+  /** Take a code repository off the folder dialog's list — the folder stays on disk. */
+  const forgetCodeRepo = async (repo: string) => {
+    setSettingRepo(true);
+    try {
+      const res = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ forgetCodeRepo: repo }),
+      });
+      const state = await res.json();
+      if (res.ok) setRecentCodeRepos(Array.isArray(state.recentCodeRepos) ? state.recentCodeRepos : []);
+      else toast.error(state.error ?? "Could not remove this folder");
+    } finally {
+      setSettingRepo(false);
+    }
+  };
+
   // Manage specification folders (specs/app/spec-folders.feature.md): take a
   // folder off the list. The server keeps the open folder on it, so the
   // dialog never offers to remove that one.
@@ -2638,6 +2796,7 @@ export function App() {
           dataRepo: reposRef.current.open,
           recentDataRepos: state.recentDataRepos,
           recentDataRepoDirs: state.recentDataRepoDirs,
+          recentCodeRepos: state.recentCodeRepos,
         });
       else toast.error(state.error ?? "Could not remove this folder");
     } finally {
@@ -2736,6 +2895,8 @@ export function App() {
    * pane").
    */
   const goHome = () => {
+    // A code repository's home is the Files tab's (its README.md, if any).
+    if (codeRepoRef.current && openPluginView(FILES_TAB, FILES_HOME, { push: true })) return;
     editorRef.current.close();
     setPluginView(null);
     setAppPage(null);
@@ -7661,8 +7822,9 @@ export function App() {
       keys: "g s",
       label: "Go to the specs",
       group: "Navigate",
-      when: () => !quiet,
-      palette: () => !quietBehindPalette,
+      // A code repository has no specs tab (specs/app/code-repo-mode.feature.md).
+      when: () => !quiet && codeRepoDir === null,
+      palette: () => !quietBehindPalette && codeRepoDir === null,
       run: () => {
         selectSidebarTab("specs");
         // A plugin's view or an app page (Settings, Images) leaves for the
@@ -8078,10 +8240,21 @@ export function App() {
           ),
         ]
       : []),
-    ...(!demo
+    // A code repository syncs nothing and is not a data folder
+    // (specs/app/code-repo-mode.feature.md "The app runs no git in a code
+    // repository"): the folder dialog is the way back to the specs.
+    ...(!demo && codeRepoDir === null
       ? [
           action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
           action("repo", "Change data folder", <FolderInput size={14} />, () => void changeRepo()),
+        ]
+      : []),
+    ...(canOpenCodeRepo
+      ? [
+          action("open-code-repo", "Open a code repository…", <FolderTree size={14} />, () => void openCodeRepoPrompt()),
+          ...(codeRepoDir !== null
+            ? [action("manage-folders", "Manage folders…", <FolderInput size={14} />, () => setFoldersOpen(true))]
+            : []),
         ]
       : []),
     shortcutAction("go-home", <Home size={14} />),
@@ -8275,7 +8448,13 @@ export function App() {
   // The header's trail (src/frontend/Breadcrumbs.tsx): the data folder, then
   // the feature's folders — a click selects the folder in the sidebar, so
   // "+ New folder" and "+ New feature" land beside the feature.
-  const repoName = demo ? "demo-data" : dataRepo ? repoDisplayName(dataRepo) : "SpecDriven";
+  const repoName = codeRepoDir
+    ? repoDisplayName(codeRepoDir)
+    : demo
+      ? "demo-data"
+      : dataRepo
+        ? repoDisplayName(dataRepo)
+        : "SpecDriven";
   const repoCrumb: Crumb = {
     label: repoName,
     href: "/",
@@ -8585,7 +8764,10 @@ export function App() {
           onSubmit={(e) => {
             e.preventDefault();
             const input = new FormData(e.currentTarget).get("repo") as string;
-            if (input?.trim()) saveRepo(input.trim());
+            if (!input?.trim()) return;
+            // A code repository opens directly (specs/app/code-repo-mode.feature.md).
+            if (startChoice === "code" && !hosted && !demo) void openCodeRepo(input.trim());
+            else saveRepo(input.trim());
           }}
         >
           <h1>SpecDriven</h1>
@@ -8595,7 +8777,7 @@ export function App() {
             <>
               <p>No spec data directory configured yet. Where are your specs?</p>
               <div className="issue-filter start-choice" role="radiogroup" aria-label="Where the specs are">
-                {(["folder", "clone"] as const).map((choice) => (
+                {(canOpenCodeRepo ? (["folder", "clone", "code"] as const) : (["folder", "clone"] as const)).map((choice) => (
                   <button
                     key={choice}
                     type="button"
@@ -8607,12 +8789,39 @@ export function App() {
                       setRepoError(null);
                     }}
                   >
-                    {choice === "folder" ? "Open a folder on this computer" : "Clone from GitHub"}
+                    {choice === "folder"
+                      ? "Open a folder on this computer"
+                      : choice === "clone"
+                        ? "Clone from GitHub"
+                        : "A code repository"}
                   </button>
                 ))}
               </div>
               {startChoice === "folder" ? (
                 folderForm
+              ) : startChoice === "code" && canOpenCodeRepo ? (
+                /* Code repository mode (specs/app/code-repo-mode.feature.md
+                   "Open a code repository"): no specs — the app shows the
+                   repository's files and runs the coding agent there, and
+                   runs no git of its own. */
+                <>
+                  <p>
+                    The folder of a code repository on this computer. The app shows its files and runs
+                    the coding agent there; it never pulls, commits or pushes — git stays yours.
+                  </p>
+                  <div className="input-row">
+                    <input ref={repoInputRef} name="repo" placeholder="/path/to/your/code" autoFocus />
+                    {canChooseFolder && (
+                      <button type="button" className="browse" onClick={() => void browseIntoRepoInput("code-repo")}>
+                        Browse…
+                      </button>
+                    )}
+                  </div>
+                  <button type="submit" className="btn btn-primary" disabled={settingRepo}>
+                    {settingRepo ? "Opening…" : "Open this code repository"}
+                  </button>
+                  {repoError && <p className="error">{repoError}</p>}
+                </>
               ) : (
                 <CloneFromGitHub
                   auth={auth}
@@ -8667,7 +8876,8 @@ export function App() {
   // section — Settings → Claude — after what the plugin renders; an agent
   // whose plugin adds none gets a section of its own, titled after it. A
   // local agent only, so not in the demo or hosted app.
-  const modelListsShown = !demo && !hosted;
+  // The lists live in the specifications folder: none while a code repository is open.
+  const modelListsShown = !demo && !hosted && codeRepoDir === null;
   const agentModelList = (agent: (typeof agents)[number]) => (
     <AgentModelList key={agent.id} agent={agent} models={agentModels[agent.id] ?? []} onSaved={saveAgentModels} />
   );
@@ -8693,7 +8903,7 @@ export function App() {
         ...pluginSettingsNav(null),
         { id: "settings-general", title: "General" },
         ...pluginSettingsNav("general"),
-        ...(demo ? [] : [{ id: "settings-sync", title: "Sync" }]),
+        ...(demo || codeRepoDir !== null ? [] : [{ id: "settings-sync", title: "Sync" }]),
         ...pluginSettingsNav("sync"),
         { id: "settings-editor", title: "Specs" },
         ...pluginSettingsNav("specs"),
@@ -8855,7 +9065,7 @@ export function App() {
       {renderPluginSettings("general")}
       {/* Demo mode has nothing to sync with: the whole autosync/live
           sync group hides — the server refuses the changes anyway. */}
-      {!demo && (
+      {!demo && codeRepoDir === null && (
       <PageSection
         id="settings-sync"
         title="Sync"
@@ -10061,6 +10271,7 @@ export function App() {
           {/* The rail mirrors the sidebar's tab bar: Specs first, then the
               plugins' tabs, lit the way the bar's tabs are (shownTab) — so
               collapsing the sidebar never loses the tree. */}
+          {codeRepoDir === null && (
           <Tooltip label="Specs" keys="g s">
             <a
               href="/"
@@ -10079,6 +10290,7 @@ export function App() {
               <FileText size={16} aria-hidden="true" />
             </a>
           </Tooltip>
+          )}
           {/* The plugins' tabs — the special folders first. A tab with nothing
               to open — an empty folder — has no icon on the rail. */}
           {pluginTabs.filter(tabReachable).map((tab) => (
@@ -10185,7 +10397,19 @@ export function App() {
               so a plain click opens the README editor and right-click → Copy
               Link works. */}
           <div className="repo-row">
-            {dataRepo && (
+            {codeRepoDir !== null ? (
+              /* A code repository (specs/app/code-repo-mode.feature.md): its
+                 name is the home link, which opens its README.md. */
+              <a
+                href="/"
+                className="repo-name"
+                title={`${codeRepoDir} — a code repository`}
+                aria-label="Open the code repository's home"
+                onClick={(e) => spaClick(e, goHome)}
+              >
+                {repoDisplayName(codeRepoDir)}
+              </a>
+            ) : dataRepo && (
               <a
                 href="/"
                 className="repo-name"
@@ -10204,7 +10428,7 @@ export function App() {
                 only — the full path is the tooltip. Picking one switches
                 to it and opens its README; the current folder is ticked,
                 and picking it just goes home to the README. */}
-            {dataRepo && !demo && !readOnly && (
+            {(dataRepo || codeRepoDir !== null) && !demo && !readOnly && (
               <div className="repo-recent">
                 <button
                   type="button"
@@ -10234,7 +10458,17 @@ export function App() {
                   className="repo-recent-menu"
                   containerSelector=".repo-recent"
                   items={[
-                    ...recentRepos.map(
+                    // With a code repository open, the ones opened before.
+                    ...(codeRepoDir !== null ? recentCodeRepos : []).map(
+                      (repo): MenuItem => ({
+                        id: `code:${repo}`,
+                        label: repoDisplayName(repo),
+                        title: repo,
+                        checked: repo === codeRepoDir,
+                        onSelect: () => void openCodeRepo(repo),
+                      }),
+                    ),
+                    ...(codeRepoDir !== null ? [] : recentRepos).map(
                       (repo): MenuItem => {
                         const current = repo === dataRepo;
                         return {
@@ -10267,13 +10501,13 @@ export function App() {
               </div>
             )}
             {!demo && !readOnly && (
-              <Tooltip label="Change data directory">
+              <Tooltip label={codeRepoDir !== null ? "Open another code repository" : "Change data directory"}>
                 <button
                   type="button"
                   className="ibtn repo-edit"
-                  aria-label="Change data directory"
+                  aria-label={codeRepoDir !== null ? "Open another code repository" : "Change data directory"}
                   disabled={settingRepo}
-                  onClick={() => void changeRepo()}
+                  onClick={() => void (codeRepoDir !== null ? openCodeRepoPrompt() : changeRepo())}
                 >
                   <Pencil size={13} aria-hidden="true" />
                 </button>
@@ -10284,7 +10518,7 @@ export function App() {
                 label while running, the icon turning; no status line at the
                 bottom of the page. Up here it works from the home view too, not
                 only with a feature open. */}
-            {!demo && !readOnly && (
+            {!demo && !readOnly && codeRepoDir === null && (
               <Tooltip label={syncing ? "Syncing…" : "Sync — pull the data folder and push saved changes"}>
                 <button
                   type="button"
@@ -10377,10 +10611,11 @@ export function App() {
             special folder the Settings switches show among them — adds its
             own beside it. The bar only shows once there is something to
             switch to — one tab is no tab bar. */}
-        {pluginTabs.length > 0 && (
+        {pluginTabs.length > (codeRepoDir !== null ? 1 : 0) && (
           <div className="side-tabs" role="tablist" aria-label="Sidebar">
             {/* Each tab's tooltip carries its `g` chord, as the rail's icons
-                do. */}
+                do. A code repository has no Specs tab. */}
+            {codeRepoDir === null && (
             <Tooltip label="Specs" keys="g s">
               <button
                 type="button"
@@ -10394,6 +10629,7 @@ export function App() {
                 <FileText size={14} aria-hidden="true" /> <span className="side-tab-label">Specs</span>
               </button>
             </Tooltip>
+            )}
             {/* The plugins' tabs (specs/app/plugins.feature.md), in their
                 order, after the core's. */}
             {pluginTabs.map((tab) => (
@@ -12844,20 +13080,24 @@ export function App() {
       )}
       {paneShown && (
         <AgentPane
-          codeRepos={codeRepos}
+          // A code repository open directly (specs/app/code-repo-mode.feature
+          // .md "The coding agent works in the code repository") is the
+          // folder, with no specifications folder behind it.
+          codeRepos={codeRepoDir !== null ? [] : codeRepos}
           compact={compact}
           demo={demo}
-          codeRepo={codeRepo}
+          codeRepo={codeRepoDir !== null ? null : codeRepo}
           // An agent works in a folder: a GitHub url's own clone, so the
           // folder menu offers it once, not as the url and again as its path.
           // The server's absolute path for the open folder: settings may
           // name it relative to the app, and an agent's folder must be absolute.
-          dataRepo={dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
+          dataRepo={codeRepoDir ?? dataDir ?? (dataRepo && (recentRepoDirs[dataRepo] ?? dataRepo))}
           homeDir={homeDir}
           prompt={prompt}
           confirm={confirm}
           ghostty={ghosttyOn && !demo && !hosted}
-          browseFolder={canChooseFolder ? () => chooseFolderNative() : undefined}
+          codeRepoOpen={codeRepoDir !== null}
+          browseFolder={canChooseFolder ? () => chooseFolderNative(codeRepoDir !== null ? "code-repo" : "data-repo") : undefined}
           onClose={() => agentChat.closePane()}
           onOpenPlugins={(wanted) => {
             setPluginsWanted(wanted ?? null);
@@ -13167,7 +13407,7 @@ export function App() {
       {foldersOpen && (
         <SpecFoldersDialog
           folders={recentRepos}
-          current={dataRepo}
+          current={codeRepoDir !== null ? null : dataRepo}
           dirs={recentRepoDirs}
           busy={settingRepo}
           trapRef={foldersTrapRef}
@@ -13181,6 +13421,23 @@ export function App() {
             setFoldersOpen(false);
             void changeRepo();
           }}
+          // Code repositories opened directly (specs/app/code-repo-mode
+          // .feature.md "Open a code repository"), where they can be.
+          {...(canOpenCodeRepo
+            ? {
+                codeRepos: recentCodeRepos,
+                currentCodeRepo: codeRepoDir,
+                onOpenCodeRepo: (folder: string) => {
+                  setFoldersOpen(false);
+                  void openCodeRepo(folder);
+                },
+                onRemoveCodeRepo: (folder: string) => void forgetCodeRepo(folder),
+                onAddCodeRepo: () => {
+                  setFoldersOpen(false);
+                  void openCodeRepoPrompt();
+                },
+              }
+            : {})}
         />
       )}
       {/* Error box (specs/agents/claude.feature.md): what the coding agent said

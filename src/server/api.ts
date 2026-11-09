@@ -6,6 +6,12 @@ import {
   readState,
   writeState,
   needsDataRepo,
+  needsFolder,
+  codeRepoMode,
+  specsOpen,
+  recentCodeRepos,
+  rememberCodeRepo,
+  forgetCodeRepo,
   normalizeAssignments,
   normalizeFeatureFlags,
   normalizeScenarioPolarity,
@@ -154,7 +160,8 @@ import {
   PERMISSION_MODES,
 } from "./agentTypes";
 import { agents } from "../plugins/host/agents";
-import { directoryExists } from "./fsx";
+import { directoryExists, fileExists } from "./fsx";
+import { FilesError, listDir, readFileText, repoPath, writeFileText } from "./files";
 import { readFile } from "node:fs/promises";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { StillReferenced, deleteImages, listImages } from "./imageCleanup";
@@ -512,6 +519,9 @@ async function authFields() {
 }
 
 
+/** What a specifications route answers while a code repository is open instead. */
+export const NO_SPECS_FOLDER = "No specifications folder is open — a code repository is open instead";
+
 /**
  * Resolve the configured data repo (local path or GitHub url, cloned on first
  * use) and hand its local directory to the handler. Nothing reads the repo
@@ -523,7 +533,12 @@ function withDataDir(
   return async (req, params) => {
     await syncedOnStart();
     const state = await readState(getAppRoot());
-    if (needsDataRepo(state)) return json({ error: "data repo not configured" }, 409);
+    if (needsDataRepo(state)) {
+      // specs/app/code-repo-mode.feature.md "The app runs no git in a code
+      // repository": a code repository open in its place has no specs to read.
+      const error = codeRepoMode(state) ? NO_SPECS_FOLDER : "data repo not configured";
+      return json({ error }, 409);
+    }
     let dir: string;
     try {
       dir = await resolveDataRepo(state.dataRepo!, getAppRoot());
@@ -628,6 +643,17 @@ async function stateFields(state: SpecDrivenState) {
   return {
     dataRepo: state.dataRepo ?? null,
     needsDataRepo: needsDataRepo(state),
+    // Code repository mode (specs/app/code-repo-mode.feature.md): a code
+    // repository opened directly, in place of a specifications folder — its
+    // absolute path, and the ones opened before for the folder dialog.
+    codeRepoMode: codeRepoMode(state),
+    codeRepoDir: codeRepoMode(state) ? state.openCodeRepo! : null,
+    recentCodeRepos: isHostedMode() || isDemoMode() ? [] : recentCodeRepos(state),
+    // The first-run screen's question: no folder of either kind is open.
+    needsFolder: needsFolder(state),
+    // Whether a code repository may be opened here: on the developer's own
+    // machine only — not in the demo, the hosted app or the read-only site.
+    canOpenCodeRepo: !isHostedMode() && !isDemoMode() && !isReadOnlyMode(),
     reloadFrequencySeconds: normalizeReloadSeconds(state.reloadFrequencySeconds),
     scenarioPreviewLines: normalizeScenarioPreviewLines(state.scenarioPreviewLines),
     autosaveIntervalSeconds: normalizeAutosaveSeconds(state.autosaveIntervalSeconds),
@@ -788,6 +814,8 @@ function readOnlyFields() {
     readOnly: true,
     dataRepo: repo,
     recentDataRepos: repo ? [repo] : [],
+    recentCodeRepos: [],
+    canOpenCodeRepo: false,
     recentDataRepoDirs: {},
     reloadFrequencySeconds: site?.refreshSeconds ?? 0,
     canOpenInIdea: false,
@@ -815,6 +843,8 @@ function readOnlyFields() {
  */
 function hostedStateRefusal(body: {
   dataRepo?: unknown;
+  openCodeRepo?: unknown;
+  forgetCodeRepo?: unknown;
   gitEngine?: unknown;
   plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
   pluginSettings?: unknown;
@@ -822,6 +852,11 @@ function hostedStateRefusal(body: {
 }): string | null {
   if (!isHostedMode()) return null;
   if (body.pluginSettings !== undefined) return "Plugin settings cannot be changed in the hosted app";
+  // A code repository is a folder on the developer's own machine
+  // (specs/app/code-repo-mode.feature.md), never one in the shared container.
+  if (body.openCodeRepo !== undefined || body.forgetCodeRepo !== undefined) {
+    return "Code repositories open in the app on your own machine, not in the hosted app";
+  }
   if (
     body.dataRepo !== undefined &&
     (typeof body.dataRepo !== "string" || parseGitHubUrl(body.dataRepo)?.host !== GITHUB_HOST)
@@ -848,6 +883,10 @@ const putState: Handler = async (req) => {
     /** Make the picked folder when it does not exist yet — the user agreed. */
     createDataRepo?: boolean;
     forgetDataRepo?: string;
+    /** Open a code repository directly (specs/app/code-repo-mode.feature.md): an absolute path. */
+    openCodeRepo?: string;
+    /** Take a code repository off the folder dialog's list. */
+    forgetCodeRepo?: string;
     reloadFrequencySeconds?: number;
     scenarioPreviewLines?: number;
     autosaveIntervalSeconds?: number;
@@ -891,6 +930,8 @@ const putState: Handler = async (req) => {
   if (
     body.dataRepo === undefined &&
     body.forgetDataRepo === undefined &&
+    body.openCodeRepo === undefined &&
+    body.forgetCodeRepo === undefined &&
     body.reloadFrequencySeconds === undefined &&
     body.scenarioPreviewLines === undefined &&
     body.autosaveIntervalSeconds === undefined &&
@@ -928,7 +969,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -940,6 +981,8 @@ const putState: Handler = async (req) => {
     isDemoMode() &&
     (body.dataRepo !== undefined ||
       body.forgetDataRepo !== undefined ||
+      body.openCodeRepo !== undefined ||
+      body.forgetCodeRepo !== undefined ||
       body.gitEngine !== undefined ||
       body.syncServerUrl !== undefined)
   ) {
@@ -1009,6 +1052,10 @@ const putState: Handler = async (req) => {
     // keeps per-folder lists, so a restart never takes it for an older one.
     migrateProfile(state as Record<string, unknown>, profileManifests);
     state.dataRepo = dataRepo;
+    // A specifications folder takes the place of an open code repository
+    // (specs/app/code-repo-mode.feature.md "Switching back to a
+    // specifications folder"), which stays on its own list.
+    delete state.openCodeRepo;
     startFolderLists(state as Record<string, unknown>);
     // Recent folder list (specs/ui/ui.feature.md): the picked folder moves
     // to the front, the oldest past ten falls off.
@@ -1025,15 +1072,54 @@ const putState: Handler = async (req) => {
       return json({ error: "forgetDataRepo must be a folder path or url" }, 400);
     }
     const target = normalizeDataRepo(body.forgetDataRepo);
-    if (target === (state.dataRepo && normalizeDataRepo(state.dataRepo))) {
+    // The open folder stays. With a code repository open, the last
+    // specifications folder is not open: it may go, and is forgotten.
+    const last = state.dataRepo ? normalizeDataRepo(state.dataRepo) : null;
+    const open = specsOpen(state) ? last : null;
+    if (target === open) {
       return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
     }
     // Any other name the list kept for that repository goes with it, so it
     // never comes back in its place — the open folder excepted.
-    const open = state.dataRepo && normalizeDataRepo(state.dataRepo);
-    for (const entry of await sameRepoAs(target, state.recentDataRepos ?? [], getAppRoot())) {
+    const names = await sameRepoAs(target, [...new Set([...(state.recentDataRepos ?? []), ...(last ? [last] : [])])], getAppRoot());
+    for (const entry of names) {
       if (entry !== open) forgetDataRepo(state, entry);
     }
+    if (!open && last && (last === target || names.includes(last))) delete state.dataRepo;
+  }
+  // Code repository mode (specs/app/code-repo-mode.feature.md "Open a code
+  // repository"): an existing folder, named by its absolute path, opens in
+  // place of the specifications folder. Nothing is written into it and
+  // nothing syncs; the last specifications folder is kept for the way back.
+  if (body.openCodeRepo !== undefined) {
+    if (body.dataRepo !== undefined) {
+      return json({ error: "open a specifications folder or a code repository, not both" }, 400);
+    }
+    const raw = typeof body.openCodeRepo === "string" ? body.openCodeRepo.trim() : "";
+    const expanded = raw === "~" || raw.startsWith("~/") ? homedir() + raw.slice(1) : raw;
+    if (!expanded) return json({ error: "openCodeRepo is required" }, 400);
+    if (!isAbsolute(expanded)) return json({ error: "openCodeRepo must be an absolute path" }, 400);
+    const dir = normalizeDataRepo(resolve(expanded));
+    if (!(await directoryExists(dir))) {
+      return json({ error: `There is no folder at ${dir}`, missing: true, path: dir }, 404);
+    }
+    // The profile's per-folder lists, as for a picked data folder: the code
+    // repository keeps a list of its own, where the coding agents switch
+    // themselves on.
+    migrateProfile(state as Record<string, unknown>, profileManifests);
+    state.openCodeRepo = dir;
+    startFolderLists(state as Record<string, unknown>);
+    rememberCodeRepo(state, dir);
+  }
+  if (body.forgetCodeRepo !== undefined) {
+    if (typeof body.forgetCodeRepo !== "string" || !body.forgetCodeRepo.trim()) {
+      return json({ error: "forgetCodeRepo must be a folder path" }, 400);
+    }
+    const target = normalizeDataRepo(body.forgetCodeRepo);
+    if (codeRepoMode(state) && target === normalizeDataRepo(state.openCodeRepo!)) {
+      return json({ error: "the open folder cannot be removed — switch to another folder first" }, 409);
+    }
+    forgetCodeRepo(state, target);
   }
   if (body.reloadFrequencySeconds !== undefined) {
     const n = body.reloadFrequencySeconds;
@@ -3174,6 +3260,52 @@ function missingAgent(agent?: ChatAgent): Response | null {
   }
 }
 
+/** The folder the coding agent pane works from: the specifications folder, or a code repository opened in its place. */
+interface WorkFolder {
+  kind: "specs" | "code";
+  dir: string;
+}
+
+/**
+ * Hand the handler the open folder: the specifications folder as
+ * withDataDir resolves it, or — in code repository mode
+ * (specs/app/code-repo-mode.feature.md "The coding agent works in the code
+ * repository") — the code repository itself.
+ */
+function withWorkFolder(
+  handler: (folder: WorkFolder, req: Request, params: Params) => Response | Promise<Response>,
+): Handler {
+  const specs = withDataDir((dir, req, params) => handler({ kind: "specs", dir }, req, params));
+  return async (req, params) => {
+    const state = await readState(getAppRoot());
+    if (!codeRepoMode(state)) return specs(req, params);
+    const dir = state.openCodeRepo!;
+    if (!(await directoryExists(dir))) return json({ error: `Code repository not found: ${dir}` }, 404);
+    return handler({ kind: "code", dir }, req, params);
+  };
+}
+
+/**
+ * Where a pane session runs in code repository mode: the folder the pane
+ * picked, else the open code repository — with no specifications folder
+ * behind it, so the prompt points the agent at none and no other folder
+ * rides along.
+ */
+async function codeRepoPlace(
+  root: string,
+  agent: ChatAgent | undefined,
+  cwd?: string,
+): Promise<SessionPlace | Response> {
+  if (!normalizeCodeGen((await readState(getAppRoot())).codeGen)) {
+    return json({ error: "Code generation is switched off in Settings" }, 403);
+  }
+  const missing = missingAgent(agent);
+  if (missing) return missing;
+  const dir = cwd ?? root;
+  if (!(await directoryExists(dir))) return json({ error: `Folder not found: ${dir}` }, 400);
+  return { dataRepo: dir };
+}
+
 /** Where a pane session runs, or the refusal: switched off, no CLI, no repo. */
 async function agentPanePlace(
   dir: string,
@@ -3208,7 +3340,7 @@ function chatError(e: unknown): Response {
   return json({ error: (e as Error).message }, 500);
 }
 
-const postAgentChat = withDataDir(async (dir, req) => {
+const postAgentChat = withWorkFolder(async (folder, req) => {
   const body = (await req.json().catch(() => ({}))) as {
     name?: unknown;
     prompt?: unknown;
@@ -3239,7 +3371,10 @@ const postAgentChat = withDataDir(async (dir, req) => {
     if (!isAbsolute(expanded)) return json({ error: "cwd must be an absolute path" }, 400);
     cwd = resolve(expanded);
   }
-  const place = await agentPanePlace(dir, agent, cwd);
+  const place =
+    folder.kind === "code"
+      ? await codeRepoPlace(folder.dir, agent, cwd)
+      : await agentPanePlace(folder.dir, agent, cwd);
   if (place instanceof Response) return place;
   const name = (typeof body.name === "string" && cleanLine(body.name)) || "Coding agent session";
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt : undefined;
@@ -3777,6 +3912,89 @@ const postOpenTestInIdea = withDataDir(async (dir, req) => {
   return json(test);
 });
 
+/**
+ * Hand the handler the open code repository (specs/app/code-repo-mode
+ * .feature.md), or refuse: outside code repository mode the files routes
+ * have no folder to serve. A FilesError the handler throws is its answer.
+ */
+function withCodeRepo(
+  handler: (root: string, req: Request, params: Params) => Response | Promise<Response>,
+): Handler {
+  return async (req, params) => {
+    const state = await readState(getAppRoot());
+    if (!codeRepoMode(state)) return json({ error: "No code repository is open" }, 409);
+    const root = state.openCodeRepo!;
+    if (!(await directoryExists(root))) return json({ error: `Code repository not found: ${root}` }, 404);
+    try {
+      return await handler(root, req, params);
+    } catch (e) {
+      if (e instanceof FilesError) return json({ error: e.message, ...e.extra }, e.status);
+      throw e;
+    }
+  };
+}
+
+/** The `path` query parameter: a path relative to the code repository, "" for its top. */
+function filesPathParam(req: Request): string {
+  return new URL(req.url).searchParams.get("path") ?? "";
+}
+
+// The navigation pane's tree (specs/app/code-repo-mode.feature.md "The
+// navigation pane lists the repository's files"): one folder at a time.
+const getFilesDir = withCodeRepo(async (root, req) => {
+  const path = filesPathParam(req);
+  return json({ path, entries: await listDir(root, path) });
+});
+
+// The editor pane opens a file (specs/app/code-repo-mode.feature.md "A
+// file opens in a plain text editor").
+const getFilesFile = withCodeRepo(async (root, req) => json(await readFileText(root, filesPathParam(req))));
+
+// ...and saves it: refused with 409 when the file changed on disk since it
+// was opened, unless the body leaves `ifMtimeMs` out ("save over it").
+const putFilesFile = withCodeRepo(async (root, req) => {
+  const body = (await req.json().catch(() => null)) as { content?: unknown; ifMtimeMs?: unknown; eol?: unknown } | null;
+  if (typeof body?.content !== "string") return json({ error: "content must be a string" }, 400);
+  if (body.ifMtimeMs !== undefined && (typeof body.ifMtimeMs !== "number" || !Number.isFinite(body.ifMtimeMs))) {
+    return json({ error: "ifMtimeMs must be a number" }, 400);
+  }
+  if (body.eol !== undefined && body.eol !== "lf" && body.eol !== "crlf") {
+    return json({ error: "eol must be lf or crlf" }, 400);
+  }
+  return json(
+    await writeFileText(root, filesPathParam(req), body.content, {
+      ...(body.ifMtimeMs !== undefined ? { ifMtimeMs: body.ifMtimeMs as number } : {}),
+      ...(body.eol !== undefined ? { eol: body.eol as "lf" | "crlf" } : {}),
+    }),
+  );
+});
+
+/**
+ * Open a code repository's file in IntelliJ IDEA (specs/app/code-repo-mode
+ * .feature.md "Open the file in IntelliJ IDEA"): `idea [--line N] <file>`,
+ * as for test links (src/server/idea.ts) but with no setting to turn on —
+ * the button is the request. The file must be in the open repository.
+ */
+const postFilesOpenInIdea = withCodeRepo(async (root, req) => {
+  const body = (await req.json().catch(() => null)) as { path?: unknown; line?: unknown } | null;
+  if (typeof body?.path !== "string" || !body.path) return json({ error: "path is required" }, 400);
+  if (body.line !== undefined && (!Number.isInteger(body.line) || (body.line as number) < 1)) {
+    return json({ error: "line must be a whole number from 1" }, 400);
+  }
+  const file = repoPath(root, body.path);
+  if (!(await fileExists(file))) return json({ error: `No file at ${body.path}` }, 404);
+  if (!ideaAvailable()) {
+    return json({ error: `idea not found on PATH — on a Mac: ${IDEA_SYMLINK_HINT}`, hint: IDEA_SYMLINK_HINT }, 502);
+  }
+  const line = body.line as number | undefined;
+  try {
+    await openInIdea(file, line);
+  } catch (e) {
+    return json({ error: `Could not start idea: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
+  return json({ file, ...(line !== undefined ? { line } : {}) });
+});
+
 // The core routes, registered first on the plugin kernel's route registry
 // (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
 // plugin appends its own, and a disposed one takes them away again.
@@ -3859,6 +4077,12 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/entity-fields", getEntityFields],
   ["GET", "/api/pull-request", getPullRequestRoute],
   ["POST", "/api/tests/open-in-idea", unlessHosted(postOpenTestInIdea)],
+  // Code repository mode (specs/app/code-repo-mode.feature.md): the open
+  // repository's tree and files, and IntelliJ for one of them.
+  ["GET", "/api/files/dir", unlessHosted(getFilesDir)],
+  ["GET", "/api/files/file", unlessHosted(getFilesFile)],
+  ["PUT", "/api/files/file", unlessHosted(putFilesFile)],
+  ["POST", "/api/files/open-in-idea", unlessHosted(postFilesOpenInIdea)],
   ["POST", "/api/code-repo/submodule", unlessHosted(postCodeRepoSubmodule)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],

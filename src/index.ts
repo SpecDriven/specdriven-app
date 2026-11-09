@@ -64,6 +64,10 @@ const shellRoutes = () => ({
   // (src/electron/static.ts).
   "/features": index,
   "/features/*": index,
+  // A code repository's files (specs/app/code-repo-mode.feature.md "A file
+  // opens in a plain text editor"): /files/<path> opens one again.
+  "/files": index,
+  "/files/*": index,
   // The app's own pages (specs/user-info-settings.feature.md "open
   // Settings", "open Plugins") take the editor pane at their own urls.
   "/settings": index,

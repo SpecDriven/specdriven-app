@@ -16,6 +16,8 @@ export interface RunResult {
 export interface RunOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  /** Written to the command's stdin, which is then closed. */
+  input?: string;
 }
 
 /**
@@ -26,7 +28,7 @@ export interface RunOptions {
  */
 export function run(cmd: string, args: string[], options: RunOptions = {}): Promise<RunResult> {
   return new Promise((done) => {
-    execFile(
+    const child = execFile(
       cmd,
       args,
       { cwd: options.cwd, env: options.env as NodeJS.ProcessEnv, maxBuffer: 64 * 1024 * 1024 },
@@ -37,6 +39,12 @@ export function run(cmd: string, args: string[], options: RunOptions = {}): Prom
         done({ exitCode, stdout: String(stdout), stderr: String(stderr) });
       },
     );
+    if (options.input !== undefined) {
+      // A command that exits before reading it all closes the pipe: that is
+      // its answer, not a reason to throw.
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(options.input);
+    }
   });
 }
 
