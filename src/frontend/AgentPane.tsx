@@ -172,6 +172,7 @@ export function AgentPane({
   homeDir = null,
   ghostty = false,
   confirm,
+  codeRepoOpen = false,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -197,6 +198,9 @@ export function AgentPane({
   /** The app's confirm dialog: closing the tab of a session at work asks
       first. Absent closes at once. */
   confirm?: (opts: ConfirmOptions) => Promise<boolean>;
+  /** A code repository is open in place of the specs (specs/app/code-repo-mode
+      .feature.md): `dataRepo` is that repository, and is named so. */
+  codeRepoOpen?: boolean;
 }) {
   const store = useAgentChat();
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
@@ -246,6 +250,7 @@ export function AgentPane({
           demo={demo}
           codeRepo={codeRepo}
           dataRepo={dataRepo}
+          codeRepoOpen={codeRepoOpen}
           folders={folders}
           askFolder={askFolder}
           onOpenPlugins={onOpenPlugins}
@@ -1018,6 +1023,7 @@ function EmptyState({
   demo,
   codeRepo,
   dataRepo,
+  codeRepoOpen = false,
   folders,
   askFolder,
   onOpenPlugins,
@@ -1027,6 +1033,7 @@ function EmptyState({
   demo: boolean;
   codeRepo: string | null;
   dataRepo: string | null;
+  codeRepoOpen?: boolean;
   folders: readonly string[];
   askFolder?: (initial: string) => Promise<string | null>;
   onOpenPlugins?: (wanted?: string) => void;
@@ -1170,7 +1177,11 @@ function EmptyState({
         ) : (
           <p>
             Your first message starts a live {picked.label} session, run by SpecDriven
-            {workDir === codeRepo ? " in the code repo" : workDir === dataRepo ? " in the data repo" : ""}
+            {workDir === codeRepo || (codeRepoOpen && workDir === dataRepo)
+              ? " in the code repo"
+              : workDir === dataRepo
+                ? " in the data repo"
+                : ""}
             {inWorktree ? ", in a git worktree of its own on a new branch" : ""}.
           </p>
         )}

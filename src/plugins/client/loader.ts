@@ -12,6 +12,7 @@ import { Context, type Plugin, type Scope } from "../kernel";
 import { builtinClientPlugins } from "../builtin/client";
 import { Registry, type PluginView, type TabPlugin } from "./tabs";
 import { settingsSections } from "./settings";
+import { filesPlugin } from "../../frontend/files/plugin";
 
 export const client = new Context();
 /** Each plugin's position in the profile, which is its tab's position. */
@@ -24,6 +25,8 @@ const mounted = new Map<string, { scope: Scope; rev?: string }>();
 let turn: Promise<void> = Promise.resolve();
 /** Plugins between an unmount and the remount of a new build. */
 const remounting = new Set<string>();
+/** The Files tab's scope, mounted for one open code repository. */
+let filesScope: { scope: Scope; root: string } | null = null;
 
 /**
  * Whether a tab that just vanished is about to be back — its plugin was
@@ -73,6 +76,19 @@ export interface ClientConfig {
    * as the "settings/changed" event.
    */
   settings?: Record<string, unknown>;
+  /**
+   * The code repository open in place of a specifications folder
+   * (specs/app/code-repo-mode.feature.md), or null/absent for none. While
+   * one is open the Files tab is mounted for it and the built-in plugins —
+   * the specifications modules — are not; an installed plugin (a coding
+   * agent's sign-in settings) still is.
+   */
+  codeRepo?: string | null;
+}
+
+/** Whether a plugin is one of the app's built-in modules, all of them about specifications. */
+function isBuiltin(row: PluginStatus): boolean {
+  return row.builtin === true || builtinClientPlugins.some((p) => p.manifest.id === row.id);
 }
 
 /**
@@ -86,7 +102,11 @@ export function syncClientPlugins(
   config: ClientConfig = { demo: false },
 ): Promise<void> {
   const run = turn.then(async () => {
-    const rows = (plugins ?? []).filter((p) => p.enabled && p.active !== false);
+    // Named outright, or as the state payload reports it — every caller
+    // hands that payload over, so a Settings change keeps the Files tab.
+    const reported = config.settings?.codeRepoMode === true ? config.settings.codeRepoDir : null;
+    const codeRepo = config.codeRepo !== undefined ? config.codeRepo || null : typeof reported === "string" ? reported : null;
+    const rows = (plugins ?? []).filter((p) => p.enabled && p.active !== false && !(codeRepo && isBuiltin(p)));
     const enabled = rows.map((p) => p.id);
     rank.clear();
     enabled.forEach((id, i) => rank.set(id, i));
@@ -98,6 +118,18 @@ export function syncClientPlugins(
         mounted.delete(id);
         await scope.dispose();
       }
+    }
+    // The Files tab follows the open code repository: gone with it, made
+    // anew for another.
+    if (filesScope && filesScope.root !== codeRepo) {
+      const old = filesScope;
+      filesScope = null;
+      await old.scope.dispose();
+    }
+    if (codeRepo && !filesScope) {
+      const scope = client.plugin(filesPlugin, { codeRepo });
+      filesScope = { scope, root: codeRepo };
+      await scope.ready;
     }
     for (const row of rows) {
       if (mounted.has(row.id)) continue;

@@ -76,8 +76,18 @@ function decodeSegment(segment: string): string {
   }
 }
 
-/** Launches the IDE on a file and line; resolves once the launcher is running. */
-export type IdeaOpener = (file: string, line: number) => Promise<void>;
+/** Launches the IDE on a file, at a line when given; resolves once the launcher is running. */
+export type IdeaOpener = (file: string, line?: number) => Promise<void>;
+
+/**
+ * The launcher's arguments: the file, after `--line N` when a line is
+ * given — a file opened from the code repository's tree
+ * (specs/app/code-repo-mode.feature.md "Open the file in IntelliJ IDEA")
+ * may have none.
+ */
+export function ideaArgs(file: string, line?: number): string[] {
+  return line === undefined ? [file] : ["--line", String(line), file];
+}
 
 /**
  * The real launcher. `idea` is the IDE itself when it isn't already running
@@ -87,7 +97,7 @@ export type IdeaOpener = (file: string, line: number) => Promise<void>;
  */
 const spawnIdea: IdeaOpener = (file, line) =>
   new Promise((resolvePromise, reject) => {
-    const child = spawn(IDEA_BIN, ["--line", String(line), file], {
+    const child = spawn(IDEA_BIN, ideaArgs(file, line), {
       detached: true,
       stdio: "ignore",
     });
@@ -107,7 +117,7 @@ export function setIdeaOpener(fn: IdeaOpener | null): IdeaOpener | null {
   return previous;
 }
 
-/** Open `file` at `line` in IDEA. */
-export function openInIdea(file: string, line: number): Promise<void> {
+/** Open `file` in IDEA, at `line` when given. */
+export function openInIdea(file: string, line?: number): Promise<void> {
   return (opener ?? spawnIdea)(file, line);
 }

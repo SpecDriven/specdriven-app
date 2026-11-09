@@ -17,7 +17,7 @@ import { NOTEBOOK, importPageDrift } from "./pages";
 import { ensureSpecsFolder } from "./features";
 import { ensureProjectSettings } from "./members";
 import { migrateAutomergeLayout, migrateToSpecsFolder } from "./migrate";
-import { readState, needsDataRepo } from "./state";
+import { codeRepoMode, readState, needsDataRepo } from "./state";
 import { checkDataFormat, stampDataFormat } from "./dataFormat";
 import { AGENTS_FILE, installAgentsFile } from "./agentsFile";
 import { isDemoMode } from "./demoMode";
@@ -41,6 +41,12 @@ const log = getLogger("reload");
  */
 export async function reloadData(rootDir: string): Promise<string> {
   const state = await readState(rootDir);
+  // A code repository opened directly is the developer's: the app pulls,
+  // commits and pushes nothing there (specs/app/code-repo-mode.feature.md).
+  if (codeRepoMode(state)) {
+    log.debug("a code repository is open; skipped sync");
+    return "a code repository is open; skipped sync";
+  }
   if (needsDataRepo(state)) {
     log.debug("data repo not configured; skipped reload");
     return "data repo not configured; skipped reload";

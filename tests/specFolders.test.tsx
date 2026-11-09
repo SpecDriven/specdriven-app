@@ -133,3 +133,52 @@ describe("SpecFoldersDialog — Manage specification folders", () => {
     expect(markup).not.toContain('class="spec-folders"');
   });
 });
+
+// Code repositories (specs/app/code-repo-mode.feature.md "Open a code
+// repository"): a second list in the same dialog, where they can be opened.
+describe("SpecFoldersDialog — Code repositories", () => {
+  const withCode = (currentCodeRepo: string | null) =>
+    html(
+      <SpecFoldersDialog
+        folders={["/specs/insurance"]}
+        current={currentCodeRepo ? null : "/specs/insurance"}
+        onOpen={noop}
+        onRemove={noop}
+        onAdd={noop}
+        onClose={noop}
+        codeRepos={["/code/app", "/code/lib"]}
+        currentCodeRepo={currentCodeRepo}
+        onOpenCodeRepo={noop}
+        onRemoveCodeRepo={noop}
+        onAddCodeRepo={noop}
+      />,
+    );
+
+  test("lists the code repositories opened before, with Open a code repository…", () => {
+    const markup = withCode(null);
+    expect(markup).toContain("Code repositories");
+    expect(markup).toContain('aria-label="Code repositories"');
+    expect(markup).toContain("/code/app");
+    expect(markup).toContain("/code/lib");
+    expect(markup).toContain(">Open a code repository…</button>");
+  });
+
+  test("the open folder is badged whether it is a spec folder or a code repository", () => {
+    const specsOpen = withCode(null);
+    expect(specsOpen.match(/spec-folder-badge/g)).toHaveLength(1);
+    expect(specsOpen).toContain('aria-label="Remove insurance from the list"');
+    const codeOpen = withCode("/code/app");
+    expect(codeOpen.match(/spec-folder-badge/g)).toHaveLength(1);
+    // The open code repository stays; the spec folder may now be removed or opened.
+    expect(codeOpen).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Remove app from the list"/);
+    expect(codeOpen).toContain('title="Open /specs/insurance"');
+  });
+
+  test("where code repositories cannot be opened, the dialog has none of it", () => {
+    const markup = html(
+      <SpecFoldersDialog folders={["/specs/a"]} current="/specs/a" onOpen={noop} onRemove={noop} onAdd={noop} onClose={noop} />,
+    );
+    expect(markup).not.toContain("Code repositories");
+    expect(markup).not.toContain("Open a code repository");
+  });
+});

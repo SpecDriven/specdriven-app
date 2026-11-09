@@ -24,6 +24,19 @@ export interface SpecDrivenState {
    * the current folder too; at most MAX_RECENT_DATA_REPOS entries.
    */
   recentDataRepos?: string[];
+  /**
+   * A code repository opened directly (specs/app/code-repo-mode.feature.md),
+   * as an absolute path. While it is set the app runs in code repository
+   * mode: no specifications folder is open and nothing syncs. `dataRepo`
+   * keeps the last specifications folder, for the way back.
+   */
+  openCodeRepo?: string;
+  /**
+   * Code repositories opened before, most recent first: the folder dialog's
+   * "Code repositories" section. Holds the open one too; at most
+   * MAX_RECENT_DATA_REPOS entries.
+   */
+  recentCodeRepos?: string[];
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
   /**
@@ -293,6 +306,10 @@ async function readFrom(path: string): Promise<SpecDrivenState | null> {
     if (Array.isArray(state.recentDataRepos)) {
       state.recentDataRepos = normalizeRecentDataRepos(state.recentDataRepos);
     }
+    if (typeof state.openCodeRepo === "string") state.openCodeRepo = normalizeDataRepo(state.openCodeRepo);
+    if (Array.isArray(state.recentCodeRepos)) {
+      state.recentCodeRepos = normalizeRecentDataRepos(state.recentCodeRepos);
+    }
     return state;
   } catch {
     return {};
@@ -532,8 +549,33 @@ export async function writeState(
   await replaceTextFile(target, serialize(state));
 }
 
+/**
+ * Code repository mode (specs/app/code-repo-mode.feature.md): a code
+ * repository is open in place of a specifications folder.
+ */
+export function codeRepoMode(state: SpecDrivenState): boolean {
+  return typeof state.openCodeRepo === "string" && state.openCodeRepo.trim() !== "";
+}
+
+/** A specifications folder is open: one is named, and no code repository took its place. */
+export function specsOpen(state: SpecDrivenState): boolean {
+  return typeof state.dataRepo === "string" && state.dataRepo.trim() !== "" && !codeRepoMode(state);
+}
+
+/**
+ * No specifications folder is open — none was ever picked, or a code
+ * repository is open instead. Every route, sync tick and plugin pass that
+ * reads or writes specifications stops here, so a code repository is never
+ * pulled, committed to or pushed (specs/app/code-repo-mode.feature.md "The
+ * app runs no git in a code repository").
+ */
 export function needsDataRepo(state: SpecDrivenState): boolean {
-  return !state.dataRepo || state.dataRepo.trim() === "";
+  return !specsOpen(state);
+}
+
+/** No folder of either kind is open: the first-run screen asks for one. */
+export function needsFolder(state: SpecDrivenState): boolean {
+  return !specsOpen(state) && !codeRepoMode(state);
 }
 
 // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
@@ -574,6 +616,31 @@ export function recentDataRepos(state: SpecDrivenState): string[] {
   const current = state.dataRepo && normalizeDataRepo(state.dataRepo);
   const stored = normalizeRecentDataRepos(state.recentDataRepos);
   return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
+}
+
+/**
+ * The code repositories as the folder dialog lists them
+ * (specs/app/code-repo-mode.feature.md "Open a code repository"): the open
+ * one first, then the stored entries.
+ */
+export function recentCodeRepos(state: SpecDrivenState): string[] {
+  const current = codeRepoMode(state) ? normalizeDataRepo(state.openCodeRepo!) : null;
+  const stored = normalizeRecentDataRepos(state.recentCodeRepos);
+  return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
+}
+
+/** Moves (or adds) a code repository to the front of its list, dropping the oldest past 10. */
+export function rememberCodeRepo(state: SpecDrivenState, repo: string): void {
+  state.recentCodeRepos = normalizeRecentDataRepos([repo, ...normalizeRecentDataRepos(state.recentCodeRepos)]);
+}
+
+/** Takes a code repository off its list — the folder stays on disk. Returns whether it was there. */
+export function forgetCodeRepo(state: SpecDrivenState, repo: string): boolean {
+  const target = normalizeDataRepo(repo);
+  const before = normalizeRecentDataRepos(state.recentCodeRepos);
+  const after = before.filter((entry) => entry !== target);
+  state.recentCodeRepos = after;
+  return after.length !== before.length;
 }
 
 /** Moves (or adds) repo to the front of the list, dropping the oldest past 10. */

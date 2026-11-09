@@ -76,6 +76,7 @@ throwaway profiles and debugging.
 | --- | --- |
 | [Features and specs](docs/user-guide/specs.md) | The Specs tab, the draft → proposed → published lifecycle, syncing, links to tests, specs as a submodule of a code repo |
 | [AI sessions](docs/user-guide/ai-sessions.md) | Handing specs to Claude Code, Codex or Pi |
+| [Opening a code repository](docs/user-guide/code-repository.md) | The coding agent, a file tree and IntelliJ on a code repository, with no specs and no sync |
 | [Engineering notebook](docs/user-guide/engineering-notebook.md) | The shared, dated log of observations and decisions |
 | [Pomodoro](docs/user-guide/pomodoro.md) | Timing your own work |
 
