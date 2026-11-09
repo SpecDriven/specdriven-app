@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.249 — 2026-11-09
+
+- One folder list: spec folders and code repositories together, each marked by kind ([#410](https://github.com/SpecDriven/specdriven-app/pull/410))
+- Agent pane header: the account chip always reads API or ACNT ([#409](https://github.com/SpecDriven/specdriven-app/pull/409))
+- Remove the Change data directory button; Manage folders is the one way to change folders ([#408](https://github.com/SpecDriven/specdriven-app/pull/408))
+
 ## v0.1.248 — 2026-11-08
 
 - Settings: the desktop app and the app's own checkout use ~/.specdriven/settings.json only ([#407](https://github.com/SpecDriven/specdriven-app/pull/407))
