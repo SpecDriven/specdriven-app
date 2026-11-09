@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyStartupState, handleApi, matchApi, reloader, syncedOnStart } from "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
-import { statePath, writeState } from "../src/server/state";
+import { SETTINGS_VERSION, statePath, writeState } from "../src/server/state";
 
 let root: string;
 let home: string;
@@ -191,6 +191,7 @@ test("PUT /api/state takes the profile whole, or a legacy switch as an alias", a
   res = await put({ roadmap: true });
   expect(res.status).toBe(200);
   expect((await settingsFile())).toEqual({
+    settingsVersion: SETTINGS_VERSION,
     reloadFrequencySeconds: 0,
     plugins: { enabled: ["tests", "notebook", "roadmap"] },
   });

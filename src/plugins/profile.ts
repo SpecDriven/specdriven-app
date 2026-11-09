@@ -111,9 +111,18 @@ function predatesFolderLists(state: State): boolean {
   return section(state).repos === undefined && knownRepos(state).length > 0;
 }
 
-/** Every folder a settings file knows: the open one, then the recent ones. */
+/**
+ * Every folder a settings file knows: the open one, then the recent
+ * specifications folders — from the one folder list, or a file's older
+ * `recentDataRepos` before the server migrates it.
+ */
 function knownRepos(state: State): string[] {
-  const recent = Array.isArray(state.recentDataRepos) ? state.recentDataRepos : [];
+  const folders = Array.isArray(state.recentFolders) ? (state.recentFolders as unknown[]) : [];
+  const listed = folders.flatMap((e) => {
+    const { path, kind } = (e ?? {}) as { path?: unknown; kind?: unknown };
+    return kind === "spec" && typeof path === "string" ? [path] : [];
+  });
+  const recent = [...listed, ...(Array.isArray(state.recentDataRepos) ? state.recentDataRepos : [])];
   return dedupe(
     [profileRepo(state), ...recent]
       .filter((r): r is string => typeof r === "string" && r.trim() !== "")

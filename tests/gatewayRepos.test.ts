@@ -12,6 +12,7 @@ import { openDatabase } from "../src/gateway/db";
 import { proxyToWorker } from "../src/gateway/proxy";
 import { cleanRepos, readWorkerRepos, RecentRepos, seedWorkerRepos } from "../src/gateway/repos";
 import { userDirs, WorkerPool } from "../src/gateway/workers";
+import { SETTINGS_VERSION } from "../src/server/state";
 
 const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SPECS = "https://github.com/o/specs";
@@ -69,7 +70,19 @@ test("the list is stored per user, reports a change, and goes with the account",
 test("a worker's settings give the open repo first, then its recent ones; no file says nothing", async () => {
   const root = await freshRoot("read");
   expect(await readWorkerRepos(root)).toBeNull();
-  await writeSettings(root, { dataRepo: OLDER, recentDataRepos: [OLDER, SPECS, "./local"], other: true });
+  await writeSettings(root, {
+    dataRepo: OLDER,
+    recentFolders: [
+      { path: OLDER, kind: "spec" },
+      { path: "/code/app", kind: "code" },
+      { path: SPECS, kind: "spec" },
+      { path: "./local", kind: "spec" },
+    ],
+    other: true,
+  });
+  expect(await readWorkerRepos(root)).toEqual([OLDER, SPECS]);
+  // A file the worker's app has not rewritten since the one folder list.
+  await writeSettings(root, { dataRepo: OLDER, recentDataRepos: [OLDER, SPECS, "./local"] });
   expect(await readWorkerRepos(root)).toEqual([OLDER, SPECS]);
   await writeSettings(root, {});
   expect(await readWorkerRepos(root)).toEqual([]);
@@ -91,7 +104,15 @@ test("a worker with no settings gets the remembered repos; one with settings kee
   expect(await seedWorkerRepos(root, [], null)).toBe(false);
   expect(await seedWorkerRepos(root, [SPECS, OLDER], null)).toBe(true);
   const seeded = JSON.parse(await readFile(join(root, ".specdriven", "settings.json"), "utf8"));
-  expect(seeded).toEqual({ dataRepo: SPECS, recentDataRepos: [SPECS, OLDER], plugins: { repos: {} } });
+  expect(seeded).toEqual({
+    settingsVersion: SETTINGS_VERSION,
+    dataRepo: SPECS,
+    recentFolders: [
+      { path: SPECS, kind: "spec" },
+      { path: OLDER, kind: "spec" },
+    ],
+    plugins: { repos: {} },
+  });
 
   expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
   expect(await readWorkerRepos(root)).toEqual([SPECS, OLDER]);
@@ -113,7 +134,7 @@ test("after the volume is lost, the user's next worker opens the repo they had o
   try {
     // The user picks a repo; the gateway notes it as the worker stops.
     await pool.socketFor(A);
-    await writeSettings(userDirs(dataDir, A).root, { dataRepo: SPECS, recentDataRepos: [SPECS, OLDER] });
+    await writeSettings(userDirs(dataDir, A).root, { dataRepo: SPECS, recentFolders: [{ path: SPECS, kind: "spec" }, { path: OLDER, kind: "spec" }] });
     await pool.stop(A);
     expect(repos.get(A)).toEqual([SPECS, OLDER]);
 
@@ -127,7 +148,7 @@ test("after the volume is lost, the user's next worker opens the repo they had o
     expect(state.recentDataRepos).toEqual([SPECS, OLDER]);
 
     // A running worker's change is noted by the sweep.
-    await writeSettings(userDirs(dataDir, A).root, { dataRepo: OLDER, recentDataRepos: [OLDER, SPECS] });
+    await writeSettings(userDirs(dataDir, A).root, { dataRepo: OLDER, recentFolders: [{ path: OLDER, kind: "spec" }, { path: SPECS, kind: "spec" }] });
     await pool.sweepIdle();
     expect(repos.get(A)).toEqual([OLDER, SPECS]);
   } finally {

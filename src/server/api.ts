@@ -12,8 +12,8 @@ import {
   recentCodeRepos,
   rememberCodeRepo,
   forgetCodeRepo,
+  keepDataRepos,
   mergeRecentFolders,
-  openFolder,
   normalizeAssignments,
   normalizeFeatureFlags,
   normalizeScenarioPolarity,
@@ -47,6 +47,7 @@ import {
   settingsDirectory,
 } from "./state";
 import type { SpecDrivenState } from "./state";
+import { upgradeSettingsFile } from "./settingsUpgrade";
 import { onePerRepo, sameRepoAs } from "./sameRepo";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
 import { isDemoMode, reseedDemo } from "./demo";
@@ -392,6 +393,12 @@ export function applyNetSync(state: SpecDrivenState): Promise<void> {
 
 /** Apply the persisted settings a server run starts from. */
 export async function applyStartupState(): Promise<void> {
+  // A settings file an older app wrote is brought to this app's format
+  // once, before anything reads it (specs/ui/app-start.feature.md
+  // "Settings file"); the file as it was is kept beside it.
+  await upgradeSettingsFile(getAppRoot()).catch((e: unknown) =>
+    getLogger("settings").warn("settings file upgrade failed; reading it as it is", { error: (e as Error).message }),
+  );
   const state = await readState(getAppRoot());
   // Log verbosity saved from the Observability page, before anything below logs.
   setLogVerbosity(savedVerbosity(state));
@@ -743,7 +750,7 @@ async function stateFields(state: SpecDrivenState) {
     // specification folders"): every folder the app knows, each with its
     // kind, the open one first, then newest first — what the folder dialog
     // and the recent ▾ menu list.
-    recentFolders: mergeRecentFolders(recent, codeRecent, state.recentFolderOpenedAt, openFolder(state)),
+    recentFolders: mergeRecentFolders(state, recent, codeRecent),
     // Where each GitHub url on that list is cloned on this computer
     // (specs/app/spec-folders.feature.md "Manage specification folders"),
     // which the Spec folders dialog shows under the url. The hosted server's
@@ -1074,7 +1081,7 @@ const putState: Handler = async (req) => {
     rememberDataRepo(state, dataRepo);
     // One entry per repository (specs/app/spec-folders.feature.md): the
     // picked folder replaces the url or folder it shares a repository with.
-    state.recentDataRepos = await onePerRepo(state.recentDataRepos ?? [], getAppRoot());
+    keepDataRepos(state, await onePerRepo(recentDataRepos(state), getAppRoot()));
   }
   // Manage specification folders (specs/app/spec-folders.feature.md): take
   // a folder off the list. Only the list entry goes — nothing on disk is
@@ -1093,7 +1100,7 @@ const putState: Handler = async (req) => {
     }
     // Any other name the list kept for that repository goes with it, so it
     // never comes back in its place — the open folder excepted.
-    const names = await sameRepoAs(target, [...new Set([...(state.recentDataRepos ?? []), ...(last ? [last] : [])])], getAppRoot());
+    const names = await sameRepoAs(target, recentDataRepos(state), getAppRoot());
     for (const entry of names) {
       if (entry !== open) forgetDataRepo(state, entry);
     }

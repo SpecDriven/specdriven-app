@@ -11,6 +11,11 @@ import type { GitEngine } from "./git";
 import { CONFLUENCE_PROGRAM, QTEST_PROGRAM } from "./parser";
 
 export interface SpecDrivenState {
+  /**
+   * The settings file's format (SETTINGS_VERSION): which upgrade steps it
+   * has had. A file without one is version 0.
+   */
+  settingsVersion?: number;
   dataRepo?: string;
   /**
    * The plugins' own settings, by plugin id (src/plugins/host/
@@ -19,11 +24,16 @@ export interface SpecDrivenState {
    */
   pluginSettings?: Record<string, Record<string, unknown>>;
   /**
-   * Data folders used before, most recent first (specs/ui/ui.feature.md
-   * "Recent folder list"): what the ▾ beside the folder name offers. Holds
-   * the current folder too; at most MAX_RECENT_DATA_REPOS entries.
+   * Every folder opened before, newest first, each with its kind — a
+   * specifications folder or a code repository (specs/app/spec-folders
+   * .feature.md "Manage specification folders", specs/ui/ui.feature.md
+   * "Recent folder list"): what the folder dialog and the ▾ beside the
+   * folder name list. The order is the recency; at most
+   * MAX_RECENT_DATA_REPOS entries of each kind. The same path may be on it
+   * twice, once per kind. Replaces `recentDataRepos`, `recentCodeRepos` and
+   * `recentFolderOpenedAt` (settings version 1, migrateRecentFolders).
    */
-  recentDataRepos?: string[];
+  recentFolders?: RecentFolder[];
   /**
    * A code repository opened directly (specs/app/code-repo-mode.feature.md),
    * as an absolute path. While it is set the app runs in code repository
@@ -31,19 +41,6 @@ export interface SpecDrivenState {
    * keeps the last specifications folder, for the way back.
    */
   openCodeRepo?: string;
-  /**
-   * Code repositories opened before, most recent first: the folder dialog's
-   * "Code repositories" section. Holds the open one too; at most
-   * MAX_RECENT_DATA_REPOS entries.
-   */
-  recentCodeRepos?: string[];
-  /**
-   * When each entry on the two lists above was last opened (ms since the
-   * epoch), by kind: what puts spec folders and code repositories in one
-   * list, newest first (specs/app/spec-folders.feature.md "Manage
-   * specification folders"). An entry saved before this has no time.
-   */
-  recentFolderOpenedAt?: { spec?: Record<string, number>; code?: Record<string, number> };
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
   /**
@@ -344,16 +341,11 @@ async function readFrom(path: string): Promise<SpecDrivenState | null> {
     const state = parsed as SpecDrivenState;
     // A folder saved before normalizing may still carry its trailing slash.
     if (typeof state.dataRepo === "string") state.dataRepo = normalizeDataRepo(state.dataRepo);
-    if (Array.isArray(state.recentDataRepos)) {
-      state.recentDataRepos = normalizeRecentDataRepos(state.recentDataRepos);
-    }
     if (typeof state.openCodeRepo === "string") state.openCodeRepo = normalizeDataRepo(state.openCodeRepo);
-    if (Array.isArray(state.recentCodeRepos)) {
-      state.recentCodeRepos = normalizeRecentDataRepos(state.recentCodeRepos);
-    }
-    if (state.recentFolderOpenedAt !== undefined) {
-      state.recentFolderOpenedAt = normalizeOpenedAt(state.recentFolderOpenedAt);
-    }
+    // An older file is read in this app's format (SETTINGS_UPGRADES); the
+    // next save writes it that way. One a newer app wrote is left as it is.
+    upgradeSettings(state as Record<string, unknown>);
+    if (state.recentFolders !== undefined) state.recentFolders = normalizeRecentFolders(state.recentFolders);
     return state;
   } catch {
     return {};
@@ -560,6 +552,12 @@ export function normalizeProjectManagementTool(value: unknown): string {
  * on the next write.
  */
 export async function readState(rootDir: string = process.cwd()): Promise<SpecDrivenState> {
+  const path = await settingsFile(rootDir);
+  return (path && (await readFrom(path))) || {};
+}
+
+/** The settings file readState reads, or null when there is none anywhere. */
+export async function settingsFile(rootDir: string = process.cwd()): Promise<string | null> {
   // The desktop app and the app's own checkout read the home file first; an
   // old project file is read only while there is no home file yet, and the
   // next save moves it home.
@@ -567,10 +565,9 @@ export async function readState(rootDir: string = process.cwd()): Promise<SpecDr
     ? [homeStatePath(), statePath(rootDir), legacyPath(rootDir)]
     : [statePath(rootDir), legacyPath(rootDir), homeStatePath()];
   for (const path of order) {
-    const state = await readFrom(path);
-    if (state) return state;
+    if (await isFile(path)) return path;
   }
-  return {};
+  return null;
 }
 
 /**
@@ -633,8 +630,76 @@ export function needsFolder(state: SpecDrivenState): boolean {
   return !specsOpen(state) && !codeRepoMode(state);
 }
 
+// Settings file format (specs/ui/app-start.feature.md "Settings file"). The
+// file carries `settingsVersion`; a file without one is version 0. Each
+// change to what the file stores — a key renamed, split, merged or dropped,
+// a value in a new shape — raises SETTINGS_VERSION by one and adds the step
+// that rewrites a file of the version before into it. A new app runs the
+// steps the file has not had, in order, when it reads it, and on start
+// saves the result, keeping the file as it was beside it
+// (src/server/settingsUpgrade.ts). A key that is only added needs no step:
+// a file without it reads as the default.
+//
+// A file a newer app wrote is read as it is and never lowered: the keys this
+// app knows still work, the ones it does not stay untouched, and the newer
+// app finds its version unchanged.
+
+/** The settings file format this app reads and writes. */
+export const SETTINGS_VERSION = 1;
+
+/** One upgrade step: rewrites a file of version - 1 into `version`. */
+export interface SettingsUpgrade {
+  version: number;
+  /** What the step changes, for the log. */
+  summary: string;
+  upgrade(state: Record<string, unknown>): void;
+}
+
+/** Every step, oldest first — one per version, 1 to SETTINGS_VERSION. */
+export const SETTINGS_UPGRADES: readonly SettingsUpgrade[] = [
+  {
+    version: 1,
+    summary: "recentDataRepos, recentCodeRepos and recentFolderOpenedAt become one recentFolders list",
+    upgrade: (state) => void migrateRecentFolders(state),
+  },
+];
+
+/** The version a settings file says it is in: 0 for none, or for anything but a whole number ≥ 0. */
+export function settingsVersionOf(state: Record<string, unknown>): number {
+  const v = state.settingsVersion;
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : 0;
+}
+
+export interface SettingsUpgradeResult {
+  /** The version the file was in. */
+  from: number;
+  /** The version it is in now: SETTINGS_VERSION, or `from` when that is newer. */
+  to: number;
+  /** A newer app wrote the file; it was left as it is. */
+  tooNew: boolean;
+  /** What the steps that ran change, oldest first. */
+  steps: string[];
+}
+
+/**
+ * Runs the steps a settings object has not had and stamps it with this
+ * app's version. One from a newer app is left as it is.
+ */
+export function upgradeSettings(state: Record<string, unknown>): SettingsUpgradeResult {
+  const from = settingsVersionOf(state);
+  if (from > SETTINGS_VERSION) return { from, to: from, tooNew: true, steps: [] };
+  const steps: string[] = [];
+  for (const step of SETTINGS_UPGRADES) {
+    if (step.version <= from) continue;
+    step.upgrade(state);
+    steps.push(step.summary);
+  }
+  state.settingsVersion = SETTINGS_VERSION;
+  return { from, to: SETTINGS_VERSION, tooNew: false, steps };
+}
+
 // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
-// data folders picked before, most recent first, up to 10.
+// folders opened before, most recent first, up to 10 of each kind.
 export const MAX_RECENT_DATA_REPOS = 10;
 
 /**
@@ -646,7 +711,7 @@ export function normalizeDataRepo(repo: string): string {
   return repo.trim().replace(/(?<=[^\\/:])[\\/]+$/, "");
 }
 
-/** Cleaned, deduplicated, capped list for a stored value. */
+/** Cleaned, deduplicated, capped list of folder paths. */
 export function normalizeRecentDataRepos(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();
@@ -662,14 +727,110 @@ export function normalizeRecentDataRepos(value: unknown): string[] {
   return out;
 }
 
+/** The two kinds of folder the app opens: a specifications folder, or a code repository. */
+export type FolderKind = "spec" | "code";
+
+/** One entry on the folder list. */
+export interface RecentFolder {
+  path: string;
+  kind: FolderKind;
+}
+
+const isKind = (value: unknown): value is FolderKind => value === "spec" || value === "code";
+
 /**
- * The recent list as shown: the current folder first, then the stored
- * entries. A settings file from before the list still offers the one
- * folder it names.
+ * A stored folder list, cleaned: entries that are not a path and a kind go,
+ * paths are normalized, each path is kept once per kind (its newest place),
+ * and each kind keeps its newest MAX_RECENT_DATA_REPOS.
+ */
+export function normalizeRecentFolders(value: unknown): RecentFolder[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const count: Record<FolderKind, number> = { spec: 0, code: 0 };
+  const out: RecentFolder[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { path, kind } = entry as { path?: unknown; kind?: unknown };
+    if (typeof path !== "string" || !isKind(kind)) continue;
+    const clean = normalizeDataRepo(path);
+    const key = `${kind}\0${clean}`;
+    if (!clean || seen.has(key) || count[kind] === MAX_RECENT_DATA_REPOS) continue;
+    seen.add(key);
+    count[kind]++;
+    out.push({ path: clean, kind });
+  }
+  return out;
+}
+
+/**
+ * Settings from before the one folder list kept three keys: a list of
+ * specification folders, a list of code repositories, and when each entry
+ * was last opened. They become the one list, in the order the folder
+ * dialog showed them — newest first by open time, entries with no time
+ * behind, spec folders before code repositories — and the old keys go, so
+ * the next save writes the list alone. A file that already has the list
+ * keeps it. Returns whether anything changed. Settings upgrade step 1.
+ */
+export function migrateRecentFolders(state: Record<string, unknown>): boolean {
+  const legacy = ["recentDataRepos", "recentCodeRepos", "recentFolderOpenedAt"] as const;
+  if (!legacy.some((key) => key in state)) return false;
+  if (!Array.isArray(state.recentFolders)) {
+    const times = legacyOpenedAt(state.recentFolderOpenedAt);
+    const entries = [
+      ...normalizeRecentDataRepos(state.recentDataRepos).map((path): RecentFolder => ({ path, kind: "spec" })),
+      ...normalizeRecentDataRepos(state.recentCodeRepos).map((path): RecentFolder => ({ path, kind: "code" })),
+    ];
+    const at = (e: RecentFolder) => times[e.kind][e.path] ?? 0;
+    // Array.prototype.sort is stable, so equal times keep the list order.
+    state.recentFolders = entries.sort((a, b) => at(b) - at(a));
+  }
+  for (const key of legacy) delete state[key];
+  return true;
+}
+
+/** The old per-kind open-time map, every non-time value dropped. */
+function legacyOpenedAt(value: unknown): Record<FolderKind, Record<string, number>> {
+  const out: Record<FolderKind, Record<string, number>> = { spec: {}, code: {} };
+  if (typeof value !== "object" || value === null) return out;
+  for (const kind of ["spec", "code"] as const) {
+    const times = (value as Record<string, unknown>)[kind];
+    if (typeof times !== "object" || times === null) continue;
+    for (const [path, at] of Object.entries(times)) {
+      if (typeof at === "number" && Number.isFinite(at)) out[kind][normalizeDataRepo(path)] = at;
+    }
+  }
+  return out;
+}
+
+/** The stored paths of one kind, newest first. */
+function storedPaths(state: SpecDrivenState, kind: FolderKind): string[] {
+  return normalizeRecentFolders(state.recentFolders)
+    .filter((e) => e.kind === kind)
+    .map((e) => e.path);
+}
+
+/** The list with `path` of `kind` moved (or added) to the front, the oldest of that kind past 10 dropped. */
+function remember(state: SpecDrivenState, kind: FolderKind, path: string): void {
+  state.recentFolders = normalizeRecentFolders([{ path, kind }, ...normalizeRecentFolders(state.recentFolders)]);
+}
+
+/** Takes `path` of `kind` off the list. Returns whether it was there. */
+function forget(state: SpecDrivenState, kind: FolderKind, path: string): boolean {
+  const target = normalizeDataRepo(path);
+  const before = normalizeRecentFolders(state.recentFolders);
+  const after = before.filter((e) => e.kind !== kind || e.path !== target);
+  state.recentFolders = after;
+  return after.length !== before.length;
+}
+
+/**
+ * The recent specifications folders as shown: the current folder first,
+ * then the stored entries. A settings file from before the list still
+ * offers the one folder it names.
  */
 export function recentDataRepos(state: SpecDrivenState): string[] {
   const current = state.dataRepo && normalizeDataRepo(state.dataRepo);
-  const stored = normalizeRecentDataRepos(state.recentDataRepos);
+  const stored = storedPaths(state, "spec");
   return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
 }
 
@@ -680,33 +841,23 @@ export function recentDataRepos(state: SpecDrivenState): string[] {
  */
 export function recentCodeRepos(state: SpecDrivenState): string[] {
   const current = codeRepoMode(state) ? normalizeDataRepo(state.openCodeRepo!) : null;
-  const stored = normalizeRecentDataRepos(state.recentCodeRepos);
+  const stored = storedPaths(state, "code");
   return current ? normalizeRecentDataRepos([current, ...stored]) : stored;
 }
 
-/** Moves (or adds) a code repository to the front of its list, dropping the oldest past 10. */
-export function rememberCodeRepo(state: SpecDrivenState, repo: string, now = Date.now()): void {
-  state.recentCodeRepos = normalizeRecentDataRepos([repo, ...normalizeRecentDataRepos(state.recentCodeRepos)]);
-  stampOpened(state, "code", repo, state.recentCodeRepos, now);
+/** Moves (or adds) a code repository to the front of the list, dropping the oldest past 10. */
+export function rememberCodeRepo(state: SpecDrivenState, repo: string): void {
+  remember(state, "code", repo);
 }
 
-/** Takes a code repository off its list — the folder stays on disk. Returns whether it was there. */
+/** Takes a code repository off the list — the folder stays on disk. Returns whether it was there. */
 export function forgetCodeRepo(state: SpecDrivenState, repo: string): boolean {
-  const target = normalizeDataRepo(repo);
-  const before = normalizeRecentDataRepos(state.recentCodeRepos);
-  const after = before.filter((entry) => entry !== target);
-  state.recentCodeRepos = after;
-  keepOpenedAt(state, "code", after);
-  return after.length !== before.length;
+  return forget(state, "code", repo);
 }
 
-/** Moves (or adds) repo to the front of the list, dropping the oldest past 10. */
-export function rememberDataRepo(state: SpecDrivenState, repo: string, now = Date.now()): void {
-  state.recentDataRepos = normalizeRecentDataRepos([
-    repo,
-    ...normalizeRecentDataRepos(state.recentDataRepos),
-  ]);
-  stampOpened(state, "spec", repo, state.recentDataRepos, now);
+/** Moves (or adds) a specifications folder to the front of the list, dropping the oldest past 10. */
+export function rememberDataRepo(state: SpecDrivenState, repo: string): void {
+  remember(state, "spec", repo);
 }
 
 /**
@@ -717,80 +868,42 @@ export function rememberDataRepo(state: SpecDrivenState, repo: string, now = Dat
  * before getting here.
  */
 export function forgetDataRepo(state: SpecDrivenState, repo: string): boolean {
-  const target = normalizeDataRepo(repo);
-  const before = normalizeRecentDataRepos(state.recentDataRepos);
-  const after = before.filter((entry) => entry !== target);
-  state.recentDataRepos = after;
-  keepOpenedAt(state, "spec", after);
-  return after.length !== before.length;
+  return forget(state, "spec", repo);
 }
 
-/** The two kinds of folder the app opens: a specifications folder, or a code repository. */
-export type FolderKind = "spec" | "code";
-
-/** One entry on the merged folder list. */
-export interface RecentFolder {
-  path: string;
-  kind: FolderKind;
-}
-
-/** A stored open-time map with every non-time value dropped. */
-export function normalizeOpenedAt(value: unknown): NonNullable<SpecDrivenState["recentFolderOpenedAt"]> {
-  const out: NonNullable<SpecDrivenState["recentFolderOpenedAt"]> = {};
-  if (typeof value !== "object" || value === null) return out;
-  for (const kind of ["spec", "code"] as const) {
-    const times = (value as Record<string, unknown>)[kind];
-    if (typeof times !== "object" || times === null) continue;
-    const kept: Record<string, number> = {};
-    for (const [path, at] of Object.entries(times)) {
-      if (typeof at === "number" && Number.isFinite(at)) kept[normalizeDataRepo(path)] = at;
-    }
-    out[kind] = kept;
-  }
-  return out;
-}
-
-/** Records when repo was opened, keeping times only for what is still on its list. */
-function stampOpened(state: SpecDrivenState, kind: FolderKind, repo: string, list: string[], now: number): void {
-  const times = normalizeOpenedAt(state.recentFolderOpenedAt);
-  times[kind] = { ...times[kind], [normalizeDataRepo(repo)]: now };
-  state.recentFolderOpenedAt = times;
-  keepOpenedAt(state, kind, list);
-}
-
-/** Drops the open times of entries no longer on their list. */
-function keepOpenedAt(state: SpecDrivenState, kind: FolderKind, list: string[]): void {
-  if (!state.recentFolderOpenedAt?.[kind]) return;
-  const times = normalizeOpenedAt(state.recentFolderOpenedAt);
-  const on = new Set(list);
-  times[kind] = Object.fromEntries(Object.entries(times[kind] ?? {}).filter(([path]) => on.has(path)));
-  state.recentFolderOpenedAt = times;
+/** Keeps only the specifications folders among `keep`, every entry where it was. */
+export function keepDataRepos(state: SpecDrivenState, keep: readonly string[]): void {
+  const on = new Set(keep.map(normalizeDataRepo));
+  state.recentFolders = normalizeRecentFolders(state.recentFolders).filter((e) => e.kind !== "spec" || on.has(e.path));
 }
 
 /**
  * Every folder the app knows, spec and code together, newest first
  * (specs/app/spec-folders.feature.md "Manage specification folders"): what
  * the folder dialog lists and the recent ▾ menu draws from. The open folder
- * comes first; the rest go by when they were last opened. Entries saved
- * before open times were kept count as never opened, so they stay in their
- * old order behind the timed ones — spec folders, then code repositories.
- * The same path may be on it twice, once per kind.
+ * comes first, then the stored list in its order; `spec` and `code` say
+ * which paths of each kind to show (one entry per repository, none in the
+ * demo), and any of them the stored list lacks follow it. The same path may
+ * be on it twice, once per kind.
  */
 export function mergeRecentFolders(
+  state: SpecDrivenState,
   spec: readonly string[],
   code: readonly string[],
-  openedAt: SpecDrivenState["recentFolderOpenedAt"],
-  open: RecentFolder | null,
 ): RecentFolder[] {
-  const times = normalizeOpenedAt(openedAt);
-  const entries = [
-    ...spec.map((path): RecentFolder => ({ path, kind: "spec" })),
-    ...code.map((path): RecentFolder => ({ path, kind: "code" })),
-  ];
-  const at = (e: RecentFolder) => times[e.kind]?.[e.path] ?? 0;
-  const isOpen = (e: RecentFolder) => open !== null && e.kind === open.kind && e.path === open.path;
-  // Array.prototype.sort is stable, so equal times keep the list order.
-  return entries.sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || at(b) - at(a));
+  const shown: Record<FolderKind, readonly string[]> = { spec, code };
+  const open = openFolder(state);
+  const out: RecentFolder[] = [];
+  const add = (e: RecentFolder) => {
+    if (!shown[e.kind].includes(e.path)) return;
+    if (out.some((o) => o.kind === e.kind && o.path === e.path)) return;
+    out.push(e);
+  };
+  if (open) add(open);
+  for (const e of normalizeRecentFolders(state.recentFolders)) add(e);
+  for (const path of spec) add({ path, kind: "spec" });
+  for (const path of code) add({ path, kind: "code" });
+  return out;
 }
 
 /** The folder open now — a code repository, or the specifications folder — or null. */

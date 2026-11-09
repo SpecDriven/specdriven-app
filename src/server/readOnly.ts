@@ -34,7 +34,7 @@ export { isReadOnlyMode, READ_ONLY_REFUSAL, READ_ONLY_USER, readOnlyAllows } fro
 function siteSettings(dir: string): Partial<SpecDrivenState> {
   return {
     dataRepo: dir,
-    recentDataRepos: [dir],
+    recentFolders: [{ path: dir, kind: "spec" }],
     gitEngine: "js",
     reloadFrequencySeconds: 0,
     codeGen: false,
