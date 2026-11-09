@@ -37,6 +37,13 @@ export interface SpecDrivenState {
    * MAX_RECENT_DATA_REPOS entries.
    */
   recentCodeRepos?: string[];
+  /**
+   * When each entry on the two lists above was last opened (ms since the
+   * epoch), by kind: what puts spec folders and code repositories in one
+   * list, newest first (specs/app/spec-folders.feature.md "Manage
+   * specification folders"). An entry saved before this has no time.
+   */
+  recentFolderOpenedAt?: { spec?: Record<string, number>; code?: Record<string, number> };
   /** How often (seconds) the data repo is git-pulled; 0 disables the reload. */
   reloadFrequencySeconds?: number;
   /**
@@ -343,6 +350,9 @@ async function readFrom(path: string): Promise<SpecDrivenState | null> {
     if (typeof state.openCodeRepo === "string") state.openCodeRepo = normalizeDataRepo(state.openCodeRepo);
     if (Array.isArray(state.recentCodeRepos)) {
       state.recentCodeRepos = normalizeRecentDataRepos(state.recentCodeRepos);
+    }
+    if (state.recentFolderOpenedAt !== undefined) {
+      state.recentFolderOpenedAt = normalizeOpenedAt(state.recentFolderOpenedAt);
     }
     return state;
   } catch {
@@ -675,8 +685,9 @@ export function recentCodeRepos(state: SpecDrivenState): string[] {
 }
 
 /** Moves (or adds) a code repository to the front of its list, dropping the oldest past 10. */
-export function rememberCodeRepo(state: SpecDrivenState, repo: string): void {
+export function rememberCodeRepo(state: SpecDrivenState, repo: string, now = Date.now()): void {
   state.recentCodeRepos = normalizeRecentDataRepos([repo, ...normalizeRecentDataRepos(state.recentCodeRepos)]);
+  stampOpened(state, "code", repo, state.recentCodeRepos, now);
 }
 
 /** Takes a code repository off its list — the folder stays on disk. Returns whether it was there. */
@@ -685,15 +696,17 @@ export function forgetCodeRepo(state: SpecDrivenState, repo: string): boolean {
   const before = normalizeRecentDataRepos(state.recentCodeRepos);
   const after = before.filter((entry) => entry !== target);
   state.recentCodeRepos = after;
+  keepOpenedAt(state, "code", after);
   return after.length !== before.length;
 }
 
 /** Moves (or adds) repo to the front of the list, dropping the oldest past 10. */
-export function rememberDataRepo(state: SpecDrivenState, repo: string): void {
+export function rememberDataRepo(state: SpecDrivenState, repo: string, now = Date.now()): void {
   state.recentDataRepos = normalizeRecentDataRepos([
     repo,
     ...normalizeRecentDataRepos(state.recentDataRepos),
   ]);
+  stampOpened(state, "spec", repo, state.recentDataRepos, now);
 }
 
 /**
@@ -708,5 +721,81 @@ export function forgetDataRepo(state: SpecDrivenState, repo: string): boolean {
   const before = normalizeRecentDataRepos(state.recentDataRepos);
   const after = before.filter((entry) => entry !== target);
   state.recentDataRepos = after;
+  keepOpenedAt(state, "spec", after);
   return after.length !== before.length;
+}
+
+/** The two kinds of folder the app opens: a specifications folder, or a code repository. */
+export type FolderKind = "spec" | "code";
+
+/** One entry on the merged folder list. */
+export interface RecentFolder {
+  path: string;
+  kind: FolderKind;
+}
+
+/** A stored open-time map with every non-time value dropped. */
+export function normalizeOpenedAt(value: unknown): NonNullable<SpecDrivenState["recentFolderOpenedAt"]> {
+  const out: NonNullable<SpecDrivenState["recentFolderOpenedAt"]> = {};
+  if (typeof value !== "object" || value === null) return out;
+  for (const kind of ["spec", "code"] as const) {
+    const times = (value as Record<string, unknown>)[kind];
+    if (typeof times !== "object" || times === null) continue;
+    const kept: Record<string, number> = {};
+    for (const [path, at] of Object.entries(times)) {
+      if (typeof at === "number" && Number.isFinite(at)) kept[normalizeDataRepo(path)] = at;
+    }
+    out[kind] = kept;
+  }
+  return out;
+}
+
+/** Records when repo was opened, keeping times only for what is still on its list. */
+function stampOpened(state: SpecDrivenState, kind: FolderKind, repo: string, list: string[], now: number): void {
+  const times = normalizeOpenedAt(state.recentFolderOpenedAt);
+  times[kind] = { ...times[kind], [normalizeDataRepo(repo)]: now };
+  state.recentFolderOpenedAt = times;
+  keepOpenedAt(state, kind, list);
+}
+
+/** Drops the open times of entries no longer on their list. */
+function keepOpenedAt(state: SpecDrivenState, kind: FolderKind, list: string[]): void {
+  if (!state.recentFolderOpenedAt?.[kind]) return;
+  const times = normalizeOpenedAt(state.recentFolderOpenedAt);
+  const on = new Set(list);
+  times[kind] = Object.fromEntries(Object.entries(times[kind] ?? {}).filter(([path]) => on.has(path)));
+  state.recentFolderOpenedAt = times;
+}
+
+/**
+ * Every folder the app knows, spec and code together, newest first
+ * (specs/app/spec-folders.feature.md "Manage specification folders"): what
+ * the folder dialog lists and the recent ▾ menu draws from. The open folder
+ * comes first; the rest go by when they were last opened. Entries saved
+ * before open times were kept count as never opened, so they stay in their
+ * old order behind the timed ones — spec folders, then code repositories.
+ * The same path may be on it twice, once per kind.
+ */
+export function mergeRecentFolders(
+  spec: readonly string[],
+  code: readonly string[],
+  openedAt: SpecDrivenState["recentFolderOpenedAt"],
+  open: RecentFolder | null,
+): RecentFolder[] {
+  const times = normalizeOpenedAt(openedAt);
+  const entries = [
+    ...spec.map((path): RecentFolder => ({ path, kind: "spec" })),
+    ...code.map((path): RecentFolder => ({ path, kind: "code" })),
+  ];
+  const at = (e: RecentFolder) => times[e.kind]?.[e.path] ?? 0;
+  const isOpen = (e: RecentFolder) => open !== null && e.kind === open.kind && e.path === open.path;
+  // Array.prototype.sort is stable, so equal times keep the list order.
+  return entries.sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || at(b) - at(a));
+}
+
+/** The folder open now — a code repository, or the specifications folder — or null. */
+export function openFolder(state: SpecDrivenState): RecentFolder | null {
+  if (codeRepoMode(state)) return { path: normalizeDataRepo(state.openCodeRepo!), kind: "code" };
+  if (specsOpen(state)) return { path: normalizeDataRepo(state.dataRepo!), kind: "spec" };
+  return null;
 }

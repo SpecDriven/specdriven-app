@@ -9633,6 +9633,20 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   background: var(--accent-soft);
 }
 
+/* A folder's kind (specs/app/spec-folders.feature.md "Manage specification
+   folders"), on the folder dialog's rows and in the recent ▾ menu: a book in
+   the accent colour for a spec folder, code brackets in green for a code
+   repository — told apart by shape and by colour. */
+.folder-kind {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--meter-3);
+}
+
+.folder-kind-spec {
+  color: var(--accent);
+}
+
 .spec-folder-text {
   flex: 1;
   min-width: 0;

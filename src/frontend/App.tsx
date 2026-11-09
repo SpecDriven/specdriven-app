@@ -264,7 +264,15 @@ import {
 import type { FolderNode, ScenarioRow } from "./tree";
 import { useFocusTrap } from "./useFocusTrap";
 import { authorshipLine } from "./authorship";
-import { FolderSwitchDialog, SpecFoldersDialog, type SwitchStep } from "./SpecFolders";
+import {
+  FOLDER_KIND_LABEL,
+  FolderKindIcon,
+  FolderSwitchDialog,
+  parseRecentFolders,
+  SpecFoldersDialog,
+  type FolderEntry,
+  type SwitchStep,
+} from "./SpecFolders";
 import { FILES_TAB } from "./files/plugin";
 import { FILES_HOME } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
@@ -1249,10 +1257,12 @@ const READ_ONLY_PALETTE = new RegExp(`^action:(${[...READ_ONLY_SHORTCUTS].join("
 
 export function App() {
   const [dataRepo, setDataRepo] = useState<string | null>(null);
-  // Recent folder list (specs/ui/ui.feature.md "Recent folder list"): the
-  // data folders used before, most recent first, up to 10 — what the ▾
-  // beside the folder name drops down.
-  const [recentRepos, setRecentRepos] = useState<string[]>([]);
+  // Recent folder list (specs/ui/ui.feature.md "Recent folder list",
+  // specs/app/spec-folders.feature.md "Manage specification folders"): every
+  // folder used before, spec folders and code repositories together, each
+  // with its kind, the open one first, then most recent first — what the ▾
+  // beside the folder name drops down (up to 10) and the folder dialog lists.
+  const [recentFolders, setRecentFolders] = useState<FolderEntry[]>([]);
   // Where each GitHub url among them is cloned on this computer — what the
   // Spec folders dialog shows under the url.
   const [recentRepoDirs, setRecentRepoDirs] = useState<Record<string, string>>({});
@@ -1269,7 +1279,6 @@ export function App() {
   // The ref is for callbacks that outlive a render (the loaders, goHome).
   const [codeRepoDir, setCodeRepoDir] = useState<string | null>(null);
   const codeRepoRef = useRef<string | null>(null);
-  const [recentCodeRepos, setRecentCodeRepos] = useState<string[]>([]);
   const [canOpenCodeRepo, setCanOpenCodeRepo] = useState(false);
   /** The open folder's absolute path, as the server resolved it. */
   const [dataDir, setDataDir] = useState<string | null>(null);
@@ -1288,7 +1297,7 @@ export function App() {
     homeDir?: unknown;
     codeRepoMode?: unknown;
     codeRepoDir?: unknown;
-    recentCodeRepos?: unknown;
+    recentFolders?: unknown;
     canOpenCodeRepo?: unknown;
   }) => {
     // An answer that says (every /api/state one) sets the mode; a code
@@ -1298,7 +1307,7 @@ export function App() {
       codeRepoRef.current = code;
       setCodeRepoDir(code);
     }
-    if (Array.isArray(state.recentCodeRepos)) setRecentCodeRepos(state.recentCodeRepos as string[]);
+    if (Array.isArray(state.recentFolders)) setRecentFolders(parseRecentFolders(state.recentFolders));
     if (typeof state.canOpenCodeRepo === "boolean") setCanOpenCodeRepo(state.canOpenCodeRepo);
     const open = codeRepoRef.current ? null : (state.dataRepo ?? null);
     const recent = Array.isArray(state.recentDataRepos) ? (state.recentDataRepos as string[]) : [];
@@ -1306,7 +1315,6 @@ export function App() {
     reposRef.current = { open, recent };
     setShareRepo(open);
     setDataRepo(open);
-    setRecentRepos(recent);
     setRecentRepoDirs(dirs && typeof dirs === "object" ? (dirs as Record<string, string>) : {});
     // An answer that does not say (the forget-a-folder reply) keeps it.
     if (state.dataDir !== undefined) setDataDir(typeof state.dataDir === "string" ? state.dataDir : null);
@@ -2773,7 +2781,7 @@ export function App() {
         body: JSON.stringify({ forgetCodeRepo: repo }),
       });
       const state = await res.json();
-      if (res.ok) setRecentCodeRepos(Array.isArray(state.recentCodeRepos) ? state.recentCodeRepos : []);
+      if (res.ok) setRecentFolders(parseRecentFolders(state.recentFolders));
       else toast.error(state.error ?? "Could not remove this folder");
     } finally {
       setSettingRepo(false);
@@ -2796,7 +2804,7 @@ export function App() {
           dataRepo: reposRef.current.open,
           recentDataRepos: state.recentDataRepos,
           recentDataRepoDirs: state.recentDataRepoDirs,
-          recentCodeRepos: state.recentCodeRepos,
+          recentFolders: state.recentFolders,
         });
       else toast.error(state.error ?? "Could not remove this folder");
     } finally {
@@ -10430,8 +10438,8 @@ export function App() {
                 <button
                   type="button"
                   className="ibtn repo-recent-toggle"
-                  title="Recent data folders"
-                  aria-label="Recent data folders"
+                  title="Recent folders"
+                  aria-label="Recent folders"
                   aria-haspopup="menu"
                   aria-expanded={recentMenuOpen}
                   disabled={settingRepo}
@@ -10451,39 +10459,33 @@ export function App() {
                 <Menu
                   open={recentMenuOpen}
                   onClose={() => setRecentMenuOpen(false)}
-                  label="Recent data folders"
+                  label="Recent folders"
                   className="repo-recent-menu"
                   containerSelector=".repo-recent"
                   items={[
-                    // With a code repository open, the ones opened before.
-                    ...(codeRepoDir !== null ? recentCodeRepos : []).map(
-                      (repo): MenuItem => ({
-                        id: `code:${repo}`,
-                        label: repoDisplayName(repo),
-                        title: repo,
-                        checked: repo === codeRepoDir,
-                        onSelect: () => void openCodeRepo(repo),
-                      }),
-                    ),
-                    ...(codeRepoDir !== null ? [] : recentRepos).map(
-                      (repo): MenuItem => {
-                        const current = repo === dataRepo;
-                        return {
-                          id: repo,
-                          label: repoDisplayName(repo),
-                          title: repo,
-                          checked: current,
-                          onSelect: () => {
-                            if (current) {
-                              goHome();
-                              void loadReadme();
-                            } else {
-                              void switchRepo(repo);
-                            }
-                          },
-                        };
-                      },
-                    ),
+                    // Every kind of folder, the newest ten, each marked
+                    // by its kind's icon (specs/app/spec-folders.feature.md
+                    // "Manage specification folders").
+                    ...recentFolders.slice(0, 10).map((folder): MenuItem => {
+                      const current =
+                        folder.kind === "code" ? folder.path === codeRepoDir : codeRepoDir === null && folder.path === dataRepo;
+                      return {
+                        id: `${folder.kind}:${folder.path}`,
+                        label: repoDisplayName(folder.path),
+                        icon: <FolderKindIcon kind={folder.kind} size={13} />,
+                        title: `${FOLDER_KIND_LABEL[folder.kind]} — ${folder.path}`,
+                        checked: current,
+                        onSelect: () => {
+                          if (folder.kind === "code") void openCodeRepo(folder.path);
+                          else if (current) {
+                            goHome();
+                            void loadReadme();
+                          } else {
+                            void switchRepo(folder.path);
+                          }
+                        },
+                      };
+                    }),
                     // Manage specification folders
                     // (specs/app/spec-folders.feature.md): the list as a
                     // dialog, where folders can be opened, removed or added.
@@ -13390,17 +13392,23 @@ export function App() {
           the same switch the recent menu does. */}
       {foldersOpen && (
         <SpecFoldersDialog
-          folders={recentRepos}
-          current={codeRepoDir !== null ? null : dataRepo}
+          folders={recentFolders}
+          current={
+            codeRepoDir !== null
+              ? { path: codeRepoDir, kind: "code" }
+              : dataRepo
+                ? { path: dataRepo, kind: "spec" }
+                : null
+          }
           dirs={recentRepoDirs}
           busy={settingRepo}
           trapRef={foldersTrapRef}
           onClose={() => setFoldersOpen(false)}
           onOpen={(folder) => {
             setFoldersOpen(false);
-            void switchRepo(folder);
+            void (folder.kind === "code" ? openCodeRepo(folder.path) : switchRepo(folder.path));
           }}
-          onRemove={(folder) => void forgetRepo(folder)}
+          onRemove={(folder) => void (folder.kind === "code" ? forgetCodeRepo(folder.path) : forgetRepo(folder.path))}
           onAdd={() => {
             setFoldersOpen(false);
             void changeRepo();
@@ -13409,13 +13417,6 @@ export function App() {
           // .feature.md "Open a code repository"), where they can be.
           {...(canOpenCodeRepo
             ? {
-                codeRepos: recentCodeRepos,
-                currentCodeRepo: codeRepoDir,
-                onOpenCodeRepo: (folder: string) => {
-                  setFoldersOpen(false);
-                  void openCodeRepo(folder);
-                },
-                onRemoveCodeRepo: (folder: string) => void forgetCodeRepo(folder),
                 onAddCodeRepo: () => {
                   setFoldersOpen(false);
                   void openCodeRepoPrompt();
