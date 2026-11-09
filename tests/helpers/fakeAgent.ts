@@ -76,6 +76,7 @@ export function fakeProvider(options: FakeProviderOptions = {}): { provider: Age
     ...(options.oneShot ? { oneShot: options.oneShot } : {}),
     ...(options.choices ? { choices: options.choices } : {}),
     ...(options.setDefaults ? { setDefaults: options.setDefaults } : {}),
+    ...(options.reconnect ? { reconnect: options.reconnect } : {}),
     async start(opts) {
       if (options.startError) throw options.startError;
       const session: FakeSession = {

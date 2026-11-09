@@ -61,6 +61,21 @@ export interface AgentProvider {
       checks the data repo's list for the agent against it and logs a
       warning for a listed model it lacks (src/server/agentModels.ts). */
   reportedModels?(): Promise<string[] | null>;
+  /** Try the agent's API again (specs/agents/agent-pane.feature.md S14):
+      the app calls it when the user switches folders, and on the pane's
+      Retry. `cwd` is the folder now open — its settings may name another
+      endpoint. A provider whose API goes through an endpoint it can reach
+      (a proxy, a gateway) checks it, retrying a moment, and says whether it
+      answered; null when there is nothing to try (an account sign-in). */
+  reconnect?(ctx: { cwd: string }): Promise<AgentReconnect | null>;
+}
+
+/** What a provider's reconnect found. */
+export interface AgentReconnect {
+  ok: boolean;
+  detail: string;
+  /** The API's address, for the pane's words. */
+  url?: string;
 }
 
 export interface AgentStartOptions {

@@ -1099,6 +1099,17 @@ export const agentChat = {
     choicesLoading.set(agent, load);
     return load;
   },
+  /** The pane's Retry (specs/agents/agent-pane.feature.md S14): the server
+      tries the agent's API again from the open folder and answers with the
+      choices, which carry what it found. */
+  async reconnect(agent: ChatAgent): Promise<AgentChoices | null> {
+    const data = await call<{ choices: AgentChoices | null }>(
+      `/api/agent/agents/${encodeURIComponent(agent)}/reconnect`,
+      { method: "POST" },
+    );
+    keepChoices(agent, data.choices);
+    return data.choices;
+  },
   /** Ask again for every list already loaded: an agent's sign-in changed
       (the plugin events stream), so its models and the header's API / ACNT
       chip may have moved on though its descriptor did not. */

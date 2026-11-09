@@ -237,6 +237,7 @@ export function AgentPane({
         onClose={onClose}
         confirm={confirm}
       />
+      {(agent ?? draftAgent) && <ConnectionWarning agent={(agent ?? draftAgent)!.id} />}
       {session && agent ? (
         <>
           <Transcript session={session} agent={agent} openSettings={agentSettings?.(agent.id)} />
@@ -340,6 +341,38 @@ function AccountChip({ agent, account }: { agent: string; account?: ChatAccount 
         {text}
       </span>
     </Tooltip>
+  );
+}
+
+/**
+ * The agent's API did not answer when the app last tried it — on a folder
+ * switch, or here (specs/agents/agent-pane.feature.md S14): said under the
+ * header, with or without a session, before a turn waits on it. Retry
+ * tries again from the open folder; an answer takes the line away.
+ */
+export function ConnectionWarning({ agent }: { agent: string }) {
+  const choices = useAgentChoices(agent);
+  const [trying, setTrying] = useState(false);
+  const connection = choices?.connection;
+  if (!connection || connection.ok) return null;
+  const retry = async () => {
+    setTrying(true);
+    try {
+      const next = await agentChat.reconnect(agent);
+      if (next?.connection?.ok) toast.success("The API answers again");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setTrying(false);
+    }
+  };
+  return (
+    <div className="agent-connection" role="alert">
+      <span className="agent-connection-text">{connection.detail}</span>
+      <button type="button" className="btn btn-secondary" disabled={trying} onClick={() => void retry()}>
+        {trying ? "Retrying…" : "Retry"}
+      </button>
+    </div>
   );
 }
 
