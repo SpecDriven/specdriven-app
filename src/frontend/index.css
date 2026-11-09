@@ -7811,6 +7811,28 @@ button.page-archive-head:hover {
   overflow-wrap: anywhere;
 }
 
+/* The API did not answer the last try (agent-pane.feature.md S14). */
+.agent-connection {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--danger-bg);
+  color: var(--danger-fg);
+  font-size: 0.75rem;
+}
+
+.agent-connection-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-connection .btn {
+  flex: none;
+}
+
 .agent-note[data-level="error"] {
   color: var(--danger-fg);
   white-space: pre-wrap;

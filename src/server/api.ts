@@ -142,6 +142,8 @@ import {
   getChatSession,
   interruptChat,
   listChatSessions,
+  reconnectAgent,
+  reconnectAgents,
   refreshChatContext,
   resolveProvider,
   sendChatMessage,
@@ -267,6 +269,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { bodyOf, json, type Handler, type Params } from "./http";
 import {
+  notifyPluginChange,
   pluginStates,
   provideDataAccess,
   rescanPlugins,
@@ -1488,6 +1491,13 @@ const putState: Handler = async (req) => {
     await syncTick(() => syncDataDir(dir));
   }
   await applyNetSync(state);
+  // specs/agents/agent-pane.feature.md S14: a folder switch tries every
+  // agent's API again — a proxy that went quiet while the user was in the
+  // other folder is woken now, not by the first turn that waits on it. Not
+  // awaited; the open pages read the agents' choices again once the tries
+  // are back, and the pane warns of an API that does not answer.
+  const opened = body.openCodeRepo !== undefined ? (state.openCodeRepo ?? null) : pickedDir;
+  if (opened && !isHostedMode()) void reconnectAgents(opened, notifyPluginChange);
   return json(await stateFields(state));
 };
 
@@ -3651,6 +3661,18 @@ const getAgentChoices: Handler = async (_req, params) => {
   }
 };
 
+// The pane's Retry (specs/agents/agent-pane.feature.md S14): try the
+// agent's API again from the folder that is open, and answer with its
+// choices, which carry what the try found.
+const postAgentReconnect = withWorkFolder(async (folder, _req, params) => {
+  try {
+    await reconnectAgent(params.agent!, folder.dir);
+    return json({ choices: await agentChoices(params.agent!, await currentDataDir()) });
+  } catch (e) {
+    return chatError(e);
+  }
+});
+
 // A pick in the new-session bar: what the agent's next sessions start on.
 const putAgentDefaults: Handler = async (req, params) => {
   const body = (await req.json().catch(() => null)) as { model?: unknown; effort?: unknown } | null;
@@ -4135,6 +4157,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
   ["POST", "/api/agent/chat/:id/context", unlessHosted(postAgentChatContext)],
   ["GET", "/api/agent/agents/:agent/choices", unlessHosted(getAgentChoices)],
+  ["POST", "/api/agent/agents/:agent/reconnect", unlessHosted(postAgentReconnect)],
   ["PUT", "/api/agent/agents/:agent/defaults", unlessHosted(putAgentDefaults)],
   ["DELETE", "/api/agent/chat/:id", unlessHosted(deleteAgentChat)],
   ["POST", "/api/agent/chat/:id/ghostty", unlessHosted(postAgentChatGhostty)],

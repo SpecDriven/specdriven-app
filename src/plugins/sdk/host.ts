@@ -41,6 +41,7 @@ export type {
   AgentHost,
   AgentProvider,
   AgentReadyInfo,
+  AgentReconnect,
   AgentRegistry,
   AgentSession,
   AgentStartOptions,
@@ -53,6 +54,7 @@ export type {
 export type {
   AgentCapabilities,
   AgentChoices,
+  AgentConnection,
   AgentDefaultsPatch,
   AgentDescriptor,
   AgentImage,

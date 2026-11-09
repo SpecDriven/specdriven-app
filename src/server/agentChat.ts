@@ -33,6 +33,7 @@ import type {
 import { AgentError, agents } from "../plugins/host/agents";
 import type {
   AgentChoices,
+  AgentConnection,
   AgentImage,
   ChatImage,
   ImageMediaType,
@@ -825,12 +826,89 @@ export async function agentChoices(agent: ChatAgent, dataRepo: string | null): P
   const provider = agents.get(agent);
   if (!provider) throw new ChatError(404, `No agent plugin provides "${agent}"`);
   if (!provider.choices) return null;
+  let choices: AgentChoices;
   try {
-    return await provider.choices({ dataRepo });
+    choices = await provider.choices({ dataRepo });
   } catch (e) {
     if (e instanceof AgentError) throw new ChatError(e.status, e.message);
     throw new ChatError(502, `${provider.label} could not list its models: ${(e as Error).message}`);
   }
+  const connection = connections().get(agent);
+  return connection ? { ...choices, connection } : choices;
+}
+
+// --- Reconnecting the agents' APIs ---------------------------------------
+//
+// specs/agents/agent-pane.feature.md S14: an agent whose API goes through
+// a proxy is tried again when the user switches folders — a proxy that
+// dropped while the user was elsewhere is woken, or the pane says it does
+// not answer before a turn waits on it. The last answer per agent rides on
+// its choices (AgentChoices.connection); kept on globalThis so a `bun --hot`
+// reload does not forget it.
+
+const CONNECTIONS = Symbol.for("specdriven.agentChat.connections");
+function connections(): Map<ChatAgent, AgentConnection> {
+  const g = globalThis as Record<symbol, unknown>;
+  return (g[CONNECTIONS] ??= new Map<ChatAgent, AgentConnection>()) as Map<ChatAgent, AgentConnection>;
+}
+
+/** The tries under way, so a Retry pressed during a switch's try shares it. */
+const reconnecting = new Map<ChatAgent, Promise<AgentConnection | null>>();
+
+/**
+ * Try one agent's API again from `cwd`. Null when the agent has nothing to
+ * try — no hook, not set up, or a sign-in with no endpoint of its own —
+ * and then any earlier answer is dropped, so the pane stops warning.
+ */
+export async function reconnectAgent(agent: ChatAgent, cwd: string): Promise<AgentConnection | null> {
+  const provider = agents.get(agent);
+  if (!provider) throw new ChatError(404, `No agent plugin provides "${agent}"`);
+  const under = reconnecting.get(agent);
+  if (under) return under;
+  const attempt = (async (): Promise<AgentConnection | null> => {
+    if (!provider.reconnect || !provider.available()) {
+      connections().delete(agent);
+      return null;
+    }
+    let found: Awaited<ReturnType<NonNullable<AgentProvider["reconnect"]>>>;
+    try {
+      found = await provider.reconnect({ cwd });
+    } catch (e) {
+      found = { ok: false, detail: (e as Error).message };
+    }
+    if (!found) {
+      connections().delete(agent);
+      return null;
+    }
+    const connection: AgentConnection = {
+      ok: found.ok === true,
+      detail: typeof found.detail === "string" ? found.detail : "",
+      ...(typeof found.url === "string" && found.url ? { url: found.url } : {}),
+      at: new Date().toISOString(),
+    };
+    connections().set(agent, connection);
+    return connection;
+  })().finally(() => reconnecting.delete(agent));
+  reconnecting.set(agent, attempt);
+  return attempt;
+}
+
+/**
+ * Every agent tries its API again — the user switched folders. Not awaited
+ * by the switch; `onDone` hears once all are back (the pages are told to
+ * read the choices again), and a try that throws is that agent's answer.
+ */
+export function reconnectAgents(cwd: string, onDone?: () => void): Promise<void> {
+  const tries = agents
+    .list()
+    .filter((p) => p.reconnect)
+    .map((p) => reconnectAgent(p.id, cwd).catch(() => null));
+  return Promise.all(tries).then(() => onDone?.());
+}
+
+/** For the tests: forget every answer. */
+export function forgetConnections(): void {
+  connections().clear();
 }
 
 /** The models an agent's API reports; null for no such agent, no hook, or no answer. */

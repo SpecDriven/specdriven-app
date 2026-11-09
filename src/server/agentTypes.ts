@@ -413,6 +413,21 @@ export interface AgentChoices {
       before any session has said which (specs/agents/agent-pane.feature.md
       S13). Absent from an agent that cannot say without a session. */
   account?: ChatAccount;
+  /** What the agent's API answered when the app last tried it — on a
+      folder switch, or the pane's Retry (specs/agents/agent-pane.feature.md
+      S14). The core adds it; absent until a try, and for an agent with
+      nothing to try (an account sign-in). */
+  connection?: AgentConnection;
+}
+
+/** One try of an agent's API: whether it answered, in words, and when. */
+export interface AgentConnection {
+  ok: boolean;
+  /** "Reachable", or why not: "Could not reach http://localhost:6655: …". */
+  detail: string;
+  /** The API's address, for the pane's words. */
+  url?: string;
+  at: string;
 }
 
 /** A change to the defaults a new session starts on; null clears one. */
