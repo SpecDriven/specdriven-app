@@ -43,7 +43,7 @@ folders, most recent first. Removing one only takes it off the list.
 - The **Specs** tab and the specification modules' tabs (Roadmap, Tasks,
   Notebook, Issues, Tests) are hidden. The navigation pane shows the
   **Files** tab instead.
-- **Sync**, **Sync now** and **Change data folder** are gone, and so is the
+- **Sync** and **Sync now** are gone, and so is the
   Sync section in Settings. Nothing syncs.
 - Plugins found in the repository's own `.specdriven/plugins` folder are not
   loaded. Plugins installed on your computer, such as the coding agents,

@@ -83,8 +83,9 @@ on in Settings the sidebar gains tabs (**Specs**, **Roadmap**, **Tasks**,
 Above the tree:
 
 - The **data folder name** links to the home page. Next to it, **Recent data
-  folders** switches between folders you have opened, and **Change data
-  directory** points the app at another folder or a GitHub url.
+  folders** switches between folders you have opened; its **Manage folders…**
+  entry lists them all, removes one from the list, and opens another folder or
+  a GitHub url (**Open another folder…**).
 - **Sync** pulls the data folder, absorbs any edits made outside the app,
   commits what you have saved and pushes. It reads `Syncing…` while it runs.
   See [Saving and syncing](#7-saving-and-syncing).

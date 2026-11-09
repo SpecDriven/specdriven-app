@@ -2567,8 +2567,8 @@ export function App() {
     if (picked && repoInputRef.current) repoInputRef.current.value = picked;
   };
 
-  // Change the data dir from the sidebar header (specs/ui/app-start.feature.md
-  // "changing the data repo"): pre-filled prompt; on success the view resets
+  // Open another data folder — Manage folders → "Open another folder…"
+  // (specs/ui/app-start.feature.md "changing the data repo"): pre-filled prompt; on success the view resets
   // to home, since the current selection belonged to the old repo.
   const changeRepo = async () => {
     const input = await prompt({
@@ -8240,22 +8240,19 @@ export function App() {
           ),
         ]
       : []),
-    // A code repository syncs nothing and is not a data folder
-    // (specs/app/code-repo-mode.feature.md "The app runs no git in a code
-    // repository"): the folder dialog is the way back to the specs.
+    // A code repository syncs nothing (specs/app/code-repo-mode.feature.md
+    // "The app runs no git in a code repository").
     ...(!demo && codeRepoDir === null
-      ? [
-          action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow()),
-          action("repo", "Change data folder", <FolderInput size={14} />, () => void changeRepo()),
-        ]
+      ? [action("sync", "Sync now", <RefreshCw size={14} />, () => void syncNow())]
+      : []),
+    // Manage folders (specs/app/spec-folders.feature.md) is the one way to
+    // open, add or remove a folder — and the way back to the specs from a
+    // code repository.
+    ...(!demo && !readOnly
+      ? [action("manage-folders", "Manage folders…", <FolderInput size={14} />, () => setFoldersOpen(true))]
       : []),
     ...(canOpenCodeRepo
-      ? [
-          action("open-code-repo", "Open a code repository…", <FolderTree size={14} />, () => void openCodeRepoPrompt()),
-          ...(codeRepoDir !== null
-            ? [action("manage-folders", "Manage folders…", <FolderInput size={14} />, () => setFoldersOpen(true))]
-            : []),
-        ]
+      ? [action("open-code-repo", "Open a code repository…", <FolderTree size={14} />, () => void openCodeRepoPrompt())]
       : []),
     shortcutAction("go-home", <Home size={14} />),
     // The plugins' tabs: the way there, and each tab's own commands —
@@ -10499,19 +10496,6 @@ export function App() {
                   ]}
                 />
               </div>
-            )}
-            {!demo && !readOnly && (
-              <Tooltip label={codeRepoDir !== null ? "Open another code repository" : "Change data directory"}>
-                <button
-                  type="button"
-                  className="ibtn repo-edit"
-                  aria-label={codeRepoDir !== null ? "Open another code repository" : "Change data directory"}
-                  disabled={settingRepo}
-                  onClick={() => void (codeRepoDir !== null ? openCodeRepoPrompt() : changeRepo())}
-                >
-                  <Pencil size={13} aria-hidden="true" />
-                </button>
-              </Tooltip>
             )}
             {/* Sync (specs/ui/ui.feature.md "Main page"): immediate data
                 reload, next to the folder it reloads. Disabled with a progress
