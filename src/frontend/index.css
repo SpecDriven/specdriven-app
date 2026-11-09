@@ -677,7 +677,7 @@ aside header h1 {
   -webkit-app-region: no-drag;
 }
 
-/* The header's folder controls — the recent ▾, the ✎ and Sync — are the
+/* The header's folder controls — the recent ▾ and Sync — are the
    same quiet `.ibtn` as the pane toggles beside them, a size down so the
    folder name keeps its room. */
 .repo-row .ibtn {
@@ -706,7 +706,7 @@ aside header h1 {
   right: 0;
 }
 
-/* Sync (specs/ui/ui.feature.md "Main page"), right of the ✎ so it sits by
+/* Sync (specs/ui/ui.feature.md "Main page"), right of the recent ▾ so it sits by
    the data folder it reloads: an icon button whose tooltip says what it
    does, the icon turning while it runs. */
 .repo-sync:disabled {
@@ -6887,7 +6887,6 @@ button.page-archive-head:hover {
   .ibtn,
   .tree-menu-btn,
   .roadmap-add,
-  .repo-edit,
   .repo-recent-toggle,
   aside.rail .rail-btn,
   aside.rail .rail-link {

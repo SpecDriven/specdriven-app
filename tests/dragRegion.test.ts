@@ -83,7 +83,7 @@ function appRegionOf(el: Element): string {
 
 /**
  * The sidebar header as App.tsx renders it on macOS: the folder name and its
- * recent-folders menu, the ✎ and Sync buttons, then the icon row — the
+ * recent-folders menu, the Sync button, then the icon row — the
  * Pomodoro's timer, the coding agent's Bot, and the sidebar collapse toggle.
  */
 const HEADER = `
@@ -96,7 +96,6 @@ const HEADER = `
           <button type="button" class="repo-recent-toggle">▾</button>
           <div class="repo-recent-menu"><button type="button" class="menu-item">a folder</button></div>
         </div>
-        <button type="button" class="repo-edit">✎</button>
         <button type="button" class="repo-sync">Sync</button>
       </div>
       <button type="button" class="ibtn pomodoro-toggle" aria-label="Pomodoro">timer</button>
