@@ -27,6 +27,7 @@ import { specdrivenHome } from "../server/appSource";
 import { FOLDER_TITLES, setFolderChooser } from "../server/folderChooser";
 import { setActivator, setRelauncher, type ActivationResult } from "../server/relaunch";
 import { run } from "../server/run";
+import { HOME_SETTINGS_ENV } from "../server/state";
 import { initTelemetry, shutdownTelemetry, telemetryActive } from "../server/telemetry";
 import { setTokenBackend } from "../server/tokenStore";
 import { setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../server/agentMcp";
@@ -76,13 +77,16 @@ const DEV_URL = process.env.ELECTRON_DEV
   : null;
 
 // One app-data anchor for the server modules (specs/app/desktop-app.feature.md
-// "Data locations"): settings resolve from here (falling through to
-// ~/.specdriven/settings.json, shared with the web version) and GitHub data
-// repos are cloned under <userData>/repos. The server modules read these
-// lazily, so setting them at startup is early enough.
+// "Data locations"): GitHub data repos are cloned under <userData>/repos.
+// Settings are ~/.specdriven/settings.json only, shared with the web version
+// (specs/ui/app-start.feature.md "Settings file"); a settings file left under
+// <userData>/.specdriven is read only until the first save moves it home.
+// The server modules read these lazily, so setting them at startup is early
+// enough.
 app.setName("SpecDriven");
 const userData = app.getPath("userData");
 process.env.SPECDRIVEN_ROOT = userData;
+process.env[HOME_SETTINGS_ENV] = "1";
 process.env.SPECDRIVEN_REPOS_DIR ||= join(userData, "repos");
 // The tokens as the Confluence MCP server reads them (src/server/agentMcp
 // .ts), written on a session's start and gone with the app: safeStorage

@@ -15,6 +15,9 @@ import {
   LEGACY_STATE_FILE,
   statePath,
   homeStatePath,
+  isAppCheckout,
+  APP_PACKAGE_NAME,
+  HOME_SETTINGS_ENV,
 } from "../src/server/state";
 
 let dir: string;
@@ -189,6 +192,70 @@ test("the settings directory is the project's, unless only the home file exists"
   expect(await settingsDirectory(dir)).toBe(home);
   await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
   expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
+});
+
+// specs/ui/app-start.feature.md "the app's own checkout uses the home
+// settings file": a dev server run from specdriven-app (or a worktree of it)
+// never keeps settings of its own.
+async function makeAppCheckout(): Promise<void> {
+  await Bun.write(join(dir, "package.json"), JSON.stringify({ name: APP_PACKAGE_NAME }));
+}
+
+test("the app's own checkout reads and writes the home settings file even with a project one", async () => {
+  await makeAppCheckout();
+  expect(await isAppCheckout(dir)).toBe(true);
+  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  expect((await readState(dir)).dataRepo).toBe("from-home");
+  await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
+  expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBe(3);
+  expect((await Bun.file(statePath(dir)).json()).scenarioPreviewLines).toBeUndefined();
+  expect(await settingsDirectory(dir)).toBe(home);
+});
+
+test("the app's own checkout creates the home settings file when there is none", async () => {
+  await makeAppCheckout();
+  expect(await settingsDirectory(dir)).toBe(home);
+  await writeState({ dataRepo: "data" }, dir);
+  expect((await Bun.file(homeStatePath()).json()).dataRepo).toBe("data");
+  expect(await Bun.file(statePath(dir)).exists()).toBe(false);
+});
+
+test("the app's own checkout reads its old project settings until the first save moves them home", async () => {
+  await makeAppCheckout();
+  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  const state = await readState(dir);
+  expect(state.dataRepo).toBe("from-project");
+  await writeState(state, dir);
+  expect((await Bun.file(homeStatePath()).json()).dataRepo).toBe("from-project");
+});
+
+// specs/app/desktop-app.feature.md: the desktop app's main process sets
+// SPECDRIVEN_HOME_SETTINGS=1, so a settings file under its app-data root is
+// never the settings file once the home one exists.
+test("the desktop app reads and writes only the home settings file", async () => {
+  const before = process.env[HOME_SETTINGS_ENV];
+  process.env[HOME_SETTINGS_ENV] = "1";
+  try {
+    await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-app-data" }));
+    expect((await readState(dir)).dataRepo).toBe("from-app-data");
+    await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+    expect((await readState(dir)).dataRepo).toBe("from-home");
+    await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
+    expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBe(3);
+    expect((await Bun.file(statePath(dir)).json()).dataRepo).toBe("from-app-data");
+    expect(await settingsDirectory(dir)).toBe(home);
+  } finally {
+    if (before === undefined) delete process.env[HOME_SETTINGS_ENV];
+    else process.env[HOME_SETTINGS_ENV] = before;
+  }
+});
+
+test("another project's package.json does not count as the app's checkout", async () => {
+  await Bun.write(join(dir, "package.json"), JSON.stringify({ name: "bookshop" }));
+  expect(await isAppCheckout(dir)).toBe(false);
+  await Bun.write(join(dir, "package.json"), "not json");
+  expect(await isAppCheckout(dir)).toBe(false);
 });
 
 // The Google Calendar switch (specs/app/tasks.feature.md "Add task to Google
