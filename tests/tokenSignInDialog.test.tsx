@@ -5,7 +5,7 @@
 // open state and the menu entries.
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TokenSignInDialog } from "../src/frontend/GitHubToken";
+import { PasteToken, TokenSignInDialog } from "../src/frontend/GitHubToken";
 
 const html = (el: React.ReactElement) => renderToStaticMarkup(el);
 const noop = () => {};
@@ -18,7 +18,9 @@ describe("TokenSignInDialog", () => {
     expect(markup).toContain("Sign in to GitHub");
     expect(markup).toContain('aria-label="GitHub host"');
     expect(markup).toContain('aria-label="Personal access token"');
-    expect(markup).toContain("Or paste a personal access token");
+    // The token is all the dialog offers, so it is not an "Or".
+    expect(markup).toContain("Paste a personal access token");
+    expect(markup).not.toContain("Or paste");
     expect(markup).not.toContain("Signed in as");
   });
 
@@ -33,5 +35,17 @@ describe("TokenSignInDialog", () => {
     expect(markup).toContain("Signed in as <strong>octo</strong>");
     expect(markup).toContain("on ghe.example.com");
     expect(markup).toContain("Replace it with a personal access token");
+  });
+});
+
+// Settings → Git & GitHub (specs/app/user-info-settings.feature.md "GitHub
+// account behind a switch"): the paste form has its own section above the
+// switch, shown whether or not it is on, so it is never an "Or".
+describe("PasteToken", () => {
+  test("signed out, it asks for a token, not as an alternative", () => {
+    const markup = html(<PasteToken replacing={false} onSignedIn={noop} />);
+    expect(markup).toContain('aria-label="Personal access token"');
+    expect(markup).toContain("Paste a personal access token");
+    expect(markup).not.toContain("Or paste");
   });
 });

@@ -9905,17 +9905,43 @@ export function App() {
             <option value="js">Built-in (no git needed)</option>
           </select>
         </label>
+        {/* The personal access token (specs/app/user-info-settings.feature.md
+            "GitHub account behind a switch"): always offered, above the
+            switch — the way in on every engine, GitHub Enterprise too. */}
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub Personal Access Token</span>
+          {auth?.signedIn && (
+            <div className="auth-row">
+              <span>
+                Signed in as <strong>{auth.login}</strong>
+                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
+              </span>
+              <button className="secondary" onClick={signOutGitHub}>
+                Sign out
+              </button>
+            </div>
+          )}
+          {!deviceFlow && !webConnecting && (
+            <PasteToken replacing={Boolean(auth?.signedIn)} onSignedIn={signedInWithToken} />
+          )}
+          {authStatus && <p className="error">{authStatus}</p>}
+          <p className="hint">
+            Publishing to GitHub uses this sign-in on every engine; without one, the
+            GitHub CLI's account on the gh engine, or git's own credentials. Local
+            folders work without either.
+          </p>
+        </div>
         {/* specs/app/user-info-settings.feature.md "GitHub account behind
-            a switch": not ready yet, so the sign-in block below shows only
-            once this is on. Off hides it; a sign-in already made keeps
-            working. */}
+            a switch": the browser and device-code sign-in and the GitHub
+            CLI's account are not ready yet, so they show only once this is
+            on. Off hides them; a sign-in already made keeps working. */}
         <label className="settings-row">
           <span className="settings-row-label">
             GitHub account
             <span className="settings-row-hint">
               {settingsGithubAccountDraft
-                ? "Preview: sign in to GitHub from here and the user menu. Not finished yet."
-                : "Hidden while it is not ready. Turn on to sign in to GitHub from here and the user menu."}
+                ? "Preview: sign in to GitHub in the browser or with a device code. Not finished yet."
+                : "Browser and device-code sign-in are hidden while not ready. A personal access token works either way."}
             </span>
           </span>
           <span className="switch">
@@ -9929,9 +9955,10 @@ export function App() {
             <span className="switch-track" aria-hidden="true" />
           </span>
         </label>
-        {/* GitHub sign-in (git-operations.md): the gh account
-            when that engine is in effect, else the device flow. */}
-        {settingsGithubAccountDraft && (
+        {/* GitHub sign-in (git-operations.md), behind the switch: the gh
+            account when that engine is in effect, else the browser or
+            device flow while not signed in. */}
+        {settingsGithubAccountDraft && (gh?.available || !auth?.signedIn) && (
         <div className="settings-row auth-section">
           <span className="auth-title">GitHub account</span>
           {gh?.available && (
@@ -9965,17 +9992,7 @@ export function App() {
               )}
             </p>
           )}
-          {auth?.signedIn ? (
-            <div className="auth-row">
-              <span>
-                Signed in as <strong>{auth.login}</strong>
-                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
-              </span>
-              <button className="secondary" onClick={signOutGitHub}>
-                Sign out
-              </button>
-            </div>
-          ) : deviceFlow ? (
+          {auth?.signedIn ? null : deviceFlow ? (
             <div className="auth-device">
               <p>
                 Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
@@ -10007,15 +10024,6 @@ export function App() {
               </button>
             </div>
           )}
-          {!deviceFlow && !webConnecting && (
-            <PasteToken replacing={Boolean(auth?.signedIn)} onSignedIn={signedInWithToken} />
-          )}
-          {authStatus && <p className="error">{authStatus}</p>}
-          <p className="hint">
-            Publishing to GitHub uses this sign-in on every engine; without one, the
-            GitHub CLI's account on the gh engine, or git's own credentials. Local
-            folders work without either.
-          </p>
         </div>
         )}
       </PageSection>
@@ -10047,9 +10055,10 @@ export function App() {
               },
             },
             // The desktop and local app's own GitHub sign-in: paste a
-            // token, switch to another account's, or sign out — behind the
-            // GitHub account switch while it is not ready.
-            ...(hosted || demo || !githubAccount
+            // token, switch to another account's, or sign out — always
+            // offered, unlike the browser sign-in behind the GitHub
+            // account switch.
+            ...(hosted || demo
               ? []
               : auth?.signedIn
                 ? [
@@ -10080,8 +10089,9 @@ export function App() {
                       },
                     },
                     // The GitHub CLI's account stands in for a missing
-                    // sign-in: signing out stops the app using it.
-                    ...(gh?.inUse
+                    // sign-in: signing out stops the app using it — behind
+                    // the switch, like the rest of the CLI account.
+                    ...(githubAccount && gh?.inUse
                       ? [
                           {
                             id: "sign-out",
