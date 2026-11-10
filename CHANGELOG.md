@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.258 — 2026-11-10
+
+- Plugin repos are cloned by system git, then built-in git, then gh ([#427](https://github.com/SpecDriven/specdriven-app/pull/427))
+
 ## v0.1.257 — 2026-11-10
 
 - Links sync the folder before they open; a miss says why ([#426](https://github.com/SpecDriven/specdriven-app/pull/426))
