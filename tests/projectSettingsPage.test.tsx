@@ -164,6 +164,7 @@ describe("the page", () => {
           initial={initial()}
           prompt={async (opts) => {
             prompts.push(opts.title);
+            if (opts.title.startsWith("Edit ")) return "Grace Hopper <grace@acme.example>";
             return opts.title.includes("member") ? "Grace <grace@acme.example>" : "acme-web";
           }}
           confirm={async () => true}
@@ -224,9 +225,15 @@ describe("the page", () => {
       members: [{ name: "Ada", email: "ada@acme.example" }, { name: "Grace", email: "grace@acme.example" }],
     });
     expect(container.textContent).toContain("grace@acme.example");
+    // Edit: the prompt starts from the current value; the row is replaced in place.
+    await act(async () => click(container.querySelector('button[aria-label="Edit Grace"]')!));
+    await flush();
+    expect(calls.at(-1)!.body).toEqual({
+      members: [{ name: "Ada", email: "ada@acme.example" }, { name: "Grace Hopper", email: "grace@acme.example" }],
+    });
     await act(async () => click(container.querySelector('button[aria-label="Remove Ada"]')!));
     await flush();
-    expect(calls.at(-1)!.body).toEqual({ members: [{ name: "Grace", email: "grace@acme.example" }] });
+    expect(calls.at(-1)!.body).toEqual({ members: [{ name: "Grace Hopper", email: "grace@acme.example" }] });
 
     // The authorship switch writes the same key Settings does.
     await act(async () => change(container.querySelector('input[aria-label="Authors in the markdown"]')!, true));
