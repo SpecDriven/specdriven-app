@@ -290,6 +290,7 @@ import { QtestPublishDialog, type QtestPublishResult } from "./QtestPublishDialo
 import { WikiQtestPublishDialog } from "./WikiQtestPublishDialog";
 import { AhaTokens, fetchAhaTokens, type AhaSite } from "./AhaToken";
 import { AhaImportDialog } from "./AhaImportDialog";
+import { importSummary, OpenSpecImportDialog } from "./OpenSpecImportDialog";
 import { HostedStartNav, hostedCloneHint, type HostedAccount } from "./HostedStartNav";
 import type { ScenarioRef } from "./route";
 import { copyText } from "./clipboard";
@@ -1746,6 +1747,12 @@ export function App() {
       no API key. */
   const [ahaImportOn, setAhaImportOn] = useState(false);
   const ahaImport = ahaImportOn && !demo && !hosted;
+  /** Import from OpenSpec (specs/external-links/openspec-import.feature.md):
+      the folder an open import lands in (null for the top level), or null
+      while the dialog is closed. Needs no key, so no Settings switch; never
+      in the demo or the hosted app, which have no code repo on disk. */
+  const [openSpecImportOpen, setOpenSpecImportOpen] = useState<{ folder: string | null } | null>(null);
+  const openSpecImport = !demo && !hosted;
   /** Import from Jira/Wiki (specs/external-links/jira-wiki-import
       .feature.md): the Jira sites this device holds a token for, and the
       folder an open import lands in (null for the top level) — or null
@@ -2426,6 +2433,7 @@ export function App() {
   const qtestTrapRef = useFocusTrap(qtestPublishOpen);
   const wikiQtestTrapRef = useFocusTrap(wikiQtestPublishOpen);
   const ahaTrapRef = useFocusTrap(ahaImportOpen !== null);
+  const openSpecTrapRef = useFocusTrap(openSpecImportOpen !== null);
   const importTrapRef = useFocusTrap(importOpen !== null);
   const foldersTrapRef = useFocusTrap(foldersOpen);
   const switchTrapRef = useFocusTrap(switching !== null);
@@ -7491,6 +7499,19 @@ export function App() {
                           onSelect: () => setAhaImportOpen({ folder: child.path }),
                         },
                       ]),
+                  // Import from OpenSpec (specs/external-links/openspec-
+                  // import.feature.md): the code repo's capabilities land
+                  // in this folder.
+                  ...(!openSpecImport
+                    ? []
+                    : [
+                        {
+                          id: "import-openspec",
+                          label: "Import from OpenSpec here…",
+                          icon: <Import size={13} />,
+                          onSelect: () => setOpenSpecImportOpen({ folder: child.path }),
+                        },
+                      ]),
                   // Import from Jira/Wiki (specs/external-links/jira-wiki
                   // -import.feature.md "Jira and Confluence imports are
                   // switched on in Settings"): which item shows depends on
@@ -7608,6 +7629,7 @@ export function App() {
   const dialogOpen =
     userInfoOpen ||
     importOpen !== null ||
+    openSpecImportOpen !== null ||
     tokenSignInOpen ||
     foldersOpen ||
     switching !== null ||
@@ -7746,6 +7768,7 @@ export function App() {
     if (qtestPublishOpen) return setQtestPublishOpen(false);
     if (wikiQtestPublishOpen) return setWikiQtestPublishOpen(false);
     if (ahaImportOpen !== null) return setAhaImportOpen(null);
+    if (openSpecImportOpen !== null) return setOpenSpecImportOpen(null);
     if (importOpen !== null) return setImportOpen(null);
     if (featureLinkOpen) return setFeatureTicketsOpen(false);
     if (featureQtestOpen) return setFeatureQtestDraft(null);
@@ -8012,6 +8035,15 @@ export function App() {
       when: () => !quiet && ahaImport && editing === null,
       palette: () => !quietBehindPalette && ahaImport && editing === null,
       run: () => setAhaImportOpen({ folder: selectedFolder }),
+    },
+    {
+      id: "import-openspec",
+      keys: [],
+      label: selectedFolder ? `Import from OpenSpec into "${selectedFolder}"…` : "Import from OpenSpec…",
+      group: "Create",
+      when: () => !quiet && openSpecImport && editing === null,
+      palette: () => !quietBehindPalette && openSpecImport && editing === null,
+      run: () => setOpenSpecImportOpen({ folder: selectedFolder }),
     },
     {
       id: "pomodoro",
@@ -13377,6 +13409,31 @@ export function App() {
             const what = data.scenarios > 0 ? ` with ${data.scenarios} scenario${data.scenarios === 1 ? "" : "s"}` : "";
             toast.success(`Imported “${data.title}” from Aha!${what}`, { action: open });
             if (data.warning) toast.error(data.warning);
+          }}
+        />
+      )}
+      {openSpecImportOpen !== null && (
+        <OpenSpecImportDialog
+          folder={openSpecImportOpen.folder}
+          trapRef={openSpecTrapRef}
+          onClose={() => setOpenSpecImportOpen(null)}
+          onImported={(data) => {
+            const { folder } = openSpecImportOpen;
+            setOpenSpecImportOpen(null);
+            // Reveal the new features: a selected folder may be collapsed.
+            if (folder) {
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                next.delete(folder);
+                return next;
+              });
+            }
+            void (async () => {
+              await loadFeatures();
+              await openFeature(data.created[0]!.fileName, { push: true });
+            })();
+            if (data.failed.length > 0) toast.error(importSummary(data));
+            else toast.success(importSummary(data));
           }}
         />
       )}
