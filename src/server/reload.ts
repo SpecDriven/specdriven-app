@@ -35,6 +35,18 @@ export function normalizeReloadSeconds(value: unknown): number {
 
 const log = getLogger("reload");
 
+// Why each data folder's last pull did not bring the remote's changes in,
+// while it did not (specs/ui/navigation.feature.md "a link opens on synced
+// data"): a link followed right after a failed pull may name a feature that
+// has not arrived, and the note for a miss says so rather than "stale". A
+// pull that only left conflicts for the documents to resolve is not one.
+const pullProblems = new Map<string, string>();
+
+/** Why a folder's last pull failed; null when it went through. */
+export function pullProblem(dir: string): string | null {
+  return pullProblems.get(dir) ?? null;
+}
+
 /**
  * One tick of the cron job: git pull the configured data repo, then commit
  * and push any locally saved scenarios.
@@ -59,6 +71,8 @@ export async function reloadData(rootDir: string): Promise<string> {
 export async function syncDataDir(dir: string): Promise<string> {
   return withSpan("sync.tick", { "specdriven.dir": dir }, async (span) => {
     const pulled = await pull(dir);
+    if (pulled.ok || pulled.conflictedFiles.length > 0) pullProblems.delete(dir);
+    else pullProblems.set(dir, pulled.message);
     if (!pulled.ok) {
       log.warn(`pull needs attention: ${pulled.message}`, {
         "git.pull.conflicted_files": pulled.conflictedFiles.length,

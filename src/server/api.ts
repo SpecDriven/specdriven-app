@@ -255,6 +255,7 @@ import { cleanLine } from "./text";
 import {
   createReloadScheduler,
   normalizeReloadSeconds,
+  pullProblem,
   reloadData,
   syncDataDir,
 } from "./reload";
@@ -1595,7 +1596,10 @@ const putState: Handler = async (req) => {
   // are back, and the pane warns of an API that does not answer.
   const opened = body.openCodeRepo !== undefined ? (state.openCodeRepo ?? null) : pickedDir;
   if (opened && !isHostedMode()) void reconnectAgents(opened, notifyPluginChange);
-  return json(await stateFields(state));
+  // A link that asked for this switch opens right after it: when the pull
+  // above failed, the note for a page it does not find says so.
+  const pullFailed = pickedDir ? pullProblem(pickedDir) : null;
+  return json({ ...(await stateFields(state)), ...(pullFailed ? { pullProblem: pullFailed } : {}) });
 };
 
 // Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
@@ -1604,7 +1608,11 @@ const postReload: Handler = async () => {
   try {
     const message = await reloadData(getAppRoot());
     reloadLog.info(message);
-    return json({ message });
+    // Why the pull brought nothing in, when it failed — a link followed on
+    // the back of this sync words its miss by it (src/frontend/linkSync.ts).
+    const dir = await currentDataDir();
+    const failed = dir ? pullProblem(dir) : null;
+    return json(failed ? { message, pullProblem: failed } : { message });
   } catch (e) {
     reloadLog.error((e as Error).message, errorAttributes(e));
     return json({ error: (e as Error).message }, 502);
