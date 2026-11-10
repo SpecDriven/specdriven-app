@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.257 — 2026-11-10
+
+- Links sync the folder before they open; a miss says why ([#426](https://github.com/SpecDriven/specdriven-app/pull/426))
+
 ## v0.1.256 — 2026-11-10
 
 - gh engine: clone github.com repos by host-qualified name ([#425](https://github.com/SpecDriven/specdriven-app/pull/425))
