@@ -282,6 +282,19 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
     await save({ members: [...(data?.members ?? []), member] });
   };
 
+  const editMember = async (member: ProjectMemberRow) => {
+    const typed = await props.prompt({
+      title: `Edit ${member.name}`,
+      hint: "A name, with the email in angle brackets if you like.",
+      initial: member.email ? `${member.name} <${member.email}>` : member.name,
+      placeholder: "Ada Lovelace <ada@acme.example>",
+      confirmLabel: "Save",
+    });
+    const edited = memberTyped(typed ?? "");
+    if (!edited) return;
+    await save({ members: (data?.members ?? []).map((m) => (m.name === member.name ? edited : m)) });
+  };
+
   return (
     <AppPageLayout title="Project settings" sections={SECTIONS} onClose={props.onClose} className="project-settings">
       {error && (
@@ -439,6 +452,15 @@ export function ProjectSettingsPage(props: ProjectSettingsPageProps) {
               </span>
               {canEdit && (
                 <span className="code-repo-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    aria-label={`Edit ${member.name}`}
+                    onClick={() => void editMember(member)}
+                  >
+                    Edit
+                  </button>
                   <button
                     type="button"
                     className="btn btn-ghost code-repo-remove"
