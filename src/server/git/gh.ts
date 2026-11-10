@@ -182,7 +182,9 @@ function githubSlug(url: string): string | null {
 
 /**
  * `gh repo clone` for GitHub repos — it carries gh's credentials itself and
- * reports gh's own errors. Anything else (a local path, another host, the
+ * reports gh's own errors. The repository is named with its host: a bare
+ * `owner/repo` is looked up on gh's default host, which is a GitHub
+ * Enterprise one when GH_HOST names it or gh is logged in there alone. Anything else (a local path, another host, the
  * loopback stub the tests clone from) is a plain `git clone` with the gh
  * credential helper already in the context.
  */
@@ -190,7 +192,7 @@ async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   const path = ghPath();
   const slug = githubSlug(url);
   if (!path || !slug || !(await ghSignedIn())) return gitClone(git, url, dir);
-  const res = await run(path, ["repo", "clone", slug, dir], {
+  const res = await run(path, ["repo", "clone", `github.com/${slug}`, dir], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
   if (res.exitCode !== 0) {

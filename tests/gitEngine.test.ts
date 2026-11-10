@@ -118,6 +118,16 @@ test("the gh engine clones GitHub repos with `gh repo clone`", async () => {
   expect(stub.calls()).toContain("repo clone");
 });
 
+// gh looks a bare owner/repo up on its default host — GH_HOST, or the only
+// host it is logged in to — which on a machine with GitHub Enterprise is not
+// github.com: "Could not resolve to a Repository".
+test("the gh engine names github.com in the clone, whatever gh's default host is", async () => {
+  const origin = await seededOrigin(root);
+  const stub = withGh({ origin });
+  await clone("https://github.com/octo/data-insurance.git", join(root, "clone"));
+  expect(stub.cloned()).toEqual(["github.com/octo/data-insurance"]);
+});
+
 test("the gh engine leaves non-GitHub urls to plain git clone", async () => {
   const origin = join(root, "origin.git");
   await $`git init --bare -b main ${origin}`.quiet();
