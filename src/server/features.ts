@@ -670,6 +670,21 @@ export async function reprojectFeatures(dataDir: string): Promise<number> {
 }
 
 /**
+ * Where createFeature writes a feature named `name` (`folder/sub/Name`):
+ * the folder segments slugified under the spec tree, the file the name's
+ * slug. An importer asks first, to tell what is already there.
+ */
+export function newFeaturePath(name: string): { featureName: string; folder: string; fileName: string } {
+  const segments = name.split("/").map(cleanLine);
+  const featureName = segments.pop() ?? "";
+  if (!featureName) throw new Error("Feature name is required");
+  const within = segments.map(slugify).filter(Boolean);
+  if (within[0] === SPECS_FOLDER) within.shift();
+  const folder = [SPECS_FOLDER, ...within].join("/");
+  return { featureName, folder, fileName: `${folder}/${slugify(featureName)}.feature.md` };
+}
+
+/**
  * Scenario "create new feature": creates a new feature file in the local
  * filesystem. A `/` in the name places the feature in a folder
  * (specs/ui/folders.feature.md): `billing/Basic Quote` creates
@@ -688,13 +703,7 @@ export async function createFeature(
   text?: string,
   message?: (featureName: string) => string,
 ): Promise<string> {
-  const segments = name.split("/").map(cleanLine);
-  const featureName = segments.pop() ?? "";
-  if (!featureName) throw new Error("Feature name is required");
-  const within = segments.map(slugify).filter(Boolean);
-  if (within[0] === SPECS_FOLDER) within.shift();
-  const folder = [SPECS_FOLDER, ...within].join("/");
-  const fileName = `${folder}/${slugify(featureName)}.feature.md`;
+  const { featureName, folder, fileName } = newFeaturePath(name);
   const path = `${dataDir}/${safe(fileName)}`;
   if (await fileExists(path)) {
     throw new Error(`Feature file already exists: ${fileName}`);

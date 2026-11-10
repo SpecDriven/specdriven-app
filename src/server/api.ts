@@ -90,6 +90,7 @@ import {
   readFeatureForEditor,
   readFeatureView,
   createFeature,
+  newFeaturePath,
   createFolder,
   deleteFolder,
   renameFolder,
@@ -183,6 +184,7 @@ import { fileDisplayName, validScenarioFiles } from "./scenarioFileList";
 import {
   PROJECT_SETTINGS_FILE,
   readProjectSettings,
+  resolveCodeRepo,
   writeAuthorsInMarkdown,
   writeCodeRepos,
   writeMembers,
@@ -216,6 +218,7 @@ import { AhaError, getAhaFeature, validateAhaKey } from "./aha";
 import { normalizeAhaBase, parseAhaRecordUrl, parseAhaRef } from "./ahaUrl";
 import { ahaToken, clearAhaToken, listAhaTokens, saveAhaToken } from "./ahaTokens";
 import { isAhaImportScope, planAhaImport } from "./ahaImport";
+import { findOpenSpecSpecs, OPENSPEC_SPECS_DIR, parseOpenSpec, planOpenSpecImport, scenarioCount } from "./openspecImport";
 import { JiraError, validateJiraToken } from "./jira";
 import { normalizeJiraBase } from "./jiraUrl";
 import { clearJiraToken, listJiraTokens, saveJiraToken } from "./jiraTokens";
@@ -1790,6 +1793,122 @@ const postAhaImport = withDataDir(async (dir, req) => {
     },
     201,
   );
+});
+
+
+// Import from OpenSpec (specs/external-links/openspec-import.feature.md): the
+// capabilities a code repository's openspec/specs folder holds — only that
+// folder; openspec/changes is never read — each becoming a feature in the
+// chosen folder. The repository is one of the code repos the data repo's
+// project-settings.json names (the default one unless another is asked
+// for), or any folder on this machine typed in, since the specs only
+// usually live in a code repo. No agent and no network: the files are
+// already structured markdown.
+
+/** The folder an import reads from: `repo` as asked for, else the default code repo. */
+async function openSpecRoot(
+  dir: string,
+  repo: unknown,
+): Promise<{ root: string | null; repos: { path: string; dir: string; isDefault: boolean }[] }> {
+  const settings = await readProjectSettings(dir);
+  const repos = [...settings.codeRepos].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const asked = typeof repo === "string" ? repo.trim() : "";
+  if (asked) {
+    const known = repos.find((r) => r.dir === asked || r.path === asked);
+    return { root: known ? known.dir : resolveCodeRepo(asked.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"), dir), repos };
+  }
+  return { root: repos[0]?.dir ?? null, repos };
+}
+
+/** The folder a feature lands in, as the client names it: no slashes at either end. */
+const importFolder = (folder: unknown) =>
+  typeof folder === "string" ? folder.trim().replace(/^\/+|\/+$/g, "") : "";
+
+const getOpenSpecSpecs = withDataDir(async (dir, req) => {
+  const url = new URL(req.url);
+  const { root, repos } = await openSpecRoot(dir, url.searchParams.get("repo"));
+  const folder = importFolder(url.searchParams.get("folder"));
+  if (!root) {
+    return json({ repos, repo: null, specs: [], problem: "No code repository in Project settings — add one there, or type a folder." });
+  }
+  if (!(await directoryExists(root))) {
+    return json({ repos, repo: root, specs: [], problem: `No folder at ${root}` });
+  }
+  let files: Awaited<ReturnType<typeof findOpenSpecSpecs>>;
+  try {
+    files = await findOpenSpecSpecs(root);
+  } catch (e) {
+    return json({ error: (e as Error).message }, e instanceof FilesError ? e.status : 500);
+  }
+  if (files.length === 0) {
+    return json({ repos, repo: root, specs: [], problem: `No OpenSpec specs in ${root} — looked for ${OPENSPEC_SPECS_DIR}/<capability>/spec.md.` });
+  }
+  const specs = await Promise.all(
+    files.map(async (f) => {
+      const plan = planOpenSpecImport(f.capability, f.path, "");
+      const { fileName } = newFeaturePath(folder ? `${folder}/${plan.name}` : plan.name);
+      const exists = await fileExists(join(dir, fileName));
+      try {
+        const doc = parseOpenSpec((await readFileText(root, f.path)).content);
+        return {
+          ...f,
+          name: plan.name.split("/").pop()!,
+          fileName,
+          exists,
+          requirements: doc.requirements.filter((r) => r.name || r.statement || r.scenarios.length).length,
+          scenarios: scenarioCount(doc),
+        };
+      } catch (e) {
+        return { ...f, name: plan.name.split("/").pop()!, fileName, exists, requirements: 0, scenarios: 0, error: (e as Error).message };
+      }
+    }),
+  );
+  return json({ repos, repo: root, specs });
+});
+
+const postOpenSpecImport = withDataDir(async (dir, req) => {
+  const body = (await req.json().catch(() => ({}))) as { repo?: unknown; folder?: unknown; capabilities?: unknown };
+  const wanted = Array.isArray(body.capabilities)
+    ? body.capabilities.filter((c): c is string => typeof c === "string" && c.trim() !== "")
+    : [];
+  if (wanted.length === 0) return json({ error: "Pick at least one spec to import" }, 400);
+  const { root } = await openSpecRoot(dir, body.repo);
+  if (!root) return json({ error: "No code repository in Project settings — add one there, or type a folder." }, 400);
+  const folder = importFolder(body.folder);
+  // Only capabilities the folder really holds: a name cannot point elsewhere.
+  const byCapability = new Map((await findOpenSpecSpecs(root).catch(() => [])).map((f) => [f.capability, f]));
+  const created: { capability: string; fileName: string; title: string; scenarios: number }[] = [];
+  const skipped: { capability: string; fileName: string }[] = [];
+  const failed: { capability: string; error: string }[] = [];
+  for (const capability of wanted) {
+    const file = byCapability.get(capability);
+    if (!file) {
+      failed.push({ capability, error: `No ${OPENSPEC_SPECS_DIR}/${capability}/spec.md in ${root}` });
+      continue;
+    }
+    let plan: ReturnType<typeof planOpenSpecImport>;
+    try {
+      plan = planOpenSpecImport(capability, file.path, (await readFileText(root, file.path)).content);
+    } catch (e) {
+      failed.push({ capability, error: (e as Error).message });
+      continue;
+    }
+    try {
+      const fileName = await createFeature(
+        dir,
+        folder ? `${folder}/${plan.name}` : plan.name,
+        plan.text,
+        (n) => `Import feature from OpenSpec: ${n} (${file.path})`,
+      );
+      created.push({ capability, fileName, title: plan.name.split("/").pop()!, scenarios: plan.scenarios.length });
+    } catch (e) {
+      const message = (e as Error).message;
+      const exists = message.match(/^Feature file already exists: (.+)$/);
+      if (exists) skipped.push({ capability, fileName: exists[1]! });
+      else failed.push({ capability, error: message });
+    }
+  }
+  return json({ created, skipped, failed }, created.length > 0 ? 201 : 200);
 });
 
 
@@ -4092,6 +4211,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/aha/tokens", unlessHosted(postAhaToken)],
   ["DELETE", "/api/aha/tokens", unlessHosted(deleteAhaToken)],
   ["POST", "/api/aha/import", unlessHosted(postAhaImport)],
+  ["GET", "/api/openspec/specs", unlessHosted(getOpenSpecSpecs)],
+  ["POST", "/api/openspec/import", unlessHosted(postOpenSpecImport)],
   ["GET", "/api/jira/tokens", unlessHosted(getJiraTokens)],
   ["POST", "/api/jira/tokens", unlessHosted(postJiraToken)],
   ["DELETE", "/api/jira/tokens", unlessHosted(deleteJiraToken)],
