@@ -8960,6 +8960,8 @@ export function App() {
         ...pluginSettingsNav(null),
         { id: "settings-general", title: "General" },
         ...pluginSettingsNav("general"),
+        ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
+        ...pluginSettingsNav("git"),
         ...(demo || codeRepoDir !== null ? [] : [{ id: "settings-sync", title: "Sync" }]),
         ...pluginSettingsNav("sync"),
         { id: "settings-editor", title: "Specs" },
@@ -8982,8 +8984,6 @@ export function App() {
         ...pluginSettingsNav("workflow"),
         ...pluginSettingsNav("agents"),
         ...sectionlessAgents.map((a) => ({ id: `settings-agent-${a.id}`, title: a.label })),
-        ...(demo ? [] : [{ id: "settings-git", title: "Git & GitHub" }]),
-        ...pluginSettingsNav("git"),
       ]}
       onClose={closeAppPage}
       actions={<span className="app-page-status">Saved to .specdriven/settings.json as you change it</span>}
@@ -9120,6 +9120,182 @@ export function App() {
         </label>
       </PageSection>
       {renderPluginSettings("general")}
+      {/* Git & GitHub (specs/app/user-info-settings.feature.md "Git
+          access"), right after General: where git gets its GitHub
+          credentials. Hidden in demo mode — the demo dataset never syncs
+          with GitHub. */}
+      {hosted ? (
+      <PageSection
+        id="settings-git"
+        title="Git & GitHub"
+        hint="The GitHub account the hosted app syncs and publishes with."
+      >
+        {/* Hosted mode: the token is pasted on the gateway's account page,
+            stored encrypted there, and handed to this app on start. */}
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub account</span>
+          <p className="hint">
+            {auth?.signedIn ? (
+              <>
+                Using the token for <strong>{auth.login}</strong> from your account.
+              </>
+            ) : (
+              <>No GitHub token yet — add one to open and publish your specs repository.</>
+            )}
+          </p>
+          <div className="auth-row">
+            <a className="secondary" href="/account">
+              Manage GitHub token and agent keys
+            </a>
+          </div>
+        </div>
+      </PageSection>
+      ) : !demo && (
+      <PageSection
+        id="settings-git"
+        title="Git & GitHub"
+        hint="Where git gets its GitHub credentials for syncing and publishing."
+      >
+        {/* Git access (specs/app/user-info-settings.feature.md "Git
+            access"): the GitHub CLI, a personal access token, or — behind
+            the GitHub account switch below — the account sign-in; the panel
+            under the radios is the chosen one's. */}
+        <GitAccessChoice
+          value={settingsAccessShown}
+          ghInstalled={Boolean(gh?.available)}
+          accountOffered={settingsGithubAccountDraft}
+          onPick={(access) => void pickGitAccess(access)}
+        />
+        {settingsAccessShown === "gh" && (
+          <div className="settings-row auth-section">
+            <span className="auth-title">GitHub CLI</span>
+            <p className="hint">
+              {!gh?.available ? (
+                <>
+                  The GitHub CLI is not installed — get it from{" "}
+                  <a href="https://cli.github.com" target="_blank" rel="noreferrer">
+                    cli.github.com
+                  </a>
+                  , run <code>gh auth login</code>, then reopen Settings.
+                </>
+              ) : gh.signedIn ? (
+                <>
+                  Signed in
+                  {gh.login ? (
+                    <>
+                      {" "}
+                      as <strong>{gh.login}</strong>
+                    </>
+                  ) : null}
+                  {gh.hosts && gh.hosts.length > 0 ? <> on {gh.hosts.join(", ")}</> : null}. For
+                  another GitHub Enterprise host, run{" "}
+                  <code>gh auth login --hostname &lt;host&gt;</code>.
+                </>
+              ) : (
+                <>
+                  Installed but signed out — run <code>gh auth login</code>, then reopen
+                  Settings.
+                </>
+              )}
+            </p>
+          </div>
+        )}
+        {settingsAccessShown === "token" && (
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub Personal Access Token</span>
+          {auth?.signedIn && (
+            <div className="auth-row">
+              <span>
+                Signed in as <strong>{auth.login}</strong>
+                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
+              </span>
+              <button className="secondary" onClick={signOutGitHub}>
+                Sign out
+              </button>
+            </div>
+          )}
+          {!deviceFlow && !webConnecting && (
+            <PasteToken replacing={Boolean(auth?.signedIn)} onSignedIn={signedInWithToken} />
+          )}
+          {authStatus && <p className="error">{authStatus}</p>}
+          <p className="hint">
+            Git uses this token on github.com or the host it was made for; without one,
+            git's own credentials on this computer. Local folders work without either.
+          </p>
+        </div>
+        )}
+        {settingsAccessShown === "account" && (
+        <div className="settings-row auth-section">
+          <span className="auth-title">GitHub account</span>
+          {auth?.signedIn && (
+            <div className="auth-row">
+              <span>
+                Signed in as <strong>{auth.login}</strong>
+                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
+              </span>
+              <button className="secondary" onClick={signOutGitHub}>
+                Sign out
+              </button>
+            </div>
+          )}
+          {authStatus && <p className="error">{authStatus}</p>}
+          {auth?.signedIn ? null : deviceFlow ? (
+            <div className="auth-device">
+              <p>
+                Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
+                <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
+                  {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
+                </a>
+              </p>
+              <p className="hint">Waiting for GitHub…</p>
+            </div>
+          ) : webConnecting ? (
+            <div className="auth-device">
+              <p>Finish signing in to GitHub in your browser, then come back here.</p>
+              <p className="hint">Waiting for GitHub…</p>
+              <button className="secondary" onClick={() => setWebConnecting(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="auth-row">
+              {/* Browser OAuth needs an http(s) callback; the desktop
+                  app:// pages offer the device code only. */}
+              {canConnectViaBrowser && (
+                <button className="secondary" onClick={connectGitHub}>
+                  Connect to GitHub
+                </button>
+              )}
+              <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
+                {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
+              </button>
+            </div>
+          )}
+        </div>
+        )}
+        <label className="settings-row">
+          <span className="settings-row-label">
+            GitHub account
+            <span className="settings-row-hint">
+              {settingsGithubAccountDraft
+                ? "Preview: offers GitHub account sign-in — the browser or a device code — as a Git access. Not finished yet."
+                : "Offers GitHub account sign-in as a Git access. Hidden while it is not ready."}
+            </span>
+          </span>
+          <span className="switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="GitHub account"
+              checked={settingsGithubAccountDraft}
+              onChange={(e) => void toggleGithubAccount(e.target.checked)}
+            />
+            <span className="switch-track" aria-hidden="true" />
+          </span>
+        </label>
+      </PageSection>
+      )}
+      {renderPluginSettings("git")}
       {/* Demo mode has nothing to sync with: the whole autosync/live
           sync group hides — the server refuses the changes anyway. */}
       {!demo && codeRepoDir === null && (
@@ -9861,181 +10037,6 @@ export function App() {
           {agentModelList(a)}
         </PageSection>
       ))}
-      {/* Git engine (git-operations.md): which one carries
-          the operations out and who supplies GitHub credentials.
-          Hidden in demo mode along with the sign-in — the demo
-          dataset never syncs with GitHub. */}
-      {hosted ? (
-      <PageSection
-        id="settings-git"
-        title="Git & GitHub"
-        hint="The GitHub account the hosted app syncs and publishes with."
-      >
-        {/* Hosted mode: the token is pasted on the gateway's account page,
-            stored encrypted there, and handed to this app on start. */}
-        <div className="settings-row auth-section">
-          <span className="auth-title">GitHub account</span>
-          <p className="hint">
-            {auth?.signedIn ? (
-              <>
-                Using the token for <strong>{auth.login}</strong> from your account.
-              </>
-            ) : (
-              <>No GitHub token yet — add one to open and publish your specs repository.</>
-            )}
-          </p>
-          <div className="auth-row">
-            <a className="secondary" href="/account">
-              Manage GitHub token and agent keys
-            </a>
-          </div>
-        </div>
-      </PageSection>
-      ) : !demo && (
-      <PageSection
-        id="settings-git"
-        title="Git & GitHub"
-        hint="Where git gets its GitHub credentials for syncing and publishing."
-      >
-        {/* Git access (specs/app/user-info-settings.feature.md "Git
-            access"): the GitHub CLI, a personal access token, or — behind
-            the GitHub account switch below — the account sign-in; the panel
-            under the radios is the chosen one's. */}
-        <GitAccessChoice
-          value={settingsAccessShown}
-          ghInstalled={Boolean(gh?.available)}
-          accountOffered={settingsGithubAccountDraft}
-          onPick={(access) => void pickGitAccess(access)}
-        />
-        {settingsAccessShown === "gh" && (
-          <div className="settings-row auth-section">
-            <span className="auth-title">GitHub CLI</span>
-            <p className="hint">
-              {!gh?.available ? (
-                <>
-                  The GitHub CLI is not installed — get it from{" "}
-                  <a href="https://cli.github.com" target="_blank" rel="noreferrer">
-                    cli.github.com
-                  </a>
-                  , run <code>gh auth login</code>, then reopen Settings.
-                </>
-              ) : gh.signedIn ? (
-                <>
-                  Signed in
-                  {gh.login ? (
-                    <>
-                      {" "}
-                      as <strong>{gh.login}</strong>
-                    </>
-                  ) : null}
-                  {gh.hosts && gh.hosts.length > 0 ? <> on {gh.hosts.join(", ")}</> : null}. For
-                  another GitHub Enterprise host, run{" "}
-                  <code>gh auth login --hostname &lt;host&gt;</code>.
-                </>
-              ) : (
-                <>
-                  Installed but signed out — run <code>gh auth login</code>, then reopen
-                  Settings.
-                </>
-              )}
-            </p>
-          </div>
-        )}
-        {settingsAccessShown === "token" && (
-        <div className="settings-row auth-section">
-          <span className="auth-title">GitHub Personal Access Token</span>
-          {auth?.signedIn && (
-            <div className="auth-row">
-              <span>
-                Signed in as <strong>{auth.login}</strong>
-                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
-              </span>
-              <button className="secondary" onClick={signOutGitHub}>
-                Sign out
-              </button>
-            </div>
-          )}
-          {!deviceFlow && !webConnecting && (
-            <PasteToken replacing={Boolean(auth?.signedIn)} onSignedIn={signedInWithToken} />
-          )}
-          {authStatus && <p className="error">{authStatus}</p>}
-          <p className="hint">
-            Git uses this token on github.com or the host it was made for; without one,
-            git's own credentials on this computer. Local folders work without either.
-          </p>
-        </div>
-        )}
-        {settingsAccessShown === "account" && (
-        <div className="settings-row auth-section">
-          <span className="auth-title">GitHub account</span>
-          {auth?.signedIn && (
-            <div className="auth-row">
-              <span>
-                Signed in as <strong>{auth.login}</strong>
-                {auth.host && auth.host !== GITHUB_HOST ? <> on {auth.host}</> : null}
-              </span>
-              <button className="secondary" onClick={signOutGitHub}>
-                Sign out
-              </button>
-            </div>
-          )}
-          {authStatus && <p className="error">{authStatus}</p>}
-          {auth?.signedIn ? null : deviceFlow ? (
-            <div className="auth-device">
-              <p>
-                Enter code <code className="device-code">{deviceFlow.userCode}</code> at{" "}
-                <a href={deviceFlow.verificationUri} target="_blank" rel="noreferrer">
-                  {deviceFlow.verificationUri.replace(/^https?:\/\//, "")}
-                </a>
-              </p>
-              <p className="hint">Waiting for GitHub…</p>
-            </div>
-          ) : webConnecting ? (
-            <div className="auth-device">
-              <p>Finish signing in to GitHub in your browser, then come back here.</p>
-              <p className="hint">Waiting for GitHub…</p>
-              <button className="secondary" onClick={() => setWebConnecting(false)}>
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <div className="auth-row">
-              {/* Browser OAuth needs an http(s) callback; the desktop
-                  app:// pages offer the device code only. */}
-              {canConnectViaBrowser && (
-                <button className="secondary" onClick={connectGitHub}>
-                  Connect to GitHub
-                </button>
-              )}
-              <button className={canConnectViaBrowser ? "link" : "secondary"} onClick={startSignIn}>
-                {canConnectViaBrowser ? "Use a device code instead" : "Sign in with GitHub"}
-              </button>
-            </div>
-          )}
-        </div>
-        )}
-        <label className="settings-row">
-          <span className="settings-row-label">
-            GitHub account
-            <span className="settings-row-hint">
-              {settingsGithubAccountDraft
-                ? "Preview: offers GitHub account sign-in — the browser or a device code — as a Git access. Not finished yet."
-                : "Offers GitHub account sign-in as a Git access. Hidden while it is not ready."}
-            </span>
-          </span>
-          <span className="switch">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="GitHub account"
-              checked={settingsGithubAccountDraft}
-              onChange={(e) => void toggleGithubAccount(e.target.checked)}
-            />
-            <span className="switch-track" aria-hidden="true" />
-          </span>
-        </label>
-      </PageSection>
-      )}
       {settingsError && <p className="error settings-error">{settingsError}</p>}
     </AppPageLayout>
   );
