@@ -113,6 +113,7 @@ export { createPromiseQueue };
 
 import { setShareRepo, shareUrl } from "./shareLink";
 import { SaveIndicator, Toaster, toast } from "./Toasts";
+import { missedFeatureNote, pullProblemOf, syncForLink } from "./linkSync";
 import { currentSyncProblem, pushHint, setSyncProblem, syncProblemMessage, useSyncProblem } from "./syncProblem";
 import { IS_MAC, ShortcutSheet, isTypingTarget, useShortcuts, type Shortcut } from "./shortcuts";
 import { MarkdownEditor } from "./MarkdownEditor";
@@ -971,6 +972,12 @@ interface OpenOptions {
    * do; in-app navigation that merely lands on a card does not.
    */
   pane?: boolean;
+  /**
+   * Why the pull behind the link that asked for this feature failed, if it
+   * did — a miss then says the feature may not have arrived, not that the
+   * link is stale (src/frontend/linkSync.ts).
+   */
+  pullProblem?: string | null;
   /**
    * The words a search hit matched on (specs/search.feature.md): the pane
    * opened for the hit marks them in the scenario's body.
@@ -2726,7 +2733,9 @@ export function App() {
           history.replaceState(null, "", entryPath);
           // Already read off the link: a folder named like its first segment
           // must not take it a second time.
-          await openFromLocationRef.current(entryPath, false);
+          // The server pulled the folder before it answered; a pull that
+          // failed rides along, for the note a missing page leaves.
+          await openFromLocationRef.current(entryPath, false, pullProblemOf(state));
         }
       } else {
         toast.error(state.error ?? "Could not use this directory");
@@ -2933,7 +2942,15 @@ export function App() {
         setSelectedScenario(null);
       }
       if (opts.push || opts.scenario !== undefined) {
-        toast.error(`Feature "${file}" not found — the link may be stale.`);
+        // Said by what the app knows (linkSync.ts): "stale" only for a file
+        // that is not there in a folder that was pulled.
+        const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+        toast.error(
+          missedFeatureNote(file, res.status, {
+            pullProblem: opts.pullProblem ?? null,
+            error: typeof body?.error === "string" ? body.error : null,
+          }),
+        );
       }
       await loadFeatures();
     }
@@ -3221,6 +3238,10 @@ export function App() {
   const openFromLocation = async (
     pathname = location.pathname,
     link = isLinkEntry(location.search),
+    // Why the pull behind a link brought nothing in — the folder switch a
+    // link asked for hands its own here; a link into the open folder finds
+    // out below.
+    pullProblem: string | null = null,
   ): Promise<void> => {
     // A link from outside names its spec folder first
     // (`specdriven://specs-insurance/tasks/ship`): the window's url drops it
@@ -3253,6 +3274,17 @@ export function App() {
           history.replaceState(history.state, "", pathname);
         }
       }
+      // A link opens on synced data (specs/ui/navigation.feature.md "a link
+      // opens on synced data"): the open folder is pulled before the link is
+      // resolved, so what a teammate just made is there to open — the next
+      // reload tick would be too late. (A switch above pulled on the server.)
+      // A code repository is never pulled (code-repo-mode.feature.md).
+      if (pathname !== "/" && !codeRepoRef.current) {
+        pullProblem = await syncForLink();
+        // What the pull brought shows the way a tick's does — the tree, and
+        // each plugin's store, which a link to one of its pages reads.
+        await refreshViewRef.current();
+      }
     }
     const route = parseRoute(pathname);
     // The app's own pages first, so no plugin can claim their urls.
@@ -3275,7 +3307,7 @@ export function App() {
       // A scenario url is a link to that scenario's page — the card's "Copy
       // link" makes one — so it opens the pane, not just the card
       // (specs/ui/navigation.feature.md "open a scenario link").
-      await openFeature(route.feature, { scenario: route.scenario ?? null, pane: true });
+      await openFeature(route.feature, { scenario: route.scenario ?? null, pane: true, pullProblem });
     } else {
       // Back to home while the editor pane is open: it leaves the way `<`
       // does (specs/editor/spec-editor.feature.md "Spec editor pane").

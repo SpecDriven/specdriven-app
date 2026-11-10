@@ -8,6 +8,8 @@ import {
   normalizeReloadSeconds,
   reloadData,
   createReloadScheduler,
+  pullProblem,
+  syncDataDir,
 } from "../src/server/reload";
 import { setGitEngine } from "../src/server/git";
 import { writeState } from "../src/server/state";
@@ -156,3 +158,23 @@ for (const engine of gitEngines()) {
     });
   });
 }
+
+// specs/ui/navigation.feature.md "a link opens on synced data": a link
+// followed behind a failed pull words its miss by the pull, so the tick
+// keeps why the last one failed — and forgets it once a pull goes through.
+test("a pull that cannot reach the remote is kept as the folder's pull problem", async () => {
+  setGitEngine("cli");
+  const { a, originDir } = await twoClones(dir);
+  expect(pullProblem(a)).toBeNull();
+  await syncDataDir(a);
+  expect(pullProblem(a)).toBeNull();
+
+  const gone = `${originDir}.gone`;
+  await $`mv ${originDir} ${gone}`.quiet();
+  await syncDataDir(a);
+  expect(pullProblem(a)).toBeTruthy();
+
+  await $`mv ${gone} ${originDir}`.quiet();
+  await syncDataDir(a);
+  expect(pullProblem(a)).toBeNull();
+});
