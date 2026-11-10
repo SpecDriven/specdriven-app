@@ -584,6 +584,42 @@ export async function settingsFile(rootDir: string = process.cwd()): Promise<str
 }
 
 /**
+ * The user's settings file, ~/.specdriven/settings.json, as the User info
+ * dialog's "View settings file…" shows it (specs/app/user-info-settings
+ * .feature.md "view the settings file"): the file as written — no upgrade,
+ * no normalizing — so the view matches what is on disk. Always the home
+ * file, never a project one; `activePath` names the file readState reads
+ * when that is a different one.
+ */
+export interface SettingsFileView {
+  path: string;
+  /** The user's home directory, so the view can write paths from `~`. */
+  home: string;
+  exists: boolean;
+  settings: Record<string, unknown>;
+  /** The file the app reads its settings from, when it is not `path`. */
+  activePath?: string;
+  /** Set when the file is there but is not a JSON object. */
+  error?: string;
+}
+
+export async function readSettingsFileView(rootDir: string = process.cwd()): Promise<SettingsFileView> {
+  const path = homeStatePath();
+  const active = await settingsFile(rootDir);
+  const view: SettingsFileView = { path, home: homedir(), exists: await isFile(path), settings: {} };
+  if (active && active !== path) view.activePath = active;
+  if (!view.exists) return view;
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) view.settings = parsed;
+    else view.error = "The file does not hold a settings object.";
+  } catch {
+    view.error = "The file is not valid JSON.";
+  }
+  return view;
+}
+
+/**
  * Writes back to whichever settings file readState would pick up, so
  * settings stay where the user keeps them; with none anywhere, the project
  * one is created.
