@@ -37,7 +37,6 @@ import {
   normalizeOpenTestsInIdea,
   normalizeGhostty,
   normalizeShowTestLinks,
-  normalizeUseGhAccount,
   normalizeSyncServerUrl,
   forgetDataRepo,
   normalizeDataRepo,
@@ -58,14 +57,17 @@ import { canChooseFolder, chooseFolder } from "./folderChooser";
 import {
   cliGitAvailable,
   currentEngine,
+  effectiveGitAccess,
   ghAccount,
   ghAccountInUse,
   ghAvailable,
+  ghHosts,
   ghSignedIn,
   jsGitAvailable,
+  normalizeGitAccess,
   normalizeGitEngine,
   pushProblem,
-  setGhAccountEnabled,
+  setAppSignIn,
   setGitEngine,
 } from "./git";
 import {
@@ -412,7 +414,7 @@ export async function applyStartupState(): Promise<void> {
   // machine has one, or whichever engine Settings names — decided before the
   // sync below, which is the first thing to use it.
   setGitEngine(normalizeGitEngine(state.gitEngine));
-  setGhAccountEnabled(normalizeUseGhAccount(state.useGhAccount));
+  applyAppSignIn(state);
   // The profile (specs/app/plugins.feature.md "Each data folder keeps its
   // own plugins"): an older settings file — the per-module switches, or one
   // device-wide `plugins.enabled` — is read as that list once and copied to
@@ -531,6 +533,16 @@ async function installAgentPlugins(state: SpecDrivenState): Promise<void> {
 
 
 /**
+ * Apply which of the app's sign-ins the system git and built-in engines stand
+ * for (src/server/git/access.ts): the GitHub account sign-in only while its
+ * switch is on, else the personal access token.
+ */
+function applyAppSignIn(state: SpecDrivenState): void {
+  const access = effectiveGitAccess("cli", state.gitAccess, normalizeGithubAccount(state.githubAccount));
+  setAppSignIn(access === "account" ? "account" : "token");
+}
+
+/**
  * Git-engine fields for /api/state (git-operations.md): the
  * engine chosen in Settings (null = default), the engine actually in
  * effect, and which binaries exist — each engine is only offered when its
@@ -538,6 +550,7 @@ async function installAgentPlugins(state: SpecDrivenState): Promise<void> {
  */
 function gitEngineFields(state: SpecDrivenState) {
   return {
+    gitAccess: effectiveGitAccess(currentEngine(), state.gitAccess, normalizeGithubAccount(state.githubAccount)),
     gitEngine: normalizeGitEngine(state.gitEngine),
     gitEngineEffective: currentEngine(),
     cliGitAvailable: cliGitAvailable(),
@@ -562,8 +575,10 @@ async function authFields() {
       available: ghAvailable(),
       signedIn: ghAvailable() ? await ghSignedIn() : false,
       login: gh?.login ?? null,
-      /** Whether gh's account stands in while the app is signed out. */
+      /** Whether gh's account is the one in use: the GitHub CLI is the Git access. */
       inUse: await ghAccountInUse(),
+      /** The hosts gh is logged in to, GitHub Enterprise ones included. */
+      hosts: ghAvailable() && (await ghSignedIn()) ? await ghHosts() : [],
     },
   };
 }
@@ -889,7 +904,7 @@ function readOnlyFields() {
     pluginMarketplaces: [],
     syncServerUrl: null,
     auth: { signedIn: false as const },
-    gh: { available: false, signedIn: false, login: null, inUse: false },
+    gh: { available: false, signedIn: false, login: null, inUse: false, hosts: [] },
   };
 }
 
@@ -904,6 +919,7 @@ function hostedStateRefusal(body: {
   openCodeRepo?: unknown;
   forgetCodeRepo?: unknown;
   gitEngine?: unknown;
+  gitAccess?: unknown;
   plugins?: { sources?: unknown; trust?: unknown; marketplaces?: unknown };
   pluginSettings?: unknown;
   syncServerUrl?: unknown;
@@ -922,6 +938,8 @@ function hostedStateRefusal(body: {
     return "The hosted app opens GitHub repositories only — enter a https://github.com/owner/repo url";
   }
   if (body.gitEngine === "gh") return "The GitHub CLI engine is not available in the hosted app";
+  // The hosted app's token lives on the gateway's account page.
+  if (body.gitAccess !== undefined) return "Git access cannot be changed in the hosted app";
   if (
     body.plugins &&
     typeof body.plugins === "object" &&
@@ -949,7 +967,7 @@ const putState: Handler = async (req) => {
     scenarioPreviewLines?: number;
     autosaveIntervalSeconds?: number;
     gitEngine?: string | null;
-    useGhAccount?: boolean;
+    gitAccess?: string;
     showTestLinks?: boolean;
     openTestsInIdea?: boolean;
     ghostty?: boolean;
@@ -995,7 +1013,7 @@ const putState: Handler = async (req) => {
     body.scenarioPreviewLines === undefined &&
     body.autosaveIntervalSeconds === undefined &&
     body.gitEngine === undefined &&
-    body.useGhAccount === undefined &&
+    body.gitAccess === undefined &&
     body.showTestLinks === undefined &&
     body.openTestsInIdea === undefined &&
     body.ghostty === undefined &&
@@ -1029,7 +1047,7 @@ const putState: Handler = async (req) => {
     return json(
       {
         error:
-          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, useGhAccount, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, githubAccount, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
+          "dataRepo, forgetDataRepo, openCodeRepo, forgetCodeRepo, reloadFrequencySeconds, scenarioPreviewLines, autosaveIntervalSeconds, gitEngine, gitAccess, showTestLinks, openTestsInIdea, ghostty, projectManagement, projectManagementTool, publishExternalLinks, ahaLinks, ahaImport, figmaLinks, qtestLinks, jiraEnabled, confluenceEnabled, codeGen, codeGenTarget, deletePublished, assignments, featureFlags, scenarioPolarity, githubAccount, plugins, pluginSettings, roadmap, tasks, notebook, models, testing, googleCalendar, issues or syncServerUrl is required",
       },
       400,
     );
@@ -1044,6 +1062,7 @@ const putState: Handler = async (req) => {
       body.openCodeRepo !== undefined ||
       body.forgetCodeRepo !== undefined ||
       body.gitEngine !== undefined ||
+      body.gitAccess !== undefined ||
       body.syncServerUrl !== undefined)
   ) {
     return json({ error: "changing the data directory is disabled in demo mode" }, 403);
@@ -1082,6 +1101,29 @@ const putState: Handler = async (req) => {
     if (engine) state.gitEngine = engine;
     else delete state.gitEngine;
     setGitEngine(engine);
+  }
+  // Git access (specs/app/user-info-settings.feature.md "Git access"): the
+  // GitHub CLI is the gh engine; a personal access token or the GitHub
+  // account sign-in run on system git, or the built-in engine where git is
+  // not installed. Only "account" is stored — the token is the default for
+  // the non-gh engines — and it needs the GitHub account switch on.
+  if (body.gitAccess !== undefined) {
+    const access = normalizeGitAccess(body.gitAccess);
+    if (access === null) return json({ error: "gitAccess must be gh, token or account" }, 400);
+    if (access === "gh") {
+      if (!ghAvailable()) return json({ error: "the GitHub CLI access needs gh installed" }, 400);
+      state.gitEngine = "gh";
+      delete state.gitAccess;
+    } else {
+      const accountOn = normalizeGithubAccount(body.githubAccount ?? state.githubAccount);
+      if (access === "account" && !accountOn) {
+        return json({ error: "GitHub account sign-in needs the GitHub account switch on" }, 400);
+      }
+      state.gitEngine = cliGitAvailable() ? "cli" : "js";
+      if (access === "account") state.gitAccess = "account";
+      else delete state.gitAccess;
+    }
+    setGitEngine(state.gitEngine);
   }
   // The directory a newly picked data repo resolves to; null when this
   // request leaves the data repo alone.
@@ -1212,14 +1254,6 @@ const putState: Handler = async (req) => {
   // Use the GitHub CLI account while signed out
   // (specs/user-info-settings.feature.md): default ON, stored as an absent
   // key; signing out stores it OFF.
-  if (body.useGhAccount !== undefined) {
-    if (typeof body.useGhAccount !== "boolean") {
-      return json({ error: "useGhAccount must be a boolean" }, 400);
-    }
-    if (body.useGhAccount) delete state.useGhAccount;
-    else state.useGhAccount = false;
-    setGhAccountEnabled(body.useGhAccount);
-  }
   // Test-links display (specs/traceability.feature.md): optional, default
   // ON — the default is stored as an absent key.
   if (body.showTestLinks !== undefined) {
@@ -1374,6 +1408,7 @@ const putState: Handler = async (req) => {
     if (body.githubAccount) state.githubAccount = true;
     else delete state.githubAccount;
   }
+  if (body.gitAccess !== undefined || body.githubAccount !== undefined) applyAppSignIn(state);
   // The profile (specs/app/plugins.feature.md "The profile lists enabled
   // plugins in tab order"): the open data folder's ordered list of enabled
   // plugins (a folder just picked above included), taken whole as
@@ -2326,15 +2361,10 @@ const postPublishQtest = withDataDir(async (dir, req, params) => {
 });
 
 // Signing out (specs/user-info-settings.feature.md "sign out from the user
-// menu") also stops the app falling back to the GitHub CLI's account, so the
-// app is signed out rather than quietly signed in as gh's user; Settings
-// turns it back on.
+// menu") forgets the app's own token. The GitHub CLI's account is a Git
+// access of its own, chosen in Settings, so signing out leaves gh alone.
 const deleteAuth: Handler = async () => {
   await signOut();
-  const state = await readState(getAppRoot());
-  state.useGhAccount = false;
-  await writeState(state, getAppRoot());
-  setGhAccountEnabled(false);
   return json({ message: "signed out" });
 };
 

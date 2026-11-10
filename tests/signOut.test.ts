@@ -1,8 +1,9 @@
 // specs/user-info-settings.feature.md "sign out from the user menu" and
-// "signing out stops using the GitHub CLI account": signing out clears the
-// app's token and turns off the fallback to the GitHub CLI's account — the
-// chip, the commit author and the Issues tab stop using gh's account until
-// Settings turns it back on. A stub gh on PATH stands in for the CLI.
+// "the GitHub CLI is a Git access of its own": signing out clears the app's
+// token; the GitHub CLI's account is used while it is the Git access chosen
+// in Settings — for the chip, the commit author and the Issues tab — and
+// signing out of the app leaves it alone. A stub gh on PATH stands in for
+// the CLI.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -10,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { handleApi } from "../src/server/api";
 import { getAuth } from "../src/server/auth";
-import { resetGhCache, setGhAccountEnabled } from "../src/server/git/gh";
+import { resetGhCache } from "../src/server/git/gh";
 import { setGitEngine } from "../src/server/git";
 import { issuesToken } from "../src/server/issues";
 import { readState } from "../src/server/state";
@@ -29,13 +30,11 @@ beforeEach(async () => {
   setTokenBackend(createFileBackend(join(dir, "token.json")));
   fakeGh = installFakeGh();
   setGitEngine("gh");
-  setGhAccountEnabled(true);
 });
 
 afterEach(async () => {
   fakeGh.restore();
   setGitEngine(null);
-  setGhAccountEnabled(true);
   resetGhCache();
   setTokenBackend(createFileBackend());
   for (const [key, value] of [
@@ -59,39 +58,33 @@ async function api(method: string, path: string, body?: unknown) {
   return { status: res.status, body: (await res.json()) as Record<string, any> };
 }
 
-test("signed out with gh signed in, the gh account stands in until sign out", async () => {
+test("with the GitHub CLI as the Git access, gh's account is the one in use", async () => {
   expect((await getCurrentUser()).login).toBe(FAKE_GH_ACCOUNT.login);
   expect(await issuesToken()).not.toBeNull();
-  expect((await api("GET", "/api/state")).body.gh.inUse).toBe(true);
+  const state = (await api("GET", "/api/state")).body;
+  expect(state.gitAccess).toBe("gh");
+  expect(state.gh.inUse).toBe(true);
 });
 
-test("sign out clears the token and stops using the GitHub CLI account", async () => {
+test("the app's own token is not used while the GitHub CLI is the Git access", async () => {
+  await saveToken({ token: "tok", login: "app-user", name: null, email: "1+app-user@users.noreply.github.com", id: 1 });
+  expect((await getCurrentUser()).login).toBe(FAKE_GH_ACCOUNT.login);
+});
+
+test("sign out clears the app's token and leaves the GitHub CLI alone", async () => {
+  setGitEngine("cli");
   await saveToken({ token: "tok", login: "app-user", name: null, email: "1+app-user@users.noreply.github.com", id: 1 });
   expect((await getCurrentUser()).login).toBe("app-user");
+  expect((await api("GET", "/api/state")).body.gh.inUse).toBe(false);
 
   const out = await api("DELETE", "/api/auth/github");
   expect(out.status).toBe(200);
   expect(await getAuth()).toBeNull();
-  expect((await readState(process.env.SPECDRIVEN_ROOT)).useGhAccount).toBe(false);
-
-  // gh is still signed in, but the app no longer uses its account.
   expect((await getCurrentUser()).login).toBeNull();
-  expect(await issuesToken()).toBeNull();
-  const state = (await api("GET", "/api/state")).body;
-  expect(state.auth.signedIn).toBe(false);
-  expect(state.gh).toMatchObject({ signedIn: true, login: FAKE_GH_ACCOUNT.login, inUse: false });
-});
-
-test("Use GitHub CLI account turns the fallback back on", async () => {
-  await api("DELETE", "/api/auth/github");
-  expect((await getCurrentUser()).login).toBeNull();
-
-  const on = await api("PUT", "/api/state", { useGhAccount: true });
-  expect(on.status).toBe(200);
-  // The default is stored as an absent key.
+  // Nothing about gh is written on the way out.
   expect((await readState(process.env.SPECDRIVEN_ROOT)).useGhAccount).toBeUndefined();
-  expect((await getCurrentUser()).login).toBe(FAKE_GH_ACCOUNT.login);
-  expect((await api("GET", "/api/state")).body.gh.inUse).toBe(true);
 
-  expect((await api("PUT", "/api/state", { useGhAccount: "yes" })).status).toBe(400);
+  // Picking the GitHub CLI again uses gh's account, as before.
+  setGitEngine("gh");
+  expect((await getCurrentUser()).login).toBe(FAKE_GH_ACCOUNT.login);
 });

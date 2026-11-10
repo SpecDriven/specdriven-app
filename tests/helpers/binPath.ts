@@ -36,6 +36,8 @@ export interface FakeGhOptions {
   signedIn?: boolean;
   /** Repository `gh repo clone` hands to git; without one, cloning fails. */
   origin?: string;
+  /** GitHub Enterprise hosts gh is logged in to besides github.com. */
+  enterpriseHosts?: string[];
 }
 
 /**
@@ -48,6 +50,9 @@ echo "$1 $2" >> "$FAKE_GH_LOG"
 case "$1 $2" in
 "auth token")
   if [ "$FAKE_GH_SIGNED_IN" = 1 ]; then echo gho_faketoken; else echo 'not logged in' >&2; exit 1; fi ;;
+"auth status")
+  if [ "$FAKE_GH_SIGNED_IN" != 1 ]; then echo '{"hosts":{}}'; exit 1; fi
+  printf '{"hosts":{"github.com":[{"state":"success","host":"github.com","login":"octo"}]%s}}\n' "$FAKE_GH_EXTRA_HOSTS" ;;
 "auth git-credential") printf 'username=x-access-token\\npassword=gho_faketoken\\n' ;;
 "api user") echo '{"login":"octo","id":7,"name":"Octo Cat","email":null}' ;;
 "repo clone")
@@ -58,11 +63,11 @@ esac
 `;
 
 /**
- * A stub gh at the front of PATH, answering the three things the engine asks
- * of it: the auth token, the account, and `repo clone`. Every call is logged
+ * A stub gh at the front of PATH, answering what the engine asks of it: the
+ * auth token, the hosts it is logged in to, the account, and `repo clone`. Every call is logged
  * so a test can assert gh — not plain git — did the work.
  */
-export function installFakeGh({ signedIn = true, origin }: FakeGhOptions = {}): FakeGh {
+export function installFakeGh({ signedIn = true, origin, enterpriseHosts = [] }: FakeGhOptions = {}): FakeGh {
   const dir = mkdtempSync(join(tmpdir(), "specdriven-gh-"));
   const log = join(dir, "calls.log");
   writeFileSync(log, "");
@@ -72,6 +77,9 @@ export function installFakeGh({ signedIn = true, origin }: FakeGhOptions = {}): 
     FAKE_GH_LOG: log,
     FAKE_GH_SIGNED_IN: signedIn ? "1" : "0",
     FAKE_GH_ORIGIN: origin ?? "",
+    FAKE_GH_EXTRA_HOSTS: enterpriseHosts
+      .map((h) => `,"${h}":[{"state":"success","host":"${h}","login":"octo"}]`)
+      .join(""),
   };
   const before = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
   Object.assign(process.env, vars);

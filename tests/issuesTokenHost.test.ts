@@ -1,8 +1,8 @@
 // Which host an issues request goes to, and which token it carries
 // (specs/app/github-issues.feature.md, "Requests to GitHub go to the code
 // repo's host"): the API of the host the repository lives on, with the app's
-// sign-in only when it was made on that host, and the GitHub CLI's token for
-// github.com only, while its account is in use. Like git
+// sign-in only when it was made on that host — or, with the GitHub CLI as the
+// Git access, gh's token for the hosts gh is logged in to, and never the app's. Like git
 // (tests/personalAccessToken.test.ts), a GitHub Enterprise token is never
 // offered to another host. Every host is a loopback stub that records the
 // Authorization header of each request.
@@ -12,7 +12,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { signOut } from "../src/server/auth";
-import { resetGhCache, setGhAccountEnabled } from "../src/server/git/gh";
+import { setGitEngine } from "../src/server/git";
+import { resetGhCache } from "../src/server/git/gh";
 import {
   enterpriseRepoOfRemote,
   getPullRequest,
@@ -68,10 +69,22 @@ async function signInOn(host?: string) {
   await saveToken({ token: TOKEN, login: "ent-user", name: null, email: null, id: 7, ...(host ? { host } : {}) });
 }
 
-/** A gh on PATH that is signed in and hands out GH_TOKEN. */
-function fakeGh() {
+/**
+ * A gh on PATH that is signed in to github.com and to `hosts`, and hands out
+ * GH_TOKEN for each of them — and nothing for any other `--hostname`.
+ */
+function fakeGh(hosts: string[] = []) {
   const bin = join(dir, "bin");
-  linkExecutable(bin, "gh", `#!/bin/sh\nif [ "$1 $2" = "auth token" ]; then echo ${GH_TOKEN}; exit 0; fi\nexit 1\n`);
+  const known = hosts.map((h) => `"${h}"`).join("|") || '"github.com"';
+  linkExecutable(
+    bin,
+    "gh",
+    `#!/bin/sh
+if [ "$1 $2" != "auth token" ]; then exit 1; fi
+if [ "$3" = "--hostname" ]; then case "$4" in ${known}) ;; *) exit 1 ;; esac; fi
+echo ${GH_TOKEN}
+`,
+  );
   process.env.PATH = bin;
   resetGhCache();
 }
@@ -92,7 +105,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await signOut();
   setTokenBackend(createFileBackend());
-  setGhAccountEnabled(true);
+  setGitEngine(null);
   process.env.PATH = realPath;
   resetGhCache();
   if (savedApi === undefined) delete process.env.SPECDRIVEN_GITHUB_API_URL;
@@ -134,25 +147,28 @@ test("a github.com sign-in goes to github.com only", async () => {
   expect(seen.get(ent)!.map((s) => s.auth)).toEqual([null]);
 });
 
-test("the GitHub CLI token is used for github.com only, while its account is in use", async () => {
+test("with the GitHub CLI as the Git access, gh's token goes to each host gh is logged in to", async () => {
   const ent = stubHost("/api/v3");
-  fakeGh();
+  const other = stubHost("/api/v3");
+  fakeGh([ent]);
   expect(await issuesToken()).toBe(GH_TOKEN);
-  expect(await issuesToken(ent)).toBeNull();
+  expect(await issuesToken(ent)).toBe(GH_TOKEN);
+  expect(await issuesToken(other)).toBeNull();
 
   await getPullRequest("acme", "app", 1);
   await listIssues(repoOn(ent));
   expect(seen.get(github)!.map((s) => s.auth)).toEqual([`Bearer ${GH_TOKEN}`]);
-  expect(seen.get(ent)!.map((s) => s.auth)).toEqual([null]);
+  expect(seen.get(ent)!.map((s) => s.auth)).toEqual([`Bearer ${GH_TOKEN}`]);
 
-  // An Enterprise sign-in leaves github.com to gh; its own host gets its token.
-  await signInOn(ent);
-  expect(await issuesToken()).toBe(GH_TOKEN);
-  expect(await issuesToken(ent)).toBe(TOKEN);
+  // The app's own token is another Git access: not used while gh is chosen.
+  await signInOn(other);
+  expect(await issuesToken(other)).toBeNull();
 
-  // Signed out of the app, gh's account is off too.
-  setGhAccountEnabled(false);
+  // Choosing the token access (system git) leaves gh out entirely.
+  setGitEngine("cli");
   expect(await issuesToken()).toBeNull();
+  expect(await issuesToken(ent)).toBeNull();
+  expect(await issuesToken(other)).toBe(TOKEN);
 });
 
 test("an Enterprise code repo has issues when the app is signed in on its host", async () => {

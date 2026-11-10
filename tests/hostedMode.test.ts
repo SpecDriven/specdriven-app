@@ -156,5 +156,6 @@ test("a refused clone points at the account page's token, not Settings", () => {
   expect(signInHint()).toContain("account page");
   expect(signInHint()).not.toContain("Settings");
   delete process.env.SPECDRIVEN_HOSTED;
-  expect(signInHint()).toContain("sign in with GitHub in Settings");
+  expect(signInHint()).toBe("authentication required — add a GitHub personal access token in Settings");
+  expect(signInHint()).not.toContain("sign in with GitHub");
 });

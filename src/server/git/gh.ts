@@ -5,19 +5,17 @@
 // config), and a GitHub repo is cloned with `gh repo clone`. gh is asked,
 // never configured; nothing here writes to the machine's git config.
 //
-// With gh installed but signed out there is nothing for it to contribute, so
-// every command falls back to the plain-git context — the machine's own
-// credentials keep working instead of being reset to nothing. The app's own
-// sign-in (a pasted token above all) is the person's explicit choice, so it
-// wins over gh's account the same way. Signing out of the app turns gh's
-// account off too (setGhAccountEnabled), so "signed out" means signed out.
+// This engine is the "GitHub CLI" Git access (src/server/git/access.ts):
+// choosing it is choosing gh's account, so the app's own token is not used
+// here — it belongs to the other two accesses. With gh installed but signed
+// out there is nothing for it to contribute, so every command runs with the
+// machine's own git credentials instead of being reset to nothing.
 
-import { getAuth } from "../auth";
 import { run, which } from "../run";
 import type { GitBackend } from "./backend";
+import { currentGitAccess } from "./access";
 import {
   signInHint,
-  appContext,
   createGitBackend,
   gitClone,
   identityConfig,
@@ -48,21 +46,14 @@ export function ghAvailable(): boolean {
 let signedIn: Promise<boolean> | null = null;
 let account: Promise<GhAccount | null> | null = null;
 
-// Whether the app may fall back to gh's account while it has no sign-in of
-// its own — the "useGhAccount" setting, applied at startup and on change.
-let enabled = true;
-
-/** Apply the "use the GitHub CLI account" setting. */
-export function setGhAccountEnabled(on: boolean): void {
-  enabled = on;
-}
+let hosts: Promise<string[]> | null = null;
 
 /**
- * Whether gh's account stands in for a missing app sign-in: gh installed,
- * signed in, and not turned off by signing out of the app.
+ * Whether gh's account is the one in use: the GitHub CLI is the Git access
+ * in effect, and gh is installed and signed in.
  */
 export async function ghAccountInUse(): Promise<boolean> {
-  return enabled && ghAvailable() && (await ghSignedIn());
+  return currentGitAccess() === "gh" && ghAvailable() && (await ghSignedIn());
 }
 
 /**
@@ -73,6 +64,33 @@ export async function ghAccountInUse(): Promise<boolean> {
 export function resetGhCache(): void {
   signedIn = null;
   account = null;
+  hosts = null;
+}
+
+/**
+ * The hosts gh is logged in to — github.com and any GitHub Enterprise host
+ * (`gh auth login --hostname …`) — so gh's credential helper answers for
+ * each of them. A gh too old for `auth status --json` is taken to know
+ * github.com only.
+ */
+export function ghHosts(): Promise<string[]> {
+  return (hosts ??= (async () => {
+    const path = ghPath();
+    if (!path) return [];
+    const res = await run(path, ["auth", "status", "--json", "hosts"]);
+    if (res.exitCode === 0) {
+      try {
+        const data = JSON.parse(res.stdout) as { hosts?: Record<string, { state?: string }[]> };
+        const known = Object.entries(data.hosts ?? {})
+          .filter(([, accounts]) => accounts.some((a) => a.state === "success"))
+          .map(([host]) => host);
+        if (known.length > 0) return known;
+      } catch {
+        // Not JSON: fall through to github.com.
+      }
+    }
+    return ["github.com"];
+  })());
 }
 
 /** Whether gh holds a token — a local lookup, no network. */
@@ -85,15 +103,15 @@ export function ghSignedIn(): Promise<boolean> {
 }
 
 /**
- * The token gh holds, or null when gh is missing or signed out. Asked for
- * on every call — a token is a credential, never cached here — and used
- * only for API requests the app makes on the user's behalf
- * (src/server/issues.ts).
+ * The token gh holds for `host` (github.com unless named), or null when gh is
+ * missing or signed out there. Asked for on every call — a token is a
+ * credential, never cached here — and used only for API requests the app
+ * makes on the user's behalf (src/server/issues.ts).
  */
-export async function ghToken(): Promise<string | null> {
+export async function ghToken(host?: string): Promise<string | null> {
   const path = ghPath();
   if (!path) return null;
-  const res = await run(path, ["auth", "token"]);
+  const res = await run(path, host ? ["auth", "token", "--hostname", host] : ["auth", "token"]);
   const token = res.stdout.trim();
   return res.exitCode === 0 && token ? token : null;
 }
@@ -130,20 +148,23 @@ function credentialHelper(path: string): string {
 }
 
 /**
- * Context for the GitHub CLI engine, unless the app has a sign-in of its own:
- * gh's credential helper for github.com,
- * scoped to that host so helpers configured for anything else stay untouched
- * (the empty entry resets only github.com's helper list). The gh account
- * authors the commits, the way the app's own sign-in does on the other engine.
+ * Context for the GitHub CLI engine: gh's credential helper for every host gh
+ * is logged in to, each scoped to its host so helpers configured for anything
+ * else stay untouched (the empty entry resets only that host's helper list).
+ * The gh account authors the commits. Signed out, git runs with the
+ * machine's own configuration.
  */
 async function ghContext(): Promise<GitContext> {
   const path = ghPath();
-  if (!path || (await getAuth()) || !(await ghAccountInUse())) return appContext();
+  if (!path || !(await ghSignedIn())) return { config: [], env: {} };
   const who = await ghAccount();
+  const helper = credentialHelper(path);
   return {
     config: [
-      "-c", "credential.https://github.com.helper=",
-      "-c", `credential.https://github.com.helper=${credentialHelper(path)}`,
+      ...(await ghHosts()).flatMap((host) => [
+        "-c", `credential.https://${host}.helper=`,
+        "-c", `credential.https://${host}.helper=${helper}`,
+      ]),
       ...(who ? identityConfig(who.name ?? who.login, who.email) : []),
     ],
     env: {},
@@ -168,7 +189,7 @@ function githubSlug(url: string): string | null {
 async function ghClone(git: GitRun, url: string, dir: string): Promise<void> {
   const path = ghPath();
   const slug = githubSlug(url);
-  if (!path || !slug || (await getAuth()) || !(await ghAccountInUse())) return gitClone(git, url, dir);
+  if (!path || !slug || !(await ghSignedIn())) return gitClone(git, url, dir);
   const res = await run(path, ["repo", "clone", slug, dir], {
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });

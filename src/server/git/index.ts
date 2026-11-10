@@ -12,12 +12,15 @@ import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
 import { cliBackend, cliGitAvailable } from "./cli";
 import { ghAvailable, ghBackend, resetGhCache } from "./gh";
 import { jsBackend } from "./js";
+import { registerEngineLookup } from "./access";
 
 export type { PathMove, PullResult, SyncResult } from "./backend";
 export { cliGitAvailable } from "./cli";
-export { ghAccount, ghAccountInUse, ghAvailable, ghSignedIn, setGhAccountEnabled } from "./gh";
+export { ghAccount, ghAccountInUse, ghAvailable, ghHosts, ghSignedIn } from "./gh";
 export type { GhAccount } from "./gh";
 export { jsGitAvailable } from "./js";
+export { currentGitAccess, effectiveGitAccess, normalizeGitAccess, setAppSignIn } from "./access";
+export type { GitAccess } from "./access";
 export { isRepoRoot } from "./repoRoot";
 
 export type GitEngine = "cli" | "gh" | "js";
@@ -51,6 +54,8 @@ export function currentEngine(): GitEngine {
   return cliGitAvailable() ? "cli" : "js";
 }
 
+registerEngineLookup(currentEngine);
+
 // A stand-in backend a test installs in place of every engine, for tests
 // whose subject is not git (tests/helpers/fakeGit.ts). Never set by the app.
 let substitute: GitBackend | null = null;
@@ -73,19 +78,19 @@ function backend(): GitBackend {
     case "gh":
       if (!ghAvailable()) {
         throw new Error(
-          "GitHub CLI selected but no gh found — switch Git engine in Settings",
+          "GitHub CLI selected but no gh found — install it, or pick another Git access in Settings",
         );
       }
       if (!cliGitAvailable()) {
         throw new Error(
-          "GitHub CLI selected but no git found — switch Git engine to Built-in in Settings",
+          "GitHub CLI selected but no git found — install git, or pick Personal Access Token as the Git access in Settings",
         );
       }
       return ghBackend;
     default:
       if (!cliGitAvailable()) {
         throw new Error(
-          "System git selected but no git found — switch Git engine to Built-in in Settings",
+          "System git selected but no git found — pick the Git access again in Settings to use the built-in engine",
         );
       }
       return cliBackend;

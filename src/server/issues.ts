@@ -193,16 +193,16 @@ export async function readIssuesRepo(dataDir: string): Promise<GitHubRepo | null
 // --- The GitHub API -----------------------------------------------------------------
 
 /**
- * The token a request to `host` carries: the app's own sign-in when it was
- * made on that host, else the GitHub CLI's — for github.com only, gh's
- * host, and only while its account is in use (signing out of the app turns
- * it off) — else none. The CLI's is asked for on every call rather than
- * cached — `gh auth logout` must take effect without a restart.
+ * The token a request to `host` carries, from the Git access in effect
+ * (src/server/git/access.ts): with the GitHub CLI, gh's token for that host;
+ * otherwise the app's own sign-in when it was made on that host; else none.
+ * gh's is asked for on every call rather than cached — `gh auth logout` must
+ * take effect without a restart.
  */
 export async function issuesToken(host: string = GITHUB_HOST): Promise<string | null> {
+  if (await ghAccountInUse()) return ghToken(sameHost(undefined, host) ? undefined : host);
   const auth = await getAuth();
   if (auth && sameHost(auth.host, host)) return auth.token;
-  if (sameHost(undefined, host) && (await ghAccountInUse())) return ghToken();
   return null;
 }
 
