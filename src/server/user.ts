@@ -70,7 +70,13 @@ export async function getCurrentUser(): Promise<CurrentUser> {
   // A hosted worker's OS user is the container's; its user is the account
   // the gateway signed in (src/gateway/workers.ts).
   const username = (isHostedMode() && process.env.SPECDRIVEN_ACCOUNT_EMAIL) || userInfo().username;
-  const auth = await getAuth();
+  // The Git access in effect names the account (src/server/git/access.ts):
+  // the GitHub CLI's when that is the access, else the app's own sign-in.
+  const gh = (await ghAccountInUse()) ? await ghAccount() : null;
+  if (gh) {
+    return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
+  }
+  const auth = currentEngine() === "gh" ? null : await getAuth();
   if (auth) {
     return {
       username,
@@ -78,13 +84,6 @@ export async function getCurrentUser(): Promise<CurrentUser> {
       name: auth.name ?? auth.login,
       email: auth.email,
     };
-  }
-  // Only when gh is the engine in effect: on system git the gh account
-  // authors nothing, so reporting it would misname the commits. Not after
-  // signing out of the app either — that turns gh's account off too.
-  const gh = currentEngine() === "gh" && (await ghAccountInUse()) ? await ghAccount() : null;
-  if (gh) {
-    return { username, login: gh.login, name: gh.name ?? gh.login, email: gh.email };
   }
   const repo = await dataRepoFolder();
   return {

@@ -25,6 +25,7 @@ import {
   theirsVersion,
 } from "../src/server/git";
 import type { GitRun } from "../src/server/git/cli";
+import { ghHosts } from "../src/server/git/gh";
 import { jsClone } from "../src/server/git/js";
 import { FAKE_GH_ACCOUNT, installFakeGh } from "./helpers/binPath";
 import type { FakeGh } from "./helpers/binPath";
@@ -93,6 +94,11 @@ test("gh reports its sign-in state and account", async () => {
   // The account's email is private, so the noreply address stands in.
   expect(await ghAccount()).toEqual(FAKE_GH_ACCOUNT);
   expect(stub.calls()).toContain("api user");
+});
+
+test("gh's credentials answer for every host it is logged in to, GitHub Enterprise too", async () => {
+  withGh({ enterpriseHosts: ["github.example.com"] });
+  expect(await ghHosts()).toEqual(["github.com", "github.example.com"]);
 });
 
 test("gh installed but signed out has no account", async () => {
@@ -174,7 +180,7 @@ test("choosing the GitHub CLI engine without gh installed is a clear error", asy
   expect(ghAvailable()).toBe(false);
   setGitEngine("gh");
   expect(pull(root)).rejects.toThrow(
-    "GitHub CLI selected but no gh found — switch Git engine in Settings",
+    "GitHub CLI selected but no gh found — install it, or pick another Git access in Settings",
   );
 });
 
@@ -186,7 +192,7 @@ test("choosing system git without a git binary is a clear error", async () => {
   expect(cliGitAvailable()).toBe(false);
   setGitEngine("cli");
   expect(pull(root)).rejects.toThrow(
-    "System git selected but no git found — switch Git engine to Built-in in Settings",
+    "System git selected but no git found — pick the Git access again in Settings to use the built-in engine",
   );
 });
 

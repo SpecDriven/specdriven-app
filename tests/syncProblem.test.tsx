@@ -174,9 +174,9 @@ test("while a push fails the Sync button, a toast and the autosave hint say so, 
 test("the listing carries the push problem to the page, and null when there is none", async () => {
   const reply = (body: object) =>
     (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
-  const failing = await fetchListing(reply({ features: [], syncProblem: "authentication required — sign in with GitHub in Settings" }));
+  const failing = await fetchListing(reply({ features: [], syncProblem: "authentication required — add a GitHub personal access token in Settings" }));
   expect("listing" in failing && failing.listing.syncProblem).toBe(
-    "authentication required — sign in with GitHub in Settings",
+    "authentication required — add a GitHub personal access token in Settings",
   );
   const fine = await fetchListing(reply({ features: [], syncProblem: null }));
   expect("listing" in fine && fine.listing.syncProblem).toBeNull();
@@ -187,7 +187,7 @@ test("the listing carries the push problem to the page, and null when there is n
 
 test("an autosave hint promises a push only while pushes go through", () => {
   expect(pushHint(null)).toBe("the next sync pushes it.");
-  expect(pushHint("authentication required — sign in with GitHub in Settings")).toBe(
+  expect(pushHint("authentication required — add a GitHub personal access token in Settings")).toBe(
     "saved on this computer only — the push is failing.",
   );
 });

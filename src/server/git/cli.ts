@@ -21,6 +21,7 @@ import { getAuth } from "../auth";
 import { readTextFile, writeTextFile } from "../fsx";
 import { GITHUB_HOST, webBase } from "../github";
 import { isHostedMode } from "../hostedMode";
+import { currentGitAccess } from "./access";
 import { run, which } from "../run";
 import { getLogger } from "../telemetry";
 import type { RunResult } from "../run";
@@ -35,14 +36,26 @@ export function cliGitAvailable(): boolean {
 }
 
 /**
- * What a failed operation says when git had no usable GitHub credential. A
- * hosted worker's token comes from the gateway's account page, not Settings
+ * What a failed operation says when git had no usable GitHub credential: the
+ * way in that Settings → Git & GitHub's Git access names. The GitHub CLI's
+ * is `gh auth login`; a personal access token is pasted in Settings; the
+ * browser or device-code sign-in, only offered while the "GitHub account"
+ * switch is on, is never named otherwise (specs/app/user-info-settings.feature.md).
+ * A hosted worker's token comes from the gateway's account page, not Settings
  * (src/server/hostedMode.ts).
  */
 export function signInHint(): string {
-  return isHostedMode()
-    ? "authentication required — add a GitHub token that can read and write it on your account page"
-    : "authentication required — sign in with GitHub in Settings";
+  if (isHostedMode()) {
+    return "authentication required — add a GitHub token that can read and write it on your account page";
+  }
+  switch (currentGitAccess()) {
+    case "gh":
+      return "authentication required — sign the GitHub CLI in with `gh auth login`, or pick another Git access in Settings";
+    case "account":
+      return "authentication required — sign in with GitHub in Settings";
+    default:
+      return "authentication required — add a GitHub personal access token in Settings";
+  }
 }
 
 /**
