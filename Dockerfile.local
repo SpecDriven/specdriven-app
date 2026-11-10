@@ -1,0 +1,48 @@
+# Local single-user image: the ordinary app (bun src/index.ts), for running on
+# a laptop in Podman or Docker with no host folder mounted (docs/running.md
+# "Run in Podman"). Everything the app writes — settings, the GitHub token,
+# cloned data repos, plugins, logs — lives under /data, which is meant to be a
+# named volume:
+#
+#   podman build -f Dockerfile.local -t specdriven-local .
+#   podman run -d --name specdriven -p 127.0.0.1:3100:3000 \
+#     -v specdriven-data:/data specdriven-local
+#
+# The app has no login, so publish the port on 127.0.0.1 only. Inside the
+# container the server must answer on every interface (the published port
+# arrives from outside loopback); the Host check stays on, and a browser on
+# http://localhost:<port> passes it (src/server/requestGuard.ts).
+FROM oven/bun:1.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
+
+WORKDIR /app
+
+COPY package.json bun.lock ./
+# --production skips devDependencies (electron and friends stay out).
+RUN bun install --frozen-lockfile --production
+
+COPY src ./src
+# The What's new page bundles CHANGELOG.md (src/frontend/WhatsNewPage.tsx imports ../../CHANGELOG.md).
+COPY CHANGELOG.md ./
+# src/index.html links the favicon as ../build/icon.svg; without it the
+# frontend bundle fails and the page is served empty.
+COPY build/icon.svg ./build/icon.svg
+
+# An empty named volume mounted here takes this directory's ownership, so the
+# unprivileged user can write to it.
+RUN mkdir -p /data && chown bun:bun /data
+
+# SPECDRIVEN_ROOT is /data, not /app: a root holding this app's own
+# package.json counts as a source checkout and keeps settings elsewhere
+# (isAppCheckout, src/server/state.ts).
+ENV NODE_ENV=production \
+    SPECDRIVEN_HOST=0.0.0.0 \
+    SPECDRIVEN_ROOT=/data \
+    SPECDRIVEN_HOME=/data/home \
+    SPECDRIVEN_REPOS_DIR=/data/repos \
+    HOME=/data/home \
+    PORT=3000
+
+USER bun
+EXPOSE 3000
+
+CMD ["bun", "src/index.ts"]
