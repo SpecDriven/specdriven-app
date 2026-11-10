@@ -279,6 +279,7 @@ import {
 import { FILES_TAB } from "./files/plugin";
 import { FILES_HOME } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
+import { SettingsFileDialog, type SettingsFile } from "./SettingsFileDialog";
 import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
 import { JiraTokens, fetchJiraTokens, type JiraSite } from "./JiraToken";
@@ -2035,6 +2036,12 @@ export function App() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userInfoOpen, setUserInfoOpen] = useState(false);
+  // "View settings file…" in User info (specs/app/user-info-settings
+  // .feature.md "view the settings file"): ~/.specdriven/settings.json,
+  // read-only and readable. `settingsFile` is null while it loads.
+  const [settingsFileOpen, setSettingsFileOpen] = useState(false);
+  const [settingsFile, setSettingsFile] = useState<SettingsFile | null>(null);
+  const [settingsFileError, setSettingsFileError] = useState<string | null>(null);
   // The user menu's token sign-in (specs/user-info-settings.feature.md).
   const [tokenSignInOpen, setTokenSignInOpen] = useState(false);
   // In-app prompt/confirm dialogs (specs/ui/ui.feature.md "Dialogs") — the
@@ -2436,6 +2443,7 @@ export function App() {
   // The editor pane is part of the page, not a dialog — Tab reaches the sidebar
   // from it (specs/editor/spec-editor.feature.md "Spec editor pane").
   const userInfoTrapRef = useFocusTrap(userInfoOpen);
+  const settingsFileTrapRef = useFocusTrap(settingsFileOpen);
   const tokenSignInTrapRef = useFocusTrap(tokenSignInOpen);
   const confluenceTrapRef = useFocusTrap(confluencePublishOpen);
   const confluenceFolderTrapRef = useFocusTrap(confluenceFolder !== null);
@@ -4989,6 +4997,23 @@ export function App() {
     await fetch("/api/auth/github", { method: "DELETE" });
     setAuth({ signedIn: false });
     await refreshUser();
+  };
+
+  // "View settings file…": User info gives way to the wider read-only view,
+  // which reads the file afresh each time it opens.
+  const openSettingsFile = async () => {
+    setUserInfoOpen(false);
+    setSettingsFile(null);
+    setSettingsFileError(null);
+    setSettingsFileOpen(true);
+    try {
+      const res = await fetch("/api/settings-file");
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+      setSettingsFile(body as SettingsFile);
+    } catch (err) {
+      setSettingsFileError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   // A token pasted in Settings or the user menu's dialog is the sign-in now.
@@ -7662,6 +7687,7 @@ export function App() {
   // while typing in a field; ESC works everywhere.
   const dialogOpen =
     userInfoOpen ||
+    settingsFileOpen ||
     importOpen !== null ||
     openSpecImportOpen !== null ||
     tokenSignInOpen ||
@@ -7795,6 +7821,7 @@ export function App() {
       dismissConflict();
       return;
     }
+    if (settingsFileOpen) return setSettingsFileOpen(false);
     if (userInfoOpen) return setUserInfoOpen(false);
     if (tokenSignInOpen) return setTokenSignInOpen(false);
     if (confluencePublishOpen) return setConfluencePublishOpen(false);
@@ -13525,6 +13552,17 @@ export function App() {
               <dd>{user?.name ?? <span className="unset">not set</span>}</dd>
               <dt>Email</dt>
               <dd>{user?.email ?? <span className="unset">not set</span>}</dd>
+              {!hosted && (
+                <>
+                  <dt>Settings file</dt>
+                  <dd className="user-info-settings-file">
+                    <code>~/.specdriven/settings.json</code>
+                    <button type="button" className="btn btn-secondary" onClick={openSettingsFile}>
+                      View settings file…
+                    </button>
+                  </dd>
+                </>
+              )}
             </dl>
             <p className="hint">
               Commits to the data repo are authored with this identity — the signed-in
@@ -13537,6 +13575,14 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {settingsFileOpen && (
+        <SettingsFileDialog
+          file={settingsFile}
+          loadError={settingsFileError}
+          trapRef={settingsFileTrapRef}
+          onClose={() => setSettingsFileOpen(false)}
+        />
       )}
       {/* Manage specification folders (specs/app/spec-folders.feature.md):
           open, remove or add spec folders. Opening one closes this and runs

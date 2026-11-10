@@ -2875,6 +2875,124 @@ button.app-version:focus-visible {
   font-style: italic;
 }
 
+.user-info-settings-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+}
+
+.user-info-settings-file code,
+.settings-file-path code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+/* The settings file, read-only (specs/app/user-info-settings.feature.md
+   "view the settings file"): labelled sections, not JSON. */
+.settings-file-dialog {
+  width: min(44rem, 92vw);
+}
+
+.settings-file-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  color: var(--text-2);
+}
+
+.settings-file-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.settings-file-section h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.settings-file {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.settings-file-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 16rem) minmax(0, 1fr);
+  gap: 0.15rem 1rem;
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.settings-file-row:first-child {
+  border-top: none;
+}
+
+.settings-file-row dt {
+  color: var(--text-2);
+}
+
+.settings-file-row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-file .unset {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* Nested rows (a plugin's settings, each folder's plugins) sit under their
+   label across the full width, inset behind a rule, so deep nesting never
+   squeezes the value column. */
+.settings-file-row.has-rows > dd {
+  grid-column: 1 / -1;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--border);
+}
+
+.settings-file-nested .settings-file-row {
+  grid-template-columns: minmax(7rem, 14rem) minmax(0, 1fr);
+  border-top: none;
+  padding: 0.1rem 0;
+}
+
+.settings-file-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.settings-file-list li + li {
+  margin-top: 0.1rem;
+}
+
+.settings-file-tag {
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .settings-file-row,
+  .settings-file-nested .settings-file-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hint {
   color: var(--text-2);
   font-size: 0.75rem;

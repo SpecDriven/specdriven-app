@@ -45,6 +45,7 @@ import {
   MIN_AUTOSAVE_SECONDS,
   normalizeQtestParentUrl,
   settingsDirectory,
+  readSettingsFileView,
 } from "./state";
 import type { SpecDrivenState } from "./state";
 import { upgradeSettingsFile } from "./settingsUpgrade";
@@ -870,6 +871,12 @@ const getState: Handler = async (req) => {
     user: await getCurrentUser(),
   });
 };
+
+// "View settings file…" in the User info dialog
+// (specs/app/user-info-settings.feature.md "view the settings file"): the
+// user's ~/.specdriven/settings.json as written, for a read-only view. It
+// holds no secrets — tokens live in files of their own.
+const getSettingsFile: Handler = async () => json(await readSettingsFileView(getAppRoot()));
 
 /**
  * What the read-only site (src/server/readOnlyMode.ts) reports over the
@@ -4218,6 +4225,7 @@ const market = marketplaceRoutes({
 const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/state", getState],
   ["PUT", "/api/state", putState],
+  ["GET", "/api/settings-file", unlessHosted(getSettingsFile)],
   // Check for Updates (src/server/appUpdate.ts): the desktop app updating
   // itself. Neither the demo nor a hosted worker installs anything.
   ["GET", "/api/app-update", unlessHosted(unlessDemoUpdate(appUpdate.index!))],
