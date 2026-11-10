@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.253 — 2026-11-09
+
+- Settings: pick the Git access — GitHub CLI (recommended), personal access token or GitHub account ([#420](https://github.com/SpecDriven/specdriven-app/pull/420))
+- Import from OpenSpec: a code repo's openspec/specs become features ([#419](https://github.com/SpecDriven/specdriven-app/pull/419))
+- Settings: the personal access token is always offered, in its own section ([#418](https://github.com/SpecDriven/specdriven-app/pull/418))
+
 ## v0.1.252 — 2026-11-09
 
 - Settings: hide the GitHub account behind an off-by-default switch ([#417](https://github.com/SpecDriven/specdriven-app/pull/417))
