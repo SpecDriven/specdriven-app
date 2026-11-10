@@ -28,6 +28,8 @@ export function isolatePath(): void {
 export interface FakeGh {
   /** Every gh subcommand the code under test ran, in order. */
   calls(): string[];
+  /** The repository each `gh repo clone` was asked for, in order. */
+  cloned(): string[];
   restore(): void;
 }
 
@@ -56,6 +58,7 @@ case "$1 $2" in
 "auth git-credential") printf 'username=x-access-token\\npassword=gho_faketoken\\n' ;;
 "api user") echo '{"login":"octo","id":7,"name":"Octo Cat","email":null}' ;;
 "repo clone")
+  echo "$3" >> "$FAKE_GH_LOG.cloned"
   if [ -n "$FAKE_GH_ORIGIN" ]; then exec git clone "$FAKE_GH_ORIGIN" "$4"; fi
   echo 'remote: Repository not found.' >&2; exit 1 ;;
 *) echo "unexpected: $*" >&2; exit 1 ;;
@@ -71,6 +74,7 @@ export function installFakeGh({ signedIn = true, origin, enterpriseHosts = [] }:
   const dir = mkdtempSync(join(tmpdir(), "specdriven-gh-"));
   const log = join(dir, "calls.log");
   writeFileSync(log, "");
+  writeFileSync(`${log}.cloned`, "");
   linkExecutable(dir, "gh", FAKE_GH);
   const vars = {
     PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
@@ -85,6 +89,7 @@ export function installFakeGh({ signedIn = true, origin, enterpriseHosts = [] }:
   Object.assign(process.env, vars);
   return {
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
+    cloned: () => readFileSync(`${log}.cloned`, "utf8").split("\n").filter(Boolean),
     restore: () => {
       for (const [k, v] of Object.entries(before)) {
         if (v === undefined) delete process.env[k];
