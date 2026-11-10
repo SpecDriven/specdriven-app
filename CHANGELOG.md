@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.255 — 2026-11-10
+
+- User info: view ~/.specdriven/settings.json in readable form, with Copy contents ([#424](https://github.com/SpecDriven/specdriven-app/pull/424))
+- Project settings: edit a member's name and email ([#423](https://github.com/SpecDriven/specdriven-app/pull/423))
+
 ## v0.1.254 — 2026-11-10
 
 - Feature name: Edit display name in the sidebar menu; header edit survives sync ([#422](https://github.com/SpecDriven/specdriven-app/pull/422))
