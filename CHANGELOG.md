@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.254 — 2026-11-10
+
+- Feature name: Edit display name in the sidebar menu; header edit survives sync ([#422](https://github.com/SpecDriven/specdriven-app/pull/422))
+- Run the single-user app in Podman with no host folder mounted ([#421](https://github.com/SpecDriven/specdriven-app/pull/421))
+
 ## v0.1.253 — 2026-11-09
 
 - Settings: pick the Git access — GitHub CLI (recommended), personal access token or GitHub account ([#420](https://github.com/SpecDriven/specdriven-app/pull/420))
