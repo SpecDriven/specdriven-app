@@ -77,6 +77,36 @@ creates the folders, and `SPECDRIVEN_ROOT`, `SPECDRIVEN_HOME` or
 `SPECDRIVEN_REPOS_DIR` set explicitly still win. Delete the folder to start
 over.
 
+## Run in Podman
+
+[Dockerfile.local](../Dockerfile.local) packages the ordinary single-user app
+for a container with no host folder mounted. Everything it writes — settings,
+the GitHub token, cloned data repos, plugins, logs — lives under `/data`, kept
+in a named volume inside the Podman machine:
+
+```sh
+podman machine start          # add the machine's name if it is not the default
+podman build -f Dockerfile.local -t specdriven-local .
+podman run -d --name specdriven -p 127.0.0.1:3100:3000 \
+  -v specdriven-data:/data specdriven-local
+```
+
+Open <http://localhost:3100> and pick **Clone from GitHub** with a personal
+access token; the image has no `git` or `gh`, so the built-in JavaScript git
+engine does the clone and the pushes. To update, rebuild the image and replace
+the container (`podman rm -f specdriven`, then `podman run` again): the volume
+keeps the data. `podman volume rm specdriven-data` deletes it.
+
+- The app has no login, so keep the `127.0.0.1:` in `-p`. Use `localhost` in
+  the browser: the server rejects API requests under any other host name
+  unless `SPECDRIVEN_ALLOWED_HOSTS` lists it.
+- A cloned data repo is pulled and pushed on the usual schedule, like any other
+  running copy of the app.
+- **Open a folder on this computer** means a folder inside the container, under
+  `/data`. There is no folder picker, and no coding agents, Ghostty or IDE
+  launchers in the image.
+- Docker works the same way with `docker` in place of `podman`.
+
 ## Debugging
 
 The server code runs on two runtimes, each with its own debugger:

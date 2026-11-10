@@ -19,6 +19,9 @@ RUN bun install --frozen-lockfile --production
 COPY src ./src
 # The What's new page bundles CHANGELOG.md (src/frontend/WhatsNewPage.tsx imports ../../CHANGELOG.md).
 COPY CHANGELOG.md ./
+# src/index.html links the favicon as ../build/icon.svg; without it the
+# frontend bundle fails and the page is served empty.
+COPY build/icon.svg ./build/icon.svg
 COPY demo-data ./demo-data
 
 ENV NODE_ENV=production \
