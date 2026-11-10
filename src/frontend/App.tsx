@@ -1568,6 +1568,12 @@ export function App() {
   /** Draft for the inline file-name editor; null while not editing. */
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renaming, setRenaming] = useState(false);
+  // The header field saves on blur, and a blur can arrive from a stale
+  // render (the field closing on ESC, or while a save is out) — these refs
+  // carry the current draft and whether a rename is in flight.
+  const renameDraftRef = useRef(renameDraft);
+  renameDraftRef.current = renameDraft;
+  const renamingRef = useRef(false);
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null);
   const scenarioRefs = useRef<(HTMLElement | null)[]>([]);
   /** The sidebar's folder tree, for scrolling its highlighted row into view. */
@@ -2268,7 +2274,10 @@ export function App() {
     // its feature as is, like the README below.
     const descPending =
       descEditRef.current !== null && descEditRef.current.text !== descSaved.current;
-    if (selected && !dirty && !editing && !conflict && !descPending) {
+    // Nor while the header's feature name is being edited in place
+    // (specs/ui/ui.feature.md "Main page"): re-opening the feature would
+    // close the field mid-typing and drop the new name.
+    if (selected && !dirty && !editing && !conflict && !descPending && renameDraft === null) {
       loads.push(openFeature(selected));
     }
     // A pulled README shows up too — unless the home editor holds an edit
@@ -2894,7 +2903,8 @@ export function App() {
         history.pushState(null, "", featurePath(file));
       }
       setDirty(false);
-      setRenameDraft(null);
+      // A same-file refresh keeps a feature name being edited in the header.
+      if (file !== selected) setRenameDraft(null);
       setConflict(null);
       if (opts.editDescription) openDescriptionEditor(file, parsed.description);
       if (missingScenario) {
@@ -3989,34 +3999,64 @@ export function App() {
   // server rewrites the heading, commits and pushes; the file name (and so the
   // feature's url) stays the same.
   const renameSelected = async () => {
-    if (!selected || renameDraft === null) return;
-    const target = cleanLine(renameDraft);
+    const draft = renameDraftRef.current;
+    if (!selected || draft === null || renamingRef.current) return;
+    const target = cleanLine(draft);
     const currentName = feature ? feature.name || titleFromFileName(selected) : "";
     if (!target || target === currentName) {
       setRenameDraft(null);
       return;
     }
+    renamingRef.current = true;
     setRenaming(true);
     try {
-      const res = await fetch(`/api/features/${encodeURIComponent(selected)}/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: target }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRenameDraft(null);
-        await loadFeatures();
-        await openFeature(selected);
-        toast.success(`Renamed to "${data.name}" — ${data.message}.`);
-      } else {
-        toast.error(data.error ?? "Rename failed");
-      }
-    } catch {
-      toast.error("Rename failed — is the server running?");
+      if (await renameFeature(selected, target)) setRenameDraft(null);
     } finally {
+      renamingRef.current = false;
       setRenaming(false);
     }
+  };
+
+  /** Rewrite `fileName`'s `# <name>` heading to `name` — committed and pushed
+      by the server; the file (and its url) stays put. True once saved. */
+  const renameFeature = async (fileName: string, name: string) => {
+    try {
+      const res = await fetch(`/api/features/${encodeURIComponent(fileName)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Rename failed");
+        return false;
+      }
+      await loadFeatures();
+      // Still the open feature? A blur-save can be out while the user
+      // already opened another one — that one stays.
+      if (selectedRef.current === fileName) await openFeature(fileName);
+      toast.success(`Renamed to "${data.name}" — ${data.message}.`);
+      return true;
+    } catch {
+      toast.error("Rename failed — is the server running?");
+      return false;
+    }
+  };
+
+  // Edit display name from a feature's ⋯ menu in the sidebar
+  // (specs/ui/ui.feature.md "Feature entry menu"): the feature name — the
+  // file's `# <name>` heading the tree shows — as the page's Edit link does.
+  // The file name and url stay the same.
+  const editFeatureDisplayName = async (f: FeatureListing) => {
+    const current = f.name || titleFromFileName(f.fileName);
+    const name = await prompt({
+      title: "Edit display name",
+      hint: "The feature name shown in the tree and on its page. The file name stays the same.",
+      initial: current,
+      confirmLabel: "Save",
+    });
+    if (name === null || !cleanLine(name) || cleanLine(name) === current) return;
+    await renameFeature(f.fileName, cleanLine(name));
   };
 
   /** The file name shown in the menu: only the part left of the dot —
@@ -7032,6 +7072,12 @@ export function App() {
               label: "Rename",
               icon: <Pencil size={13} />,
               onSelect: () => void renameFile(f.fileName),
+            },
+            {
+              id: "display-name",
+              label: "Edit display name",
+              icon: <Tag size={13} />,
+              onSelect: () => void editFeatureDisplayName(f),
             },
             // Move up / Move down (specs/ui/folders.feature.md "order
             // features"): the order among its siblings is the user's, kept
@@ -11957,17 +12003,35 @@ export function App() {
                         spellCheck={false}
                         onChange={(e) => setRenameDraft(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Escape") setRenameDraft(null);
+                          if (e.key === "Escape") {
+                            renameDraftRef.current = null;
+                            setRenameDraft(null);
+                          }
                         }}
+                        // Leaving the field saves, as in-place edits do; ESC
+                        // or Cancel is the way out without saving.
+                        onBlur={() => void renameSelected()}
                       />
+                      {/* mousedown would blur the field first — save on
+                          blur — so the buttons keep the focus where it is
+                          and act on click alone. */}
                       <button
                         type="submit"
                         className="link"
                         disabled={renaming || !renameDraft.trim()}
+                        onMouseDown={(e) => e.preventDefault()}
                       >
                         {renaming ? "Renaming…" : "Save"}
                       </button>
-                      <button type="button" className="link" onClick={() => setRenameDraft(null)}>
+                      <button
+                        type="button"
+                        className="link"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          renameDraftRef.current = null;
+                          setRenameDraft(null);
+                        }}
+                      >
                         Cancel
                       </button>
                     </form>
