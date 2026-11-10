@@ -1,7 +1,7 @@
 // The marketplace on the host (specs/app/plugins.feature.md "The marketplace
 // is a git repository with an index", "A plugin from the marketplace is
 // installed with consent"): each marketplace the profile names is cloned
-// or pulled through the app's own git engine into
+// (by the first way that works: system git, built-in git, gh) or pulled into
 // `~/.specdriven/marketplaces/<name>` and its `marketplace.json` read; an
 // install clones the plugin pinned to the ref the index names (or copies
 // the marketplace's subdirectory) into a staging folder, reads its manifest
@@ -17,7 +17,7 @@
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { version as appVersion } from "../../../package.json";
-import { checkoutRef, clone, headCommit, pull } from "../../server/git";
+import { checkoutRef, clonePluginRepo, headCommit, pull } from "../../server/git";
 import { bodyOf, json, type Handler } from "../../server/http";
 import { builtinManifests, profileManifests } from "../builtin/manifests";
 import {
@@ -85,7 +85,7 @@ async function cacheMarketplace(
   if (!cached) {
     await rm(dir, { recursive: true, force: true });
     await mkdir(marketplacesHome(), { recursive: true });
-    await clone(entry.source, dir);
+    await clonePluginRepo(entry.source, dir);
   } else if (refresh) {
     const res = await pull(dir);
     if (res.ok) return;
@@ -113,7 +113,7 @@ async function recloneMarketplace(entry: MarketplaceRef, dir: string): Promise<v
     await rm(fresh, { recursive: true, force: true });
     await mkdir(marketplacesHome(), { recursive: true });
     try {
-      await clone(entry.source, fresh);
+      await clonePluginRepo(entry.source, fresh);
     } catch (e) {
       await rm(fresh, { recursive: true, force: true });
       throw e;
@@ -327,7 +327,7 @@ async function fetchInto(row: MarketplacePlugin, marketplaceDir: string, into: s
   const subdir = subdirectorySource(row.source);
   let commit: string;
   if (subdir === null) {
-    await clone(row.source, into);
+    await clonePluginRepo(row.source, into);
     commit = row.ref ? await checkoutRef(into, row.ref) : await headCommit(into);
   } else {
     const from = resolve(marketplaceDir, subdir);

@@ -6,6 +6,7 @@
 // implemented in JavaScript, bundled with the app and always available.
 
 import type { Attributes } from "@opentelemetry/api";
+import { rm } from "node:fs/promises";
 import { isHostedMode } from "../hostedMode";
 import { getLogger, withSpan } from "../telemetry";
 import type { GitBackend, PathMove, PullResult, SyncResult } from "./backend";
@@ -288,4 +289,66 @@ export async function clone(url: string, dir: string): Promise<void> {
     log.info(`cloning ${url}`, { "specdriven.dir": dir });
     await backend().clone(url, dir);
   });
+}
+
+/** One way of cloning, as the fallback chain names it in its errors. */
+export interface CloneMethod {
+  readonly label: string;
+  clone(url: string, dir: string): Promise<void>;
+}
+
+/**
+ * The ways a plugin repository is cloned, in the order they are tried
+ * (specs/app/plugins.feature.md "A plugin repository is cloned by the first
+ * way that works"): the system git, then the git bundled with the app, then
+ * the GitHub CLI. Whichever this machine lacks is left out; the bundled one
+ * is always there. A hosted worker never uses gh — its credentials would be
+ * the container's, not the signed-in user's.
+ */
+export function cloneMethods(): CloneMethod[] {
+  if (substitute) return [{ label: "git", clone: substitute.clone.bind(substitute) }];
+  const methods: CloneMethod[] = [];
+  if (cliGitAvailable()) methods.push({ label: "system git", clone: cliBackend.clone });
+  methods.push({ label: "built-in git", clone: jsBackend.clone });
+  if (!isHostedMode() && ghAvailable() && cliGitAvailable()) {
+    methods.push({ label: "GitHub CLI", clone: ghBackend.clone });
+  }
+  return methods;
+}
+
+/**
+ * Clone through each method in turn until one works. A failed attempt's
+ * leftovers are removed before the next one starts, so `dir` must not exist
+ * beforehand. When every method fails the error names each with its reason.
+ */
+export async function cloneThrough(methods: readonly CloneMethod[], url: string, dir: string): Promise<void> {
+  const failures: string[] = [];
+  for (const method of methods) {
+    try {
+      await method.clone(url, dir);
+      if (failures.length) log.info(`cloned ${url} with ${method.label} after: ${failures.join("; ")}`);
+      return;
+    } catch (e) {
+      const reason = (e as Error).message;
+      log.warn(`cloning ${url} with ${method.label} failed: ${reason}`, { "specdriven.dir": dir });
+      // Each engine opens with the same "Could not clone <url>: "; say it once.
+      const prefix = `Could not clone ${url}: `;
+      const why = reason.startsWith(prefix) ? reason.slice(prefix.length) : reason;
+      failures.push(methods.length > 1 ? `${method.label}: ${why.trim()}` : reason);
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+  if (methods.length === 1) throw new Error(failures[0]);
+  throw new Error(`Could not clone ${url} — ${failures.join("; ") || "no git available"}`);
+}
+
+/**
+ * Clone a plugin repository — a marketplace or a plugin's own — whatever the
+ * Git access setting says: the system git, the bundled git, the GitHub CLI,
+ * each tried when the one before it fails.
+ */
+export async function clonePluginRepo(url: string, dir: string): Promise<void> {
+  return withSpan("git.clone_plugin_repo", { "specdriven.dir": dir, "git.url": url }, () =>
+    cloneThrough(cloneMethods(), url, dir),
+  );
 }
