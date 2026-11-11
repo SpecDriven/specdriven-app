@@ -4,9 +4,7 @@
 
 Please report security issues privately — never in a public issue.
 
-- Use GitHub's **Report a vulnerability** button on this repository's
-  Security tab (private vulnerability reporting), or
-- email **info@specdriven.app** with "SECURITY" in the subject.
+Please email **info@specdriven.app** with "SECURITY" in the subject.
 
 Tell us the version you ran (the user menu shows it), what you did, and what
 an attacker could gain. We will acknowledge your report, keep you posted

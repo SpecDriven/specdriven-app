@@ -1,44 +1,37 @@
-# SpecDriven
+# Specdriven.app
 
-**A workspace for evolutionary spec-driven development.**
+**A tool for evolutionary spec-driven development.**
 
 [![Test](https://github.com/SpecDriven/specdriven-app/actions/workflows/test.yml/badge.svg)](https://github.com/SpecDriven/specdriven-app/actions/workflows/test.yml)
 [![Release](https://img.shields.io/github/v/release/SpecDriven/specdriven-app?label=release)](https://github.com/SpecDriven/specdriven-app/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE.md)
 
-SpecDriven is a desktop and web app for writing software specifications as
-versioned, testable scenarios, and for handing those scenarios to people and
-coding agents to implement. Specs are plain markdown files in a git
-repository you own; there is no server, no database and no account to
-create.
+Specdriven.app is a desktop and a web application for managing multi-modal software specifications.
+The driving vision of the project is to make it pleasant and effective for the *whole team* (including your AI agents)
+to maintain detailed functional specifications with traceability to the tests that automate them,
+aka "executable specifications".
 
-- **Specs as markdown in git.** Every feature is a `.feature.md` file with
-  Given / When / Then scenarios. The app commits, pushes and pulls for you,
-  and the files stay readable and reviewable on GitHub without the app.
-- **A lifecycle, not a wiki.** Scenarios move from draft to proposed to
-  published. Published scenarios are immutable and versioned; a change is a
-  new version that supersedes the old one.
-- **Traceable to tests.** A scenario links to the automated tests that prove
-  it, by name and line, and tests carry a `@Spec` annotation pointing back.
-- **Built for AI agents.** Select the scenarios to implement and start a
-  session in Claude Code, Codex or Pi, from the app's own agent pane or your
-  desktop.
-- **Conflict-free collaboration.** Edits are merged at the CRDT level
-  (Automerge), so concurrent changes to the same scenario merge instead of
-  becoming git conflicts.
-- **Integrations.** Jira, Confluence, Aha!, qTest and GitHub issues, plus a
-  plugin system for module tabs of your own.
+The specifications are presented as Markdown files with optional images.
 
-Try it without installing anything at
-[demo.specdriven.app](https://demo.specdriven.app).
-Product information is at [specdriven.app](https://specdriven.app).
+For ease of adoption, the "database" is also stored in git in the form of [automerge](https://automerge.org) binary files.
+
+## Architecture
+
+The app is built by [Bun](https://bun.com/) and is entirely written in TypeScript.
+
+A lightweight plugin capability with support for remote plugin marketplaces extends the core application.
+
+## Integrations
+
+The app is developed with the intention of supporting large, mature enterprises, and thus we aim to provide built-in
+integrations with many of the most popular SDLC tools such as Aha!, Figma, Jira, Confluence (wiki),qTest, GitHub Issues, 
+and many more.
+
 
 ## Install
 
-SpecDriven ships as a source zip so you can review the code and bring your
-own supply chain before building. One command fetches the latest release,
-checks its signature and checksum, builds the desktop app with
-[Bun](https://bun.sh) and starts it.
+Specdriven.app ships as a zip file containing the source and is built on your machine using Bun. This allows our users to run the source
+via their security infrastructure and avoid trust issues associated with a binary distribution.
 
 macOS and Linux:
 
@@ -61,41 +54,22 @@ hand are in [docs/installation.md](docs/installation.md).
 
 ```sh
 bun install
+bun test               # run the test suite
 bun run dev            # web app at http://localhost:3000, hot reload
-bun run dev:electron   # desktop shell on top of the running dev server
-bun test               # test suite
+bun run dev:electron   # (run in a separate shell instance) Electron-based desktop shell on top of the running dev server
+
 ```
 
 On first start the app asks for a data repo: a GitHub url to clone, or a
 path to a local clone. See [docs/running.md](docs/running.md) for settings,
 throwaway profiles and debugging.
 
-## Documentation
+## [Documentation](docs/index.md)
 
-| For users | |
-| --- | --- |
-| [Features and specs](docs/user-guide/specs.md) | The Specs tab, the draft → proposed → published lifecycle, syncing, links to tests, specs as a submodule of a code repo |
-| [AI sessions](docs/user-guide/ai-sessions.md) | Handing specs to Claude Code, Codex or Pi |
-| [Opening a code repository](docs/user-guide/code-repository.md) | The coding agent, a file tree and IntelliJ on a code repository, with no specs and no sync |
-| [Engineering notebook](docs/user-guide/engineering-notebook.md) | The shared, dated log of observations and decisions |
-| [Pomodoro](docs/user-guide/pomodoro.md) | Timing your own work |
-
-| For developers and operators | |
-| --- | --- |
-| [Running from source](docs/running.md) | Scripts, settings, profiles, debugging, tests |
-| [Architecture](docs/ARCHITECTURE.md) | Storage model, the Automerge store, the local trust boundary |
-| [Development](docs/DEVELOPMENT.md) | The spec-first workflow, repository layout, writing a plugin |
-| [Building](docs/building.md) | Standalone binaries and the Electron desktop app |
-| [Installation](docs/installation.md) | What `install.sh` and `install.ps1` do |
-| [Releasing](docs/releasing.md) | Versioning, tagging and the release workflow |
-| [Deployment modes](docs/deployment-modes.md) | Demo mode, hosted multi-user |
-| [Hosted on Railway](docs/deployment-railway.md) | The multi-user gateway deployment |
-| [Observability](docs/observability.md) | OpenTelemetry export, log files, the in-app log viewer |
 
 ## Contributing
 
-We do not accept pull requests: every line we ship is code we answer for,
-and we cannot take on the review and supply-chain cost of outside changes.
+We are unable to accept pull requests this time due to lack of resources to review them appropriately.
 Forks are welcome under the license.
 
 What we do welcome is **specs**. This app is built from the specifications in
