@@ -11,7 +11,7 @@ import { baseName, filesPath, parentFolders, parseFilesRoute } from "../src/fron
 import { createFilesStore, isDirty, type FilesState, type OpenFile } from "../src/frontend/files/filesStore";
 import { treeRows } from "../src/frontend/files/FilesSidebar";
 import { FilesPane, readmeOf, saveStatus } from "../src/frontend/files/FilesPane";
-import { isMarkdownFile } from "../src/frontend/files/CodeEditor";
+import { languageOf } from "../src/frontend/files/codeLanguage";
 import { filesTab, searchFiles } from "../src/frontend/files/plugin";
 import { matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 
@@ -33,10 +33,10 @@ test("the tab's urls are home at / and /files, and /files/<path> for a file", ()
   expect(parentFolders("a/b/c.ts")).toEqual(["a", "a/b"]);
 });
 
-test("Markdown files get Markdown's highlighting, every other file is plain text", () => {
-  expect(isMarkdownFile("README.md")).toBe(true);
-  expect(isMarkdownFile("docs/x.MARKDOWN")).toBe(true);
-  expect(isMarkdownFile("src/index.ts")).toBe(false);
+test("Markdown files get Markdown's highlighting, a file in no known language is plain text", () => {
+  expect(languageOf("README.md")).toBe("markdown");
+  expect(languageOf("docs/x.MARKDOWN")).toBe("markdown");
+  expect(languageOf("LICENSE")).toBe(null);
 });
 
 // --- The store ----------------------------------------------------------------

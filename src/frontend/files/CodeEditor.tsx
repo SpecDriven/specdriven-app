@@ -1,12 +1,13 @@
 // The plain text editor of the Files tab (specs/app/code-repo-mode.feature
 // .md "A file opens in a plain text editor"): CodeMirror with line numbers,
 // undo, Tab indenting and ⌘S — no Markdown toolbar, no styled spans, no
-// link marks (src/frontend/SourceEditor.tsx is the Markdown one). A `.md`
-// file gets Markdown's highlighting; every other file is plain text. Vim's
-// keys follow the Settings switch, as in the Markdown editor's Vim tab.
+// link marks (src/frontend/SourceEditor.tsx is the Markdown one). A file in
+// a language codeLanguage.ts knows is highlighted as that language; every
+// other file is plain text. Vim's keys follow the Settings switch, as in the
+// Markdown editor's Vim tab.
 
 import { useEffect, useRef, useState } from "react";
-import { EditorState } from "@codemirror/state";
+import { Compartment, EditorState } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -16,7 +17,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { languageOf, loadLanguage } from "./codeLanguage";
 
 type VimModule = typeof import("@replit/codemirror-vim");
 
@@ -27,11 +28,6 @@ function minimalChange(from: string, to: string) {
   let end = 0;
   while (end < from.length - start && end < to.length - start && from[from.length - 1 - end] === to[to.length - 1 - end]) end++;
   return { from: start, to: from.length - end, insert: to.slice(start, to.length - end) };
-}
-
-/** Whether a file gets Markdown's highlighting. */
-export function isMarkdownFile(path: string): boolean {
-  return /\.(md|markdown)$/i.test(path);
 }
 
 export function CodeEditor({
@@ -72,6 +68,8 @@ export function CodeEditor({
   useEffect(() => {
     const parent = host.current;
     if (!parent || (vim && !vimReady)) return;
+    // Empty until the file's grammar has loaded; the text shows meanwhile.
+    const grammar = new Compartment();
     const v = new EditorView({
       parent,
       state: EditorState.create({
@@ -84,7 +82,7 @@ export function CodeEditor({
           highlightActiveLine(),
           history(),
           drawSelection(),
-          isMarkdownFile(path) ? markdown() : [],
+          grammar.of([]),
           keymap.of([
             {
               key: "Mod-s",
@@ -108,6 +106,14 @@ export function CodeEditor({
       }),
     });
     view.current = v;
+    const language = languageOf(path, value);
+    parent.dataset.language = language ?? "text";
+    if (language) {
+      void loadLanguage(language, path).then((extension) => {
+        // The editor may be gone by now: another file, or the pane closed.
+        if (view.current === v) v.dispatch({ effects: grammar.reconfigure(extension) });
+      });
+    }
     return () => {
       v.destroy();
       view.current = null;

@@ -1,7 +1,10 @@
 // package.json `overrides` pin packages that must load as a single copy: two
 // Automerge instances make netsync throw "expected instance of Automerge" (so
 // every websocket test in tests/automerge/automergeNetsync.test.ts times out),
-// and two CodeMirror state/view copies split EditorView for tsc. bun.lock
+// two CodeMirror state/view copies split EditorView for tsc, and a grammar
+// that loads its own @codemirror/language or @lezer/highlight parses the text
+// into a tree the editor's highlighter never sees — nothing is coloured, and
+// nothing fails (tests/codeLanguage.test.tsx is where it would show). bun.lock
 // keeps them deduped, but `bun install` never deletes a nested copy an older
 // lockfile left in node_modules, so a stale checkout fails here, by name,
 // instead of as a pile of unrelated timeouts.
