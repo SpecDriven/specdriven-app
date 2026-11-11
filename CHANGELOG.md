@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.262 — 2026-11-10
+
+- The user menu offers Log out instead of Sign in with token ([#432](https://github.com/SpecDriven/specdriven-app/pull/432))
+- The agent header's account chip shows an icon instead of ACNT or API ([#431](https://github.com/SpecDriven/specdriven-app/pull/431))
+
 ## v0.1.261 — 2026-11-10
 
 - The User info dialog no longer shows the email ([#430](https://github.com/SpecDriven/specdriven-app/pull/430))
