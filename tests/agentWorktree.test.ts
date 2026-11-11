@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { handleApi, reloader } from "../src/server/api";
 import { endAllChatSessions, getChatSession } from "../src/server/agentChat";
 import type { ChatSessionMeta } from "../src/server/agentTypes";
-import { setWorktreeGit, worktreeSlug } from "../src/server/agentWorktree";
+import { folderGitInfo, setWorktreeGit, worktreeSlug } from "../src/server/agentWorktree";
 import { run } from "../src/server/run";
 import { agents } from "../src/plugins/host/agents";
 import type { Disposer } from "../src/plugins/kernel";
@@ -231,4 +231,169 @@ test("a session name becomes a branch-safe slug", () => {
   expect(worktreeSlug("   ")).toBe("session");
   expect(worktreeSlug("../../etc/passwd")).toBe("etc-passwd");
   expect(worktreeSlug("a".repeat(100))).toHaveLength(40);
+});
+
+// --- Starting from main, level with origin ---------------------------------
+// The tests above use a repo with no remote, which has nothing to be level
+// with. These give the repo a bare `origin` and a second clone to move it.
+
+/** Give `dir` a bare origin of its main branch; returns a second clone that can push to it. */
+async function withOrigin(dir: string, name: string): Promise<string> {
+  const origin = join(root, `${name}-origin.git`);
+  await git(root, "clone", "-q", "--bare", dir, origin);
+  await git(dir, "remote", "add", "origin", origin);
+  await git(dir, "fetch", "-q", "origin");
+  const other = join(root, `${name}-other`);
+  await git(root, "clone", "-q", origin, other);
+  return other;
+}
+
+/** Commit a file in the second clone and push it, so the first falls behind origin. */
+async function advanceOrigin(other: string, file: string, body: string): Promise<void> {
+  await writeFile(join(other, file), body);
+  await git(other, "add", ".");
+  await git(other, "commit", "-q", "-m", `change ${file}`);
+  await git(other, "push", "-q", "origin", "main");
+}
+
+async function refused(body: Record<string, unknown>): Promise<{ status: number; error: string }> {
+  const res = await api("/api/agent/chat", "POST", { name: "Fix the login bug", agent: "fake", ...body });
+  return { status: res.status, error: ((await res.json()) as { error: string }).error };
+}
+
+test("a worktree session starts from main level with origin, and a main that fell behind is fast-forwarded first", async () => {
+  register();
+  const other = await withOrigin(code, "code");
+  // Level already: nothing moves, and nothing is said.
+  const level = await start({ cwd: code, worktree: true });
+  expect(level.worktree).toMatchObject({ base: "main" });
+  expect(level.worktree!.unchecked).toBeUndefined();
+
+  // Origin moves on; an uncommitted change out of its way stays as it is.
+  await advanceOrigin(other, "NEW.md", "new\n");
+  await writeFile(join(code, "src", "app.ts"), "export const wip = true;\n");
+  expect(await git(code, "rev-list", "--count", "main..origin/main")).toBe("0");
+  const meta = await start({ cwd: code, worktree: true });
+  const tip = await git(other, "rev-parse", "main");
+  expect(await git(code, "rev-parse", "main")).toBe(tip);
+  expect(await git(code, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  expect(await readFile(join(code, "src", "app.ts"), "utf8")).toBe("export const wip = true;\n");
+  // The worktree branched off the fast-forwarded main.
+  expect(await git(meta.worktree!.path, "merge-base", "HEAD", "origin/main")).toBe(tip);
+  expect(await readFile(join(meta.worktree!.path, "NEW.md"), "utf8")).toBe("new\n");
+  expect(meta.worktree!.unchecked).toBeUndefined();
+});
+
+test("a folder on another branch, or a main with commits origin lacks, is refused with nothing left behind", async () => {
+  const fake = register();
+  const other = await withOrigin(code, "code");
+  // Another branch checked out.
+  await git(code, "checkout", "-q", "-b", "feature");
+  let res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toBe(`Worktree sessions start from main, but ${code} is on feature — switch it to main first`);
+  // A detached HEAD.
+  await git(code, "checkout", "-q", "--detach");
+  res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toContain("has a detached HEAD");
+  // On main, with a commit origin does not have.
+  await git(code, "checkout", "-q", "main");
+  await writeFile(join(code, "local.ts"), "export {};\n");
+  await git(code, "add", ".");
+  await git(code, "commit", "-q", "-m", "local");
+  res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toBe(
+    "main has 1 commit that origin/main does not — push or remove it before starting a worktree session",
+  );
+  // Diverged: both sides have moved.
+  await advanceOrigin(other, "NEW.md", "new\n");
+  res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toContain("main has 1 commit that origin/main does not and is 1 commit behind it");
+  // Nothing was made, moved or started; without a worktree the folder still takes a session.
+  expect(fake.sessions).toHaveLength(0);
+  expect(await exists(worktreesDir())).toBe(false);
+  expect(await git(code, "branch", "--list", "specdriven/*")).toBe("");
+  expect(await git(code, "log", "-1", "--format=%s", "main")).toBe("local");
+  expect((await start({ cwd: code })).cwd).toBe(code);
+});
+
+test("a main that cannot be fast-forwarded over uncommitted changes is refused, and the changes stay", async () => {
+  const fake = register();
+  const other = await withOrigin(code, "code");
+  const before = await git(code, "rev-parse", "main");
+  await advanceOrigin(other, "README.md", "theirs\n");
+  await writeFile(join(code, "README.md"), "mine, not committed\n");
+  const res = await refused({ cwd: code, worktree: true });
+  expect(res.status).toBe(409);
+  expect(res.error).toContain("main is 1 commit behind origin/main and could not be fast-forwarded");
+  expect(await readFile(join(code, "README.md"), "utf8")).toBe("mine, not committed\n");
+  expect(await git(code, "rev-parse", "main")).toBe(before);
+  expect(fake.sessions).toHaveLength(0);
+  expect(await exists(worktreesDir())).toBe(false);
+});
+
+test("with origin out of reach the worktree starts from main as last fetched, and says so", async () => {
+  register();
+  await withOrigin(code, "code");
+  await git(code, "remote", "set-url", "origin", join(root, "gone.git"));
+  const meta = await start({ cwd: code, worktree: true });
+  expect(meta.worktree).toMatchObject({ base: "main" });
+  expect(meta.worktree!.unchecked).toBeTruthy();
+  expect(await git(meta.worktree!.path, "rev-parse", "HEAD")).toBe(await git(code, "rev-parse", "main"));
+  // The last fetch still decides: a branch that is not main is refused offline too.
+  await git(code, "checkout", "-q", "-b", "feature");
+  expect((await refused({ cwd: code, worktree: true })).status).toBe(409);
+});
+
+test("the specifications folder, which the app keeps level itself, is neither fetched nor moved", async () => {
+  register();
+  await repo(data);
+  const other = await withOrigin(data, "data");
+  await advanceOrigin(other, "NEW.md", "new\n");
+  const before = await git(data, "rev-parse", "main");
+  const seen = await git(data, "rev-parse", "origin/main");
+  const meta = await start({ worktree: true });
+  expect(meta.worktree!.folder).toBe(data);
+  expect(meta.worktree!.unchecked).toBeUndefined();
+  expect(await git(data, "rev-parse", "main")).toBe(before);
+  expect(await git(data, "rev-parse", "origin/main")).toBe(seen);
+  expect(await git(meta.worktree!.path, "rev-parse", "HEAD")).toBe(before);
+});
+
+test("the pane learns which branch a worktree session has to start from", async () => {
+  const ask = async (path: string) =>
+    (await (await api(`/api/agent/folder?path=${encodeURIComponent(path)}`)).json()) as Record<string, unknown>;
+  // No remote: nothing to be level with.
+  expect(await ask(code)).toEqual({ canWorktree: true, repo: code, branch: "main" });
+  // An origin with a main branch.
+  await withOrigin(code, "code");
+  expect(await ask(code)).toEqual({ canWorktree: true, repo: code, branch: "main", base: "main" });
+  await git(code, "checkout", "-q", "-b", "feature");
+  expect(await ask(code)).toEqual({ canWorktree: true, repo: code, branch: "feature", base: "main" });
+  // A clone knows its origin's default branch by whatever name it has.
+  const trunk = join(root, "trunk");
+  await mkdir(trunk);
+  await git(trunk, "init", "-q", "-b", "trunk");
+  await writeFile(join(trunk, "README.md"), "hello\n");
+  await git(trunk, "add", ".");
+  await git(trunk, "commit", "-q", "-m", "first");
+  const clone = join(root, "trunk-clone");
+  await git(root, "clone", "-q", trunk, clone);
+  expect(await ask(clone)).toEqual({ canWorktree: true, repo: clone, branch: "trunk", base: "trunk" });
+  // The specifications folder is the app's to sync: no branch is asked of it.
+  await repo(data);
+  await withOrigin(data, "data");
+  expect(await ask(data)).toEqual({ canWorktree: true, repo: data, branch: "main" });
+  // The same answers straight from folderGitInfo: only a folder named as synced is spared.
+  expect(await folderGitInfo(data)).toEqual({ canWorktree: true, repo: data, branch: "main", base: "main" });
+  expect(await folderGitInfo(data, { synced: data })).toEqual({ canWorktree: true, repo: data, branch: "main" });
+  expect(await folderGitInfo(code, { synced: data })).toEqual({
+    canWorktree: true,
+    repo: code,
+    branch: "feature",
+    base: "main",
+  });
 });
