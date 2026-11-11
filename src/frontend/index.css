@@ -10659,12 +10659,11 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   white-space: pre-line;
 }
 
-/* Claude's login/billing chip in the agent pane header. */
+/* Claude's login/billing chip in the agent pane header: one icon, a plug
+   for the API or a person for an account. */
 .agent-account {
   flex: none;
-  white-space: nowrap;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  padding: 0 0.35rem;
 }
 .agent-account[data-billing="api"],
 .agent-account[data-billing="provider"] {

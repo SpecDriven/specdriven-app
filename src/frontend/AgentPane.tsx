@@ -12,6 +12,7 @@ import {
   Bot,
   ChevronDown,
   CircleHelp,
+  CircleUserRound,
   FilePen,
   FileText,
   ArrowUp,
@@ -21,6 +22,7 @@ import {
   Globe,
   PanelRightClose,
   Pin,
+  Plug,
   Plus,
   Puzzle,
   Search,
@@ -34,7 +36,7 @@ import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
 import { SessionRailButton } from "./SessionRail";
-import { accountChipDetail, accountChipText } from "./agentAccount";
+import { accountChipDetail, accountChipKind, accountChipWord } from "./agentAccount";
 import { Tooltip } from "./Tooltip";
 import { renderMarkdown } from "./markdown";
 import { useSpellCheck } from "./spellCheckPref";
@@ -348,7 +350,8 @@ export function pickedAgent(all: readonly AgentDescriptor[], id: string | null):
 }
 
 /**
- * The header's API / ACNT chip (specs/agents/agent-pane.feature.md S13):
+ * The header's account chip — a plug for the API, a person for an account
+ * (specs/agents/agent-pane.feature.md S13):
  * what the session's agent reported of its sign-in, else — no session yet,
  * or one still starting — what the agent says a new session would start
  * under (AgentChoices.account), which the pane loads for its model menus
@@ -359,16 +362,18 @@ function AccountChip({ agent, account }: { agent: string; account?: ChatAccount 
   const choices = useAgentChoices(agent);
   const shown = account ?? choices?.account;
   if (!shown) return null;
-  const text = accountChipText(shown);
+  const kind = accountChipKind(shown);
+  const Icon = kind === "api" ? Plug : CircleUserRound;
   return (
     <Tooltip label={accountChipDetail(shown)}>
       <span
         className="chip muted agent-account"
+        data-kind={kind}
         data-billing={shown.billing}
         tabIndex={0}
-        aria-label={`${text === "API" ? "API" : "Account"}: ${shown.label}`}
+        aria-label={`${accountChipWord(shown)}: ${shown.label}`}
       >
-        {text}
+        <Icon size={14} aria-hidden="true" />
       </span>
     </Tooltip>
   );
@@ -456,7 +461,7 @@ function AgentHeader({
       {/* The session popover (specs/agents/agent-pane.feature.md S10): how
           full the context window is, the folder and the branch. */}
       {meta && agent && <SessionRailButton key={meta.id} meta={meta} agent={agent} homeDir={homeDir} />}
-      {/* An agent with an account: API or ACNT, always one of the two —
+      {/* An agent with an account: the plug or the person, always one of the two —
           with or without a session (specs/agents/agent-pane.feature.md S13). */}
       {chipAgent?.capabilities.hasAccount && <AccountChip agent={chipAgent.id} account={meta?.account} />}
       {meta && busy && agent?.capabilities.canInterrupt && (
