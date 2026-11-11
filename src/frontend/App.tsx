@@ -280,6 +280,7 @@ import {
 import { FILES_TAB } from "./files/plugin";
 import { FILES_HOME, type FilesView } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
+import { accountMenuEntries } from "./accountMenu";
 import { SettingsFileDialog, type SettingsFile } from "./SettingsFileDialog";
 import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice";
 import { ConfluenceTokens, fetchConfluenceTokens, type ConfluenceWiki } from "./ConfluenceToken";
@@ -10146,6 +10147,30 @@ export function App() {
     </AppPageLayout>
   );
 
+  // "Log out" (specs/app/user-info-settings.feature.md "log out from the
+  // user menu"): the server forgets the app's GitHub token and closes the
+  // folder; a fresh load then opens on the first-run screen — a folder, or a
+  // clone with a token — with nothing of the old folder left in the page.
+  const logOut = async () => {
+    setDrawerOpen(false);
+    const res = await fetch("/api/logout", { method: "POST" }).catch(() => null);
+    if (res?.ok) {
+      window.location.assign("/");
+      return;
+    }
+    // A failed log out still leaves for the first-run screen, which says
+    // what went wrong — the menu that offered it is gone by now.
+    const body = res ? ((await res.json().catch(() => null)) as { error?: string } | null) : null;
+    setRepoError(`Could not log out: ${body?.error ?? (res ? `HTTP ${res.status}` : "the app did not answer")}`);
+    setNeedsRepo(true);
+  };
+  const logOutItem: MenuItem = {
+    id: "log-out",
+    label: "Log out",
+    icon: <LogOut size={13} />,
+    onSelect: () => void logOut(),
+  };
+
   // The user menu (specs/user-info-settings.feature.md), behind the avatar
   // in the sidebar's corner and on the rail alike. Three inline sections —
   // the account, this project, the app — so a dozen unlike rows read as
@@ -10168,15 +10193,16 @@ export function App() {
                 setUserInfoOpen(true);
               },
             },
-            // The desktop and local app's own GitHub sign-in: paste a
-            // token, switch to another account's, or sign out — always
-            // offered, unlike the browser sign-in behind the GitHub
-            // account switch.
-            ...(hosted || demo
-              ? []
-              : auth?.signedIn
-                ? [
-                    {
+            // The desktop and local app's own GitHub sign-in: switch to
+            // another account's token while signed in, and log out — always
+            // offered, unlike the browser sign-in behind the GitHub account
+            // switch. Signing in is the first-run screen's, where log out
+            // leads.
+            ...accountMenuEntries({ hosted, demo, signedIn: auth?.signedIn === true }).map(
+              (entry): MenuItem =>
+                entry === "log-out"
+                  ? logOutItem
+                  : {
                       id: "switch-account",
                       label: "Switch account…",
                       icon: <KeyRound size={13} />,
@@ -10185,24 +10211,7 @@ export function App() {
                         setTokenSignInOpen(true);
                       },
                     },
-                    {
-                      id: "sign-out",
-                      label: "Sign out",
-                      icon: <LogOut size={13} />,
-                      onSelect: () => void signOutGitHub(),
-                    },
-                  ]
-                : [
-                    {
-                      id: "sign-in",
-                      label: "Sign in with token…",
-                      icon: <KeyRound size={13} />,
-                      onSelect: () => {
-                        setDrawerOpen(false);
-                        setTokenSignInOpen(true);
-                      },
-                    },
-                  ]),
+            ),
             // The hosted gateway's own pages (src/gateway): the account with
             // its tokens and password, and signing out.
             ...(hosted

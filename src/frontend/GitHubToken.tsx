@@ -243,9 +243,9 @@ export function PasteToken({
 }
 
 /**
- * The user menu's "Sign in with token…" / "Switch account…" dialog
- * (specs/user-info-settings.feature.md "sign in with a token from the user
- * menu"): the Settings paste form on its own, for the desktop app, where
+ * The user menu's "Switch account…" dialog
+ * (specs/app/user-info-settings.feature.md "switch account with a token
+ * from the user menu"): the Settings paste form on its own, for the desktop app, where
  * the browser sign-in has no http(s) page to return to.
  */
 export function TokenSignInDialog({

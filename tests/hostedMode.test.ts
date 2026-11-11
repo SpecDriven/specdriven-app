@@ -67,6 +67,7 @@ test.each([
   ["POST", "/api/auth/github/start"],
   ["POST", "/api/auth/github/web/start"],
   ["DELETE", "/api/auth/github"],
+  ["POST", "/api/logout"],
 ])("%s %s is refused in a hosted worker", async (method, path) => {
   const res = await api(method, path, method === "GET" || method === "DELETE" ? undefined : {});
   expect(res.status).toBe(403);
