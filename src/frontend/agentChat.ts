@@ -1239,7 +1239,7 @@ export const agentChat = {
     return data.choices;
   },
   /** Ask again for every list already loaded: an agent's sign-in changed
-      (the plugin events stream), so its models and the header's API / ACNT
+      (the plugin events stream), so its models and the header's account
       chip may have moved on though its descriptor did not. */
   reloadChoices(): Promise<unknown> {
     return Promise.all(Object.keys(state.choices).map((agent) => agentChat.loadChoices(agent, true).catch(() => null)));
