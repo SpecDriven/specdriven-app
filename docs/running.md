@@ -48,10 +48,14 @@ existing local clone works too.
 
 ## Settings
 
-Settings are read from `./.specdriven/settings.json` (git-ignored,
-per-checkout) and fall back to `~/.specdriven/settings.json`, so one settings
+Settings are read from `./.specdriven/settings.yaml` (git-ignored,
+per-checkout) and fall back to `~/.specdriven/settings.yaml`, so one settings
 file can serve every checkout; `SPECDRIVEN_HOME` overrides that home
 directory. Settings are saved back to whichever file was read.
+
+The file is YAML. A `settings.json` from an older version of the app is
+converted to `settings.yaml` when the app starts, and kept beside it as
+`settings.json.bak`.
 
 Besides the data repo, the file holds the reload interval, the editor
 autosave interval, the scenario preview length, the git engine, the

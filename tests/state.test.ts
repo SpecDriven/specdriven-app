@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings, writeSettings } from "./helpers/settingsFile";
 import {
   readState,
   writeState,
@@ -27,7 +28,7 @@ const realHome = process.env.SPECDRIVEN_HOME;
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "specdriven-state-"));
   // Point the home fallback at an empty temp dir, so these tests never read
-  // or write the developer's own ~/.specdriven/settings.json.
+  // or write the developer's own ~/.specdriven/settings.yaml.
   home = await mkdtemp(join(tmpdir(), "specdriven-home-"));
   process.env.SPECDRIVEN_HOME = home;
 });
@@ -52,40 +53,40 @@ test("a settings file without a dataRepo means the user must be asked", async ()
 });
 
 test("a corrupt settings file is treated as empty state", async () => {
-  await Bun.write(statePath(dir), "not json");
+  await Bun.write(statePath(dir), "{ not yaml");
   expect(needsDataRepo(await readState(dir))).toBe(true);
 });
 
-// specs/ui/app-start.feature.md "Settings file": ./.specdriven/settings.json
-// first, then ~/.specdriven/settings.json.
+// specs/ui/app-start.feature.md "Settings file": ./.specdriven/settings.yaml
+// first, then ~/.specdriven/settings.yaml.
 test("the home settings file is used when the project has none", async () => {
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
   const state = await readState(dir);
   expect(state.dataRepo).toBe("from-home");
   expect(needsDataRepo(state)).toBe(false);
 });
 
 test("the project settings file wins over the home settings file", async () => {
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
-  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
+  await writeSettings(statePath(dir), { dataRepo: "from-project" });
   expect((await readState(dir)).dataRepo).toBe("from-project");
 });
 
 // specs/ui/app-start.feature.md: saves go back to whichever settings file was
 // read.
 test("settings are saved back to the home settings file when only it exists", async () => {
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
   await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
-  expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBe(3);
+  expect((await readSettings(homeStatePath())).scenarioPreviewLines).toBe(3);
   expect(await Bun.file(statePath(dir)).exists()).toBe(false);
 });
 
 test("a project settings file keeps saves local and leaves the home settings file alone", async () => {
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
-  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
+  await writeSettings(statePath(dir), { dataRepo: "from-project" });
   await writeState({ dataRepo: "from-project", scenarioPreviewLines: 3 }, dir);
-  expect((await Bun.file(statePath(dir)).json()).scenarioPreviewLines).toBe(3);
-  expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBeUndefined();
+  expect((await readSettings(statePath(dir))).scenarioPreviewLines).toBe(3);
+  expect((await readSettings(homeStatePath())).scenarioPreviewLines).toBeUndefined();
 });
 
 // specs/ui/app-start.feature.md: the pre-settings.json layout still reads, and
@@ -97,7 +98,7 @@ test("a legacy .specdriven file is read and migrated on the next save", async ()
 
   await writeState({ dataRepo: "legacy", scenarioPreviewLines: 5 }, dir);
   expect(await Bun.file(legacy).exists()).toBe(false);
-  expect((await Bun.file(statePath(dir)).json()).scenarioPreviewLines).toBe(5);
+  expect((await readSettings(statePath(dir))).scenarioPreviewLines).toBe(5);
   expect((await readState(dir)).dataRepo).toBe("legacy");
 });
 
@@ -188,9 +189,9 @@ test("the session target round-trips through the settings file", async () => {
 // they follow the same local-then-home rule as a settings save.
 test("the settings directory is the project's, unless only the home file exists", async () => {
   expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
   expect(await settingsDirectory(dir)).toBe(home);
-  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  await writeSettings(statePath(dir), { dataRepo: "from-project" });
   expect(await settingsDirectory(dir)).toBe(join(dir, ".specdriven"));
 });
 
@@ -204,12 +205,12 @@ async function makeAppCheckout(): Promise<void> {
 test("the app's own checkout reads and writes the home settings file even with a project one", async () => {
   await makeAppCheckout();
   expect(await isAppCheckout(dir)).toBe(true);
-  await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
-  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  await writeSettings(homeStatePath(), { dataRepo: "from-home" });
+  await writeSettings(statePath(dir), { dataRepo: "from-project" });
   expect((await readState(dir)).dataRepo).toBe("from-home");
   await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
-  expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBe(3);
-  expect((await Bun.file(statePath(dir)).json()).scenarioPreviewLines).toBeUndefined();
+  expect((await readSettings(homeStatePath())).scenarioPreviewLines).toBe(3);
+  expect((await readSettings(statePath(dir))).scenarioPreviewLines).toBeUndefined();
   expect(await settingsDirectory(dir)).toBe(home);
 });
 
@@ -217,17 +218,17 @@ test("the app's own checkout creates the home settings file when there is none",
   await makeAppCheckout();
   expect(await settingsDirectory(dir)).toBe(home);
   await writeState({ dataRepo: "data" }, dir);
-  expect((await Bun.file(homeStatePath()).json()).dataRepo).toBe("data");
+  expect((await readSettings(homeStatePath())).dataRepo).toBe("data");
   expect(await Bun.file(statePath(dir)).exists()).toBe(false);
 });
 
 test("the app's own checkout reads its old project settings until the first save moves them home", async () => {
   await makeAppCheckout();
-  await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-project" }));
+  await writeSettings(statePath(dir), { dataRepo: "from-project" });
   const state = await readState(dir);
   expect(state.dataRepo).toBe("from-project");
   await writeState(state, dir);
-  expect((await Bun.file(homeStatePath()).json()).dataRepo).toBe("from-project");
+  expect((await readSettings(homeStatePath())).dataRepo).toBe("from-project");
 });
 
 // specs/app/desktop-app.feature.md: the desktop app's main process sets
@@ -237,13 +238,13 @@ test("the desktop app reads and writes only the home settings file", async () =>
   const before = process.env[HOME_SETTINGS_ENV];
   process.env[HOME_SETTINGS_ENV] = "1";
   try {
-    await Bun.write(statePath(dir), JSON.stringify({ dataRepo: "from-app-data" }));
+    await writeSettings(statePath(dir), { dataRepo: "from-app-data" });
     expect((await readState(dir)).dataRepo).toBe("from-app-data");
-    await Bun.write(homeStatePath(), JSON.stringify({ dataRepo: "from-home" }));
+    await writeSettings(homeStatePath(), { dataRepo: "from-home" });
     expect((await readState(dir)).dataRepo).toBe("from-home");
     await writeState({ dataRepo: "from-home", scenarioPreviewLines: 3 }, dir);
-    expect((await Bun.file(homeStatePath()).json()).scenarioPreviewLines).toBe(3);
-    expect((await Bun.file(statePath(dir)).json()).dataRepo).toBe("from-app-data");
+    expect((await readSettings(homeStatePath())).scenarioPreviewLines).toBe(3);
+    expect((await readSettings(statePath(dir))).dataRepo).toBe("from-app-data");
     expect(await settingsDirectory(dir)).toBe(home);
   } finally {
     if (before === undefined) delete process.env[HOME_SETTINGS_ENV];

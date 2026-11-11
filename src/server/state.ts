@@ -1,5 +1,7 @@
-// Local state lives in .specdriven/settings.json — in the project root, or in
-// the user's home directory as a fallback (specs/ui/app-start.feature.md).
+// Local state lives in .specdriven/settings.yaml — in the project root, or in
+// the user's home directory as a fallback (specs/ui/app-start.feature.md). A
+// settings.json from before the file was YAML is still read, and converted
+// when the app starts (src/server/settingsUpgrade.ts).
 // Per specs/ui/app-start.feature.md: if it doesn't name the last data repo,
 // the UI must ask the user for one.
 
@@ -7,6 +9,7 @@ import { readFile, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { replaceTextFile } from "./fsx";
+import { isYamlPath, parseSettingsText, serializeSettings } from "./settingsFormat";
 import type { GitEngine } from "./git";
 import { CONFLUENCE_PROGRAM, QTEST_PROGRAM } from "./parser";
 
@@ -280,17 +283,19 @@ export function normalizeSyncServerUrl(value: unknown): string | null {
 
 /** Directory holding the settings, in the project root or in $HOME. */
 export const STATE_DIR = ".specdriven";
-export const STATE_FILE = "settings.json";
+export const STATE_FILE = "settings.yaml";
+/** What the settings file was called while it was JSON. */
+export const LEGACY_JSON_STATE_FILE = "settings.json";
 /** Where settings used to live: a plain .specdriven file in the root. */
 export const LEGACY_STATE_FILE = ".specdriven";
 
-/** The settings file inside a project root: ./.specdriven/settings.json. */
+/** The settings file inside a project root: ./.specdriven/settings.yaml. */
 export function statePath(rootDir: string): string {
   return join(rootDir, STATE_DIR, STATE_FILE);
 }
 
 /**
- * The fallback settings file: ~/.specdriven/settings.json. SPECDRIVEN_HOME
+ * The fallback settings file: ~/.specdriven/settings.yaml. SPECDRIVEN_HOME
  * overrides the directory — the variable install.sh uses for that prefix.
  */
 export function homeStatePath(): string {
@@ -335,6 +340,16 @@ function legacyPath(rootDir: string): string {
   return join(rootDir, LEGACY_STATE_FILE);
 }
 
+/** The settings.json beside a settings.yaml path: the file from before YAML. */
+export function jsonStatePath(yamlPath: string): string {
+  return join(dirname(yamlPath), LEGACY_JSON_STATE_FILE);
+}
+
+/** Where a settings.json is kept once its settings are in settings.yaml. */
+export function jsonBackupPath(jsonPath: string): string {
+  return `${jsonPath}.bak`;
+}
+
 async function isFile(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile();
@@ -343,13 +358,24 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * The settings file a folder holds, given its settings.yaml path: that file,
+ * or the settings.json from before it while it has not been converted. A
+ * settings.json beside a settings.yaml is not read. Null when neither is there.
+ */
+async function settingsAt(yamlPath: string): Promise<string | null> {
+  if (await isFile(yamlPath)) return yamlPath;
+  const json = jsonStatePath(yamlPath);
+  return (await isFile(json)) ? json : null;
+}
+
 /** Parsed settings at path, or null when there is no settings file there.
     A file that exists but doesn't parse is empty state, not a reason to look
     elsewhere — the user's own settings must not be silently overridden. */
 async function readFrom(path: string): Promise<SpecDrivenState | null> {
   if (!(await isFile(path))) return null;
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8"));
+    const parsed = parseSettingsText(await readFile(path, "utf8"), path);
     if (typeof parsed !== "object" || parsed === null) return {};
     const state = parsed as SpecDrivenState;
     // A folder saved before normalizing may still carry its trailing slash.
@@ -365,8 +391,19 @@ async function readFrom(path: string): Promise<SpecDrivenState | null> {
   }
 }
 
-function serialize(state: SpecDrivenState): string {
-  return JSON.stringify(state, null, 2) + "\n";
+/**
+ * Saves settings as the settings.yaml at yamlPath. A settings.json the folder
+ * still kept its settings in is then set aside as settings.json.bak, so one
+ * file holds the settings; one lying beside a settings.yaml that was already
+ * there was not being read, and stays as it is.
+ */
+async function saveSettings(yamlPath: string, state: SpecDrivenState): Promise<void> {
+  const hadYaml = await isFile(yamlPath);
+  // In one step: requests read the file while others write it.
+  await replaceTextFile(yamlPath, serializeSettings(state));
+  if (hadYaml) return;
+  const json = jsonStatePath(yamlPath);
+  if (await isFile(json)) await rename(json, jsonBackupPath(json));
 }
 
 export const DEFAULT_SCENARIO_PREVIEW_LINES = 8;
@@ -436,7 +473,7 @@ export function normalizeCodeGenTarget(value: unknown, agentIds: readonly string
 
 /**
  * The directory holding the settings file writeState would write to:
- * <root>/.specdriven, unless only ~/.specdriven/settings.json exists (same
+ * <root>/.specdriven, unless only ~/.specdriven/settings.yaml exists (same
  * rule as writeState). Local, non-git session records live beside the
  * settings (src/server/agent.ts). No legacy-file migration here: a stale
  * plain `.specdriven` file blocks creating the directory until the next
@@ -446,7 +483,7 @@ export async function settingsDirectory(rootDir: string = process.cwd()): Promis
   const local = statePath(rootDir);
   const home = homeStatePath();
   if (await homeSettingsOnly(rootDir)) return dirname(home);
-  const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
+  const target = !(await settingsAt(local)) && (await settingsAt(home)) ? home : local;
   return dirname(target);
 }
 
@@ -574,22 +611,26 @@ export async function settingsFile(rootDir: string = process.cwd()): Promise<str
   // The desktop app and the app's own checkout read the home file first; an
   // old project file is read only while there is no home file yet, and the
   // next save moves it home.
+  const legacy = legacyPath(rootDir);
   const order = (await homeSettingsOnly(rootDir))
-    ? [homeStatePath(), statePath(rootDir), legacyPath(rootDir)]
-    : [statePath(rootDir), legacyPath(rootDir), homeStatePath()];
+    ? [homeStatePath(), statePath(rootDir), legacy]
+    : [statePath(rootDir), legacy, homeStatePath()];
   for (const path of order) {
-    if (await isFile(path)) return path;
+    // Each folder's settings.yaml, or its settings.json from before YAML.
+    const found = path === legacy ? ((await isFile(path)) ? path : null) : await settingsAt(path);
+    if (found) return found;
   }
   return null;
 }
 
 /**
- * The user's settings file, ~/.specdriven/settings.json, as the User info
+ * The user's settings file, ~/.specdriven/settings.yaml, as the User info
  * dialog's "View settings file…" shows it (specs/app/user-info-settings
  * .feature.md "view the settings file"): the file as written — no upgrade,
  * no normalizing — so the view matches what is on disk. Always the home
- * file, never a project one; `activePath` names the file readState reads
- * when that is a different one.
+ * file, never a project one — its settings.json while that has not been
+ * converted; `activePath` names the file readState reads when that is a
+ * different one.
  */
 export interface SettingsFileView {
   path: string;
@@ -599,22 +640,24 @@ export interface SettingsFileView {
   settings: Record<string, unknown>;
   /** The file the app reads its settings from, when it is not `path`. */
   activePath?: string;
-  /** Set when the file is there but is not a JSON object. */
+  /** Set when the file is there but does not hold a settings object. */
   error?: string;
 }
 
 export async function readSettingsFileView(rootDir: string = process.cwd()): Promise<SettingsFileView> {
-  const path = homeStatePath();
+  const found = await settingsAt(homeStatePath());
+  const path = found ?? homeStatePath();
   const active = await settingsFile(rootDir);
-  const view: SettingsFileView = { path, home: homedir(), exists: await isFile(path), settings: {} };
+  const view: SettingsFileView = { path, home: homedir(), exists: found !== null, settings: {} };
   if (active && active !== path) view.activePath = active;
   if (!view.exists) return view;
   try {
-    const parsed = JSON.parse(await readFile(path, "utf8"));
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) view.settings = parsed;
-    else view.error = "The file does not hold a settings object.";
+    const parsed = parseSettingsText(await readFile(path, "utf8"), path);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      view.settings = parsed as Record<string, unknown>;
+    } else view.error = "The file does not hold a settings object.";
   } catch {
-    view.error = "The file is not valid JSON.";
+    view.error = isYamlPath(path) ? "The file is not valid YAML." : "The file is not valid JSON.";
   }
   return view;
 }
@@ -629,7 +672,7 @@ export async function writeState(
   rootDir: string = process.cwd(),
 ): Promise<void> {
   if (await homeSettingsOnly(rootDir)) {
-    await replaceTextFile(homeStatePath(), serialize(state));
+    await saveSettings(homeStatePath(), state);
     return;
   }
   const local = statePath(rootDir);
@@ -640,14 +683,13 @@ export async function writeState(
     // migration leaves the old settings recoverable instead of gone.
     const aside = `${legacy}.migrating`;
     await rename(legacy, aside);
-    await replaceTextFile(local, serialize(state));
+    await saveSettings(local, state);
     await rm(aside, { force: true });
     return;
   }
   const home = homeStatePath();
-  const target = !(await isFile(local)) && (await isFile(home)) ? home : local;
-  // In one step: requests read the file while others write it.
-  await replaceTextFile(target, serialize(state));
+  const target = !(await settingsAt(local)) && (await settingsAt(home)) ? home : local;
+  await saveSettings(target, state);
 }
 
 /**

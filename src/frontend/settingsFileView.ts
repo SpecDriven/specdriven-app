@@ -1,6 +1,6 @@
 // The settings file as people read it (specs/app/user-info-settings.feature.md
-// "view the settings file"): ~/.specdriven/settings.json turned into labelled
-// sections — On / Off, seconds, folder lists — instead of JSON. Pure, so the
+// "view the settings file"): ~/.specdriven/settings.yaml turned into labelled
+// sections — On / Off, seconds, folder lists — instead of YAML. Pure, so the
 // dialog (src/frontend/SettingsFileDialog.tsx) and its tests share it.
 
 /** One value as shown: a line of text, a bullet list, or nested rows. */

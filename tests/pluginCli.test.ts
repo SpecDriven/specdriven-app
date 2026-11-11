@@ -14,6 +14,7 @@ import { parsePackageManifest } from "../src/plugins/manifest";
 import { pluginStates, shell, stopWatching, syncPlugins } from "../src/plugins/host/loader";
 import { matchApi } from "../src/server/api";
 import { readState, statePath } from "../src/server/state";
+import { readSettings } from "./helpers/settingsFile";
 import { version as appVersion } from "../package.json";
 
 let work: string;
@@ -73,7 +74,7 @@ test("plugin new, build and link take a plugin from nothing to a mounted tab", a
   expect(typeof host.default.apply).toBe("function");
 
   expect(await runPluginCli(["link", dir], io)).toBe(0);
-  const settings = JSON.parse(await readFile(statePath(root), "utf8")) as { plugins: { sources: { path: string }[] } };
+  const settings = (await readSettings(statePath(root))) as { plugins: { sources: { path: string }[] } };
   expect(settings.plugins.sources).toEqual([{ path: dir }]);
   // Linking twice keeps one entry.
   expect(await runPluginCli(["link", dir], io)).toBe(0);

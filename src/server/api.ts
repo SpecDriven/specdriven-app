@@ -878,7 +878,7 @@ const getState: Handler = async (req) => {
 
 // "View settings file…" in the User info dialog
 // (specs/app/user-info-settings.feature.md "view the settings file"): the
-// user's ~/.specdriven/settings.json as written, for a read-only view. It
+// user's ~/.specdriven/settings.yaml as written, for a read-only view. It
 // holds no secrets — tokens live in files of their own.
 const getSettingsFile: Handler = async () => json(await readSettingsFileView(getAppRoot()));
 

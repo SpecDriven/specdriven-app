@@ -16,7 +16,14 @@ import { join } from "node:path";
 import { PROFILE_KEY } from "../plugins/profile";
 import { GITHUB_HOST } from "../server/github";
 import { parseGitHubUrl } from "../server/repo";
-import { MAX_RECENT_DATA_REPOS, SETTINGS_VERSION, STATE_DIR, STATE_FILE } from "../server/state";
+import { parseSettingsText, serializeSettings } from "../server/settingsFormat";
+import {
+  LEGACY_JSON_STATE_FILE,
+  MAX_RECENT_DATA_REPOS,
+  SETTINGS_VERSION,
+  STATE_DIR,
+  STATE_FILE,
+} from "../server/state";
 
 /** Larger than any settings file the app writes; anything bigger is not read. */
 const MAX_SETTINGS_BYTES = 1024 * 1024;
@@ -74,9 +81,11 @@ export class RecentRepos {
   }
 }
 
+/** The worker's settings folder, its settings.yaml, and the settings.json
+    an app from before YAML left there (read until that worker converts it). */
 function settingsPaths(root: string) {
   const dir = join(root, STATE_DIR);
-  return { dir, file: join(dir, STATE_FILE) };
+  return { dir, file: join(dir, STATE_FILE), json: join(dir, LEGACY_JSON_STATE_FILE) };
 }
 
 /**
@@ -84,12 +93,16 @@ function settingsPaths(root: string) {
  * there is no settings file to read (nothing to learn, so nothing to forget).
  */
 export async function readWorkerRepos(root: string): Promise<string[] | null> {
-  const { dir, file } = settingsPaths(root);
-  const [dirStat, fileStat] = await Promise.all([lstat(dir).catch(() => null), lstat(file).catch(() => null)]);
+  const { dir, file: yaml, json } = settingsPaths(root);
+  const [dirStat, yamlStat, jsonStat] = await Promise.all(
+    [dir, yaml, json].map((path) => lstat(path).catch(() => null)),
+  );
+  // As the app reads it: settings.yaml, and settings.json only without one.
+  const [file, fileStat] = yamlStat ? [yaml, yamlStat] : [json, jsonStat];
   if (!dirStat?.isDirectory() || !fileStat?.isFile() || fileStat.size > MAX_SETTINGS_BYTES) return null;
   let state: unknown;
   try {
-    state = JSON.parse(await readFile(file, "utf8"));
+    state = parseSettingsText(await readFile(file, "utf8"), file);
   } catch {
     return null;
   }
@@ -116,12 +129,15 @@ export async function readWorkerRepos(root: string): Promise<string[] | null> {
 export async function seedWorkerRepos(root: string, repos: string[], uid: number | null): Promise<boolean> {
   const clean = cleanRepos(repos);
   if (clean.length === 0) return false;
-  const { dir, file } = settingsPaths(root);
+  const { dir, file, json } = settingsPaths(root);
   const dirStat = await lstat(dir).catch(() => null);
   if (!dirStat) {
     await mkdir(dir, { mode: 0o700 });
     if (uid !== null) await chown(dir, uid, uid);
   } else if (!dirStat.isDirectory()) {
+    return false;
+  } else if (await lstat(json).catch(() => null)) {
+    // Settings from before YAML: the user's too, read until converted.
     return false;
   }
   const state = {
@@ -135,7 +151,7 @@ export async function seedWorkerRepos(root: string, repos: string[], uid: number
   };
   try {
     // "wx" fails on anything already at the path, a symlink included.
-    await writeFile(file, JSON.stringify(state, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    await writeFile(file, serializeSettings(state), { flag: "wx", mode: 0o600 });
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw e;

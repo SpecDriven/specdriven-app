@@ -12,7 +12,7 @@ isolatePath();
 // The home settings file (src/server/state.ts homeStatePath) is where
 // writeState lands whenever a test's SPECDRIVEN_ROOT has no settings file of
 // its own — so a test that set only the root overwrote the developer's real
-// ~/.specdriven/settings.json, pointing the installed app at a deleted temp
+// ~/.specdriven/settings.yaml, pointing the installed app at a deleted temp
 // folder (2026-11-09). Every test gets an empty home of its own; the tests
 // that need a particular one still set SPECDRIVEN_HOME themselves.
 process.env.SPECDRIVEN_HOME = mkdtempSync(join(tmpdir(), "specdriven-test-home-"));

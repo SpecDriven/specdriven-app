@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeSettings } from "./helpers/settingsFile";
 import { applyStartupState, handleApi, reloader, syncedOnStart } from "../src/server/api";
 import { setGitEngine } from "../src/server/git";
 import {
@@ -143,10 +144,10 @@ test("picking a folder with a trailing slash saves it without one", async () => 
 });
 
 test("a settings file saved with a trailing slash reads back without one", async () => {
-  await Bun.write(
-    join(root, ".specdriven", "settings.json"),
-    JSON.stringify({ dataRepo: "/specs/a/", recentDataRepos: ["/specs/a/", "/specs/b", "/specs/a"] }),
-  );
+  await writeSettings(join(root, ".specdriven", "settings.yaml"), {
+    dataRepo: "/specs/a/",
+    recentDataRepos: ["/specs/a/", "/specs/b", "/specs/a"],
+  });
   const saved = await readState(root);
   expect(saved.dataRepo).toBe("/specs/a");
   expect(specPaths(saved)).toEqual(["/specs/a", "/specs/b"]);

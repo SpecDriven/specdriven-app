@@ -18,6 +18,7 @@ import {
   upgradeSettings,
 } from "../src/server/state";
 import { stopServers } from "./helpers/fixtures";
+import { readSettings, writeSettings } from "./helpers/settingsFile";
 
 let root: string;
 let home: string;
@@ -41,7 +42,7 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "specdriven-settings-version-home-"));
   process.env.SPECDRIVEN_ROOT = root;
   process.env.SPECDRIVEN_HOME = home;
-  file = join(root, ".specdriven", "settings.json");
+  file = join(root, ".specdriven", "settings.yaml");
 });
 
 afterEach(async () => {
@@ -60,8 +61,7 @@ afterEach(async () => {
   }
 });
 
-const writeRaw = (value: unknown) =>
-  Bun.write(file, typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n");
+const writeRaw = (value: string | object) => (typeof value === "string" ? Bun.write(file, value) : writeSettings(file, value));
 const readRaw = () => Bun.file(file).text();
 
 test("there is one upgrade step per version, from 1 up to this app's", () => {
@@ -132,7 +132,7 @@ test("upgrading the file saves it in this app's format and keeps the old one bes
   const backup = settingsBackupPath(file, 0);
   expect(result).toMatchObject({ from: 0, to: SETTINGS_VERSION, tooNew: false, path: file, backup });
   expect(await Bun.file(backup).text()).toBe(before);
-  const saved = JSON.parse(await readRaw());
+  const saved = await readSettings(file);
   expect(saved.settingsVersion).toBe(SETTINGS_VERSION);
   expect(saved.recentFolders).toHaveLength(3);
   expect(saved.ghostty).toBe(true);
@@ -143,7 +143,7 @@ test("upgrading the file saves it in this app's format and keeps the old one bes
   const after = await readRaw();
   expect((await upgradeSettingsFile(root))?.backup).toBeNull();
   expect(await readRaw()).toBe(after);
-  expect((await readdir(join(root, ".specdriven"))).sort()).toEqual(["settings.json", "settings.json.v0.bak"]);
+  expect((await readdir(join(root, ".specdriven"))).sort()).toEqual(["settings.yaml", "settings.yaml.v0.bak"]);
 });
 
 test("a backup already there is kept, as it holds the oldest file", async () => {
@@ -151,7 +151,7 @@ test("a backup already there is kept, as it holds the oldest file", async () => 
   await Bun.write(settingsBackupPath(file, 0), "the first one\n");
   await upgradeSettingsFile(root);
   expect(await Bun.file(settingsBackupPath(file, 0)).text()).toBe("the first one\n");
-  expect(JSON.parse(await readRaw()).settingsVersion).toBe(SETTINGS_VERSION);
+  expect((await readSettings(file)).settingsVersion).toBe(SETTINGS_VERSION);
 });
 
 test("a newer app's file, an unreadable file and no file are left alone", async () => {
@@ -160,16 +160,16 @@ test("a newer app's file, an unreadable file and no file are left alone", async 
   const newer = await readRaw();
   expect(await upgradeSettingsFile(root)).toMatchObject({ tooNew: true, backup: null });
   expect(await readRaw()).toBe(newer);
-  await writeRaw("{ not json");
+  await writeRaw("{ not yaml");
   expect(await upgradeSettingsFile(root)).toBeNull();
-  expect(await readRaw()).toBe("{ not json");
-  expect(await readdir(join(root, ".specdriven"))).toEqual(["settings.json"]);
+  expect(await readRaw()).toBe("{ not yaml");
+  expect(await readdir(join(root, ".specdriven"))).toEqual(["settings.yaml"]);
 });
 
 test("starting the app upgrades an older settings file", async () => {
   await writeRaw(VERSION_0);
   await applyStartupState();
-  const saved = JSON.parse(await readRaw());
+  const saved = await readSettings(file);
   expect(saved.settingsVersion).toBe(SETTINGS_VERSION);
   expect(saved.recentFolders).toBeDefined();
   expect(await Bun.file(settingsBackupPath(file, 0)).exists()).toBe(true);

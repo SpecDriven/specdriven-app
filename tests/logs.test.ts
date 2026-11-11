@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings } from "./helpers/settingsFile";
 import { matchApi } from "../src/server/api";
 import { getLogs, getLogSettings, parseLogLine, putLogSettings, queryLogs } from "../src/server/logs";
 import {
@@ -213,7 +214,7 @@ describe("routes", () => {
     expect(settings.known).toContain("git");
     expect(settings.source).toEqual({ kind: "file", dir: join(dir, "logs") });
     expect(effectiveLogLevel("git")).toBe("error");
-    const saved = JSON.parse(await readFile(join(dir, ".specdriven", "settings.json"), "utf8"));
+    const saved = await readSettings(join(dir, ".specdriven", "settings.yaml"));
     expect(saved.logLevel).toBe("info");
     expect(saved.logLevels).toEqual({ git: "error" });
   });

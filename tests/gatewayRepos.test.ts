@@ -5,9 +5,11 @@
 // asking for its url again.
 
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { serializeSettings } from "../src/server/settingsFormat";
+import { readSettings } from "./helpers/settingsFile";
 import { openDatabase } from "../src/gateway/db";
 import { proxyToWorker } from "../src/gateway/proxy";
 import { cleanRepos, readWorkerRepos, RecentRepos, seedWorkerRepos } from "../src/gateway/repos";
@@ -40,7 +42,7 @@ async function freshRoot(name: string): Promise<string> {
 
 async function writeSettings(root: string, state: unknown): Promise<void> {
   await mkdir(join(root, ".specdriven"), { recursive: true });
-  await writeFile(join(root, ".specdriven", "settings.json"), JSON.stringify(state));
+  await writeFile(join(root, ".specdriven", "settings.yaml"), serializeSettings(state as object));
 }
 
 test("only GitHub repos are kept, in canonical form, once each, at most ten", () => {
@@ -93,7 +95,7 @@ test("a settings file that is a symlink is not followed", async () => {
   const elsewhere = join(dir, "elsewhere.json");
   await writeFile(elsewhere, JSON.stringify({ dataRepo: SPECS }));
   await mkdir(join(root, ".specdriven"));
-  await symlink(elsewhere, join(root, ".specdriven", "settings.json"));
+  await symlink(elsewhere, join(root, ".specdriven", "settings.yaml"));
   expect(await readWorkerRepos(root)).toBeNull();
   expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
   expect(JSON.parse(await readFile(elsewhere, "utf8"))).toEqual({ dataRepo: SPECS });
@@ -103,7 +105,7 @@ test("a worker with no settings gets the remembered repos; one with settings kee
   const root = await freshRoot("seed");
   expect(await seedWorkerRepos(root, [], null)).toBe(false);
   expect(await seedWorkerRepos(root, [SPECS, OLDER], null)).toBe(true);
-  const seeded = JSON.parse(await readFile(join(root, ".specdriven", "settings.json"), "utf8"));
+  const seeded = await readSettings(join(root, ".specdriven", "settings.yaml"));
   expect(seeded).toEqual({
     settingsVersion: SETTINGS_VERSION,
     dataRepo: SPECS,
@@ -155,3 +157,20 @@ test("after the volume is lost, the user's next worker opens the repo they had o
     await pool.stopAll();
   }
 }, 60_000);
+
+// specs/ui/app-start.feature.md "Settings file": a worker whose app has not
+// converted its settings.json to settings.yaml yet still has its repos read,
+// and its file is the user's — never seeded over.
+test("a worker's settings.json from before YAML is read, and not seeded over", async () => {
+  const root = await freshRoot("json");
+  await mkdir(join(root, ".specdriven"));
+  const json = join(root, ".specdriven", "settings.json");
+  await writeFile(json, JSON.stringify({ dataRepo: SPECS, recentDataRepos: [SPECS, OLDER] }));
+  expect(await readWorkerRepos(root)).toEqual([SPECS, OLDER]);
+  expect(await seedWorkerRepos(root, [OLDER], null)).toBe(false);
+  expect(await readdir(join(root, ".specdriven"))).toEqual(["settings.json"]);
+
+  // Once the worker's app has converted it, settings.yaml is the one read.
+  await writeSettings(root, { dataRepo: OLDER });
+  expect(await readWorkerRepos(root)).toEqual([OLDER]);
+});

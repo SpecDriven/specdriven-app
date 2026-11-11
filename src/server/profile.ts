@@ -19,7 +19,7 @@ export function profileArg(argv: string[]): string | null {
 }
 
 /**
- * Point settings (`<dir>/.specdriven/settings.json`), the home folder (the
+ * Point settings (`<dir>/.specdriven/settings.yaml`), the home folder (the
  * fallback settings file, the GitHub token, logs, plugins) and GitHub clones
  * into `dir`. Returns the absolute folder, or null with no `--profile`.
  */

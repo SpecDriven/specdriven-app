@@ -136,7 +136,7 @@
 <rect x="980" y="900" width="460" height="70" rx="6" ry="6" fill="#f8f9fa" stroke="#1e1e1e" stroke-width="1.5" stroke-dasharray="6 4"/>
 <text x="990" y="922" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" font-weight="bold" fill="#1e1e1e">Data repo (local git clone) ⇄ GitHub</text>
 <text x="990" y="939" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#555">.feature.md projections + .specdriven/automerge/ chunks;</text>
-<text x="990" y="956" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#555">settings in .specdriven/settings.json</text>
+<text x="990" y="956" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#555">settings in .specdriven/settings.yaml</text>
 <path d="M 700 112 L 780 112" fill="none" stroke="#1e1e1e" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrowStart)"/>
 <text x="740" y="103" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" font-style="italic" fill="#555" text-anchor="middle">proxy</text>
 <text x="740" y="128" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" font-style="italic" fill="#555" text-anchor="middle">per-user worker</text>

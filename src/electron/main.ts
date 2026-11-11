@@ -78,7 +78,7 @@ const DEV_URL = process.env.ELECTRON_DEV
 
 // One app-data anchor for the server modules (specs/app/desktop-app.feature.md
 // "Data locations"): GitHub data repos are cloned under <userData>/repos.
-// Settings are ~/.specdriven/settings.json only, shared with the web version
+// Settings are ~/.specdriven/settings.yaml only, shared with the web version
 // (specs/ui/app-start.feature.md "Settings file"); a settings file left under
 // <userData>/.specdriven is read only until the first save moves it home.
 // The server modules read these lazily, so setting them at startup is early

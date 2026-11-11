@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings } from "./helpers/settingsFile";
 import { proxyToWorker } from "../src/gateway/proxy";
 import type { UserSecrets } from "../src/gateway/secrets";
 import { userDirs, workerCommand, workerEnv, workerIsolation, WorkerPool } from "../src/gateway/workers";
@@ -95,8 +96,8 @@ test("two users get two workers with separate settings, folders and environments
   const stateB = (await (await api(socketB, "GET", "/api/state")).json()) as Record<string, unknown>;
   expect(stateB.reloadFrequencySeconds).not.toBe(300);
 
-  const settingsA = await readFile(join(userDirs(dataDir, A).root, ".specdriven", "settings.json"), "utf8");
-  expect(JSON.parse(settingsA).reloadFrequencySeconds).toBe(300);
+  const settingsA = await readSettings(join(userDirs(dataDir, A).root, ".specdriven", "settings.yaml"));
+  expect(settingsA.reloadFrequencySeconds).toBe(300);
 
   // The account is git's default author in the worker's home.
   const gitconfig = await readFile(join(userDirs(dataDir, A).home, ".gitconfig"), "utf8");
@@ -148,7 +149,7 @@ test.skipIf(!isolated)("each worker runs as its own uid, owning its folder alone
     expect(info.mode & 0o777).toBe(0o700);
     // A file the worker itself wrote belongs to its uid: it ran as that uid.
     expect((await api(socketA, "PUT", "/api/state", { reloadFrequencySeconds: 300 })).status).toBe(200);
-    expect((await stat(join(a.root, ".specdriven", "settings.json"))).uid).toBe(200_101);
+    expect((await stat(join(a.root, ".specdriven", "settings.yaml"))).uid).toBe(200_101);
     expect((await stat(isoDir)).mode & 0o777).toBe(0o711);
 
     // What a symlink in A's data repo would ask for: B's files, the user

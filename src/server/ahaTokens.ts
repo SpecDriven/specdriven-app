@@ -2,7 +2,7 @@
 // Aha! API key is kept per site on this device"): one per Aha! site, on
 // this device only. Like the Confluence and qTest tokens
 // (./confluenceTokens.ts, ./qtestTokens.ts) they are never part of
-// settings.json or the data repo. The default backend is a 0600 JSON file
+// settings.yaml or the data repo. The default backend is a 0600 JSON file
 // next to the home settings file; the desktop app swaps in an OS-encrypted
 // backend (Electron safeStorage) via setAhaTokenBackend.
 

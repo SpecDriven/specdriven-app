@@ -1,7 +1,7 @@
 // Where qTest bearer tokens live (specs/external-links/qtest-test-cases
 // .feature.md "A qTest token is kept per site on this device"): one per
 // qTest site, on this device only. Like the Confluence tokens
-// (./confluenceTokens.ts) they are never part of settings.json or the data
+// (./confluenceTokens.ts) they are never part of settings.yaml or the data
 // repo. The default backend is a 0600 JSON file next to the home settings
 // file; the desktop app swaps in an OS-encrypted backend (Electron
 // safeStorage) via setQtestTokenBackend.

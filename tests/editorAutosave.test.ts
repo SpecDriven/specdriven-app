@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings } from "./helpers/settingsFile";
 import { handleApi, reloader } from "../src/server/api";
 import { namingInProgress, scenarioSignature } from "../src/frontend/App";
 import type { Scenario } from "../src/server/parser";
@@ -84,7 +85,7 @@ test("Settings saves the autosave interval to the settings file", async () => {
   expect(((await res.json()) as { autosaveIntervalSeconds: number }).autosaveIntervalSeconds).toBe(
     12,
   );
-  expect((await Bun.file(statePath(root)).json()).autosaveIntervalSeconds).toBe(12);
+  expect((await readSettings(statePath(root))).autosaveIntervalSeconds).toBe(12);
 });
 
 test("an interval below the 3 second minimum is refused, and changes nothing", async () => {

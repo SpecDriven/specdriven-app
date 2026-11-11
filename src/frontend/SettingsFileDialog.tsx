@@ -1,7 +1,7 @@
 // "View settings file…" from the User info dialog
 // (specs/app/user-info-settings.feature.md "view the settings file"): the
-// user's ~/.specdriven/settings.json, read-only, as labelled sections
-// (src/frontend/settingsFileView.ts) rather than JSON. App.tsx fetches
+// user's ~/.specdriven/settings.yaml, read-only, as labelled sections
+// (src/frontend/settingsFileView.ts) rather than YAML. App.tsx fetches
 // GET /api/settings-file and owns the open state.
 
 import { useState, type Ref } from "react";
@@ -65,7 +65,7 @@ export function SettingsFileDialog({
   // Which copy just landed, for a moment: the path or the whole view.
   const [copied, setCopied] = useState<"path" | "contents" | null>(null);
   const sections = file && file.exists && !file.error ? settingsFileSections(file.settings, file.home) : [];
-  const shownPath = file ? tildePath(file.path, file.home) : "~/.specdriven/settings.json";
+  const shownPath = file ? tildePath(file.path, file.home) : "~/.specdriven/settings.yaml";
   const copy = async (what: "path" | "contents") => {
     if (!file) return;
     try {
