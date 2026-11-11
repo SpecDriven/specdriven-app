@@ -73,6 +73,9 @@ export interface ChatWorktree {
   branch: string;
   /** The branch it was made from, when one was checked out. */
   base?: string;
+  /** Why that branch could not be checked against origin when the worktree
+      was made (origin out of reach): it started from the last fetch. */
+  unchecked?: string;
 }
 
 // --- Context usage -------------------------------------------------------------

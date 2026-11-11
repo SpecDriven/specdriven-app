@@ -73,6 +73,7 @@ import {
   useAgentChat,
   useAgentChoices,
   useFolderInfo,
+  worktreeTooltip,
   withLocalCommands,
   writeAgentFollow,
   writeAgentWorktree,
@@ -84,6 +85,7 @@ import {
   type ChatSessionMeta,
   type ChatStatus,
   type EffortLevel,
+  type FolderGitInfo,
   type PermissionMode,
   type Question,
   type RefState,
@@ -895,16 +897,12 @@ function WorktreeToggle({
 }: {
   checked: boolean;
   /** The folder's git facts; null while they load. */
-  info: { canWorktree: boolean; reason?: string; branch?: string } | null;
+  info: FolderGitInfo | null;
   onChange: (on: boolean) => void;
 }) {
   const can = info?.canWorktree === true;
   // Named first: a tight bar shows the box with an icon, not the word.
-  const tooltip = !info
-    ? "Worktree · checking the folder…"
-    : !can
-      ? `Worktree · ${info.reason ?? "this folder cannot have one"}`
-      : `Worktree · the session gets a git worktree of its own, on a new branch off ${info.branch && info.branch !== "HEAD" ? info.branch : "the current commit"}`;
+  const tooltip = worktreeTooltip(info);
   return (
     <Tooltip label={tooltip}>
       <label className={`agent-bar-check${can ? "" : " is-disabled"}`}>
@@ -1209,11 +1207,12 @@ function EmptyState({
   // Before a session on the code repo (the app under development), check how its
   // branch stands against the remote of record so new work branches from the
   // right place (specs/agents/agent-plugins.feature.md "A coding session should
-  // check that source is up to date"). A worktree branches off HEAD itself, so
-  // the check is about the HEAD the worktree would use either way. The data repo
-  // syncs on its own, so it is not checked here.
+  // check that source is up to date"). A worktree session has no dialog: the
+  // server itself brings main level with origin before the worktree branches
+  // off it, or refuses and says why (src/server/agentWorktree.ts). The data
+  // repo syncs on its own, so it is not checked here.
   const start = async (text: string, images: ImageUpload[], sentRefs: string[] = []) => {
-    if (workDir !== codeRepo || !codeRepo) {
+    if (workDir !== codeRepo || !codeRepo || inWorktree) {
       await doStart(text, images, sentRefs);
       return;
     }

@@ -62,7 +62,7 @@ afterEach(() => {
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentPane, knownFolders, sessionFolder } from "../src/frontend/AgentPane";
-import { agentChat, forgetFolderInfos, worktreeClosedNote } from "../src/frontend/agentChat";
+import { agentChat, forgetFolderInfos, worktreeClosedNote, worktreeStartedNote, worktreeTooltip } from "../src/frontend/agentChat";
 import type { ChatSessionMeta, ChatWorktree } from "../src/frontend/agentChat";
 import { toast } from "../src/frontend/Toasts";
 import { CLAUDE_AGENT } from "./fixtures/agents";
@@ -266,4 +266,82 @@ test("with Ghostty on, a click on the worktree's branch asks the server to open 
     toast.error = realError;
     await agentChat.end("s1");
   }
+});
+
+// A worktree session starts from main, level with origin: the server makes
+// sure of it (tests/agentWorktree.test.ts), so the pane asks nothing first.
+test("a worktree session on the code repo starts with no source dialog, and says when origin was out of reach", async () => {
+  const posts: Record<string, unknown>[] = [];
+  server(posts);
+  const serve = globalThis.fetch;
+  const asked: string[] = [];
+  globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    // A branch two commits behind: without a worktree this opens the dialog.
+    if (url.startsWith("/api/agent/source?")) {
+      asked.push(url);
+      return Response.json({
+        repo: "/w/code",
+        branch: "main",
+        upstream: "origin/main",
+        online: true,
+        hasRemote: true,
+        detached: false,
+        behind: 2,
+        ahead: 0,
+        dirty: false,
+      });
+    }
+    if (url === "/api/agent/chat" && init.method === "POST") {
+      posts.push(JSON.parse(String(init.body)));
+      return Response.json({ ...META, worktree: { ...WORKTREE, unchecked: "fatal: unable to access origin" } });
+    }
+    return serve(input, init);
+  }) as unknown as typeof fetch;
+  const errors: string[] = [];
+  const realError = toast.error;
+  toast.error = (message: string) => {
+    errors.push(message);
+    return 0;
+  };
+  try {
+    localStorage.setItem("sd-agent-worktree", "1");
+    agentChat.setAgents([CLAUDE_AGENT]);
+    const { host, unmount } = mount(pane());
+    await settle();
+    type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, "Fix login");
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click());
+    await settle();
+    expect(asked).toEqual([]);
+    expect(host.querySelector('[aria-label="Start from up-to-date source"]')).toBeNull();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ prompt: "Fix login", worktree: true });
+    expect(errors).toEqual([
+      "Could not reach origin (fatal: unable to access origin) — the worktree started from main as last fetched",
+    ]);
+    unmount();
+  } finally {
+    toast.error = realError;
+    await agentChat.end("s1").catch(() => undefined);
+  }
+});
+
+test("the Worktree box says which branch the session starts from, and when the folder is not on it", () => {
+  expect(worktreeTooltip(null)).toBe("Worktree · checking the folder…");
+  expect(worktreeTooltip({ canWorktree: false, reason: "Not a git repository" })).toBe("Worktree · Not a git repository");
+  // No origin: off whatever is checked out.
+  expect(worktreeTooltip({ canWorktree: true, branch: "feature" })).toBe(
+    "Worktree · the session gets a git worktree of its own, on a new branch off feature",
+  );
+  expect(worktreeTooltip({ canWorktree: true, branch: "HEAD" })).toContain("off the current commit");
+  // With an origin: off main, once it is level.
+  expect(worktreeTooltip({ canWorktree: true, branch: "main", base: "main" })).toBe(
+    "Worktree · the session gets a git worktree of its own, on a new branch off main, once main is level with origin",
+  );
+  expect(worktreeTooltip({ canWorktree: true, branch: "feature", base: "main" })).toBe(
+    "Worktree · sessions start from main, but this folder is on feature — switch it to main first",
+  );
+  expect(worktreeTooltip({ canWorktree: true, branch: "HEAD", base: "main" })).toContain("has a detached HEAD");
+  expect(worktreeStartedNote(META)).toBeNull();
+  expect(worktreeStartedNote({})).toBeNull();
 });

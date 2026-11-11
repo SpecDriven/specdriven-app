@@ -305,7 +305,7 @@ function BranchRow({ meta, homeDir }: { meta: ChatSessionMeta; homeDir: string |
           <span className="agent-rail-name agent-rail-mono">{wt.branch}</span>
           <Tooltip label={wt.path}>
             <span className="agent-rail-sub" tabIndex={0}>
-              {`${wt.base ? `off ${wt.base} · ` : ""}${abbreviatePath(wt.path, homeDir)}`}
+              {`${wt.base ? `off ${wt.base}${wt.unchecked ? " (origin not reached)" : ""} · ` : ""}${abbreviatePath(wt.path, homeDir)}`}
             </span>
           </Tooltip>
         </div>

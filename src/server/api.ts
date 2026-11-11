@@ -3697,6 +3697,9 @@ const postAgentChat = withWorkFolder(async (folder, req) => {
       // A worktree of its own (src/server/agentWorktree.ts), beside the
       // session records and outside every repo.
       ...(body.worktree === true ? { worktreesDir: join(await settingsDirectory(getAppRoot()), WORKTREES_SUBDIR) } : {}),
+      // The specifications folder syncs on its own; a code repository's main
+      // branch is brought level with origin before the worktree branches.
+      ...(folder.kind === "specs" ? { syncedRepo: folder.dir } : {}),
     });
     return json(meta);
   } catch (e) {
@@ -3976,12 +3979,18 @@ const putAgentDefaults: Handler = async (req, params) => {
 };
 
 // What the new-session bar needs to offer a worktree for a folder: whether
-// it is in a git repo with a commit, and the branch checked out there.
+// it is in a git repo with a commit, the branch checked out there, and the
+// branch a worktree session has to start from (none for the specifications
+// folder, which the app keeps level itself).
 const getAgentFolder: Handler = async (req) => {
   const raw = new URL(req.url).searchParams.get("path") ?? "";
   if (!isAbsolute(raw)) return json({ error: "path must be an absolute path" }, 400);
   if (!(await directoryExists(raw))) return json({ error: `Folder not found: ${raw}` }, 404);
-  return json(await folderGitInfo(resolve(raw)));
+  const state = await readState(getAppRoot());
+  const synced = specsOpen(state)
+    ? await resolveDataRepo(state.dataRepo!, getAppRoot()).catch(() => undefined)
+    : undefined;
+  return json(await folderGitInfo(resolve(raw), { ...(synced ? { synced } : {}) }));
 };
 
 // How a code repo stands against its remote of record before a session starts

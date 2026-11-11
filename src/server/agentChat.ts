@@ -478,6 +478,9 @@ export interface CreateChatOptions {
   /** Present: the session gets its own git worktree of the place's folder,
       made under this folder (<settings dir>/worktrees, agentWorktree.ts). */
   worktreesDir?: string;
+  /** The open specifications folder: the app keeps it level with its remote
+      itself, so a worktree of it is made as it stands (agentWorktree.ts). */
+  syncedRepo?: string;
   id?: string;
   now?: Date;
 }
@@ -518,7 +521,12 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
   let worktree: ChatWorktree | undefined;
   if (opts.worktreesDir) {
     try {
-      worktree = await createWorktree({ folder: sessionWorkDir(opts.place), name: opts.name, worktreesDir: opts.worktreesDir });
+      worktree = await createWorktree({
+        folder: sessionWorkDir(opts.place),
+        name: opts.name,
+        worktreesDir: opts.worktreesDir,
+        ...(opts.syncedRepo ? { synced: opts.syncedRepo } : {}),
+      });
     } catch (e) {
       if (e instanceof WorktreeError) throw new ChatError(e.status, e.message);
       throw new ChatError(500, `Could not make a worktree: ${(e as Error).message}`);

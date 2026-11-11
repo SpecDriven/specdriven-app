@@ -704,6 +704,8 @@ export interface FolderGitInfo {
   reason?: string;
   repo?: string;
   branch?: string;
+  /** The branch a worktree session has to start from, where the repo has an origin. */
+  base?: string;
 }
 
 // A folder's answer is kept for a while: the bar asks on every render of
@@ -741,6 +743,28 @@ export function useFolderInfo(path: string | null): FolderGitInfo | null {
     };
   }, [path]);
   return info && info.path === path ? info.info : null;
+}
+
+/** What the Worktree box says of a folder: what ticking it does, or why it cannot be. */
+export function worktreeTooltip(info: FolderGitInfo | null): string {
+  if (!info) return "Worktree · checking the folder…";
+  if (!info.canWorktree) return `Worktree · ${info.reason ?? "this folder cannot have one"}`;
+  const own = "the session gets a git worktree of its own, on a new branch off";
+  if (!info.base) {
+    return `Worktree · ${own} ${info.branch && info.branch !== "HEAD" ? info.branch : "the current commit"}`;
+  }
+  if (info.branch !== info.base) {
+    const on = info.branch && info.branch !== "HEAD" ? `is on ${info.branch}` : "has a detached HEAD";
+    return `Worktree · sessions start from ${info.base}, but this folder ${on} — switch it to ${info.base} first`;
+  }
+  return `Worktree · ${own} ${info.base}, once ${info.base} is level with origin`;
+}
+
+/** What starting a session said about its worktree, for a toast; null says nothing. */
+export function worktreeStartedNote(meta: Pick<ChatSessionMeta, "worktree">): string | null {
+  const wt = meta.worktree;
+  if (!wt?.unchecked) return null;
+  return `Could not reach origin (${wt.unchecked}) — the worktree started from ${wt.base ?? "the branch"} as last fetched`;
 }
 
 /** What closing a session said about its worktree, for a toast; null says nothing. */
@@ -1147,6 +1171,9 @@ export const agentChat = {
     });
     await agentChat.openSession(meta.id);
     agentChat.openPane();
+    const note = worktreeStartedNote(meta);
+    // Kept on screen until dismissed: the worktree may be behind origin.
+    if (note) toast.error(note);
     return meta.id;
   },
   /** The server's sessions: each is a tab, and every tab is followed live
@@ -1321,6 +1348,7 @@ export const agentChat = {
     forget(id);
     // A worktree with changes in it stays: say where.
     const note = meta ? worktreeClosedNote(meta, res.worktree) : null;
-    if (note) toast.info(note);
+    // Kept on screen until dismissed: the worktree may be behind origin.
+    if (note) toast.error(note);
   },
 };
