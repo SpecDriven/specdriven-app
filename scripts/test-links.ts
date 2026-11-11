@@ -215,12 +215,12 @@ export function rewrite(text: string, rewrites: Map<string, string>): string {
 
 // --- Running against the real repos ---------------------------------------
 
-function git(cwd: string, ...args: string[]): string | null {
+export function git(cwd: string, ...args: string[]): string | null {
   const r = Bun.spawnSync(["git", ...args], { cwd, stderr: "ignore" });
   return r.exitCode === 0 ? r.stdout.toString().trim() : null;
 }
 
-function specsDir(root: string): string | null {
+export function specsDir(root: string): string | null {
   const candidates = [process.env.SPECDRIVEN_SPECS_DIR, join(root, "specs")];
   const common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir");
   if (common) candidates.push(join(dirname(common), "..", "specs-specdriven", "specs"));
@@ -230,7 +230,7 @@ function specsDir(root: string): string | null {
   return null;
 }
 
-function walk(dir: string, keep: (name: string) => boolean, out: string[] = []): string[] {
+export function walk(dir: string, keep: (name: string) => boolean, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
     const path = join(dir, entry.name);
@@ -241,7 +241,7 @@ function walk(dir: string, keep: (name: string) => boolean, out: string[] = []):
 }
 
 /** The branch's base: where it left origin/main, else HEAD. */
-function baseOf(root: string): string {
+export function baseOf(root: string): string {
   return git(root, "merge-base", "HEAD", "origin/main") ?? "HEAD";
 }
 
