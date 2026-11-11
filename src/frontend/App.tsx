@@ -13594,8 +13594,6 @@ export function App() {
               <dd>{user?.login ?? <span className="unset">not signed in</span>}</dd>
               <dt>Name</dt>
               <dd>{user?.name ?? <span className="unset">not set</span>}</dd>
-              <dt>Email</dt>
-              <dd>{user?.email ?? <span className="unset">not set</span>}</dd>
               {!hosted && (
                 <>
                   <dt>Settings file</dt>
