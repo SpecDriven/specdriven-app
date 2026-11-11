@@ -1,6 +1,6 @@
 // Secrets a plugin keeps on this device (specs/agents/agent-plugins
 // .feature.md): a named store of string fields — a proxy token, an API
-// key — that is deliberately NOT part of settings.json, which is shareable
+// key — that is deliberately NOT part of settings.yaml, which is shareable
 // where a credential never is. Like the GitHub token (src/server/
 // tokenStore.ts), the default backend is a 0600 JSON file under the app's
 // home; the desktop app swaps in an OS-encrypted backend (Electron

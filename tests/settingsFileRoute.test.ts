@@ -1,10 +1,11 @@
 // "View settings file…" (specs/app/user-info-settings.feature.md "view the
-// settings file"): GET /api/settings-file reads ~/.specdriven/settings.json
+// settings file"): GET /api/settings-file reads ~/.specdriven/settings.yaml
 // as written — always the home file — through readSettingsFileView.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { serializeSettings } from "../src/server/settingsFormat";
 import { matchApi } from "../src/server/api";
 import { readSettingsFileView } from "../src/server/state";
 
@@ -40,37 +41,37 @@ describe("readSettingsFileView", () => {
   test("reads the home settings file as written, without upgrading it", async () => {
     // A version-0 file: readState would upgrade recentDataRepos away.
     const raw = { recentDataRepos: ["/a/specs"], featureFlags: true };
-    await writeFile(join(home, "settings.json"), JSON.stringify(raw));
+    await writeFile(join(home, "settings.yaml"), serializeSettings(raw));
     const view = await readSettingsFileView(root);
-    expect(view.path).toBe(join(home, "settings.json"));
+    expect(view.path).toBe(join(home, "settings.yaml"));
     expect(view.exists).toBe(true);
     expect(view.settings).toEqual(raw);
     expect(view.activePath).toBeUndefined();
   });
 
   test("shows the home file even when a project settings file is the one in effect", async () => {
-    await writeFile(join(home, "settings.json"), JSON.stringify({ codeGen: false }));
+    await writeFile(join(home, "settings.yaml"), serializeSettings({ codeGen: false }));
     await mkdir(join(root, ".specdriven"));
-    await writeFile(join(root, ".specdriven", "settings.json"), JSON.stringify({ codeGen: true }));
+    await writeFile(join(root, ".specdriven", "settings.yaml"), serializeSettings({ codeGen: true }));
     const view = await readSettingsFileView(root);
-    expect(view.path).toBe(join(home, "settings.json"));
+    expect(view.path).toBe(join(home, "settings.yaml"));
     expect(view.settings).toEqual({ codeGen: false });
-    expect(view.activePath).toBe(join(root, ".specdriven", "settings.json"));
+    expect(view.activePath).toBe(join(root, ".specdriven", "settings.yaml"));
   });
 
   test("with no home file it says so, and does not fall back to the project file", async () => {
     await mkdir(join(root, ".specdriven"));
-    await writeFile(join(root, ".specdriven", "settings.json"), JSON.stringify({ codeGen: true }));
+    await writeFile(join(root, ".specdriven", "settings.yaml"), serializeSettings({ codeGen: true }));
     const view = await readSettingsFileView(root);
     expect(view.exists).toBe(false);
     expect(view.settings).toEqual({});
   });
 
-  test("a file that is not JSON is reported, not thrown", async () => {
-    await writeFile(join(home, "settings.json"), "{ not json");
+  test("a file that is not YAML is reported, not thrown", async () => {
+    await writeFile(join(home, "settings.yaml"), "{ not yaml");
     const view = await readSettingsFileView(root);
     expect(view.exists).toBe(true);
-    expect(view.error).toBe("The file is not valid JSON.");
+    expect(view.error).toBe("The file is not valid YAML.");
   });
 });
 
@@ -81,12 +82,12 @@ describe("GET /api/settings-file", () => {
   });
 
   test("answers with the home file", async () => {
-    await writeFile(join(home, "settings.json"), JSON.stringify({ ghostty: true }));
+    await writeFile(join(home, "settings.yaml"), serializeSettings({ ghostty: true }));
     const m = matchApi("GET", "/api/settings-file")!;
     const res = await m.handler(new Request("http://x/api/settings-file"), m.params);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.path).toBe(join(home, "settings.json"));
+    expect(body.path).toBe(join(home, "settings.yaml"));
     expect(body.settings).toEqual({ ghostty: true });
   });
 

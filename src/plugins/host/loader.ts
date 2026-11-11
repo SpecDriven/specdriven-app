@@ -126,7 +126,7 @@ export interface HostConfig {
   manifest: PluginManifest;
   /** The plugin's folder; "" for a built-in, which has none. */
   dir: string;
-  /** The plugin's own section of settings.json (src/plugins/host/pluginSettings.ts). */
+  /** The plugin's own section of settings.yaml (src/plugins/host/pluginSettings.ts). */
   settings: PluginSettings;
   /** A named secret store of the plugin's, kept on this device apart from the settings. */
   secrets: (name: string) => SecretStore;

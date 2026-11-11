@@ -1,14 +1,15 @@
 // A plugin's own settings (src/plugins/host/pluginSettings.ts, specs/agents/
 // agent-plugins.feature.md "The Settings page shows a plugin's section"):
-// a section under the plugin's id in settings.json, patched through the
+// a section under the plugin's id in settings.yaml, patched through the
 // service its host half gets or through `PUT /api/state`'s pluginSettings,
 // checked for shape only, with the keys a plugin had at the top of the file
 // adopted once.
 
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readSettings } from "./helpers/settingsFile";
 import { handleApi } from "../src/server/api";
 import { readState, writeState } from "../src/server/state";
 import {
@@ -92,7 +93,7 @@ test("the service a host half gets reads, writes and adopts its section of the s
   await settings.write({ retries: null });
   expect(await settings.read()).toEqual({ token: "t" });
   await expect(settings.write("nope" as never)).rejects.toThrow(/object/);
-  const file = JSON.parse(await readFile(join(root, ".specdriven", "settings.json"), "utf8")) as Record<string, unknown>;
+  const file = await readSettings(join(root, ".specdriven", "settings.yaml"));
   expect(file.pluginSettings).toEqual({ acme: { token: "t" } });
 
   // Adoption: the named top-level keys come in once, those already in the

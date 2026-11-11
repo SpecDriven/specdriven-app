@@ -1,6 +1,6 @@
 // The settings file as people read it (specs/app/user-info-settings.feature.md
 // "view the settings file"): src/frontend/settingsFileView.ts turns
-// ~/.specdriven/settings.json into labelled sections instead of JSON.
+// ~/.specdriven/settings.yaml into labelled sections instead of YAML.
 import { describe, expect, test } from "bun:test";
 import { humanizeKey, settingsFileSections, settingsFileText, tildePath, type SettingsSection } from "../src/frontend/settingsFileView";
 
@@ -124,7 +124,7 @@ describe("settingsFileSections", () => {
 
 describe("helpers", () => {
   test("tildePath writes paths under home from ~", () => {
-    expect(tildePath("/Users/ann/.specdriven/settings.json", HOME)).toBe("~/.specdriven/settings.json");
+    expect(tildePath("/Users/ann/.specdriven/settings.yaml", HOME)).toBe("~/.specdriven/settings.yaml");
     expect(tildePath("/Users/anna/x", HOME)).toBe("/Users/anna/x");
     expect(tildePath("/tmp/x", "")).toBe("/tmp/x");
   });
@@ -146,9 +146,9 @@ describe("settingsFileText", () => {
       },
       HOME,
     );
-    expect(settingsFileText("~/.specdriven/settings.json", sections)).toBe(
+    expect(settingsFileText("~/.specdriven/settings.yaml", sections)).toBe(
       [
-        "Settings file: ~/.specdriven/settings.json",
+        "Settings file: ~/.specdriven/settings.yaml",
         "",
         "Folders",
         "  Recent folders:",

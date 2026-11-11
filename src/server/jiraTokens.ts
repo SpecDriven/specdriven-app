@@ -2,7 +2,7 @@
 // (specs/external-links/jira-wiki-import.feature.md "A Jira token is kept per
 // site on this device"): one per site, on this device only. Like the
 // Confluence tokens (./confluenceTokens.ts) they are never part of
-// settings.json or the data repo. The default backend is a 0600 JSON file
+// settings.yaml or the data repo. The default backend is a 0600 JSON file
 // next to the home settings file; the desktop app swaps in an OS-encrypted
 // backend (Electron safeStorage) via setJiraTokenBackend.
 

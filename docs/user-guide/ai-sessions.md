@@ -55,7 +55,7 @@ Two settings shape sessions:
 - **Code generation** (Settings). On by default. Turning it off removes the
   selection checkboxes and the Start AI Session button, clears any
   selection, and makes the server refuse sessions even from outside the UI.
-  The switch is saved in `.specdriven/settings.json`.
+  The switch is saved in `.specdriven/settings.yaml`.
 - **`code-repo`** in the data folder's `project-settings.json`. This is the
   directory the agent works in, the repository whose code implements the
   specs. Without it the session runs in the data folder itself, which is
@@ -272,7 +272,7 @@ Every session opened in Claude Code Desktop or the pane leaves a record on
 this machine: a folder named by the session's id, holding `session.json`
 (name, start time, agent, data folder, code repo, and the specs sent) and,
 for desktop sessions, the `prompt.md` that was handed over. The records sit
-under `sessions/` next to the app's settings file, `.specdriven/settings.json`,
+under `sessions/` next to the app's settings file, `.specdriven/settings.yaml`,
 and never inside the data folder, which is pushed to git.
 
 The record also carries the agent's own session id, so a past pane session

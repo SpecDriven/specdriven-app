@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { applyStartupState, handleApi, matchApi, reloader, syncedOnStart } from "../src/server/api";
 import { syncPlugins } from "../src/plugins/host/loader";
 import { SETTINGS_VERSION, statePath, writeState } from "../src/server/state";
+import { readSettings } from "./helpers/settingsFile";
 
 let root: string;
 let home: string;
@@ -40,7 +41,7 @@ afterEach(async () => {
 });
 
 async function settingsFile(): Promise<Record<string, unknown>> {
-  return JSON.parse(await readFile(statePath(root), "utf8")) as Record<string, unknown>;
+  return readSettings(statePath(root));
 }
 
 async function put(body: unknown): Promise<Response> {

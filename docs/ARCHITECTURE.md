@@ -25,7 +25,7 @@ Users that have read/write access to the repo that stores data.
 
 ## Local state
 
-`.specdriven/settings.json`, in the project root or in `$HOME`
+`.specdriven/settings.yaml`, in the project root or in `$HOME`
 (specs/ui/app-start.feature.md)
 
 ## Local trust boundary
@@ -84,7 +84,7 @@ would close that if the app ever runs on shared hosts.
 agent — Claude Code Desktop, or the app's own pane driven by Claude, by Pi or
 by Codex (src/server/agent.ts). Desktop: the full prompt and a `session.json` record are
 written under
-`<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.json`, never
+`<settings dir>/sessions/<uuid>/` — beside `.specdriven/settings.yaml`, never
 in the auto-pushed data repo — and the app opens
 `claude://code/new?q=<bootstrap>&folder=<data repo>`, a short prompt that tells
 the new Claude Code Desktop session to title itself with the session name and
@@ -123,7 +123,7 @@ the rest from the same indexes. Their manifests `autoEnable`: they go on in
 every data folder the first time it is opened with them installed, since
 they have no tab, and a switch-off in Settings → Plugins is kept per folder
 (`plugins.repos[<folder>].autoEnabled`). Each is mounted with a `HostConfig`:
-`settings`, the plugin's own section of settings.json
+`settings`, the plugin's own section of settings.yaml
 (`pluginSettings[<id>]`, src/plugins/host/pluginSettings.ts, patched through
 the service or `PUT /api/state`), and `secrets(name)`, a named store kept
 apart from the settings file (src/server/secrets.ts: a 0600 file under the

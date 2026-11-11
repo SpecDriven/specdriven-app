@@ -1,6 +1,6 @@
 // A plugin's own settings (specs/agents/agent-plugins.feature.md "The
 // Settings page shows a plugin's section"): a JSON object kept under the
-// plugin's id in settings.json's `pluginSettings`, read and patched
+// plugin's id in settings.yaml's `pluginSettings`, read and patched
 // through the service the loader hands each host half (HostConfig.settings).
 // The core validates only the shape — an object, JSON, not too big — and
 // the plugin's own route validates the keys. `adopt` copies top-level

@@ -8,6 +8,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { serializeSettings } from "../src/server/settingsFormat";
 import { agentMcpServers, setConfluenceMcpLauncher, setConfluenceMcpTokensFile } from "../src/server/agentMcp";
 import {
   clearConfluenceToken,
@@ -27,7 +28,7 @@ const realEnv = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
 /** Write the settings file SPECDRIVEN_ROOT points agentMcpServers() at. */
 async function writeSettings(state: Record<string, unknown>): Promise<void> {
   await mkdir(join(home, ".specdriven"), { recursive: true });
-  await writeFile(join(home, ".specdriven", "settings.json"), JSON.stringify(state));
+  await writeFile(join(home, ".specdriven", "settings.yaml"), serializeSettings(state));
 }
 
 beforeEach(async () => {

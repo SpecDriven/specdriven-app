@@ -2060,7 +2060,7 @@ export function App() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userInfoOpen, setUserInfoOpen] = useState(false);
   // "View settings file…" in User info (specs/app/user-info-settings
-  // .feature.md "view the settings file"): ~/.specdriven/settings.json,
+  // .feature.md "view the settings file"): ~/.specdriven/settings.yaml,
   // read-only and readable. `settingsFile` is null while it loads.
   const [settingsFileOpen, setSettingsFileOpen] = useState(false);
   const [settingsFile, setSettingsFile] = useState<SettingsFile | null>(null);
@@ -9205,7 +9205,7 @@ export function App() {
         ...sectionlessAgents.map((a) => ({ id: `settings-agent-${a.id}`, title: a.label })),
       ]}
       onClose={closeAppPage}
-      actions={<span className="app-page-status">Saved to .specdriven/settings.json as you change it</span>}
+      actions={<span className="app-page-status">Saved to .specdriven/settings.yaml as you change it</span>}
       aside={
         <button type="button" className="app-page-nav-link" onClick={openPlugins}>
           <Puzzle size={13} aria-hidden="true" /> Plugins
@@ -13720,7 +13720,7 @@ export function App() {
                 <>
                   <dt>Settings file</dt>
                   <dd className="user-info-settings-file">
-                    <code>~/.specdriven/settings.json</code>
+                    <code>~/.specdriven/settings.yaml</code>
                     <button type="button" className="btn btn-secondary" onClick={openSettingsFile}>
                       View settings file…
                     </button>
