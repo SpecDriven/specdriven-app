@@ -4,6 +4,12 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.263 — 2026-11-10
+
+- Switching folders closes the other folder's coding agent sessions ([#435](https://github.com/SpecDriven/specdriven-app/pull/435))
+- The Files tab's editor highlights source code by language ([#434](https://github.com/SpecDriven/specdriven-app/pull/434))
+- The start screen opens spec folders and code repositories from one field ([#433](https://github.com/SpecDriven/specdriven-app/pull/433))
+
 ## v0.1.262 — 2026-11-10
 
 - The user menu offers Log out instead of Sign in with token ([#432](https://github.com/SpecDriven/specdriven-app/pull/432))
