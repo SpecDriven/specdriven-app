@@ -127,6 +127,7 @@ import {
 import type { FeatureView, ScenarioTarget } from "./features";
 import {
   buildSessionPrompt,
+  checkRefs,
   claudeDesktopAvailable,
   launchDesktopSession,
   SESSION_TITLE_MAX,
@@ -3591,7 +3592,10 @@ const postAgentChat = withWorkFolder(async (folder, req) => {
     effort?: unknown;
     images?: unknown;
     worktree?: unknown;
+    refs?: unknown;
   };
+  const refs = checkRefs(body.refs);
+  if (typeof refs === "string") return json({ error: refs }, 400);
   if (body.worktree !== undefined && typeof body.worktree !== "boolean") {
     return json({ error: "worktree must be true or false" }, 400);
   }
@@ -3643,6 +3647,8 @@ const postAgentChat = withWorkFolder(async (folder, req) => {
       ...(agent ? { agent } : {}),
       ...(prompt ? { prompt } : {}),
       ...(images.length ? { images: images.map(({ mediaType, data, name }) => ({ mediaType, data, ...(name ? { name } : {}) })) } : {}),
+      // The feature or file open in the main pane, named to the agent.
+      ...(refs.length ? { refs: { root: folder.dir, paths: refs } } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
@@ -3757,16 +3763,27 @@ const getAgentChatEvents: Handler = (req, params) => {
 };
 
 const postAgentChatMessage: Handler = async (req, params) => {
-  const body = (await req.json().catch(() => ({}))) as { text?: unknown; images?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { text?: unknown; images?: unknown; refs?: unknown };
+  const refs = checkRefs(body.refs);
+  if (typeof refs === "string") return json({ error: refs }, 400);
   // Images may come without text (specs/agents/agent-pane.feature.md "Paste
   // an image into the message").
   if (typeof body.text !== "string" && body.images === undefined) return json({ error: "text is required" }, 400);
   if (body.text !== undefined && typeof body.text !== "string") return json({ error: "text must be a string" }, 400);
-  try {
-    return json({ event: await sendChatMessage(params.id!, (body.text as string | undefined) ?? "", body.images) });
-  } catch (e) {
-    return chatError(e);
-  }
+  const send = async (root?: string): Promise<Response> => {
+    try {
+      const text = (body.text as string | undefined) ?? "";
+      return json({
+        event: await sendChatMessage(params.id!, text, body.images, root ? { root, paths: refs } : undefined),
+      });
+    } catch (e) {
+      return chatError(e);
+    }
+  };
+  // The files that go with it are named from the open folder; a message
+  // with none needs no folder, as before.
+  if (refs.length === 0) return send();
+  return withWorkFolder((folder) => send(folder.dir))(req, params);
 };
 
 // An image pasted into a session's message: the user bubble shows it. The

@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { writeTextFile } from "./fsx";
 import { run } from "./run";
 import type { RunOptions, RunResult } from "./run";
@@ -56,6 +56,68 @@ export interface SessionPlace {
 /** The folder a session runs in for a place. */
 export function sessionWorkDir(place: SessionPlace): string {
   return place.codeRepo ?? place.dataRepo;
+}
+
+// --- The files that go with a pane message ---------------------------------
+// (specs/agents/agent-pane.feature.md "The open feature or file goes with a
+// message")
+
+export const MAX_REFS = 20;
+
+/**
+ * The files a request names, each relative to the open folder — or the
+ * words of the refusal. A path that leaves the folder is refused: the pane
+ * only ever names what the main pane shows.
+ */
+export function checkRefs(value: unknown): string[] | string {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_REFS) return `refs must be a list of at most ${MAX_REFS} paths`;
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "string" || !raw.trim() || raw.length > 1024 || /[\r\n\0]/.test(raw)) {
+      return "refs must be file paths";
+    }
+    const path = raw.trim().replace(/\\/g, "/");
+    if (isAbsolute(path) || /^[A-Za-z]:/.test(path) || path.split("/").includes("..")) {
+      return "refs must be paths inside the open folder";
+    }
+    if (!out.includes(path)) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * The same files as the agent should be told them: relative to the folder
+ * it works in when they are inside it, absolute when they are not (a spec,
+ * while the session runs in the code repo). A worktree session works on its
+ * own copy of the repo, so a file of that repo is named in the copy.
+ */
+export function resolveRefs(
+  refs: readonly string[],
+  root: string,
+  session: { cwd: string; worktree?: { repo: string; path: string } },
+): string[] {
+  return refs.map((ref) => {
+    let file = resolve(root, ref);
+    const wt = session.worktree;
+    if (wt) {
+      const inRepo = relative(wt.repo, file);
+      if (inRepo && !inRepo.startsWith("..") && !isAbsolute(inRepo)) file = join(wt.path, inRepo);
+    }
+    const inCwd = relative(session.cwd, file);
+    return inCwd && !inCwd.startsWith("..") && !isAbsolute(inCwd) ? inCwd.split(sep).join("/") : file;
+  });
+}
+
+/**
+ * A message as the agent gets it: the user's words, then one line naming
+ * the files. A `/command` goes as it is — the agent's CLI parses it, and a
+ * trailing line would become its argument.
+ */
+export function withRefs(text: string, paths: readonly string[]): string {
+  if (paths.length === 0 || text.trimStart().startsWith("/")) return text;
+  const line = `[Context — ${paths.length === 1 ? "file" : "files"} open in SpecDriven: ${paths.join(", ")}]`;
+  return text.trim() ? `${text}\n\n${line}` : line;
 }
 
 /** Injectable subprocess runner, so tests never spawn a real CLI. */

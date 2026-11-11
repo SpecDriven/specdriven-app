@@ -409,7 +409,13 @@ class SimulatedSession implements AgentSession {
 
   /** Everything else: short, so the composer stays useful in a demo. */
   private async followUp(prompt: string, images = 0): Promise<void> {
-    const asked = prompt.trim().replace(/\s+/g, " ").slice(0, 80);
+    // The user's words only: the line naming the open files (agent.ts
+    // withRefs) is for an agent, not for quoting back.
+    const asked = prompt
+      .replace(/\n*\[Context — files? open in SpecDriven: [^\]]*\]\s*$/, "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .slice(0, 80);
     const pasted = images === 1 ? "the image you pasted" : `the ${images} images you pasted`;
     const what = [asked ? `act on “${asked}”` : "", images > 0 ? `look at ${pasted}` : ""].filter(Boolean).join(" or ");
     await this.say(

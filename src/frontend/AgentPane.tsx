@@ -20,6 +20,7 @@ import {
   GitBranch,
   Globe,
   PanelRightClose,
+  Pin,
   Plus,
   Puzzle,
   Search,
@@ -40,20 +41,28 @@ import { useSpellCheck } from "./spellCheckPref";
 import { toast } from "./Toasts";
 import { cleanLine, cleanText } from "../server/text";
 import {
+  HISTORY_START,
   agentChat,
   applyCommand,
   canOpenAnother,
+  composeRefs,
   defaultSessionName,
   describeAgent,
   filterCommands,
   formatCost,
   formatDuration,
   hasModes,
+  historyStep,
   isBusy,
   isFinalStatus,
+  isHelpCommand,
   loadFolderInfo,
   loadSourceStatus,
+  pushPromptHistory,
+  readAgentFollow,
   readAgentWorktree,
+  readPromptHistory,
+  refLabel,
   refreshSource,
   shouldFollow,
   sourceNeedsAttention,
@@ -62,6 +71,8 @@ import {
   useAgentChat,
   useAgentChoices,
   useFolderInfo,
+  withLocalCommands,
+  writeAgentFollow,
   writeAgentWorktree,
   type AgentChatStore,
   type AgentChoices,
@@ -73,6 +84,7 @@ import {
   type EffortLevel,
   type PermissionMode,
   type Question,
+  type RefState,
   type RefreshMode,
   type SessionState,
   type SourceStatus,
@@ -174,6 +186,7 @@ export function AgentPane({
   ghostty = false,
   confirm,
   codeRepoOpen = false,
+  current = null,
 }: {
   compact: boolean;
   /** Demo mode: every session in here is the simulation (src/server/demoAgent.ts). */
@@ -202,8 +215,23 @@ export function AgentPane({
   /** A code repository is open in place of the specs (specs/app/code-repo-mode
       .feature.md): `dataRepo` is that repository, and is named so. */
   codeRepoOpen?: boolean;
+  /** The feature or file open in the main pane, relative to the open
+      folder; null when neither is. It goes with a message unless removed
+      (specs/agents/agent-pane.feature.md "The open feature or file goes
+      with a message"). */
+  current?: string | null;
 }) {
   const store = useAgentChat();
+  // One list for the pane: it stays as the tabs change.
+  const [refState, setRefState] = useState<RefState>(() => ({ follow: readAgentFollow(), pinned: [] }));
+  const refs: RefsControl = {
+    current,
+    state: refState,
+    onChange: (next) => {
+      if (next.follow !== refState.follow) writeAgentFollow(next.follow);
+      setRefState(next);
+    },
+  };
   const session = store.activeId ? (store.sessions[store.activeId] ?? null) : null;
   const agent = session ? describeAgent(session.meta.agent, store.agents) : null;
   /** The agent picked on the new-session screen; null is the first usable. */
@@ -248,6 +276,7 @@ export function AgentPane({
             folders={folders}
             askFolder={askFolder}
             ghostty={ghostty}
+            refs={refs}
           />
         </>
       ) : (
@@ -263,6 +292,7 @@ export function AgentPane({
           askFolder={askFolder}
           onOpenPlugins={onOpenPlugins}
           agentSettings={agentSettings}
+          refs={refs}
         />
       )}
       {demo && <SimulationWatermark />}
@@ -1099,6 +1129,7 @@ function EmptyState({
   askFolder,
   onOpenPlugins,
   agentSettings,
+  refs,
 }: {
   store: AgentChatStore;
   /** The agent picked here (kept by the pane, so its header can name it); null is the first. */
@@ -1112,6 +1143,7 @@ function EmptyState({
   askFolder?: (initial: string) => Promise<string | null>;
   onOpenPlugins?: (wanted?: string) => void;
   agentSettings?: AgentSettingsOpener;
+  refs?: RefsControl;
 }) {
   // Only the agents whose CLI is on PATH; with one, there is nothing to pick.
   const agents = usableAgents(store.agents);
@@ -1122,7 +1154,7 @@ function EmptyState({
   /** Whether the session gets a worktree: the last pick, kept on this device. */
   const [worktree, setWorktree] = useState(readAgentWorktree);
   /** A start held while the source-check dialog is open; null when none is. */
-  const [pending, setPending] = useState<{ status: SourceStatus; text: string; images: ImageUpload[] } | null>(null);
+  const [pending, setPending] = useState<{ status: SourceStatus; text: string; images: ImageUpload[]; refs: string[] } | null>(null);
   const picked = pickedAgent(store.agents, agentId);
   const choices = useAgentChoices(picked?.id ?? null);
   const defaultDir = codeRepo ?? dataRepo;
@@ -1147,12 +1179,13 @@ function EmptyState({
   // sessions start on (the pick is the default, as it is mid-session).
   const saveDefault = (patch: { model?: string | null; effort?: EffortLevel | null }) =>
     void agentChat.saveDefaults(picked.id, patch).catch(fail);
-  const doStart = (text: string, images: ImageUpload[]) =>
+  const doStart = (text: string, images: ImageUpload[], sentRefs: string[] = []) =>
     agentChat.createSession({
       name: nameFromMessage(text) || defaultSessionName(),
       agent: picked.id,
       prompt: text,
       ...(images.length ? { images } : {}),
+      ...(sentRefs.length ? { refs: sentRefs } : {}),
       ...(folder && folder !== defaultDir ? { cwd: folder } : {}),
       ...(inWorktree ? { worktree: true } : {}),
       ...(hasModes(picked) ? { permissionMode: startMode } : {}),
@@ -1165,18 +1198,18 @@ function EmptyState({
   // check that source is up to date"). A worktree branches off HEAD itself, so
   // the check is about the HEAD the worktree would use either way. The data repo
   // syncs on its own, so it is not checked here.
-  const start = async (text: string, images: ImageUpload[]) => {
+  const start = async (text: string, images: ImageUpload[], sentRefs: string[] = []) => {
     if (workDir !== codeRepo || !codeRepo) {
-      await doStart(text, images);
+      await doStart(text, images, sentRefs);
       return;
     }
     const status = await loadSourceStatus(codeRepo);
     if (!sourceNeedsAttention(status)) {
-      await doStart(text, images);
+      await doStart(text, images, sentRefs);
       return;
     }
     // Hold the message until the user answers the dialog.
-    setPending({ status, text, images });
+    setPending({ status, text, images, refs: sentRefs });
   };
   const left = (
     <>
@@ -1271,7 +1304,8 @@ function EmptyState({
         disabled={!room}
         canSend={room}
         autoFocus
-        hint="Enter to start · Shift+Enter for a new line"
+        hint="Enter to start · Shift+Enter for a new line · ↑ for sent messages"
+        refs={refs}
         left={left}
         right={right}
         imagesFrom={{ label: picked.label, canRead: picked.capabilities.images === true }}
@@ -1284,7 +1318,7 @@ function EmptyState({
           onStartAnyway={() => {
             const held = pending;
             setPending(null);
-            void doStart(held.text, held.images).catch(fail);
+            void doStart(held.text, held.images, held.refs).catch(fail);
           }}
           onRefresh={async (mode: RefreshMode) => {
             try {
@@ -1299,7 +1333,7 @@ function EmptyState({
             }
             const held = pending;
             setPending(null);
-            void doStart(held.text, held.images).catch(fail);
+            void doStart(held.text, held.images, held.refs).catch(fail);
             return true;
           }}
         />
@@ -1397,6 +1431,16 @@ export function TranscriptRow({
         <div className="agent-msg user">
           {item.images && item.images.length > 0 && <MessageImages images={item.images} />}
           {item.text}
+          {item.refs && item.refs.length > 0 && (
+            <div className="agent-msg-refs" aria-label="Context">
+              {item.refs.map((path) => (
+                <span key={path} title={path}>
+                  <FileText size={11} aria-hidden="true" />
+                  {refLabel(path)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       );
     case "assistant":
@@ -1731,7 +1775,14 @@ function QuestionCard({
  * textarea with its "/" popup, and the bar under it (`bar`), with Send at
  * its end. `onSend` gets the cleaned text; a rejection puts it back.
  */
-function ComposerBox({
+/** The pane's context list, as a message box reads and changes it. */
+export interface RefsControl {
+  current: string | null;
+  state: RefState;
+  onChange: (next: RefState) => void;
+}
+
+export function ComposerBox({
   listKey,
   commands,
   placeholder,
@@ -1742,6 +1793,7 @@ function ComposerBox({
   right,
   autoFocus,
   imagesFrom,
+  refs,
   onSend,
 }: {
   listKey: string;
@@ -1759,9 +1811,19 @@ function ComposerBox({
   /** The agent that would read pasted images; null when it reads none, so
       a pasted image is refused with its name. */
   imagesFrom: { label: string; canRead: boolean };
-  onSend: (text: string, images: ImageUpload[]) => Promise<void>;
+  /** The files that go with the message; absent, none do. */
+  refs?: RefsControl;
+  onSend: (text: string, images: ImageUpload[], refs: string[]) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
+  // Sent messages, for Up and Down (specs/agents/agent-pane.feature.md "Up
+  // and Down recall sent messages"), and where the box stands among them.
+  const [entries, setEntries] = useState(readPromptHistory);
+  const [cursor, setCursor] = useState(HISTORY_START);
+  // The pane's own answer to /help, shown over the box until dismissed.
+  const [help, setHelp] = useState(false);
+  const all = withLocalCommands(commands);
+  const context = refs && !disabled ? composeRefs(refs.current, refs.state) : null;
   // Pasted images (specs/agents/agent-pane.feature.md "Paste an image into
   // the message"), and how many are still being read.
   const [images, setImages] = useState<PendingImage[]>([]);
@@ -1772,13 +1834,16 @@ function ComposerBox({
   const [slashIndex, setSlashIndex] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const slash = filterCommands(commands, draft, caret);
+  const slash = filterCommands(all, draft, caret);
   const popup = slash.active && !dismissed && slash.items.length > 0;
   useEffect(() => {
     setSlashIndex(0);
   }, [slash.query]);
+  // A recalled message is not a "/" being typed: its popup stays shut.
+  const recalled = useRef(false);
   useEffect(() => {
-    setDismissed(false);
+    setDismissed(recalled.current);
+    recalled.current = false;
   }, [draft]);
   // Grow with the text, up to a share of the window.
   useLayoutEffect(() => {
@@ -1793,12 +1858,23 @@ function ComposerBox({
     // block) keeps its indentation (specs/ui/ui.feature.md "User-entered
     // text is cleaned up").
     const text = cleanText(draft);
+    // /help is the pane's own: it needs no agent, so it answers even
+    // while one is mid-turn.
+    if (isHelpCommand(text) && images.length === 0) {
+      setDraft("");
+      setCursor(HISTORY_START);
+      setHelp(true);
+      return;
+    }
     if ((!text.trim() && images.length === 0) || !canSend || reading > 0) return;
     const sent = images;
     setDraft("");
     setImages([]);
+    setHelp(false);
+    setCursor(HISTORY_START);
+    if (text.trim()) setEntries(pushPromptHistory(text));
     try {
-      await onSend(text, sent.map(toUpload));
+      await onSend(text, sent.map(toUpload), context?.refs.map((r) => r.path) ?? []);
     } catch (e) {
       setDraft(text);
       setImages(sent);
@@ -1862,6 +1938,33 @@ function ComposerBox({
         return;
       }
     }
+    if (e.key === "Escape" && help) {
+      e.preventDefault();
+      e.stopPropagation();
+      setHelp(false);
+      return;
+    }
+    if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      // Only from the box's edge: inside a message of several lines the
+      // arrows move the caret, as they always did. Down recalls nothing
+      // until Up has (historyStep answers null).
+      const el = e.currentTarget;
+      const collapsed = el.selectionStart === el.selectionEnd;
+      const up = e.key === "ArrowUp";
+      const atEdge = up
+        ? !draft.slice(0, el.selectionStart).includes("\n")
+        : !draft.slice(el.selectionEnd).includes("\n");
+      const step = collapsed && atEdge ? historyStep(entries, cursor, up ? "up" : "down", draft) : null;
+      if (step) {
+        e.preventDefault();
+        recalled.current = true;
+        setDraft(step.draft);
+        setCursor(step.cursor);
+        setCaret(step.draft.length);
+        requestAnimationFrame(() => ref.current?.setSelectionRange(step.draft.length, step.draft.length));
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
@@ -1890,7 +1993,85 @@ function ComposerBox({
           ))}
         </div>
       )}
+      {help && !popup && (
+        <div className="agent-help" role="note" aria-label="Commands">
+          <div className="agent-help-head">
+            <span>Commands</span>
+            <button type="button" className="agent-help-close" aria-label="Close help" onClick={() => setHelp(false)}>
+              <X size={12} aria-hidden="true" />
+            </button>
+          </div>
+          <ul>
+            {[...all]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((c) => (
+                <li key={c.name}>
+                  <span className="agent-slash-name">/{c.name}</span>
+                  {c.argumentHint && <span className="agent-slash-hint">{c.argumentHint}</span>}
+                  {c.description && <span className="agent-help-desc">{c.description}</span>}
+                </li>
+              ))}
+          </ul>
+          {commands.length === 0 && <p>The agent's own commands are listed once a session has started.</p>}
+          <p>Enter sends · Shift+Enter starts a new line · ↑ and ↓ recall sent messages · Esc closes this</p>
+        </div>
+      )}
       <div className="agent-composer-box" data-disabled={disabled || undefined}>
+        {refs && context && (context.refs.length > 0 || context.offer !== null) && (
+          <ul className="agent-refs" aria-label="Context">
+            {context.refs.map(({ path, auto }) => {
+              const label = refLabel(path);
+              return (
+                <li key={path} className="agent-ref" data-auto={auto || undefined}>
+                  <FileText size={12} aria-hidden="true" />
+                  <span className="agent-ref-name" title={auto ? `${path} — the open file, sent with your message` : path}>
+                    {label}
+                  </span>
+                  {auto && (
+                    <Tooltip label="Keep in context when you open something else">
+                      <button
+                        type="button"
+                        className="agent-ref-btn"
+                        aria-label={`Keep ${label} in context`}
+                        onClick={() => refs.onChange({ ...refs.state, pinned: [...refs.state.pinned, path] })}
+                      >
+                        <Pin size={11} aria-hidden="true" />
+                      </button>
+                    </Tooltip>
+                  )}
+                  <button
+                    type="button"
+                    className="agent-ref-btn"
+                    aria-label={`Remove ${label} from context`}
+                    onClick={() =>
+                      refs.onChange({
+                        // Removing the open file, pinned or not, stops following it.
+                        follow: path === refs.current ? false : refs.state.follow,
+                        pinned: refs.state.pinned.filter((p) => p !== path),
+                      })
+                    }
+                  >
+                    <X size={11} aria-hidden="true" />
+                  </button>
+                </li>
+              );
+            })}
+            {context.offer !== null && (
+              <li>
+                <button
+                  type="button"
+                  className="agent-ref agent-ref-offer"
+                  aria-label={`Add ${refLabel(context.offer)} to context`}
+                  title={context.offer}
+                  onClick={() => refs.onChange({ ...refs.state, follow: true })}
+                >
+                  <Plus size={12} aria-hidden="true" />
+                  <span className="agent-ref-name">{refLabel(context.offer)}</span>
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
         {(images.length > 0 || reading > 0) && (
           <ul className="agent-attachments" aria-label="Pasted images">
             {images.map((image, i) => (
@@ -1922,6 +2103,8 @@ function ComposerBox({
           aria-controls={popup ? listId : undefined}
           aria-activedescendant={popup ? `${listId}-${slashIndex}` : undefined}
           onChange={(e) => {
+            // Typing makes the text a new draft: Up starts from the newest again.
+            setCursor(HISTORY_START);
             setDraft(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);
           }}
@@ -1960,6 +2143,7 @@ function Composer({
   folders,
   askFolder,
   ghostty = false,
+  refs,
 }: {
   session: SessionState;
   agent: AgentDescriptor;
@@ -1968,6 +2152,7 @@ function Composer({
   askFolder?: (initial: string) => Promise<string | null>;
   /** A worktree session's branch opens a Ghostty shell in the worktree. */
   ghostty?: boolean;
+  refs?: RefsControl;
 }) {
   const meta = session.meta;
   const id = meta.id;
@@ -1978,7 +2163,7 @@ function Composer({
   const fail = (e: Error) => toast.error(e.message);
   const hint =
     status === "idle"
-      ? "Enter to send · Shift+Enter for a new line · / for commands"
+      ? "Enter to send · Shift+Enter for a new line · / for commands · ↑ for sent messages"
       : status === "starting"
         ? `${who} is starting…`
         : status === "running"
@@ -2048,7 +2233,8 @@ function Composer({
       left={left}
       right={right}
       imagesFrom={{ label: who, canRead: agent.capabilities.images === true }}
-      onSend={(text, images) => agentChat.send(id, text, images)}
+      refs={refs}
+      onSend={(text, images, sent) => agentChat.send(id, text, images, sent)}
     />
   );
 }
