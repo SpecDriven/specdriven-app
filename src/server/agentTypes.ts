@@ -147,6 +147,12 @@ export interface ChatSessionMeta {
   worktree?: ChatWorktree;
   dataRepo: string;
   codeRepo?: string;
+  /** The folder open in the app when the session started — the
+      specifications folder, or the code repository opened in its place.
+      Switching to another folder closes the session
+      (specs/agents/agent-pane.feature.md "Switching folders closes the
+      other folder's sessions"). */
+  project: string;
   /** ISO 8601. */
   startedAt: string;
   endedAt?: string;

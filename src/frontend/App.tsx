@@ -177,6 +177,7 @@ import {
   agentChat,
   agentPaneOffered,
   clampAgentWidth,
+  closedSessionsNote,
   defaultSessionName,
   useAgentChat,
 } from "./agentChat";
@@ -2680,6 +2681,18 @@ export function App() {
   // the recent folder list (specs/ui/ui.feature.md "Recent folder list"), or
   // named by a link (`specdriven://<folder>/...`), which then opens `entryPath`
   // in it rather than its README.
+  /**
+   * The coding agent pane follows a folder switch
+   * (specs/agents/agent-pane.feature.md "Switching folders closes the other
+   * folder's sessions"): the server closed the other folder's sessions, so
+   * their tabs go, and a toast says how many.
+   */
+  const afterFolderSwitch = (state: { closedSessions?: unknown }) => {
+    void agentChat.switchedFolder();
+    const note = closedSessionsNote(state.closedSessions);
+    if (note) toast.info(note);
+  };
+
   const switchRepo = async (next: string, entryPath?: string) => {
     if (!next || next === reposRef.current.open) return;
     setSettingRepo(true);
@@ -2702,6 +2715,7 @@ export function App() {
       if (res.ok) {
         setSwitching({ folder: next, step: "loading" });
         applyRepos(state);
+        afterFolderSwitch(state);
         setSelected(null);
         setFeature(null);
         setSelectedScenario(null);
@@ -2791,6 +2805,7 @@ export function App() {
       }
       if (!first) setSwitching({ folder: next, step: "loading" });
       applyRepos(state);
+      afterFolderSwitch(state);
       setNeedsRepo(false);
       setSelected(null);
       setFeature(null);
