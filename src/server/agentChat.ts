@@ -15,7 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { resolveRefs, sessionWorkDir, withRefs } from "./agent";
 import { agentMcpServers } from "./agentMcp";
 import { cleanUpWorktree, createWorktree, discardWorktree, WorktreeError } from "./agentWorktree";
@@ -456,6 +456,9 @@ function refsFor(meta: Pick<ChatSessionMeta, "cwd" | "worktree">, text: string, 
 
 export interface CreateChatOptions {
   place: SessionPlace;
+  /** The folder open in the app (ChatSessionMeta.project); absent is the
+      place's data repo, which is that folder whenever specs are open. */
+  project?: string;
   name: string;
   /** Which provider; absent is the lowest-ranked one whose CLI is there. */
   agent?: ChatAgent;
@@ -553,6 +556,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       ...(worktree ? { worktree } : {}),
       dataRepo: opts.place.dataRepo,
       ...(codeRepo ? { codeRepo } : {}),
+      project: resolve(opts.project ?? opts.place.dataRepo),
       startedAt: now.toISOString(),
       status: "starting",
       ...(opts.model ? { model: opts.model } : {}),
@@ -967,10 +971,10 @@ export async function setAgentDefaults(agent: ChatAgent, patch: AgentDefaultsPat
  * A worktree of its own is removed when nothing in it is uncommitted (its
  * branch stays), else kept; the answer says which.
  */
-export async function endChatSession(id: string): Promise<{ worktree?: WorktreeCleanup }> {
+export async function endChatSession(id: string, why = "Session ended."): Promise<{ worktree?: WorktreeCleanup }> {
   const session = get(id);
   if (!isFinalStatus(session.meta.status)) {
-    const saved = finish(session, "ended", "Session ended.");
+    const saved = finish(session, "ended", why);
     session.abort.abort();
     await saved;
   }
@@ -978,6 +982,19 @@ export async function endChatSession(id: string): Promise<{ worktree?: WorktreeC
   const wt = session.meta.worktree;
   if (!wt) return {};
   return { worktree: await cleanUpWorktree(wt).catch((): WorktreeCleanup => "kept") };
+}
+
+/**
+ * The user switched folders (specs/agents/agent-pane.feature.md "Switching
+ * folders closes the other folder's sessions"): every session started in
+ * another folder ends and is forgotten, as its tab's × would — a worktree
+ * with changes in it is kept. Answers how many went.
+ */
+export async function closeOtherProjects(project: string): Promise<number> {
+  const open = resolve(project);
+  const others = [...registry().values()].filter((s) => s.meta.project !== open).map((s) => s.meta.id);
+  await Promise.all(others.map((id) => endChatSession(id, "The folder was switched; this session belonged to another folder.").catch(() => undefined)));
+  return others.length;
 }
 
 /** Server shutdown: every live subprocess goes. */

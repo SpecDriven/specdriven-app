@@ -74,6 +74,7 @@ const WORKTREE_META: ChatSessionMeta = {
     base: "main",
   },
   dataRepo: "/Users/dev/specs",
+  project: "/Users/dev/specs",
   startedAt: "2026-11-07T09:00:00.000Z",
   status: "idle",
   permissionMode: "auto",

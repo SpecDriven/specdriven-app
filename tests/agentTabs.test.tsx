@@ -86,6 +86,7 @@ function meta(id: string, minute: number, status: ChatStatus = "idle"): ChatSess
     agent: "claude",
     cwd: "/w/code",
     dataRepo: "/w/data",
+    project: "/w/data",
     codeRepo: "/w/code",
     startedAt: `2026-11-08T10:${String(minute).padStart(2, "0")}:00.000Z`,
     status,

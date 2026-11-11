@@ -226,6 +226,12 @@ export function AgentPane({
   const store = useAgentChat();
   // One list for the pane: it stays as the tabs change.
   const [refState, setRefState] = useState<RefState>(() => ({ follow: readAgentFollow(), pinned: [] }));
+  // Files kept from another folder name nothing in this one: a folder
+  // switch drops them (specs/agents/agent-pane.feature.md "Switching
+  // folders closes the other folder's sessions").
+  useEffect(() => {
+    setRefState((s) => (s.pinned.length ? { ...s, pinned: [] } : s));
+  }, [dataRepo]);
   const refs: RefsControl = {
     current,
     state: refState,
@@ -283,6 +289,9 @@ export function AgentPane({
         </>
       ) : (
         <EmptyState
+          // A folder picked for the last folder's new session is not this
+          // one's: the screen starts afresh on a switch.
+          key={dataRepo ?? ""}
           store={store}
           agentId={draftAgentId}
           onPickAgent={setDraftAgentId}

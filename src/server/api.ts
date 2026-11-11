@@ -153,6 +153,7 @@ import {
   listChatSessions,
   reconnectAgent,
   reconnectAgents,
+  closeOtherProjects,
   refreshChatContext,
   resolveProvider,
   sendChatMessage,
@@ -1608,10 +1609,19 @@ const putState: Handler = async (req) => {
   // are back, and the pane warns of an API that does not answer.
   const opened = body.openCodeRepo !== undefined ? (state.openCodeRepo ?? null) : pickedDir;
   if (opened && !isHostedMode()) void reconnectAgents(opened, notifyPluginChange);
+  // specs/agents/agent-pane.feature.md "Switching folders closes the other
+  // folder's sessions": the pane is for the folder now open. Awaited, so the
+  // client's next read of the sessions — which follows this response —
+  // already has them gone.
+  const closedSessions = opened && !isHostedMode() ? await closeOtherProjects(opened) : 0;
   // A link that asked for this switch opens right after it: when the pull
   // above failed, the note for a page it does not find says so.
   const pullFailed = pickedDir ? pullProblem(pickedDir) : null;
-  return json({ ...(await stateFields(state)), ...(pullFailed ? { pullProblem: pullFailed } : {}) });
+  return json({
+    ...(await stateFields(state)),
+    ...(pullFailed ? { pullProblem: pullFailed } : {}),
+    ...(closedSessions ? { closedSessions } : {}),
+  });
 };
 
 // Sync button (specs/ui/ui.feature.md "Main page"): immediate data reload —
@@ -3671,6 +3681,9 @@ const postAgentChat = withWorkFolder(async (folder, req) => {
     const images = checkImages(body.images);
     const meta = await createChatSession({
       place,
+      // The open folder, which a folder the pane picked is not: a switch
+      // away from it closes the session.
+      project: folder.dir,
       name,
       ...(agent ? { agent } : {}),
       ...(prompt ? { prompt } : {}),

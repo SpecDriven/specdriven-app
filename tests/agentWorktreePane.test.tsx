@@ -83,6 +83,7 @@ const META: ChatSessionMeta = {
   cwd: WORKTREE.cwd,
   worktree: WORKTREE,
   dataRepo: "/w/data",
+  project: "/w/data",
   codeRepo: WORKTREE.cwd,
   startedAt: "2026-11-06T10:00:00.000Z",
   status: "idle",

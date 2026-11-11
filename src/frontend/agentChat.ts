@@ -592,6 +592,12 @@ export function isFinalStatus(status: ChatStatus): boolean {
 
 export { MAX_OPEN_SESSIONS };
 
+/** The toast after a folder switch closed sessions; null when none went. */
+export function closedSessionsNote(count: unknown): string | null {
+  if (typeof count !== "number" || count < 1) return null;
+  return `Closed ${count} coding agent session${count === 1 ? "" : "s"} from the other folder`;
+}
+
 /** The sessions as the tab row shows them: in the order they started, so a
     new one opens on the right. */
 export function tabOrder<T extends Pick<ChatSessionMeta, "startedAt">>(list: readonly T[]): T[] {
@@ -1158,6 +1164,15 @@ export const agentChat = {
         .filter((m) => !state.sessions[m.id])
         .map((m) => agentChat.openSession(m.id, { activate: false }).catch(() => undefined)),
     );
+  },
+  /** The user switched folders (specs/agents/agent-pane.feature.md
+      "Switching folders closes the other folder's sessions"): the server
+      closed the other folder's sessions before it answered, so their tabs
+      go; the pane shows a tab of this folder's, else the new-session
+      screen. The old folder's git facts go too. */
+  async switchedFolder(): Promise<void> {
+    forgetFolderInfos();
+    await agentChat.refreshList().catch(() => undefined);
   },
   /** On boot: the remembered pane state, every open session, and the
       remembered one shown if it is still there (else the newest). */

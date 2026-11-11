@@ -85,6 +85,7 @@ const META: ChatSessionMeta = {
   agent: "claude",
   cwd: "/w/code",
   dataRepo: "/w/data",
+  project: "/w/data",
   startedAt: "2026-11-07T09:00:00.000Z",
   status: "idle",
   permissionMode: "auto",
