@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.261 — 2026-11-10
+
+- The User info dialog no longer shows the email ([#430](https://github.com/SpecDriven/specdriven-app/pull/430))
+
 ## v0.1.260 — 2026-11-10
 
 - A session ends with the specs caught up with the code ([#429](https://github.com/SpecDriven/specdriven-app/pull/429))
