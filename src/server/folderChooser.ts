@@ -21,11 +21,13 @@ export type FolderChooser = (title?: string) => Promise<string | null>;
  * title is spliced into the osascript and PowerShell below, so it is never
  * free text from a request.
  */
-export type FolderPurpose = "data-repo" | "code-repo";
+export type FolderPurpose = "data-repo" | "code-repo" | "folder";
 
 export const FOLDER_TITLES: Record<FolderPurpose, string> = {
   "data-repo": "Choose the spec data directory",
   "code-repo": "Choose the code repository",
+  // The first-run screen's one field takes either kind.
+  folder: "Choose a specification folder or a code repository",
 };
 
 const PROMPT = FOLDER_TITLES["data-repo"];

@@ -190,3 +190,25 @@ test("the Linux dialog shows the title it is given", async () => {
   expect(await chooser()).toBe(FOLDER_TITLES["data-repo"]);
   expect(await chooser(FOLDER_TITLES["code-repo"])).toBe("Choose the code repository");
 });
+
+// The first-run screen's one field (specs/ui/app-start.feature.md "one field
+// opens a specification folder or a code repository") takes either kind of
+// folder, so its chooser says so.
+test("the first-run field's chooser is titled for either kind of folder", async () => {
+  const titles: (string | undefined)[] = [];
+  setFolderChooser(async (title) => {
+    titles.push(title);
+    return "/tmp/picked";
+  });
+  const m = matchApi("POST", "/api/choose-folder")!;
+  await m.handler(
+    new Request("http://localhost/api/choose-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose: "folder" }),
+    }),
+    {},
+  );
+  expect(titles).toEqual(["Choose a specification folder or a code repository"]);
+  expect(FOLDER_TITLES.folder).toBe(titles[0]!);
+});

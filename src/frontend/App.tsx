@@ -275,8 +275,16 @@ import {
   parseRecentFolders,
   SpecFoldersDialog,
   type FolderEntry,
+  type FolderKind,
   type SwitchStep,
 } from "./SpecFolders";
+import {
+  parseFolderVerdict,
+  recentKindOf,
+  StartFolderField,
+  startFolderStep,
+  type KindQuestion,
+} from "./StartFolder";
 import { FILES_TAB } from "./files/plugin";
 import { FILES_HOME, type FilesView } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
@@ -1346,7 +1354,13 @@ export function App() {
   // First-run screen (specs/ui/app-start.feature.md): open a folder on this
   // computer, or clone a GitHub repository with a personal access token.
   // Or open a code repository directly (specs/app/code-repo-mode.feature.md).
-  const [startChoice, setStartChoice] = useState<"folder" | "clone" | "code">("folder");
+  const [startChoice, setStartChoice] = useState<"folder" | "clone">("folder");
+  // The first-run field's folder is neither kind by its contents
+  // (src/server/folderKind.ts): the question the screen asks about it.
+  const [kindQuestion, setKindQuestion] = useState<KindQuestion | null>(null);
+  // The recent folder the field was last filled from — its kind is known,
+  // even where the list has the same path as both kinds.
+  const pickedRecent = useRef<FolderEntry | null>(null);
   // Switch spec folder (specs/app/spec-folders.feature.md): while a switch
   // runs, a modal covers the app with the folder being opened and the step
   // it is on; null between switches.
@@ -2540,12 +2554,20 @@ export function App() {
   const putDataRepo = async (
     repo: string,
     asking?: (open: boolean) => void,
+    /** The user called it a specification folder: add `.specdriven` and `specs`. */
+    init = false,
   ): Promise<{ res: Response; state: any } | null> => {
     const put = async (create: boolean) => {
       const res = await fetch("/api/state", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(create ? { dataRepo: repo, createDataRepo: true } : { dataRepo: repo }),
+        // A folder made here starts as a specification folder, with the two
+        // folders that mark one (src/server/folderKind.ts).
+        body: JSON.stringify({
+          dataRepo: repo,
+          ...(create ? { createDataRepo: true } : {}),
+          ...(create || init ? { initSpecFolder: true } : {}),
+        }),
       });
       return { res, state: await res.json() };
     };
@@ -2562,7 +2584,7 @@ export function App() {
     return ok ? put(true) : null;
   };
 
-  const saveRepo = async (repo: string) => {
+  const saveRepo = async (repo: string, init = false) => {
     // Capture the entry url now: once needsRepo flips, the canonical-url
     // effect would rewrite a deep link before we get to honor it
     // (specs/ui/navigation.feature.md "deep link before a data repo is
@@ -2572,7 +2594,7 @@ export function App() {
     setSettingRepo(true);
     setRepoError(null);
     try {
-      const put = await putDataRepo(repo);
+      const put = await putDataRepo(repo, undefined, init);
       if (!put) return;
       const { res, state } = put;
       if (res.ok) {
@@ -2609,7 +2631,7 @@ export function App() {
   // Native OS folder chooser (specs/ui/app-start.feature.md): the server (or
   // the desktop shell) owns the dialog; null means canceled or unavailable.
   const chooseFolderNative = async (
-    purpose: "data-repo" | "code-repo" = "data-repo",
+    purpose: "data-repo" | "code-repo" | "folder" = "data-repo",
   ): Promise<string | null> => {
     const res = await fetch("/api/choose-folder", {
       method: "POST",
@@ -2623,9 +2645,82 @@ export function App() {
 
   // First-run form (specs/ui/app-start.feature.md): the picker fills the path
   // field; the user still confirms with the submit button.
-  const browseIntoRepoInput = async (purpose: "data-repo" | "code-repo" = "data-repo") => {
+  const browseIntoRepoInput = async (purpose: "data-repo" | "folder" = "data-repo") => {
     const picked = await chooseFolderNative(purpose);
-    if (picked && repoInputRef.current) repoInputRef.current.value = picked;
+    if (picked && repoInputRef.current) {
+      repoInputRef.current.value = picked;
+      pickedRecent.current = null;
+      setKindQuestion(null);
+    }
+  };
+
+  /**
+   * The first-run screen's one folder field (specs/ui/app-start.feature.md
+   * "one field opens a specification folder or a code repository"): a
+   * folder opened before opens as the kind it was; any other is told apart
+   * by its contents (src/server/folderKind.ts) — and where they do not say,
+   * the user is asked. `as` is the answer to that question.
+   */
+  const openStartFolder = async (input: string, as?: FolderKind) => {
+    const typed = input.trim();
+    if (!typed) return;
+    const asked = kindQuestion;
+    setKindQuestion(null);
+    if (as && asked) {
+      // The user said which: a specification folder gets its two folders.
+      if (as === "code") await openCodeRepo(asked.path);
+      else await saveRepo(asked.open, true);
+      return;
+    }
+    // Where no code repository can be opened, every folder is a spec folder.
+    if (hosted || demo || !canOpenCodeRepo) return saveRepo(typed);
+    const known = pickedRecent.current?.path === typed ? pickedRecent.current.kind : recentKindOf(recentFolders, typed);
+    if (known === "code") return void (await openCodeRepo(typed));
+    if (known === "spec") return saveRepo(typed);
+    setSettingRepo(true);
+    setRepoError(null);
+    let verdict: ReturnType<typeof parseFolderVerdict> = null;
+    try {
+      const res = await fetch("/api/folder-kind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: typed }),
+      });
+      const body = await res.json().catch(() => null);
+      verdict = res.ok ? parseFolderVerdict(body) : null;
+      if (!verdict) {
+        setRepoError((body as { error?: string } | null)?.error ?? "Could not read this folder");
+        return;
+      }
+    } catch {
+      setRepoError("Could not read this folder — the app did not answer");
+      return;
+    } finally {
+      setSettingRepo(false);
+    }
+    switch (startFolderStep(verdict)) {
+      case "spec":
+        return saveRepo(verdict.open);
+      case "code":
+        return void (await openCodeRepo(verdict.path));
+      case "refuse":
+        setRepoError(`Not a folder: ${verdict.path}`);
+        return;
+      case "ask":
+        setKindQuestion({ open: verdict.open, path: verdict.path, name: verdict.name });
+        return;
+      case "confirm-specs": {
+        const yes = await confirm({
+          title: "Set up a specification folder?",
+          body: `${verdict.name} is empty. Is it a specification folder? Setting it up adds a .specdriven folder and a specs folder inside ${verdict.path}.`,
+          confirmLabel: "Yes, set it up",
+          danger: false,
+        });
+        // A no leaves the folder as it was, and the screen where it is.
+        if (yes) await saveRepo(verdict.open, true);
+        return;
+      }
+    }
   };
 
   // Open another data folder — Manage folders → "Open another folder…"
@@ -8882,6 +8977,8 @@ export function App() {
     );
 
   if (needsRepo) {
+    // The hosted app and the demo keep their single field: a GitHub url on
+    // the one, the pinned dataset on the other.
     const folderForm = (
       <>
         <p>
@@ -8928,9 +9025,9 @@ export function App() {
             e.preventDefault();
             const input = new FormData(e.currentTarget).get("repo") as string;
             if (!input?.trim()) return;
-            // A code repository opens directly (specs/app/code-repo-mode.feature.md).
-            if (startChoice === "code" && !hosted && !demo) void openCodeRepo(input.trim());
-            else saveRepo(input.trim());
+            // One field for both kinds of folder: what is inside says which
+            // (specs/ui/app-start.feature.md).
+            void openStartFolder(input);
           }}
         >
           <h1>SpecDriven</h1>
@@ -8938,9 +9035,9 @@ export function App() {
             folderForm
           ) : (
             <>
-              <p>No spec data directory configured yet. Where are your specs?</p>
-              <div className="issue-filter start-choice" role="radiogroup" aria-label="Where the specs are">
-                {(canOpenCodeRepo ? (["folder", "clone", "code"] as const) : (["folder", "clone"] as const)).map((choice) => (
+              <p>No folder is open yet. Where is your work?</p>
+              <div className="issue-filter start-choice" role="radiogroup" aria-label="Where the folder is">
+                {(["folder", "clone"] as const).map((choice) => (
                   <button
                     key={choice}
                     type="button"
@@ -8950,41 +9047,39 @@ export function App() {
                     onClick={() => {
                       setStartChoice(choice);
                       setRepoError(null);
+                      setKindQuestion(null);
                     }}
                   >
-                    {choice === "folder"
-                      ? "Open a folder on this computer"
-                      : choice === "clone"
-                        ? "Clone from GitHub"
-                        : "A code repository"}
+                    {choice === "folder" ? "Open a folder on this computer" : "Clone from GitHub"}
                   </button>
                 ))}
               </div>
               {startChoice === "folder" ? (
-                folderForm
-              ) : startChoice === "code" && canOpenCodeRepo ? (
-                /* Code repository mode (specs/app/code-repo-mode.feature.md
-                   "Open a code repository"): no specs — the app shows the
-                   repository's files and runs the coding agent there, and
-                   runs no git of its own. */
-                <>
-                  <p>
-                    The folder of a code repository on this computer. The app shows its files and runs
-                    the coding agent there; it never pulls, commits or pushes — git stays yours.
-                  </p>
-                  <div className="input-row">
-                    <input ref={repoInputRef} name="repo" placeholder="/path/to/your/code" autoFocus />
-                    {canChooseFolder && (
-                      <button type="button" className="browse" onClick={() => void browseIntoRepoInput("code-repo")}>
-                        Browse…
-                      </button>
-                    )}
-                  </div>
-                  <button type="submit" className="btn btn-primary" disabled={settingRepo}>
-                    {settingRepo ? "Opening…" : "Open this code repository"}
-                  </button>
-                  {repoError && <p className="error">{repoError}</p>}
-                </>
+                canOpenCodeRepo ? (
+                  /* A specification folder or a code repository, told apart
+                     by what is inside; the folders opened before are a
+                     click away on the field. */
+                  <StartFolderField
+                    inputRef={repoInputRef}
+                    recent={recentFolders}
+                    busy={settingRepo}
+                    error={repoError}
+                    question={kindQuestion}
+                    onPickRecent={(folder) => {
+                      pickedRecent.current = folder;
+                      setKindQuestion(null);
+                      setRepoError(null);
+                    }}
+                    onEdit={() => {
+                      pickedRecent.current = null;
+                      if (kindQuestion) setKindQuestion(null);
+                    }}
+                    onBrowse={canChooseFolder ? () => void browseIntoRepoInput("folder") : undefined}
+                    onAnswer={(kind) => void openStartFolder(kindQuestion?.open ?? "", kind)}
+                  />
+                ) : (
+                  folderForm
+                )
               ) : (
                 <CloneFromGitHub
                   auth={auth}
@@ -9001,6 +9096,9 @@ export function App() {
           )}
           {hostedAccount && <HostedStartNav account={hostedAccount} onSignOut={signOutHosted} />}
         </form>
+        {/* The questions this screen asks — make a missing folder, set up an
+            empty specs- one — are the app's own dialogs. */}
+        {modal}
       </main>
     );
   }
