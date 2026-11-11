@@ -13,8 +13,8 @@ import {
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, redo, undo } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { tags } from "@lezer/highlight";
+import { syntaxHighlighting } from "@codemirror/language";
+import { markdownStyle } from "./editorHighlight";
 import { autocompletion, closeCompletion, startCompletion } from "@codemirror/autocomplete";
 import type { CompletionContext, CompletionResult } from "@codemirror/autocomplete";
 import { atQuery, filterChoices } from "./entityFields";
@@ -78,21 +78,6 @@ interface SourceEditorProps {
    */
   onOpenLink?: (url: string) => void;
 }
-
-// Markdown syntax, in the app's own colours (index.css): headings and links
-// take the accent, the marks around them recede.
-const markdownStyle = HighlightStyle.define([
-  { tag: tags.heading, fontWeight: "700", color: "var(--accent-strong)" },
-  { tag: tags.strong, fontWeight: "700" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strikethrough, textDecoration: "line-through" },
-  { tag: tags.link, color: "var(--accent)" },
-  { tag: tags.url, color: "var(--text-2)" },
-  { tag: tags.monospace, background: "var(--code-bg)", borderRadius: "2px" },
-  { tag: tags.quote, color: "var(--text-2)" },
-  { tag: tags.processingInstruction, color: "var(--text-3)" },
-  { tag: tags.contentSeparator, color: "var(--text-3)" },
-]);
 
 /** Marks every occurrence of the terms in the visible text. */
 function highlightTerms(terms: string[]) {

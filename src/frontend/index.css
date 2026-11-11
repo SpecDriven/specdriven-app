@@ -57,6 +57,18 @@
   --meter-buffer: light-dark(#c9ccd1, #4a4d53);
   --meter-free: light-dark(#ebecee, #2e3034);
 
+  /* Source code in the Files tab's editor (specs/app/code-repo-mode.feature.md
+     "Source files are highlighted by language"): six hues, each at least
+     4.5:1 on the editor's surface and on its active line, in both themes.
+     Keywords take the accent; names, operators and brackets stay --text-1. */
+  --syntax-keyword: var(--accent-strong);
+  --syntax-string: light-dark(#1a7f4b, #6cc594);
+  --syntax-constant: light-dark(#b3541e, #e0975a);
+  --syntax-comment: var(--text-2);
+  --syntax-type: light-dark(#0b7285, #5cc4d6);
+  --syntax-name: light-dark(#1f6fc4, #6aa9f0);
+  --syntax-property: light-dark(#9a3d82, #d58cc4);
+
   /* Elevation: none on panes and cards; popovers medium, dialogs large. */
   --shadow-c1: light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.4));
   --shadow-c2: light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.3));
