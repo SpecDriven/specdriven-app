@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.264 — 2026-11-10
+
+- A worktree session starts from main, level with origin ([#436](https://github.com/SpecDriven/specdriven-app/pull/436))
+
 ## v0.1.263 — 2026-11-10
 
 - Switching folders closes the other folder's coding agent sessions ([#435](https://github.com/SpecDriven/specdriven-app/pull/435))
