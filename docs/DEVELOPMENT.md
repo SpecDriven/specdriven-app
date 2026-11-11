@@ -80,7 +80,9 @@ src/gateway/        hosted multi-user gateway (sign-in, one worker per user)
 specs/              this app's own specifications — a symlink to ../specs-specdriven/specs
 tests/              bun test suite
 scripts/            build.ts (binaries), build-desktop.ts (dmg/AppImage/deb), dev-electron.ts,
-                    bump-version.ts (version, commit, tag), crash-test-desktop.ts
+                    bump-version.ts (version, commit, tag), crash-test-desktop.ts,
+                    test-links.ts + spec-discovery.ts (the Claude Code hooks in
+                    .claude/settings.json that keep specs and code in step)
 docs/               this folder; user guides under docs/user-guide
 ```
 

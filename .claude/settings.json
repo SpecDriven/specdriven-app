@@ -19,6 +19,11 @@
             "type": "command",
             "command": "bun \"$CLAUDE_PROJECT_DIR/scripts/test-links.ts\" --hook stop",
             "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "bun \"$CLAUDE_PROJECT_DIR/scripts/spec-discovery.ts\" --hook stop",
+            "timeout": 60
           }
         ]
       }
