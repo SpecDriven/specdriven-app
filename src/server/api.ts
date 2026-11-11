@@ -51,6 +51,7 @@ import type { SpecDrivenState } from "./state";
 import { upgradeSettingsFile } from "./settingsUpgrade";
 import { onePerRepo, sameRepoAs } from "./sameRepo";
 import { dataRepoDir, ensureDataRepoFolder, MissingDataRepoError, parseGitHubUrl, resolveDataRepo } from "./repo";
+import { folderKind, initSpecFolder } from "./folderKind";
 import { isDemoMode, reseedDemo } from "./demo";
 import { HOSTED_REFUSAL, isHostedMode } from "./hostedMode";
 import { isReadOnlyMode, READ_ONLY_REFUSAL, readOnlyAllows, readOnlySite } from "./readOnlyMode";
@@ -967,6 +968,12 @@ const putState: Handler = async (req) => {
     dataRepo?: string;
     /** Make the picked folder when it does not exist yet — the user agreed. */
     createDataRepo?: boolean;
+    /**
+     * Add `.specdriven` and `specs` to the picked folder — the user said it
+     * is a specification folder (specs/ui/app-start.feature.md "an empty
+     * specs- folder is set up on a yes").
+     */
+    initSpecFolder?: boolean;
     forgetDataRepo?: string;
     /** Open a code repository directly (specs/app/code-repo-mode.feature.md): an absolute path. */
     openCodeRepo?: string;
@@ -1151,6 +1158,10 @@ const putState: Handler = async (req) => {
       // Data a newer app wrote (specs/app/data-format.feature.md) is flagged
       // before anything below writes to it; the pull further down re-checks.
       await checkDataFormat(pickedDir);
+      // A folder the user called a specification folder gets the two
+      // folders that mark one (src/server/folderKind.ts) — a local folder
+      // only: a clone brings its own.
+      if (body.initSpecFolder === true && !parseGitHubUrl(dataRepo)) await initSpecFolder(pickedDir);
     } catch (e) {
       if (e instanceof MissingDataRepoError) {
         return json({ error: e.message, missing: true, path: e.dir }, 404);
@@ -4028,8 +4039,22 @@ const postChooseFolder: Handler = async (req) => {
     return json({ error: "no native folder chooser on this runtime" }, 501);
   }
   const body = (await req.json().catch(() => null)) as { purpose?: unknown } | null;
-  const purpose = body?.purpose === "code-repo" ? "code-repo" : "data-repo";
+  const purpose = body?.purpose === "code-repo" || body?.purpose === "folder" ? body.purpose : "data-repo";
   return json({ path: await chooseFolder(purpose) });
+};
+
+// What kind of folder a path names (src/server/folderKind.ts): the first-run
+// screen's one field asks before it opens the folder as specifications or
+// as code. Reads the folder's top level only, and only where a code
+// repository can be opened at all — the developer's own machine.
+const postFolderKind: Handler = async (req) => {
+  if (isDemoMode() || isReadOnlyMode()) {
+    return json({ error: "folders on this computer cannot be opened here" }, 403);
+  }
+  const body = (await req.json().catch(() => null)) as { path?: unknown } | null;
+  const path = typeof body?.path === "string" ? body.path.trim() : "";
+  if (!path) return json({ error: "path is required" }, 400);
+  return json(await folderKind(path, getAppRoot()));
 };
 
 /**
@@ -4281,6 +4306,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/plugins/:id/update", unlessHosted(market.postUpdate)],
   ["DELETE", "/api/plugins/:id", unlessHosted(market.deletePlugin)],
   ["POST", "/api/choose-folder", unlessHosted(postChooseFolder)],
+  ["POST", "/api/folder-kind", unlessHosted(postFolderKind)],
   ["GET", "/api/confluence/tokens", unlessHosted(getConfluenceTokens)],
   ["POST", "/api/confluence/tokens", unlessHosted(postConfluenceToken)],
   ["DELETE", "/api/confluence/tokens", unlessHosted(deleteConfluenceToken)],
@@ -4414,7 +4440,7 @@ export function matchApi(method: string, pathname: string) {
  * none of them writes to the data repo. The data viewer reads the store's
  * bytes as they are, migrating nothing, so it is exactly what helps then.
  */
-const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|logs|auth|data)(\/|$)/;
+const OUTDATED_ALLOWED = /^\/api\/(state|reload|choose-folder|folder-kind|logs|auth|data)(\/|$)/;
 
 /** Serve an API request, or null when the path is not an API route. */
 export async function handleApi(req: Request): Promise<Response | null> {

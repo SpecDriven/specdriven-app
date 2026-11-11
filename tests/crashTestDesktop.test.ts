@@ -28,7 +28,7 @@ const cleanRun = (overrides: Partial<RunResult> = {}): RunResult => ({
   rendererCrashed: false,
   mainWatched: true,
   mainExceptions: [],
-  screen: "SpecDriven No spec data directory configured yet.",
+  screen: "SpecDriven No folder is open yet. Where is your work?",
   link: null,
   entry: "app://specdriven/",
   findings: [],
