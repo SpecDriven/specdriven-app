@@ -241,8 +241,9 @@ export type ChatEventBody =
       tools?: string[];
       commands?: SlashCommandInfo[];
     }
-  /** What the pane sent — echoed from the request, never from a replay. */
-  | { kind: "user"; id: string; text: string; images?: ChatImage[] }
+  /** What the pane sent — echoed from the request, never from a replay.
+      `refs` are the files that went with it, as the agent was told them. */
+  | { kind: "user"; id: string; text: string; images?: ChatImage[]; refs?: string[] }
   | { kind: "text_delta"; messageId: string; index: number; text: string }
   | {
       kind: "assistant";

@@ -672,3 +672,78 @@ test("a saved wiki token hands the provider the Confluence MCP server; none, not
     setConfluenceTokenBackend(createConfluenceFileBackend());
   }
 });
+
+// specs/agents/agent-pane.feature.md "The open feature or file goes with a
+// message": the pane names files relative to the open folder; the agent is
+// told them relative to where it works.
+// (Imported here, not at the top: the specs link to this file's tests by line.)
+import { MAX_REFS, checkRefs, resolveRefs, withRefs } from "../src/server/agent";
+
+test("a file is named relative to the agent's folder, or in full outside it", () => {
+  const session = { cwd: "/w/code" };
+  expect(resolveRefs(["src/a.ts"], "/w/code", session)).toEqual(["src/a.ts"]);
+  // A spec, while the session runs in the code repo.
+  expect(resolveRefs(["specs/quote.feature.md"], "/w/data", session)).toEqual(["/w/data/specs/quote.feature.md"]);
+  // A session in a subfolder: files beside it are outside its folder.
+  expect(resolveRefs(["pkg/a.ts", "other/b.ts"], "/w/code", { cwd: "/w/code/pkg" })).toEqual(["a.ts", "/w/code/other/b.ts"]);
+  // A worktree session is told its own copy of the file.
+  const worktree = { repo: "/w/code", path: "/wt/s1" };
+  expect(resolveRefs(["src/a.ts"], "/w/code", { cwd: "/wt/s1", worktree })).toEqual(["src/a.ts"]);
+  expect(resolveRefs(["specs/q.feature.md"], "/w/data", { cwd: "/wt/s1", worktree })).toEqual(["/w/data/specs/q.feature.md"]);
+});
+
+test("the files follow the user's words in one line; a /command goes as it is", () => {
+  expect(withRefs("Fix it", ["src/a.ts"])).toBe("Fix it\n\n[Context — file open in SpecDriven: src/a.ts]");
+  expect(withRefs("Fix it", ["a.ts", "/w/b.md"])).toBe("Fix it\n\n[Context — files open in SpecDriven: a.ts, /w/b.md]");
+  expect(withRefs("", ["a.ts"])).toBe("[Context — file open in SpecDriven: a.ts]");
+  expect(withRefs("Fix it", [])).toBe("Fix it");
+  expect(withRefs("/compact now", ["a.ts"])).toBe("/compact now");
+});
+
+test("only paths inside the open folder are taken", () => {
+  expect(checkRefs(undefined)).toEqual([]);
+  expect(checkRefs(["specs/a.feature.md", " src\\b.ts ", "specs/a.feature.md"])).toEqual(["specs/a.feature.md", "src/b.ts"]);
+  expect(checkRefs("specs/a.md")).toBe(`refs must be a list of at most ${MAX_REFS} paths`);
+  expect(checkRefs(Array.from({ length: MAX_REFS + 1 }, (_, i) => `f${i}`))).toBe(`refs must be a list of at most ${MAX_REFS} paths`);
+  expect(checkRefs([7])).toBe("refs must be file paths");
+  expect(checkRefs(["a\nb"])).toBe("refs must be file paths");
+  expect(checkRefs(["/etc/passwd"])).toBe("refs must be paths inside the open folder");
+  expect(checkRefs(["specs/../../secret"])).toBe("refs must be paths inside the open folder");
+  expect(checkRefs(["C:\\secret"])).toBe("refs must be paths inside the open folder");
+});
+
+test("a message's files are shown under it and told to the agent", async () => {
+  const fake = register();
+  // The first message starts the session with them.
+  const res = await api("/api/agent/chat", "POST", { name: "chat", agent: fake.provider.id, prompt: "Start", refs: ["specs/quote.feature.md"] });
+  const { id } = (await res.json()) as ChatSessionMeta;
+  const session = fake.sessions.at(-1)!;
+  await untilStatus(id, "running");
+  expect(session.opts.prompt).toBe("Start\n\n[Context — file open in SpecDriven: specs/quote.feature.md]");
+  const first = getChatEvents(id).find((e) => e.kind === "user");
+  expect(first).toMatchObject({ text: "Start", refs: ["specs/quote.feature.md"] });
+  session.host.turnEnded();
+  await untilStatus(id, "idle");
+
+  const sent = await api(`/api/agent/chat/${id}/message`, "POST", { text: "Next", refs: ["specs/quote.feature.md", "roadmap/plan.md"] });
+  expect(sent.status).toBe(200);
+  expect(session.sent.at(-1)).toBe("Next\n\n[Context — files open in SpecDriven: specs/quote.feature.md, roadmap/plan.md]");
+  const { event } = (await sent.json()) as { event: ChatEvent };
+  expect(event).toMatchObject({ kind: "user", text: "Next", refs: ["specs/quote.feature.md", "roadmap/plan.md"] });
+  session.host.turnEnded();
+  await untilStatus(id, "idle");
+
+  // A command is the agent's to parse: nothing is added, nothing is shown.
+  const command = await api(`/api/agent/chat/${id}/message`, "POST", { text: "/compact", refs: ["specs/quote.feature.md"] });
+  expect(session.sent.at(-1)).toBe("/compact");
+  expect(((await command.json()) as { event: ChatEvent }).event).not.toHaveProperty("refs");
+  session.host.turnEnded();
+  await untilStatus(id, "idle");
+
+  // A path that leaves the open folder is refused, and no turn starts.
+  const refused = await api(`/api/agent/chat/${id}/message`, "POST", { text: "x", refs: ["../other/secret"] });
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toEqual({ error: "refs must be paths inside the open folder" });
+  expect((await api("/api/agent/chat", "POST", { name: "x", agent: fake.provider.id, refs: ["/abs"] })).status).toBe(400);
+  expect(session.sent.at(-1)).toBe("/compact");
+});

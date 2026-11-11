@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { sessionWorkDir } from "./agent";
+import { resolveRefs, sessionWorkDir, withRefs } from "./agent";
 import { agentMcpServers } from "./agentMcp";
 import { cleanUpWorktree, createWorktree, discardWorktree, WorktreeError } from "./agentWorktree";
 import type { WorktreeCleanup } from "./agentWorktree";
@@ -441,6 +441,19 @@ export function getChatImage(id: string, imageId: string): { path: string; media
 
 // --- Starting one -----------------------------------------------------------
 
+/** The files that go with a message: paths relative to `root`, the folder
+    open in the app (src/server/agent.ts checkRefs, resolveRefs). */
+export interface MessageRefs {
+  root: string;
+  paths: string[];
+}
+
+/** Those files as this session's agent is told them; none for a `/command`. */
+function refsFor(meta: Pick<ChatSessionMeta, "cwd" | "worktree">, text: string, refs?: MessageRefs): string[] {
+  if (!refs || refs.paths.length === 0 || text.trimStart().startsWith("/")) return [];
+  return resolveRefs(refs.paths, refs.root, meta);
+}
+
 export interface CreateChatOptions {
   place: SessionPlace;
   name: string;
@@ -450,6 +463,8 @@ export interface CreateChatOptions {
   prompt?: string;
   /** Pasted with the first message (checkImages has looked at them). */
   images?: ImageUpload[];
+  /** The files that go with the first message (checkRefs has looked at them). */
+  refs?: MessageRefs;
   permissionMode?: PermissionMode;
   /** The model to start on; absent, the agent's default. */
   model?: string;
@@ -528,6 +543,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     throw new ChatError(500, `Could not keep the pasted images: ${(e as Error).message}`);
   }
   const firstTurn = Boolean(opts.prompt) || pasted.given.length > 0;
+  const firstRefs = firstTurn ? refsFor({ cwd, ...(worktree ? { worktree } : {}) }, opts.prompt ?? "", opts.refs) : [];
   const session: ChatSession = {
     meta: {
       id,
@@ -565,7 +581,13 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     session.busy = true;
     emit(
       session,
-      { kind: "user", id: randomUUID(), text: opts.prompt ?? "", ...(pasted.shown.length ? { images: pasted.shown } : {}) },
+      {
+        kind: "user",
+        id: randomUUID(),
+        text: opts.prompt ?? "",
+        ...(pasted.shown.length ? { images: pasted.shown } : {}),
+        ...(firstRefs.length ? { refs: firstRefs } : {}),
+      },
       now,
     );
   }
@@ -581,7 +603,7 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
       permissionMode,
       ...(opts.model ? { model: opts.model } : {}),
       ...(effort ? { effort } : {}),
-      ...(firstTurn ? { prompt: opts.prompt ?? "" } : {}),
+      ...(firstTurn ? { prompt: withRefs(opts.prompt ?? "", firstRefs) } : {}),
       ...(pasted.given.length ? { images: pasted.given } : {}),
       ...(mcpServers.length ? { mcpServers } : {}),
       signal: session.abort.signal,
@@ -646,7 +668,7 @@ function checkSendable(session: ChatSession): asserts session is ChatSession & {
  * the images pasted into it (specs/agents/agent-pane.feature.md "Paste an
  * image into the message"). Text may be empty when images came.
  */
-export async function sendChatMessage(id: string, text: string, images?: unknown): Promise<ChatEvent> {
+export async function sendChatMessage(id: string, text: string, images?: unknown, refs?: MessageRefs): Promise<ChatEvent> {
   const session = get(id);
   const trimmed = text.trim();
   const uploads = checkImages(images);
@@ -664,14 +686,19 @@ export async function sendChatMessage(id: string, text: string, images?: unknown
   for (const [imageId, kept] of pasted.kept) session.images.set(imageId, kept);
   session.turn += 1;
   session.busy = true;
+  // The files that go with it: shown under the message, and told to the
+  // agent in a line after the user's words.
+  const paths = refsFor(session.meta, trimmed, refs);
   const event = emit(session, {
     kind: "user",
     id: randomUUID(),
     text: trimmed,
     ...(pasted.shown.length ? { images: pasted.shown } : {}),
+    ...(paths.length ? { refs: paths } : {}),
   });
   if (session.meta.status === "idle") setStatus(session, "running");
-  const sent = pasted.given.length ? session.session.send(trimmed, pasted.given) : session.session.send(trimmed);
+  const told = withRefs(trimmed, paths);
+  const sent = pasted.given.length ? session.session.send(told, pasted.given) : session.session.send(told);
   sent.catch((e: Error) => {
     // The turn never started: say so, and give the composer back.
     if (isFinalStatus(session.meta.status)) return;

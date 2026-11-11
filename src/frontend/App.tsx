@@ -278,7 +278,7 @@ import {
   type SwitchStep,
 } from "./SpecFolders";
 import { FILES_TAB } from "./files/plugin";
-import { FILES_HOME } from "./files/route";
+import { FILES_HOME, type FilesView } from "./files/route";
 import { CloneFromGitHub, GITHUB_HOST, PasteToken, TokenSignInDialog } from "./GitHubToken";
 import { SettingsFileDialog, type SettingsFile } from "./SettingsFileDialog";
 import { accessShown, GitAccessChoice, type GitAccess } from "./GitAccessChoice";
@@ -13268,6 +13268,18 @@ export function App() {
           confirm={confirm}
           ghostty={ghosttyOn && !demo && !hosted}
           codeRepoOpen={codeRepoDir !== null}
+          // What the main pane shows goes with a message by default: the
+          // open feature, or the Files tab's file (both relative to the
+          // open folder). A plugin's other views and the app's pages name none.
+          current={
+            pluginView
+              ? pluginView.tab === FILES_TAB
+                ? (pluginView.view as FilesView).path
+                : null
+              : appPage
+                ? null
+                : selected
+          }
           browseFolder={canChooseFolder ? () => chooseFolderNative(codeRepoDir !== null ? "code-repo" : "data-repo") : undefined}
           onClose={() => agentChat.closePane()}
           onOpenPlugins={(wanted) => {

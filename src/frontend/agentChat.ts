@@ -105,7 +105,7 @@ export interface Question {
 }
 
 export type TranscriptItem =
-  | { kind: "user"; id: string; text: string; at: string; images?: ChatImage[] }
+  | { kind: "user"; id: string; text: string; at: string; images?: ChatImage[]; refs?: string[] }
   | {
       kind: "assistant";
       id: string;
@@ -214,6 +214,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
         text: ev.text,
         at: ev.at,
         ...(ev.images?.length ? { images: ev.images } : {}),
+        ...(ev.refs?.length ? { refs: ev.refs } : {}),
       });
     case "text_delta": {
       const id = `a:${ev.messageId}`;
@@ -410,6 +411,102 @@ export function applyCommand(command: SlashCommandInfo): string {
   return `/${command.name} `;
 }
 
+/**
+ * The commands the pane answers itself, never the agent
+ * (specs/agents/agent-pane.feature.md "/help lists the commands").
+ */
+export const LOCAL_COMMANDS: SlashCommandInfo[] = [
+  { name: "help", description: "List the available commands", argumentHint: "" },
+];
+
+/** The pane's own commands, then the agent's — one row a name, the agent's
+    description winning (the pane still answers it). */
+export function withLocalCommands(commands: SlashCommandInfo[]): SlashCommandInfo[] {
+  const named = new Set(commands.map((c) => c.name.toLowerCase()));
+  return [...LOCAL_COMMANDS.filter((c) => !named.has(c.name.toLowerCase())), ...commands];
+}
+
+/** Whether a message is the pane's own `/help`, to be answered here. */
+export function isHelpCommand(text: string): boolean {
+  return /^\/help\s*$/i.test(text.trim());
+}
+
+// --- Prompt history ----------------------------------------------------------
+
+export const HISTORY_LIMIT = 100;
+
+/** A sent message added to the history, oldest first: blank ones and a
+    repeat of the last one are not kept, and the oldest fall off the cap. */
+export function addToHistory(entries: readonly string[], text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed || entries[entries.length - 1] === trimmed) return [...entries];
+  return [...entries, trimmed].slice(-HISTORY_LIMIT);
+}
+
+/** Where the composer stands in the history: `index` null is the unsent
+    draft, and `stash` is that draft, kept while an older message shows. */
+export interface HistoryCursor {
+  index: number | null;
+  stash: string;
+}
+
+export const HISTORY_START: HistoryCursor = { index: null, stash: "" };
+
+/**
+ * One Up or Down in the message box (specs/agents/agent-pane.feature.md
+ * "Up and Down recall sent messages"): Up shows the message before the one
+ * showing, Down the one after and, past the newest, the draft that was
+ * there. Null when there is nowhere to go.
+ */
+export function historyStep(
+  entries: readonly string[],
+  cursor: HistoryCursor,
+  direction: "up" | "down",
+  draft: string,
+): { cursor: HistoryCursor; draft: string } | null {
+  if (direction === "up") {
+    const index = cursor.index === null ? entries.length - 1 : cursor.index - 1;
+    if (index < 0) return null;
+    return { cursor: { index, stash: cursor.index === null ? draft : cursor.stash }, draft: entries[index]! };
+  }
+  if (cursor.index === null) return null;
+  const index = cursor.index + 1;
+  if (index >= entries.length) return { cursor: HISTORY_START, draft: cursor.stash };
+  return { cursor: { index, stash: cursor.stash }, draft: entries[index]! };
+}
+
+// --- Context references ------------------------------------------------------
+
+/** What the pane keeps about the files that go with a message: whether the
+    open feature or file is one of them, and the ones pinned to stay. */
+export interface RefState {
+  follow: boolean;
+  pinned: string[];
+}
+
+/** A file's name, for its chip: `specs/billing/quotes.feature.md` -> `quotes`. */
+export function refLabel(path: string): string {
+  const base = path.split("/").pop() ?? path;
+  return base.replace(/\.feature\.md$/, "") || path;
+}
+
+/**
+ * The files that go with the next message (specs/agents/agent-pane.feature.md
+ * "The open feature or file goes with a message"): the pinned ones, then the
+ * open one while it is followed — once, and marked as the automatic one.
+ * `offer` is the open file when it is not going, so the row can offer it.
+ */
+export function composeRefs(
+  current: string | null,
+  state: RefState,
+): { refs: { path: string; auto: boolean }[]; offer: string | null } {
+  const pinned = [...new Set(state.pinned)];
+  const isPinned = current !== null && pinned.includes(current);
+  const refs = pinned.map((path) => ({ path, auto: false }));
+  if (current !== null && state.follow && !isPinned) refs.push({ path: current, auto: true });
+  return { refs, offer: current !== null && !state.follow && !isPinned ? current : null };
+}
+
 // --- Geometry --------------------------------------------------------------
 
 // Wide enough for the composer bar's one row — folder, model, effort, mode
@@ -526,6 +623,8 @@ const WIDTH_KEY = "sd-agent-width";
 const OPEN_KEY = "sd-agent-open";
 const ACTIVE_KEY = "sd-agent-session";
 const WORKTREE_KEY = "sd-agent-worktree";
+const HISTORY_KEY = "sd-agent-history";
+const FOLLOW_KEY = "sd-agent-follow";
 
 function readLocal(key: string): string | null {
   try {
@@ -561,6 +660,33 @@ export function readAgentWorktree(): boolean {
 
 export function writeAgentWorktree(on: boolean): void {
   writeLocal(WORKTREE_KEY, on ? "1" : null);
+}
+
+/** The messages sent from this device, oldest first — one list for every
+    session, like a shell's. */
+export function readPromptHistory(): string[] {
+  try {
+    const list: unknown = JSON.parse(readLocal(HISTORY_KEY) ?? "[]");
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string").slice(-HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Keep a sent message for Up to recall; the list as it now stands. */
+export function pushPromptHistory(text: string): string[] {
+  const next = addToHistory(readPromptHistory(), text);
+  writeLocal(HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
+/** Whether the open feature or file goes with a message: on until removed. */
+export function readAgentFollow(): boolean {
+  return readLocal(FOLLOW_KEY) !== "0";
+}
+
+export function writeAgentFollow(on: boolean): void {
+  writeLocal(FOLLOW_KEY, on ? null : "0");
 }
 
 // --- Worktrees (specs/agents/agent-pane.feature.md "A session can run in
@@ -918,6 +1044,8 @@ export interface CreateSessionOptions {
   prompt?: string;
   /** Images pasted with the first message. */
   images?: ImageUpload[];
+  /** The files that go with the first message, relative to the open folder. */
+  refs?: string[];
   permissionMode?: PermissionMode;
   /** The folder to work in; absent is the code repo, else the data repo. */
   cwd?: string;
@@ -1048,10 +1176,10 @@ export const agentChat = {
       writeLocal(ACTIVE_KEY, pick.id);
     }
   },
-  async send(id: string, text: string, images: ImageUpload[] = []): Promise<void> {
+  async send(id: string, text: string, images: ImageUpload[] = [], refs: string[] = []): Promise<void> {
     await call(`/api/agent/chat/${id}/message`, {
       method: "POST",
-      body: JSON.stringify(images.length ? { text, images } : { text }),
+      body: JSON.stringify({ text, ...(images.length ? { images } : {}), ...(refs.length ? { refs } : {}) }),
     });
   },
   async answer(
