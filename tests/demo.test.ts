@@ -314,6 +314,7 @@ test("GitHub sign-in routes refuse in demo mode", async () => {
     ["POST", "/api/auth/github/web/poll"],
     ["GET", "/api/auth/github/callback"],
     ["DELETE", "/api/auth/github"],
+    ["POST", "/api/logout"],
   ] as const) {
     const res = await api(path, { method });
     expect(res.status).toBe(403);

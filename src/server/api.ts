@@ -2384,6 +2384,23 @@ const deleteAuth: Handler = async () => {
   return json({ message: "signed out" });
 };
 
+// Log out (specs/app/user-info-settings.feature.md "log out from the user
+// menu"): the app forgets its GitHub token and closes the open folder, so
+// it — and a reload — opens on the first-run screen. What was saved is
+// pushed first, while the sign-in still stands. The folder lists stay, and
+// so does the GitHub CLI's own sign-in, a Git access of its own.
+const postLogout: Handler = async () => {
+  const dir = await currentDataDir();
+  if (dir) await syncTick(() => syncDataDir(dir));
+  await signOut();
+  const state = await readState(getAppRoot());
+  delete state.dataRepo;
+  delete state.openCodeRepo;
+  await writeState(state, getAppRoot());
+  await applyNetSync(state);
+  return json(await stateFields(state));
+};
+
 // Browser sign-in (git-operations.md "connect to GitHub via the
 // browser"): start hands back the GitHub authorize url for the browser;
 // GitHub redirects to the callback below; the Settings dialog polls until
@@ -4302,6 +4319,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/auth/github/callback", unlessHosted(unlessDemo(getAuthWebCallback))],
   ["POST", "/api/auth/github/token", unlessHosted(unlessDemo(postAuthToken))],
   ["DELETE", "/api/auth/github", unlessHosted(unlessDemo(deleteAuth))],
+  ["POST", "/api/logout", unlessHosted(unlessDemo(postLogout))],
   ["GET", "/api/features", getFeatures],
   ["POST", "/api/features", postFeatures],
   ["GET", "/api/images", getImages],
