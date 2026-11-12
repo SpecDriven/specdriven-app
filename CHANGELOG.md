@@ -4,6 +4,14 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.267 — 2026-11-12
+
+- Code repository mode highlights .cxml files as XML ([#443](https://github.com/SpecDriven/specdriven-app/pull/443))
+- Code repository mode: Git Pull in the navigation pane, and the coding agent asks to pull a branch behind origin ([#442](https://github.com/SpecDriven/specdriven-app/pull/442))
+- Code repository mode highlights XML files ([#441](https://github.com/SpecDriven/specdriven-app/pull/441))
+- The agent pane's footer shows the folder's branch and stays one usable row ([#440](https://github.com/SpecDriven/specdriven-app/pull/440))
+- Add prune-branches script: delete local branches older than N days ([#439](https://github.com/SpecDriven/specdriven-app/pull/439))
+
 ## v0.1.266 — 2026-11-12
 
 - Code repository mode finds files by name and searches their text ([#438](https://github.com/SpecDriven/specdriven-app/pull/438))
