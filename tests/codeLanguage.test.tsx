@@ -45,6 +45,17 @@ test("a file's extension picks its language, whatever its case or folder", () =>
     "compose.yaml": "yaml",
     "package.json": "json",
     ".vscode/settings.jsonc": "json",
+    "pom.xml": "xml",
+    "src/main/resources/LOGBACK.XML": "xml",
+    "schema/order.xsd": "xml",
+    "a.xsl": "xml",
+    "a.xslt": "xml",
+    "page.xhtml": "xml",
+    "icons/logo.svg": "xml",
+    "api/service.wsdl": "xml",
+    "Info.plist": "xml",
+    "app.iml": "xml",
+    "ui/main.fxml": "xml",
     "README.md": "markdown",
     "docs/x.MARKDOWN": "markdown",
   };
@@ -74,6 +85,16 @@ test("a script with no extension is the language its first line runs it with", (
   expect(languageOf("bin/x", "#!/usr/bin/env\n")).toBe(null);
   expect(languageOf("bin/x", "echo hi\n#!/bin/bash\n")).toBe(null);
   expect(languageOf("notes.txt", "#!/bin/bash\n")).toBe(null);
+});
+
+test("a file with no extension that opens with an XML declaration is XML", () => {
+  expect(languageOf("config/settings", '<?xml version="1.0" encoding="UTF-8"?>\n<a/>\n')).toBe("xml");
+  expect(languageOf("config/settings", "\uFEFF<?xml version='1.0'?><a/>")).toBe("xml");
+  // Only a declaration on the very first line, and never against an extension.
+  expect(languageOf("config/settings", "<a/>\n")).toBe(null);
+  expect(languageOf("config/settings", '\n<?xml version="1.0"?>')).toBe(null);
+  expect(languageOf("config/settings", "<?xmlfoo?>")).toBe(null);
+  expect(languageOf("notes.txt", '<?xml version="1.0"?>\n')).toBe(null);
 });
 
 // --- What each grammar paints ---------------------------------------------------
@@ -223,6 +244,20 @@ const SAMPLES: { path: string; text: string; expected: [string, string][] }[] = 
       ["1", "--syntax-constant"],
       ["true", "--syntax-constant"],
       ["null", "--syntax-constant"],
+    ],
+  },
+  {
+    path: "pom.xml",
+    text: '<?xml version="1.0"?>\n<!-- build -->\n<project xmlns="urn:x">\n  <name>a &amp; b</name>\n  <![CDATA[raw]]>\n</project>\n',
+    expected: [
+      ['<?xml version="1.0"?>', "--syntax-comment"],
+      ["<!-- build -->", "--syntax-comment"],
+      ["project", "--syntax-type"],
+      ["xmlns", "--syntax-property"],
+      ['"urn:x"', "--syntax-string"],
+      ["name", "--syntax-type"],
+      ["&amp;", "--syntax-string"],
+      ["<![CDATA[raw]]>", "--syntax-string"],
     ],
   },
 ];
