@@ -51,6 +51,7 @@ import {
   defaultSessionName,
   describeAgent,
   filterCommands,
+  folderBranch,
   formatCost,
   formatDuration,
   hasModes,
@@ -886,6 +887,24 @@ function FolderPicker({
 }
 
 /**
+ * The branch the folder has checked out, between the folder and the Worktree
+ * box (specs/agents/agent-pane.feature.md "Footer cmponents"): a fact, not a
+ * menu. Nothing for a folder that is in no git repo, or while that is asked.
+ */
+function FolderBranch({ info }: { info: FolderGitInfo | null }) {
+  const branch = folderBranch(info);
+  if (!branch) return null;
+  return (
+    <Tooltip label={branch.tooltip}>
+      <span className="agent-bar-fact agent-bar-branch" aria-label={`Branch: ${branch.name}`} tabIndex={0}>
+        <GitBranch size={12} aria-hidden="true" />
+        <span className="agent-bar-chip-text">{branch.name}</span>
+      </span>
+    </Tooltip>
+  );
+}
+
+/**
  * The Worktree checkbox beside the folder on the new-session screen, as in
  * Claude Desktop: checked, the session gets a git worktree of its own on a
  * new branch. Greyed out, with the reason, where the folder cannot have one.
@@ -1255,6 +1274,7 @@ function EmptyState({
           onSelect={setFolder}
         />
       )}
+      {workDir && <FolderBranch info={folderInfo} />}
       {workDir && (
         <WorktreeToggle
           checked={worktree}
@@ -2185,6 +2205,10 @@ function Composer({
             ? `Answer ${who}'s request above`
             : "This session has ended — start a new one from the session menu";
   const shown = sessionFolder(meta);
+  // A session in the folder itself names the branch the folder has checked
+  // out, read again as its status changes: a turn may have switched it. A
+  // worktree session names its own branch, which never changes.
+  const folderInfo = useFolderInfo(meta.worktree ? null : meta.cwd, status);
   const left = (
     <>
       <FolderPicker
@@ -2213,11 +2237,13 @@ function Composer({
             .catch(fail);
         }}
       />
-      {meta.worktree && (
+      {meta.worktree ? (
         <WorktreeBranch
           worktree={meta.worktree}
           onOpenShell={ghostty ? () => void agentChat.openInGhostty(id).catch(fail) : undefined}
         />
+      ) : (
+        <FolderBranch info={folderInfo} />
       )}
     </>
   );

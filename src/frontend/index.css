@@ -8375,72 +8375,94 @@ button.agent-ref-offer:hover {
   color: var(--text-2);
 }
 
-/* Folder (and the agent, before a session) on the left; model, effort and
-   mode on the right; Send last — always one row, as in Claude Desktop. A
-   narrow pane shortens the folder's name instead of wrapping; the model,
-   effort and mode keep theirs whole, down to a phone, where they shorten
-   too. Send never does. */
+/* The folder, its branch and the Worktree box (and the agent, before a
+   session) on the left; model, effort and mode on the right; Send last —
+   always one row, as in Claude Desktop. The two sides are groups for a
+   reader, not boxes: the bar lays out every chip itself, so what gives way
+   as the row runs short is decided chip by chip and no chip is ever pushed
+   over its neighbour (specs/agents/agent-pane.feature.md "Footer
+   cmponents"). A row that runs short first drops what it can do without,
+   step by step (below); then the folder's and the branch's names shorten;
+   the model, effort and mode keep theirs whole, giving way only once those
+   two are down to a few letters. Send never does. */
 .agent-bar {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.15rem;
   min-width: 0;
   padding: 0.2rem 0.3rem 0.3rem;
 }
 
 .agent-bar-side {
-  display: flex;
-  flex: 0 1 auto;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 0.15rem;
-  min-width: 0;
+  display: contents;
 }
 
-/* Model, effort, mode and Send keep together at the right edge, never
-   narrower than their names: min-content, because a side that may shrink
-   at all hands its chips a fraction of a pixel less than their text and
-   every name then ends in an ellipsis. */
-.agent-bar-right {
-  justify-content: flex-end;
-  min-width: min-content;
-  margin-left: auto;
+/* What is left of the row lies between the two sides, never less than the
+   breath that tells them apart. */
+.agent-bar-right::before {
+  content: "";
+  flex: 1 0 0.2rem;
 }
 
-/* On the left only the folder gives way; the agent keeps its name. */
-.agent-bar-picker[data-picker="agent"] {
-  min-width: min-content;
-}
-
-/* A tight box drops the chevrons first; a phone-wide one lets every name
-   shorten, so Send stays in the box. */
-@container agent-composer (max-width: 32rem) {
+/* What a narrowing box drops, in this order, before a name is cut short:
+   the chevrons; the word beside the Worktree box (a branch icon stands in,
+   further down); the agent's name (its icon stays, and the heading above
+   names it); and, on the new-session screen, the folder's branch — there
+   the Worktree box needs the room, and its tooltip names the branch — with
+   the chips set closer together; and last the folder's icon (both further
+   down). The steps are set so that, with two agents and long names, the
+   folder and the branch keep over half their letters just above each one,
+   and at the pane's narrowest (420px) the folder still shows a few with
+   every other name whole. */
+@container agent-composer (max-width: 44rem) {
   .agent-bar-chevron {
     display: none;
   }
 }
 
-@container agent-composer (max-width: 22rem) {
-  .agent-bar-right,
-  .agent-bar-picker[data-picker="agent"] {
-    min-width: 0;
+@container agent-composer (max-width: 35rem) {
+  .agent-bar-picker[data-picker="agent"] .agent-bar-chip-text {
+    display: none;
+  }
+}
+
+@container agent-composer (max-width: 31rem) {
+  .agent-bar-side:has(.agent-bar-check) .agent-bar-branch {
+    display: none;
   }
 }
 
 /* Static, so a chip's menu hangs off the whole composer, as the "/" popup
    does: a chip sits anywhere in the bar, and a menu anchored to it would run
-   past the pane's edge. */
+   past the pane's edge.
+
+   Which names give way, and in what order, is set by shrink weights a
+   million apart: the folder and the branch first, then the model, then the
+   effort and the mode. The gap is that wide because a chip handed even a
+   sixty-fourth of a pixel less than its name ends it in an ellipsis: the
+   model's share of what the folder gives up has to round to nothing while
+   the folder still has letters to give. A cut-down chip still shows its
+   icon and a few letters, never an empty box. */
 .agent-bar-picker {
   display: inline-flex;
   flex: 0 1 auto;
-  /* A cut-down chip still shows a few letters (the icon too, where it has
-     one) — never shrinks to an empty box. */
-  min-width: 2.5rem;
+  min-width: 2rem;
+}
+
+.agent-bar-picker[data-picker="agent"] {
+  flex: none;
+  min-width: 0;
 }
 
 .agent-bar-picker[data-picker="folder"] {
+  flex: 0 1e12 auto;
   min-width: 3.5rem;
+}
+
+.agent-bar-picker[data-picker="model"] {
+  flex: 0 1e6 auto;
+  min-width: 4.5rem;
 }
 
 .agent-bar-chip {
@@ -8488,6 +8510,17 @@ button.agent-ref-offer:hover {
   font-family: var(--font-mono);
 }
 
+/* The folder's name and the branch's are cut off at about the width of the
+   other chips, so a long one never takes more of the row than they do
+   (specs/agents/agent-pane.feature.md "Footer cmponents"); the tooltip has
+   it whole. The cap is on the name, not on its chip: a chip capped itself
+   would count its whole name when the row shares out what to give up, and
+   the chip beside it would be squeezed in its place. */
+.agent-bar-picker[data-picker="folder"] .agent-bar-chip-text,
+.agent-bar-branch .agent-bar-chip-text {
+  max-width: 8.5rem;
+}
+
 .agent-bar-chevron {
   flex: none;
   color: var(--text-3);
@@ -8495,6 +8528,7 @@ button.agent-ref-offer:hover {
 
 /* A fact the bar cannot change: a model the agent reports, no gate. */
 .agent-bar-fact {
+  flex: 0 1 auto;
   min-width: 3ch;
   padding: 0 0.4rem;
   overflow: hidden;
@@ -8544,7 +8578,7 @@ button.agent-ref-offer:hover {
   flex: none;
 }
 
-@container agent-composer (max-width: 28rem) {
+@container agent-composer (max-width: 38rem) {
   .agent-bar-check-text {
     display: none;
   }
@@ -8554,11 +8588,14 @@ button.agent-ref-offer:hover {
   }
 }
 
-/* A worktree session's branch: shortened first, like the folder, and only
-   as the bar runs out of room: no cap, so a wide pane shows all of it. */
+/* The branch beside the folder — the one the folder has checked out, or a
+   worktree session's own: shortened first, like the folder and as readily,
+   with its name capped like the folder's (above). With "Open worktrees in
+   Ghostty" on, a worktree session's branch is a button that opens a shell
+   in the worktree: a chip's hover and focus. */
 .agent-bar-branch {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 0 1e12 auto;
   align-items: center;
   gap: 0.3rem;
   min-width: 2.5rem;
@@ -8569,10 +8606,30 @@ button.agent-ref-offer:hover {
   flex: none;
 }
 
-/* With "Open worktrees in Ghostty" on, the branch is a button that opens a
-   shell in the worktree: a chip's hover and focus, still uncapped. */
-.agent-bar-chip.agent-bar-branch {
-  max-width: none;
+/* The tightest box also sets its chips closer together, which leaves the
+   folder's name a few more letters. */
+@container agent-composer (max-width: 31rem) {
+  .agent-bar-chip,
+  .agent-bar-fact,
+  .agent-bar-check {
+    padding-inline: 0.25rem;
+  }
+}
+
+/* At the pane's narrowest the folder gives up its icon for letters: its
+   name is the one in the code font, and its tooltip the path. */
+@container agent-composer (max-width: 25rem) {
+  .agent-bar-picker[data-picker="folder"] .agent-bar-chip > svg:not(.agent-bar-chevron) {
+    display: none;
+  }
+}
+
+/* A phone-wide box: the model's name may shorten as far as the others,
+   so Send stays in the box. */
+@container agent-composer (max-width: 22rem) {
+  .agent-bar-picker[data-picker="model"] {
+    min-width: 2.5rem;
+  }
 }
 
 /* The bar sits at the bottom of the pane: its menus open upward, over the
