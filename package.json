@@ -26,6 +26,7 @@
     "build:icons": "bun scripts/build-icons.ts",
     "test:desktop": "bun scripts/crash-test-desktop.ts",
     "bump": "bun scripts/bump-version.ts",
+    "prune-branches": "bun scripts/prune-branches.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit -p ."
   },
