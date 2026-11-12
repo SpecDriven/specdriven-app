@@ -38,6 +38,19 @@ export interface OpenFile {
   conflict: boolean;
 }
 
+/** A place in a file the editor is asked to show: a search result's line. */
+export interface GoTo {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based; the line's start when left out. */
+  col: number;
+  /** How much to select from there; 0 puts the caret. */
+  length: number;
+  /** Tells one request from the next for the same place. */
+  seq: number;
+}
+
 export interface FilesState {
   root: string | null;
   /** Listings by folder path, "" for the repository's top. */
@@ -45,6 +58,8 @@ export interface FilesState {
   /** The folders open in the tree. */
   expanded: string[];
   open: OpenFile | null;
+  /** Where the editor should go once it shows the file; null once it has. */
+  goto: GoTo | null;
 }
 
 /** Whether the editor holds text not yet on disk. */
@@ -83,7 +98,8 @@ async function errorOf(res: Response): Promise<string> {
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, init)) {
-  let state: FilesState = { root: null, dirs: {}, expanded: [], open: null };
+  let state: FilesState = { root: null, dirs: {}, expanded: [], open: null, goto: null };
+  let gotoSeq = 0;
   const listeners = new Set<() => void>();
   const saves = createPromiseQueue();
   /** Bumped on every reset, so an answer for the old repository is dropped. */
@@ -200,7 +216,7 @@ export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, 
     async configure(root: string): Promise<void> {
       if (state.root === root) return;
       generation++;
-      state = { root, dirs: {}, expanded: readExpanded(root), open: null };
+      state = { root, dirs: {}, expanded: readExpanded(root), open: null, goto: null };
       for (const l of listeners) l();
       await Promise.all(["", ...state.expanded].map((p) => loadDir(p)));
     },
@@ -208,7 +224,7 @@ export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, 
     /** Forget the repository: the tab is going away. */
     reset(): void {
       generation++;
-      set({ root: null, dirs: {}, expanded: [], open: null });
+      set({ root: null, dirs: {}, expanded: [], open: null, goto: null });
     },
 
     loadDir,
@@ -238,6 +254,8 @@ export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, 
 
     /** Open a file in the editor; the file it replaces is saved first. */
     async open(path: string): Promise<void> {
+      // A place asked for in a file that was never shown is forgotten.
+      if (state.goto && state.goto.path !== path) set({ goto: null });
       if (state.open?.path === path && state.open.status !== "error") return;
       await save();
       await saves.idle();
@@ -264,6 +282,19 @@ export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, 
       await save();
       await saves.idle();
       if (state.open && state.open.path === leaving) set({ open: null });
+    },
+
+    /**
+     * Ask the editor to show a place in a file — a search result — once the
+     * file is open; opening the file is the caller's navigation.
+     */
+    goTo(path: string, line: number, col = 1, length = 0): void {
+      set({ goto: { path, line, col, length, seq: ++gotoSeq } });
+    },
+
+    /** The editor went there: the request is done. */
+    wentTo(seq: number): void {
+      if (state.goto?.seq === seq) set({ goto: null });
     },
 
     /** The editor's text changed. */

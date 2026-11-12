@@ -8118,6 +8118,28 @@ export function App() {
           run: () => void openPluginView(tab.id, tab.route.home, { push: true }),
         }),
       ),
+    // ...and the keys a tab adds of its own (⇧⌘F, search in files): the
+    // sidebar shows the tab first, whatever it showed and however it was put
+    // away.
+    ...pluginTabs.flatMap((tab) =>
+      (tab.shortcuts ?? []).map(
+        (s): Shortcut => ({
+          id: s.id,
+          keys: s.keys,
+          label: s.label,
+          group: "Navigate",
+          inFields: true,
+          when: () => !quiet,
+          palette: () => !quietBehindPalette,
+          run: () => {
+            selectSidebarTab(tab.id);
+            if (compact) setDrawerOpen(true);
+            else if (sidebarCollapsed) toggleSidebar();
+            s.run();
+          },
+        }),
+      ),
+    ),
     {
       id: "settings",
       keys: "mod+,",
@@ -8536,6 +8558,7 @@ export function App() {
     // .feature.md), since the tab's own button is a tab away.
     ...pluginTabs.flatMap((tab) => [
       shortcutAction(`go-${tab.id}`, <tab.icon size={14} />),
+      ...(tab.shortcuts ?? []).map((s) => shortcutAction(s.id, <Search size={14} />)),
       ...(tab.palette?.commands?.({
         prompt,
         promptWithChoice,

@@ -11312,6 +11312,99 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   padding: 0.3rem 0.6rem;
 }
 
+/* Search in files (specs/app/code-search.feature.md): the field with its
+   three switches under the section head, then one line that counts the
+   results; the results take the tree's place. */
+.files-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0 0.35rem 0 0.6rem;
+}
+
+.files-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 0.15rem 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-3);
+}
+
+.files-search-field:focus-within {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.files-search-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.3rem 0.25rem;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.files-search-switch {
+  flex: none;
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.files-search-switch[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.files-search-status {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+.files-search-status.error {
+  color: var(--danger-fg);
+}
+
+/* A result: the file's row, then its matches — the line number where the
+   tree has its twisty, the line in the editor's type, the match marked. */
+.files-hit-folder {
+  color: var(--text-3);
+  font-size: 0.6875rem;
+}
+
+.files-hit .page-entry {
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  padding-left: 1.5rem;
+}
+
+.files-hit .row-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.71875rem;
+  color: var(--text-2);
+  white-space: pre;
+}
+
+.files-hit-line {
+  min-width: 1.75rem;
+  text-align: right;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.files-hit mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 /* The pane: the file's trail, its save state and "Open in IntelliJ" in the
    page header; the editor fills the rest. */
 .files-head .page-actions {

@@ -5,22 +5,15 @@
 // the sidebar's one row shape (src/frontend/SidebarRow.tsx), indented by
 // depth; ↑/↓ walk them and →/← open and close a folder.
 
-import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, File, Folder, FolderOpen, RefreshCw, Search } from "lucide-react";
 import { SectionAction, SidebarSection } from "../SidebarSection";
 import { SidebarRow } from "../SidebarRow";
 import { listKeyDown, useRevealActive } from "../sidebarList";
 import { files, type FilesState, type FilesStore } from "./filesStore";
+import { FilesSearchField, FilesSearchResults, spaClick, type Navigate } from "./FilesSearch";
+import { fileSearch } from "./searchStore";
 import { filesPath, FILES_HOME, type FilesView } from "./route";
-
-type Navigate = (view: FilesView, opts?: { push?: boolean }) => void;
-
-/** Handle a link in-app on a plain click; modified clicks keep the browser's. */
-function spaClick(e: MouseEvent, go: () => void) {
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  e.preventDefault();
-  go();
-}
 
 /** The rows of one folder and, under each open folder, its own — depth first. */
 export function treeRows(
@@ -115,8 +108,13 @@ export function filesKeyDown(e: KeyboardEvent<HTMLElement>, store: Pick<FilesSto
 
 export function FilesSidebar({ view, navigate }: { view: FilesView | null; navigate: Navigate }) {
   const state = useSyncExternalStore(files.subscribe, files.getState, files.getState);
+  const search = useSyncExternalStore(fileSearch.subscribe, fileSearch.getState, fileSearch.getState);
   const listRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const active = view?.path ?? state.open?.path ?? null;
+  // The results take the tree's place while something is typed
+  // (specs/app/code-search.feature.md "Find text in the repository").
+  const searching = search.open && search.query !== "";
   useRevealActive(listRef, active);
   // Coming back to the window: an agent or the IDE may have added, removed
   // or changed files since.
@@ -137,25 +135,44 @@ export function FilesSidebar({ view, navigate }: { view: FilesView | null; navig
           </a>
         }
         actions={
-          <SectionAction
-            label="Refresh the file list"
-            icon={<RefreshCw size={14} />}
-            onClick={() => {
-              void files.refresh();
-              void files.recheck();
-            }}
-          />
+          <>
+            <SectionAction
+              label="Search in files"
+              keys="mod+shift+f"
+              icon={<Search size={14} />}
+              className={search.open ? "active" : undefined}
+              onClick={() => (search.open ? fileSearch.hide() : fileSearch.show())}
+            />
+            <SectionAction
+              label="Refresh the file list"
+              icon={<RefreshCw size={14} />}
+              onClick={() => {
+                void files.refresh();
+                void files.recheck();
+              }}
+            />
+          </>
         }
-      />
-      <div
-        className="page-rows files-tree"
-        role="tree"
-        aria-label="Files"
-        ref={listRef}
-        onKeyDown={(e) => filesKeyDown(e, files)}
       >
-        {treeRows(state, active, files, navigate)}
-      </div>
+        {search.open && (
+          <FilesSearchField
+            onDown={() => resultsRef.current?.querySelector<HTMLElement>("[role=treeitem]")?.focus()}
+          />
+        )}
+      </SidebarSection>
+      {searching ? (
+        <FilesSearchResults active={active} navigate={navigate} listRef={resultsRef} />
+      ) : (
+        <div
+          className="page-rows files-tree"
+          role="tree"
+          aria-label="Files"
+          ref={listRef}
+          onKeyDown={(e) => filesKeyDown(e, files)}
+        >
+          {treeRows(state, active, files, navigate)}
+        </div>
+      )}
     </div>
   );
 }
