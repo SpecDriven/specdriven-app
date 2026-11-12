@@ -56,6 +56,7 @@ test("a file's extension picks its language, whatever its case or folder", () =>
     "Info.plist": "xml",
     "app.iml": "xml",
     "ui/main.fxml": "xml",
+    "punchout/OrderRequest.cxml": "xml",
     "README.md": "markdown",
     "docs/x.MARKDOWN": "markdown",
   };

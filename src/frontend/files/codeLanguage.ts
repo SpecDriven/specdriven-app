@@ -60,7 +60,7 @@ const BY_EXTENSION: Record<string, CodeLanguage> = {
   json: "json",
   jsonc: "json",
   // XML, and the formats written in it: schemas, stylesheets, SVG, WSDL,
-  // property lists, IntelliJ modules, JavaFX layouts.
+  // property lists, IntelliJ modules, JavaFX layouts, cXML (commerce XML).
   xml: "xml",
   xsd: "xml",
   xsl: "xml",
@@ -71,6 +71,7 @@ const BY_EXTENSION: Record<string, CodeLanguage> = {
   plist: "xml",
   iml: "xml",
   fxml: "xml",
+  cxml: "xml",
   md: "markdown",
   markdown: "markdown",
 };
