@@ -341,6 +341,42 @@ test("a turn the provider refuses is noted and the composer freed; a provider th
   expect(getChatEvents(id).some((e) => e.kind === "text_delta")).toBe(false);
 });
 
+// specs/agents/agent-plugins.feature.md "A provider reports the agent's
+// thinking": deltas while it streams, then the block that carries all of it.
+test("a provider's thinking reaches the log, and the settled block replaces its deltas", async () => {
+  const fake = register({ id: "gemini", label: "Gemini" });
+  const { id, session } = await ready(fake);
+  const thinking = () => getChatEvents(id).filter((e) => e.kind === "thinking_delta");
+  session.host.emit({ kind: "thinking_delta", messageId: "m1", index: 0, text: "Read the " });
+  session.host.emit({ kind: "thinking_delta", messageId: "m1", index: 0, text: "spec first." });
+  session.host.emit({ kind: "thinking_delta", messageId: "m2", index: 0, text: "Still going" });
+  expect(thinking()).toHaveLength(3);
+  session.host.emit({
+    kind: "assistant",
+    messageId: "m1",
+    turn: session.host.turn(),
+    blocks: [{ type: "thinking", text: "Read the spec first." }],
+    parentToolUseId: null,
+  });
+  // m1's deltas are dead weight for a replay now; m2 is still streaming.
+  expect(thinking().map((e) => e.messageId)).toEqual(["m2"]);
+  expect(getChatEvents(id).at(-1)).toMatchObject({
+    kind: "assistant",
+    blocks: [{ type: "thinking", text: "Read the spec first." }],
+  });
+  // The message's words, when they come, leave the thinking in the log.
+  session.host.emit({ kind: "text_delta", messageId: "m1", index: 1, text: "On it." });
+  session.host.emit({
+    kind: "assistant",
+    messageId: "m1",
+    turn: session.host.turn(),
+    blocks: [{ type: "text", text: "On it." }],
+    parentToolUseId: null,
+  });
+  expect(getChatEvents(id).filter((e) => e.kind === "assistant" && e.messageId === "m1")).toHaveLength(2);
+  expect(getChatEvents(id).some((e) => e.kind === "text_delta")).toBe(false);
+});
+
 test("the provider's facts reach the pane through ready and update, and quiet keeps them off the log", async () => {
   const fake = register({ id: "gemini", readyAtStart: false });
   const res = await api("/api/agent/chat", "POST", { name: "chat", agent: "gemini", prompt: "implement it" });

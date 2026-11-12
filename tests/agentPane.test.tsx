@@ -10,6 +10,7 @@ import {
   STATUS_LABEL,
   SimulationWatermark,
   TranscriptRow,
+  TranscriptRows,
   effortItems,
   effortsFor,
   folderItems,
@@ -25,14 +26,20 @@ import {
   agentChat,
   applyCommand,
   applyEvent,
+  applyTranscriptView,
   clampAgentWidth,
   filterCommands,
   formatCost,
   formatDuration,
+  nestedToolCount,
+  readTranscriptView,
+  runSummary,
   shouldFollow,
   toolSummary,
+  useTranscriptView,
+  viewRows,
 } from "../src/frontend/agentChat";
-import type { AgentChoices, ChatEvent, TranscriptItem } from "../src/frontend/agentChat";
+import type { AgentChoices, ChatEvent, TranscriptItem, TranscriptView, ViewRow } from "../src/frontend/agentChat";
 import { codeGenTargetLabel, readCodeGenTarget, resolveCodeGenTarget } from "../src/frontend/codeGenTarget";
 import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agentsWith } from "./fixtures/agents";
 
@@ -165,6 +172,247 @@ describe("applyEvent", () => {
   });
 });
 
+// specs/agents/agent-pane.feature.md "Transcript view": what the agent
+// thought and which subagent call said what are kept in the transcript
+// whatever the view; `viewRows` then decides what each view shows of it.
+describe("thinking and subagents in the transcript", () => {
+  test("thinking streams into one item, and the settled block replaces the stream", () => {
+    const t = reduce([
+      ev({ kind: "user", id: "u1", text: "go" }),
+      ev({ kind: "thinking_delta", messageId: "m1", index: 0, text: "Read the " }),
+      ev({ kind: "thinking_delta", messageId: "m1", index: 0, text: "spec" }),
+    ]);
+    expect(t.items.map((i) => i.kind)).toEqual(["user", "thinking"]);
+    expect(t.items[1]).toMatchObject({ id: "k:m1", text: "Read the spec", streaming: true });
+    const settled = reduce([
+      ev({ kind: "thinking_delta", messageId: "m1", index: 0, text: "Read the spec" }),
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "Read the spec first." }], parentToolUseId: null }),
+      ev({ kind: "text_delta", messageId: "m1", index: 1, text: "On it." }),
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "text", text: "On it." }], parentToolUseId: null }),
+    ]);
+    // The thought sits above the words it led to, both of one message.
+    expect(settled.items.map((i) => i.id)).toEqual(["k:m1", "a:m1"]);
+    expect(settled.items[0]).toMatchObject({ text: "Read the spec first.", streaming: false });
+    expect(settled.items[1]).toMatchObject({ text: "On it.", streaming: false });
+  });
+
+  test("an empty thinking block adds nothing, and a turn's result ends a thought still streaming", () => {
+    const empty = reduce([
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "" }, { type: "text", text: "Hi." }], parentToolUseId: null }),
+    ]);
+    expect(empty.items.map((i) => i.kind)).toEqual(["assistant"]);
+    const cut = reduce([
+      ev({ kind: "thinking_delta", messageId: "m2", index: 0, text: "Hmm" }),
+      ev({ kind: "result", turn: 1, subtype: "success", isError: false, costUsd: null, durationMs: 5, numTurns: 1, denials: 0 }),
+    ]);
+    expect(cut.items[0]).toMatchObject({ kind: "thinking", text: "Hmm", streaming: false });
+  });
+
+  test("what a subagent says and calls is marked with the call that started it", () => {
+    const t = reduce([
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "tool_use", id: "task1", name: "Task", input: { description: "Look around" } }], parentToolUseId: null }),
+      ev({ kind: "text_delta", messageId: "m2", index: 0, text: "Look", parentToolUseId: "task1" }),
+      ev({ kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "text", text: "Looking." }, { type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.ts" } }], parentToolUseId: "task1" }),
+      ev({ kind: "tool_result", toolUseId: "r1", content: "…", isError: false, parentToolUseId: "task1" }),
+      ev({ kind: "tool_result", toolUseId: "task1", content: "Found it.", isError: false, parentToolUseId: null }),
+    ]);
+    expect(t.items.map((i) => [i.id, (i as { parent?: string }).parent])).toEqual([
+      ["t:task1", undefined],
+      ["a:m2", "t:task1"],
+      ["t:r1", "t:task1"],
+    ]);
+  });
+});
+
+describe("viewRows", () => {
+  const at = "2026-09-04T10:00:00.000Z";
+  const tool = (id: string, name: string, extra: Partial<Extract<TranscriptItem, { kind: "tool" }>> = {}): TranscriptItem => ({
+    kind: "tool",
+    id: `t:${id}`,
+    name,
+    input: {},
+    summary: id,
+    result: { content: "ok", isError: false },
+    at,
+    ...extra,
+  });
+  const say = (id: string, text: string, parent?: string): TranscriptItem => ({
+    kind: "assistant",
+    id: `a:${id}`,
+    text,
+    streaming: false,
+    streamText: "",
+    finalParts: [text],
+    at,
+    ...(parent ? { parent } : {}),
+  });
+  const think = (id: string, streaming = false): TranscriptItem => ({
+    kind: "thinking",
+    id: `k:${id}`,
+    text: "Hmm.",
+    streaming,
+    streamText: "",
+    finalParts: [],
+    at,
+  });
+  const note = (id: string, code: string, level: "info" | "error" = "info"): TranscriptItem => ({
+    kind: "note",
+    id: `n:${id}`,
+    level,
+    code,
+    text: code,
+    at,
+  });
+  /** A row as a word: its id, a run with its line, nested rows in brackets. */
+  const shape = (rows: readonly ViewRow[]): string[] =>
+    rows.map((row) =>
+      row.kind === "tool-run"
+        ? `${row.id} «${row.summary}»`
+        : `${row.id}${row.depth ? ` +${row.depth}` : ""}${row.nested ? ` [${shape(row.nested).join(", ")}]` : ""}`,
+    );
+  const TURN: TranscriptItem[] = [
+    note("1", "init"),
+    think("1"),
+    say("1", "Looking."),
+    tool("r1", "Read"),
+    tool("r2", "Read"),
+    think("2"),
+    tool("b1", "Bash"),
+    say("2", "Found it."),
+    tool("e1", "Edit"),
+    note("2", "compact"),
+  ];
+
+  test("Normal folds each run of tool calls into one line and leaves thinking and start-up notes out", () => {
+    expect(shape(viewRows(TURN, "normal"))).toEqual([
+      "a:1",
+      // The thought between the calls is not shown, so it does not break the run.
+      "run:t:r1 «Read 2 files, ran 1 command»",
+      "a:2",
+      // One call is not a run: it stays its own row.
+      "t:e1",
+      "n:2",
+    ]);
+  });
+
+  test("Thinking shows every call on its own row and what the agent thought", () => {
+    expect(shape(viewRows(TURN, "thinking"))).toEqual(["k:1", "a:1", "t:r1", "t:r2", "k:2", "t:b1", "a:2", "t:e1", "n:2"]);
+  });
+
+  test("Verbose shows everything, in the order it happened", () => {
+    expect(shape(viewRows(TURN, "verbose"))).toEqual(TURN.map((i) => i.id));
+  });
+
+  test("a call still running or one that failed stays out of a run in Normal", () => {
+    const items = [
+      tool("r1", "Read"),
+      tool("r2", "Read"),
+      tool("b1", "Bash", { result: { content: "exit 1", isError: true } }),
+      tool("g1", "Grep"),
+      tool("g2", "Glob"),
+      tool("b2", "Bash", { result: undefined }),
+    ];
+    expect(shape(viewRows(items, "normal"))).toEqual([
+      "run:t:r1 «Read 2 files»",
+      "t:b1",
+      "run:t:g1 «Searched 2 times»",
+      "t:b2",
+    ]);
+    // Once the last call is in, it joins the run it follows; the run keeps its id.
+    const done = [...items.slice(0, 5), tool("b2", "Bash")];
+    expect(shape(viewRows(done, "normal")).at(-1)).toBe("run:t:g1 «Searched 2 times, ran 1 command»");
+  });
+
+  test("Normal says a thought is happening only while it streams; an error note shows in every view", () => {
+    const items = [think("1", true), note("1", "stderr", "error"), note("2", "stderr")];
+    expect(shape(viewRows(items, "normal"))).toEqual(["k:1", "n:1"]);
+    expect(shape(viewRows([think("1"), ...items.slice(1)], "normal"))).toEqual(["n:1"]);
+    expect(shape(viewRows(items, "thinking"))).toEqual(["k:1", "n:1"]);
+    expect(shape(viewRows(items, "verbose"))).toEqual(["k:1", "n:1", "n:2"]);
+  });
+
+  test("a subagent's traffic sits inside its call's row, and inline a step in under Verbose", () => {
+    const items = [
+      say("1", "I'll ask a subagent."),
+      tool("task", "Task"),
+      say("s1", "Looking.", "t:task"),
+      tool("r1", "Read", { parent: "t:task" }),
+      tool("r2", "Read", { parent: "t:task" }),
+      say("2", "Done."),
+    ];
+    expect(shape(viewRows(items, "normal"))).toEqual([
+      "a:1",
+      "t:task [a:s1, run:t:r1 «Read 2 files»]",
+      "a:2",
+    ]);
+    expect(shape(viewRows(items, "thinking"))).toEqual(["a:1", "t:task [a:s1, t:r1, t:r2]", "a:2"]);
+    expect(shape(viewRows(items, "verbose"))).toEqual(["a:1", "t:task", "a:s1 +1", "t:r1 +1", "t:r2 +1", "a:2"]);
+    // Traffic whose call the transcript never saw is shown where it happened.
+    expect(shape(viewRows([say("x", "Orphan.", "t:gone")], "normal"))).toEqual(["a:x"]);
+  });
+
+  test("a subagent call counts the calls made under it, folded runs and deeper subagents included", () => {
+    const items = [
+      tool("task", "Task"),
+      tool("r1", "Read", { parent: "t:task" }),
+      tool("r2", "Read", { parent: "t:task" }),
+      say("s1", "Asking another.", "t:task"),
+      tool("inner", "Task", { parent: "t:task" }),
+      tool("g1", "Grep", { parent: "t:inner" }),
+    ];
+    for (const view of ["normal", "thinking"] as const) {
+      const [task] = viewRows(items, view);
+      expect(task).toMatchObject({ kind: "item", id: "t:task" });
+      // Two reads, the inner subagent call, and its one search.
+      expect(nestedToolCount((task as Extract<ViewRow, { kind: "item" }>).nested ?? [])).toBe(4);
+    }
+    expect(nestedToolCount([])).toBe(0);
+  });
+
+  test("the view is kept on the device, Normal until one is picked and for a value it does not know", () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      },
+    });
+    /** What a component reading the view renders. */
+    const Probe = () => <i>{useTranscriptView()}</i>;
+    try {
+      expect(readTranscriptView()).toBe("normal");
+      expect(renderToStaticMarkup(<Probe />)).toBe("<i>normal</i>");
+      applyTranscriptView("verbose");
+      expect(store.get("sd-agent-transcript-view")).toBe("verbose");
+      expect(readTranscriptView()).toBe("verbose");
+      expect(renderToStaticMarkup(<Probe />)).toBe("<i>verbose</i>");
+      applyTranscriptView("thinking");
+      expect(readTranscriptView()).toBe("thinking");
+      // Normal is the default, so picking it leaves nothing stored.
+      applyTranscriptView("normal");
+      expect(store.has("sd-agent-transcript-view")).toBe(false);
+      store.set("sd-agent-transcript-view", "everything");
+      expect(readTranscriptView()).toBe("normal");
+    } finally {
+      if (saved) Object.defineProperty(globalThis, "localStorage", saved);
+      else delete (globalThis as unknown as Record<string, unknown>).localStorage;
+    }
+    // With no storage at all the pane still has a view.
+    expect(readTranscriptView()).toBe("normal");
+  });
+
+  test("a run's line counts each kind of call, in the order they first appear", () => {
+    const names = (...list: string[]) => list.map((name) => ({ name }));
+    expect(runSummary(names("Read", "Bash", "Read", "Edit", "Read"))).toBe("Read 3 files, ran 1 command, edited 1 file");
+    expect(runSummary(names("Grep", "Glob", "WebFetch", "WebSearch"))).toBe("Searched 2 times, used the web 2 times");
+    expect(runSummary(names("confluence/search", "specs/read"))).toBe("Used 2 tools");
+    expect(runSummary(names("Write", "TodoWrite", "Task"))).toBe("Edited 1 file, used 1 other tool, ran 1 agent");
+  });
+});
+
 describe("toolSummary", () => {
   test("names the one thing each tool is about", () => {
     expect(toolSummary("Bash", { command: "bun test", description: "Run tests" })).toBe("bun test");
@@ -263,6 +511,69 @@ describe("TranscriptRow", () => {
     expect(html).toContain(">ls<");
     expect(html).toContain("done");
     expect(html).toContain("a.txt");
+  });
+
+  // specs/agents/agent-pane.feature.md "Transcript view".
+  test("each transcript view renders its rows, a folded run, the thinking or every call opened", () => {
+    const transcript = [
+      ev({ kind: "note", level: "info", code: "init", text: "Claude Code 2 · opus · /w" }),
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "Read the spec first." }], parentToolUseId: null }),
+      ev({ kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.feature.md" } }], parentToolUseId: null }),
+      ev({ kind: "tool_result", toolUseId: "r1", content: "# A", isError: false, parentToolUseId: null }),
+      ev({ kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "bun test" } }], parentToolUseId: null }),
+      ev({ kind: "tool_result", toolUseId: "b1", content: "3 pass", isError: false, parentToolUseId: null }),
+      ev({ kind: "assistant", messageId: "m3", turn: 1, blocks: [{ type: "text", text: "All green." }], parentToolUseId: null }),
+      ev({ kind: "result", turn: 1, subtype: "success", isError: false, costUsd: 0.12, durationMs: 41_000, numTurns: 3, denials: 0 }),
+    ].reduce(applyEvent, EMPTY_TRANSCRIPT);
+    const render = (view: TranscriptView) =>
+      renderToStaticMarkup(<TranscriptRows rows={viewRows(transcript.items, view)} view={view} agent={CLAUDE_AGENT} />);
+
+    const normal = render("normal");
+    expect(normal).toContain("Read 1 file, ran 1 command");
+    expect(normal).toContain("agent-tool-run");
+    // The calls are inside the run, closed; nothing is opened for the reader.
+    expect(normal).toContain("a.feature.md");
+    expect(normal).not.toContain("<details open");
+    expect(normal).not.toContain("Read the spec first.");
+    expect(normal).not.toContain("Claude Code 2");
+    expect(normal).not.toContain("3 turns");
+
+    const thinking = render("thinking");
+    expect(thinking).toContain('aria-label="Thinking"');
+    expect(thinking).toContain("Read the spec first.");
+    expect(thinking).not.toContain("agent-tool-run");
+    expect(thinking).not.toContain("<details open");
+    expect(thinking).not.toContain("Claude Code 2");
+
+    const verbose = render("verbose");
+    expect(verbose).toContain("Read the spec first.");
+    expect(verbose).toContain("Claude Code 2 · opus · /w");
+    // Every call opened on its input and output, and the turn footer counts the turns.
+    expect(verbose.match(/<details class="agent-tool" open=""/g)).toHaveLength(2);
+    expect(verbose).toContain("3 pass");
+    expect(verbose).toContain("3 turns");
+  });
+
+  test("Normal shows a thought still streaming as one line, and a subagent call says how many calls it made", () => {
+    const at2 = at;
+    const live = renderToStaticMarkup(
+      <TranscriptRow item={{ kind: "thinking", id: "k:1", text: "Secret plan", streaming: true, streamText: "Secret plan", finalParts: [], at: at2 }} />,
+    );
+    expect(live).toContain("Thinking…");
+    expect(live).not.toContain("Secret plan");
+
+    const items: TranscriptItem[] = [
+      { kind: "tool", id: "t:task", name: "Task", input: { description: "Look around" }, summary: "Look around", result: { content: "Found it.", isError: false }, at: at2 },
+      { kind: "tool", id: "t:r1", name: "Read", input: {}, summary: "a.ts", result: { content: "…", isError: false }, at: at2, parent: "t:task" },
+      { kind: "tool", id: "t:r2", name: "Read", input: {}, summary: "b.ts", result: { content: "…", isError: false }, at: at2, parent: "t:task" },
+    ];
+    const nested = renderToStaticMarkup(<TranscriptRows rows={viewRows(items, "normal")} view="normal" agent={CLAUDE_AGENT} />);
+    expect(nested).toContain("2 calls");
+    expect(nested).toContain("Read 2 files");
+    // Under Verbose the same traffic is inline, a step in.
+    const inline = renderToStaticMarkup(<TranscriptRows rows={viewRows(items, "verbose")} view="verbose" agent={CLAUDE_AGENT} />);
+    expect(inline.match(/class="agent-sub"/g)).toHaveLength(2);
+    expect(inline).not.toContain("2 calls");
   });
 
   test("a permission card offers Allow always only with a rule to keep", () => {
