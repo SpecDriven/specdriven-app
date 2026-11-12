@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.266 — 2026-11-12
+
+- Code repository mode finds files by name and searches their text ([#438](https://github.com/SpecDriven/specdriven-app/pull/438))
+
 ## v0.1.265 — 2026-11-11
 
 - The settings file is YAML: settings.json is converted to settings.yaml ([#437](https://github.com/SpecDriven/specdriven-app/pull/437))
