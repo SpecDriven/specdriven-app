@@ -78,6 +78,8 @@ test("the files routes are registered with their methods", () => {
   expect(matchApi("GET", "/api/files/file")).not.toBeNull();
   expect(matchApi("PUT", "/api/files/file")).not.toBeNull();
   expect(matchApi("POST", "/api/files/open-in-idea")).not.toBeNull();
+  expect(matchApi("POST", "/api/files/pull")).not.toBeNull();
+  expect(matchApi("GET", "/api/files/pull")).toBeNull();
   expect(matchApi("DELETE", "/api/files/file")).toBeNull();
   expect(matchApi("GET", "/api/files/open-in-idea")).toBeNull();
 });
@@ -89,6 +91,7 @@ test("outside code repository mode the files routes have no folder to serve", as
     await api(`/api/files/file${q("README.md")}`),
     await api(`/api/files/file${q("README.md")}`, "PUT", { content: "x" }),
     await api("/api/files/open-in-idea", "POST", { path: "README.md" }),
+    await api("/api/files/pull", "POST"),
   ]) {
     expect(res.status).toBe(409);
   }

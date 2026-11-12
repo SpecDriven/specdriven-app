@@ -329,7 +329,51 @@ export function createFilesStore(fetchFn: Fetch = (input, init) => fetch(input, 
       await save();
       await saves.idle();
     },
+
+    /**
+     * Git Pull (specs/app/code-repo-mode.feature.md "Git Pull from the
+     * navigation pane"): land the editor's text first, so the pull sees it
+     * (and refuses a dirty tree rather than losing it), then pull, then list
+     * the tree and read the open file again as the pull left them.
+     */
+    async pull(): Promise<PullResult> {
+      await save();
+      await saves.idle();
+      let result: PullResult;
+      try {
+        const res = await fetchFn("/api/files/pull", { method: "POST" });
+        result = res.ok
+          ? ((await res.json()) as PullResult)
+          : { ok: false, conflicted: false, message: await errorOf(res) };
+      } catch (e) {
+        result = { ok: false, conflicted: false, message: (e as Error).message };
+      }
+      // A failed merge may still have changed files (conflict markers).
+      await Promise.all(["", ...state.expanded].map((p) => loadDir(p)));
+      const open = state.open;
+      if (open && open.status === "ready" && !isDirty(open) && !open.saving) await read(open.path);
+      return result;
+    },
   };
+}
+
+/** What POST /api/files/pull answers (src/server/agentSource.ts RefreshResult). */
+export interface PullResult {
+  ok: boolean;
+  message: string;
+  conflicted: boolean;
+  /** Commits the branch gained; 0 when it was already up to date. */
+  pulled?: number;
+  branch?: string;
+}
+
+/** The toast after a pull that went through. */
+export function pulledMessage(result: PullResult): string {
+  const n = result.pulled;
+  if (n === 0) return "Already up to date";
+  const into = result.branch ? ` into ${result.branch}` : "";
+  if (n === undefined) return `Pulled${into}`;
+  return `Pulled ${n} commit${n === 1 ? "" : "s"}${into}`;
 }
 
 export type FilesStore = ReturnType<typeof createFilesStore>;

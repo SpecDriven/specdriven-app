@@ -9722,6 +9722,16 @@ a.tests-title {
   color: var(--danger-fg);
 }
 
+/* Four buttons (Cancel, Start anyway, Rebase & start, Update & start) need
+   more room than the start dialog's 28rem; on a narrow screen they wrap. */
+.dialog.start-dialog.source-check-dialog {
+  width: min(32rem, 90vw);
+}
+
+.source-check-dialog .dialog-actions {
+  flex-wrap: wrap;
+}
+
 /* The four interval lengths in a 2×2 grid, each a caption over a number. */
 .pomodoro-fields {
   display: grid;

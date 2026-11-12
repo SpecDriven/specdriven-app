@@ -185,10 +185,20 @@ test("refreshSource with merge advances a behind branch to its upstream", async 
   const res = await refreshSource(work, "merge");
   expect(res.ok).toBe(true);
   expect(res.conflicted).toBe(false);
+  expect(res.pulled).toBe(1);
+  expect(res.branch).toBe("main");
 
   const after = await sourceStatus(work);
   expect(after.behind).toBe(0);
   expect(await Bun.file(join(work, "a.txt")).text()).toBe("a\n");
+});
+
+test("refreshSource on a branch already level with its upstream pulls nothing", async () => {
+  await cloned();
+  const res = await refreshSource(work, "merge");
+  expect(res.ok).toBe(true);
+  expect(res.pulled).toBe(0);
+  expect(res.branch).toBe("main");
 });
 
 test("refreshSource with rebase replays local work on top of the upstream", async () => {

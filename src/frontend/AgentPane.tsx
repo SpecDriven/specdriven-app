@@ -1190,6 +1190,10 @@ function EmptyState({
   const choices = useAgentChoices(picked?.id ?? null);
   const defaultDir = codeRepo ?? dataRepo;
   const workDir = folder ?? defaultDir;
+  // The code repo a session start checks against its remote: the project's
+  // code repo, or the repository open in code repository mode (which arrives
+  // as `dataRepo`, nothing being synced there). Never a specifications folder.
+  const checkedRepo = codeRepo ?? (codeRepoOpen ? dataRepo : null);
   const folderInfo = useFolderInfo(picked ? workDir : null);
   const inWorktree = worktree && folderInfo?.canWorktree === true;
   // Every open tab holds a slot; at the cap a new session waits for one to close.
@@ -1229,13 +1233,14 @@ function EmptyState({
   // check that source is up to date"). A worktree session has no dialog: the
   // server itself brings main level with origin before the worktree branches
   // off it, or refuses and says why (src/server/agentWorktree.ts). The data
-  // repo syncs on its own, so it is not checked here.
+  // repo syncs on its own, so it is not checked here; a repository open in
+  // code repository mode is (specs/app/code-repo-mode.feature.md).
   const start = async (text: string, images: ImageUpload[], sentRefs: string[] = []) => {
-    if (workDir !== codeRepo || !codeRepo || inWorktree) {
+    if (workDir !== checkedRepo || !checkedRepo || inWorktree) {
       await doStart(text, images, sentRefs);
       return;
     }
-    const status = await loadSourceStatus(codeRepo);
+    const status = await loadSourceStatus(checkedRepo);
     if (!sourceNeedsAttention(status)) {
       await doStart(text, images, sentRefs);
       return;
@@ -1344,7 +1349,7 @@ function EmptyState({
         imagesFrom={{ label: picked.label, canRead: picked.capabilities.images === true }}
         onSend={start}
       />
-      {pending && codeRepo && (
+      {pending && checkedRepo && (
         <SourceCheckDialog
           status={pending.status}
           onClose={() => setPending(null)}
@@ -1355,7 +1360,7 @@ function EmptyState({
           }}
           onRefresh={async (mode: RefreshMode) => {
             try {
-              const result = await refreshSource(codeRepo, mode);
+              const result = await refreshSource(checkedRepo, mode);
               if (!result.ok) {
                 toast.error(result.message);
                 return false;
