@@ -18,8 +18,23 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { languageOf, loadLanguage } from "./codeLanguage";
+import type { GoTo } from "./filesStore";
 
 type VimModule = typeof import("@replit/codemirror-vim");
+
+/**
+ * Show a place in the text (specs/app/code-search.feature.md "A result opens
+ * the file at its line"): the match selected, its line in the middle of the
+ * editor. A line past the end is the last line. The focus stays where it
+ * is, so the result list keeps its arrow keys.
+ */
+function showPlace(view: EditorView, place: Pick<GoTo, "line" | "col" | "length">): void {
+  const doc = view.state.doc;
+  const line = doc.line(Math.max(1, Math.min(doc.lines, Math.floor(place.line) || 1)));
+  const anchor = Math.min(line.from + Math.max(0, place.col - 1), line.to);
+  const head = Math.min(anchor + Math.max(0, place.length), line.to);
+  view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(anchor, { y: "center" }) });
+}
 
 /** The smallest change that turns `from` into `to`, so the caret keeps its place. */
 function minimalChange(from: string, to: string) {
@@ -36,6 +51,8 @@ export function CodeEditor({
   onChange,
   onSave,
   onCaretLine,
+  goto = null,
+  onWentTo,
   vim = false,
 }: {
   /** The file's path: a new file is a new editor, with its own undo history. */
@@ -46,6 +63,10 @@ export function CodeEditor({
   onSave: () => void;
   /** The 1-based line the caret is on, as it moves. */
   onCaretLine?: (line: number) => void;
+  /** A place to show: a search result's line. */
+  goto?: GoTo | null;
+  /** The editor showed it. */
+  onWentTo?: (seq: number) => void;
   vim?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -62,8 +83,17 @@ export function CodeEditor({
     };
   }, [vim, vimModule]);
   const vimReady = vim ? vimModule : null;
-  const latest = useRef({ onChange, onSave, onCaretLine });
-  latest.current = { onChange, onSave, onCaretLine };
+  const latest = useRef({ onChange, onSave, onCaretLine, onWentTo, goto });
+  latest.current = { onChange, onSave, onCaretLine, onWentTo, goto };
+  // The last request answered: the editor's own start and the request's
+  // arrival both look, and a request is answered once.
+  const went = useRef(0);
+  const go = (v: EditorView, place: GoTo) => {
+    if (went.current === place.seq) return;
+    went.current = place.seq;
+    showPlace(v, place);
+    latest.current.onWentTo?.(place.seq);
+  };
 
   useEffect(() => {
     const parent = host.current;
@@ -106,6 +136,8 @@ export function CodeEditor({
       }),
     });
     view.current = v;
+    // A place asked for before the file was here: a result in another file.
+    if (latest.current.goto) go(v, latest.current.goto);
     const language = languageOf(path, value);
     parent.dataset.language = language ?? "text";
     if (language) {
@@ -129,6 +161,14 @@ export function CodeEditor({
     const current = v.state.doc.toString();
     if (current !== value) v.dispatch({ changes: minimalChange(current, value) });
   }, [value]);
+
+  // A place asked for in the file already showing.
+  const gotoSeq = goto?.seq;
+  useEffect(() => {
+    if (view.current && goto) go(view.current, goto);
+    // The request is its `seq`; the object changes with every store update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gotoSeq]);
 
   if (vim && !vimReady) return <div className="md-source code-source md-vim-loading">Loading Vim…</div>;
   return (

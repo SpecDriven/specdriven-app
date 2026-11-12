@@ -172,6 +172,8 @@ export function FilesPane({
             onCaretLine={(n) => {
               line.current = n;
             }}
+            goto={state.goto?.path === path ? state.goto : null}
+            onWentTo={(seq) => files.wentTo(seq)}
           />
         </div>
       )}

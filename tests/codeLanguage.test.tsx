@@ -339,6 +339,37 @@ describe("the Files tab's editor", () => {
     return EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!;
   }
 
+  // specs/app/code-search.feature.md "A result opens the file at its line".
+  test("a place asked of the editor is selected, at once and when asked later, a line past the end being the last", async () => {
+    const text = "one\ntwo\n  three hello\nfour\n";
+    const went: number[] = [];
+    const render = (goto: { path: string; line: number; col: number; length: number; seq: number } | null) =>
+      act(async () =>
+        root!.render(
+          <CodeEditor path="notes.txt" value={text} onChange={() => {}} onSave={() => {}} goto={goto} onWentTo={(seq) => went.push(seq)} />,
+        ),
+      );
+    root = createRoot(host!);
+    // Asked before the editor was there: a result in a file not yet open.
+    await render({ path: "notes.txt", line: 3, col: 9, length: 5, seq: 1 });
+    const view = EditorView.findFromDOM(host!.querySelector<HTMLElement>(".cm-editor")!)!;
+    const selected = () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
+    expect(selected()).toBe("hello");
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(3);
+    expect(went).toEqual([1]);
+    // Asked of the file already showing; the same request is not answered twice.
+    await render({ path: "notes.txt", line: 2, col: 1, length: 3, seq: 2 });
+    await render({ path: "notes.txt", line: 2, col: 1, length: 3, seq: 2 });
+    expect(selected()).toBe("two");
+    expect(went).toEqual([1, 2]);
+    // The file changed since the search: the place is kept inside the text.
+    await render({ path: "notes.txt", line: 99, col: 40, length: 5, seq: 3 });
+    expect(view.state.selection.main.empty).toBe(true);
+    expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(view.state.doc.lines);
+    // The focus stays out of the editor, so the results keep the arrow keys.
+    expect(view.hasFocus).toBe(false);
+  });
+
   /** The words the editor painted in `colour`. */
   function words(view: EditorView, colour: string): string[] {
     return [...view.contentDOM.querySelectorAll("span")]

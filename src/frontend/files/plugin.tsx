@@ -6,7 +6,9 @@
 // (src/plugins/client/loader.ts). Being a plugin, it hears "data/leaving",
 // so a folder switch lands what the editor holds first.
 
+import type { ReactNode } from "react";
 import { FolderTree } from "lucide-react";
+import type { FileHit } from "../../server/codeSearch";
 import type { Context, Plugin } from "../../plugins/kernel";
 import type { TabPlugin } from "../../plugins/client/tabs";
 import { repoDisplayName } from "../route";
@@ -14,21 +16,37 @@ import { files } from "./filesStore";
 import { FilesPane, readmeOf } from "./FilesPane";
 import { FilesSidebar } from "./FilesSidebar";
 import { baseName, FILES_HOME, filesKey, filesPath, parseFilesRoute, type FilesView } from "./route";
+import { fileSearch } from "./searchStore";
 
 export const FILES_TAB = "files";
 
-/** The tab's search: the loaded files whose name or path holds the query. */
-export function searchFiles(query: string): { path: string; name: string }[] {
-  const q = query.trim().toLowerCase();
+/**
+ * The tab's search (specs/app/code-search.feature.md "Find a file by name"):
+ * every file of the repository whose name or path holds the typed
+ * characters in order, best first — asked of the server, which knows the
+ * files in folders the tree has not opened.
+ */
+export async function findFiles(query: string, signal?: AbortSignal): Promise<FileHit[]> {
+  const q = query.trim();
   if (!q) return [];
-  const hits: { path: string; name: string }[] = [];
-  for (const listing of Object.values(files.getState().dirs)) {
-    if ("error" in listing) continue;
-    for (const e of listing.entries) {
-      if (e.kind === "file" && e.path.toLowerCase().includes(q)) hits.push({ path: e.path, name: e.name });
-    }
+  const res = await fetch(`/api/files/find?q=${encodeURIComponent(q)}`, { signal });
+  const body = (await res.json().catch(() => null)) as { results?: FileHit[]; error?: string } | null;
+  if (!res.ok) throw new Error(body?.error ?? `Search failed (${res.status})`);
+  return body?.results ?? [];
+}
+
+/** A path with the matched characters marked, run by run. */
+export function markedPath(path: string, indexes: number[]): ReactNode {
+  const hit = new Set(indexes);
+  const out: ReactNode[] = [];
+  for (let i = 0; i < path.length; ) {
+    const on = hit.has(i);
+    let end = i;
+    while (end < path.length && hit.has(end) === on) end++;
+    out.push(on ? <mark key={i}>{path.slice(i, end)}</mark> : path.slice(i, end));
+    i = end;
   }
-  return hits.sort((a, b) => a.path.localeCompare(b.path)).slice(0, 50);
+  return out;
 }
 
 export const filesTab: TabPlugin<FilesView> = {
@@ -59,15 +77,17 @@ export const filesTab: TabPlugin<FilesView> = {
   ),
   palette: {
     group: "Files",
-    search: (query) =>
-      searchFiles(query).map((hit) => ({
+    search: async (query, signal) =>
+      (await findFiles(query, signal)).map((hit) => ({
         id: `files:${hit.path}`,
         label: hit.name,
-        sub: hit.path,
+        sub: markedPath(hit.path, hit.indexes),
         href: filesPath({ path: hit.path }),
         view: { path: hit.path },
       })),
   },
+  // ⇧⌘F: the sidebar turns to the tab and its search field takes the focus.
+  shortcuts: [{ id: "files-search", keys: "mod+shift+f", label: "Search in files", run: () => fileSearch.show() }],
   recent: (view) => view.path,
   subscribe: files.subscribe,
 };
@@ -89,6 +109,7 @@ export const filesPlugin: Plugin<Context, FilesConfig> = {
     await files.configure(config.codeRepo);
     ctx.effect(() => ctx.need("tabs").add(filesTab as TabPlugin));
     ctx.effect(() => () => files.reset());
+    ctx.effect(() => () => fileSearch.reset());
     // A folder switch: what the editor holds lands in this repository first.
     ctx.on("data/leaving", () => files.flush());
   },

@@ -12,7 +12,7 @@ import { createFilesStore, isDirty, type FilesState, type OpenFile } from "../sr
 import { treeRows } from "../src/frontend/files/FilesSidebar";
 import { FilesPane, readmeOf, saveStatus } from "../src/frontend/files/FilesPane";
 import { languageOf } from "../src/frontend/files/codeLanguage";
-import { filesTab, searchFiles } from "../src/frontend/files/plugin";
+import { filesTab } from "../src/frontend/files/plugin";
 import { matchPluginRoute, syncClientPlugins, tabs } from "../src/plugins/client/loader";
 
 afterEach(async () => {
@@ -192,6 +192,7 @@ const state = (over: Partial<FilesState> = {}): FilesState => ({
   dirs: { "": { entries: TREE[""] }, src: { entries: TREE.src } },
   expanded: ["src"],
   open: null,
+  goto: null,
   ...over,
 });
 
@@ -275,7 +276,6 @@ test("an open code repository mounts the Files tab and none of the specification
   }
 });
 
-test("the tab's home opens the README when the repository has one; search finds loaded files", () => {
+test("the tab's home opens the README when the repository has one", () => {
   expect(filesTab.route.resolve!({ path: "docs/a.md" })).toEqual({ path: "docs/a.md" });
-  expect(searchFiles("")).toEqual([]);
 });

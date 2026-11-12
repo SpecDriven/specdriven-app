@@ -176,6 +176,7 @@ import {
 import { agents } from "../plugins/host/agents";
 import { directoryExists, fileExists } from "./fsx";
 import { FilesError, listDir, readFileText, repoPath, writeFileText } from "./files";
+import { compileSearch, findFiles, searchRepo, type SearchOptions } from "./codeSearch";
 import { readFile } from "node:fs/promises";
 import { currentImageName, imageMime, readImage, storeImage, MAX_IMAGE_BYTES } from "./images";
 import { StillReferenced, deleteImages, listImages } from "./imageCleanup";
@@ -4299,6 +4300,70 @@ const postFilesOpenInIdea = withCodeRepo(async (root, req) => {
   return json({ file, ...(line !== undefined ? { line } : {}) });
 });
 
+// The palette's file search (specs/app/code-search.feature.md "Find a file
+// by name"): the repository's files whose name or path holds what was
+// typed, best first.
+const getFilesFind = withCodeRepo(async (root, req) => {
+  const params = new URL(req.url).searchParams;
+  const query = (params.get("q") ?? "").trim();
+  const limit = Math.min(Math.max(Number(params.get("limit") ?? "50") || 50, 1), 200);
+  return json({ query, ...(await findFiles(root, query, limit)) });
+});
+
+// Search the repository's text (specs/app/code-search.feature.md "Find text
+// in the repository"): one JSON object per line — a file with its matches
+// as each is found, in path order, then a last line with the totals. The
+// search stops when the client goes away. A query that cannot be searched
+// for is refused before anything is streamed.
+const getFilesSearch = withCodeRepo((root, req) => {
+  const params = new URL(req.url).searchParams;
+  const on = (name: string) => params.get(name) === "1";
+  const options: SearchOptions = {
+    query: params.get("q") ?? "",
+    caseSensitive: on("case"),
+    wholeWord: on("word"),
+    regex: on("regex"),
+  };
+  compileSearch(options);
+  const abort = new AbortController();
+  req.signal.addEventListener("abort", () => abort.abort());
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = (line: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
+        } catch {
+          // The client closed the stream: nobody is reading.
+          abort.abort();
+        }
+      };
+      void searchRepo(root, options, send, abort.signal)
+        .then(
+          (summary) => send({ done: true, ...summary }),
+          (e) => send({ done: true, error: e instanceof Error ? e.message : String(e) }),
+        )
+        .finally(() => {
+          try {
+            controller.close();
+          } catch {
+            // already closed by the client
+          }
+        });
+    },
+    cancel() {
+      abort.abort();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
+});
+
 // The core routes, registered first on the plugin kernel's route registry
 // (src/plugins/host/loader.ts) so they match before any plugin's; a mounted
 // plugin appends its own, and a disposed one takes them away again.
@@ -4394,6 +4459,9 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/files/file", unlessHosted(getFilesFile)],
   ["PUT", "/api/files/file", unlessHosted(putFilesFile)],
   ["POST", "/api/files/open-in-idea", unlessHosted(postFilesOpenInIdea)],
+  // ...and search in it (specs/app/code-search.feature.md).
+  ["GET", "/api/files/find", unlessHosted(getFilesFind)],
+  ["GET", "/api/files/search", unlessHosted(getFilesSearch)],
   ["GET", "/api/features/:file", getFeature],
   ["PUT", "/api/features/:file", putFeature],
   ["POST", "/api/features/:file/confluence", unlessHosted(postPublishConfluence)],

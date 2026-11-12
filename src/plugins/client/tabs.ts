@@ -123,6 +123,12 @@ export interface TabPlugin<V = unknown> {
     }): PaletteItem[];
   };
   /**
+   * Keys of the tab's own beyond its `g` chord — ⇧⌘F searches the code
+   * repository's files. App turns the sidebar to the tab, then runs it; the
+   * key works while typing, and the command palette lists it.
+   */
+  shortcuts?: { id: string; keys: string | string[]; label: string; run(): void }[];
+  /**
    * Crumbs a feature page carries back into the module — an Event Model
    * whose slice links the feature, say. App makes each a link to the view.
    */

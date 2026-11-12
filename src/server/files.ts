@@ -23,7 +23,7 @@ export class FilesError extends Error {
 /** Files larger than this are not opened as text (specs "A file opens in a plain text editor"). */
 export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 /** How much of a file is looked at for a NUL byte, the sign of a binary file. */
-const SNIFF_BYTES = 8192;
+export const SNIFF_BYTES = 8192;
 
 /** The folder git keeps its own data in: never listed, read or written. */
 const GIT_DIR = ".git";
