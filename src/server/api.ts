@@ -4300,6 +4300,16 @@ const postFilesOpenInIdea = withCodeRepo(async (root, req) => {
   return json({ file, ...(line !== undefined ? { line } : {}) });
 });
 
+/**
+ * Git Pull from the navigation pane (specs/app/code-repo-mode.feature.md
+ * "Git Pull from the navigation pane"): `git pull --no-rebase` in the open
+ * repository, the one pull the app makes there and only because the user
+ * asked. A dirty working tree is refused, a conflict or failure reported
+ * (src/server/agentSource.ts refreshSource). The answer is always 200: `ok`
+ * says whether the branch was brought up to date.
+ */
+const postFilesPull = withCodeRepo(async (root) => json(await refreshSource(root, "merge")));
+
 // The palette's file search (specs/app/code-search.feature.md "Find a file
 // by name"): the repository's files whose name or path holds what was
 // typed, best first.
@@ -4459,6 +4469,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/files/file", unlessHosted(getFilesFile)],
   ["PUT", "/api/files/file", unlessHosted(putFilesFile)],
   ["POST", "/api/files/open-in-idea", unlessHosted(postFilesOpenInIdea)],
+  ["POST", "/api/files/pull", unlessHosted(postFilesPull)],
   // ...and search in it (specs/app/code-search.feature.md).
   ["GET", "/api/files/find", unlessHosted(getFilesFind)],
   ["GET", "/api/files/search", unlessHosted(getFilesSearch)],

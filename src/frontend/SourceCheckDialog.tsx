@@ -111,7 +111,7 @@ export function SourceCheckDialog({ status, onRefresh, onStartAnyway, onClose }:
       }}
     >
       <div
-        className="dialog modal-dialog start-dialog"
+        className="dialog modal-dialog start-dialog source-check-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Start from up-to-date source"

@@ -5,12 +5,13 @@
 // the sidebar's one row shape (src/frontend/SidebarRow.tsx), indented by
 // depth; ↑/↓ walk them and →/← open and close a folder.
 
-import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, File, Folder, FolderOpen, RefreshCw, Search } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowDownToLine, ChevronDown, ChevronRight, File, Folder, FolderOpen, RefreshCw, Search } from "lucide-react";
+import { toast } from "../Toasts";
 import { SectionAction, SidebarSection } from "../SidebarSection";
 import { SidebarRow } from "../SidebarRow";
 import { listKeyDown, useRevealActive } from "../sidebarList";
-import { files, type FilesState, type FilesStore } from "./filesStore";
+import { files, pulledMessage, type FilesState, type FilesStore } from "./filesStore";
 import { FilesSearchField, FilesSearchResults, spaClick, type Navigate } from "./FilesSearch";
 import { fileSearch } from "./searchStore";
 import { filesPath, FILES_HOME, type FilesView } from "./route";
@@ -116,6 +117,20 @@ export function FilesSidebar({ view, navigate }: { view: FilesView | null; navig
   // (specs/app/code-search.feature.md "Find text in the repository").
   const searching = search.open && search.query !== "";
   useRevealActive(listRef, active);
+  const [pulling, setPulling] = useState(false);
+  // Git Pull (specs/app/code-repo-mode.feature.md "Git Pull from the
+  // navigation pane"): the one pull the app makes in a code repository,
+  // because the user asked for it.
+  const pull = async () => {
+    setPulling(true);
+    try {
+      const result = await files.pull();
+      if (result.ok) toast.success(pulledMessage(result));
+      else toast.error(result.message);
+    } finally {
+      setPulling(false);
+    }
+  };
   // Coming back to the window: an agent or the IDE may have added, removed
   // or changed files since.
   useEffect(() => {
@@ -142,6 +157,12 @@ export function FilesSidebar({ view, navigate }: { view: FilesView | null; navig
               icon={<Search size={14} />}
               className={search.open ? "active" : undefined}
               onClick={() => (search.open ? fileSearch.hide() : fileSearch.show())}
+            />
+            <SectionAction
+              label={pulling ? "Pulling…" : "Git Pull"}
+              icon={<ArrowDownToLine size={14} />}
+              disabled={pulling}
+              onClick={() => void pull()}
             />
             <SectionAction
               label="Refresh the file list"

@@ -345,3 +345,97 @@ test("the Worktree box says which branch the session starts from, and when the f
   expect(worktreeStartedNote(META)).toBeNull();
   expect(worktreeStartedNote({})).toBeNull();
 });
+
+// In code repository mode the open repository arrives as the pane's
+// `dataRepo` (nothing syncs there), and a session on it is checked against its
+// remote like the project's code repo (specs/app/code-repo-mode.feature.md
+// "The coding agent works in the code repository").
+function sourceServer(posts: Record<string, unknown>[], asked: string[], behind: number) {
+  server(posts);
+  const serve = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url.startsWith("/api/agent/source?")) {
+      asked.push(new URL(url, "http://x").searchParams.get("path")!);
+      return Response.json({
+        repo: "/w/code",
+        branch: "main",
+        upstream: "origin/main",
+        online: true,
+        hasRemote: true,
+        detached: false,
+        behind,
+        ahead: 0,
+        dirty: false,
+      });
+    }
+    if (url === "/api/agent/source/refresh" && init.method === "POST") {
+      asked.push(`refresh ${JSON.parse(String(init.body)).mode}`);
+      return Response.json({ ok: true, conflicted: false, message: "Fast-forward", pulled: behind, branch: "main" });
+    }
+    return serve(input, init);
+  }) as unknown as typeof fetch;
+}
+
+const codeModePane = (open = true) => (
+  <AgentPane compact={false} demo={false} codeRepo={null} dataRepo="/w/code" codeRepoOpen={open} onClose={() => {}} ghostty={false} />
+);
+
+async function send(host: HTMLElement, text: string) {
+  await settle();
+  type(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!, text);
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click());
+  await settle();
+}
+
+test("in code repository mode a branch behind origin asks to pull before the session, and Update & start pulls then starts", async () => {
+  const posts: Record<string, unknown>[] = [];
+  const asked: string[] = [];
+  sourceServer(posts, asked, 2);
+  try {
+    agentChat.setAgents([CLAUDE_AGENT]);
+    const { host, unmount } = mount(codeModePane());
+    await send(host, "Fix login");
+    expect(asked).toEqual(["/w/code"]);
+    const dialog = host.querySelector('[aria-label="Start from up-to-date source"]')!;
+    expect(dialog).not.toBeNull();
+    expect(dialog.textContent).toContain("2 behind");
+    // Held until the user answers.
+    expect(posts).toEqual([]);
+    const update = [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Update & start")!;
+    await act(async () => update.click());
+    await settle();
+    expect(asked).toEqual(["/w/code", "refresh merge"]);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ prompt: "Fix login" });
+    expect(host.querySelector('[aria-label="Start from up-to-date source"]')).toBeNull();
+    unmount();
+  } finally {
+    await agentChat.end("s1").catch(() => undefined);
+  }
+});
+
+test("in code repository mode a branch level with origin starts at once; a specifications folder is never checked", async () => {
+  const posts: Record<string, unknown>[] = [];
+  const asked: string[] = [];
+  sourceServer(posts, asked, 0);
+  try {
+    agentChat.setAgents([CLAUDE_AGENT]);
+    const level = mount(codeModePane());
+    await send(level.host, "Fix login");
+    expect(asked).toEqual(["/w/code"]);
+    expect(level.host.querySelector('[aria-label="Start from up-to-date source"]')).toBeNull();
+    expect(posts).toHaveLength(1);
+    level.unmount();
+    await agentChat.end("s1").catch(() => undefined);
+    // The same folder as a specifications folder (not code repository mode): the app syncs it itself.
+    asked.length = 0;
+    const specs = mount(codeModePane(false));
+    await send(specs.host, "Fix login");
+    expect(asked).toEqual([]);
+    expect(posts).toHaveLength(2);
+    specs.unmount();
+  } finally {
+    await agentChat.end("s1").catch(() => undefined);
+  }
+});

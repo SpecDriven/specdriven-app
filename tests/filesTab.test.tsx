@@ -8,7 +8,7 @@
 import { test, expect, afterEach } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { baseName, filesPath, parentFolders, parseFilesRoute } from "../src/frontend/files/route";
-import { createFilesStore, isDirty, type FilesState, type OpenFile } from "../src/frontend/files/filesStore";
+import { createFilesStore, isDirty, pulledMessage, type FilesState, type OpenFile } from "../src/frontend/files/filesStore";
 import { treeRows } from "../src/frontend/files/FilesSidebar";
 import { FilesPane, readmeOf, saveStatus } from "../src/frontend/files/FilesPane";
 import { languageOf } from "../src/frontend/files/codeLanguage";
@@ -174,6 +174,43 @@ test("opening another file saves the one it replaces; leaving saves it too", asy
   await store.close("src/index.ts");
   expect(server.files["src/index.ts"]).toBe("y\n");
   expect(store.getState().open).toBeNull();
+});
+
+test("Git Pull saves the editor first, pulls, then lists the tree and reads the open file again", async () => {
+  const server = fakeServer({ "README.md": "one\n" }, TREE);
+  const order: string[] = [];
+  let answer: { status: number; body: unknown } = { status: 200, body: { ok: true, conflicted: false, message: "Fast-forward", pulled: 2, branch: "main" } };
+  const fetchFn = async (input: string, init?: RequestInit): Promise<Response> => {
+    order.push(`${init?.method ?? "GET"} ${new URL(input, "http://x").pathname}`);
+    if (input === "/api/files/pull") {
+      // The pull changes the file the editor has open.
+      server.touch("README.md", "pulled\n");
+      return new Response(JSON.stringify(answer.body), { status: answer.status });
+    }
+    return server.fetchFn(input, init);
+  };
+  const store = createFilesStore(fetchFn);
+  await store.configure("/code");
+  await store.open("README.md");
+  store.edit("mine\n");
+  order.length = 0;
+  const result = await store.pull();
+  expect(result).toMatchObject({ ok: true, pulled: 2, branch: "main" });
+  expect(order).toEqual(["PUT /api/files/file", "POST /api/files/pull", "GET /api/files/dir", "GET /api/files/file"]);
+  expect(store.getState().open).toMatchObject({ content: "pulled\n", saved: "pulled\n" });
+  // A refusal comes back as the server's words.
+  answer = { status: 200, body: { ok: false, conflicted: false, message: "The working tree has uncommitted changes" } };
+  expect(await store.pull()).toMatchObject({ ok: false, message: "The working tree has uncommitted changes" });
+  // Outside code repository mode the route says why.
+  answer = { status: 409, body: { error: "No code repository is open" } };
+  expect(await store.pull()).toMatchObject({ ok: false, message: "No code repository is open" });
+});
+
+test("the Git Pull toast says how many commits came in, and into which branch", () => {
+  expect(pulledMessage({ ok: true, conflicted: false, message: "", pulled: 0, branch: "main" })).toBe("Already up to date");
+  expect(pulledMessage({ ok: true, conflicted: false, message: "", pulled: 1, branch: "main" })).toBe("Pulled 1 commit into main");
+  expect(pulledMessage({ ok: true, conflicted: false, message: "", pulled: 3, branch: "dev" })).toBe("Pulled 3 commits into dev");
+  expect(pulledMessage({ ok: true, conflicted: false, message: "" })).toBe("Pulled");
 });
 
 test("a file the server will not show as text says why", async () => {

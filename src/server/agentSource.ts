@@ -66,6 +66,10 @@ export interface RefreshResult {
   message: string;
   /** Whether the refresh left the working tree with merge/rebase conflicts. */
   conflicted: boolean;
+  /** On success: the commits the branch gained (0 when it was already up to date). */
+  pulled?: number;
+  /** On success: the branch that was brought up to date. */
+  branch?: string;
 }
 
 /** How to bring the branch up to date. */
@@ -161,6 +165,22 @@ export async function sourceStatus(folder: string): Promise<SourceStatus> {
 }
 
 /**
+ * After a pull: how many commits the branch gained since `before` (HEAD as it
+ * was), and the branch's name. Either is left out when git cannot say.
+ */
+async function gained(folder: string, before: RunResult): Promise<{ pulled?: number; branch?: string }> {
+  const out: { pulled?: number; branch?: string } = {};
+  const branch = await git(folder, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch.exitCode === 0 && branch.stdout.trim() !== "HEAD") out.branch = branch.stdout.trim();
+  const from = before.exitCode === 0 ? before.stdout.trim() : "";
+  if (!from) return out;
+  const count = await git(folder, ["rev-list", "--count", `${from}..HEAD`]);
+  const n = Number.parseInt(count.stdout.trim(), 10);
+  if (count.exitCode === 0 && Number.isFinite(n)) out.pulled = n;
+  return out;
+}
+
+/**
  * Bring the branch up to date before the session: a merge (`git pull
  * --no-rebase`) or a rebase (`git pull --rebase`). A dirty working tree is
  * refused up front so a refresh never half-applies over uncommitted work.
@@ -179,9 +199,10 @@ export async function refreshSource(folder: string, mode: RefreshMode): Promise<
     };
   }
 
+  const before = await git(folder, ["rev-parse", "--verify", "--quiet", "HEAD"]);
   const res = await git(folder, ["pull", mode === "rebase" ? "--rebase" : "--no-rebase"]);
   if (res.exitCode === 0) {
-    return { ok: true, message: res.stdout.trim() || "Already up to date.", conflicted: false };
+    return { ok: true, message: res.stdout.trim() || "Already up to date.", conflicted: false, ...(await gained(folder, before)) };
   }
 
   // A conflict leaves unmerged index entries; anything else is reported as is,
