@@ -12,7 +12,7 @@
 // event carries a sequence number; a stream that drops is reopened from
 // the last one seen, so nothing is lost or shown twice.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   AgentChoices,
   AgentDefaultsPatch,
@@ -713,10 +713,14 @@ export interface FolderGitInfo {
 const FOLDER_TTL_MS = 30_000;
 const folderInfos = new Map<string, { at: number; info: Promise<FolderGitInfo> }>();
 
+// An answer asked for again — the branch may have been switched — is still
+// shared by everything that asks in the same moment (the bar and the popover).
+const FOLDER_AGAIN_MS = 1_000;
+
 /** Whether a folder can have worktrees, and why not; a failed ask is "cannot". */
-export function loadFolderInfo(path: string): Promise<FolderGitInfo> {
+export function loadFolderInfo(path: string, maxAgeMs = FOLDER_TTL_MS): Promise<FolderGitInfo> {
   const kept = folderInfos.get(path);
-  if (kept && Date.now() - kept.at < FOLDER_TTL_MS) return kept.info;
+  if (kept && Date.now() - kept.at < maxAgeMs) return kept.info;
   const info = call<FolderGitInfo>(`/api/agent/folder?path=${encodeURIComponent(path)}`).catch(
     (e: Error): FolderGitInfo => ({ canWorktree: false, reason: e.message }),
   );
@@ -729,20 +733,42 @@ export function forgetFolderInfos(): void {
   folderInfos.clear();
 }
 
-/** A folder's git facts for the bar; null while they load. */
-export function useFolderInfo(path: string | null): FolderGitInfo | null {
+/**
+ * A folder's git facts for the bar; null while they load. The bar shows the
+ * branch the folder has checked out, which changes under it: the facts are
+ * asked for again when `stamp` changes (a session's status — its agent may
+ * have switched branches in a turn) and when the window is looked at again
+ * (the user may have, in a terminal).
+ */
+export function useFolderInfo(path: string | null, stamp?: unknown): FolderGitInfo | null {
   const [info, setInfo] = useState<{ path: string; info: FolderGitInfo } | null>(null);
+  const asked = useRef<{ path: string; stamp: unknown } | null>(null);
   useEffect(() => {
     if (!path) return;
     let live = true;
-    void loadFolderInfo(path).then((i) => {
-      if (live) setInfo({ path, info: i });
-    });
+    const ask = (again: boolean) =>
+      void loadFolderInfo(path, again ? FOLDER_AGAIN_MS : FOLDER_TTL_MS).then((i) => {
+        if (live) setInfo({ path, info: i });
+      });
+    ask(asked.current?.path === path && asked.current.stamp !== stamp);
+    asked.current = { path, stamp };
+    const onFocus = () => ask(true);
+    window.addEventListener("focus", onFocus);
     return () => {
       live = false;
+      window.removeEventListener("focus", onFocus);
     };
-  }, [path]);
+  }, [path, stamp]);
   return info && info.path === path ? info.info : null;
+}
+
+/** A folder's branch as the bar names it: null where there is none to name. */
+export function folderBranch(info: FolderGitInfo | null): { name: string; tooltip: string } | null {
+  if (!info?.branch) return null;
+  const where = info.repo ? ` · ${info.repo}` : "";
+  // `git rev-parse --abbrev-ref HEAD` says "HEAD" for a commit checked out by itself.
+  if (info.branch === "HEAD") return { name: "detached", tooltip: `Detached HEAD — no branch is checked out${where}` };
+  return { name: info.branch, tooltip: `Branch ${info.branch} is checked out${where}` };
 }
 
 /** What the Worktree box says of a folder: what ticking it does, or why it cannot be. */
