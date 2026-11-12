@@ -1,7 +1,7 @@
 // Which language a file in the Files tab is highlighted as (specs/app/
 // code-repo-mode.feature.md "Source files are highlighted by language"), and
 // the CodeMirror grammar for it. The grammars load on demand: a specs-only
-// user never opens a code file, and nobody needs all eight at once.
+// user never opens a code file, and nobody needs all of them at once.
 //
 // Highlighting is all a grammar adds here. The editor stays the plain one:
 // Enter keeps the line's own indentation rather than the grammar's idea of
@@ -21,6 +21,7 @@ export type CodeLanguage =
   | "sql"
   | "yaml"
   | "json"
+  | "xml"
   | "markdown";
 
 /** The name shown for each language. */
@@ -33,6 +34,7 @@ export const LANGUAGE_NAMES: Record<CodeLanguage, string> = {
   sql: "SQL",
   yaml: "YAML",
   json: "JSON",
+  xml: "XML",
   markdown: "Markdown",
 };
 
@@ -57,6 +59,18 @@ const BY_EXTENSION: Record<string, CodeLanguage> = {
   yml: "yaml",
   json: "json",
   jsonc: "json",
+  // XML, and the formats written in it: schemas, stylesheets, SVG, WSDL,
+  // property lists, IntelliJ modules, JavaFX layouts.
+  xml: "xml",
+  xsd: "xml",
+  xsl: "xml",
+  xslt: "xml",
+  xhtml: "xml",
+  svg: "xml",
+  wsdl: "xml",
+  plist: "xml",
+  iml: "xml",
+  fxml: "xml",
   md: "markdown",
   markdown: "markdown",
 };
@@ -93,14 +107,16 @@ function interpreterOf(firstLine: string): string | null {
 
 /**
  * The language a file is highlighted as, or null for plain text: by its
- * extension, then its name, then — for a file with no extension — the
- * interpreter its first line names.
+ * extension, then its name, then — for a file with no extension — an XML
+ * declaration or the interpreter its first line names.
  */
 export function languageOf(path: string, text = ""): CodeLanguage | null {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   if (dot > 0) return BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? null;
   if (SHELL_FILES.has(name)) return "bash";
+  // An XML file with no extension still opens with its declaration.
+  if (/^\uFEFF?<\?xml[\s?]/.test(text)) return "xml";
   const end = text.indexOf("\n");
   const interpreter = interpreterOf(end < 0 ? text.slice(0, 200) : text.slice(0, end));
   if (!interpreter) return null;
@@ -129,6 +145,8 @@ async function grammar(language: CodeLanguage, path: string): Promise<Extension>
       return (await import("@codemirror/lang-yaml")).yamlLanguage;
     case "json":
       return [(await import("@codemirror/lang-json")).jsonLanguage, syntaxHighlighting(jsonKeyStyle)];
+    case "xml":
+      return (await import("@codemirror/lang-xml")).xmlLanguage;
     case "markdown":
       return (await import("@codemirror/lang-markdown")).markdown();
   }
