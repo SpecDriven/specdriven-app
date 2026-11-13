@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.269 — 2026-11-12
+
+- The Linux desktop app restarts into the version an update installed ([#448](https://github.com/SpecDriven/specdriven-app/pull/448))
+- The agent pane picks the agent, model and effort in one picker ([#447](https://github.com/SpecDriven/specdriven-app/pull/447))
+
 ## v0.1.268 — 2026-11-12
 
 - The packaged macOS app finds an OpenCode CLI in ~/.opencode/bin ([#445](https://github.com/SpecDriven/specdriven-app/pull/445))
