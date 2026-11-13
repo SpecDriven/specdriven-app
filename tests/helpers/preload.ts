@@ -5,6 +5,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setPermanentMarketplacesForTests } from "../../src/plugins/marketplace";
 import { isolatePath } from "./binPath";
 
 isolatePath();
@@ -27,3 +28,8 @@ process.env.SPECDRIVEN_LOG_FILE ??= "0";
 // GitHub: no test start reaches out. The one test of that start swaps the
 // marketplace for a fake and clears this (tests/autoInstall.test.ts).
 process.env.SPECDRIVEN_NO_AUTO_INSTALL ??= "1";
+
+// The SpecDriven marketplace is on every list (src/plugins/marketplace.ts
+// withDefaultMarketplaces), so a test naming a local marketplace would clone
+// it from GitHub as well. Off here; the tests of the default turn it back on.
+setPermanentMarketplacesForTests([]);

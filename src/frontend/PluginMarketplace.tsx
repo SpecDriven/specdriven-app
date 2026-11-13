@@ -25,7 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { PluginStatus } from "../plugins/client/loader";
 import type { MarketplaceIndex, MarketplaceRef, PluginRelease } from "../plugins/marketplace";
-import { compareVersions, isPrerelease, marketplaceNameFor, releaseOf } from "../plugins/marketplace";
+import { compareVersions, isDefaultMarketplace, isPrerelease, marketplaceNameFor, releaseOf } from "../plugins/marketplace";
 import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 
@@ -275,15 +275,40 @@ export function PluginMarketplace({
       confirmLabel: "Add",
     });
     const source = result?.trim();
-    if (!source) return;
-    let name = marketplaceNameFor(source);
+    if (source) await addSource(source);
+  };
+
+  /** Put a git url on the list, under a name no other marketplace has. */
+  const addSource = async (source: string, preferred?: string) => {
+    let name = preferred ?? marketplaceNameFor(source);
     if (!name) {
       setError(`Cannot make a marketplace name out of ${source}`);
       return;
     }
     if (marketplaces.some((m) => m.source === source)) return;
-    for (let n = 2; marketplaces.some((m) => m.name === name); n++) name = `${marketplaceNameFor(source)}-${n}`;
+    const base = name;
+    for (let n = 2; marketplaces.some((m) => m.name === name); n++) name = `${base}-${n}`;
     await patchSettings({ plugins: { marketplaces: [...marketplaces, { name, source }] } });
+  };
+
+  // specs/app/plugins.feature.md "An empty repository is initialized as a
+  // marketplace": the server clones it, writes the index, README and CI and
+  // pushes main; only then is it added to the list, and the list opened.
+  const initializeMarketplace = async () => {
+    const result = await prompt({
+      title: "Initialize a marketplace",
+      hint: "The git url of a repository you have already created, empty — a private one for your company's plugins, say. The app writes marketplace.json, a README and the CI checks into it, pushes them to main and adds it here.",
+      placeholder: "https://github.com/acme/specdriven-plugins",
+      confirmLabel: "Initialize",
+    });
+    const source = result?.trim();
+    if (!source) return;
+    await run("initialize", async () => {
+      const data = await post("/api/plugins/marketplaces/init", { source });
+      const made = data.marketplace as MarketplaceRef;
+      await addSource(made.source, made.name);
+      setOpen(true);
+    });
   };
 
   const removeMarketplace = (name: string) =>
@@ -488,8 +513,17 @@ export function PluginMarketplace({
             >
               {loading && refreshing ? "Refreshing…" : "Refresh"}
             </button>
-            <button type="button" className="link" onClick={() => void addMarketplace()}>
+            <button type="button" className="link" disabled={busy !== null} onClick={() => void addMarketplace()}>
               Add marketplace…
+            </button>
+            <button
+              type="button"
+              className="link"
+              title="Turn a repository you created empty into a marketplace: index, README and CI, pushed to main"
+              disabled={busy !== null}
+              onClick={() => void initializeMarketplace()}
+            >
+              {busy === "initialize" ? "Initializing…" : "Initialize marketplace…"}
             </button>
           </span>
         )}
@@ -522,14 +556,22 @@ export function PluginMarketplace({
               </span>
               {!readOnly && (
                 <span className="plugin-market-row-actions">
-                  <button
-                    type="button"
-                    className="link"
-                    aria-label={`Remove marketplace ${m.name}`}
-                    onClick={() => void removeMarketplace(m.name)}
-                  >
-                    Remove
-                  </button>
+                  {/* The SpecDriven marketplace stays (specs/app/plugins.feature.md
+                      "The SpecDriven marketplace cannot be removed"). */}
+                  {isDefaultMarketplace(m) ? (
+                    <span className="settings-row-hint" title="The SpecDriven marketplace is always on the list">
+                      Default
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="link"
+                      aria-label={`Remove marketplace ${m.name}`}
+                      onClick={() => void removeMarketplace(m.name)}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </span>
               )}
             </div>

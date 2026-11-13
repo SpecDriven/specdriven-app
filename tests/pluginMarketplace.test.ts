@@ -27,8 +27,10 @@ import {
   marketplaceEntries,
   marketplaceNameFor,
   parseMarketplaceIndex,
+  setPermanentMarketplacesForTests,
   subdirectorySource,
 } from "../src/plugins/marketplace";
+import { initMarketplace, marketplaceOwnerFor } from "../src/plugins/host/marketplace";
 
 let root: string;
 let home: string;
@@ -38,6 +40,7 @@ const saved = {
   SPECDRIVEN_HOME: process.env.SPECDRIVEN_HOME,
   DEMO_MODE: process.env.DEMO_MODE,
   SPECDRIVEN_HOSTED: process.env.SPECDRIVEN_HOSTED,
+  GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
 };
 
 beforeEach(async () => {
@@ -48,6 +51,18 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_HOME = home;
   delete process.env.DEMO_MODE;
   delete process.env.SPECDRIVEN_HOSTED;
+  // Initializing a marketplace commits in a clone the app makes itself, with
+  // the machine's git identity — which a CI runner does not have. A global
+  // config of the test's own gives it one, whatever this machine's says. It
+  // also pins git's own default branch to master, as a Linux runner has it
+  // (the macOS Command Line Tools ship main), so a fixture that means main
+  // has to say so.
+  const gitconfig = join(work, "gitconfig");
+  await writeFile(
+    gitconfig,
+    "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = master\n",
+  );
+  process.env.GIT_CONFIG_GLOBAL = gitconfig;
   // Marketplace plugins ship dist/: the loader in node mode, as the desktop app runs it.
   setBuildDisabled(true);
   setGitEngine("cli");
@@ -203,12 +218,30 @@ test("a source is a git url or a subdirectory, and an index row's api is checked
   expect(indexRowRefusal({ name: "a", source: "x", description: "", api: "soon" })).toMatch(/not a version/);
 });
 
-test("the settings name the marketplaces; absent, the SpecDriven index; empty, none", () => {
-  expect(marketplaceEntries({})).toEqual([{ name: "specdriven", source: "https://github.com/SpecDriven/plugins" }]);
-  expect(marketplaceEntries({ marketplaces: [] })).toEqual([]);
-  expect(marketplaceEntries({ marketplaces: [{ name: "a", source: "https://x/a" }, { name: "Bad!", source: "x" }, { name: "a", source: "dup" }, "nope"] })).toEqual([
-    { name: "a", source: "https://x/a" },
-  ]);
+test("the settings name the marketplaces, and the SpecDriven index is always among them", () => {
+  setPermanentMarketplacesForTests(null);
+  try {
+    const specdriven = { name: "specdriven", source: "https://github.com/SpecDriven/plugins" };
+    expect(marketplaceEntries({})).toEqual([specdriven]);
+    expect(marketplaceEntries({ marketplaces: [] })).toEqual([specdriven]);
+    expect(marketplaceEntries({ marketplaces: [{ name: "a", source: "https://x/a" }, { name: "Bad!", source: "x" }, { name: "a", source: "dup" }, "nope"] })).toEqual([
+      specdriven,
+      { name: "a", source: "https://x/a" },
+    ]);
+    // Listed under another name, it is not listed twice and keeps its place.
+    const renamed = { name: "public", source: "https://github.com/specdriven/plugins.git" };
+    expect(marketplaceEntries({ marketplaces: [{ name: "a", source: "https://x/a" }, renamed] })).toEqual([
+      { name: "a", source: "https://x/a" },
+      renamed,
+    ]);
+    // A row that took its name for another url gives the name up.
+    expect(marketplaceEntries({ marketplaces: [{ name: "specdriven", source: "https://x/mine" }] })).toEqual([
+      specdriven,
+      { name: "specdriven-2", source: "https://x/mine" },
+    ]);
+  } finally {
+    setPermanentMarketplacesForTests([]);
+  }
   expect(marketplaceNameFor("https://github.com/SpecDriven/plugins")).toBe("plugins");
   expect(marketplaceNameFor("git@github.com:SpecDriven/Plugins.git")).toBe("plugins");
   expect(marketplaceNameFor("/Users/me/dev/My Market/")).toBe("my-market");
@@ -507,11 +540,140 @@ test("the settings carry the marketplaces, and GET /api/state lists them", async
   const ok = await json(await api("PUT", "/api/state", { plugins: { marketplaces: [{ name: "one", source: "https://example.com/one" }, { name: "one", source: "dup" }] } }));
   expect(ok.status).toBe(200);
   expect(ok.body.pluginMarketplaces).toEqual([{ name: "one", source: "https://example.com/one" }]);
-  // No key at all reads as the default index.
-  await writeState({ plugins: { enabled: [] } } as never, root);
-  expect((await json(await api("GET", "/api/state"))).body.pluginMarketplaces).toEqual([
-    { name: "specdriven", source: "https://github.com/SpecDriven/plugins" },
-  ]);
+});
+
+// specs/app/plugins.feature.md "The SpecDriven marketplace cannot be removed".
+test("the SpecDriven marketplace stays on the list whatever the settings say; the others can go", async () => {
+  setPermanentMarketplacesForTests(null);
+  try {
+    const specdriven = { name: "specdriven", source: "https://github.com/SpecDriven/plugins" };
+    // No key at all, and an empty list saved before it was permanent.
+    await writeState({ plugins: { enabled: [] } } as never, root);
+    expect((await json(await api("GET", "/api/state"))).body.pluginMarketplaces).toEqual([specdriven]);
+    await writeState({ plugins: { enabled: [], marketplaces: [] } } as never, root);
+    expect((await json(await api("GET", "/api/state"))).body.pluginMarketplaces).toEqual([specdriven]);
+    const one = { name: "one", source: "https://example.com/one" };
+    let res = await json(await api("PUT", "/api/state", { plugins: { marketplaces: [specdriven, one] } }));
+    expect(res.body.pluginMarketplaces).toEqual([specdriven, one]);
+    // Removing it is refused by putting it back; removing another one works.
+    res = await json(await api("PUT", "/api/state", { plugins: { marketplaces: [one] } }));
+    expect(res.status).toBe(200);
+    expect(res.body.pluginMarketplaces).toEqual([specdriven, one]);
+    res = await json(await api("PUT", "/api/state", { plugins: { marketplaces: [specdriven] } }));
+    expect(res.body.pluginMarketplaces).toEqual([specdriven]);
+    const stored = (await readState(root)) as { plugins?: { marketplaces?: unknown } };
+    expect(stored.plugins?.marketplaces).toEqual([specdriven]);
+  } finally {
+    setPermanentMarketplacesForTests([]);
+  }
+});
+
+// ---- initializing ----------------------------------------------------------------
+
+/** A stand-in for the SpecDriven marketplace: what a new marketplace copies. */
+async function templateMarketplace(dir: string) {
+  await marketplaceRepo(dir, []);
+  await mkdir(join(dir, ".github", "workflows"), { recursive: true });
+  await mkdir(join(dir, "scripts"), { recursive: true });
+  await writeFile(join(dir, ".github", "workflows", "ci.yml"), "name: CI\n");
+  await writeFile(join(dir, "scripts", "check-index.ts"), "console.log('ok');\n");
+  await writeFile(join(dir, ".gitignore"), ".idea\n");
+  await writeFile(join(dir, "LICENSE"), "Apache\n");
+  await git(dir, "add", "-A");
+  await git(dir, "commit", "-q", "-m", "ci");
+}
+
+const treeOf = async (bare: string) =>
+  (await $`git -C ${bare} ls-tree -r --name-only main`.text()).trim().split("\n").sort();
+
+// specs/app/plugins.feature.md "An empty repository is initialized as a marketplace".
+test("an empty repository is initialized as a marketplace: index, README and CI pushed to main", async () => {
+  const template = join(work, "template");
+  await templateMarketplace(template);
+  setPermanentMarketplacesForTests([{ name: "specdriven", source: template }]);
+  try {
+    const bare = join(work, "acme-plugins.git");
+    // An empty repository as GitHub makes one: its default branch is main.
+    // (A host makes the first branch pushed its default; a bare repository
+    // keeps naming git's own, which the app's clone would then not find.)
+    await $`git init -q --bare -b main ${bare}`.quiet();
+    await boot([]);
+
+    const res = await json(await api("POST", "/api/plugins/marketplaces/init", { source: bare }));
+    expect(res.status).toBe(200);
+    expect(res.body.marketplace).toMatchObject({ name: "acme-plugins", source: bare, index: { name: "acme-plugins", plugins: [] } });
+
+    expect(await treeOf(bare)).toEqual([
+      ".github/workflows/ci.yml",
+      ".gitignore",
+      "README.md",
+      "marketplace.json",
+      "plugins/.gitkeep",
+      "scripts/check-index.ts",
+    ]);
+    const index = parseMarketplaceIndex(JSON.parse(await $`git -C ${bare} show main:marketplace.json`.text()));
+    expect(index).toMatchObject({ name: "acme-plugins", plugins: [] });
+    expect(await $`git -C ${bare} show main:README.md`.text()).toContain(bare);
+    expect(await $`git -C ${bare} log -1 --pretty=%s main`.text()).toBe("Initialize the acme-plugins marketplace\n");
+    // The working clone is gone, and the settings are the page's to change.
+    expect((await readdir(marketplacesHome()).catch(() => [])).filter((d) => d.endsWith(".init"))).toEqual([]);
+    expect((await json(await api("GET", "/api/state"))).body.pluginMarketplaces).toEqual([{ name: "specdriven", source: template }]);
+
+    // Added, it lists like any other marketplace.
+    await api("PUT", "/api/state", { plugins: { marketplaces: [{ name: "acme-plugins", source: bare }] } });
+    const listed = await json(await api("GET", "/api/plugins/marketplaces"));
+    expect(listed.body.marketplaces.find((m: any) => m.name === "acme-plugins")).toMatchObject({ index: { name: "acme-plugins", plugins: [] } });
+    // A url on the list already is refused.
+    const again = await json(await api("POST", "/api/plugins/marketplaces/init", { source: bare }));
+    expect(again.status).toBe(400);
+    expect(again.body.error).toMatch(/already on the list/);
+  } finally {
+    setPermanentMarketplacesForTests([]);
+  }
+});
+
+test("a repository with commits keeps them, and its own README", async () => {
+  const template = join(work, "template");
+  await templateMarketplace(template);
+  const bare = join(work, "corp.git");
+  await $`git init -q --bare -b main ${bare}`.quiet();
+  const seed = join(work, "seed");
+  await $`git clone -q ${bare} ${seed}`.quiet();
+  await writeFile(join(seed, "README.md"), "# Ours\n");
+  await git(seed, "add", "-A");
+  await git(seed, "commit", "-q", "-m", "README");
+  await git(seed, "push", "-q", "origin", "main");
+
+  await initMarketplace(bare, { configured: [], templateDir: template });
+  expect(await $`git -C ${bare} show main:README.md`.text()).toBe("# Ours\n");
+  expect(await $`git -C ${bare} log --pretty=%s main`.text()).toBe("Initialize the corp marketplace\nREADME\n");
+});
+
+test("a repository that is a marketplace already, or cannot be pushed to, is refused with nothing left behind", async () => {
+  const template = join(work, "template");
+  await templateMarketplace(template);
+  // Already a marketplace.
+  await expect(initMarketplace(template, { configured: [], templateDir: template })).rejects.toThrow(
+    /already has a marketplace.json/,
+  );
+  // A host that refuses the push: the commit never lands and nothing is kept.
+  const bare = join(work, "locked.git");
+  await $`git init -q --bare ${bare}`.quiet();
+  const hook = join(bare, "hooks", "pre-receive");
+  await writeFile(hook, "#!/bin/sh\necho 'read-only for you' >&2\nexit 1\n");
+  await $`chmod +x ${hook}`.quiet();
+  await expect(initMarketplace(bare, { configured: [], templateDir: template })).rejects.toThrow(/Could not push to .*read-only for you/s);
+  expect((await $`git -C ${bare} for-each-ref`.text()).trim()).toBe("");
+  // A url that does not clone.
+  await expect(initMarketplace(join(work, "nowhere.git"), { configured: [], templateDir: template })).rejects.toThrow(/Could not clone/);
+  expect((await readdir(marketplacesHome()).catch(() => [])).filter((d) => d.endsWith(".init"))).toEqual([]);
+});
+
+test("a marketplace's owner is read from its url", () => {
+  expect(marketplaceOwnerFor("https://github.com/acme/plugins")).toEqual({ name: "acme", url: "https://github.com/acme" });
+  expect(marketplaceOwnerFor("git@github.com:acme/plugins.git")).toEqual({ name: "acme", url: "https://github.com/acme" });
+  expect(marketplaceOwnerFor("https://git.acme.test/platform/plugins")).toEqual({ name: "platform" });
+  expect(marketplaceOwnerFor("https://git.acme.test/plugins")).toBeUndefined();
 });
 
 test("the hosted demo browses the marketplaces, never refreshed, and changes nothing", async () => {
@@ -532,6 +694,7 @@ test("the hosted demo browses the marketplaces, never refreshed, and changes not
 
   for (const [method, path] of [
     ["POST", "/api/plugins/install"],
+    ["POST", "/api/plugins/marketplaces/init"],
     ["POST", "/api/plugins/x/update"],
     ["DELETE", "/api/plugins/x"],
   ] as const) {

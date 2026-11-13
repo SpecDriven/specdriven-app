@@ -91,19 +91,52 @@ export const MARKETPLACE_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 /**
  * The marketplaces the profile section names: `plugins.marketplaces` as
- * `{ name, source }` rows, malformed rows dropped; the default index when
- * the key is absent — an empty list is the user's own choice of none.
+ * `{ name, source }` rows, malformed rows dropped. The SpecDriven index is
+ * always among them, first when the list does not name it (by its url,
+ * under whatever name): it cannot be removed (specs/app/plugins.feature.md
+ * "The SpecDriven marketplace cannot be removed").
  */
 export function marketplaceEntries(section: Record<string, unknown>): MarketplaceRef[] {
   const raw = section.marketplaces;
-  if (raw === undefined) return [...DEFAULT_MARKETPLACES];
-  if (!Array.isArray(raw)) return [];
+  return withDefaultMarketplaces(Array.isArray(raw) ? raw : []);
+}
+
+// The marketplaces every list holds. The test preload empties it, so a test
+// that names a local marketplace does not also clone the SpecDriven one from
+// GitHub; the tests of the default put it back. Never changed by the app.
+let permanent: readonly MarketplaceRef[] = DEFAULT_MARKETPLACES;
+
+/** Replace the marketplaces every list holds; null restores the default. For tests only. */
+export function setPermanentMarketplacesForTests(list: readonly MarketplaceRef[] | null): void {
+  permanent = list ?? DEFAULT_MARKETPLACES;
+}
+
+/** The marketplaces every list holds: the SpecDriven one. */
+export function permanentMarketplaces(): readonly MarketplaceRef[] {
+  return permanent;
+}
+
+/**
+ * Settings rows as marketplaces, malformed ones and repeated names dropped,
+ * with each default marketplace the rows do not name put first.
+ */
+export function withDefaultMarketplaces(raw: readonly unknown[]): MarketplaceRef[] {
   const rows: MarketplaceRef[] = [];
   for (const row of raw) {
     const ref = marketplaceRef(row);
     if (ref && !rows.some((r) => r.name === ref.name)) rows.push(ref);
   }
-  return rows;
+  const missing = permanent.filter(
+    (d) => !rows.some((r) => normalizedSource(r.source) === normalizedSource(d.source)),
+  );
+  // A row that took a default's name for another url gives the name up.
+  const out = [...missing];
+  for (const row of rows) {
+    let name = row.name;
+    for (let n = 2; out.some((r) => r.name === name); n++) name = `${row.name}-${n}`;
+    out.push(name === row.name ? row : { ...row, name });
+  }
+  return out;
 }
 
 /** One settings row as a marketplace, or null for a malformed one. */

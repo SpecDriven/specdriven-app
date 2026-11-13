@@ -333,3 +333,77 @@ describe("a released plugin's row", () => {
     ]);
   });
 });
+
+// specs/app/plugins.feature.md "An empty repository is initialized as a
+// marketplace", "The SpecDriven marketplace cannot be removed".
+describe("initializing a marketplace, and the one that stays", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    document.body.innerHTML = "";
+  });
+  const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+  const specdriven = { name: "specdriven", source: "https://github.com/SpecDriven/plugins" };
+  const corp = { name: "corp", source: "https://example.test/corp" };
+
+  async function mount(opts: { answer: string | null; init: (body: unknown) => Response }) {
+    const posted: unknown[] = [];
+    const patches: Record<string, unknown>[] = [];
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/plugins/marketplaces/init") {
+        const body = JSON.parse(String(init?.body));
+        posted.push(body);
+        return opts.init(body);
+      }
+      return Response.json({ marketplaces: [] });
+    }) as unknown as typeof fetch;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await act(async () =>
+      createRoot(container).render(
+        <PluginMarketplace
+          marketplaces={[specdriven, corp]}
+          plugins={[]}
+          patchSettings={async (patch) => {
+            patches.push(patch);
+            return true;
+          }}
+          prompt={async () => opts.answer}
+          confirm={async () => false}
+          onChanged={async () => {}}
+        />,
+      ),
+    );
+    return { container, posted, patches };
+  }
+
+  test("the SpecDriven marketplace has no Remove; another one does", async () => {
+    const { container } = await mount({ answer: null, init: () => Response.json({}) });
+    const removes = [...container.querySelectorAll("button")].map((b) => b.getAttribute("aria-label")).filter(Boolean);
+    expect(removes).toEqual(["Remove marketplace corp"]);
+    expect(container.querySelector('[data-marketplace="specdriven"]')?.textContent).toContain("Default");
+  });
+
+  test("Initialize posts the url and adds the marketplace once the server has pushed it", async () => {
+    const source = "https://github.com/acme/plugins";
+    const { container, posted, patches } = await mount({
+      answer: ` ${source} `,
+      init: () => Response.json({ marketplace: { name: "plugins", source, index: { name: "plugins", plugins: [] } } }),
+    });
+    await act(async () => click(buttonNamed(container, "Initialize marketplace…")));
+    await flush();
+    expect(posted).toEqual([{ source }]);
+    expect(patches).toEqual([{ plugins: { marketplaces: [specdriven, corp, { name: "plugins", source }] } }]);
+  });
+
+  test("a refused initialization is shown and nothing is added", async () => {
+    const { container, patches } = await mount({
+      answer: "https://example.test/locked",
+      init: () => Response.json({ error: "Could not push to https://example.test/locked: denied" }, { status: 400 }),
+    });
+    await act(async () => click(buttonNamed(container, "Initialize marketplace…")));
+    await flush();
+    expect(patches).toEqual([]);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Could not push");
+  });
+});

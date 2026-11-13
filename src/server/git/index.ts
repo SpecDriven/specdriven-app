@@ -269,6 +269,21 @@ export async function commitAndPush(
   );
 }
 
+/**
+ * Commit the whole working tree and make the first push of `branch`, which
+ * then tracks the remote's — what initializing a marketplace in an empty
+ * repository does (specs/app/plugins.feature.md "An empty repository is
+ * initialized as a marketplace").
+ */
+export async function commitAllAndPublish(repoDir: string, branch: string, message: string): Promise<SyncResult> {
+  return traced(
+    "commit_all_and_publish",
+    repoDir,
+    () => backend().commitAllAndPublish(repoDir, branch, message),
+    (result) => ({ ...syncOutcome(result), "git.branch": branch }),
+  );
+}
+
 export async function hasUpstream(repoDir: string): Promise<boolean> {
   return backend().hasUpstream(repoDir);
 }
