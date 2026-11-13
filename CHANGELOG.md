@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.272 — 2026-11-13
+
+- Initialize marketplace…: an empty repository becomes a plugin marketplace; the SpecDriven one can't be removed ([#453](https://github.com/SpecDriven/specdriven-app/pull/453))
+- The agent plugins' descriptions say how each signs in: an account or the API ([#452](https://github.com/SpecDriven/specdriven-app/pull/452))
+
 ## v0.1.271 — 2026-11-13
 
 - A marketplace plugin is released in versions, and any of them can be installed ([#451](https://github.com/SpecDriven/specdriven-app/pull/451))
