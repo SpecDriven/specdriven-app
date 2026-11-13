@@ -335,13 +335,17 @@ test("the bar is one row laid out chip by chip, so a chip gives way and never si
   // is what put the Worktree box on top of the model's name.
   expect(declarations(".agent-bar-side").display).toBe("contents");
   // The folder and the branch give way first, then the model, then the rest;
-  // the Worktree box, the agent and Send never do.
+  // the Worktree box and Send never do.
   expect(shrink(FOLDER)).toBe(shrink(".agent-bar-branch"));
   expect(shrink(FOLDER)).toBeGreaterThanOrEqual(shrink(MODEL) * 1e6);
   expect(shrink(MODEL)).toBeGreaterThanOrEqual(shrink(".agent-bar-picker") * 1e6);
   expect(shrink(".agent-bar-picker")).toBeGreaterThan(0);
   expect(shrink(".agent-bar-check")).toBe(0);
-  expect(shrink('.agent-bar-picker[data-picker="agent"]')).toBe(0);
+  // In the model's chip the effort gives way before the model's name, and
+  // the agent's icon never does.
+  expect(shrink(".agent-bar-chip-more")).toBeGreaterThanOrEqual(1e6);
+  expect(declarations(".agent-bar-chip-more")).toMatchObject({ overflow: "hidden", "text-overflow": "ellipsis" });
+  expect(shrink(".agent-icon")).toBe(0);
   expect(shrink(".agent-send")).toBe(0);
   // A chip cut down still shows a few letters.
   for (const chip of [FOLDER, ".agent-bar-branch", MODEL, ".agent-bar-picker"]) {
@@ -349,11 +353,10 @@ test("the bar is one row laid out chip by chip, so a chip gives way and never si
   }
 });
 
-test("a narrowing bar drops its chevrons, the Worktree word, the agent's name and a new session's branch, in that order", () => {
+test("a narrowing bar drops its chevrons, the Worktree word, a new session's branch and the folder's icon, in that order", () => {
   const steps = [
     narrowStep(".agent-bar-chevron"),
     narrowStep(".agent-bar-check-text"),
-    narrowStep('.agent-bar-picker[data-picker="agent"] .agent-bar-chip-text'),
     // Only beside the Worktree box: a running session keeps its branch.
     narrowStep(".agent-bar-side:has(.agent-bar-check) .agent-bar-branch"),
     narrowStep(`${FOLDER} .agent-bar-chip > svg:not(.agent-bar-chevron)`),
