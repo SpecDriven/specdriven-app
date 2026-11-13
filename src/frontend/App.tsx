@@ -3141,6 +3141,13 @@ export function App() {
     setSelectedFolder(null);
     setDrawerOpen(false);
     setSettingsError(null);
+    // The page lives in the editor column: a hidden editor would open it out
+    // of sight (Updates from the version chip, Settings, Plugins…), so the
+    // editor comes back, as "\" would bring it.
+    if (editorHidden) {
+      setEditorHidden(false);
+      storeEditorHidden(false);
+    }
     const path = appPagePath(page);
     if (location.pathname !== path) {
       if (opts.push && !appPage) {
