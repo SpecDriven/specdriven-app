@@ -15,6 +15,16 @@
 // relaunch all keep working — and the old one is removed once the new app
 // has shown a window (main.ts), so a build that cannot start leaves it
 // beside itself to rename back.
+//
+// Linux is the one platform that cannot simply relaunch. The app runs from
+// an AppImage, which the AppImage runtime mounts over FUSE and unmounts the
+// moment the process it started exits — and Electron's `app.relaunch` starts
+// the new app from a helper process forked out of the running executable,
+// which is a path inside that mount. The helper dies with the mount and
+// nothing is left to start anything: the app quits and never comes back
+// (#446). So Linux hands over instead: a small `/bin/sh` of the system's
+// own, detached from this process, waits for it to go — the
+// single-instance lock is held until then — and execs the new AppImage.
 
 import { basename, dirname, join } from "node:path";
 import { builtApp } from "../server/appUpdate";
@@ -30,6 +40,8 @@ export type ActivationPlan =
   | { kind: "swap-bundle"; bundle: string; newBundle: string; execPath: string }
   /** Start the new build where the installer left it. */
   | { kind: "relaunch-into"; execPath: string }
+  /** Linux: a detached shell starts `execPath` once this process has quit. */
+  | { kind: "hand-over"; execPath: string }
   /** The shell cannot do it here; the new app is at `path` for the user. */
   | { kind: "manual"; reason: string; path: string | null };
 
@@ -60,6 +72,8 @@ export async function planActivation(input: PlanInput): Promise<ActivationPlan> 
   if (!built) {
     return { kind: "manual", reason: `There is no built app under ${join(input.newSourceDir, "release")}`, path: null };
   }
+  // Linux: the AppImage outlives nothing it starts itself (see above).
+  if (input.platform === "linux") return { kind: "hand-over", execPath: built };
   if (input.platform !== "darwin") return { kind: "relaunch-into", execPath: built };
 
   const bundle = bundleOf(input.execPath);
@@ -113,4 +127,54 @@ export async function swapBundle(plan: Extract<ActivationPlan, { kind: "swap-bun
     await deps.rename(previous, plan.bundle);
     throw e;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Handing over on Linux
+
+/** How long the waiting shell gives this process to quit before starting the new app anyway. */
+export const HANDOVER_WAIT_SECONDS = 60;
+
+/** How often it looks, in seconds — `sleep`'s fractions, which GNU and busybox both take. */
+const HANDOVER_POLL_SECONDS = 0.2;
+
+/**
+ * The shell that starts the new app once this process has gone. It is the
+ * system's `/bin/sh`, not anything inside the AppImage: it has to outlive
+ * the mount the running app is unpacked into. `kill -0` is the wait — the
+ * single-instance lock (main.ts) is held for as long as the process is, so
+ * starting sooner would only focus the old window and quit. After
+ * HANDOVER_WAIT_SECONDS it starts the new app regardless, rather than
+ * leaving the user with no app at all.
+ *
+ * The paths go in as arguments, never interpolated into the script, so a
+ * directory with a space or a quote in its name is just an argument.
+ */
+export function handoverCommand(execPath: string, pid: number): { command: string; args: string[] } {
+  const polls = Math.ceil(HANDOVER_WAIT_SECONDS / HANDOVER_POLL_SECONDS);
+  const script = [
+    // `sleep` is a program, not a builtin: the app's own PATH may be
+    // anything (a packaged app's is minimal), so the usual places are
+    // appended rather than trusted to be there.
+    'PATH="${PATH:-}:/usr/bin:/bin"; export PATH',
+    'app="$1"; pid="$2"; n=0',
+    `while [ "$n" -lt ${polls} ] && kill -0 "$pid" 2>/dev/null; do`,
+    `  sleep ${HANDOVER_POLL_SECONDS}`,
+    '  n=$((n + 1))',
+    "done",
+    'exec "$app"',
+  ].join("\n");
+  return { command: "/bin/sh", args: ["-c", script, "sh", execPath, String(pid)] };
+}
+
+/**
+ * The environment the new app starts in: this AppImage's own variables
+ * removed, so the new one's runtime sets its own. They name the mount this
+ * app runs from, which is gone by then — an inherited LD_LIBRARY_PATH would
+ * point the new app's loader at an unmounted directory.
+ */
+export function handoverEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!env.APPDIR && !env.APPIMAGE) return { ...env };
+  const { APPDIR: _dir, APPIMAGE: _image, ARGV0: _argv0, OWD: _owd, LD_LIBRARY_PATH: _libs, ...rest } = env;
+  return rest;
 }
