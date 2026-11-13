@@ -7681,6 +7681,39 @@ button.page-archive-head:hover {
   color: var(--text-2);
 }
 
+/* The session's agent, by the mark the model picker shows for it, with the
+   dot for how the session is doing on its lower-right corner. The dot's ring
+   is the tab's own background, so it stands off the mark. */
+.agent-tab {
+  --agent-tab-bg: var(--surface-1);
+}
+
+.agent-tab[aria-selected="true"] {
+  --agent-tab-bg: var(--surface-2);
+}
+
+.agent-tab-mark {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  color: var(--text-2);
+}
+
+.agent-tab:hover .agent-tab-mark,
+.agent-tab[aria-selected="true"] .agent-tab-mark {
+  color: var(--text-1);
+}
+
+.agent-tab-mark .agent-dot {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--agent-tab-bg);
+  box-sizing: border-box;
+}
+
 .agent-tab-name {
   flex: 1 1 auto;
   min-width: 0;
