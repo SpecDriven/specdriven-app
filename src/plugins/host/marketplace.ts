@@ -13,7 +13,15 @@
 // fresh copy the same way and, on a confirmation that says so, swaps it in
 // for the folder that is there. The loader notices the folder change and
 // mounts, remounts or unwinds the plugin.
+//
+// A plugin with a `release` folder (specs/app/plugins.feature.md "A plugin
+// is released as a versioned zip in its release folder") is installed from
+// a zip in it instead of from its source folder: the newest version this
+// app can run, or the one asked for — its checksum checked against
+// `releases.json` before it is unpacked. The zips are in the marketplace's
+// clone already, so putting an older version back needs no network.
 
+import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { version as appVersion } from "../../../package.json";
@@ -22,18 +30,28 @@ import { bodyOf, json, type Handler } from "../../server/http";
 import { builtinManifests, profileManifests } from "../builtin/manifests";
 import {
   INSTALL_RECORD_FILE,
+  RELEASE_DIR,
+  RELEASES_FILE,
+  compareVersions,
   indexRowRefusal,
+  isPrerelease,
   marketplaceEntries,
+  newestInstallable,
   parseMarketplaceIndex,
+  parseReleases,
+  releaseOf,
+  releaseRefusal,
   subdirectorySource,
   type InstallRecord,
   type MarketplaceIndex,
   type MarketplacePlugin,
   type MarketplaceRef,
+  type PluginRelease,
 } from "../marketplace";
 import { PROFILE_KEY, dropPlugin } from "../profile";
-import { externalPlugin, notifyPluginChange, pluginStates, rescanPlugins, type PluginState } from "./loader";
+import { externalPlugin, notifyPluginChange, pluginStates, rebuildPlugin, rescanPlugins, type PluginState } from "./loader";
 import { marketplacesHome, pluginsHome, readPluginFolder, safeId } from "./sources";
+import { unzipInto } from "./zip";
 
 /** A marketplace as Settings lists it: its cache, its index, or why it has none. */
 export interface MarketplaceStatus extends MarketplaceRef {
@@ -155,7 +173,70 @@ async function readIndex(dir: string): Promise<MarketplaceIndex> {
   } catch (e) {
     throw new Error(`marketplace.json does not parse: ${(e as Error).message}`);
   }
-  return parseMarketplaceIndex(raw);
+  const index = parseMarketplaceIndex(raw);
+  await Promise.all(index.plugins.map((row) => readReleases(dir, row)));
+  return index;
+}
+
+/**
+ * The versions a subdirectory plugin has released, onto its row: each with
+ * why this app cannot install it, when it cannot. A plugin with no
+ * `release` folder is left as it is — it installs from its source folder —
+ * and a `releases.json` that cannot be read is reported on its row alone.
+ */
+async function readReleases(marketplaceDir: string, row: MarketplacePlugin): Promise<void> {
+  const subdir = subdirectorySource(row.source);
+  if (subdir === null) return;
+  let text: string;
+  try {
+    text = await readFile(join(marketplaceDir, subdir, RELEASE_DIR, RELEASES_FILE), "utf8");
+  } catch {
+    return;
+  }
+  try {
+    row.releases = parseReleases(JSON.parse(text), row.name).map((release) => {
+      const refusal = releaseRefusal(release, appVersion);
+      return refusal ? { ...release, refusal } : release;
+    });
+  } catch (e) {
+    row.releasesError = `${RELEASE_DIR}/${RELEASES_FILE}: ${(e as Error).message}`;
+  }
+}
+
+/**
+ * The released version an install or update means: the one asked for, or
+ * the newest this app can run. Throws with the reason when there is none —
+ * no such version, one withdrawn, or one this app is too old for.
+ */
+function pickRelease(row: MarketplacePlugin, version: string | undefined): PluginRelease {
+  if (row.releasesError) throw new Error(`${row.name}: ${row.releasesError}`);
+  const releases = row.releases ?? [];
+  if (version !== undefined) {
+    const release = releaseOf(releases, version);
+    if (!release) throw new Error(`${row.name} has no released version ${version}`);
+    const refusal = releaseRefusal(release, appVersion);
+    if (refusal) throw new Error(refusal);
+    return release;
+  }
+  const newest = newestInstallable(releases, appVersion);
+  if (newest) return newest;
+  const stable = releases.filter((r) => !isPrerelease(r.version));
+  const why = stable.map((r) => releaseRefusal(r, appVersion)).find((r) => r !== null);
+  throw new Error(
+    why ?? (releases.length ? `${row.name} has only pre-release versions; pick one` : `${row.name} has no released version`),
+  );
+}
+
+/** A version picked on purpose that is older than the newest this app can run is held. */
+function heldAt(row: MarketplacePlugin, release: PluginRelease | undefined, asked: string | undefined): boolean {
+  if (!release || asked === undefined || !row.releases) return false;
+  const newest = newestInstallable(row.releases, appVersion);
+  return newest !== undefined && compareVersions(release.version, newest.version) < 0;
+}
+
+/** What a record remembers of the version it replaces: that one, when it differs. */
+function previousOf(before: string | undefined, next: string | undefined, kept: string | undefined): string | undefined {
+  return before && next && compareVersions(before, next) !== 0 ? before : kept;
 }
 
 // ---- installing ------------------------------------------------------------
@@ -212,10 +293,12 @@ function stagingDir(name: string): string {
  * with the reason. A plugin already installed under the id is named in the
  * preview as what a confirmation with `replace` swaps out; one linked from
  * a folder or shipped with the data folder cannot be replaced and is refused.
+ * A released plugin is staged at `version`, or at the newest this app runs.
  */
 export async function stageInstall(
   entry: MarketplaceRef,
   name: string,
+  version?: string,
 ): Promise<InstallPreview> {
   return exclusive(name, "installed", async () => {
     const status = await marketplaceIndex(entry);
@@ -229,7 +312,7 @@ export async function stageInstall(
     await rm(staging, { recursive: true, force: true });
     await mkdir(join(pluginsHome(), ".staging"), { recursive: true });
     try {
-      const commit = await fetchInto(row, status.dir, staging);
+      const { commit, release } = await fetchInto(row, status.dir, staging, version);
       const found = await readPluginFolder(staging, "home", appVersion);
       if (!found) throw new Error("the plugin has no package.json");
       if (found.error) throw new Error(found.error);
@@ -237,14 +320,24 @@ export async function stageInstall(
       if (builtinManifests.some((m) => m.id === manifest.id)) {
         throw new Error(`the id "${manifest.id}" belongs to a built-in plugin`);
       }
+      refuseMislabelled(release, manifest.version);
       const replaces = await installedPlugin(manifest.id);
+      const next = manifest.version ?? row.version;
+      const was = externalPlugin(manifest.id)?.install;
+      const previous = previousOf(replaces?.version, next, was?.previous);
+      // A reinstall of the version that is there keeps it as it was: held or not.
+      const same = replaces?.version !== undefined && next !== undefined && compareVersions(replaces.version, next) === 0;
+      const held = same ? was?.held === true : heldAt(row, release, version);
       const record: InstallRecord = {
         marketplace: entry.name,
         name,
         source: row.source,
         ...(row.ref ? { ref: row.ref } : {}),
-        ...(manifest.version || row.version ? { version: manifest.version ?? row.version } : {}),
+        ...(next ? { version: next } : {}),
         commit,
+        ...(release ? { sha256: release.sha256 } : {}),
+        ...(previous ? { previous } : {}),
+        ...(held ? { held: true } : {}),
         installedAt: new Date().toISOString(),
       };
       await writeFile(join(staging, INSTALL_RECORD_FILE), JSON.stringify(record, null, 2) + "\n");
@@ -284,10 +377,17 @@ export async function discardStaged(name: string): Promise<void> {
 export async function confirmInstall(
   entry: MarketplaceRef,
   name: string,
-  opts: { replace?: boolean } = {},
+  opts: { replace?: boolean; version?: string } = {},
 ): Promise<{ id: string; dir: string; replaced: boolean }> {
   const staging = stagingDir(name);
-  if (!(await exists(join(staging, INSTALL_RECORD_FILE)))) await stageInstall(entry, name);
+  // Staged at the version the consent step showed; anything else is staged afresh.
+  const staged = await readFile(join(staging, INSTALL_RECORD_FILE), "utf8")
+    .then((text) => JSON.parse(text) as InstallRecord)
+    .catch(() => null);
+  const asked = opts.version;
+  if (!staged || (asked !== undefined && (!staged.version || compareVersions(staged.version, asked) !== 0))) {
+    await stageInstall(entry, name, asked);
+  }
   return exclusive(name, "installed", async () => {
     const found = await readPluginFolder(staging, "home", appVersion);
     if (!found?.manifest) {
@@ -319,14 +419,23 @@ export async function confirmInstall(
 /**
  * The plugin at the ref the index names into `into`: a git source is
  * cloned and put at its ref, a subdirectory is copied out of the
- * marketplace's clone. Symlinks that leave the plugin's folder are refused.
- * Answers the commit the plugin — or, for a subdirectory, the marketplace
- * — is at.
+ * marketplace's clone — or, when it has releases, the zip of one version is
+ * unpacked from its `release` folder, once its checksum matches the one
+ * `releases.json` lists. Symlinks that leave the plugin's folder are
+ * refused. Answers the commit the plugin — or, for a subdirectory, the
+ * marketplace — is at, and the release that was unpacked.
  */
-async function fetchInto(row: MarketplacePlugin, marketplaceDir: string, into: string): Promise<string> {
+async function fetchInto(
+  row: MarketplacePlugin,
+  marketplaceDir: string,
+  into: string,
+  version?: string,
+): Promise<{ commit: string; release?: PluginRelease }> {
   const subdir = subdirectorySource(row.source);
   let commit: string;
+  let release: PluginRelease | undefined;
   if (subdir === null) {
+    if (version !== undefined) throw new Error(`${row.name} is not released in versions; it follows its repository`);
     await clonePluginRepo(row.source, into);
     commit = row.ref ? await checkoutRef(into, row.ref) : await headCommit(into);
   } else {
@@ -334,14 +443,34 @@ async function fetchInto(row: MarketplacePlugin, marketplaceDir: string, into: s
     if (!(from + sep).startsWith(resolve(marketplaceDir) + sep)) {
       throw new Error(`the source "${row.source}" leaves the marketplace`);
     }
-    if (!(await exists(join(from, "package.json")))) {
-      throw new Error(`${row.source} in ${marketplaceDir} has no package.json`);
+    if (row.releases || row.releasesError) {
+      release = pickRelease(row, version);
+      const zip = await readFile(join(from, RELEASE_DIR, release.file)).catch(() => {
+        throw new Error(`${row.name} ${release!.version}: ${release!.file} is not in the marketplace's release folder`);
+      });
+      const sum = createHash("sha256").update(zip).digest("hex");
+      if (sum !== release.sha256) {
+        throw new Error(`${release.file} does not match its checksum in ${RELEASES_FILE}; nothing was installed`);
+      }
+      await unzipInto(zip, into);
+    } else {
+      if (version !== undefined) throw new Error(`${row.name} has no released versions to pick from`);
+      if (!(await exists(join(from, "package.json")))) {
+        throw new Error(`${row.source} in ${marketplaceDir} has no package.json`);
+      }
+      await cp(from, into, { recursive: true, verbatimSymlinks: true });
     }
-    await cp(from, into, { recursive: true, verbatimSymlinks: true });
     commit = await headCommit(marketplaceDir);
   }
   await refuseEscapingSymlinks(into);
-  return commit;
+  return { commit, ...(release ? { release } : {}) };
+}
+
+/** A zip must hold the version its row in `releases.json` says it does. */
+function refuseMislabelled(release: PluginRelease | undefined, manifestVersion: string | undefined): void {
+  if (release && (!manifestVersion || compareVersions(manifestVersion, release.version) !== 0)) {
+    throw new Error(`${release.file} holds version ${manifestVersion ?? "none"}, not ${release.version}`);
+  }
 }
 
 /** A symlink under a plugin's folder that points outside it is refused. */
@@ -404,10 +533,17 @@ async function installedPlugin(id: string): Promise<InstalledPlugin | null> {
  * back where it was when the new manifest is refused), a subdirectory is
  * copied afresh from the refreshed marketplace and swapped in. Answers the
  * new record.
+ *
+ * A released plugin goes to the newest version this app can run, or to
+ * `version` — an older one included, which is how it is rolled back: it is
+ * then held there, offered no update, until an update without a version
+ * moves it on. The record remembers the version it replaced. A version the
+ * marketplace's copy already has is unpacked without reaching the network.
  */
 export async function updatePlugin(
   id: string,
   entries: readonly MarketplaceRef[],
+  opts: { version?: string } = {},
 ): Promise<InstallRecord> {
   return exclusive(id, "updated", async () => {
     const known = externalPlugin(id);
@@ -417,15 +553,22 @@ export async function updatePlugin(
     const record = known.install;
     const entry = entries.find((m) => m.name === record.marketplace);
     if (!entry) throw new Error(`the marketplace "${record.marketplace}" is no longer configured`);
-    const status = await marketplaceIndex(entry, true);
-    if (!status.index) throw new Error(`${entry.name}: ${status.error}`);
+    const asked = opts.version;
+    // A version this machine already has the zip of needs no pull.
+    let status = asked === undefined ? undefined : await marketplaceIndex(entry);
+    const cached = status?.index?.plugins.find((p) => p.name === record.name);
+    if (!cached?.releases || !releaseOf(cached.releases, asked!)) status = await marketplaceIndex(entry, true);
+    if (!status?.index) throw new Error(`${entry.name}: ${status?.error}`);
     const row = status.index.plugins.find((p) => p.name === record.name);
     if (!row) throw new Error(`${entry.name} no longer lists "${record.name}"`);
     const early = indexRowRefusal(row);
     if (early) throw new Error(early);
 
+    const before = (await readPluginFolder(known.dir, "home", appVersion))?.manifest?.version ?? record.version;
     let commit: string;
+    let release: PluginRelease | undefined;
     if (subdirectorySource(row.source) === null) {
+      if (asked !== undefined) throw new Error(`${record.name} is not released in versions; it follows its repository`);
       commit = row.ref ? await checkoutRef(known.dir, row.ref) : await pullDefault(known.dir);
       const found = await readPluginFolder(known.dir, "home", appVersion);
       const problem = !found ? "the plugin has no package.json" : found.error ?? (found.manifest!.id !== id ? `the update's manifest names "${found.manifest!.id}", not "${id}"` : null);
@@ -439,10 +582,11 @@ export async function updatePlugin(
       await rm(staging, { recursive: true, force: true });
       await mkdir(join(pluginsHome(), ".staging"), { recursive: true });
       try {
-        commit = await fetchInto(row, status.dir, staging);
+        ({ commit, release } = await fetchInto(row, status.dir, staging, asked));
         const found = await readPluginFolder(staging, "home", appVersion);
         const problem = !found ? "the plugin has no package.json" : found.error ?? (found.manifest!.id !== id ? `the update's manifest names "${found.manifest!.id}", not "${id}"` : null);
         if (problem) throw new Error(problem);
+        refuseMislabelled(release, found!.manifest!.version);
       } catch (e) {
         await rm(staging, { recursive: true, force: true });
         throw e;
@@ -451,12 +595,18 @@ export async function updatePlugin(
       await rename(staging, known.dir);
     }
     const manifest = (await readPluginFolder(known.dir, "home", appVersion))?.manifest;
+    const version = manifest?.version ?? row.version;
+    const { sha256: _sum, previous: kept, held: _held, ...carried } = record;
+    const previous = previousOf(before, version, kept);
     const next: InstallRecord = {
-      ...record,
+      ...carried,
       source: row.source,
       ...(row.ref ? { ref: row.ref } : {}),
-      ...(manifest?.version || row.version ? { version: manifest?.version ?? row.version } : {}),
+      ...(version ? { version } : {}),
       commit,
+      ...(release ? { sha256: release.sha256 } : {}),
+      ...(previous ? { previous } : {}),
+      ...(heldAt(row, release, asked) ? { held: true } : {}),
       installedAt: new Date().toISOString(),
     };
     if (!row.ref) delete next.ref;
@@ -529,7 +679,8 @@ export interface MarketplaceRouteDeps {
  * The marketplace routes, for api.ts to register among the core rows:
  * `GET /api/plugins/marketplaces[?refresh=1]`, `POST /api/plugins/install`
  * with `{ marketplace, name, step: "stage" | "confirm" | "cancel" }`,
- * `POST /api/plugins/:id/update` and `DELETE /api/plugins/:id`.
+ * `POST /api/plugins/:id/update` and `DELETE /api/plugins/:id`. Install
+ * and update take a `version` for a plugin that is released in versions.
  */
 export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   getMarketplaces: Handler;
@@ -548,6 +699,11 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       }
     };
   const entries = async () => marketplaceEntries(profileSection(await deps.readState()));
+  // A plugin that failed to load keeps its error through a rescan, which
+  // mounts only what has none — so one whose folder was just replaced is
+  // loaded again by name. That is what lets a version that will not load
+  // be rolled back, or updated past, without a restart.
+  const remount = (id: string) => rebuildPlugin(id);
   const row = (id: string): PluginState | undefined => pluginStates().find((p) => p.id === id);
 
   return {
@@ -562,6 +718,7 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       if (typeof marketplace !== "string" || typeof name !== "string" || !name) {
         return json({ error: "marketplace and name are required" }, 400);
       }
+      const version = typeof body.version === "string" && body.version.trim() ? body.version.trim() : undefined;
       const entry = (await entries()).find((m) => m.name === marketplace);
       if (!entry) return json({ error: `No marketplace named "${marketplace}" is configured` }, 400);
       if (step === "cancel") {
@@ -569,7 +726,7 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
         return json({ ok: true });
       }
       if (step === "confirm") {
-        const { id, replaced } = await confirmInstall(entry, name, { replace: body.replace === true });
+        const { id, replaced } = await confirmInstall(entry, name, { replace: body.replace === true, version });
         if (replaced) {
           // A reinstall starts over like a fresh install: dropped from
           // `seen`, the rescan adopts the new folder and switches it on
@@ -582,15 +739,22 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
           }
         }
         await rescanPlugins();
-        if (replaced) notifyPluginChange();
+        if (replaced) {
+          await remount(id);
+          notifyPluginChange();
+        }
         return json({ id, replaced, plugin: row(id) ?? null });
       }
-      return json({ preview: await stageInstall(entry, name) });
+      return json({ preview: await stageInstall(entry, name, version) });
     }),
-    postUpdate: guard(async (_req, params) => {
+    postUpdate: guard(async (req, params) => {
       const id = params.id ?? "";
-      const record = await updatePlugin(id, await entries());
+      // The start's dialog posts no body: the newest version is meant.
+      const body = await bodyOf(req).catch((): Record<string, unknown> => ({}));
+      const version = typeof body.version === "string" && body.version.trim() ? body.version.trim() : undefined;
+      const record = await updatePlugin(id, await entries(), { version });
       await rescanPlugins();
+      await remount(id);
       notifyPluginChange();
       return json({ id, install: record, plugin: row(id) ?? null });
     }),
