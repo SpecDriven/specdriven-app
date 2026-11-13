@@ -8463,16 +8463,16 @@ button.agent-ref-offer:hover {
   color: var(--text-2);
 }
 
-/* The folder, its branch and the Worktree box (and the agent, before a
-   session) on the left; model, effort and mode on the right; Send last —
-   always one row, as in Claude Desktop. The two sides are groups for a
+/* The folder, its branch and the Worktree box on the left; the model chip
+   (the agent's icon, the model and the effort) and the mode on the right;
+   Send last — always one row, as in Claude Desktop. The two sides are groups for a
    reader, not boxes: the bar lays out every chip itself, so what gives way
    as the row runs short is decided chip by chip and no chip is ever pushed
    over its neighbour (specs/agents/agent-pane.feature.md "Footer
    cmponents"). A row that runs short first drops what it can do without,
    step by step (below); then the folder's and the branch's names shorten;
-   the model, effort and mode keep theirs whole, giving way only once those
-   two are down to a few letters. Send never does. */
+   the model and the mode keep theirs whole, giving way only once those two
+   are down to a few letters. Send never does. */
 .agent-bar {
   display: flex;
   flex-wrap: nowrap;
@@ -8495,22 +8495,15 @@ button.agent-ref-offer:hover {
 
 /* What a narrowing box drops, in this order, before a name is cut short:
    the chevrons; the word beside the Worktree box (a branch icon stands in,
-   further down); the agent's name (its icon stays, and the heading above
-   names it); and, on the new-session screen, the folder's branch — there
+   further down); and, on the new-session screen, the folder's branch — there
    the Worktree box needs the room, and its tooltip names the branch — with
    the chips set closer together; and last the folder's icon (both further
-   down). The steps are set so that, with two agents and long names, the
-   folder and the branch keep over half their letters just above each one,
-   and at the pane's narrowest (420px) the folder still shows a few with
-   every other name whole. */
+   down). The steps are set so that, with long names, the folder and the
+   branch keep over half their letters just above each one, and at the
+   pane's narrowest (420px) the folder still shows a few with every other
+   name whole. */
 @container agent-composer (max-width: 44rem) {
   .agent-bar-chevron {
-    display: none;
-  }
-}
-
-@container agent-composer (max-width: 35rem) {
-  .agent-bar-picker[data-picker="agent"] .agent-bar-chip-text {
     display: none;
   }
 }
@@ -8527,7 +8520,7 @@ button.agent-ref-offer:hover {
 
    Which names give way, and in what order, is set by shrink weights a
    million apart: the folder and the branch first, then the model, then the
-   effort and the mode. The gap is that wide because a chip handed even a
+   mode. The gap is that wide because a chip handed even a
    sixty-fourth of a pixel less than its name ends it in an ellipsis: the
    model's share of what the folder gives up has to round to nothing while
    the folder still has letters to give. A cut-down chip still shows its
@@ -8536,11 +8529,6 @@ button.agent-ref-offer:hover {
   display: inline-flex;
   flex: 0 1 auto;
   min-width: 2rem;
-}
-
-.agent-bar-picker[data-picker="agent"] {
-  flex: none;
-  min-width: 0;
 }
 
 .agent-bar-picker[data-picker="folder"] {
@@ -8607,6 +8595,27 @@ button.agent-ref-offer:hover {
 .agent-bar-picker[data-picker="folder"] .agent-bar-chip-text,
 .agent-bar-branch .agent-bar-chip-text {
   max-width: 8.5rem;
+}
+
+/* The effort after the model's name, in the model's chip: quieter, and the
+   first of the two to give way — the model is the one a reader looks for. */
+.agent-bar-chip-more {
+  flex: 0 1e6 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-bar-chip:hover:not(:disabled) .agent-bar-chip-more,
+.agent-bar-chip[aria-expanded="true"] .agent-bar-chip-more {
+  color: var(--text-2);
+}
+
+/* An agent's mark (src/frontend/AgentIcons.tsx): never squeezed. */
+.agent-icon {
+  flex: none;
 }
 
 .agent-bar-chevron {
@@ -8745,6 +8754,176 @@ button.agent-ref-offer:hover {
 
 .agent-bar-menu-folder .menu-desc {
   font-family: var(--font-mono);
+}
+
+/* The model chip's picker (src/frontend/AgentModelPicker.tsx): the agents'
+   icons, a search field over a long list, the models, the effort levels.
+   Only the models scroll; the rows around them stay put. */
+.popover.agent-model-popover {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: min(60vh, 30rem);
+  padding: 0.25rem;
+  overflow: hidden;
+}
+
+.agent-model-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.agent-model-agents {
+  display: flex;
+  flex: none;
+  gap: 0.15rem;
+  margin-bottom: 0.25rem;
+  padding: 0.1rem 0.25rem 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The agent that is picked is told apart by a filled box and a rule under
+   it, not by its colour alone. */
+.agent-model-agent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.agent-model-agent:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.agent-model-agent.on {
+  background: var(--hover);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  color: var(--text-1);
+}
+
+.agent-model-agent:focus-visible,
+.agent-model-effort:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.agent-model-agent.on:focus-visible {
+  box-shadow:
+    inset 0 -2px 0 var(--accent),
+    0 0 0 2px var(--ring);
+}
+
+/* The agent's name over what it is, in the tooltip of its icon. */
+.agent-model-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  max-width: 16rem;
+  white-space: normal;
+}
+
+.agent-model-tip strong {
+  font-weight: 600;
+}
+
+.agent-model-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.9rem;
+  margin-bottom: 0.25rem;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.agent-model-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.agent-model-search input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.agent-model-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* A list with a search field keeps its height while typing narrows it:
+   the picker hangs from its foot, so a list that shrank would move the
+   field under the typing hand. */
+.agent-model-list.is-searched {
+  flex-basis: 18rem;
+}
+
+.agent-model-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-model-note {
+  margin: 0;
+  padding: 0.25rem 0.5rem 0.4rem;
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+
+.agent-model-effort-heading {
+  flex: none;
+  margin-top: 0.25rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid var(--border);
+}
+
+/* The levels in a row, wrapping in a narrow pane. */
+.agent-model-efforts {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  padding: 0 0.25rem 0.25rem;
+}
+
+.agent-model-effort {
+  height: 1.6rem;
+  padding: 0 0.5rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.agent-model-effort:hover {
+  background: var(--hover);
+  color: var(--text-1);
+}
+
+.agent-model-effort.on {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
 }
 
 .agent-send {

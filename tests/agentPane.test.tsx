@@ -11,16 +11,13 @@ import {
   SimulationWatermark,
   TranscriptRow,
   TranscriptRows,
-  effortItems,
-  effortsFor,
   folderItems,
   folderPath,
   knownFolders,
   modeItems,
-  modelItems,
-  modelLabel,
   nameFromMessage,
 } from "../src/frontend/AgentPane";
+import { effortRows, effortsFor, filterModelRows, modelLabel, modelRow, modelRows } from "../src/frontend/AgentModelPicker";
 import {
   EMPTY_TRANSCRIPT,
   agentChat,
@@ -743,9 +740,10 @@ describe("SimulationWatermark", () => {
 });
 
 // The composer bar (specs/agents/agent-pane.feature.md "The composer bar
-// picks the folder, model, effort and mode"): the model and effort menus are
+// picks the folder, model, effort and mode"): the model picker's rows are
 // built from what the agent offers (AgentProvider.choices), and the
-// new-session screen is the same message box with the bar under it.
+// new-session screen is the same message box with the bar under it. The
+// picker itself is opened in tests/agentModelPicker.test.tsx.
 describe("composer bar", () => {
   const choices: AgentChoices = {
     models: [
@@ -758,29 +756,41 @@ describe("composer bar", () => {
     effort: "high",
   };
 
-  test("the model menu lists the agent's models, the running one checked and the default badged", () => {
-    const picked: (string | null)[] = [];
+  test("the model list holds the agent's models, the running one checked and the default badged", () => {
     // A session reports the id its alias stands for; the row still matches.
-    const items = modelItems(choices, "claude-sonnet-5-5", CLAUDE_AGENT, (m) => picked.push(m));
-    expect(items.map((i) => i.id)).toEqual(["model:opus", "model:sonnet", "model:haiku", "model:custom-model"]);
-    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:sonnet"]);
-    expect(items.map((i) => i.keys)).toEqual(["1", "2", "3", "4"]);
-    expect(renderToStaticMarkup(<>{items[0]!.label}</>)).toContain("Default");
-    expect(items[0]!.description).toBe("Most capable");
-    items[2]!.onSelect!();
-    expect(picked).toEqual(["haiku"]);
+    const rows = modelRows(choices, "claude-sonnet-5-5", CLAUDE_AGENT);
+    expect(rows.map((r) => r.id)).toEqual(["model:opus", "model:sonnet", "model:haiku", "model:custom-model"]);
+    expect(rows.filter((r) => r.checked).map((r) => r.id)).toEqual(["model:sonnet"]);
+    expect(rows.filter((r) => r.isDefault).map((r) => r.id)).toEqual(["model:opus"]);
+    expect(rows[0]!.description).toBe("Most capable");
+    // Picking a row sets the value the agent takes, not its display name.
+    expect(rows.map((r) => r.value)).toEqual(["opus", "sonnet", "haiku", "custom-model"]);
     expect(modelLabel(choices, "claude-opus-5-5")).toBe("Opus 5.5");
+    // Two aliases can stand for one id: the one new sessions start on is the row.
+    const twins: AgentChoices = {
+      models: [
+        { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default" },
+        { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5" },
+      ],
+      model: "opus",
+      effort: null,
+    };
+    expect(modelRow(twins, "claude-opus-5-5")!.value).toBe("opus");
+    expect(modelRow({ ...twins, model: null }, "claude-opus-5-5")!.value).toBe("default");
+    expect(modelRow(twins, "default")!.value).toBe("default");
+    expect(modelRow(twins, "elsewhere-1")).toBeUndefined();
+    expect(modelRow(null, "opus")).toBeUndefined();
     expect(modelLabel(choices, "elsewhere-1")).toBe("elsewhere-1");
     expect(modelLabel(null, undefined)).toBe("Default model");
   });
 
-  test("a model off the list still shows, and with no default the agent's own leads the menu", () => {
-    const items = modelItems({ ...choices, model: null }, "elsewhere-1", CLAUDE_AGENT, () => {});
-    expect(items.map((i) => i.id).slice(0, 2)).toEqual(["model:default", "model:elsewhere-1"]);
-    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:elsewhere-1"]);
-    expect(items[0]!.description).toBe("Whatever Claude picks on its own");
-    const fresh = modelItems({ ...choices, model: null }, null, CLAUDE_AGENT, () => {});
-    expect(fresh.filter((i) => i.checked).map((i) => i.id)).toEqual(["model:default"]);
+  test("a model off the list still shows, and with no default the agent's own leads the list", () => {
+    const rows = modelRows({ ...choices, model: null }, "elsewhere-1", CLAUDE_AGENT);
+    expect(rows.map((r) => r.id).slice(0, 2)).toEqual(["model:default", "model:elsewhere-1"]);
+    expect(rows.filter((r) => r.checked).map((r) => r.id)).toEqual(["model:elsewhere-1"]);
+    expect(rows[0]).toMatchObject({ value: null, description: "Whatever Claude picks on its own" });
+    const fresh = modelRows({ ...choices, model: null }, null, CLAUDE_AGENT);
+    expect(fresh.filter((r) => r.checked).map((r) => r.id)).toEqual(["model:default"]);
   });
 
   test("a model's description that only repeats its name is left off, as a proxy's rows carry it", () => {
@@ -789,12 +799,22 @@ describe("composer bar", () => {
       model: "claude-opus-4-8",
       effort: null,
     };
-    const [row] = modelItems(proxy, null, CLAUDE_AGENT, () => {});
+    const [row] = modelRows(proxy, null, CLAUDE_AGENT);
     expect(row!.description).toBeUndefined();
-    expect(renderToStaticMarkup(<>{row!.label}</>)).toContain("Opus 4.8 (latest)");
+    expect(row!.name).toBe("Opus 4.8 (latest)");
   });
 
-  test("the effort menu offers the levels the model takes, after the agent's own default", () => {
+  test("a search keeps the models that hold every word typed, in the name or the value", () => {
+    const rows = modelRows(choices, "opus", CLAUDE_AGENT);
+    expect(filterModelRows(rows, "").map((r) => r.id)).toEqual(rows.map((r) => r.id));
+    expect(filterModelRows(rows, "5.5").map((r) => r.value)).toEqual(["opus", "sonnet", "haiku"]);
+    expect(filterModelRows(rows, "  SONNET 5 ").map((r) => r.value)).toEqual(["sonnet"]);
+    // "custom" is only in the value the agent takes.
+    expect(filterModelRows(rows, "custom").map((r) => r.value)).toEqual(["custom-model"]);
+    expect(filterModelRows(rows, "gemini")).toEqual([]);
+  });
+
+  test("the effort row offers the levels the model takes, after the agent's own default", () => {
     expect(effortsFor(choices, "claude-sonnet-5-5")).toEqual(["low", "medium", "high"]);
     expect(effortsFor(choices, "haiku")).toEqual([]);
     // A row that does not say, or no row, offers every level.
@@ -802,17 +822,13 @@ describe("composer bar", () => {
     expect(effortsFor(null, "x")).toEqual(["low", "medium", "high", "xhigh", "max"]);
     // No model picked yet: the default model's levels.
     expect(effortsFor(choices, null)).toHaveLength(5);
-    const picked: (string | null)[] = [];
-    const items = effortItems(["low", "medium", "high"], "high", CLAUDE_AGENT, (e) => picked.push(e));
-    expect(items.map((i) => i.label)).toEqual(["Default", "Low", "Medium", "High"]);
-    expect(items.filter((i) => i.checked).map((i) => i.id)).toEqual(["effort:high"]);
-    expect(items[0]!.description).toBe("Claude decides for the model");
-    items[0]!.onSelect!();
-    items[1]!.onSelect!();
-    expect(picked).toEqual([null, "low"]);
-    expect(effortItems(["max"], null, CLAUDE_AGENT, () => {}).filter((i) => i.checked).map((i) => i.id)).toEqual([
-      "effort:default",
-    ]);
+    const rows = effortRows(["low", "medium", "high"], "high", CLAUDE_AGENT);
+    expect(rows.map((r) => r.label)).toEqual(["Default", "Low", "Medium", "High"]);
+    expect(rows.map((r) => r.value)).toEqual([null, "low", "medium", "high"]);
+    expect(rows.filter((r) => r.checked).map((r) => r.id)).toEqual(["effort:high"]);
+    expect(rows[0]!.description).toBe("Claude decides for the model");
+    expect(rows[3]!.description).toBe("Thinks things through");
+    expect(effortRows(["max"], null, CLAUDE_AGENT).filter((r) => r.checked).map((r) => r.id)).toEqual(["effort:default"]);
   });
 
   test("a session is named after the first line of its first message", () => {
@@ -828,7 +844,10 @@ describe("composer bar", () => {
     );
     expect(html).toContain("New Claude session");
     expect(html).toContain('placeholder="Describe a task for Claude"');
+    // With two agents the model chip is where the agent is picked; no chip of its own.
     expect(html).toContain('aria-label="Agent: Claude"');
+    expect(html).toContain('data-agent-icon="claude"');
+    expect(html).not.toContain('data-picker="agent"');
     expect(html).toContain('aria-label="Folder: /w/code"');
     expect(html).toContain('aria-label="Permission mode: Auto"');
     expect(html).toContain('aria-label="Send"');
