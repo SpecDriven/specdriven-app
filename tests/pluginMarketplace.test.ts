@@ -53,9 +53,15 @@ beforeEach(async () => {
   delete process.env.SPECDRIVEN_HOSTED;
   // Initializing a marketplace commits in a clone the app makes itself, with
   // the machine's git identity — which a CI runner does not have. A global
-  // config of the test's own gives it one, whatever this machine's says.
+  // config of the test's own gives it one, whatever this machine's says. It
+  // also pins git's own default branch to master, as a Linux runner has it
+  // (the macOS Command Line Tools ship main), so a fixture that means main
+  // has to say so.
   const gitconfig = join(work, "gitconfig");
-  await writeFile(gitconfig, "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n");
+  await writeFile(
+    gitconfig,
+    "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = master\n",
+  );
   process.env.GIT_CONFIG_GLOBAL = gitconfig;
   // Marketplace plugins ship dist/: the loader in node mode, as the desktop app runs it.
   setBuildDisabled(true);
@@ -587,7 +593,10 @@ test("an empty repository is initialized as a marketplace: index, README and CI 
   setPermanentMarketplacesForTests([{ name: "specdriven", source: template }]);
   try {
     const bare = join(work, "acme-plugins.git");
-    await $`git init -q --bare ${bare}`.quiet();
+    // An empty repository as GitHub makes one: its default branch is main.
+    // (A host makes the first branch pushed its default; a bare repository
+    // keeps naming git's own, which the app's clone would then not find.)
+    await $`git init -q --bare -b main ${bare}`.quiet();
     await boot([]);
 
     const res = await json(await api("POST", "/api/plugins/marketplaces/init", { source: bare }));
