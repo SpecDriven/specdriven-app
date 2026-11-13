@@ -87,6 +87,9 @@ export function installFakeGit(script: Partial<Omit<GitBackend, "name">> = {}): 
     async hasUpstream() {
       return true;
     },
+    async commitAllAndPublish() {
+      return PUSHED;
+    },
     async checkoutRef(_repoDir, ref) {
       throw new Error(`fake git: checkout of ${ref} is not scripted`);
     },

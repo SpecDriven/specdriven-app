@@ -12,6 +12,7 @@ import { $ } from "bun";
 import {
   cliGitAvailable,
   clone,
+  commitAllAndPublish,
   commitAndPush,
   currentEngine,
   ghAccount,
@@ -362,4 +363,45 @@ test("the bundled engine clones into an absolute target whose parent does not ex
   expect(await stat(join(target, ".git")).then((s) => s.isDirectory())).toBe(true);
   expect(await stat(join(process.cwd(), root.replace(/^\//, ""))).catch(() => null)).toBeNull();
   stopServers();
+});
+
+// specs/app/plugins.feature.md "An empty repository is initialized as a
+// marketplace": the first push into a repository created empty starts
+// `main` there and tracks it, on every engine — the bundled one with no git
+// on PATH.
+for (const engine of ["cli", "js"] as const) {
+  test(`the ${engine} engine publishes the first branch of an empty repository`, async () => {
+    const origin = join(root, "empty.git");
+    await $`git init -q --bare -b trunk ${origin}`.quiet();
+    const work = join(root, "work");
+    // The machine's default branch is not the one asked for.
+    await $`git -c init.defaultBranch=trunk clone -q ${origin} ${work}`.quiet();
+    await git(work, "config", "user.email", "init@example.com");
+    await git(work, "config", "user.name", "Init");
+    await Bun.write(join(work, "marketplace.json"), "{}\n");
+    await Bun.write(join(work, "scripts/check.ts"), "export {};\n");
+
+    if (engine === "js") process.env.PATH = "/nonexistent";
+    setGitEngine(engine);
+    const res = await commitAllAndPublish(work, "main", "Initialize");
+    process.env.PATH = realPath!;
+    expect(res).toEqual({ pushed: true, message: "committed and pushed to main" });
+
+    const files = (await git(origin, "ls-tree", "-r", "--name-only", "main")).stdout.toString().trim().split("\n");
+    expect(files.sort()).toEqual(["marketplace.json", "scripts/check.ts"]);
+    expect((await git(origin, "log", "-1", "--pretty=%s", "main")).stdout.toString().trim()).toBe("Initialize");
+    expect((await git(work, "config", "--get", "branch.main.remote")).stdout.toString().trim()).toBe("origin");
+  });
+}
+
+test("a repository that already has a branch gets the commit on that branch", async () => {
+  const { originDir } = await twoClones(root);
+  const work = join(root, "seeded");
+  await clone(originDir, work);
+  const branch = (await git(work, "rev-parse", "--abbrev-ref", "HEAD")).stdout.toString().trim();
+  await Bun.write(join(work, "marketplace.json"), "{}\n");
+  setGitEngine("cli");
+  const res = await commitAllAndPublish(work, "main", "Initialize");
+  expect(res).toEqual({ pushed: true, message: `committed and pushed to ${branch}` });
+  expect((await git(originDir, "log", "-1", "--pretty=%s", branch)).stdout.toString().trim()).toBe("Initialize");
 });

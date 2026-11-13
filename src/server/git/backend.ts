@@ -72,6 +72,14 @@ export interface GitBackend {
   commitAndPush(repoDir: string, paths: string | string[], message: string): Promise<SyncResult>;
   hasUpstream(repoDir: string): Promise<boolean>;
   /**
+   * Commit everything in the working tree and push it, setting the branch
+   * to track the remote's — the first push into a repository created empty
+   * on its host, where there is no branch to track yet. A clone with no
+   * commit yet starts on `branch`; one that has commits pushes the branch it
+   * is on. A push that fails comes back as `failure`, the commit kept.
+   */
+  commitAllAndPublish(repoDir: string, branch: string, message: string): Promise<SyncResult>;
+  /**
    * Put a clone at a ref the remote names — a tag, a branch or a commit —
    * fetching first, so an update lands on what the remote holds now, and
    * detached, so a branch name leaves no stale local branch behind. Answers

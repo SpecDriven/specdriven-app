@@ -504,6 +504,29 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     return pushOutcome(await push(repoDir), "committed and pushed", "committed");
   }
 
+  async function commitAllAndPublish(repoDir: string, branch: string, message: string): Promise<SyncResult> {
+    // A clone of an empty repository has no commit, and its HEAD names
+    // whatever branch this git defaults to: point it at the one asked for.
+    const born = (await git(repoDir, "rev-parse", "--verify", "--quiet", "HEAD")).exitCode === 0;
+    if (!born) {
+      const res = await git(repoDir, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+      if (res.exitCode !== 0) {
+        const fallback = await git(repoDir, "checkout", "-b", branch);
+        if (fallback.exitCode !== 0) {
+          throw new Error(`Could not start the branch ${branch}: ${(fallback.stderr + fallback.stdout).trim()}`);
+        }
+      }
+    }
+    await git(repoDir, "add", "-A");
+    await commit(repoDir, "-m", message);
+    const current = (await git(repoDir, "rev-parse", "--abbrev-ref", "HEAD")).stdout.trim() || branch;
+    const res = await git(repoDir, "push", "-u", "origin", `${current}:refs/heads/${current}`);
+    if (res.exitCode === 0) return { pushed: true, message: `committed and pushed to ${current}` };
+    const output = (res.stderr + res.stdout).trim();
+    const failure = isAuthFailure(output) ? signInHint() : output;
+    return { pushed: false, failure, message: `committed; push failed: ${failure}` };
+  }
+
   async function headCommit(repoDir: string): Promise<string> {
     const res = await git(repoDir, "rev-parse", "HEAD");
     if (res.exitCode !== 0) throw new Error(`Not a git repository: ${repoDir}`);
@@ -551,6 +574,7 @@ export function createGitBackend({ name, git, clone: cloneWith }: BackendOptions
     removeAndPush,
     commitAndPush,
     hasUpstream,
+    commitAllAndPublish,
   };
 }
 

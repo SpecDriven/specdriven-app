@@ -25,20 +25,24 @@ import { createHash } from "node:crypto";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { version as appVersion } from "../../../package.json";
-import { checkoutRef, clonePluginRepo, headCommit, pull } from "../../server/git";
+import { checkoutRef, clonePluginRepo, commitAllAndPublish, headCommit, pull } from "../../server/git";
 import { bodyOf, json, type Handler } from "../../server/http";
 import { builtinManifests, profileManifests } from "../builtin/manifests";
 import {
   INSTALL_RECORD_FILE,
   RELEASE_DIR,
   RELEASES_FILE,
+  DEFAULT_MARKETPLACES,
   compareVersions,
   indexRowRefusal,
+  isDefaultMarketplace,
   isPrerelease,
   marketplaceEntries,
+  marketplaceNameFor,
   newestInstallable,
   parseMarketplaceIndex,
   parseReleases,
+  permanentMarketplaces,
   releaseOf,
   releaseRefusal,
   subdirectorySource,
@@ -658,6 +662,161 @@ async function exists(path: string): Promise<boolean> {
   );
 }
 
+// ---- initializing ----------------------------------------------------------------
+
+/**
+ * What a new marketplace takes from the SpecDriven one, as its clone has
+ * them: the CI that checks each plugin inside the app, and the scripts it
+ * runs (specs/app/plugins.feature.md "An empty repository is initialized as
+ * a marketplace"). A folder is copied whole.
+ */
+export const MARKETPLACE_TEMPLATE_FILES: readonly string[] = [".github/workflows/ci.yml", "scripts", ".gitignore"];
+
+/** The branch a new marketplace is published on: the one every app reads. */
+const MARKETPLACE_BRANCH = "main";
+
+/**
+ * Who owns a marketplace, from its git url: the path segment before the
+ * repository's — `acme` in `https://github.com/acme/plugins` or
+ * `git@github.com:acme/plugins.git` — with a link for one on github.com.
+ */
+export function marketplaceOwnerFor(source: string): { name: string; url?: string } | undefined {
+  const parts = source
+    .trim()
+    .replace(/[\\/]+$/, "")
+    .replace(/\.git$/, "")
+    .split(/[\\/:]/)
+    .filter(Boolean);
+  const name = parts.length >= 3 ? parts.at(-2) : undefined;
+  // A host (`github.com`, `git@host`) is no owner: the url names none.
+  if (!name || /[.@]/.test(name)) return undefined;
+  const github = /(^|[@/])github\.com[:/]/i.test(source);
+  return github ? { name, url: `https://github.com/${name}` } : { name };
+}
+
+/** The README a new marketplace starts with. */
+export function marketplaceReadme(name: string, source: string): string {
+  return `# ${name}
+
+A SpecDriven plugin marketplace: a git repository with \`marketplace.json\`
+at its root. To use it, open Settings → Plugins → Marketplaces in the app,
+choose Add marketplace… and give it this repository's url:
+
+\`\`\`
+${source}
+\`\`\`
+
+Everyone who adds it needs read access to this repository through the app's
+git access (Settings → Git).
+
+## Layout
+
+- \`marketplace.json\` — the index: the marketplace's name and owner, and one
+  row per plugin with its \`name\` (the plugin's manifest id), \`source\`,
+  \`description\`, \`version\`, \`category\` and plugin \`api\`.
+- \`plugins/<name>/\` — a plugin's sources, listed in the index with the
+  source \`./plugins/<name>\`. A row can name a plugin in a repository of its
+  own instead: a git url and the \`ref\` to pin it to.
+- \`plugins/<name>/release/\` — what the plugin has released: one zip per
+  version and \`releases.json\`. The app installs from these, and any version
+  in the folder can be installed or put back.
+
+## Adding a plugin
+
+Scaffold one with \`specdriven plugin new\` under \`plugins/\`, add its row
+to \`marketplace.json\`, then release it. With the app checked out at
+\`../specdriven-app\` (or \`SPECDRIVEN_APP\` naming it):
+
+\`\`\`bash
+bun scripts/release.ts plugins/<name> --notes "What changed, in a line"
+\`\`\`
+
+That builds the plugin, writes its zip and \`releases.json\` row, and puts the
+version on its row in \`marketplace.json\`. Commit all of it in one pull
+request. A released version is never written again: a change needs a new
+version.
+
+## CI
+
+\`.github/workflows/ci.yml\` checks the index and every plugin inside the
+app — at the oldest version each plugin says it runs in, the newest release,
+and the app's \`main\` — with the scripts in \`scripts/\`. Merging to \`main\`
+publishes: every app that lists this marketplace reads \`main\`. The
+workflow and scripts were copied from the SpecDriven marketplace
+(https://github.com/SpecDriven/plugins) when this one was initialized; take
+later changes from there by hand.
+`;
+}
+
+/**
+ * Turn a repository created empty on its host into a marketplace
+ * (specs/app/plugins.feature.md "An empty repository is initialized as a
+ * marketplace"): clone it, write \`marketplace.json\` with no plugins, a
+ * README, \`plugins/\` and the CI and scripts copied from \`templateDir\` —
+ * the SpecDriven marketplace's clone unless a test names another — then
+ * commit and push \`main\`. A README or .gitignore the host put there is
+ * kept. Nothing is added to the settings here; the caller does that once
+ * this has pushed. The clone is thrown away either way.
+ */
+export async function initMarketplace(
+  source: string,
+  opts: { configured: readonly MarketplaceRef[]; templateDir?: string },
+): Promise<MarketplaceRef & { index: MarketplaceIndex }> {
+  const url = source.trim();
+  if (!url) throw new Error("Give the git url of the repository to initialize");
+  const name = marketplaceNameFor(url);
+  if (!name) throw new Error(`Cannot make a marketplace name out of ${url}`);
+  if (isDefaultMarketplace({ name, source: url })) throw new Error("That is the SpecDriven marketplace itself");
+  const same = (a: string) => a.trim().replace(/[\\/]+$/, "").replace(/\.git$/, "").toLowerCase();
+  const listed = opts.configured.find((m) => same(m.source) === same(url));
+  if (listed) throw new Error(`${url} is already on the list, as ${listed.name}`);
+
+  return exclusive(`marketplace ${url}`, "initialized", async () => {
+    const template = opts.templateDir ?? (await specdrivenClone(opts.configured));
+    const work = join(marketplacesHome(), `.${name}.init`);
+    await rm(work, { recursive: true, force: true });
+    await mkdir(marketplacesHome(), { recursive: true });
+    try {
+      await clonePluginRepo(url, work);
+      if (await exists(join(work, "marketplace.json"))) {
+        throw new Error(`${url} already has a marketplace.json — use Add marketplace… for it`);
+      }
+      const owner = marketplaceOwnerFor(url);
+      const index = { name, ...(owner ? { owner } : {}), plugins: [] };
+      await writeFile(join(work, "marketplace.json"), `${JSON.stringify(index, null, 2)}\n`);
+      if (!(await exists(join(work, "README.md")))) await writeFile(join(work, "README.md"), marketplaceReadme(name, url));
+      await mkdir(join(work, "plugins"), { recursive: true });
+      await writeFile(join(work, "plugins", ".gitkeep"), "");
+      for (const rel of MARKETPLACE_TEMPLATE_FILES) {
+        const from = join(template, rel);
+        if (!(await exists(from))) continue;
+        const to = join(work, rel);
+        if (rel === ".gitignore" && (await exists(to))) continue;
+        await cp(from, to, { recursive: true, force: true });
+      }
+      const res = await commitAllAndPublish(work, MARKETPLACE_BRANCH, `Initialize the ${name} marketplace`);
+      if (!res.pushed) throw new Error(`Could not push to ${url}: ${res.failure ?? res.message}`);
+      return { name, source: url, index: parseMarketplaceIndex(index) };
+    } finally {
+      await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+  });
+}
+
+/**
+ * The SpecDriven marketplace's clone, pulled first so a new marketplace gets
+ * the CI as it is now — or cloned when there is none. A pull that fails
+ * leaves the copy there was, which is still good to copy from.
+ */
+async function specdrivenClone(configured: readonly MarketplaceRef[]): Promise<string> {
+  const entry = configured.find(isDefaultMarketplace) ?? permanentMarketplaces()[0] ?? DEFAULT_MARKETPLACES[0]!;
+  const status = await marketplaceIndex(entry, true);
+  if (!(await exists(join(status.dir, ".git")))) {
+    throw new Error(`Could not read the SpecDriven marketplace to copy its CI from: ${status.error ?? "no clone"}`);
+  }
+  return status.dir;
+}
+
 // ---- the routes ----------------------------------------------------------------
 
 export interface MarketplaceRouteDeps {
@@ -687,6 +846,7 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
   postInstall: Handler;
   postUpdate: Handler;
   deletePlugin: Handler;
+  postInitMarketplace: Handler;
 } {
   const guard =
     (handler: Handler, inDemo = false): Handler =>
@@ -757,6 +917,15 @@ export function marketplaceRoutes(deps: MarketplaceRouteDeps): {
       await remount(id);
       notifyPluginChange();
       return json({ id, install: record, plugin: row(id) ?? null });
+    }),
+    // The repository is pushed to here; the page adds it to the settings.
+    postInitMarketplace: guard(async (req) => {
+      const body = await bodyOf(req);
+      if (typeof body.source !== "string" || !body.source.trim()) {
+        return json({ error: "source is required" }, 400);
+      }
+      const marketplace = await initMarketplace(body.source, { configured: await entries() });
+      return json({ marketplace });
     }),
     deletePlugin: guard(async (_req, params) => {
       const id = params.id ?? "";

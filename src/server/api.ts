@@ -302,7 +302,7 @@ import {
   refreshMarketplacesOnStart,
   startupUpdates,
 } from "../plugins/host/autoInstall";
-import { marketplaceEntries, marketplaceRef } from "../plugins/marketplace";
+import { marketplaceEntries, marketplaceRef, withDefaultMarketplaces } from "../plugins/marketplace";
 import { marketplaceRoutes } from "../plugins/host/marketplace";
 import {
   PROFILE_KEY,
@@ -1497,18 +1497,16 @@ const putState: Handler = async (req) => {
       (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, trusted };
     }
     // The marketplaces (specs/app/plugins.feature.md "The marketplace is a
-    // git repository with an index"): `{ name, source }` rows, taken whole;
-    // an empty list is the choice of none, unlike no key at all.
+    // git repository with an index"): `{ name, source }` rows, taken whole —
+    // except the SpecDriven marketplace, which a list that leaves it out gets
+    // back ("The SpecDriven marketplace cannot be removed").
     if (marketplaces !== undefined) {
       const rows = Array.isArray(marketplaces) ? marketplaces.map(marketplaceRef) : null;
       if (!rows || rows.some((r) => r === null)) {
         return json({ error: "plugins.marketplaces must be a list of { name, source } rows" }, 400);
       }
-      const unique = (rows as { name: string; source: string }[]).filter(
-        (r, i, all) => all.findIndex((x) => x.name === r.name) === i,
-      );
       const section = profileSection(state);
-      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, marketplaces: unique };
+      (state as Record<string, unknown>)[PROFILE_KEY] = { ...section, marketplaces: withDefaultMarketplaces(rows) };
     }
   }
   for (const manifest of profileManifests) {
@@ -4397,6 +4395,7 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["POST", "/api/app-update/install", unlessHosted(unlessDemoUpdate(appUpdate.install!))],
   ["POST", "/api/app-update/restart", unlessHosted(unlessDemoUpdate(appUpdate.restart!))],
   ["GET", "/api/plugins/marketplaces", market.getMarketplaces],
+  ["POST", "/api/plugins/marketplaces/init", unlessHosted(market.postInitMarketplace)],
   ["GET", "/api/plugins/updates", getPluginUpdates],
   ["POST", "/api/plugins/updates/dismiss", dismissPluginUpdates],
   ["POST", "/api/plugins/install", unlessHosted(market.postInstall)],
