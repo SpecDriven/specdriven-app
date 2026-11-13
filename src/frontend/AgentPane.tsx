@@ -34,6 +34,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { AgentIcon } from "./AgentIcons";
 import { ModelPicker } from "./AgentModelPicker";
 import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
@@ -519,7 +520,8 @@ export function sessionTabTitle(m: ChatSessionMeta, agents: readonly AgentDescri
  * One tab per open session (specs/agents/agent-pane.feature.md "Each session
  * has its own tab, at most five") on the pane's header line, in the order
  * they started, then + for a new one. Every session in here runs on whether its tab is shown or not;
- * its dot says how it is doing. While the new-session screen is up it has a
+ * its tab leads with its agent's mark, as in the model picker, and the dot
+ * on that mark says how it is doing. While the new-session screen is up it has a
  * tab of its own, with nothing to close. A tab whose agent is at work asks
  * before it closes, since closing ends the session.
  */
@@ -593,7 +595,10 @@ export function SessionTabs({
               }}
               onKeyDown={(e) => onKey(e, at)}
             >
-              <span className="agent-dot" data-status={m.status} aria-hidden="true" />
+              <span className="agent-tab-mark" aria-hidden="true">
+                <AgentIcon agent={m.agent} size={14} />
+                <span className="agent-dot" data-status={m.status} />
+              </span>
               <span className="agent-tab-name">{m.name}</span>
               <button
                 type="button"

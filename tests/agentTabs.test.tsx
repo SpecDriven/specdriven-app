@@ -222,6 +222,29 @@ test("each open session has a tab in start order, every one followed, and a clic
   unmount();
 });
 
+test("each tab leads with its agent's mark, as in the model picker, with the session's dot on it", async () => {
+  const { host, unmount } = await boot([
+    meta("a", 1),
+    { ...meta("b", 2, "running"), agent: "codex" },
+    { ...meta("c", 3, "ended"), agent: "someone-new" },
+  ]);
+  const marks = tabs(host).map((t) => t.querySelector(".agent-tab-mark")!);
+  expect(marks.map((m) => m.querySelector("[data-agent-icon]")!.getAttribute("data-agent-icon"))).toEqual([
+    "claude",
+    "codex",
+    "generic",
+  ]);
+  expect(marks.map((m) => m.querySelector(".agent-dot")!.getAttribute("data-status"))).toEqual([
+    "idle",
+    "running",
+    "ended",
+  ]);
+  // The mark comes before the name, and is decoration: the tab is named by its session.
+  expect(marks[0]!.nextElementSibling!.className).toBe("agent-tab-name");
+  expect(marks[0]!.getAttribute("aria-hidden")).toBe("true");
+  unmount();
+});
+
 test("the arrow keys, Home and End move between tabs", async () => {
   const { host, unmount } = await boot([meta("a", 1), meta("b", 2), meta("c", 3)]);
   expect(selected(host)).toBe("Task c");
