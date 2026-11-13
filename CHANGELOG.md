@@ -4,6 +4,11 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.268 — 2026-11-12
+
+- The packaged macOS app finds an OpenCode CLI in ~/.opencode/bin ([#445](https://github.com/SpecDriven/specdriven-app/pull/445))
+- The agent pane's transcript has three views: Normal, Thinking, Verbose ([#444](https://github.com/SpecDriven/specdriven-app/pull/444))
+
 ## v0.1.267 — 2026-11-12
 
 - Code repository mode highlights .cxml files as XML ([#443](https://github.com/SpecDriven/specdriven-app/pull/443))
