@@ -11042,6 +11042,20 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   padding: 0.6rem 0;
 }
 
+/* A released plugin has a version chip beside its actions: in a narrow pane
+   they move under the name rather than squeeze it into a column of words. */
+.plugin-market-row {
+  flex-wrap: wrap;
+}
+
+.plugin-market-row > .settings-row-label {
+  flex-basis: 16rem;
+}
+
+.plugin-market-row > .plugin-market-row-actions {
+  margin-left: auto;
+}
+
 .plugin-market-row + .plugin-market-row {
   border-top: 1px solid var(--border);
 }
@@ -11059,6 +11073,25 @@ aside.rail .rail-btn.pomodoro-chip.flash {
   align-items: baseline;
   gap: 0.9rem;
   white-space: nowrap;
+}
+
+/* A released plugin's version chip: its menu lists every version, each
+   with its date and notes or why this app cannot run it. */
+.plugin-version-anchor {
+  align-self: center;
+}
+
+.plugin-version-menu {
+  min-width: 15rem;
+  max-width: 24rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  white-space: normal;
+}
+
+/* Roll back, under the error of a plugin that stopped loading after a switch. */
+.plugin-row-rollback {
+  align-self: flex-start;
 }
 
 /* The Plugins page's own "Find in marketplace" / "Remove from list" pair. */

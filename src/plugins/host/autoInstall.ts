@@ -164,7 +164,7 @@ export async function startupUpdates(
         .filter((p) => p.installed && !p.builtin && p.source === "home")
         .map((p) => ({ id: p.id, displayName: p.displayName, version: p.version, install: externalPlugin(p.id)?.install })));
   const indexes = deps.indexes ?? cachedMarketplaceIndexes;
-  return pluginUpdates(installed(), await indexes(marketplaces));
+  return pluginUpdates(installed(), await indexes(marketplaces), appVersion);
 }
 
 /**

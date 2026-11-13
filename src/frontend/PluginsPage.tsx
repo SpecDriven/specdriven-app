@@ -17,7 +17,7 @@ import type { PluginStatus } from "../plugins/client/loader";
 import type { MarketplaceRef } from "../plugins/marketplace";
 import { AppPageLayout, PageSection } from "./AppPage";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
-import { PluginMarketplace } from "./PluginMarketplace";
+import { PluginMarketplace, switchPluginVersion } from "./PluginMarketplace";
 
 export interface PluginsPageProps {
   /** A marketplace plugin's id to open scrolled to — the agent pane sent the user to install it. */
@@ -58,6 +58,21 @@ export function PluginsPage(props: PluginsPageProps) {
   const { plugins, demo } = props;
   // The id a not-installed row asked the marketplaces for.
   const [wanted, setWanted] = useState<string | null>(props.initialWanted ?? null);
+  // A roll back under way, and why the last one could not be done.
+  const [rolling, setRolling] = useState<string | null>(null);
+  const [rollError, setRollError] = useState<{ id: string; message: string } | null>(null);
+  const rollBack = async (id: string, version: string) => {
+    setRolling(id);
+    setRollError(null);
+    try {
+      await switchPluginVersion(id, version);
+      await props.onChanged();
+    } catch (e) {
+      setRollError({ id, message: (e as Error).message });
+    } finally {
+      setRolling(null);
+    }
+  };
   const on = plugins.filter((p) => p.enabled);
   const off = plugins.filter((p) => !p.enabled);
 
@@ -92,6 +107,7 @@ export function PluginsPage(props: PluginsPageProps) {
             <span className="plugin-row-meta" title={plugin.dir}>
               {originOf(plugin)}
               {plugin.version ? ` · v${plugin.version}` : ""}
+              {plugin.install?.held ? " · held" : ""}
             </span>
           </span>
           {plugin.description && <span className="settings-row-hint">{plugin.description}</span>}
@@ -116,6 +132,22 @@ export function PluginsPage(props: PluginsPageProps) {
           {loadError && !plugin.error && (
             <span className="settings-row-hint plugin-row-error" role="alert">
               {loadError}
+            </span>
+          )}
+          {!demo && (plugin.error || loadError) && plugin.install?.previous && (
+            <button
+              type="button"
+              className="link plugin-row-rollback"
+              disabled={rolling === plugin.id}
+              title="Put back the version this one replaced; it is held there until you update"
+              onClick={() => void rollBack(plugin.id, plugin.install!.previous!)}
+            >
+              {rolling === plugin.id ? "Rolling back…" : `Roll back to v${plugin.install.previous}`}
+            </button>
+          )}
+          {rollError?.id === plugin.id && (
+            <span className="settings-row-hint plugin-row-error" role="alert">
+              {rollError.message}
             </span>
           )}
         </span>
@@ -285,7 +317,7 @@ export function PluginsPage(props: PluginsPageProps) {
       <PageSection
         id="plugins-marketplaces"
         title="Marketplaces"
-        hint="Git repositories with a marketplace.json, read through the app's git engine. A plugin installed from one is pinned to the ref the index names and runs with the app's own rights; nothing updates on its own."
+        hint="Git repositories with a marketplace.json, read through the app's git engine. A plugin installed from one is pinned to the ref the index names and runs with the app's own rights; nothing updates on its own. A plugin released in versions can be switched to any of them from its version chip."
       >
         <PluginMarketplace
           marketplaces={props.marketplaces}
