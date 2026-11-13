@@ -398,6 +398,8 @@ test("a repository that already has a branch gets the commit on that branch", as
   const { originDir } = await twoClones(root);
   const work = join(root, "seeded");
   await clone(originDir, work);
+  await git(work, "config", "user.email", "init@example.com");
+  await git(work, "config", "user.name", "Init");
   const branch = (await git(work, "rev-parse", "--abbrev-ref", "HEAD")).stdout.toString().trim();
   await Bun.write(join(work, "marketplace.json"), "{}\n");
   setGitEngine("cli");

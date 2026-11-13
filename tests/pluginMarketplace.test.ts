@@ -40,6 +40,7 @@ const saved = {
   SPECDRIVEN_HOME: process.env.SPECDRIVEN_HOME,
   DEMO_MODE: process.env.DEMO_MODE,
   SPECDRIVEN_HOSTED: process.env.SPECDRIVEN_HOSTED,
+  GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
 };
 
 beforeEach(async () => {
@@ -50,6 +51,12 @@ beforeEach(async () => {
   process.env.SPECDRIVEN_HOME = home;
   delete process.env.DEMO_MODE;
   delete process.env.SPECDRIVEN_HOSTED;
+  // Initializing a marketplace commits in a clone the app makes itself, with
+  // the machine's git identity — which a CI runner does not have. A global
+  // config of the test's own gives it one, whatever this machine's says.
+  const gitconfig = join(work, "gitconfig");
+  await writeFile(gitconfig, "[user]\n\tname = Fixture\n\temail = fixture@example.com\n[commit]\n\tgpgsign = false\n");
+  process.env.GIT_CONFIG_GLOBAL = gitconfig;
   // Marketplace plugins ship dist/: the loader in node mode, as the desktop app runs it.
   setBuildDisabled(true);
   setGitEngine("cli");
