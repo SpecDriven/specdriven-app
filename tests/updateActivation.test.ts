@@ -121,7 +121,7 @@ describe("which executable the next launch is", () => {
     const image = await makeBuilt(linux, "linux");
     expect(await planActivation({ platform: "linux", execPath: "/tmp/.mount_x/specdriven", newSourceDir: linux, appDir, fs })).toEqual({
       kind: "hand-over",
-      execPath: image,
+      appImage: image,
     });
   });
 

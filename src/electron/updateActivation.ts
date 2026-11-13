@@ -40,8 +40,13 @@ export type ActivationPlan =
   | { kind: "swap-bundle"; bundle: string; newBundle: string; execPath: string }
   /** Start the new build where the installer left it. */
   | { kind: "relaunch-into"; execPath: string }
-  /** Linux: a detached shell starts `execPath` once this process has quit. */
-  | { kind: "hand-over"; execPath: string }
+  /**
+   * Linux: a detached shell starts `appImage`, the new build, once this
+   * process has quit. Its own field, not the `execPath` of the plans above:
+   * those may be made from the running executable's name, and this one —
+   * the only path a shell is ever handed — never is.
+   */
+  | { kind: "hand-over"; appImage: string }
   /** The shell cannot do it here; the new app is at `path` for the user. */
   | { kind: "manual"; reason: string; path: string | null };
 
@@ -73,7 +78,7 @@ export async function planActivation(input: PlanInput): Promise<ActivationPlan> 
     return { kind: "manual", reason: `There is no built app under ${join(input.newSourceDir, "release")}`, path: null };
   }
   // Linux: the AppImage outlives nothing it starts itself (see above).
-  if (input.platform === "linux") return { kind: "hand-over", execPath: built };
+  if (input.platform === "linux") return { kind: "hand-over", appImage: built };
   if (input.platform !== "darwin") return { kind: "relaunch-into", execPath: built };
 
   const bundle = bundleOf(input.execPath);

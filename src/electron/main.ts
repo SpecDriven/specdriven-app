@@ -446,10 +446,10 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
   });
   if (plan.kind === "manual") return { restart: "manual", reason: plan.reason, path: plan.path };
   if (plan.kind === "hand-over") {
-    const failure = await handOver(plan.execPath);
+    const failure = await handOver(plan.appImage);
     // Nothing is waiting to start the new app: better to say so than to
     // quit into nothing, which is the bug this replaced (#446).
-    if (failure) return { restart: "manual", reason: `The shell that would start the new app could not run here: ${failure}`, path: plan.execPath };
+    if (failure) return { restart: "manual", reason: `The shell that would start the new app could not run here: ${failure}`, path: plan.appImage };
     // quit, not exit: will-quit still ends the agent sessions and flushes.
     setTimeout(() => app.quit(), RELAUNCH_DELAY_MS);
     return { restart: "relaunching" };
