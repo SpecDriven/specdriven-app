@@ -34,6 +34,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { ModelPicker } from "./AgentModelPicker";
 import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 import { SourceCheckDialog } from "./SourceCheckDialog";
@@ -86,7 +87,6 @@ import {
   type AgentChatStore,
   type AgentChoices,
   type AgentDescriptor,
-  type AgentModelOption,
   type AgentOffer,
   type ChatSessionMeta,
   type ChatStatus,
@@ -102,7 +102,7 @@ import {
   type TranscriptView,
   type ViewRow,
 } from "./agentChat";
-import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
+import { MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
 import type { ChatAccount, ChatImage, ImageUpload } from "../server/agentTypes";
 import { pastedImageFiles, prepareImage, toUpload, type PendingImage } from "./pastedImages";
 
@@ -694,109 +694,8 @@ export function modeItems(
 }
 
 // --- The composer bar (specs/agents/agent-pane.feature.md "The composer bar
-// picks the folder, model, effort and mode") ----------------------------------
-
-/** What each effort level means, under its name in the menu. */
-export const EFFORT_DESCRIPTION: Record<EffortLevel, string> = {
-  low: "Quick answers, little thinking",
-  medium: "Balanced speed and thinking",
-  high: "Thinks things through",
-  xhigh: "Longer thinking for hard problems",
-  max: "The most thinking the model allows",
-};
-
-/** The menu row a model value stands for: by its value, or the id an alias resolves to. */
-export function modelRow(choices: AgentChoices | null, model: string | null | undefined): AgentModelOption | undefined {
-  if (!choices || !model) return undefined;
-  const exact = choices.models.find((m) => m.value === model);
-  if (exact) return exact;
-  // Several aliases can stand for one id (Claude's "default" and "opus"):
-  // the one new sessions start on wins, else the first.
-  const resolved = choices.models.filter((m) => m.resolvedModel === model);
-  return resolved.find((m) => m.value === choices.model) ?? resolved[0];
-}
-
-/** A model as the bar names it: its row's name, else the value, else "Default". */
-export function modelLabel(choices: AgentChoices | null, model: string | null | undefined): string {
-  return modelRow(choices, model)?.displayName ?? model ?? "Default model";
-}
-
-/**
- * The model menu: the agent's own default first (while no model is set),
- * then every model it offers, the current one checked and the one new
- * sessions start on badged.
- */
-export function modelItems(
-  choices: AgentChoices,
-  current: string | null | undefined,
-  agent: Pick<AgentDescriptor, "label">,
-  onSelect: (model: string | null) => void,
-): MenuItem[] {
-  const currentRow = modelRow(choices, current);
-  const defaultRow = modelRow(choices, choices.model);
-  const items: MenuItem[] = choices.models.map((m, i) => ({
-    id: `model:${m.value}`,
-    label:
-      m === defaultRow ? (
-        <>
-          {m.displayName} <span className="menu-badge">Default</span>
-        </>
-      ) : (
-        m.displayName
-      ),
-    // A description that only repeats the name (a proxy's rows) is left off.
-    ...(m.description && m.description !== m.displayName ? { description: m.description } : {}),
-    ...(i < 9 ? { keys: String(i + 1) } : {}),
-    checked: m === currentRow,
-    onSelect: () => onSelect(m.value),
-  }));
-  // A model the agent reports that is not on its list still shows, checked.
-  if (current && !currentRow) {
-    items.unshift({ id: `model:${current}`, label: current, checked: true, onSelect: () => onSelect(current) });
-  }
-  if (choices.model === null) {
-    items.unshift({
-      id: "model:default",
-      label: "Default model",
-      description: `Whatever ${agent.label} picks on its own`,
-      checked: !current,
-      onSelect: () => onSelect(null),
-    });
-  }
-  return items;
-}
-
-/** The levels a model takes: its row's, else every level (the agent
-    lowers one its model does not take). */
-export function effortsFor(choices: AgentChoices | null, model: string | null | undefined): readonly EffortLevel[] {
-  return modelRow(choices, model ?? choices?.model)?.efforts ?? EFFORT_LEVELS;
-}
-
-/** The effort menu: the agent's own default, then each level the model takes. */
-export function effortItems(
-  efforts: readonly EffortLevel[],
-  current: EffortLevel | null | undefined,
-  agent: Pick<AgentDescriptor, "label">,
-  onSelect: (effort: EffortLevel | null) => void,
-): MenuItem[] {
-  return [
-    {
-      id: "effort:default",
-      label: "Default",
-      description: `${agent.label} decides for the model`,
-      checked: !current,
-      onSelect: () => onSelect(null),
-    },
-    ...efforts.map((e, i) => ({
-      id: `effort:${e}`,
-      label: EFFORT_LABEL[e],
-      description: EFFORT_DESCRIPTION[e],
-      keys: String(i + 1),
-      checked: e === current,
-      onSelect: () => onSelect(e),
-    })),
-  ];
-}
+// picks the folder, model, effort and mode"). The model chip and its picker —
+// the agent, the model and the effort — are in AgentModelPicker.tsx. ---------
 
 /** A session name from the first message: its first line, cut to fit the menu. */
 export function nameFromMessage(text: string): string {
@@ -992,7 +891,7 @@ function WorktreeBranch({
   );
 }
 
-/** The model, effort and mode chips, right of the folder. */
+/** The model chip (the agent, the model and the effort in one picker) and the mode chip, right of the folder. */
 function ModelEffortMode({
   agent,
   choices,
@@ -1004,6 +903,8 @@ function ModelEffortMode({
   onModel,
   onEffort,
   onMode,
+  agents,
+  onPickAgent,
 }: {
   agent: AgentDescriptor;
   choices: AgentChoices | null;
@@ -1015,43 +916,24 @@ function ModelEffortMode({
   onModel: (model: string | null) => void;
   onEffort: (effort: EffortLevel | null) => void;
   onMode: (mode: PermissionMode) => void;
+  /** Before a session: the agents that can start, picked between in the model picker. */
+  agents?: readonly AgentDescriptor[];
+  onPickAgent?: (id: string) => void;
 }) {
-  const efforts = effortsFor(choices, model);
   return (
     <>
-      {choices && canPickModel ? (
-        <BarPicker
-          name="model"
-          text={modelLabel(choices, model)}
-          ariaLabel={`Model: ${modelLabel(choices, model)}`}
-          tooltip="Model — new sessions start on the one you pick"
-          heading="Model"
-          items={modelItems(choices, model, agent, onModel)}
-          disabled={disabled}
-          align="right"
-          onOpen={() => void agentChat.loadChoices(agent.id).catch(() => undefined)}
-        />
-      ) : (
-        model && (
-          <Tooltip label={`${agent.label} runs on ${model}`}>
-            <span className="agent-bar-fact" tabIndex={0}>
-              {modelLabel(choices, model)}
-            </span>
-          </Tooltip>
-        )
-      )}
-      {choices && agent.capabilities.effort && efforts.length > 0 && (
-        <BarPicker
-          name="effort"
-          text={effort ? EFFORT_LABEL[effort] : "Effort"}
-          ariaLabel={`Effort: ${effort ? EFFORT_LABEL[effort] : "default"}`}
-          tooltip="How hard the model thinks — new sessions start at the one you pick"
-          heading="Effort"
-          items={effortItems(efforts, effort, agent, onEffort)}
-          disabled={disabled}
-          align="right"
-        />
-      )}
+      <ModelPicker
+        agent={agent}
+        choices={choices}
+        model={model}
+        effort={effort}
+        canPickModel={canPickModel}
+        disabled={disabled}
+        onModel={onModel}
+        onEffort={onEffort}
+        agents={agents}
+        onPickAgent={onPickAgent}
+      />
       {hasModes(agent) ? (
         <BarPicker
           name="mode"
@@ -1257,26 +1139,6 @@ function EmptyState({
   };
   const left = (
     <>
-      {agents.length > 1 && (
-        <BarPicker
-          name="agent"
-          text={picked.label}
-          icon={<Bot size={13} aria-hidden="true" />}
-          ariaLabel={`Agent: ${picked.label}`}
-          tooltip="The coding agent this session runs"
-          heading="Agent"
-          items={agents.map((a) => ({
-            id: `agent:${a.id}`,
-            label: a.label,
-            description: a.description,
-            checked: a.id === picked.id,
-            onSelect: () => {
-              onPickAgent(a.id);
-              setMode(null);
-            },
-          }))}
-        />
-      )}
       {workDir && (
         <FolderPicker
           folder={workDir}
@@ -1311,6 +1173,12 @@ function EmptyState({
       onModel={(model) => saveDefault({ model })}
       onEffort={(effort) => saveDefault({ effort })}
       onMode={setMode}
+      agents={agents}
+      onPickAgent={(id) => {
+        onPickAgent(id);
+        // The mode is the agent's: another agent starts in its own default.
+        setMode(null);
+      }}
     />
   );
   return (

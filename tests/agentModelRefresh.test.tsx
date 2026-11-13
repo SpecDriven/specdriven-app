@@ -2,8 +2,8 @@
 // composer bar picks the folder, model, effort and mode"): the list is what
 // the agent's sign-in offers, and that changes under an open window — an
 // account given another model. The store loads it again once it is a minute
-// old (src/frontend/agentChat.ts), and the model menu loads it as it opens
-// (src/frontend/AgentPane.tsx), so the menu never lists what the sign-in
+// old (src/frontend/agentChat.ts), and the model picker loads it as it opens
+// (src/frontend/AgentModelPicker.tsx), so it never lists what the sign-in
 // stopped offering until the plugin is switched off and on again. React
 // needs a DOM to open the menu, so this file borrows one the way
 // tests/agentModelsSettings.test.tsx does.
@@ -109,7 +109,7 @@ test("the pane's model list is loaded again once it has gone stale, and readers 
   expect(fetched.asked()).toBe(3);
 });
 
-test("the pane's model list is loaded again when the model menu opens, and the menu lists what came back", async () => {
+test("the pane's model list is loaded again when the model picker opens, and it lists what came back", async () => {
   let models = [OPUS];
   const fetched = answering(() => models);
   agentChat.setAgents([CLAUDE_AGENT]);
