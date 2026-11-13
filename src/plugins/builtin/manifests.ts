@@ -46,14 +46,14 @@ export const retiredManifests: readonly PluginManifest[] = [
     id: "agent-claude",
     api: "1",
     displayName: "Claude agent",
-    description: "Claude Code in the coding agent pane, with its sign-in and proxy settings",
+    description: "Claude Code in the coding agent pane, with its sign-in (your Claude account or the API) in Settings",
     defaultEnabled: false,
   },
   {
     id: "agent-codex",
     api: "1",
     displayName: "Codex agent",
-    description: "OpenAI Codex in the coding agent pane",
+    description: "OpenAI Codex in the coding agent pane, with its sign-in (your ChatGPT account or the API) in Settings",
     defaultEnabled: false,
   },
   {
