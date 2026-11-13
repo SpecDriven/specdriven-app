@@ -4,6 +4,10 @@ What changed in each release of SpecDriven, newest first. `bun run bump` writes
 each version's section from the pull requests merged since the version before
 it ([docs/releasing.md](docs/releasing.md)).
 
+## v0.1.271 — 2026-11-13
+
+- A marketplace plugin is released in versions, and any of them can be installed ([#451](https://github.com/SpecDriven/specdriven-app/pull/451))
+
 ## v0.1.270 — 2026-11-12
 
 - The Linux desktop app restarts into the version an update installed ([#448](https://github.com/SpecDriven/specdriven-app/pull/448))
