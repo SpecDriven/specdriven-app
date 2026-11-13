@@ -231,9 +231,13 @@ export interface AgentImage {
   path: string;
 }
 
-/** One block of an assistant turn the pane renders. */
+/** One block of an assistant turn the pane renders. `thinking` is what the
+    agent reasoned before it answered, as far as it reports it — shown in the
+    pane's Thinking and Verbose transcript views
+    (specs/agents/agent-pane.feature.md "Transcript view"). */
 export type AssistantBlock =
   | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown };
 
 export type NoteCode = "init" | "compact" | "stderr" | "ended" | "spawn_failed" | "interrupted" | "api";
@@ -253,7 +257,11 @@ export type ChatEventBody =
   /** What the pane sent — echoed from the request, never from a replay.
       `refs` are the files that went with it, as the agent was told them. */
   | { kind: "user"; id: string; text: string; images?: ChatImage[]; refs?: string[] }
-  | { kind: "text_delta"; messageId: string; index: number; text: string }
+  /** `parentToolUseId` on a delta: the subagent call it streams under, when
+      the agent says so before the message is whole. */
+  | { kind: "text_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
+  /** Thinking as it streams; the message's `thinking` block then replaces it. */
+  | { kind: "thinking_delta"; messageId: string; index: number; text: string; parentToolUseId?: string | null }
   | {
       kind: "assistant";
       messageId: string;
@@ -364,6 +372,10 @@ export interface AgentCapabilities {
       (AgentSession.contextUsage); "totals" — the count and the window's
       size alone; absent — nothing. */
   contextUsage?: "breakdown" | "totals";
+  /** Whether the agent reports its thinking (`thinking` blocks,
+      `thinking_delta` events); absent is no, and the pane's Thinking view
+      says so. */
+  thinking?: boolean;
 }
 
 // --- Model and effort --------------------------------------------------------

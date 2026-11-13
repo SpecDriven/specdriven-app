@@ -305,6 +305,24 @@ class SimulatedSession implements AgentSession {
     });
   }
 
+  /** What the agent thought before it spoke: streamed, then settled into the
+      block that replaces the deltas — the Thinking transcript view's content. */
+  private async think(text: string): Promise<void> {
+    const messageId = `msg_${randomUUID()}`;
+    for (const chunk of chunks(text)) {
+      if (this.cancelled) break;
+      this.host.emit({ kind: "thinking_delta", messageId, index: 0, text: chunk });
+      await sleep(TYPE_MS, this.signals);
+    }
+    this.host.emit({
+      kind: "assistant",
+      messageId,
+      turn: this.host.turn(),
+      blocks: [{ type: "thinking", text }],
+      parentToolUseId: null,
+    });
+  }
+
   /** A tool row and the result that closes it — no tool actually runs. */
   private async useTool(name: string, input: Record<string, unknown>, output: string): Promise<void> {
     const toolUseId = `toolu_${randomUUID()}`;
@@ -370,6 +388,10 @@ class SimulatedSession implements AgentSession {
   private async opening({ name, specs }: Brief): Promise<number> {
     const spec = specs[0]!;
     const list = specs.length > 1 ? `${specs.length} specs` : specTitle(spec);
+    await this.think(
+      `The request is ${name}. Before writing anything I should read ${spec} for the rules it sets, then check whether the code already covers any of them.`,
+    );
+    if (this.cancelled) return 0;
     await this.say(
       `I'll implement ${name}. Starting with ${list} — let me read the spec and see what the code already does.`,
     );
@@ -384,6 +406,13 @@ class SimulatedSession implements AgentSession {
     );
     if (this.cancelled) return 0;
     const file = targetFile(spec);
+    await sleep(TOOL_MS, this.signals);
+    await this.useTool("Bash", { command: "git status --short", description: "Check the working tree" }, "(clean)");
+    if (this.cancelled) return 0;
+    await this.think(
+      `No match for the spec's terms and a clean tree, so this is new code. One module, ${file}, with a case per scenario keeps the mapping to the spec easy to check.`,
+    );
+    if (this.cancelled) return 0;
     await this.say(
       `Nothing implements this yet, so I'll add it. The scenarios map cleanly onto one module with a case per rule; I'll write ${file} and wire the checks the spec's Then clauses name.`,
     );
@@ -409,6 +438,8 @@ class SimulatedSession implements AgentSession {
 
   /** Everything else: short, so the composer stays useful in a demo. */
   private async followUp(prompt: string, images = 0): Promise<void> {
+    await this.think("Nothing here runs for real, so the honest answer is to say what a live session would do.");
+    if (this.cancelled) return;
     // The user's words only: the line naming the open files (agent.ts
     // withRefs) is for an agent, not for quoting back.
     const asked = prompt
@@ -448,6 +479,7 @@ export const simulatedProvider: AgentProvider = fromPlugin(
       oneShot: false,
       images: true,
       contextUsage: "breakdown",
+      thinking: true,
     },
     defaultPermissionMode: "auto",
     start(opts) {

@@ -8,6 +8,7 @@ import {
   ContextMeter,
   SessionRail,
   SessionRailButton,
+  TranscriptViewRow,
   abbreviatePath,
   contextHeadline,
   contextLevel,
@@ -16,7 +17,16 @@ import {
   parentPath,
   sliceColor,
 } from "../src/frontend/SessionRail";
-import { EMPTY_TRANSCRIPT, applyEvent, formatPercent, formatTokens } from "../src/frontend/agentChat";
+import {
+  EMPTY_TRANSCRIPT,
+  TRANSCRIPT_VIEWS,
+  TRANSCRIPT_VIEW_HINT,
+  TRANSCRIPT_VIEW_LABEL,
+  applyEvent,
+  formatPercent,
+  formatTokens,
+  transcriptViewHint,
+} from "../src/frontend/agentChat";
 import type { ChatContextUsage, ChatEvent, ChatSessionMeta } from "../src/frontend/agentChat";
 import { CLAUDE_AGENT, CODEX_AGENT, PI_AGENT, agent } from "./fixtures/agents";
 
@@ -180,6 +190,38 @@ describe("the context meter's numbers", () => {
     const t = applyEvent(EMPTY_TRANSCRIPT, ev);
     expect(t.items).toEqual([]);
     expect(t.lastSeq).toBe(3);
+  });
+});
+
+// specs/agents/agent-pane.feature.md "The transcript view shows a session at
+// three levels of detail": the popover's Transcript row. Switching it in a
+// page is tests/agentRail.test.tsx.
+describe("the Transcript row", () => {
+  test("the popover offers Normal, Thinking and Verbose, with Normal picked on a device that never chose", () => {
+    const html = renderToStaticMarkup(<TranscriptViewRow agent={CLAUDE} />);
+    expect(html).toContain('role="radiogroup" aria-label="Transcript view"');
+    expect(TRANSCRIPT_VIEWS.map((v) => TRANSCRIPT_VIEW_LABEL[v])).toEqual(["Normal", "Thinking", "Verbose"]);
+    expect([...html.matchAll(/aria-checked="(true|false)"[^>]*>([^<]+)</g)].map((m) => [m[2], m[1]])).toEqual([
+      ["Normal", "true"],
+      ["Thinking", "false"],
+      ["Verbose", "false"],
+    ]);
+    // The row sits in the popover itself, between the branch and the window.
+    const rail = renderToStaticMarkup(<SessionRail meta={WORKTREE_META} agent={CLAUDE} homeDir={null} />);
+    expect(rail.indexOf('data-row="branch"')).toBeLessThan(rail.indexOf('data-row="transcript"'));
+    expect(rail.indexOf('data-row="transcript"')).toBeLessThan(rail.indexOf("15% used"));
+  });
+
+  test("the Thinking choice says when the agent does not report its thinking", () => {
+    const thinks = agent({ ...CLAUDE_AGENT, capabilities: { ...CLAUDE_AGENT.capabilities, thinking: true } });
+    expect(transcriptViewHint("thinking", thinks)).toBe(TRANSCRIPT_VIEW_HINT.thinking);
+    expect(transcriptViewHint("thinking", PI_AGENT)).toBe(
+      `${TRANSCRIPT_VIEW_HINT.thinking} — ${PI_AGENT.label} does not report its thinking`,
+    );
+    // The other two views read the same for every agent.
+    for (const view of ["normal", "verbose"] as const) {
+      expect(transcriptViewHint(view, PI_AGENT)).toBe(TRANSCRIPT_VIEW_HINT[view]);
+    }
   });
 });
 

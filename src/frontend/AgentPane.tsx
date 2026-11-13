@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -20,6 +21,7 @@ import {
   FolderOpen,
   GitBranch,
   Globe,
+  Layers,
   PanelRightClose,
   Pin,
   Plug,
@@ -61,6 +63,7 @@ import {
   isHelpCommand,
   loadFolderInfo,
   loadSourceStatus,
+  nestedToolCount,
   pushPromptHistory,
   readAgentFollow,
   readAgentWorktree,
@@ -74,6 +77,8 @@ import {
   useAgentChat,
   useAgentChoices,
   useFolderInfo,
+  useTranscriptView,
+  viewRows,
   worktreeTooltip,
   withLocalCommands,
   writeAgentFollow,
@@ -94,6 +99,8 @@ import {
   type SessionState,
   type SourceStatus,
   type TranscriptItem,
+  type TranscriptView,
+  type ViewRow,
 } from "./agentChat";
 import { EFFORT_LABEL, EFFORT_LEVELS, MAX_IMAGES_PER_MESSAGE, MAX_OPEN_SESSIONS } from "../server/agentTypes";
 import type { ChatAccount, ChatImage, ImageUpload } from "../server/agentTypes";
@@ -1393,6 +1400,10 @@ function Transcript({
   const [following, setFollowing] = useState(true);
   const [unseen, setUnseen] = useState(false);
   const { items } = session.transcript;
+  // What the reader's transcript view shows of it (the session popover's
+  // Normal / Thinking / Verbose).
+  const view = useTranscriptView();
+  const rows = useMemo(() => viewRows(items, view), [items, view]);
   // A new session starts at its bottom.
   useEffect(() => {
     setFollowing(true);
@@ -1406,6 +1417,11 @@ function Transcript({
     if (following) el.scrollTop = el.scrollHeight;
     else setUnseen(true);
   }, [session.transcript]);
+  // Another view is another height: a reader at the bottom stays there.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && following) el.scrollTop = el.scrollHeight;
+  }, [view]);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
@@ -1430,12 +1446,10 @@ function Transcript({
       aria-live="polite"
       aria-label="Session transcript"
     >
-      {items.length === 0 && (
+      {rows.length === 0 && (
         <p className="agent-note">{statusLabel(session.meta.status, agent)}</p>
       )}
-      {items.map((item) => (
-        <TranscriptRow key={item.id} item={item} agent={agent} onAnswer={answer} openSettings={openSettings} />
-      ))}
+      <TranscriptRows rows={rows} view={view} agent={agent} onAnswer={answer} openSettings={openSettings} />
       {session.connection === "reconnecting" && (
         <p className="agent-note" data-level="error">
           Connection lost — reconnecting…
@@ -1450,19 +1464,54 @@ function Transcript({
   );
 }
 
-/** One transcript entry. Exported so tests can render a row on its own. */
-export function TranscriptRow({
-  item,
-  agent = describeAgent("claude"),
-  onAnswer,
-  openSettings,
-}: {
-  item: TranscriptItem;
+interface RowContext {
+  /** The reader's transcript view (agentChat.ts `viewRows`). */
+  view?: TranscriptView;
   agent?: AgentDescriptor;
   onAnswer?: (answer: Answer) => void;
   /** The agent's own Settings section, offered under a sign-in failure. */
   openSettings?: () => void;
+}
+
+/** The rows a view made of a transcript (agentChat.ts `viewRows`), in order.
+    Exported so tests can render a view without the pane around it. */
+export function TranscriptRows({ rows, ...context }: RowContext & { rows: readonly ViewRow[] }) {
+  return (
+    <>
+      {rows.map((row) =>
+        row.kind === "tool-run" ? (
+          <ToolRun key={row.id} row={row} />
+        ) : (
+          <TranscriptRow key={row.id} item={row.item} depth={row.depth} nested={row.nested} {...context} />
+        ),
+      )}
+    </>
+  );
+}
+
+/** One transcript entry. Exported so tests can render a row on its own. */
+export function TranscriptRow({
+  item,
+  view = "normal",
+  depth = 0,
+  nested,
+  agent = describeAgent("claude"),
+  onAnswer,
+  openSettings,
+}: RowContext & {
+  item: TranscriptItem;
+  /** Verbose: how many subagent calls deep the entry sits. */
+  depth?: number;
+  /** A subagent call's own traffic, shown inside its row. */
+  nested?: readonly ViewRow[];
 }) {
+  if (depth > 0) {
+    return (
+      <div className="agent-sub" style={{ marginInlineStart: `${depth * 0.9}rem` }}>
+        <TranscriptRow item={item} view={view} nested={nested} agent={agent} onAnswer={onAnswer} openSettings={openSettings} />
+      </div>
+    );
+  }
   switch (item.kind) {
     case "user":
       return (
@@ -1488,8 +1537,24 @@ export function TranscriptRow({
           {item.streaming && <span className="agent-caret" aria-hidden="true" />}
         </div>
       );
+    case "thinking":
+      // Normal says only that it is happening; the words are for the
+      // Thinking and Verbose views.
+      if (view === "normal") return <p className="agent-note agent-thinking-now">Thinking…</p>;
+      return (
+        <div className="agent-thinking" role="group" aria-label="Thinking">
+          {renderMarkdown(item.text)}
+          {item.streaming && <span className="agent-caret" aria-hidden="true" />}
+        </div>
+      );
     case "tool":
-      return <ToolRow item={item} />;
+      return (
+        <ToolRow item={item} open={view === "verbose"} calls={nested ? nestedToolCount(nested) : 0}>
+          {nested && nested.length > 0 && (
+            <TranscriptRows rows={nested} view={view} agent={agent} onAnswer={onAnswer} openSettings={openSettings} />
+          )}
+        </ToolRow>
+      );
     case "permission":
       return <PermissionCard item={item} agent={agent} onAnswer={onAnswer} />;
     case "question":
@@ -1510,6 +1575,9 @@ export function TranscriptRow({
           </span>
           {item.costUsd !== null && <span>{formatCost(item.costUsd)}</span>}
           <span>{formatDuration(item.durationMs)}</span>
+          {view === "verbose" && item.numTurns > 0 && (
+            <span>{item.numTurns === 1 ? "1 turn" : `${item.numTurns} turns`}</span>
+          )}
           {item.isError && item.text && <span className="agent-err-text">{item.text}</span>}
           {loginHint && agent.loginHint && (
             <span className="agent-err-text">
@@ -1607,22 +1675,58 @@ function toolIcon(name: string): ReactNode {
   }
 }
 
-function ToolRow({ item }: { item: Extract<TranscriptItem, { kind: "tool" }> }) {
+function ToolRow({
+  item,
+  open = false,
+  calls = 0,
+  children,
+}: {
+  item: Extract<TranscriptItem, { kind: "tool" }>;
+  /** Verbose: the row starts opened. The reader can still close it. */
+  open?: boolean;
+  /** A subagent call: how many tool calls it made in turn. */
+  calls?: number;
+  /** A subagent call's own traffic, between what it was asked and what it answered. */
+  children?: ReactNode;
+}) {
   const state = item.result ? (item.result.isError ? "failed" : "done") : "running…";
   return (
-    <details className={`agent-tool${item.result?.isError ? " err" : ""}`}>
+    <details className={`agent-tool${item.result?.isError ? " err" : ""}`} open={open || undefined}>
       <summary>
         {toolIcon(item.name)}
         <span className="agent-tool-name">{item.name || "Tool"}</span>
         <span className="agent-tool-summary" title={item.summary}>
           {item.summary}
         </span>
+        {calls > 0 && <span className="agent-tool-state">{calls === 1 ? "1 call" : `${calls} calls`}</span>}
         <span className="agent-tool-state">{state}</span>
       </summary>
       {item.input !== null && item.input !== undefined && (
         <pre className="agent-tool-input">{JSON.stringify(item.input, null, 2)}</pre>
       )}
+      {children && <div className="agent-tool-nested">{children}</div>}
       {item.result && <pre className="agent-tool-output">{item.result.content || "(no output)"}</pre>}
+    </details>
+  );
+}
+
+/** Normal view: a run of finished tool calls as one line, which opens into
+    the calls themselves (agentChat.ts `viewRows`). */
+function ToolRun({ row }: { row: Extract<ViewRow, { kind: "tool-run" }> }) {
+  return (
+    <details className="agent-tool agent-tool-run">
+      <summary>
+        <Layers size={13} aria-hidden="true" />
+        <span className="agent-tool-summary" title={row.summary}>
+          {row.summary}
+        </span>
+        <span className="agent-tool-state">done</span>
+      </summary>
+      <div className="agent-tool-nested">
+        {row.tools.map((tool) => (
+          <ToolRow key={tool.id} item={tool} />
+        ))}
+      </div>
     </details>
   );
 }

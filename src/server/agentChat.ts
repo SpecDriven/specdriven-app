@@ -127,6 +127,12 @@ function emit(session: ChatSession, body: ChatEventBody, now: Date = new Date())
       (e) => !(e.kind === "text_delta" && e.messageId === body.messageId),
     );
   }
+  // The same for thinking: the block carries all of it.
+  if (body.kind === "assistant" && body.blocks.some((b) => b.type === "thinking")) {
+    session.log = session.log.filter(
+      (e) => !(e.kind === "thinking_delta" && e.messageId === body.messageId),
+    );
+  }
   // A context count stands for the window now: the one before is history no
   // replay needs, and with every MCP tool listed it is not small.
   if (body.kind === "context") session.log = session.log.filter((e) => e.kind !== "context");

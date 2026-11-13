@@ -171,6 +171,65 @@ test("the header ring opens the session popover on the folder, its branch and th
   unmount();
 });
 
+// specs/agents/agent-pane.feature.md "Transcript view": the popover's
+// Transcript row picks Normal, Thinking or Verbose for every session on
+// this device, and the open transcript follows at once.
+test("the popover's Transcript row switches the view, the transcript follows, and the choice is kept", async () => {
+  const feed: { push?: (line: string) => void } = {};
+  server([], feed);
+  agentChat.setAgents([CLAUDE]);
+  await agentChat.openSession("s1");
+  const { host, unmount } = mount(
+    <AgentPane compact={false} demo={false} codeRepo="/w/code" dataRepo="/w/data" homeDir="/w" onClose={() => {}} />,
+  );
+  await settle();
+  const at = COUNT.at;
+  const lines = [
+    { kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "thinking", text: "Read the spec first." }], parentToolUseId: null },
+    { kind: "assistant", messageId: "m1", turn: 1, blocks: [{ type: "tool_use", id: "r1", name: "Read", input: { file_path: "a.md" } }], parentToolUseId: null },
+    { kind: "tool_result", toolUseId: "r1", content: "# A", isError: false, parentToolUseId: null },
+    { kind: "assistant", messageId: "m2", turn: 1, blocks: [{ type: "tool_use", id: "b1", name: "Bash", input: { command: "bun test" } }], parentToolUseId: null },
+    { kind: "tool_result", toolUseId: "b1", content: "3 pass", isError: false, parentToolUseId: null },
+  ];
+  act(() => lines.forEach((line, i) => feed.push!(JSON.stringify({ ...line, seq: i + 2, at }))));
+  await settle();
+  const log = () => host.querySelector<HTMLElement>('[role="log"]')!;
+  // Normal, the default: the two calls are one line, the thought is not shown.
+  expect(log().querySelectorAll(".agent-tool-run")).toHaveLength(1);
+  expect(log().textContent).toContain("Read 1 file, ran 1 command");
+  expect(log().textContent).not.toContain("Read the spec first.");
+
+  act(() => button(host).click());
+  await settle();
+  const radios = () => [...popover(host)!.querySelectorAll<HTMLButtonElement>('[data-row="transcript"] [role="radio"]')];
+  expect(radios().map((r) => [r.textContent, r.getAttribute("aria-checked")])).toEqual([
+    ["Normal", "true"],
+    ["Thinking", "false"],
+    ["Verbose", "false"],
+  ]);
+
+  act(() => radios()[1]!.click());
+  expect(radios().map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+  expect(log().querySelectorAll(".agent-tool-run")).toHaveLength(0);
+  expect(log().querySelectorAll(".agent-tool")).toHaveLength(2);
+  expect(log().querySelector(".agent-thinking")!.textContent).toBe("Read the spec first.");
+  expect(log().querySelectorAll("details[open]")).toHaveLength(0);
+  expect(localStorage.getItem("sd-agent-transcript-view")).toBe("thinking");
+
+  act(() => radios()[2]!.click());
+  expect(log().querySelectorAll("details[open]")).toHaveLength(2);
+  expect(localStorage.getItem("sd-agent-transcript-view")).toBe("verbose");
+  unmount();
+
+  // The choice is the device's: a pane opened later starts on it.
+  const again = mount(
+    <AgentPane compact={false} demo={false} codeRepo="/w/code" dataRepo="/w/data" homeDir="/w" onClose={() => {}} />,
+  );
+  await settle();
+  expect(again.host.querySelectorAll('[role="log"] details[open]')).toHaveLength(2);
+  again.unmount();
+});
+
 test("Refresh asks the agent to count every category, and a count on the stream moves the ring", async () => {
   const posts: { url: string; body: unknown }[] = [];
   const feed: { push?: (line: string) => void } = {};

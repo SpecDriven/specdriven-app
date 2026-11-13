@@ -200,9 +200,13 @@ test("the script streams its text before settling it", async () => {
   // The context window is counted once the session is ready and again once
   // the turn is over (specs/agents/agent-pane.feature.md S10).
   expect(seen[2]).toBe("context");
-  expect(seen[3]).toBe("text_delta");
+  // What the script thought comes first, streamed and then settled, for the
+  // pane's Thinking view (specs/agents/agent-pane.feature.md "Transcript view").
+  expect(seen[3]).toBe("thinking_delta");
+  expect(seen.indexOf("assistant")).toBeGreaterThan(seen.indexOf("thinking_delta"));
+  expect(seen.indexOf("text_delta")).toBeGreaterThan(seen.indexOf("assistant"));
   expect(seen.filter((s) => s === "text_delta").length).toBeGreaterThan(3);
-  expect(seen.indexOf("assistant")).toBeGreaterThan(seen.indexOf("text_delta"));
+  expect(seen.lastIndexOf("assistant")).toBeGreaterThan(seen.indexOf("text_delta"));
   expect(seen.at(-2)).toBe("result");
   expect(seen.at(-1)).toBe("context");
 });
@@ -231,8 +235,13 @@ test("a demo session starts and plays a scripted Claude Code turn", async () => 
   const tools = events.flatMap((e) =>
     e.kind === "assistant" ? e.blocks.filter((b) => b.type === "tool_use") : [],
   );
-  expect(tools.map((t) => t.name)).toEqual(["Read", "Grep"]);
+  // Three calls in a row: the run the Normal transcript view folds into one line.
+  expect(tools.map((t) => t.name)).toEqual(["Read", "Grep", "Bash"]);
   expect(tools[0]!.input).toMatchObject({ file_path: SPEC });
+  // What it thought is in the log as settled blocks, the deltas dropped.
+  const thoughts = events.flatMap((e) => (e.kind === "assistant" ? e.blocks.filter((b) => b.type === "thinking") : []));
+  expect(thoughts).toHaveLength(2);
+  expect(kinds(events)).not.toContain("thinking_delta");
 
   // Parked on the permission card until the visitor answers.
   expect(getChatSession(id)!.status).toBe("awaiting_input");

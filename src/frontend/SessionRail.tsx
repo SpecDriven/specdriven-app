@@ -7,16 +7,21 @@
 // Claude says what fills the window, Codex only how much, Pi nothing. Every
 // helper below is pure, so the pane's tests pin the numbers and the words.
 
-import { ChevronRight, Copy, Folder, GitBranch, RefreshCw } from "lucide-react";
+import { ChevronRight, Copy, Folder, GitBranch, RefreshCw, ScrollText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Popover } from "./Popover";
 import { Tooltip } from "./Tooltip";
 import { toast } from "./Toasts";
 import {
+  TRANSCRIPT_VIEWS,
+  TRANSCRIPT_VIEW_LABEL,
   agentChat,
+  applyTranscriptView,
   formatPercent,
   formatTokens,
+  transcriptViewHint,
   useFolderInfo,
+  useTranscriptView,
   type AgentDescriptor,
   type ChatContextUsage,
   type ChatSessionMeta,
@@ -288,7 +293,39 @@ export function SessionRail({
         <CopyButton text={folder} what="folder path" />
       </div>
       <BranchRow meta={meta} homeDir={homeDir} />
+      <TranscriptViewRow agent={agent} />
       <ContextSection meta={meta} agent={agent} />
+    </div>
+  );
+}
+
+/**
+ * How much of the transcript the pane shows (specs/agents/agent-pane
+ * .feature.md "Transcript view"), as in Claude Desktop: Normal, Thinking or
+ * Verbose. The choice is the reader's, for every session on this device
+ * (agentChat.ts `useTranscriptView`), so it is not the session's to record.
+ */
+export function TranscriptViewRow({ agent }: { agent: AgentDescriptor }) {
+  const view = useTranscriptView();
+  return (
+    <div className="agent-rail-row" data-row="transcript">
+      <ScrollText size={15} aria-hidden="true" className="agent-rail-icon" />
+      <span className="agent-rail-value agent-rail-name">Transcript</span>
+      <div className="agent-rail-seg" role="radiogroup" aria-label="Transcript view">
+        {TRANSCRIPT_VIEWS.map((v) => (
+          <Tooltip key={v} label={transcriptViewHint(v, agent)}>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={view === v}
+              className={view === v ? "active" : ""}
+              onClick={() => applyTranscriptView(v)}
+            >
+              {TRANSCRIPT_VIEW_LABEL[v]}
+            </button>
+          </Tooltip>
+        ))}
+      </div>
     </div>
   );
 }

@@ -115,6 +115,20 @@ export type TranscriptItem =
       streamText: string;
       finalParts: string[];
       at: string;
+      /** The subagent call (a tool item's id) this was said under. */
+      parent?: string;
+    }
+  | {
+      /** What the agent reasoned before it answered — one item per message,
+          shown by the Thinking and Verbose views (`viewRows`). */
+      kind: "thinking";
+      id: string;
+      text: string;
+      streaming: boolean;
+      streamText: string;
+      finalParts: string[];
+      at: string;
+      parent?: string;
     }
   | {
       kind: "tool";
@@ -124,6 +138,7 @@ export type TranscriptItem =
       summary: string;
       result?: { content: string; isError: boolean };
       at: string;
+      parent?: string;
     }
   | {
       kind: "permission";
@@ -202,6 +217,13 @@ function isQuestions(value: unknown): value is Question[] {
   );
 }
 
+/** The `parent` field of an item: the subagent call the event names (a tool
+    item's id), else the one the item already had. */
+function parentOf(parentToolUseId: string | null | undefined, known?: string): { parent?: string } {
+  const parent = parentToolUseId ? `t:${parentToolUseId}` : known;
+  return parent ? { parent } : {};
+}
+
 /** Fold one server event into the transcript. Events already seen are skipped. */
 export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
   if (ev.seq <= t.lastSeq) return t;
@@ -229,11 +251,48 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
         text: finalParts.length > 0 ? finalParts.join("") : streamText,
         streaming: true,
         at: current?.at ?? ev.at,
+        ...parentOf(ev.parentToolUseId, current?.parent),
+      });
+    }
+    case "thinking_delta": {
+      const id = `k:${ev.messageId}`;
+      const current = itemOf(next, id, "thinking");
+      const streamText = (current?.streamText ?? "") + ev.text;
+      const finalParts = current?.finalParts ?? [];
+      return withItem(next, {
+        kind: "thinking",
+        id,
+        streamText,
+        finalParts,
+        text: finalParts.length > 0 ? finalParts.join("\n\n") : streamText,
+        streaming: true,
+        at: current?.at ?? ev.at,
+        ...parentOf(ev.parentToolUseId, current?.parent),
       });
     }
     case "assistant": {
       let out = next;
       const id = `a:${ev.messageId}`;
+      // Thinking first: it came before the words it led to.
+      const thoughts = ev.blocks.filter((b): b is Extract<AssistantBlock, { type: "thinking" }> => b.type === "thinking");
+      if (thoughts.length > 0) {
+        const kid = `k:${ev.messageId}`;
+        const current = itemOf(out, kid, "thinking");
+        // An agent that keeps its thinking to itself sends the block empty.
+        const finalParts = [...(current?.finalParts ?? []), ...thoughts.map((b) => b.text).filter((text) => text.trim())];
+        if (current || finalParts.length > 0) {
+          out = withItem(out, {
+            kind: "thinking",
+            id: kid,
+            streamText: current?.streamText ?? "",
+            finalParts,
+            text: finalParts.length > 0 ? finalParts.join("\n\n") : (current?.streamText ?? ""),
+            streaming: false,
+            at: current?.at ?? ev.at,
+            ...parentOf(ev.parentToolUseId, current?.parent),
+          });
+        }
+      }
       const texts = ev.blocks.filter((b): b is Extract<AssistantBlock, { type: "text" }> => b.type === "text");
       if (texts.length > 0) {
         const current = itemOf(out, id, "assistant");
@@ -246,6 +305,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
           text: finalParts.join(""),
           streaming: false,
           at: current?.at ?? ev.at,
+          ...parentOf(ev.parentToolUseId, current?.parent),
         });
       }
       for (const block of ev.blocks) {
@@ -260,6 +320,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
           summary: toolSummary(block.name, block.input),
           ...(placeholder?.result ? { result: placeholder.result } : {}),
           at: placeholder?.at ?? ev.at,
+          ...parentOf(ev.parentToolUseId, placeholder?.parent),
         });
       }
       return out;
@@ -275,6 +336,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
         summary: tool?.summary ?? "",
         result: { content: ev.content, isError: ev.isError },
         at: tool?.at ?? ev.at,
+        ...parentOf(ev.parentToolUseId, tool?.parent),
       });
     }
     case "permission_request": {
@@ -310,7 +372,7 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
     case "result": {
       // The turn is over: nothing is streaming any more.
       const items = next.items.map((item) =>
-        item.kind === "assistant" && item.streaming ? { ...item, streaming: false } : item,
+        (item.kind === "assistant" || item.kind === "thinking") && item.streaming ? { ...item, streaming: false } : item,
       );
       // The result text is the reply's last words; shown only when the
       // transcript does not already end on them.
@@ -378,6 +440,219 @@ export function toolSummary(name: string, input: unknown): string {
       return "";
     }
   }
+}
+
+// --- Transcript view (specs/agents/agent-pane.feature.md "Transcript view") --
+//
+// How much of a session the reader sees, as in Claude Code Desktop. The
+// transcript itself is the same under every view — the server's log and the
+// reduction above know nothing of it — so switching re-renders what the pane
+// already holds:
+//
+//   normal    the conversation: a run of tool calls is one line, thinking and
+//             a subagent's own traffic stay out of the way
+//   thinking  one row per tool call, and what the agent thought
+//   verbose   everything, opened: every call with its input and output, a
+//             subagent's traffic inline, the notes an agent starts with
+
+export type TranscriptView = "normal" | "thinking" | "verbose";
+
+export const TRANSCRIPT_VIEWS: readonly TranscriptView[] = ["normal", "thinking", "verbose"];
+
+export const TRANSCRIPT_VIEW_LABEL: Record<TranscriptView, string> = {
+  normal: "Normal",
+  thinking: "Thinking",
+  verbose: "Verbose",
+};
+
+/** What each view is for — the control's tooltips. */
+export const TRANSCRIPT_VIEW_HINT: Record<TranscriptView, string> = {
+  normal: "The conversation, with each run of tool calls folded into one line",
+  thinking: "Every tool call on its own row, and what the agent thought",
+  verbose: "Everything: every tool call opened, subagent traffic, session notes",
+};
+
+/** A view's tooltip for an agent: Thinking says so when the agent keeps its
+    thinking to itself — the view still works, with a row per call and no thoughts. */
+export function transcriptViewHint(view: TranscriptView, agent: AgentDescriptor): string {
+  return view === "thinking" && !agent.capabilities.thinking
+    ? `${TRANSCRIPT_VIEW_HINT[view]} — ${agent.label} does not report its thinking`
+    : TRANSCRIPT_VIEW_HINT[view];
+}
+
+type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
+
+/** One line of the transcript as a view shows it. */
+export type ViewRow =
+  | {
+      kind: "item";
+      id: string;
+      item: TranscriptItem;
+      /** Verbose: how many subagent calls deep the item sits. */
+      depth: number;
+      /** A subagent call's own traffic, shown inside its row. */
+      nested?: ViewRow[];
+    }
+  /** Normal: consecutive finished tool calls, as one line that opens. */
+  | { kind: "tool-run"; id: string; tools: ToolItem[]; summary: string };
+
+/** The notes only Verbose shows: how the agent started, what it wrote to stderr. */
+const QUIET_NOTES = new Set(["init", "stderr"]);
+
+function shownIn(item: TranscriptItem, view: TranscriptView): boolean {
+  if (view === "verbose") return true;
+  if (item.kind === "note") return item.level === "error" || !QUIET_NOTES.has(item.code);
+  // Normal keeps thinking to one live "Thinking…" line while it streams.
+  if (item.kind === "thinking") return view === "thinking" || item.streaming;
+  return true;
+}
+
+function itemParent(item: TranscriptItem): string | undefined {
+  return item.kind === "assistant" || item.kind === "thinking" || item.kind === "tool" ? item.parent : undefined;
+}
+
+/** Whether a tool call folds into a run: it finished, and finished well. */
+function foldsIntoRun(row: ViewRow): row is Extract<ViewRow, { kind: "item" }> & { item: ToolItem } {
+  return row.kind === "item" && row.item.kind === "tool" && !!row.item.result && !row.item.result.isError && !row.nested;
+}
+
+/** Normal: every stretch of two or more calls that fold becomes one row. */
+function foldRuns(rows: ViewRow[]): ViewRow[] {
+  const out: ViewRow[] = [];
+  let run: ToolItem[] = [];
+  const flush = () => {
+    if (run.length === 1) out.push({ kind: "item", id: run[0]!.id, item: run[0]!, depth: 0 });
+    else if (run.length > 1) out.push({ kind: "tool-run", id: `run:${run[0]!.id}`, tools: run, summary: runSummary(run) });
+    run = [];
+  };
+  for (const row of rows) {
+    if (foldsIntoRun(row)) run.push(row.item);
+    else {
+      flush();
+      out.push(row);
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * The transcript as a view shows it — the one place that decides what each
+ * view leaves out, folds or nests. Row ids are stable as a transcript grows
+ * (a run is named for its first call), so a row the reader opened stays open.
+ */
+export function viewRows(items: readonly TranscriptItem[], view: TranscriptView): ViewRow[] {
+  const shown = items.filter((item) => shownIn(item, view));
+  const byId = new Map(items.map((item) => [item.id, item]));
+  if (view === "verbose") {
+    // Inline, in the order it happened, indented under the call it belongs to.
+    const depthOf = (item: TranscriptItem): number => {
+      let depth = 0;
+      let parent = itemParent(item);
+      while (parent && byId.has(parent) && depth < 8) {
+        depth += 1;
+        parent = itemParent(byId.get(parent)!);
+      }
+      return depth;
+    };
+    return shown.map((item) => ({ kind: "item", id: item.id, item, depth: depthOf(item) }));
+  }
+  // A subagent's traffic goes inside the row of the call that started it.
+  const children = new Map<string, TranscriptItem[]>();
+  const top: TranscriptItem[] = [];
+  for (const item of shown) {
+    const parent = itemParent(item);
+    if (parent && byId.get(parent)?.kind === "tool") children.set(parent, [...(children.get(parent) ?? []), item]);
+    else top.push(item);
+  }
+  const build = (list: TranscriptItem[]): ViewRow[] => {
+    const rows = list.map((item): ViewRow => {
+      const own = item.kind === "tool" ? children.get(item.id) : undefined;
+      return { kind: "item", id: item.id, item, depth: 0, ...(own ? { nested: build(own) } : {}) };
+    });
+    return view === "normal" ? foldRuns(rows) : rows;
+  };
+  return build(top);
+}
+
+/** How many tool calls a subagent call's rows hold, runs counted through. */
+export function nestedToolCount(rows: readonly ViewRow[]): number {
+  let n = 0;
+  for (const row of rows) {
+    if (row.kind === "tool-run") n += row.tools.length;
+    else if (row.item.kind === "tool") n += 1 + nestedToolCount(row.nested ?? []);
+  }
+  return n;
+}
+
+/** What a tool does, for the run line: the families toolSummary already knows. */
+const RUN_FAMILIES: readonly { names: readonly string[]; phrase: (n: number) => string }[] = [
+  { names: ["Read"], phrase: (n) => `read ${n} ${n === 1 ? "file" : "files"}` },
+  { names: ["Edit", "Write", "MultiEdit", "NotebookEdit"], phrase: (n) => `edited ${n} ${n === 1 ? "file" : "files"}` },
+  { names: ["Bash"], phrase: (n) => `ran ${n} ${n === 1 ? "command" : "commands"}` },
+  { names: ["Grep", "Glob"], phrase: (n) => `searched ${n} ${n === 1 ? "time" : "times"}` },
+  { names: ["WebFetch", "WebSearch"], phrase: (n) => `used the web ${n} ${n === 1 ? "time" : "times"}` },
+  { names: ["Task", "Agent"], phrase: (n) => `ran ${n} ${n === 1 ? "agent" : "agents"}` },
+];
+
+/** A run of tool calls in a few words: "Read 3 files, ran 2 commands". */
+export function runSummary(tools: readonly { name: string }[]): string {
+  // Counted per family, said in the order each family first appears.
+  const counts = new Map<number, number>();
+  for (const tool of tools) {
+    const family = RUN_FAMILIES.findIndex((f) => f.names.includes(tool.name));
+    counts.set(family, (counts.get(family) ?? 0) + 1);
+  }
+  const onlyOthers = counts.size === 1 && counts.has(-1);
+  const parts = [...counts].map(([family, n]) =>
+    family >= 0
+      ? RUN_FAMILIES[family]!.phrase(n)
+      : `used ${n} ${onlyOthers ? "" : "other "}${n === 1 ? "tool" : "tools"}`,
+  );
+  const line = parts.join(", ");
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}
+
+// The view is the reader's habit, not the session's: one choice for every
+// session, kept on this device like Vim mode (src/frontend/vimPref.ts).
+
+const VIEW_KEY = "sd-agent-transcript-view";
+/** Fired on window when the view changes, so the open transcript follows. */
+const VIEW_EVENT = "sd-agent-transcript-view-change";
+
+export function readTranscriptView(): TranscriptView {
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(VIEW_KEY);
+  } catch {
+    // No storage: the default view.
+  }
+  return TRANSCRIPT_VIEWS.find((v) => v === stored) ?? "normal";
+}
+
+export function applyTranscriptView(view: TranscriptView): void {
+  try {
+    if (view === "normal") localStorage.removeItem(VIEW_KEY);
+    else localStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // Storage unavailable (private mode): the choice just won't stick.
+  }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(VIEW_EVENT));
+}
+
+function subscribeTranscriptView(onChange: () => void): () => void {
+  window.addEventListener(VIEW_EVENT, onChange);
+  // Another window of the app switching the view.
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(VIEW_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** The transcript view; re-renders when the session popover switches it. */
+export function useTranscriptView(): TranscriptView {
+  return useSyncExternalStore(subscribeTranscriptView, readTranscriptView, readTranscriptView);
 }
 
 // --- Slash commands --------------------------------------------------------
