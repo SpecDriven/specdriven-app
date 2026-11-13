@@ -28,7 +28,7 @@ import { which } from "./run";
 import { BUN_MISSING, discoverSource, findBun, NO_SOURCE, type SourceInfo } from "./selfFix";
 import { RELEASE_REPO_URL } from "./sourceUrl";
 import { getLogger } from "./telemetry";
-import { isNewer, parseVersion } from "./version";
+import { isNewer, parseVersion, SEMVER } from "./version";
 
 const log = getLogger("app-update");
 
@@ -311,7 +311,10 @@ export async function installUpdate(
   deps: InstallDeps = {},
 ): Promise<{ state: InstallState; done: Promise<InstallState> }> {
   if (install.phase === "installing") throw new UpdateError(`SpecDriven ${install.version} is still installing`, 409);
-  if (!parseVersion(version)) throw new UpdateError(`"${version}" is not a release version`, 400);
+  // Three numbers and two dots, tested here and not behind a helper: this
+  // string names the tree the restart later starts an executable from
+  // (`newDir` below), and it arrives from the releases page or the request.
+  if (!SEMVER.test(version)) throw new UpdateError(`"${version}" is not a release version`, 400);
   const pre = await preconditions();
   if (pre.reasons.length > 0 || !pre.bun || !pre.source || !pre.shell) throw new UpdateError(pre.reasons[0] ?? NO_SOURCE, 409);
   if (!isNewer(version, appVersion)) throw new UpdateError(`${version} does not come after the running ${appVersion}`, 409);
@@ -322,6 +325,10 @@ export async function installUpdate(
   const runner = deps.runner ?? moduleDeps.runner;
   const { cmd, args } = installerCommand(pre.source.dir, pre.shell, os);
   const { dir: sourceDir } = pre.source;
+  // Where the installer puts the new version: beside the one running. Named
+  // here, straight after the check above, so nothing but a checked version
+  // ever makes up a path the app is restarted from.
+  const newDir = join(dirname(sourceDir), `specdriven-${version}`);
   const bunDir = join(pre.bun, "..");
 
   install = { ...EMPTY_INSTALL, phase: "installing", version, startedAt: now().toISOString() };
@@ -353,7 +360,6 @@ export async function installUpdate(
     // on it (unless SPECDRIVEN_APP_SOURCE names the source outright, in
     // which case `current` is not the installer's to move), and the app
     // built in it.
-    const newDir = join(dirname(sourceDir), `specdriven-${version}`);
     if (!(await directoryExists(newDir))) return fail(`The installer finished, but left no ${newDir}`);
     if (!env.SPECDRIVEN_APP_SOURCE) {
       let current: string;

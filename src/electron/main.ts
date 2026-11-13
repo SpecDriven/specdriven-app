@@ -483,8 +483,15 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
  * nothing may quit on the strength of a handover that never began.
  */
 async function handOver(execPath: string): Promise<string | null> {
+  let handover: ReturnType<typeof handoverCommand>;
+  try {
+    handover = handoverCommand(execPath, process.pid);
+  } catch (e) {
+    // Not a path the shell may be handed (it is not absolute).
+    return (e as Error).message;
+  }
+  const { command, args } = handover;
   await chmod(execPath, 0o755).catch(() => {});
-  const { command, args } = handoverCommand(execPath, process.pid);
   const child = spawn(command, args, {
     detached: true,
     stdio: "ignore",

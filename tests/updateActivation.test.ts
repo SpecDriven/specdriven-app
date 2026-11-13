@@ -243,6 +243,15 @@ describe.skipIf(process.platform === "win32")("handing over to the new app on Li
     expect(args[1]).toContain(`"$n" -lt ${HANDOVER_WAIT_SECONDS / 0.2}`);
   });
 
+  test("only an absolute path is handed to the shell, nothing it could look up on PATH or read as an option", () => {
+    for (const path of ["SpecDriven.AppImage", "release/SpecDriven.AppImage", "-c", "--help", ""]) {
+      expect(() => handoverCommand(path, 4242)).toThrow("is not an absolute path");
+    }
+    for (const pid of [0, -1, 1.5, Number.NaN]) {
+      expect(() => handoverCommand("/new/SpecDriven.AppImage", pid)).toThrow("is not a process id");
+    }
+  });
+
   test("the new app does not inherit this AppImage's own variables", () => {
     const appImage = {
       PATH: "/usr/bin",

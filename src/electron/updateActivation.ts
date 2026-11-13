@@ -26,7 +26,7 @@
 // own, detached from this process, waits for it to go — the
 // single-instance lock is held until then — and execs the new AppImage.
 
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { builtApp } from "../server/appUpdate";
 
 export interface ActivationFs {
@@ -148,9 +148,14 @@ const HANDOVER_POLL_SECONDS = 0.2;
  * leaving the user with no app at all.
  *
  * The paths go in as arguments, never interpolated into the script, so a
- * directory with a space or a quote in its name is just an argument.
+ * directory with a space or a quote in its name is just an argument. The
+ * app's has to be absolute, and anything else throws: `exec` would look a
+ * bare name up on PATH, and a shell whose `exec` takes options (bash, where
+ * it is /bin/sh) would read a leading `-` as one.
  */
 export function handoverCommand(execPath: string, pid: number): { command: string; args: string[] } {
+  if (!isAbsolute(execPath)) throw new Error(`${JSON.stringify(execPath)} is not an absolute path to an app`);
+  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`${pid} is not a process id`);
   const polls = Math.ceil(HANDOVER_WAIT_SECONDS / HANDOVER_POLL_SECONDS);
   const script = [
     // `sleep` is a program, not a builtin: the app's own PATH may be
