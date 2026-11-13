@@ -103,9 +103,10 @@ export function ModelSelect({
 }
 
 /**
- * The agents whose plugin adds no Settings section of its own (Codex, so
- * far): each gets a section of the app's, titled after it, holding its
- * model list. The others' lists sit in their own section (Settings → Claude).
+ * The agents whose plugin adds no Settings section of its own (Pi, say):
+ * each gets a section of the app's, titled after it, holding its model
+ * list. The others' lists sit in their own section (Settings → Claude,
+ * Settings → Codex).
  */
 export function agentsWithoutSection<A extends Pick<AgentDescriptor, "id">>(
   agents: readonly A[],
