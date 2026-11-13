@@ -4,25 +4,50 @@
 // `plugin build [dir]` bundles them into `dist/` the way the app does — the
 // browser half over the app's React — and `plugin link <dir>` adds the
 // folder to the profile's sources, so the running app finds it.
+// `plugin release [dir]` (specs/app/plugins.feature.md "A plugin is released
+// as a versioned zip in its release folder") builds the plugin and adds the
+// version its package.json names to the `release` folder beside it: a zip
+// of what runs, and its row in `releases.json`. A version already there is
+// never written again.
 
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
 import { version as appVersion } from "../../package.json";
 import { getAppRoot } from "../server/paths";
 import { readState, writeState } from "../server/state";
 import { API_MAJOR, PLUGIN_ID_PATTERN, parsePackageManifest } from "./manifest";
 import { buildClient, buildHost, canBuild } from "./host/build";
+import { zipEntries, type ZipEntry } from "./host/zip";
+import {
+  RELEASE_DIR,
+  RELEASES_FILE,
+  RELEASES_KEPT,
+  compareVersions,
+  parseReleases,
+  releaseFileName,
+  releaseOf,
+  type PluginRelease,
+} from "./marketplace";
 import { PROFILE_KEY } from "./profile";
 
 const USAGE = `Usage:
   specdriven plugin new <id> [dir]   scaffold a plugin (both halves) in <dir>, default ./<id>
   specdriven plugin build [dir]      bundle src/ into dist/, default the current folder
   specdriven plugin link <dir>       add a plugin folder to this machine's profile
+  specdriven plugin release [dir] [--notes <text>] [--keep <n>]
+                                     build, then add package.json's version to release/ as a zip
 
 A plugin is a package whose package.json has a "specdriven" section; see the
 scaffold's README. The app builds a linked TypeScript plugin itself when it
 runs on Bun and rebuilds it as you edit; the desktop app loads dist/ only,
-which "plugin build" writes.`;
+which "plugin build" writes.
+
+"plugin release" writes release/<id>-<version>.zip — package.json, dist/
+without its source maps, README and LICENSE — and lists it in
+release/releases.json with its checksum. A marketplace that keeps the
+plugin in a subdirectory then offers every version in that folder; the
+newest ${RELEASES_KEPT} are kept unless --keep says otherwise (0 keeps all).`;
 
 export interface CliIo {
   log(line: string): void;
@@ -43,6 +68,8 @@ export async function runPluginCli(
         return await build(rest, io);
       case "link":
         return await link(rest, io);
+      case "release":
+        return await release(rest, io);
       case undefined:
       case "help":
       case "--help":
@@ -326,4 +353,126 @@ async function link(args: string[], io: CliIo): Promise<number> {
   io.log(`Linked ${manifest.id} (${dir}) in this machine's profile.`);
   io.log("The app loads it on its next start, or as soon as it re-reads its settings.");
   return 0;
+}
+
+// ---- release ----------------------------------------------------------------
+
+/** The files beside package.json and dist/ that travel in a release, when there. */
+const RELEASE_EXTRAS = ["README.md", "LICENSE", "LICENSE.md", "CHANGELOG.md"];
+
+async function release(args: string[], io: CliIo): Promise<number> {
+  let dirArg: string | undefined;
+  let notes: string | undefined;
+  let keep = RELEASES_KEPT;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--notes" || arg === "--keep") {
+      const value = args[++i];
+      if (value === undefined) {
+        io.error(`${arg} needs a value.\n\n${USAGE}`);
+        return 2;
+      }
+      if (arg === "--notes") notes = value.trim() || undefined;
+      else {
+        keep = Number.parseInt(value, 10);
+        if (Number.isNaN(keep) || keep < 0) {
+          io.error(`--keep takes a number of versions, 0 for all; got "${value}".`);
+          return 2;
+        }
+      }
+    } else if (arg.startsWith("--")) {
+      io.error(`Unknown option "${arg}".\n\n${USAGE}`);
+      return 2;
+    } else if (dirArg === undefined) dirArg = arg;
+  }
+  const dir = resolve(dirArg?.trim() || ".");
+  const pkg = await readFile(join(dir, "package.json"));
+  const manifest = parsePackageManifest(JSON.parse(pkg.toString("utf8")) as unknown, appVersion);
+  const version = manifest.version;
+  if (!version) {
+    io.error(`${join(dir, "package.json")} has no "version" to release.`);
+    return 1;
+  }
+
+  // The list as it is, kept as written: a field this app does not know stays.
+  const releaseDir = join(dir, RELEASE_DIR);
+  const listFile = join(releaseDir, RELEASES_FILE);
+  const listText = await readFile(listFile, "utf8").catch(() => null);
+  const list = (listText === null ? { plugin: manifest.id, releases: [] } : JSON.parse(listText)) as {
+    plugin?: unknown;
+    releases: Record<string, unknown>[];
+  };
+  const listed = parseReleases(list, manifest.id);
+  const file = releaseFileName(manifest.id, version);
+  if (releaseOf(listed, version) || (await exists(join(releaseDir, file)))) {
+    io.error(
+      `${manifest.id} ${version} is released already, and a release is never written again: raise "version" in package.json.`,
+    );
+    return 1;
+  }
+
+  if (manifest.src?.host || manifest.src?.client) {
+    const built = await build([dir], io);
+    if (built !== 0) return built;
+  }
+  for (const half of [manifest.host, manifest.client]) {
+    if (half && !(await exists(join(dir, half)))) {
+      io.error(`${half} is missing: a release ships the built halves the manifest names.`);
+      return 1;
+    }
+  }
+
+  const files: ZipEntry[] = [{ path: "package.json", data: pkg }];
+  for (const path of await walkFiles(join(dir, "dist"))) {
+    if (path.endsWith(".map")) continue;
+    files.push({ path: relative(dir, path).split(sep).join("/"), data: await readFile(path) });
+  }
+  for (const name of RELEASE_EXTRAS) {
+    const data = await readFile(join(dir, name)).catch(() => null);
+    if (data) files.push({ path: name, data });
+  }
+  const zip = zipEntries(files);
+  const entry: PluginRelease = {
+    version,
+    file,
+    sha256: createHash("sha256").update(zip).digest("hex"),
+    size: zip.length,
+    date: new Date().toISOString().slice(0, 10),
+    api: manifest.api,
+    ...(manifest.minAppVersion ? { minAppVersion: manifest.minAppVersion } : {}),
+    ...(notes ? { notes } : {}),
+  };
+  await mkdir(releaseDir, { recursive: true });
+  await writeFile(join(releaseDir, file), zip);
+
+  const rows = [entry as unknown as Record<string, unknown>, ...list.releases].sort((a, b) =>
+    compareVersions(String(b.version), String(a.version)),
+  );
+  const dropped = keep > 0 ? rows.splice(keep) : [];
+  for (const row of dropped) await rm(join(releaseDir, String(row.file)), { force: true });
+  await writeFile(listFile, `${JSON.stringify({ ...list, plugin: manifest.id, releases: rows }, null, 2)}\n`);
+
+  io.log(`Released ${manifest.id} ${version}: ${join(RELEASE_DIR, file)} (${files.length} files, ${zip.length} bytes)`);
+  io.log(`  sha256 ${entry.sha256}`);
+  if (dropped.length) io.log(`  no longer kept: ${dropped.map((r) => r.version).join(", ")}`);
+  io.log(`Commit ${RELEASE_DIR}/ — the marketplace offers the version once it is there.`);
+  return 0;
+}
+
+/** Every file under a folder, sorted; nothing when the folder is not there. */
+async function walkFiles(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const name of (await readdir(dir).catch(() => [])).sort()) {
+    const path = join(dir, name);
+    if ((await stat(path)).isDirectory()) out.push(...(await walkFiles(path)));
+    else out.push(path);
+  }
+  return out;
+}
+
+async function exists(path: string): Promise<boolean> {
+  return stat(path).then(
+    () => true,
+    () => false,
+  );
 }

@@ -63,7 +63,17 @@ export interface PluginStatus {
   rev?: string;
   permissions?: string[];
   /** Where a marketplace install came from, when it was one. */
-  install?: { marketplace: string; name: string; ref?: string; version?: string; installedAt?: string };
+  install?: {
+    marketplace: string;
+    name: string;
+    ref?: string;
+    version?: string;
+    installedAt?: string;
+    /** The version the last switch replaced: what Roll back puts back. */
+    previous?: string;
+    /** Kept at a version older than the newest by the user's own pick. */
+    held?: boolean;
+  };
   error?: string;
 }
 

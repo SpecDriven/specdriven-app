@@ -11,11 +11,22 @@
 // that was removed and added back under another name — says what it
 // replaces and swaps a fresh copy in on confirmation. The hosted demo lists its
 // marketplaces, open from the start, and offers none of the actions.
+//
+// A plugin released in versions ("Any released version of a plugin can be
+// installed", "A plugin rolled back to an older version stays there until
+// the user updates it") has a version chip beside its actions: its menu
+// lists every version the marketplace holds, newest first, the ones this
+// app cannot run greyed with the reason. Before an install it picks what
+// Install fetches; on an installed plugin, picking one switches to it at
+// once. A plugin put on an older version says it is held, and Update names
+// the version it would move to.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { PluginStatus } from "../plugins/client/loader";
-import type { MarketplaceIndex, MarketplaceRef } from "../plugins/marketplace";
-import { marketplaceNameFor } from "../plugins/marketplace";
+import type { MarketplaceIndex, MarketplaceRef, PluginRelease } from "../plugins/marketplace";
+import { compareVersions, isPrerelease, marketplaceNameFor, releaseOf } from "../plugins/marketplace";
+import { Menu, type MenuItem } from "./Menu";
 import type { ConfirmOptions, PromptOptions } from "./ModalPrompts";
 
 interface MarketplaceStatus extends MarketplaceRef {
@@ -65,6 +76,41 @@ async function call(url: string, init?: RequestInit): Promise<Record<string, unk
 const post = (url: string, body: unknown) =>
   call(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/** Put an installed plugin on one of its released versions — an older one rolls it back. */
+export const switchPluginVersion = (id: string, version: string): Promise<unknown> =>
+  post(`/api/plugins/${encodeURIComponent(id)}/update`, { version });
+
+/** The version Install and Update mean: the newest the server says this app can run. */
+export function newestOffered(releases: readonly PluginRelease[]): PluginRelease | undefined {
+  return releases.find((r) => !r.refusal && !isPrerelease(r.version));
+}
+
+/**
+ * The version menu's rows, newest first: each with its date and notes, or
+ * why this app cannot run it — then it cannot be picked. A withdrawn
+ * version is listed only while it is the one installed.
+ */
+export function versionItems(
+  releases: readonly PluginRelease[],
+  current: string | undefined,
+  pick: (version: string) => void,
+): MenuItem[] {
+  const isCurrent = (r: PluginRelease) => current !== undefined && compareVersions(r.version, current) === 0;
+  return releases
+    .filter((r) => r.yanked === undefined || isCurrent(r))
+    .map((r) => ({
+      id: r.version,
+      label: `v${r.version}`,
+      description: r.refusal
+        ? r.refusal.replace(/^version \S+ /, "")
+        : [r.date, r.notes].filter(Boolean).join(" · ") || undefined,
+      checked: isCurrent(r),
+      disabled: r.refusal !== undefined && !isCurrent(r),
+      title: r.refusal ?? r.notes,
+      onSelect: () => pick(r.version),
+    }));
+}
+
 /** The consent text: what the plugin is and what installing it means. */
 export function consentBody(preview: InstallPreview, marketplace: string): string {
   const lines = [preview.description || `${preview.id} from ${marketplace}.`];
@@ -103,6 +149,14 @@ export function PluginMarketplace({
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The row whose version menu is open, and the version picked for a plugin not installed yet.
+  const [versionMenu, setVersionMenu] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  // The last row's menu opens past the end of the page: bring it into view.
+  useEffect(() => {
+    if (versionMenu === null) return;
+    document.querySelector(".plugin-version-menu")?.scrollIntoView?.({ block: "nearest" });
+  }, [versionMenu]);
 
   const load = useCallback(async (refresh: boolean) => {
     setLoading(true);
@@ -165,9 +219,9 @@ export function PluginMarketplace({
     }
   };
 
-  const install = (marketplace: string, name: string) =>
+  const install = (marketplace: string, name: string, version?: string) =>
     run(`${marketplace}/${name}`, async () => {
-      const staged = await post("/api/plugins/install", { marketplace, name, step: "stage" });
+      const staged = await post("/api/plugins/install", { marketplace, name, step: "stage", ...(version ? { version } : {}) });
       const preview = staged.preview as InstallPreview;
       const verb = preview.replaces ? "Reinstall" : "Install";
       const ok = await confirm({
@@ -183,8 +237,15 @@ export function PluginMarketplace({
         marketplace,
         name,
         step: "confirm",
+        ...(version ? { version } : {}),
         ...(preview.replaces ? { replace: true } : {}),
       });
+      await onChanged();
+    });
+
+  const switchTo = (plugin: PluginStatus, version: string) =>
+    run(plugin.id, async () => {
+      await switchPluginVersion(plugin.id, version);
       await onChanged();
     });
 
@@ -234,16 +295,68 @@ export function PluginMarketplace({
     const installed = installedFor(marketplace, row.name);
     const id = `${marketplace}/${row.name}`;
     const working = busy === id || (installed !== undefined && busy === installed.id);
-    const meta = [
-      row.version ? `v${row.version}` : "",
-      row.category ?? "",
-      installed
-        ? "Installed" +
-          (installed.install?.version && installed.install.version !== row.version
-            ? ` (v${installed.install.version})`
-            : "")
-        : "",
-    ].filter(Boolean);
+    // Released in versions: the chip names the version, and its menu the others.
+    const releases = row.releases?.length ? row.releases : undefined;
+    const newest = releases ? newestOffered(releases) : undefined;
+    const has = installed?.version ?? installed?.install?.version;
+    const current = installed ? has : (picked[id] ?? newest?.version);
+    const withdrawn = releases && has !== undefined && releaseOf(releases, has)?.yanked !== undefined;
+    const behind = newest !== undefined && has !== undefined && compareVersions(newest.version, has) > 0;
+    const movable = newest !== undefined && (behind || (withdrawn && compareVersions(newest.version, has!) !== 0));
+    const meta = (
+      releases
+        ? [
+            readOnly && row.version ? `v${row.version}` : "",
+            row.category ?? "",
+            installed
+              ? "Installed" +
+                (readOnly && has ? ` (v${has})` : "") +
+                (withdrawn ? " · withdrawn" : installed.install?.held ? " · held" : "")
+              : "",
+          ]
+        : [
+            row.version ? `v${row.version}` : "",
+            row.category ?? "",
+            installed
+              ? "Installed" +
+                (installed.install?.version && installed.install.version !== row.version
+                  ? ` (v${installed.install.version})`
+                  : "")
+              : "",
+          ]
+    ).filter(Boolean);
+    const versionChip = releases && (
+      <span className="chip-anchor plugin-version-anchor">
+        <button
+          type="button"
+          className="chip plugin-version-chip"
+          aria-haspopup="menu"
+          aria-expanded={versionMenu === id}
+          aria-label={`Version of ${row.name}`}
+          title={
+            installed
+              ? "Switch to another released version — an older one is held there until you update"
+              : "Pick the version Install fetches"
+          }
+          disabled={working}
+          onClick={() => setVersionMenu((open) => (open === id ? null : id))}
+        >
+          {current ? `v${current}` : "No version"}
+          <ChevronDown size={12} aria-hidden="true" />
+        </button>
+        <Menu
+          open={versionMenu === id}
+          onClose={() => setVersionMenu((open) => (open === id ? null : open))}
+          label={`Versions of ${row.name}`}
+          className="chip-menu chip-menu-end plugin-version-menu"
+          containerSelector=".plugin-version-anchor"
+          items={versionItems(releases, current, (version) => {
+            if (!installed) setPicked((all) => ({ ...all, [id]: version }));
+            else if (has === undefined || compareVersions(version, has) !== 0) void switchTo(installed, version);
+          })}
+        />
+      </span>
+    );
     return (
       <div
         className={`plugin-market-row${row.name === wanted && !installed ? " wanted" : ""}`}
@@ -256,18 +369,48 @@ export function PluginMarketplace({
             {meta.length > 0 && <span className="plugin-row-meta">{meta.join(" · ")}</span>}
           </span>
           {row.description && <span className="settings-row-hint">{row.description}</span>}
+          {row.releasesError && (
+            <span className="settings-row-hint plugin-row-error" role="alert">
+              {row.releasesError}
+            </span>
+          )}
         </span>
         {readOnly ? null : installed ? (
           <span className="plugin-market-row-actions">
-            <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
-              Update
-            </button>
+            {versionChip}
+            {releases ? (
+              movable && (
+                <button
+                  type="button"
+                  className="link"
+                  disabled={working}
+                  title={
+                    behind
+                      ? "Fetch the newest version this app can run; a held plugin is let go"
+                      : "The installed version was withdrawn: move to the newest one that was not"
+                  }
+                  onClick={() => void update(installed)}
+                >
+                  {`${behind ? "Update" : "Move"} to v${newest!.version}`}
+                </button>
+              )
+            ) : (
+              <button type="button" className="link" disabled={working} onClick={() => void update(installed)}>
+                Update
+              </button>
+            )}
             <button
               type="button"
               className="link"
               disabled={working}
-              title="Fetch a fresh copy at the ref the index names and replace the installed folder"
-              onClick={() => void install(marketplace, row.name)}
+              title={
+                releases
+                  ? "Unpack the installed version afresh and replace the installed folder"
+                  : "Fetch a fresh copy at the ref the index names and replace the installed folder"
+              }
+              onClick={() =>
+                void install(marketplace, row.name, releases && has && releaseOf(releases, has) ? has : undefined)
+              }
             >
               {working ? "Reinstalling…" : "Reinstall"}
             </button>
@@ -276,9 +419,17 @@ export function PluginMarketplace({
             </button>
           </span>
         ) : (
-          <button type="button" className="link" disabled={working} onClick={() => void install(marketplace, row.name)}>
-            {working ? "Installing…" : "Install"}
-          </button>
+          <span className="plugin-market-row-actions">
+            {versionChip}
+            <button
+              type="button"
+              className="link"
+              disabled={working || (releases !== undefined && current === undefined)}
+              onClick={() => void install(marketplace, row.name, releases ? current : undefined)}
+            >
+              {working ? "Installing…" : "Install"}
+            </button>
+          </span>
         )}
       </div>
     );
