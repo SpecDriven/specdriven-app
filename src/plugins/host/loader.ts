@@ -783,14 +783,19 @@ export function changeListeners(): number {
 // descriptor — Claude Code fetched by the email sign-in is now there — and
 // the pages read descriptors off /api/state, which this stream has them
 // re-read. Without it the pane kept saying "not set up" until a restart.
-// The registry outlives a `bun --hot` reload and these streams do not, so a
-// reload replaces the earlier listener.
+// An agent that came or went — its plugin switched on or off, installed,
+// updated or removed — is the same news: a window other than the one that
+// made the change offered only the agents it loaded with until a reload.
+// Those are told once the registry settles, so an update's remove-then-add
+// is one re-read. The registry outlives a `bun --hot` reload and these
+// streams do not, so a reload replaces the earlier listener.
 {
   const WATCH = Symbol.for("specdriven.plugins.agentWatch");
   const g = globalThis as Record<symbol, unknown>;
   (g[WATCH] as (() => void) | undefined)?.();
   g[WATCH] = agents.subscribe((change) => {
     if (change.type === "changed") notifyPluginChange();
+    else schedule("agents", async () => notifyPluginChange());
   });
 }
 
