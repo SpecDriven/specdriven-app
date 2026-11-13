@@ -114,9 +114,12 @@ app.on("will-quit", (event) => {
 // Homebrew locations so git and gh can be found there — every git operation
 // needs the one, the default engine needs the other
 // (specs/app/desktop-app.feature.md "Git") — ~/.local/bin, where the native
-// Claude installer puts `claude` (specs/agents/agent-pane.feature.md), and
+// Claude installer puts `claude` (specs/agents/agent-pane.feature.md),
 // ~/.bun/bin, where install.sh puts the bun a self-fix rebuilds with
-// (specs/app/self-healing.feature.md).
+// (specs/app/self-healing.feature.md), and ~/.opencode/bin, where OpenCode's
+// installer puts `opencode` — the agent plugins are installed, and offered in
+// the pane, for the commands found on PATH
+// (specs/agents/agent-plugins.feature.md).
 if (process.platform === "darwin") {
   const parts = (process.env.PATH || "").split(":");
   for (const dir of [
@@ -124,6 +127,7 @@ if (process.platform === "darwin") {
     "/opt/homebrew/bin",
     join(homedir(), ".local", "bin"),
     join(homedir(), ".bun", "bin"),
+    join(homedir(), ".opencode", "bin"),
   ]) {
     if (!parts.includes(dir)) parts.push(dir);
   }
