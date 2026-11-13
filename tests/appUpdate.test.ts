@@ -254,6 +254,11 @@ describe("installing an update", () => {
   test("a version that is not newer, not a version, or already installing is refused", async () => {
     await expect(installUpdate(appVersion)).rejects.toThrow(`${appVersion} does not come after the running ${appVersion}`);
     await expect(installUpdate("latest")).rejects.toThrow('"latest" is not a release version');
+    // The version names a directory the restart starts an executable from:
+    // nothing that could step out of it, or carry anything along, gets by.
+    for (const bad of ["9.9.9/../../elsewhere", "../9.9.9", "9.9.9 ", "9.9.9\n", "9.9.9;id", "v9.9.9", "9.9"]) {
+      await expect(installUpdate(bad)).rejects.toThrow("is not a release version");
+    }
     let release!: () => void;
     const slow: StreamRunner = () => new Promise((r) => (release = () => r({ exitCode: 1 })));
     const { done } = await installUpdate(NEWER, { runner: slow });

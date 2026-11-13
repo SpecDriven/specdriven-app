@@ -4,10 +4,11 @@
 // bundle is replaced in place, and how that swap is undone if the copy
 // fails. Pure decisions over temp directories — no Electron.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { bundleOf, planActivation, previousBundle, swapBundle, type ActivationFs } from "../src/electron/updateActivation";
+import { bundleOf, handoverCommand, handoverEnv, HANDOVER_WAIT_SECONDS, planActivation, previousBundle, swapBundle, type ActivationFs } from "../src/electron/updateActivation";
 
 let root: string;
 let appDir: string;
@@ -114,11 +115,13 @@ describe("which executable the next launch is", () => {
       kind: "relaunch-into",
       execPath: exe,
     });
+    // Linux hands the new AppImage to a shell that outlives this one's
+    // mount, rather than relaunching from inside it (#446).
     const linux = join(root, "linux-source");
     const image = await makeBuilt(linux, "linux");
     expect(await planActivation({ platform: "linux", execPath: "/tmp/.mount_x/specdriven", newSourceDir: linux, appDir, fs })).toEqual({
-      kind: "relaunch-into",
-      execPath: image,
+      kind: "hand-over",
+      appImage: image,
     });
   });
 
@@ -175,5 +178,92 @@ describe("swapping the running bundle", () => {
       "remove /Applications/SpecDriven.app",
       "rename /Applications/SpecDriven.app.previous -> /Applications/SpecDriven.app",
     ]);
+  });
+});
+
+// The handover itself (#446): a real /bin/sh, a real process to outlive.
+describe.skipIf(process.platform === "win32")("handing over to the new app on Linux", () => {
+  /** A script that writes `started` next to itself, so starting it is visible. */
+  async function marker(): Promise<{ app: string; stamp: string }> {
+    const app = join(root, "new-app");
+    const stamp = join(root, "started");
+    await writeFile(app, `#!/bin/sh\nprintf 'started' > ${JSON.stringify(stamp)}\n`);
+    await chmod(app, 0o755);
+    return { app, stamp };
+  }
+
+  async function started(stamp: string): Promise<boolean> {
+    return (await readFile(stamp, "utf8").catch(() => null)) === "started";
+  }
+
+  async function settle(ms = 400): Promise<void> {
+    await new Promise((done) => setTimeout(done, ms));
+  }
+
+  test("the new app starts only once the old process has gone", async () => {
+    const { app, stamp } = await marker();
+    // Stands in for the app being restarted: it holds the single-instance
+    // lock, so nothing may start before it exits. It blocks on its stdin
+    // rather than sleeping, since the suite's PATH holds git alone
+    // (tests/helpers/binPath.ts).
+    const old = spawn("/bin/sh", ["-c", "read line"], { stdio: ["pipe", "ignore", "ignore"] });
+    const { command, args } = handoverCommand(app, old.pid!);
+    const waiter = spawn(command, args, { detached: true, stdio: "ignore" });
+    waiter.unref();
+    await settle();
+    expect(await started(stamp)).toBe(false);
+    old.kill();
+    await settle(1500);
+    expect(await started(stamp)).toBe(true);
+  });
+
+  test("a path with spaces and quotes in it is an argument, never part of the script", async () => {
+    const dir = join(root, "my apps", "it's \"here\"");
+    await mkdir(dir, { recursive: true });
+    const app = join(dir, "new app");
+    const stamp = join(dir, "started");
+    await writeFile(app, `#!/bin/sh\nprintf 'started' > ${JSON.stringify(stamp)}\n`);
+    await chmod(app, 0o755);
+    const gone = spawn("/bin/sh", ["-c", "exit 0"], { stdio: "ignore" });
+    await new Promise((done) => gone.on("exit", done));
+    const { command, args } = handoverCommand(app, gone.pid!);
+    const waiter = spawn(command, args, { detached: true, stdio: "ignore" });
+    waiter.unref();
+    await settle(1000);
+    expect(await started(stamp)).toBe(true);
+  });
+
+  test("the waiting shell is the system's own, and gives up waiting rather than never starting the app", () => {
+    const { command, args } = handoverCommand("/new/SpecDriven.AppImage", 4242);
+    expect(command).toBe("/bin/sh");
+    expect(args[0]).toBe("-c");
+    expect(args.slice(2)).toEqual(["sh", "/new/SpecDriven.AppImage", "4242"]);
+    expect(args[1]).toContain('kill -0 "$pid"');
+    expect(args[1]).toContain('exec "$app"');
+    expect(args[1]).toContain(`"$n" -lt ${HANDOVER_WAIT_SECONDS / 0.2}`);
+  });
+
+  test("only an absolute path is handed to the shell, nothing it could look up on PATH or read as an option", () => {
+    for (const path of ["SpecDriven.AppImage", "release/SpecDriven.AppImage", "-c", "--help", ""]) {
+      expect(() => handoverCommand(path, 4242)).toThrow("is not an absolute path");
+    }
+    for (const pid of [0, -1, 1.5, Number.NaN]) {
+      expect(() => handoverCommand("/new/SpecDriven.AppImage", pid)).toThrow("is not a process id");
+    }
+  });
+
+  test("the new app does not inherit this AppImage's own variables", () => {
+    const appImage = {
+      PATH: "/usr/bin",
+      APPIMAGE: "/home/me/.specdriven/app/current/release/SpecDriven-0.1.268-x86_64.AppImage",
+      APPDIR: "/tmp/.mount_SpecDrWxYz",
+      ARGV0: "SpecDriven.AppImage",
+      OWD: "/home/me",
+      LD_LIBRARY_PATH: "/tmp/.mount_SpecDrWxYz/usr/lib",
+    };
+    expect(handoverEnv(appImage)).toEqual({ PATH: "/usr/bin" });
+    // Not an AppImage (a development run): the environment is left alone.
+    const plain = { PATH: "/usr/bin", LD_LIBRARY_PATH: "/opt/lib" };
+    expect(handoverEnv(plain)).toEqual(plain);
   });
 });

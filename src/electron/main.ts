@@ -15,8 +15,9 @@ import {
   session,
   shell,
 } from "electron";
+import { spawn } from "node:child_process";
 import { constants, existsSync, rmSync } from "node:fs";
-import { access, readFile, realpath, rename } from "node:fs/promises";
+import { access, chmod, readFile, realpath, rename } from "node:fs/promises";
 import inspector from "node:inspector";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -57,7 +58,7 @@ import {
   safeStorageAvailable,
 } from "./secureToken";
 import { mimeType, shellHtml, staticFilePath } from "./static";
-import { bundleOf, planActivation, previousBundle, swapBundle } from "./updateActivation";
+import { bundleOf, handoverCommand, handoverEnv, planActivation, previousBundle, swapBundle } from "./updateActivation";
 import {
   DEFAULT_HEIGHT,
   DEFAULT_WIDTH,
@@ -444,6 +445,15 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
     },
   });
   if (plan.kind === "manual") return { restart: "manual", reason: plan.reason, path: plan.path };
+  if (plan.kind === "hand-over") {
+    const failure = await handOver(plan.appImage);
+    // Nothing is waiting to start the new app: better to say so than to
+    // quit into nothing, which is the bug this replaced (#446).
+    if (failure) return { restart: "manual", reason: `The shell that would start the new app could not run here: ${failure}`, path: plan.appImage };
+    // quit, not exit: will-quit still ends the agent sessions and flushes.
+    setTimeout(() => app.quit(), RELAUNCH_DELAY_MS);
+    return { restart: "relaunching" };
+  }
   if (plan.kind === "swap-bundle") {
     await swapBundle(plan, {
       rename: (from, to) => rename(from, to),
@@ -458,6 +468,43 @@ async function activateUpdate(newSourceDir: string): Promise<ActivationResult> {
   // quit, not exit: will-quit still ends the agent sessions and flushes.
   setTimeout(() => app.quit(), RELAUNCH_DELAY_MS);
   return { restart: "relaunching" };
+}
+
+/**
+ * Linux's restart (src/electron/updateActivation.ts): a detached `/bin/sh`
+ * that outlives this app's AppImage mount, waiting for this process to go
+ * and then starting the app at `execPath`. Detached (its own session) and
+ * with a working directory of its own, so neither this process group nor
+ * any directory that goes with the mount holds it back; the installer
+ * already made the AppImage executable, and the chmod is for the case
+ * where something left it unset.
+ *
+ * Returns why the shell could not be started, or null once it is running —
+ * nothing may quit on the strength of a handover that never began.
+ */
+async function handOver(execPath: string): Promise<string | null> {
+  let handover: ReturnType<typeof handoverCommand>;
+  try {
+    handover = handoverCommand(execPath, process.pid);
+  } catch (e) {
+    // Not a path the shell may be handed (it is not absolute).
+    return (e as Error).message;
+  }
+  const { command, args } = handover;
+  await chmod(execPath, 0o755).catch(() => {});
+  const child = spawn(command, args, {
+    detached: true,
+    stdio: "ignore",
+    cwd: homedir(),
+    env: handoverEnv(process.env),
+  });
+  const failure = await new Promise<string | null>((done) => {
+    child.once("spawn", () => done(null));
+    child.once("error", (e: Error) => done(e.message));
+  });
+  if (failure) return failure;
+  child.unref();
+  return null;
 }
 
 /** A beat after the restart route has answered, so the client hears it. */
@@ -548,8 +595,13 @@ if (!app.requestSingleInstanceLock()) {
     if (!app.isPackaged && process.platform === "darwin" && existsSync(iconFile)) app.dock?.setIcon(iconFile);
     // A self-fix's "Rebuild & restart" (specs/app/self-healing.feature.md):
     // the next launch goes through the boot shim, which picks the bundle.
-    setRelauncher(() => {
-      app.relaunch();
+    // An AppImage cannot relaunch itself either (#446), so it hands over to
+    // its own path the same way an update hands over to the new one.
+    setRelauncher(async () => {
+      const image = process.platform === "linux" ? process.env.APPIMAGE : undefined;
+      // Electron's own relaunch everywhere else, and where the handover
+      // could not be started it is still the only thing left to try.
+      if (!image || (await handOver(image))) app.relaunch();
       // quit, not exit: will-quit still ends the agent sessions and flushes.
       app.quit();
     });
