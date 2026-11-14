@@ -58,6 +58,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_IMAGES_PER_MESSAGE,
   MAX_OPEN_SESSIONS,
+  MAX_WAITING_MESSAGES,
   normalizeImageMediaType,
   normalizePermissionMode,
   PERMISSION_MODES,
@@ -81,6 +82,18 @@ interface PendingPermission {
   resolve: (outcome: PermissionOutcome) => void;
 }
 
+/** A message as a turn takes it: what the pane shows of it, and what the
+    agent is handed. */
+interface TurnMessage {
+  /** The `user` event's id — and, while it waits, the `queued` event's. */
+  id: string;
+  text: string;
+  shown: ChatImage[];
+  given: AgentImage[];
+  /** The files that go with it, as the agent is told them. */
+  refs: string[];
+}
+
 interface ChatSession {
   meta: ChatSessionMeta;
   log: ChatEvent[];
@@ -93,6 +106,16 @@ interface ChatSession {
   pending: Map<string, PendingPermission>;
   /** A user message is in and its result is not yet out. */
   busy: boolean;
+  /** Messages sent while a turn was under way, oldest first: each goes when
+      the turn before it ends (specs/agents/agent-pane.feature.md "A message
+      sent while the agent works waits for the turn"). */
+  waiting: TurnMessage[];
+  /** The turn under way was stopped or failed: when it ends, the waiting
+      messages keep waiting rather than start a turn nobody asked for. */
+  hold: boolean;
+  /** "Send now" stopped the turn under way: when it ends the first waiting
+      message goes, whatever `hold` says. */
+  sendNow: boolean;
   turn: number;
   commands: SlashCommandInfo[];
   recordPath: string;
@@ -132,6 +155,11 @@ function emit(session: ChatSession, body: ChatEventBody, now: Date = new Date())
     session.log = session.log.filter(
       (e) => !(e.kind === "thinking_delta" && e.messageId === body.messageId),
     );
+  }
+  // A waiting message that was sent, or taken back, waits no longer: a
+  // replay shows it once, where it went.
+  if (body.kind === "user" || body.kind === "unqueued") {
+    session.log = session.log.filter((e) => !(e.kind === "queued" && e.id === body.id));
   }
   // A context count stands for the window now: the one before is history no
   // replay needs, and with every MCP tool listed it is not small.
@@ -259,6 +287,8 @@ function hostFor(session: ChatSession): AgentHost {
   return {
     emit(body) {
       if (final()) return;
+      // A turn that failed sends nothing after it on its own.
+      if (body.kind === "result" && body.isError) session.hold = true;
       emit(session, body);
     },
     note(level, code, text) {
@@ -277,6 +307,9 @@ function hostFor(session: ChatSession): AgentHost {
       // A card still open belongs to a turn that is over.
       denyAllPending(session, "interrupt", "The turn ended");
       session.busy = false;
+      // A message that waited for this turn goes now, and the session
+      // works on.
+      if (sendNextWaiting(session)) return;
       if (session.meta.status !== "starting") setStatus(session, "idle");
     },
     context(usage) {
@@ -354,6 +387,8 @@ function finish(
 ): Promise<void> {
   denyAllPending(session, "ended", "The session has ended");
   session.busy = false;
+  // What still waited is never sent; the log keeps it, so the pane says so.
+  session.waiting = [];
   emit(session, { kind: "note", level: status === "error" ? "error" : "info", code, text });
   setStatus(session, status);
   try {
@@ -585,6 +620,9 @@ export async function createChatSession(opts: CreateChatOptions): Promise<ChatSe
     abort: new AbortController(),
     pending: new Map(),
     busy: false,
+    waiting: [],
+    hold: false,
+    sendNow: false,
     turn: 0,
     commands: [],
     recordPath: join(sessionDir, "session.json"),
@@ -674,17 +712,90 @@ export function subscribeChat(id: string, fn: (event: ChatEvent) => void): () =>
   };
 }
 
-/** Whether a session would take a message now; the refusal otherwise. */
-function checkSendable(session: ChatSession): asserts session is ChatSession & { session: AgentSession } {
+/** Whether a session would take a message now — at once, or to wait for
+    the turn under way; the refusal otherwise. */
+function checkSendable(session: ChatSession): void {
   if (isFinalStatus(session.meta.status)) throw new ChatError(409, "The session has ended");
-  if (session.busy) throw new ChatError(409, "A turn is in progress — Stop it first");
+  if (session.busy) {
+    if (session.waiting.length >= MAX_WAITING_MESSAGES) {
+      throw new ChatError(409, `At most ${MAX_WAITING_MESSAGES} messages can wait for a turn — remove one, or wait`);
+    }
+    return;
+  }
   if (!session.session) throw new ChatError(409, `${session.provider.label} is still starting`);
+}
+
+/** What an event shows of a message: its words, images and files. */
+function shownOf(message: TurnMessage): { id: string; text: string; images?: ChatImage[]; refs?: string[] } {
+  return {
+    id: message.id,
+    text: message.text,
+    ...(message.shown.length ? { images: message.shown } : {}),
+    ...(message.refs.length ? { refs: message.refs } : {}),
+  };
+}
+
+/**
+ * Begin a turn with a message: it is counted and shown as the `user` event,
+ * and handed to the agent. `later` hands it over once the caller is done —
+ * for a message sent from inside the provider's own turnEnded().
+ */
+function beginTurn(session: ChatSession, message: TurnMessage, later = false): ChatEvent {
+  session.turn += 1;
+  session.busy = true;
+  session.hold = false;
+  session.sendNow = false;
+  const event = emit(session, { kind: "user", ...shownOf(message) });
+  if (session.meta.status === "idle") setStatus(session, "running");
+  // The files that go with it are told to the agent in a line after the
+  // user's words.
+  const told = withRefs(message.text, message.refs);
+  const hand = () => {
+    if (isFinalStatus(session.meta.status)) return;
+    let sent: Promise<void>;
+    try {
+      const agent = session.session;
+      if (!agent) throw new Error(`${session.provider.label} is still starting`);
+      sent = message.given.length ? agent.send(told, message.given) : agent.send(told);
+    } catch (e) {
+      sent = Promise.reject(e);
+    }
+    sent.catch((e: Error) => {
+      // The turn never started: say so, and give the composer back. What
+      // waits behind it keeps waiting.
+      if (isFinalStatus(session.meta.status)) return;
+      session.busy = false;
+      emit(session, { kind: "note", level: "error", code: "api", text: e.message });
+      if (session.meta.status === "running") setStatus(session, "idle");
+    });
+  };
+  if (later) queueMicrotask(hand);
+  else hand();
+  return event;
+}
+
+/**
+ * A turn ended: the first waiting message becomes the next turn — unless
+ * the turn was stopped or failed, which leaves them waiting (a "Send now"
+ * is the one stop that asks for the next message). Answers whether one went.
+ */
+function sendNextWaiting(session: ChatSession): boolean {
+  const go = session.sendNow || !session.hold;
+  session.hold = false;
+  session.sendNow = false;
+  if (!go || !session.session) return false;
+  const next = session.waiting.shift();
+  if (!next) return false;
+  beginTurn(session, next, true);
+  return true;
 }
 
 /**
  * One user turn: text (a plain message or a `/command`) to the agent, with
  * the images pasted into it (specs/agents/agent-pane.feature.md "Paste an
- * image into the message"). Text may be empty when images came.
+ * image into the message"). Text may be empty when images came. While a
+ * turn is under way the message waits for it to end (a `queued` event)
+ * instead of being refused.
  */
 export async function sendChatMessage(id: string, text: string, images?: unknown, refs?: MessageRefs): Promise<ChatEvent> {
   const session = get(id);
@@ -702,29 +813,61 @@ export async function sendChatMessage(id: string, text: string, images?: unknown
   // The files took a moment: the session may have moved on meanwhile.
   checkSendable(session);
   for (const [imageId, kept] of pasted.kept) session.images.set(imageId, kept);
-  session.turn += 1;
-  session.busy = true;
-  // The files that go with it: shown under the message, and told to the
-  // agent in a line after the user's words.
-  const paths = refsFor(session.meta, trimmed, refs);
-  const event = emit(session, {
-    kind: "user",
+  const message: TurnMessage = {
     id: randomUUID(),
     text: trimmed,
-    ...(pasted.shown.length ? { images: pasted.shown } : {}),
-    ...(paths.length ? { refs: paths } : {}),
-  });
-  if (session.meta.status === "idle") setStatus(session, "running");
-  const told = withRefs(trimmed, paths);
-  const sent = pasted.given.length ? session.session.send(told, pasted.given) : session.session.send(told);
-  sent.catch((e: Error) => {
-    // The turn never started: say so, and give the composer back.
-    if (isFinalStatus(session.meta.status)) return;
-    session.busy = false;
-    emit(session, { kind: "note", level: "error", code: "api", text: e.message });
-    if (session.meta.status === "running") setStatus(session, "idle");
-  });
-  return event;
+    shown: pasted.shown,
+    given: pasted.given,
+    // The files that go with it: shown under the message, and told to the
+    // agent with it.
+    refs: refsFor(session.meta, trimmed, refs),
+  };
+  if (session.busy) {
+    session.waiting.push(message);
+    return emit(session, { kind: "queued", ...shownOf(message) });
+  }
+  return beginTurn(session, message);
+}
+
+/**
+ * "Send now" on a waiting message: the turn under way is stopped, and the
+ * message is the next turn as soon as it has — the agent carries on in the
+ * same session, with what the stopped turn did still in its context. With
+ * no turn under way (the one before was stopped, or failed) it goes at once.
+ */
+export async function sendWaitingNow(id: string, messageId: string): Promise<void> {
+  const session = get(id);
+  if (isFinalStatus(session.meta.status)) throw new ChatError(409, "The session has ended");
+  const at = session.waiting.findIndex((m) => m.id === messageId);
+  if (at < 0) throw new ChatError(404, "no such waiting message — it may have been sent");
+  if (!session.busy) {
+    if (!session.session) throw new ChatError(409, `${session.provider.label} is still starting`);
+    beginTurn(session, session.waiting.splice(at, 1)[0]!);
+    return;
+  }
+  if (!session.provider.capabilities.canInterrupt) {
+    throw new ChatError(409, `${session.provider.label} cannot be interrupted — the message goes when the turn ends`);
+  }
+  if (session.meta.status === "starting" || !session.session) {
+    throw new ChatError(409, `${session.provider.label} is still starting — the message goes once it is ready`);
+  }
+  // First in line, so it is the one the turn's end sends.
+  session.waiting.unshift(session.waiting.splice(at, 1)[0]!);
+  // A stop already asked for stops the same turn: one is enough.
+  if (session.sendNow) return;
+  session.sendNow = true;
+  denyAllPending(session, "interrupt", "Interrupted by the user");
+  emit(session, { kind: "note", level: "info", code: "interrupted", text: "Stopped for your message." });
+  await session.session.interrupt();
+}
+
+/** Take a waiting message back before it is sent. */
+export function removeWaitingMessage(id: string, messageId: string): void {
+  const session = get(id);
+  const at = session.waiting.findIndex((m) => m.id === messageId);
+  if (at < 0) throw new ChatError(404, "no such waiting message — it may have been sent");
+  session.waiting.splice(at, 1);
+  emit(session, { kind: "unqueued", id: messageId });
 }
 
 export function answerPermission(id: string, answer: PermissionAnswer): void {
@@ -742,7 +885,8 @@ export function answerPermission(id: string, answer: PermissionAnswer): void {
   resolvePending(session, answer.requestId, decision, "user");
 }
 
-/** Stop the current turn; the agent stays up for the next message. */
+/** Stop the current turn; the agent stays up for the next message. Messages
+    that waited for the turn keep waiting: a Stop starts nothing. */
 export async function interruptChat(id: string): Promise<void> {
   const session = get(id);
   if (session.meta.status !== "running" && session.meta.status !== "awaiting_input") {
@@ -751,6 +895,8 @@ export async function interruptChat(id: string): Promise<void> {
   if (!session.provider.capabilities.canInterrupt) {
     throw new ChatError(409, `${session.provider.label} cannot be interrupted`);
   }
+  session.hold = true;
+  session.sendNow = false;
   denyAllPending(session, "interrupt", "Interrupted by the user");
   emit(session, { kind: "note", level: "info", code: "interrupted", text: "Stopped." });
   await session.session?.interrupt();

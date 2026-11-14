@@ -177,11 +177,39 @@ export type TranscriptItem =
     }
   | { kind: "note"; id: string; level: "info" | "error"; code: string; text: string; at: string };
 
+/** A message sent while a turn was under way, waiting for it to end
+    (specs/agents/agent-pane.feature.md "A message sent while the agent works
+    waits for the turn"). `id` is the server's, the one "Send now" names. */
+export interface WaitingMessage {
+  id: string;
+  text: string;
+  at: string;
+  images?: ChatImage[];
+  refs?: string[];
+}
+
 export interface Transcript {
   items: TranscriptItem[];
   /** Item id → position in `items`. */
   index: Record<string, number>;
   lastSeq: number;
+  /** The messages waiting for the turn under way, oldest first: shown under
+      everything else until each is sent, and then a `user` item where it
+      went. Absent is none. */
+  waiting?: WaitingMessage[];
+}
+
+/** A transcript's waiting messages; none for a transcript that has no list. */
+export function waitingMessages(t: Pick<Transcript, "waiting">): readonly WaitingMessage[] {
+  return t.waiting ?? NO_WAITING;
+}
+
+const NO_WAITING: readonly WaitingMessage[] = [];
+
+/** The transcript without one waiting message: it was sent, or taken back. */
+function withoutWaiting(t: Transcript, id: string): Transcript {
+  if (!t.waiting?.some((m) => m.id === id)) return t;
+  return { ...t, waiting: t.waiting.filter((m) => m.id !== id) };
 }
 
 export const EMPTY_TRANSCRIPT: Transcript = { items: [], index: {}, lastSeq: 0 };
@@ -229,8 +257,27 @@ export function applyEvent(t: Transcript, ev: ChatEvent): Transcript {
   if (ev.seq <= t.lastSeq) return t;
   const next = { ...t, lastSeq: ev.seq };
   switch (ev.kind) {
+    case "queued":
+      if (waitingMessages(next).some((m) => m.id === ev.id)) return next;
+      return {
+        ...next,
+        waiting: [
+          ...waitingMessages(next),
+          {
+            id: ev.id,
+            text: ev.text,
+            at: ev.at,
+            ...(ev.images?.length ? { images: ev.images } : {}),
+            ...(ev.refs?.length ? { refs: ev.refs } : {}),
+          },
+        ],
+      };
+    case "unqueued":
+      return withoutWaiting(next, ev.id);
     case "user":
-      return withItem(next, {
+      // A message that waited is sent: it leaves the foot of the transcript
+      // for its place in it.
+      return withItem(withoutWaiting(next, ev.id), {
         kind: "user",
         id: `u:${ev.id}`,
         text: ev.text,
@@ -898,6 +945,31 @@ export function isBusy(status: ChatStatus): boolean {
   return status === "running" || status === "awaiting_input";
 }
 
+/** Whether the message box takes a message now: a session that is ready
+    sends it, one at work keeps it waiting for the turn to end. */
+export function takesMessages(status: ChatStatus): boolean {
+  return status === "idle" || isBusy(status);
+}
+
+/**
+ * What a waiting message says of itself, and whether it offers "Send now":
+ * while the agent works it is queued behind the turn, and Send now stops the
+ * turn for it — where the agent can be stopped; with the agent ready (the
+ * turn before was stopped or failed) Send now just sends it; a session that
+ * ended never sent it.
+ */
+export function waitingState(
+  status: ChatStatus,
+  agent: Pick<AgentDescriptor, "label" | "capabilities">,
+): { label: string; sendNow: boolean; hint: string } {
+  if (isFinalStatus(status)) return { label: "Not sent — the session ended", sendNow: false, hint: "" };
+  if (status === "idle") return { label: "Not sent yet", sendNow: true, hint: "Send this message now" };
+  if (status === "starting") return { label: `Queued — sent once ${agent.label} is ready`, sendNow: false, hint: "" };
+  return agent.capabilities.canInterrupt
+    ? { label: "Queued — sent when this turn ends", sendNow: true, hint: `Stop ${agent.label} and send this message now` }
+    : { label: "Queued — sent when this turn ends", sendNow: false, hint: "" };
+}
+
 // --- Persistence (device-local, like the sidebar width) --------------------
 
 const WIDTH_KEY = "sd-agent-width";
@@ -1539,6 +1611,24 @@ export const agentChat = {
   },
   async interrupt(id: string): Promise<void> {
     await call(`/api/agent/chat/${id}/interrupt`, { method: "POST" });
+  },
+  /** "Send now" on a waiting message: the server stops the turn under way
+      and sends it. One that went meanwhile (the turn ended by itself) has
+      nothing left to do. */
+  async sendNow(id: string, messageId: string): Promise<void> {
+    await call(`/api/agent/chat/${id}/waiting/${encodeURIComponent(messageId)}/send`, { method: "POST" }).catch(
+      (e: Error) => {
+        if (!/no such waiting message/.test(e.message)) throw e;
+      },
+    );
+  },
+  /** Take a waiting message back before it is sent. */
+  async unqueue(id: string, messageId: string): Promise<void> {
+    await call(`/api/agent/chat/${id}/waiting/${encodeURIComponent(messageId)}`, { method: "DELETE" }).catch(
+      (e: Error) => {
+        if (!/no such waiting message/.test(e.message)) throw e;
+      },
+    );
   },
   async setMode(id: string, permissionMode: PermissionMode): Promise<void> {
     await call(`/api/agent/chat/${id}/mode`, {

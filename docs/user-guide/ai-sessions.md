@@ -245,10 +245,24 @@ latest** chip returns you to the newest output.
 ### The composer
 
 Type a message and press `Enter`. Typing `/` opens a popup of the commands
-the agent supports (Claude Code's own slash commands, for instance). While
-the agent is working the composer says so; press **Stop** to send something
-else. After **End session** it reads `This session has ended — start a new
-one from the session menu`.
+the agent supports (Claude Code's own slash commands, for instance). After
+**End session** it reads `This session has ended — start a new one from the
+session menu`.
+
+You can keep typing while the agent is working. A message sent mid-turn
+waits at the foot of the transcript, in a dashed bubble marked `Queued —
+sent when this turn ends`, and is sent by itself when the turn ends. Each
+waiting message has two controls:
+
+- **Send now** stops the current turn and sends the message straight away.
+  The agent carries on in the same session, with what it had done so far
+  still in its context.
+- **×** removes the message without sending it.
+
+**Stop** only stops: messages that were waiting stay where they are, marked
+`Not sent yet`, until you click **Send now** on one or the next turn ends.
+The same happens after a turn that failed. Up to 10 messages can wait at
+once.
 
 ## 7. A session without specs
 

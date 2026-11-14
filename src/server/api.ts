@@ -157,6 +157,8 @@ import {
   refreshChatContext,
   resolveProvider,
   sendChatMessage,
+  sendWaitingNow,
+  removeWaitingMessage,
   setAgentDefaults,
   setChatEffort,
   setChatModel,
@@ -3885,6 +3887,27 @@ const postAgentChatInterrupt: Handler = async (_req, params) => {
   }
 };
 
+// A message that waits for the turn under way (specs/agents/agent-pane
+// .feature.md "A message sent while the agent works waits for the turn"):
+// "Send now" stops the turn and sends it; DELETE takes it back.
+const postAgentChatWaitingSend: Handler = async (_req, params) => {
+  try {
+    await sendWaitingNow(params.id!, params.messageId!);
+    return json({ ok: true });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
+const deleteAgentChatWaiting: Handler = async (_req, params) => {
+  try {
+    removeWaitingMessage(params.id!, params.messageId!);
+    return json({ ok: true });
+  } catch (e) {
+    return chatError(e);
+  }
+};
+
 const putAgentChatMode: Handler = async (req, params) => {
   const body = (await req.json().catch(() => ({}))) as { permissionMode?: unknown };
   const mode = normalizePermissionMode(body.permissionMode);
@@ -4509,6 +4532,8 @@ const coreRoutes: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/agent/chat/:id/images/:imageId", unlessHosted(getAgentChatImage)],
   ["POST", "/api/agent/chat/:id/permission", unlessHosted(postAgentChatPermission)],
   ["POST", "/api/agent/chat/:id/interrupt", unlessHosted(postAgentChatInterrupt)],
+  ["POST", "/api/agent/chat/:id/waiting/:messageId/send", unlessHosted(postAgentChatWaitingSend)],
+  ["DELETE", "/api/agent/chat/:id/waiting/:messageId", unlessHosted(deleteAgentChatWaiting)],
   ["PUT", "/api/agent/chat/:id/mode", unlessHosted(putAgentChatMode)],
   ["PUT", "/api/agent/chat/:id/model", unlessHosted(putAgentChatModel)],
   ["PUT", "/api/agent/chat/:id/effort", unlessHosted(putAgentChatEffort)],
